@@ -607,7 +607,16 @@ export function useProfileScreenForms(input: {
     ],
   });
   const draftProfileResult = useMemo(
-    () => buildProfilePayload(currentProfileBaseline, profileForm.getValues()),
+    // Use the same payload as Save: untouched imported values stay canonical.
+    // A normalized editor round trip can differ even when nothing needs saving.
+    () =>
+      buildCanonicalAwareProfilePayload({
+        draftValues: profileForm.getValues(),
+        dirtyFields: profileForm.formState.dirtyFields,
+        latestResumeImportReviewCandidates:
+          input.latestResumeImportReviewCandidates,
+        profile: currentProfileBaseline,
+      }),
     [
       applicationIdentityValues,
       answerBankValues,
@@ -617,10 +626,12 @@ export function useProfileScreenForms(input: {
       eligibilityValues,
       experienceValues,
       identityValues,
+      input.latestResumeImportReviewCandidates,
       languageValues,
       linkValues,
       narrativeValues,
       profileForm,
+      profileForm.formState.dirtyFields,
       profileSkillValues,
       proofBankValues,
       projectValues,
