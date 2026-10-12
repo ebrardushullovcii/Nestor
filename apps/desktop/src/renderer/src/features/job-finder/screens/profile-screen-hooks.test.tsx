@@ -945,6 +945,46 @@ describe("useProfileScreenForms save-state truth on load", () => {
     expect(result.current.hasUserDraftChanges).toBe(false);
   });
 
+  it("does not treat editor normalization as an unsaved import after saving sources", () => {
+    const importedProfile = CandidateProfileSchema.parse({
+      ...profile,
+      skills: ["TypeScript."],
+      portfolioUrl: "portfolio.example.com",
+      professionalSummary: { fullSummary: "A longer imported summary." },
+    });
+    const { result, rerender } = renderProfileScreenForms(
+      createInput({ profile: importedProfile }),
+    );
+
+    // A source-only save deliberately returns the exact stored profile.
+    // The footer must compare what Save writes, not a normalized round trip.
+    act(() => {
+      result.current.preferencesForm.setValue("locations", "London", {
+        shouldDirty: true,
+      });
+    });
+    const savedProfile = buildCanonicalAwareProfilePayload({
+      profile: importedProfile,
+      draftValues: result.current.profileForm.getValues(),
+      dirtyFields: result.current.profileForm.formState.dirtyFields,
+      latestResumeImportReviewCandidates: [],
+    }).payload;
+    expect(savedProfile).toEqual(importedProfile);
+
+    rerender(
+      createInput({
+        profile: structuredClone(importedProfile),
+        searchPreferences: JobSearchPreferencesSchema.parse({
+          ...searchPreferences,
+          locations: ["London"],
+        }),
+      }),
+    );
+
+    expect(result.current.hasUserDraftChanges).toBe(false);
+    expect(result.current.hasUnsavedChanges).toBe(false);
+  });
+
   it("reports unsaved changes as soon as a field is edited", () => {
     const { result } = renderProfileScreenForms(
       createInput({ profile: importedLocationProfile }),

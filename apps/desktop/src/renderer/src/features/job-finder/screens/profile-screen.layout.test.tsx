@@ -738,6 +738,57 @@ describe("ProfileScreen ready-state density and save-bar footprint", () => {
     expect(savedPreferences.workModes).toContain("remote");
   });
 
+  it("shows a clean footer for imported data and after saving a real edit", () => {
+    const importedProfile = CandidateProfileSchema.parse({
+      ...profile,
+      skills: ["TypeScript."],
+      portfolioUrl: "portfolio.example.com",
+      professionalSummary: { fullSummary: "A longer imported summary." },
+    });
+    const onSaveAll = vi.fn<ProfileScreenProps["onSaveAll"]>();
+    const { rerender } = renderProfileScreen({
+      profile: importedProfile,
+      onSaveAll,
+    });
+    const saveButton = screen.getByRole<HTMLButtonElement>("button", {
+      name: "Save changes",
+    });
+
+    expect(screen.getByText("No unsaved changes.")).toBeTruthy();
+    expect(saveButton.disabled).toBe(true);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Headline" }), {
+      target: { value: "Saved headline" },
+    });
+    expect(screen.getByText("Unsaved changes on this page.")).toBeTruthy();
+    expect(saveButton.disabled).toBe(false);
+    fireEvent.click(saveButton);
+    expect(onSaveAll).toHaveBeenCalledTimes(1);
+    const [savedProfile, savedPreferences] = onSaveAll.mock.calls[0]!;
+    expect(savedProfile.headline).toBe("Saved headline");
+
+    rerender(
+      <ToastProvider>
+        <MemoryRouter initialEntries={["/job-finder/profile"]}>
+          <ProfileScreen
+            {...buildProfileScreenProps({
+              onSaveAll,
+              profile: savedProfile,
+              searchPreferences: savedPreferences,
+            })}
+            actionState={{ message: "Profile and saved answers saved." }}
+          />
+        </MemoryRouter>
+      </ToastProvider>,
+    );
+
+    expect(screen.getByText("No unsaved changes.")).toBeTruthy();
+    expect(saveButton.disabled).toBe(true);
+    expect(
+      screen.queryByText("Imported details on this page are not saved yet."),
+    ).toBeNull();
+  });
+
   it("keeps malformed email edits local and replaces stale success feedback with validation", () => {
     const onSaveAll = vi.fn();
     const props = buildProfileScreenProps({ onSaveAll });
