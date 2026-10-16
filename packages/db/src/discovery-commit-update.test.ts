@@ -76,6 +76,7 @@ async function expectCommitDiscoveryStateUpdateParity(
 
     await expect(
       repository.commitDiscoveryStateUpdate((current) => {
+        // @ts-expect-error Exercise a caller that ignores the borrowed-state contract.
         current.runState = "cancelled";
         return {
           sessions: [],
@@ -330,6 +331,100 @@ describe("commitSavedJobDelta paired discovery updates", () => {
       await expectPairedSavedJobDiscoveryDeltaParity(() =>
         temp.createRepository(),
       );
+    } finally {
+      await cleanupTempDirectoryWithRetry(temp.tempDirectory);
+    }
+  });
+});
+
+async function expectScopedSavedJobDeltaParity(
+  createRepository: () => JobFinderRepository | Promise<JobFinderRepository>,
+): Promise<void> {
+  const repository = await createRepository();
+  try {
+    await repository.commitSavedJobDelta({
+      upserts: ["job_c", "job_a", "job_b"].map((id) =>
+        createSavedJob({ id, sourceJobId: `target_${id}` }),
+      ),
+    });
+    expect(await repository.listSavedJobIds()).toEqual([
+      "job_a",
+      "job_b",
+      "job_c",
+    ]);
+
+    const updatedIds: string[] = [];
+    await repository.commitSavedJobDelta({
+      upserts: [
+        createSavedJob({ id: "job_c", sourceJobId: "target_c_replaced" }),
+        createSavedJob({ id: "job_d", sourceJobId: "target_d" }),
+      ],
+      updateJobIds: ["job_a"],
+      update: (job) => {
+        updatedIds.push(job.id);
+        return job.id === "job_a" ? { ...job, status: "shortlisted" } : job;
+      },
+    });
+
+    // Only the named row and the stored row an upsert names are read.
+    expect(updatedIds.sort()).toEqual(["job_a", "job_c"]);
+    const jobs = await repository.listSavedJobs();
+    expect(jobs.map((job) => [job.id, job.status, job.sourceJobId])).toEqual([
+      ["job_a", "shortlisted", "target_job_a"],
+      ["job_b", "ready_for_review", "target_job_b"],
+      // An upsert of a stored row still yields to the stored row.
+      ["job_c", "ready_for_review", "target_job_c"],
+      ["job_d", "ready_for_review", "target_d"],
+    ]);
+  } finally {
+    await repository.close();
+  }
+}
+
+describe("commitSavedJobDelta scoped updates", () => {
+  test("in-memory repository updates only the named rows", async () => {
+    await expectScopedSavedJobDeltaParity(() =>
+      createInMemoryJobFinderRepository(createSeed()),
+    );
+  });
+
+  test("file repository updates only the named rows", async () => {
+    const temp = await createTempRepository("nordri-db-scoped-delta-");
+    try {
+      await expectScopedSavedJobDeltaParity(() => temp.createRepository());
+    } finally {
+      await cleanupTempDirectoryWithRetry(temp.tempDirectory);
+    }
+  });
+});
+
+describe("file repository whole saved-job reads", () => {
+  test("return every job in id order across parse chunks", async () => {
+    const temp = await createTempRepository("nordri-db-chunked-read-");
+    try {
+      const repository = await temp.createRepository();
+      try {
+        const ids = Array.from(
+          { length: 250 },
+          (_, index) => `job_${String(index).padStart(3, "0")}`,
+        );
+        await repository.commitSavedJobDelta({
+          upserts: [...ids]
+            .reverse()
+            .map((id) => createSavedJob({ id, sourceJobId: `target_${id}` })),
+        });
+
+        const jobs = await repository.listSavedJobs();
+        expect(jobs.map((job) => job.id)).toEqual(ids);
+        expect(await repository.listSavedJobIds()).toEqual(ids);
+        expect(
+          (await repository.listSavedJobsByIds(["job_200", "job_007"])).map(
+            (job) => job.id,
+          ),
+        ).toEqual(["job_007", "job_200"]);
+      } finally {
+        await repository.close();
+      }
     } finally {
       await cleanupTempDirectoryWithRetry(temp.tempDirectory);
     }

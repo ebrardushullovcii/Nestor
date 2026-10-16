@@ -1,10 +1,26 @@
-import type { ListingActivity, SavedJob } from "@nordri/contracts";
+import type {
+  JobListMatchAssessment,
+  ListingActivity,
+  SavedJob,
+} from "@nordri/contracts";
 
 /**
  * A candidate as the ordering sees it. `listingActivity` is a projection, so
  * callers that sort stored rows before it is computed simply omit it.
  */
-export type OrderableDiscoveryJob = SavedJob & {
+export type OrderableDiscoveryJob = Pick<
+  SavedJob,
+  | "id"
+  | "title"
+  | "company"
+  | "discoveryMethod"
+  | "workMode"
+  | "postedAt"
+  | "firstSeenAt"
+  | "discoveredAt"
+  | "detailQuality"
+> & {
+  matchAssessment: JobListMatchAssessment;
   listingActivity?: ListingActivity | undefined;
 };
 
@@ -106,7 +122,7 @@ export function getDiscoveryListingRecencyKey(input: {
  * under every discovery ordering so the mismatch-reveal flow never mixes
  * conflicts into the triage order.
  */
-export function getClearMismatchPenalty(job: SavedJob): number {
+export function getClearMismatchPenalty(job: OrderableDiscoveryJob): number {
   return job.matchAssessment.recommendation === "skip" ? 1 : 0;
 }
 
@@ -120,7 +136,7 @@ export function getClearMismatchPenalty(job: SavedJob): number {
  * `outside_area`: no saved area, no stated geography, or an assessment written
  * before the field existed all score zero and change nothing.
  */
-export function getOutOfAreaOnsitePenalty(job: SavedJob): number {
+export function getOutOfAreaOnsitePenalty(job: OrderableDiscoveryJob): number {
   return job.matchAssessment.locationReach === "outside_area" ? 1 : 0;
 }
 
@@ -136,7 +152,9 @@ export function getOutOfAreaOnsitePenalty(job: SavedJob): number {
  * ordering while real schema-validated rows remain covered.
  */
 export function isProvisionalMatchAssessment(
-  job: Pick<SavedJob, "discoveryMethod" | "matchAssessment">,
+  job: Pick<SavedJob, "discoveryMethod"> & {
+    matchAssessment: JobListMatchAssessment;
+  },
 ): boolean {
   if (job.discoveryMethod === "catalog_seed") {
     return true;
@@ -163,11 +181,26 @@ export function isProvisionalMatchAssessment(
  * (postedAt, then firstSeenAt, then discoveredAt; undated last). Detail
  * quality and stable lexical keys settle only otherwise identical signals.
  */
+// Rows are immutable and reused between refreshes, so each row's recency is
+// parsed once instead of twice per comparison. Sorting 6,000 jobs parsed
+// about 150,000 dates every time the list was rebuilt.
+const recencyByJob = new WeakMap<object, number>();
+function listingRecency(job: OrderableDiscoveryJob): number {
+  let recency = recencyByJob.get(job);
+  if (recency === undefined) {
+    recency = toSortableListingTime(
+      job.postedAt ?? job.firstSeenAt ?? job.discoveredAt,
+    );
+    recencyByJob.set(job, recency);
+  }
+  return recency;
+}
+
 export function compareDiscoveryFitTieBreaks(
-  left: SavedJob,
-  right: SavedJob,
+  left: OrderableDiscoveryJob,
+  right: OrderableDiscoveryJob,
 ): number {
-  const titleFamilyRank = (job: SavedJob) => {
+  const titleFamilyRank = (job: OrderableDiscoveryJob) => {
     switch (job.matchAssessment.titleFamilyMatch) {
       case "same_family":
         return 0;
@@ -182,12 +215,8 @@ export function compareDiscoveryFitTieBreaks(
   const titleFamilyDelta = titleFamilyRank(left) - titleFamilyRank(right);
   if (titleFamilyDelta !== 0) return titleFamilyDelta;
 
-  const leftRecency = toSortableListingTime(
-    left.postedAt ?? left.firstSeenAt ?? left.discoveredAt,
-  );
-  const rightRecency = toSortableListingTime(
-    right.postedAt ?? right.firstSeenAt ?? right.discoveredAt,
-  );
+  const leftRecency = listingRecency(left);
+  const rightRecency = listingRecency(right);
   if (leftRecency !== rightRecency) {
     return rightRecency - leftRecency;
   }

@@ -52,10 +52,11 @@ import {
 } from "../apply-collection-support";
 import { USER_ACTION_INDEXED_COLLECTION_CONFIGS } from "../user-action-repository-support";
 
+import { normalizeLegacySourceDebugRunRecord } from "./legacy";
 import {
-  normalizeLegacyDiscoveryState,
-  normalizeLegacySourceDebugRunRecord,
-} from "./legacy";
+  readDiscoveryStorage,
+  replaceDiscoveryStorage,
+} from "./discovery-storage";
 import type {
   JobFinderRepositorySeed,
   SchemaParser,
@@ -219,7 +220,7 @@ function describePersistedRowFailure(error: unknown): string {
   return "schema validation failed";
 }
 
-function parsePersistedRowValue<TValue>(input: {
+export function parsePersistedRowValue<TValue>(input: {
   tableName: string;
   rowId: string;
   rawValue: string;
@@ -267,6 +268,43 @@ export function listValues<TValue>(
   );
 }
 
+const PARSE_CHUNK_ROWS = 100;
+
+/**
+ * `listValues` for a whole large collection without holding the event loop:
+ * the rows are read at once, so the result is one consistent read, and are
+ * parsed a chunk at a time with a turn of the event loop in between. Parsing
+ * a few thousand saved jobs in one go held Electron main for over a second.
+ */
+export async function listValuesInChunks<TValue>(
+  database: DatabaseSync,
+  tableName: StateCollectionTable,
+  schema: SchemaParser<TValue>,
+): Promise<TValue[]> {
+  const rows = database
+    .prepare(`SELECT id, value FROM ${stateTableNames[tableName]} ORDER BY id`)
+    .all();
+  const values: TValue[] = [];
+  for (let start = 0; start < rows.length; start += PARSE_CHUNK_ROWS) {
+    if (start > 0) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    for (const row of rows.slice(start, start + PARSE_CHUNK_ROWS)) {
+      // Parsed from this read's own JSON, so already the caller's own copy;
+      // cloning again was a second full copy of every job per read.
+      values.push(
+        parsePersistedRowValue({
+          tableName,
+          rowId: String(row.id),
+          rawValue: String(row.value),
+          schema,
+        }),
+      );
+    }
+  }
+  return values;
+}
+
 export function listCollectionValues<TValue>(
   database: DatabaseSync,
   tableName: StateCollectionTable,
@@ -295,6 +333,43 @@ export function listCollectionValues<TValue>(
         schema,
       }),
     );
+}
+
+/**
+ * Parsed singletons by their stored text. A workspace refresh reads the plan
+ * state, search settings and discovery state every time, and validating them
+ * (about 1 MB with a large search) dominated an unchanged refresh. When the
+ * stored text is the same, a copy of the earlier validated value is returned;
+ * callers own and may edit what they get, so the cached value is never shared.
+ */
+const parsedSingletons = new WeakMap<
+  DatabaseSync,
+  Map<string, { raw: string; schema: unknown; value: unknown }>
+>();
+
+function parseSingletonRow<TValue>(
+  database: DatabaseSync,
+  key: StateTableKey,
+  rawValue: string,
+  schema: SchemaParser<TValue>,
+): TValue {
+  let byKey = parsedSingletons.get(database);
+  if (!byKey) {
+    byKey = new Map();
+    parsedSingletons.set(database, byKey);
+  }
+  const cached = byKey.get(key);
+  if (cached && cached.schema === schema && cached.raw === rawValue) {
+    return structuredClone(cached.value) as TValue;
+  }
+  const value = parsePersistedRowValue({
+    tableName: stateTableNames.singleton_state,
+    rowId: key,
+    rawValue,
+    schema,
+  });
+  byKey.set(key, { raw: rawValue, schema, value: structuredClone(value) });
+  return value;
 }
 
 export function getSingletonValue<TValue>(
@@ -342,12 +417,7 @@ export function getSingletonValue<TValue>(
     }
   }
 
-  return parsePersistedRowValue({
-    tableName: stateTableNames.singleton_state,
-    rowId: key,
-    rawValue: String(row.value),
-    schema,
-  });
+  return parseSingletonRow(database, key, String(row.value), schema);
 }
 
 export interface SingletonValueWithRevision<TValue> {
@@ -371,12 +441,7 @@ export function getSingletonValueWithRevision<TValue>(
   }
 
   return {
-    value: parsePersistedRowValue({
-      tableName: stateTableNames.singleton_state,
-      rowId: key,
-      rawValue: row.value,
-      schema,
-    }),
+    value: parseSingletonRow(database, key, row.value, schema),
     revision: Number(row.revision ?? 0),
   };
 }
@@ -581,7 +646,7 @@ export function writeState(
       state.profileSetupState,
     );
     initSingletonValue(database, "settings", state.settings);
-    initSingletonValue(database, "discovery_state", state.discovery);
+    replaceDiscoveryStorage(database, state.discovery);
     if (state.campaigns.length > 0 && state.activeCampaignId) {
       initSingletonValue(database, "campaign_state", {
         campaigns: state.campaigns,
@@ -1023,10 +1088,7 @@ export function readState(
       "profile_setup_state",
       ProfileSetupStateSchema,
     ) ?? fallbackSeed.profileSetupState;
-  const discovery =
-    getSingletonValue(database, "discovery_state", {
-      parse: normalizeLegacyDiscoveryState,
-    }) ?? fallbackSeed.discovery;
+  const discovery = readDiscoveryStorage(database, fallbackSeed.discovery);
   const campaignState = getSingletonValue(
     database,
     "campaign_state",

@@ -59,7 +59,7 @@ describe("Add this job", () => {
       expect.objectContaining({
         pageType: "job_detail",
         maxJobs: 1,
-        pageText: expect.stringContaining("Browsed designer"),
+        pageText: expect.stringContaining("Browsed designer") as unknown,
       }),
     );
     const job = (await repository.listSavedJobs()).find(

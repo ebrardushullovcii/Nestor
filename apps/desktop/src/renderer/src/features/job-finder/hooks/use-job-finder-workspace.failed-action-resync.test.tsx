@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type {
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   JobFinderWorkspaceSyncResult,
 } from "@nordri/contracts";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -12,7 +12,7 @@ import { useJobFinderWorkspace } from "./use-job-finder-workspace";
 function createWorkspace(input: {
   assetStatus: "not_started" | "failed";
   generatedAt: string;
-}): JobFinderWorkspaceSnapshot {
+}): JobFinderRendererWorkspaceSnapshot {
   return {
     generatedAt: input.generatedAt,
     hydration: { phase: "complete", deferredCollections: [] },
@@ -38,12 +38,12 @@ function createWorkspace(input: {
     selectedApplicationRecordId: null,
     campaigns: [],
     activeCampaignId: null,
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function snapshotResult(
   currentRevision: number,
-  snapshot: JobFinderWorkspaceSnapshot,
+  snapshot: JobFinderRendererWorkspaceSnapshot,
 ): JobFinderWorkspaceSyncResult {
   return { kind: "snapshot", currentRevision, reason: "initial", snapshot };
 }
@@ -54,10 +54,10 @@ describe("useJobFinderWorkspace after a failed action", () => {
       (baseRevision: number | null) => Promise<JobFinderWorkspaceSyncResult>
     >();
   const generateResume =
-    vi.fn<(jobId: string) => Promise<JobFinderWorkspaceSnapshot>>();
-  const getWorkspace = vi.fn<() => Promise<JobFinderWorkspaceSnapshot>>();
+    vi.fn<(jobId: string) => Promise<JobFinderRendererWorkspaceSnapshot>>();
+  const getWorkspace = vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const checkBrowserSession =
-    vi.fn<() => Promise<JobFinderWorkspaceSnapshot>>();
+    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
 
   beforeEach(() => {
     vi.clearAllMocks();

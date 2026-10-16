@@ -1,4 +1,24 @@
+import {
+  createAdaptiveConcurrencyLimiter,
+  createConcurrencyLimiter,
+} from "@nordri/core";
+import {
+  RESUME_AI_CONCURRENCY,
+  RESUME_LOCAL_CONCURRENCY,
+  RESUME_PIPELINE_CAPACITY,
+  type ResumeBatchGenerationResult,
+  type ResumeBatchGenerationProgress,
+  type ResumeBatchProviderBlock,
+} from "@nordri/contracts";
 import { refreshApprovedApplicationLetter } from "./approved-application-letter";
+import type {
+  DiscoveryFeedbackBatchOutcome,
+  DiscoveryFeedbackBatchResult,
+  JobFinderDiscoveryState,
+  JobFinderDismissDiscoveryJobInput,
+} from "@nordri/contracts";
+import { normalizeCompanyName } from "@nordri/contracts";
+import type { DiscoveryFeedbackBatchOptions } from "./workspace-service-contracts";
 import {
   mergeResumeBatchCheckpoints,
   markResumeBatchRunning,
@@ -7,7 +27,11 @@ import {
 import { checkSameCompanySends } from "./same-company-sends";
 import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import { withPlanAssessment } from "./plan-assessment";
-import { completeTailoredResumeDraft } from "@nordri/ai-providers";
+import {
+  getAiProviderAccessFailure,
+  isAiProviderRateLimited,
+  completeTailoredResumeDraft,
+} from "@nordri/ai-providers";
 import {
   applyResumeLanguage,
   collectResumeLanguageFields,
@@ -126,7 +150,6 @@ import {
   summarizeApplyJobResultStates,
 } from "./workspace-apply-run-support";
 import { markSavedJobStatusInLedger } from "./workspace-discovery-ledger";
-import { mergeSavedJobs } from "./workspace-service-helpers";
 import {
   buildConsentSummary,
   buildEvidenceRefIdsFromInstruction,
@@ -329,19 +352,32 @@ function getApplyResultSortTime(input: {
   return Date.parse(input.completedAt ?? input.updatedAt ?? input.startedAt);
 }
 
+class FeedbackMutationStoppedError extends Error {
+  constructor() {
+    super("The workspace changed or closed, or the assistant stopped.");
+  }
+}
+class FeedbackMutationHeldError extends Error {}
+
 type WorkspaceApplicationMethods = Omit<
   Pick<
     JobFinderWorkspaceService,
     | "assessJobListing"
     | "queueJobForReview"
+    | "queueJobsForReview"
     | "setJobResumeApplicationMode"
     | "saveResumeBatchCheckpoint"
     | "removeJobFromReview"
+    | "removeJobsFromReview"
     | "dismissDiscoveryJob"
+    | "dismissDiscoveryJobs"
+    | "excludeEmployerDiscoveryJobs"
     | "previewEmployerExclusion"
     | "removeEmployerExclusion"
     | "restoreDismissedDiscoveryJob"
+    | "restoreDismissedDiscoveryJobs"
     | "generateResume"
+    | "generateResumeForBatch"
     | "getResumeWorkspace"
     | "previewResumeDraft"
     | "saveResumeDraft"
@@ -356,6 +392,7 @@ type WorkspaceApplicationMethods = Omit<
     | "setWorkHistoryReviewAcknowledgment"
     | "setResumeClaimConfirmation"
     | "getResumeAssistantMessages"
+    | "getResumeAssistantHistory"
     | "sendResumeAssistantMessage"
     | "resolveResumeAssistantProposal"
     | "startApplyCopilotRun"
@@ -593,13 +630,308 @@ export function createWorkspaceApplicationMethods(
     );
   }
 
+  const pendingListingReads = new Map<string, number>();
+  const listingReadGenerations = new Map<string, number>();
+  let activeListingReads = 0;
+  const listingGeneration = () =>
+    ctx.listingAssessmentGenerationRef?.current ?? 0;
+  const listingReadCurrent = (generation: number) =>
+    generation === listingGeneration() && !ctx.isWorkspaceClosing?.();
+
+  type ListingReadOptions = {
+    force?: boolean;
+    throwOnFailure?: boolean;
+    resumeWriterOwnsSlot?: boolean;
+  };
+  const listingReads = new Map<
+    string,
+    {
+      generation: number;
+      options: ListingReadOptions;
+      promise: Promise<void>;
+    }
+  >();
+  const listingSlotWaiters: Array<() => void> = [];
+  let occupiedListingSlots = 0;
+
+  /** An abort as an Error, whatever the signal was aborted with. */
+  function abortReason(signal: AbortSignal): Error {
+    return signal.reason instanceof Error
+      ? signal.reason
+      : new DOMException("The operation was aborted.", "AbortError");
+  }
+
+  function acquireListingSlot(signal: AbortSignal): Promise<() => void> {
+    return new Promise((resolve, reject) => {
+      const cancel = () => {
+        const index = listingSlotWaiters.indexOf(start);
+        if (index >= 0) listingSlotWaiters.splice(index, 1);
+        reject(abortReason(signal));
+      };
+      const start = () => {
+        signal.removeEventListener("abort", cancel);
+        if (signal.aborted) {
+          reject(abortReason(signal));
+          return;
+        }
+        occupiedListingSlots += 1;
+        let released = false;
+        resolve(() => {
+          if (released) return;
+          released = true;
+          occupiedListingSlots -= 1;
+          listingSlotWaiters.shift()?.();
+        });
+      };
+      if (signal.aborted) {
+        reject(abortReason(signal));
+        return;
+      }
+      if (occupiedListingSlots < 2) start();
+      else {
+        listingSlotWaiters.push(start);
+        signal.addEventListener("abort", cancel, { once: true });
+      }
+    });
+  }
+
+  async function withListingAssessmentSlot<T>(
+    operation: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const signal =
+      ctx.listingAssessmentAbortControllerRef?.current.signal ??
+      new AbortController().signal;
+    if (ctx.isWorkspaceClosing?.())
+      throw new Error(
+        "Job Finder changed or closed before this assessment could start.",
+      );
+    let release: (() => void) | undefined;
+    let cancel: (() => void) | undefined;
+    try {
+      release = await acquireListingSlot(signal);
+      const stopped = new Promise<never>((_resolve, reject) => {
+        cancel = () => reject(abortReason(signal));
+        signal.addEventListener("abort", cancel, { once: true });
+        if (signal.aborted) cancel();
+      });
+      signal.throwIfAborted();
+      return await Promise.race([operation(signal), stopped]);
+    } finally {
+      if (cancel) signal.removeEventListener("abort", cancel);
+      release?.();
+    }
+  }
+  ctx.withListingAssessmentSlot = withListingAssessmentSlot;
+
+  async function readListingDetailForShortlistedJob(
+    jobId: string,
+    options: ListingReadOptions = {},
+  ): Promise<void> {
+    const generation = listingGeneration();
+    if (!listingReadCurrent(generation)) {
+      if (options.throwOnFailure)
+        throw new Error(
+          "Job Finder changed or closed before this listing could be read.",
+        );
+      return;
+    }
+    const existing = listingReads.get(jobId);
+    if (existing?.generation === generation) {
+      const needsFreshRead =
+        (options.force && !existing.options.force) ||
+        (options.throwOnFailure && !existing.options.throwOnFailure);
+      if (!needsFreshRead) return existing.promise;
+      await existing.promise;
+      return readListingDetailForShortlistedJob(jobId, options);
+    }
+    const signal =
+      ctx.listingAssessmentAbortControllerRef?.current.signal ??
+      new AbortController().signal;
+    const promise = (async () => {
+      try {
+        // Explicit resume jobs already hold a writer permit. Their model
+        // listing check uses that capacity; background checks retain two slots.
+        if (options.resumeWriterOwnsSlot)
+          await performListingDetailRead(jobId, options);
+        else
+          await withListingAssessmentSlot(() =>
+            performListingDetailRead(jobId, options),
+          );
+      } catch (error) {
+        if (options.throwOnFailure || !signal.aborted) throw error;
+      }
+    })();
+    const request = { generation, options, promise };
+    listingReads.set(jobId, request);
+    try {
+      await promise;
+    } finally {
+      if (listingReads.get(jobId) === request) listingReads.delete(jobId);
+    }
+  }
+
+  function drainListingReads(): void {
+    while (activeListingReads < 2 && pendingListingReads.size > 0) {
+      const [jobId, generation] = pendingListingReads.entries().next().value!;
+      pendingListingReads.delete(jobId);
+      if (!listingReadCurrent(generation)) {
+        if (listingReadGenerations.get(jobId) === generation) {
+          listingReadGenerations.delete(jobId);
+          ctx.listingAssessmentJobIds?.delete(jobId);
+        }
+        continue;
+      }
+      activeListingReads += 1;
+      void readListingDetailForShortlistedJob(jobId)
+        .catch((error: unknown) => {
+          if (listingReadCurrent(generation))
+            console.warn("[shortlist] Listing assessment failed", error);
+        })
+        .finally(() => {
+          activeListingReads -= 1;
+          if (listingReadGenerations.get(jobId) === generation) {
+            listingReadGenerations.delete(jobId);
+            ctx.listingAssessmentJobIds?.delete(jobId);
+          }
+          if (listingReadCurrent(generation))
+            ctx.onListingAssessmentFinished?.();
+          drainListingReads();
+        });
+    }
+  }
+
+  async function queueJobsForReview(jobIds: readonly string[]): Promise<void> {
+    const generation = listingGeneration();
+    const assertCurrent = () => {
+      if (!listingReadCurrent(generation))
+        throw new Error(
+          "Job Finder changed or closed before these jobs could be shortlisted. No jobs were added.",
+        );
+    };
+    assertCurrent();
+    const ids = [...new Set(jobIds)];
+    if (ids.length === 0) return;
+    const requested = new Set(ids);
+    const [
+      discovery,
+      settings,
+      preferences,
+      selectedSaved,
+      intelligence,
+      assets,
+      attempts,
+    ] = await Promise.all([
+      ctx.repository.readDiscoveryDisplayProjection(),
+      ctx.repository.getSettings(),
+      ctx.repository.getSearchPreferences(),
+      ctx.repository.listSavedJobsByIds(ids),
+      ctx.repository.getIntelligenceState(),
+      ctx.repository.listTailoredAssets(),
+      ctx.repository.listApplicationAttempts(),
+    ]);
+    const selectedPending = discovery.pendingDiscoveryJobs.filter((job) =>
+      requested.has(job.id),
+    );
+    const selected = new Map(
+      [...selectedSaved, ...selectedPending].map((job) => [job.id, job]),
+    );
+    for (const id of ids)
+      if (!selected.has(id))
+        throw new Error(`Unable to shortlist unknown job '${id}'.`);
+    // Resolving inactive aliases needs the complete identity inventory; the common
+    // active-listing path reads only the rows this shortlist actually changes.
+    const activityJobs = discovery.discoveryLedger.some(
+      (entry) => entry.latestStatus === "inactive" && entry.inactiveAt !== null,
+    )
+      ? [
+          ...(await ctx.repository.readSavedJobsProjection()),
+          ...selectedPending,
+        ]
+      : [...selected.values()];
+    const views = projectDiscoveryJobViews({
+      jobs: activityJobs,
+      discoveryLedger: discovery.discoveryLedger,
+      listingSignals: intelligence.safeguards.listingSignals,
+      applicationAttempts: attempts,
+    });
+    for (const view of views)
+      if (requested.has(view.id) && view.listingActivity.status === "closed")
+        throw new Error(
+          `Unable to shortlist closed job '${view.id}'. The listing has explicit closed evidence.`,
+        );
+    const assetByJob = new Map(assets.map((asset) => [asset.jobId, asset]));
+    const shortlist = (job: SavedJob): SavedJob => {
+      assertCurrent();
+      if (
+        job.status === "archived" &&
+        selected.get(job.id)?.status !== "archived"
+      )
+        throw new Error(
+          `Unable to shortlist '${job.title}': it was removed while this selection was being saved.`,
+        );
+      if (job.matchAssessment.judgment?.listingClosed)
+        throw new Error(
+          `Unable to shortlist '${job.title}': the listing says it is closed.`,
+        );
+      if (
+        ["drafting", "ready_for_review", "approved", "submitted"].includes(
+          job.status,
+        )
+      )
+        return job;
+      return {
+        ...job,
+        status:
+          assetByJob.get(job.id)?.status === "ready"
+            ? "ready_for_review"
+            : "drafting",
+        resumeApplicationMode:
+          job.resumeApplicationMode ??
+          settings.resumeApplicationMode ??
+          DEFAULT_RESUME_APPLICATION_MODE,
+        resumeTailoringMode:
+          job.resumeTailoringMode ?? preferences.tailoringMode,
+      };
+    };
+    assertCurrent();
+    await ctx.repository.commitSavedJobDelta({
+      ...(selectedPending.length > 0
+        ? {
+            upsertsFromBorrowedDiscovery: (current) =>
+              current.pendingDiscoveryJobs
+                .filter((job) => requested.has(job.id))
+                .map((job) => SavedJobSchema.parse(shortlist(job))),
+          }
+        : {}),
+      updateJobIds: ids,
+      update: (job) => shortlist(job),
+      ...(selectedPending.length > 0
+        ? {
+            updateDiscoveryState: (current: JobFinderDiscoveryState) => ({
+              ...current,
+              pendingDiscoveryJobs: current.pendingDiscoveryJobs.filter(
+                (job) => !requested.has(job.id),
+              ),
+            }),
+          }
+        : {}),
+    });
+    for (const id of ids) {
+      if (listingReadGenerations.get(id) === generation) continue;
+      listingReadGenerations.set(id, generation);
+      ctx.listingAssessmentJobIds?.add(id);
+      pendingListingReads.set(id, generation);
+    }
+    drainListingReads();
+  }
+
   /**
    * Shortlisting is the moment the job's body starts to matter: the tailored
    * resume is written toward it and the fit score gates "Prepare". If the
    * search left this job as a card, read its page now, once, and re-score.
    * Never fatal: a page that will not read leaves the shortlist unchanged.
    */
-  async function readListingDetailForShortlistedJob(
+  async function performListingDetailRead(
     jobId: string,
     options: {
       /**
@@ -609,6 +941,7 @@ export function createWorkspaceApplicationMethods(
        */
       force?: boolean;
       throwOnFailure?: boolean;
+      resumeWriterOwnsSlot?: boolean;
     } = {},
   ): Promise<void> {
     const fetchListingHtml = ctx.fetchListingHtml;
@@ -616,13 +949,15 @@ export function createWorkspaceApplicationMethods(
       return;
     }
     try {
-      const [savedJobs, discoveryState] = await Promise.all([
-        ctx.repository.listSavedJobs(),
-        ctx.repository.getDiscoveryState(),
-      ]);
+      const generation = listingGeneration();
+      const signal = ctx.listingAssessmentAbortControllerRef?.current.signal;
+      if (!listingReadCurrent(generation)) return;
+      const savedJobs = await ctx.repository.listSavedJobsByIds([jobId]);
       const job =
-        savedJobs.find((entry) => entry.id === jobId) ??
-        discoveryState.pendingDiscoveryJobs.find((entry) => entry.id === jobId);
+        savedJobs[0] ??
+        (await ctx.repository.getDiscoveryState()).pendingDiscoveryJobs.find(
+          (entry) => entry.id === jobId,
+        );
       if (!job) {
         if (options.throwOnFailure) {
           throw new Error(
@@ -631,9 +966,14 @@ export function createWorkspaceApplicationMethods(
         }
         return;
       }
+      if (!listingReadCurrent(generation)) return;
+      const isPending = savedJobs.length === 0;
       const alreadyRead =
         job.detailQuality === "detail_enriched" &&
         job.listingDetailFetch?.outcome === "enriched";
+      // Resume writing needs the captured posting body, not another fit
+      // verdict. Explicit assessment controls still request a fresh judgment.
+      if (options.resumeWriterOwnsSlot && alreadyRead) return;
       if (!options.force && !alreadyRead && !jobNeedsListingDetail(job)) {
         return;
       }
@@ -678,26 +1018,40 @@ export function createWorkspaceApplicationMethods(
             settings,
           ),
           job,
+          signal,
         );
         const matchAssessment = session.remember(job, assessed);
+        if (!listingReadCurrent(generation)) return;
         await ctx.repository.commitSavedJobDelta({
+          updateJobIds: [jobId],
           update: (current) =>
             current.id === jobId && current.description === job.description
               ? withPlanAssessment(current, assessmentPlanId, matchAssessment)
               : current,
-          updateDiscoveryState: (current) => ({
-            ...current,
-            pendingDiscoveryJobs: current.pendingDiscoveryJobs.map((entry) =>
-              entry.id === jobId && entry.description === job.description
-                ? withPlanAssessment(entry, assessmentPlanId, matchAssessment)
-                : entry,
-            ),
-          }),
+          ...(isPending
+            ? {
+                updateDiscoveryState: (current: JobFinderDiscoveryState) => ({
+                  ...current,
+                  pendingDiscoveryJobs: current.pendingDiscoveryJobs.map(
+                    (entry) =>
+                      entry.id === jobId &&
+                      entry.description === job.description
+                        ? withPlanAssessment(
+                            entry,
+                            assessmentPlanId,
+                            matchAssessment,
+                          )
+                        : entry,
+                  ),
+                }),
+              }
+            : {}),
         });
         return;
       }
       const enrichment = await enrichSavedJobListingDetails({
         jobs: [job],
+        ...(signal ? { signal } : {}),
         fetchHtml: fetchListingHtml,
         readPage: createModelListingPageReader(ctx.aiClient),
         ...(ctx.browserRuntime.readRenderedPage
@@ -717,6 +1071,7 @@ export function createWorkspaceApplicationMethods(
                 settings,
               ),
               posting,
+              signal,
             );
             return session.remember(posting, assessed);
           } catch (error) {
@@ -770,13 +1125,22 @@ export function createWorkspaceApplicationMethods(
                 : next.matchAssessment,
             }
           : current;
+      if (!listingReadCurrent(generation)) return;
       await ctx.repository.commitSavedJobDelta({
+        updateJobIds: [jobId],
         update: applyRead,
-        updateDiscoveryState: (current) => ({
-          ...current,
-          pendingDiscoveryJobs: current.pendingDiscoveryJobs.map(applyRead),
-        }),
+        ...(isPending
+          ? {
+              updateDiscoveryState: (current: JobFinderDiscoveryState) => ({
+                ...current,
+                pendingDiscoveryJobs:
+                  current.pendingDiscoveryJobs.map(applyRead),
+              }),
+            }
+          : {}),
       });
+      if (enrichment.providerAccessError instanceof Error)
+        throw enrichment.providerAccessError;
       if (
         options.throwOnFailure &&
         next.listingDetailFetch?.outcome !== "enriched" &&
@@ -788,7 +1152,18 @@ export function createWorkspaceApplicationMethods(
         );
       }
     } catch (error) {
-      if (options.throwOnFailure) throw error;
+      // A resume is written toward the listing: when the AI service refused
+      // the read, the writer pauses the batch rather than writing without it.
+      if (
+        options.throwOnFailure ||
+        (options.resumeWriterOwnsSlot && getAiProviderAccessFailure(error))
+      )
+        throw error;
+      if (
+        ctx.listingAssessmentAbortControllerRef?.current.signal.aborted ||
+        ctx.isWorkspaceClosing?.()
+      )
+        return;
       // The shortlist itself succeeded; the body stays unread for now and the
       // job records nothing, so the next look can try again.
       console.warn("[shortlist] Listing assessment failed", error);
@@ -1262,6 +1637,82 @@ export function createWorkspaceApplicationMethods(
     string,
     Promise<JobFinderWorkspaceSnapshot>
   >();
+
+  const resumeAdmission = createConcurrencyLimiter(RESUME_PIPELINE_CAPACITY);
+  // Writers back off together when the AI service keeps refusing for load,
+  // instead of every queued resume running into the same limit and failing.
+  const resumeWriters = createAdaptiveConcurrencyLimiter({
+    max: RESUME_AI_CONCURRENCY,
+    min: 2,
+  });
+  const resumeProcessors = createConcurrencyLimiter(RESUME_LOCAL_CONCURRENCY);
+  const resumeCheckpointEpochs = new Map<string, number>();
+  const inFlightResumeCores = new Map<
+    string,
+    Promise<ResumeBatchGenerationResult>
+  >();
+  type GenerationOptions = {
+    language?: string | null;
+    shouldStop?: () => boolean;
+    onStage?: (stage: ResumeBatchGenerationProgress["stage"]) => void;
+    onProviderBlocked?: (block: ResumeBatchProviderBlock) => void;
+  };
+
+  function reportResumeStage(
+    options: GenerationOptions | undefined,
+    stage: ResumeBatchGenerationProgress["stage"],
+  ): void {
+    try {
+      options?.onStage?.(stage);
+    } catch {
+      /* A disconnected observer cannot cancel durable work. */
+    }
+  }
+
+  function startResumeGeneration(
+    jobId: string,
+    options?: GenerationOptions,
+    regenerate = false,
+  ): Promise<ResumeBatchGenerationResult> {
+    const existing = inFlightResumeCores.get(jobId);
+    if (existing) return existing;
+    let lastStage: ResumeBatchGenerationProgress["stage"] | undefined;
+    const observedOptions: GenerationOptions = {
+      ...options,
+      onStage: (stage) => {
+        if (lastStage === stage) return;
+        lastStage = stage;
+        options?.onStage?.(stage);
+      },
+    };
+    reportResumeStage(observedOptions, "queued");
+    const generation = listingGeneration();
+    const run = resumeAdmission
+      .run(() =>
+        withResumeDraftTransition(
+          jobId,
+          async (): Promise<ResumeBatchGenerationResult> => {
+            if (options?.shouldStop?.() || !listingReadCurrent(generation))
+              return { jobId, outcome: "not_started" };
+            if (regenerate) {
+              const draft = await ctx.repository.getResumeDraftByJobId(jobId);
+              if (draft && hasLockedResumeContent(draft))
+                throw new Error(
+                  "Unlock pinned resume sections or bullets before regenerating the full draft.",
+                );
+            }
+            return runGenerateResume(jobId, observedOptions);
+          },
+        ),
+      )
+      .finally(() => {
+        if (inFlightResumeCores.get(jobId) === run)
+          inFlightResumeCores.delete(jobId);
+        reportResumeStage(observedOptions, "finished");
+      });
+    inFlightResumeCores.set(jobId, run);
+    return run;
+  }
 
   async function withResumeDraftTransition<T>(
     jobId: string,
@@ -3674,11 +4125,30 @@ export function createWorkspaceApplicationMethods(
    */
   async function runGenerateResume(
     jobId: string,
-    options?: { language?: string | null },
-  ): Promise<JobFinderWorkspaceSnapshot> {
+    options?: GenerationOptions,
+  ): Promise<ResumeBatchGenerationResult> {
+    const generation = listingGeneration();
+    const signal = ctx.listingAssessmentAbortControllerRef?.current.signal;
+    const current = () => listingReadCurrent(generation);
+    let releaseWriter: (() => void) | undefined;
+    let releaseProcessor: (() => void) | undefined;
+    let providerBlockReported = false;
+    let providerBlockError: Error | undefined;
+    const reportProviderBlock = (error: unknown) => {
+      const block = getAiProviderAccessFailure(error);
+      if (!block || providerBlockReported || !current()) return;
+      providerBlockReported = true;
+      providerBlockError = new Error(block.message, { cause: error });
+      try {
+        options?.onProviderBlocked?.(block);
+      } catch {
+        /* Observers cannot replace the provider error. */
+      }
+    };
     const intelligence = withResumeBatchLiveness(
       ctx.repository,
-      await ctx.repository.getIntelligenceState(),
+      await (ctx.repository.readIntelligenceProjection?.() ??
+        ctx.repository.getIntelligenceState()),
     );
     const continuedBatch = intelligence.resumeBatchCheckpoint?.running
       ? intelligence.resumeBatchCheckpoints?.findLast(
@@ -3693,591 +4163,703 @@ export function createWorkspaceApplicationMethods(
     const request = continuedBatch?.requests?.findLast(
       (entry) => entry.jobId === jobId,
     );
-    if (options === undefined && request?.language)
-      options = { language: request.language };
+    if (options?.language === undefined && request?.language !== undefined)
+      options = { ...options, language: request.language };
 
-    const requestedJob = (await ctx.repository.listSavedJobs()).find(
-      (entry) => entry.id === jobId,
-    );
+    if (request?.level) {
+      await ctx.updateJob(jobId, (job) =>
+        SavedJobSchema.parse({
+          ...job,
+          resumeApplicationMode: "tailored_per_job",
+          resumeTailoringMode:
+            request.level === "light"
+              ? "conservative"
+              : request.level === "tailored"
+                ? "balanced"
+                : "aggressive",
+        }),
+      );
+    }
+    const requestedJob = (
+      await ctx.repository.listSavedJobsByIds([jobId])
+    ).find((entry) => entry.id === jobId);
+    if (
+      options?.shouldStop &&
+      requestedJob?.resumeApplicationMode === "original_resume"
+    )
+      return { jobId, outcome: "original" };
     if (requestedJob?.status !== "shortlisted")
       removedResumeJobIds.delete(jobId);
-    if (removedResumeJobIds.has(jobId)) return ctx.getWorkspaceSnapshot();
+    if (removedResumeJobIds.has(jobId)) return { jobId, outcome: "cancelled" };
     // A resume is written toward the listing, so read the listing first when
     // the search only kept the card (or an earlier read failed).
-    await readListingDetailForShortlistedJob(jobId, { force: true });
-    const [
-      profileState,
-      searchPreferences,
-      settings,
-      savedJobs,
-      tailoredAssets,
-      intelligenceState,
-      campaignState,
-    ] = await Promise.all([
-      ctx.repository.getProfileWithRevision(),
-      ctx.repository.getSearchPreferences(),
-      ctx.repository.getSettings(),
-      ctx.repository.listSavedJobs(),
-      ctx.repository.listTailoredAssets(),
-      ctx.repository.getIntelligenceState(),
-      ctx.repository.getCampaignState(),
-    ]);
-    const { revision: profileRevision } = profileState;
-    const profile = {
-      ...profileState.profile,
-      experiences: profileState.profile.experiences.filter(
-        (record) => !record.isDraft,
-      ),
-      education: profileState.profile.education.filter(
-        (record) => !record.isDraft,
-      ),
-      certifications: profileState.profile.certifications.filter(
-        (record) => !record.isDraft,
-      ),
-      links: profileState.profile.links.filter((record) => !record.isDraft),
-    };
-    const job = savedJobs.find((entry) => entry.id === jobId);
-
-    if (!job) {
-      throw new Error(
-        `Unable to generate a resume for unknown job '${jobId}'.`,
-      );
+    releaseWriter = await resumeWriters.acquire();
+    if (options?.shouldStop?.() || !current()) {
+      releaseWriter();
+      return { jobId, outcome: "not_started" };
     }
-
-    const existingAsset = tailoredAssets.find((asset) => asset.jobId === jobId);
-    if (existingAsset?.failureMessage || existingAsset?.failedAt) {
-      await ctx.repository.upsertTailoredAsset({
-        ...existingAsset,
-        failureMessage: null,
-        failedAt: null,
-      });
-    }
-
-    const existingDraft = await ctx.repository.getResumeDraftByJobId(jobId);
-    const templates = ctx.documentManager.listResumeTemplates();
-    const strategyContext = buildResumeStrategyContext({
-      state: intelligenceState,
-      job,
-      campaignDefaultResumeStrategyId: resolveCampaignDefaultResumeStrategyId(
-        campaignState,
-        jobId,
-      ),
-    });
-    const strategyPolicy = buildResumeGenerationStrategyPolicy({
-      state: intelligenceState,
-      job,
-      campaignDefaultResumeStrategyId: resolveCampaignDefaultResumeStrategyId(
-        campaignState,
-        jobId,
-      ),
-    });
-    const effectiveTailoringMode =
-      job.resumeTailoringMode ??
-      strategyPolicy?.tailoringStrength ??
-      searchPreferences.tailoringMode;
-    const generationSearchPreferences = {
-      ...searchPreferences,
-      tailoringMode: effectiveTailoringMode,
-    };
-    const generationStrategyPolicy =
-      strategyPolicy && job.resumeTailoringMode
-        ? {
-            ...strategyPolicy,
-            tailoringStrength: job.resumeTailoringMode,
-          }
-        : strategyPolicy;
-    const selectedBaseResumeDocumentId =
-      strategyPolicy?.baseResumeDocumentId ?? profile.baseResume.id;
-    const resumeImportBundles = strategyPolicy
-      ? await ctx.repository.listResumeImportDocumentBundles()
-      : [];
-    const selectedBaseResume =
-      resumeImportBundles.find(
-        (bundle) =>
-          bundle.id === selectedBaseResumeDocumentId ||
-          bundle.sourceResumeId === selectedBaseResumeDocumentId,
-      ) ?? null;
-    const resumeText =
-      selectedBaseResume?.fullText ?? profile.baseResume.textContent;
-    const baseResumeFallbackNote =
-      strategyPolicy &&
-      selectedBaseResumeDocumentId !== profile.baseResume.id &&
-      !selectedBaseResume?.fullText
-        ? `Strategy base resume document "${selectedBaseResumeDocumentId}" was unavailable, so the current profile resume was used as the grounded source.`
-        : null;
-    const existingDraftRevisions = existingDraft
-      ? await ctx.repository.listResumeDraftRevisions(existingDraft.id)
-      : [];
-    const hasExplicitDraftTemplate = existingDraftRevisions.some(
-      (revision) =>
-        (revision.actor === "user" || revision.actor === "restore") &&
-        revision.diff?.templateChanged === true,
-    );
-    const hasExplicitStrategyTemplate =
-      strategyPolicy?.effectiveSource === "selection";
-    const lockedTemplateId = hasExplicitDraftTemplate
-      ? (existingDraft?.templateId ?? null)
-      : hasExplicitStrategyTemplate
-        ? (strategyContext.templateId ?? null)
-        : null;
-    // Generation, rendering, and persistence failures must leave durable
-    // queue truth behind: record the failed tailored asset before
-    // propagating the original error to callers.
     try {
-      const research = await fetchAndPersistResearch(
-        ctx,
-        job,
-        profileRevision,
-        profile,
-      );
-      const evidence = collectResumeWorkspaceEvidence({
-        profile,
-        job,
-        research,
+      reportResumeStage(options, "writing");
+      await readListingDetailForShortlistedJob(jobId, {
+        force: true,
+        resumeWriterOwnsSlot: true,
       });
-      const researchContext = collectResearchContext(research);
-      const targetLanguage =
-        options?.language !== undefined
-          ? options.language
-          : (existingDraft?.language ?? null);
-      const baseDraft = buildResumeDraftFromTailoredDraft({
-        job,
-        profile,
-        research,
-        templateId: settings.resumeTemplateId,
-        draft: completeTailoredResumeDraft(
-          {},
-          {
-            profile,
-            job,
-            settings,
-            searchPreferences: generationSearchPreferences,
-            resumeText,
-            strategy: generationStrategyPolicy,
-          },
-        ),
-        createdAt: new Date().toISOString(),
-        generationMethod: "ai",
-      });
-      const draft = await ctx.aiClient.createResumeDraft({
-        profile,
-        searchPreferences: generationSearchPreferences,
+      if (!current()) return { jobId, outcome: "cancelled" };
+      const [
+        profileState,
+        searchPreferences,
         settings,
+        savedJobs,
+        existingAsset,
+        intelligenceState,
+        campaignState,
+      ] = await Promise.all([
+        ctx.repository.getProfileWithRevision(),
+        ctx.repository.getSearchPreferences(),
+        ctx.repository.getSettings(),
+        ctx.repository.listSavedJobsByIds([jobId]),
+        ctx.repository.getTailoredAssetByJobId(jobId),
+        ctx.repository.readIntelligenceProjection?.() ??
+          ctx.repository.getIntelligenceState(),
+        ctx.repository.getCampaignState(),
+      ]);
+      const { revision: profileRevision } = profileState;
+      const profile = {
+        ...profileState.profile,
+        experiences: profileState.profile.experiences.filter(
+          (record) => !record.isDraft,
+        ),
+        education: profileState.profile.education.filter(
+          (record) => !record.isDraft,
+        ),
+        certifications: profileState.profile.certifications.filter(
+          (record) => !record.isDraft,
+        ),
+        links: profileState.profile.links.filter((record) => !record.isDraft),
+      };
+      const job = savedJobs.find((entry) => entry.id === jobId);
+
+      if (!job) {
+        throw new Error(
+          `Unable to generate a resume for unknown job '${jobId}'.`,
+        );
+      }
+
+      if (
+        options?.shouldStop &&
+        job.resumeApplicationMode === "original_resume"
+      )
+        return { jobId, outcome: "original" };
+      if (removedResumeJobIds.has(jobId) || !current())
+        return { jobId, outcome: "cancelled" };
+      reportResumeStage(options, "writing");
+      if (existingAsset?.failureMessage || existingAsset?.failedAt) {
+        await ctx.repository.upsertTailoredAsset({
+          ...existingAsset,
+          failureMessage: null,
+          failedAt: null,
+        });
+      }
+
+      const existingDraft = await ctx.repository.getResumeDraftByJobId(jobId);
+      const templates = ctx.documentManager.listResumeTemplates();
+      const strategyContext = buildResumeStrategyContext({
+        state: intelligenceState,
         job,
-        resumeText,
-        strategy: generationStrategyPolicy,
-        evidence,
-        researchContext,
-        availableTemplates: templates,
-        selectedTemplateId:
+        campaignDefaultResumeStrategyId: resolveCampaignDefaultResumeStrategyId(
+          campaignState,
+          jobId,
+        ),
+      });
+      const strategyPolicy = buildResumeGenerationStrategyPolicy({
+        state: intelligenceState,
+        job,
+        campaignDefaultResumeStrategyId: resolveCampaignDefaultResumeStrategyId(
+          campaignState,
+          jobId,
+        ),
+      });
+      const effectiveTailoringMode =
+        job.resumeTailoringMode ??
+        strategyPolicy?.tailoringStrength ??
+        searchPreferences.tailoringMode;
+      const generationSearchPreferences = {
+        ...searchPreferences,
+        tailoringMode: effectiveTailoringMode,
+      };
+      const generationStrategyPolicy =
+        strategyPolicy && job.resumeTailoringMode
+          ? {
+              ...strategyPolicy,
+              tailoringStrength: job.resumeTailoringMode,
+            }
+          : strategyPolicy;
+      const selectedBaseResumeDocumentId =
+        strategyPolicy?.baseResumeDocumentId ?? profile.baseResume.id;
+      const resumeImportBundles = strategyPolicy
+        ? await ctx.repository.listResumeImportDocumentBundles()
+        : [];
+      const selectedBaseResume =
+        resumeImportBundles.find(
+          (bundle) =>
+            bundle.id === selectedBaseResumeDocumentId ||
+            bundle.sourceResumeId === selectedBaseResumeDocumentId,
+        ) ?? null;
+      const resumeText =
+        selectedBaseResume?.fullText ?? profile.baseResume.textContent;
+      const baseResumeFallbackNote =
+        strategyPolicy &&
+        selectedBaseResumeDocumentId !== profile.baseResume.id &&
+        !selectedBaseResume?.fullText
+          ? `Strategy base resume document "${selectedBaseResumeDocumentId}" was unavailable, so the current profile resume was used as the grounded source.`
+          : null;
+      const existingDraftRevisions = existingDraft
+        ? await ctx.repository.listResumeDraftRevisions(existingDraft.id)
+        : [];
+      const hasExplicitDraftTemplate = existingDraftRevisions.some(
+        (revision) =>
+          (revision.actor === "user" || revision.actor === "restore") &&
+          revision.diff?.templateChanged === true,
+      );
+      const hasExplicitStrategyTemplate =
+        strategyPolicy?.effectiveSource === "selection";
+      const lockedTemplateId = hasExplicitDraftTemplate
+        ? (existingDraft?.templateId ?? null)
+        : hasExplicitStrategyTemplate
+          ? (strategyContext.templateId ?? null)
+          : null;
+      // Generation, rendering, and persistence failures must leave durable
+      // queue truth behind: record the failed tailored asset before
+      // propagating the original error to callers.
+      try {
+        const research = await fetchAndPersistResearch(
+          ctx,
+          job,
+          profileRevision,
+          profile,
+        );
+        const evidence = collectResumeWorkspaceEvidence({
+          profile,
+          job,
+          research,
+        });
+        const researchContext = collectResearchContext(research);
+        const targetLanguage =
+          options?.language !== undefined
+            ? options.language
+            : (existingDraft?.language ?? null);
+        const baseDraft = buildResumeDraftFromTailoredDraft({
+          job,
+          profile,
+          research,
+          templateId: settings.resumeTemplateId,
+          draft: completeTailoredResumeDraft(
+            {},
+            {
+              profile,
+              job,
+              settings,
+              searchPreferences: generationSearchPreferences,
+              resumeText,
+              strategy: generationStrategyPolicy,
+            },
+          ),
+          createdAt: new Date().toISOString(),
+          generationMethod: "ai",
+        });
+        let excludedQueueWaitMs = 0;
+        // Verdicts belong to this writer even if other jobs displace them from
+        // the bounded session cache. The checker still compares the complete
+        // evidence/context key and each line's hash before reusing them.
+        let previewClaimChecks: NonNullable<ResumeDraft["claimChecks"]> = [];
+        const draft = await ctx.aiClient.createResumeDraft({
+          getExcludedElapsedMs: () => excludedQueueWaitMs,
+          ...(signal ? { signal } : {}),
+          profile,
+          searchPreferences: generationSearchPreferences,
+          settings,
+          job,
+          resumeText,
+          strategy: generationStrategyPolicy,
+          evidence,
+          researchContext,
+          availableTemplates: templates,
+          selectedTemplateId:
+            lockedTemplateId ??
+            existingDraft?.templateId ??
+            strategyContext.templateId ??
+            settings.resumeTemplateId,
+          templateSelectionLocked: lockedTemplateId !== null,
+          language: targetLanguage,
+          languageFields: collectResumeLanguageFields(baseDraft),
+          renderPreview: async ({
+            draft: previewDraft,
+            templateId,
+            signal: previewSignal,
+            getRemainingBudgetMs,
+          }) => {
+            const checkSignal =
+              previewSignal && signal
+                ? AbortSignal.any([previewSignal, signal])
+                : (previewSignal ?? signal);
+            if (!current())
+              throw new Error(
+                "Resume generation stopped because the workspace changed.",
+              );
+            const template =
+              templates.find((candidate) => candidate.id === templateId) ??
+              null;
+            if (!template || !isResumeTemplateApplyEligible(template)) {
+              throw new Error(
+                `Resume template '${templateId}' is unavailable or not apply-safe.`,
+              );
+            }
+            const previewAt = new Date().toISOString();
+            const assembledPreviewDraft = buildResumeDraftFromTailoredDraft({
+              job,
+              templateId: template.id,
+              draft: previewDraft,
+              createdAt: previewAt,
+              updatedAt: previewAt,
+              existingDraftId: existingDraft?.id ?? null,
+              previousWorkHistoryReviewAcknowledgments:
+                existingDraft?.workHistoryReviewAcknowledgments ?? [],
+              generationMethod: "ai",
+              profile,
+              research,
+            });
+            assembledPreviewDraft.claimChecks = previewClaimChecks;
+            const previewResumeDraft = await sanitizeAndCheckResumeDraft(
+              ctx,
+              {
+                draft: previewDraft.languagePresentation
+                  ? applyResumeLanguage(
+                      assembledPreviewDraft,
+                      previewDraft.languagePresentation,
+                    )
+                  : assembledPreviewDraft,
+                job,
+                profile,
+                ...(generationStrategyPolicy
+                  ? { sourceSkills: previewDraft.coreSkills }
+                  : {}),
+              },
+              {
+                ...(checkSignal ? { signal: checkSignal } : {}),
+                ...(getRemainingBudgetMs ? { getRemainingBudgetMs } : {}),
+              },
+            ).catch((error: unknown) => {
+              reportProviderBlock(error);
+              throw error;
+            });
+            const rendered = await ctx.documentManager.renderResumeArtifact({
+              ...(checkSignal ? { signal: checkSignal } : {}),
+              onQueueWait: (milliseconds) => {
+                excludedQueueWaitMs += milliseconds;
+              },
+              job,
+              profile,
+              renderDocument: buildResumeRenderDocument(
+                profile,
+                previewResumeDraft,
+              ),
+              templateId: template.id,
+              settings,
+            });
+            const previewValidation = validateResumeDraft({
+              draft: previewResumeDraft,
+              job,
+              profile,
+              strategy: generationStrategyPolicy,
+              pageCount: rendered.pageCount ?? null,
+              validatedAt: previewAt,
+            });
+            previewClaimChecks = previewResumeDraft.claimChecks ?? [];
+            // A stretch is the person's call only in aggressive tailoring
+            // (ADR 0018); in the other modes the writer grounds it or drops it.
+            const stretchesAreThePersons =
+              effectiveTailoringMode === "aggressive";
+            const personConfirmationAssessmentIds = new Set(
+              stretchesAreThePersons
+                ? previewValidation.claimAssessments
+                    .filter(
+                      (assessment) => assessment.status === "confirm_needed",
+                    )
+                    .map((assessment) => assessment.id)
+                : [],
+            );
+            return {
+              templateId: template.id,
+              pageCount: rendered.pageCount ?? null,
+              warnings: rendered.warnings ?? [],
+              fileName: rendered.fileName,
+              requiredModelRepairs: previewValidation.issues.filter(
+                (issue) =>
+                  issue.severity === "error" &&
+                  !issue.id.startsWith("issue_claim_confirmation_") &&
+                  // A profile too thin for a full resume needs the person's
+                  // evidence; the writer cannot add it, so it does not hold the
+                  // writer back. It still waits for the person's review.
+                  !issue.id.startsWith("issue_thin_fallback_") &&
+                  !(
+                    issue.id.startsWith("issue_claim_grounding_") &&
+                    personConfirmationAssessmentIds.has(
+                      issue.id.slice("issue_claim_grounding_".length),
+                    )
+                  ),
+              ),
+              personConfirmationCount: personConfirmationAssessmentIds.size,
+              languageFields: collectResumeLanguageFields(previewResumeDraft),
+            };
+          },
+        });
+        // Prefer the structured provenance recorded by the AI boundary; the
+        // note-prose inference stays only for legacy clients that omit it.
+        releaseWriter();
+        releaseWriter = undefined;
+        reportResumeStage(options, "queued");
+        if (!current()) return { jobId, outcome: "cancelled" };
+        const provenance = draft.generationProvenance ?? null;
+        const generationMethod = provenance
+          ? provenance.method === "ai"
+            ? "ai_assisted"
+            : "deterministic"
+          : draft.notes.some((note: string) =>
+                normalizeText(note).includes("deterministic"),
+              )
+            ? "deterministic"
+            : ctx.aiClient.getStatus().kind === "openai_compatible"
+              ? "ai_assisted"
+              : "deterministic";
+        const generationReason =
+          generationMethod === "deterministic"
+            ? (provenance?.reason ??
+              (ctx.aiClient.getStatus().kind === "openai_compatible"
+                ? "provider_failed"
+                : "no_provider_configured"))
+            : null;
+        const generationDetail = provenance?.detail?.trim() || null;
+        const now = createMonotonicTimestamp(existingDraft?.updatedAt ?? null);
+        // A strategy may supply the template default for a fresh draft, but it
+        // never approves or readies the artifact: the generated draft stays
+        // unapproved and the per-job approval/staleness checks stay
+        // authoritative.
+        const strategyTemplateId =
           lockedTemplateId ??
+          draft.recommendedTemplateId ??
           existingDraft?.templateId ??
           strategyContext.templateId ??
-          settings.resumeTemplateId,
-        templateSelectionLocked: lockedTemplateId !== null,
-        language: targetLanguage,
-        languageFields: collectResumeLanguageFields(baseDraft),
-        renderPreview: async ({ draft: previewDraft, templateId }) => {
-          const template =
-            templates.find((candidate) => candidate.id === templateId) ?? null;
-          if (!template || !isResumeTemplateApplyEligible(template)) {
-            throw new Error(
-              `Resume template '${templateId}' is unavailable or not apply-safe.`,
-            );
-          }
-          const previewAt = new Date().toISOString();
-          const assembledPreviewDraft = buildResumeDraftFromTailoredDraft({
+          null;
+        const strategyDisplayName =
+          strategyContext.selectedStrategyName ??
+          strategyContext.recommendedStrategyName ??
+          null;
+        const sourceDraft = buildResumeDraftFromTailoredDraft({
+          job,
+          templateId: strategyTemplateId ?? settings.resumeTemplateId,
+          draft,
+          createdAt: existingDraft?.createdAt ?? now,
+          updatedAt: now,
+          existingDraftId: existingDraft?.id ?? null,
+          previousWorkHistoryReviewAcknowledgments:
+            existingDraft?.workHistoryReviewAcknowledgments ?? [],
+          generationMethod:
+            generationMethod === "ai_assisted" ? "ai" : "deterministic",
+          profile,
+          research,
+          headline:
+            strategyPolicy?.headlinePolicy === "fixed"
+              ? profile.headline
+              : strategyPolicy?.headlinePolicy === "role_family_template"
+                ? strategyPolicy.roleFamily
+                : strategyPolicy?.headlinePolicy === "per_job_tailored"
+                  ? job.title
+                  : undefined,
+        });
+        const languageDraft = {
+          ...sourceDraft,
+          claimChecks: previewClaimChecks,
+          language: targetLanguage,
+        };
+        const resumeDraft = draft.languagePresentation
+          ? applyResumeLanguage(languageDraft, draft.languagePresentation)
+          : languageDraft;
+        releaseProcessor = await resumeProcessors.acquire();
+        if (!current()) return { jobId, outcome: "cancelled" };
+        reportResumeStage(options, "processing");
+        const sanitizedResumeDraft = await sanitizeAndCheckResumeDraft(
+          ctx,
+          {
+            draft: resumeDraft,
             job,
-            templateId: template.id,
-            draft: previewDraft,
-            createdAt: previewAt,
-            updatedAt: previewAt,
-            existingDraftId: existingDraft?.id ?? null,
-            previousWorkHistoryReviewAcknowledgments:
-              existingDraft?.workHistoryReviewAcknowledgments ?? [],
-            generationMethod: "ai",
             profile,
-            research,
-          });
-          const previewResumeDraft = await sanitizeAndCheckResumeDraft(ctx, {
-            draft: previewDraft.languagePresentation
-              ? applyResumeLanguage(
-                  assembledPreviewDraft,
-                  previewDraft.languagePresentation,
-                )
-              : assembledPreviewDraft,
-            job,
-            profile,
-            ...(generationStrategyPolicy
-              ? { sourceSkills: previewDraft.coreSkills }
-              : {}),
-          });
-          const rendered = await ctx.documentManager.renderResumeArtifact({
+            ...(strategyPolicy ? { sourceSkills: draft.coreSkills } : {}),
+          },
+          { fixGeneratedLines: true },
+        );
+        const previewSections = buildTailoredAssetBridge({
+          draft: sanitizedResumeDraft,
+          job,
+          profile,
+        }).previewSections;
+        const contentText = buildTailoredResumeTextFromResumeDraft(
+          profile,
+          job,
+          sanitizedResumeDraft,
+        );
+        await assertCurrentResumeProfile(
+          ctx,
+          profileRevision,
+          "rendering this generated resume",
+          profile,
+        );
+        const renderedArtifact = await ctx.documentManager.renderResumeArtifact(
+          {
             job,
             profile,
             renderDocument: buildResumeRenderDocument(
               profile,
-              previewResumeDraft,
+              sanitizedResumeDraft,
             ),
-            templateId: template.id,
+            templateId: sanitizedResumeDraft.templateId,
             settings,
-          });
-          const previewValidation = validateResumeDraft({
-            draft: previewResumeDraft,
-            job,
-            profile,
-            strategy: generationStrategyPolicy,
-            pageCount: rendered.pageCount ?? null,
-            validatedAt: previewAt,
-          });
-          // A stretch is the person's call only in aggressive tailoring
-          // (ADR 0018); in the other modes the writer grounds it or drops it.
-          const stretchesAreThePersons =
-            effectiveTailoringMode === "aggressive";
-          const personConfirmationAssessmentIds = new Set(
-            stretchesAreThePersons
-              ? previewValidation.claimAssessments
-                  .filter(
-                    (assessment) => assessment.status === "confirm_needed",
-                  )
-                  .map((assessment) => assessment.id)
-              : [],
-          );
-          return {
-            templateId: template.id,
-            pageCount: rendered.pageCount ?? null,
-            warnings: rendered.warnings ?? [],
-            fileName: rendered.fileName,
-            requiredModelRepairs: previewValidation.issues.filter(
-              (issue) =>
-                issue.severity === "error" &&
-                !issue.id.startsWith("issue_claim_confirmation_") &&
-                // A profile too thin for a full resume needs the person's
-                // evidence; the writer cannot add it, so it does not hold the
-                // writer back. It still waits for the person's review.
-                !issue.id.startsWith("issue_thin_fallback_") &&
-                !(
-                  issue.id.startsWith("issue_claim_grounding_") &&
-                  personConfirmationAssessmentIds.has(
-                    issue.id.slice("issue_claim_grounding_".length),
-                  )
-                ),
-            ),
-            personConfirmationCount: personConfirmationAssessmentIds.size,
-            languageFields: collectResumeLanguageFields(previewResumeDraft),
-          };
-        },
-      });
-      // Prefer the structured provenance recorded by the AI boundary; the
-      // note-prose inference stays only for legacy clients that omit it.
-      const provenance = draft.generationProvenance ?? null;
-      const generationMethod = provenance
-        ? provenance.method === "ai"
-          ? "ai_assisted"
-          : "deterministic"
-        : draft.notes.some((note: string) =>
-              normalizeText(note).includes("deterministic"),
-            )
-          ? "deterministic"
-          : ctx.aiClient.getStatus().kind === "openai_compatible"
-            ? "ai_assisted"
-            : "deterministic";
-      const generationReason =
-        generationMethod === "deterministic"
-          ? (provenance?.reason ??
-            (ctx.aiClient.getStatus().kind === "openai_compatible"
-              ? "provider_failed"
-              : "no_provider_configured"))
-          : null;
-      const generationDetail = provenance?.detail?.trim() || null;
-      const now = createMonotonicTimestamp(existingDraft?.updatedAt ?? null);
-      // A strategy may supply the template default for a fresh draft, but it
-      // never approves or readies the artifact: the generated draft stays
-      // unapproved and the per-job approval/staleness checks stay
-      // authoritative.
-      const strategyTemplateId =
-        lockedTemplateId ??
-        draft.recommendedTemplateId ??
-        existingDraft?.templateId ??
-        strategyContext.templateId ??
-        null;
-      const strategyDisplayName =
-        strategyContext.selectedStrategyName ??
-        strategyContext.recommendedStrategyName ??
-        null;
-      const sourceDraft = buildResumeDraftFromTailoredDraft({
-        job,
-        templateId: strategyTemplateId ?? settings.resumeTemplateId,
-        draft,
-        createdAt: existingDraft?.createdAt ?? now,
-        updatedAt: now,
-        existingDraftId: existingDraft?.id ?? null,
-        previousWorkHistoryReviewAcknowledgments:
-          existingDraft?.workHistoryReviewAcknowledgments ?? [],
-        generationMethod:
-          generationMethod === "ai_assisted" ? "ai" : "deterministic",
-        profile,
-        research,
-        headline:
-          strategyPolicy?.headlinePolicy === "fixed"
-            ? profile.headline
-            : strategyPolicy?.headlinePolicy === "role_family_template"
-              ? strategyPolicy.roleFamily
-              : strategyPolicy?.headlinePolicy === "per_job_tailored"
-                ? job.title
-                : undefined,
-      });
-      const languageDraft = { ...sourceDraft, language: targetLanguage };
-      const resumeDraft = draft.languagePresentation
-        ? applyResumeLanguage(languageDraft, draft.languagePresentation)
-        : languageDraft;
-      const sanitizedResumeDraft = await sanitizeAndCheckResumeDraft(
-        ctx,
-        {
-          draft: resumeDraft,
-          job,
-          profile,
-          ...(strategyPolicy ? { sourceSkills: draft.coreSkills } : {}),
-        },
-        { fixGeneratedLines: true },
-      );
-      const previewSections = buildTailoredAssetBridge({
-        draft: sanitizedResumeDraft,
-        job,
-        profile,
-      }).previewSections;
-      const contentText = buildTailoredResumeTextFromResumeDraft(
-        profile,
-        job,
-        sanitizedResumeDraft,
-      );
-      await assertCurrentResumeProfile(
-        ctx,
-        profileRevision,
-        "rendering this generated resume",
-        profile,
-      );
-      const renderedArtifact = await ctx.documentManager.renderResumeArtifact({
-        job,
-        profile,
-        renderDocument: buildResumeRenderDocument(
-          profile,
-          sanitizedResumeDraft,
-        ),
-        templateId: sanitizedResumeDraft.templateId,
-        settings,
-      });
-
-      await assertCurrentResumeProfile(
-        ctx,
-        profileRevision,
-        "completing this generated resume",
-        profile,
-      );
-
-      if (!renderedArtifact.storagePath) {
-        throw new Error(
-          `Resume export failed for '${job.title}' at '${job.company}'.`,
+          },
         );
-      }
 
-      const validation = validateResumeDraft({
-        draft: sanitizedResumeDraft,
-        job,
-        profile,
-        strategy: generationStrategyPolicy,
-        pageCount: renderedArtifact.pageCount ?? null,
-        validatedAt: now,
-      });
-      const workHistoryReviewSuggestions = buildWorkHistoryReviewSuggestions({
-        draft: sanitizedResumeDraft,
-        tailoredDraft: draft,
-      });
-      const validationWithReviewGuidance = ResumeValidationResultSchema.parse({
-        ...validation,
-        coverageComparison: buildResumeCoverageComparison({
-          profile,
-          draft: sanitizedResumeDraft,
-          pageCount: renderedArtifact.pageCount ?? null,
-          validationIssues: validation.issues,
-          coverageMetadata: draft.coverageMetadata,
-        }),
-        issues: [
-          ...validation.issues,
-          ...workHistoryReviewSuggestions.map((suggestion) => ({
-            id: `issue_${suggestion.id}`,
-            severity: suggestion.severity,
-            category:
-              suggestion.kind === "date_quality"
-                ? ("date_quality" as const)
-                : ("work_history_review" as const),
-            sectionId: suggestion.sectionId,
-            entryId: suggestion.entryId,
-            bulletId: null,
-            message: suggestion.message,
-          })),
-        ],
-      });
-      const nextAsset = TailoredAssetSchema.parse({
-        id: existingAsset?.id ?? `resume_${jobId}`,
-        jobId,
-        kind: "resume",
-        status: "ready",
-        label: resolveTailoredAssetLabel({
-          existingLabel: draft.label ?? existingAsset?.label ?? null,
-          generationMethod,
-          generationReason,
-        }),
-        version: nextAssetVersion(existingAsset),
-        templateName: resolveResumeTemplateLabel({
-          templateId: sanitizedResumeDraft.templateId,
-          templates,
-          fallbackLabel: existingAsset?.templateName ?? "Chronology Classic",
-        }),
-        compatibilityScore:
-          draft.compatibilityScore ??
-          Math.min(100, job.matchAssessment.score + 3),
-        progressPercent: 100,
-        updatedAt: now,
-        storagePath: renderedArtifact.storagePath,
-        contentText,
-        previewSections,
-        generationMethod,
-        generationReason,
-        generationDetail,
-        notes: uniqueStrings([
-          ...draft.notes,
-          ...(strategyTemplateId && !existingDraft
-            ? [
-                `Used resume strategy${strategyDisplayName ? ` "${strategyDisplayName}"` : ""} as the template default. The strategy does not approve or ready this artifact; it still needs your review and explicit approval.`,
-              ]
-            : []),
-          ...(strategyPolicy
-            ? [
-                `Applied resume strategy "${strategyPolicy.strategyName}" (${strategyPolicy.effectiveSource}: ${strategyPolicy.effectiveReason}); policies ${strategyPolicy.headlinePolicy} headline, ${strategyPolicy.skillsPolicy} skills, ${strategyPolicy.coveragePolicy} coverage, ${strategyPolicy.tailoringStrength} tailoring.`,
-              ]
-            : []),
-          ...(baseResumeFallbackNote ? [baseResumeFallbackNote] : []),
-          ...(renderedArtifact.fileName
-            ? [
-                `Generated ${renderedArtifact.format.toUpperCase()} resume artifact ${renderedArtifact.fileName}.`,
-              ]
-            : []),
-          ...(renderedArtifact.intermediateFileName
-            ? [
-                `Saved HTML debug render ${renderedArtifact.intermediateFileName}.`,
-              ]
-            : []),
-          ...(renderedArtifact.pageCount !== null &&
-          renderedArtifact.pageCount !== undefined
-            ? [`Generated PDF page count: ${renderedArtifact.pageCount}.`]
-            : []),
-          ...(renderedArtifact.warnings ?? []),
-          ...(renderedArtifact.pageCount !== null &&
-          renderedArtifact.pageCount !== undefined &&
-          renderedArtifact.pageCount > sanitizedResumeDraft.targetPageCount
-            ? [
-                renderedArtifact.pageCount >= 3
-                  ? "Resume export reached 3 or more pages and needs review before apply."
-                  : `Resume export exceeded the ${sanitizedResumeDraft.targetPageCount}-page target and should be reviewed.`,
-              ]
-            : []),
-        ]),
-        // A successful generation is authoritative: clear any failure detail
-        // left by an earlier failed attempt so retry truth stays accurate.
-        failureMessage: null,
-        failedAt: null,
-      });
-
-      await assertCurrentResumeProfile(
-        ctx,
-        profileRevision,
-        "saving this generated resume",
-        profile,
-      );
-
-      const latestJob = (await ctx.repository.listSavedJobs()).find(
-        (entry) => entry.id === jobId,
-      );
-      if (!latestJob || removedResumeJobIds.has(jobId))
-        return ctx.getWorkspaceSnapshot();
-
-      if (
-        existingDraft &&
-        buildResumeDraftStateHash(existingDraft) !==
-          buildResumeDraftStateHash(sanitizedResumeDraft)
-      ) {
-        const revision = buildResumeDraftRevision({
-          draft: existingDraft,
-          resultingDraft: sanitizedResumeDraft,
-          createdAt: now,
-          parentRevisionId: await getLatestResumeRevisionId(
-            ctx,
-            existingDraft.id,
-          ),
-          actor: "assistant",
-          mutationKind: "regenerate_draft",
-          reason: "Regenerated full resume draft",
-        });
         await assertCurrentResumeProfile(
           ctx,
           profileRevision,
-          "committing this generated resume",
+          "completing this generated resume",
           profile,
         );
-        await ctx.repository.applyResumePatchWithRevision({
-          expectedDraftUpdatedAt: existingDraft.updatedAt,
-          draft: sanitizedResumeDraft,
-          revision,
-          validation: validationWithReviewGuidance,
-          tailoredAsset: nextAsset,
-        });
-      } else {
-        await ctx.repository.saveResumeDraftWithValidation({
-          draft: sanitizedResumeDraft,
-          validation: validationWithReviewGuidance,
-          tailoredAsset: nextAsset,
-        });
-      }
-      await ctx.updateJob(jobId, (currentJob) => ({
-        ...currentJob,
-        status: removedResumeJobIds.has(jobId)
-          ? currentJob.status
-          : "ready_for_review",
-      }));
 
-      return ctx.getWorkspaceSnapshot();
-    } catch (error) {
-      // A failed run changes nothing (ADR 0041): a job that already had a
-      // resume keeps it as it was, ready or approved, and the error tells the
-      // person. The failure notice is saved beside the retained file, or on a
-      // failed asset when no draft exists. A newer edit keeps its own state.
-      try {
-        const latestDraft = await ctx.repository.getResumeDraftByJobId(jobId);
-        if (
-          existingAsset &&
-          existingDraft &&
-          latestDraft?.updatedAt === existingDraft.updatedAt
-        ) {
-          await ctx.repository.upsertTailoredAsset({
-            ...existingAsset,
-            failureMessage: `${sanitizeTailoredAssetFailureMessage(error)} Your previous resume was kept.`,
-            failedAt: new Date().toISOString(),
-          });
-        } else if (existingDraft === null && latestDraft === null) {
-          await ctx.repository.upsertTailoredAsset(
-            buildFailedTailoredAsset({
-              jobId,
-              existingAsset: existingAsset ?? null,
-              error,
-            }),
+        if (!renderedArtifact.storagePath) {
+          throw new Error(
+            `Resume export failed for '${job.title}' at '${job.company}'.`,
           );
         }
-      } catch {
-        // Failure persistence must never mask the original generation
-        // error: the caller still sees why generation failed.
+
+        const validation = validateResumeDraft({
+          draft: sanitizedResumeDraft,
+          job,
+          profile,
+          strategy: generationStrategyPolicy,
+          pageCount: renderedArtifact.pageCount ?? null,
+          validatedAt: now,
+        });
+        const workHistoryReviewSuggestions = buildWorkHistoryReviewSuggestions({
+          draft: sanitizedResumeDraft,
+          tailoredDraft: draft,
+        });
+        const validationWithReviewGuidance = ResumeValidationResultSchema.parse(
+          {
+            ...validation,
+            coverageComparison: buildResumeCoverageComparison({
+              profile,
+              draft: sanitizedResumeDraft,
+              pageCount: renderedArtifact.pageCount ?? null,
+              validationIssues: validation.issues,
+              coverageMetadata: draft.coverageMetadata,
+            }),
+            issues: [
+              ...validation.issues,
+              ...workHistoryReviewSuggestions.map((suggestion) => ({
+                id: `issue_${suggestion.id}`,
+                severity: suggestion.severity,
+                category:
+                  suggestion.kind === "date_quality"
+                    ? ("date_quality" as const)
+                    : ("work_history_review" as const),
+                sectionId: suggestion.sectionId,
+                entryId: suggestion.entryId,
+                bulletId: null,
+                message: suggestion.message,
+              })),
+            ],
+          },
+        );
+        const nextAsset = TailoredAssetSchema.parse({
+          id: existingAsset?.id ?? `resume_${jobId}`,
+          jobId,
+          kind: "resume",
+          status: "ready",
+          label: resolveTailoredAssetLabel({
+            existingLabel: draft.label ?? existingAsset?.label ?? null,
+            generationMethod,
+            generationReason,
+          }),
+          version: nextAssetVersion(existingAsset ?? undefined),
+          templateName: resolveResumeTemplateLabel({
+            templateId: sanitizedResumeDraft.templateId,
+            templates,
+            fallbackLabel: existingAsset?.templateName ?? "Chronology Classic",
+          }),
+          compatibilityScore:
+            draft.compatibilityScore ??
+            Math.min(100, job.matchAssessment.score + 3),
+          progressPercent: 100,
+          updatedAt: now,
+          storagePath: renderedArtifact.storagePath,
+          contentText,
+          previewSections,
+          generationMethod,
+          generationReason,
+          generationDetail,
+          notes: uniqueStrings([
+            ...draft.notes,
+            ...(strategyTemplateId && !existingDraft
+              ? [
+                  `Used resume strategy${strategyDisplayName ? ` "${strategyDisplayName}"` : ""} as the template default. The strategy does not approve or ready this artifact; it still needs your review and explicit approval.`,
+                ]
+              : []),
+            ...(strategyPolicy
+              ? [
+                  `Applied resume strategy "${strategyPolicy.strategyName}" (${strategyPolicy.effectiveSource}: ${strategyPolicy.effectiveReason}); policies ${strategyPolicy.headlinePolicy} headline, ${strategyPolicy.skillsPolicy} skills, ${strategyPolicy.coveragePolicy} coverage, ${strategyPolicy.tailoringStrength} tailoring.`,
+                ]
+              : []),
+            ...(baseResumeFallbackNote ? [baseResumeFallbackNote] : []),
+            ...(renderedArtifact.fileName
+              ? [
+                  `Generated ${renderedArtifact.format.toUpperCase()} resume artifact ${renderedArtifact.fileName}.`,
+                ]
+              : []),
+            ...(renderedArtifact.intermediateFileName
+              ? [
+                  `Saved HTML debug render ${renderedArtifact.intermediateFileName}.`,
+                ]
+              : []),
+            ...(renderedArtifact.pageCount !== null &&
+            renderedArtifact.pageCount !== undefined
+              ? [`Generated PDF page count: ${renderedArtifact.pageCount}.`]
+              : []),
+            ...(renderedArtifact.warnings ?? []),
+            ...(renderedArtifact.pageCount !== null &&
+            renderedArtifact.pageCount !== undefined &&
+            renderedArtifact.pageCount > sanitizedResumeDraft.targetPageCount
+              ? [
+                  renderedArtifact.pageCount >= 3
+                    ? "Resume export reached 3 or more pages and needs review before apply."
+                    : `Resume export exceeded the ${sanitizedResumeDraft.targetPageCount}-page target and should be reviewed.`,
+                ]
+              : []),
+          ]),
+          // A successful generation is authoritative: clear any failure detail
+          // left by an earlier failed attempt so retry truth stays accurate.
+          failureMessage: null,
+          failedAt: null,
+        });
+
+        if (!current()) return { jobId, outcome: "cancelled" };
+        await assertCurrentResumeProfile(
+          ctx,
+          profileRevision,
+          "saving this generated resume",
+          profile,
+        );
+
+        const latestJob = (
+          await ctx.repository.listSavedJobsByIds([jobId])
+        ).find((entry) => entry.id === jobId);
+        if (!latestJob || removedResumeJobIds.has(jobId))
+          return { jobId, outcome: "cancelled" };
+
+        if (
+          existingDraft &&
+          buildResumeDraftStateHash(existingDraft) !==
+            buildResumeDraftStateHash(sanitizedResumeDraft)
+        ) {
+          const revision = buildResumeDraftRevision({
+            draft: existingDraft,
+            resultingDraft: sanitizedResumeDraft,
+            createdAt: now,
+            parentRevisionId: await getLatestResumeRevisionId(
+              ctx,
+              existingDraft.id,
+            ),
+            actor: "assistant",
+            mutationKind: "regenerate_draft",
+            reason: "Regenerated full resume draft",
+          });
+          await assertCurrentResumeProfile(
+            ctx,
+            profileRevision,
+            "committing this generated resume",
+            profile,
+          );
+          await ctx.repository.applyResumePatchWithRevision({
+            expectedDraftUpdatedAt: existingDraft.updatedAt,
+            draft: sanitizedResumeDraft,
+            revision,
+            validation: validationWithReviewGuidance,
+            tailoredAsset: nextAsset,
+          });
+        } else {
+          await ctx.repository.saveResumeDraftWithValidation({
+            draft: sanitizedResumeDraft,
+            validation: validationWithReviewGuidance,
+            tailoredAsset: nextAsset,
+          });
+        }
+        await ctx.updateJob(jobId, (currentJob) => ({
+          ...currentJob,
+          status: removedResumeJobIds.has(jobId)
+            ? currentJob.status
+            : "ready_for_review",
+        }));
+
+        if (generationMethod !== "deterministic") resumeWriters.recordSuccess();
+        return {
+          jobId,
+          outcome:
+            generationMethod === "deterministic" ? "fallback" : "written",
+        };
+      } catch (error) {
+        if (isAiProviderRateLimited(error)) resumeWriters.recordOverload();
+        if (!current()) return { jobId, outcome: "cancelled" };
+        // Stop waiting writers before any asynchronous failure persistence.
+        reportProviderBlock(error);
+        const generationError = providerBlockError ?? error;
+        // A failed run changes nothing (ADR 0041): a job that already had a
+        // resume keeps it as it was, ready or approved, and the error tells the
+        // person. The failure notice is saved beside the retained file, or on a
+        // failed asset when no draft exists. A newer edit keeps its own state.
+        try {
+          const latestDraft = await ctx.repository.getResumeDraftByJobId(jobId);
+          if (
+            existingAsset &&
+            existingDraft &&
+            latestDraft?.updatedAt === existingDraft.updatedAt
+          ) {
+            await ctx.repository.upsertTailoredAsset({
+              ...existingAsset,
+              failureMessage: `${sanitizeTailoredAssetFailureMessage(generationError)} Your previous resume was kept.`,
+              failedAt: new Date().toISOString(),
+            });
+          } else if (existingDraft === null && latestDraft === null) {
+            await ctx.repository.upsertTailoredAsset(
+              buildFailedTailoredAsset({
+                jobId,
+                existingAsset: existingAsset ?? null,
+                error: generationError,
+              }),
+            );
+          }
+        } catch {
+          // Failure persistence must never mask the original generation
+          // error: the caller still sees why generation failed.
+        }
+        throw generationError;
       }
-      throw error;
+    } catch (error) {
+      // Includes listing/preflight failures outside the asset-writing scope.
+      reportProviderBlock(error);
+      throw providerBlockError ?? error;
+    } finally {
+      // Publish completion before transferring a permit to the next job.
+      // Otherwise progress can transiently count three processors despite a two-slot gate.
+      reportResumeStage(options, "finished");
+      releaseWriter?.();
+      releaseProcessor?.();
     }
   }
 
@@ -4451,6 +5033,258 @@ export function createWorkspaceApplicationMethods(
     return ctx.getWorkspaceSnapshot();
   }
 
+  function feedbackFence(options?: DiscoveryFeedbackBatchOptions): () => void {
+    const generation = listingGeneration();
+    return () => {
+      if (!listingReadCurrent(generation) || options?.signal?.aborted) {
+        throw new FeedbackMutationStoppedError();
+      }
+      try {
+        options?.assertCurrent?.();
+      } catch {
+        throw new FeedbackMutationStoppedError();
+      }
+    };
+  }
+
+  async function runFeedbackBatch(
+    jobIds: readonly string[],
+    success: "hidden" | "restored",
+    options: DiscoveryFeedbackBatchOptions | undefined,
+    mutate: (jobId: string, fence: () => void) => Promise<void>,
+  ): Promise<DiscoveryFeedbackBatchResult> {
+    const generation = listingGeneration();
+    const fence = feedbackFence(options);
+    const outcomes: DiscoveryFeedbackBatchOutcome[] = [];
+    let stopped = false;
+    for (const jobId of jobIds) {
+      if (stopped) {
+        outcomes.push({ jobId, status: "stopped" });
+        continue;
+      }
+      try {
+        fence();
+        await mutate(jobId, fence);
+        outcomes.push({ jobId, status: success });
+      } catch (error) {
+        if (error instanceof FeedbackMutationStoppedError) {
+          stopped = true;
+          outcomes.push({ jobId, status: "stopped" });
+        } else {
+          outcomes.push({
+            jobId,
+            status:
+              error instanceof FeedbackMutationHeldError ? "held" : "failed",
+            message:
+              error instanceof Error ? error.message.slice(0, 200) : "error",
+          });
+        }
+      }
+    }
+    let workspace = listingReadCurrent(generation)
+      ? await ctx.getWorkspaceSnapshot()
+      : null;
+    if (!listingReadCurrent(generation)) workspace = null;
+    return { outcomes, workspace };
+  }
+
+  async function dismissDiscoveryJobWithoutSnapshot(
+    input: JobFinderDismissDiscoveryJobInput,
+    assertCurrent: () => void,
+    discoveredEmployer?: string,
+  ): Promise<void> {
+    assertCurrent();
+    const occurredAt = new Date().toISOString();
+    const reasons = [...new Set(input.reasons)];
+    await ctx.repository.commitDiscoveryFeedbackUpdate(
+      input.jobId,
+      (current) => {
+        assertCurrent();
+        const targetJob = current.job;
+        if (!targetJob) {
+          throw new Error("Unable to hide unknown job '" + input.jobId + "'.");
+        }
+
+        if (discoveredEmployer !== undefined) {
+          if (targetJob.status !== "discovered") {
+            throw new FeedbackMutationHeldError(
+              "The job is no longer in the found list.",
+            );
+          }
+          if (normalizeCompanyName(targetJob.company) !== discoveredEmployer) {
+            throw new FeedbackMutationHeldError(
+              "The employer identity changed after preview.",
+            );
+          }
+        }
+        let nextSearchPreferences = current.searchPreferences;
+        let nextCampaignState = current.campaignState;
+        let employerExclusion =
+          targetJob.discoveryFeedback?.employerExclusion ?? null;
+        if (input.action === "hide_and_exclude_employer") {
+          const activeCampaign = current.campaignState?.campaigns.find(
+            (campaign) =>
+              campaign.id === current.campaignState?.activeCampaignId,
+          );
+          const activePreferences =
+            activeCampaign?.searchPreferences ?? current.searchPreferences;
+          const preview = resolveEmployerExclusionPreview({
+            job: targetJob,
+            searchPreferences: {
+              ...activePreferences,
+              companyWhitelist: uniqueStrings([
+                ...current.searchPreferences.companyWhitelist,
+                ...activePreferences.companyWhitelist,
+              ]),
+            },
+            companies: current.intelligenceState.companies,
+          });
+          if (preview.status !== "available") {
+            throw new Error(
+              `Employer exclusion is unavailable: ${preview.reason}.`,
+            );
+          }
+          if (
+            preview.normalizedCompanyName !==
+            input.expectedNormalizedCompanyName
+          ) {
+            throw new Error(
+              "The employer identity changed after preview. Review it again before excluding this employer.",
+            );
+          }
+          const appended = appendExactEmployerExclusion(
+            activePreferences.companyBlacklist,
+            preview.displayCompanyName,
+            preview.normalizedCompanyName,
+          );
+          nextSearchPreferences = {
+            ...current.searchPreferences,
+            companyBlacklist: appended.values,
+          };
+          employerExclusion = {
+            normalizedCompanyName: preview.normalizedCompanyName,
+            displayCompanyName: preview.displayCompanyName,
+            addedByThisFeedback: appended.added,
+            campaignId: activeCampaign?.id ?? null,
+          };
+          if (nextCampaignState !== null) {
+            nextCampaignState = {
+              ...nextCampaignState,
+              campaigns: nextCampaignState.campaigns.map((campaign) =>
+                campaign.id === nextCampaignState!.activeCampaignId
+                  ? {
+                      ...campaign,
+                      searchPreferences: {
+                        ...campaign.searchPreferences,
+                        companyBlacklist: appended.values,
+                      },
+                    }
+                  : campaign,
+              ),
+            };
+          }
+        }
+
+        const priorStatus =
+          targetJob.status === "archived"
+            ? (targetJob.discoveryFeedback?.priorStatus ?? null)
+            : current.jobIsPending
+              ? null
+              : targetJob.status;
+        const nextJob = SavedJobSchema.parse({
+          ...targetJob,
+          status: "archived",
+          discoveryFeedback: {
+            version: 1,
+            revision: (targetJob.discoveryFeedback?.revision ?? 0) + 1,
+            reasons,
+            recordedAt: occurredAt,
+            priorStatus,
+            employerExclusion,
+          },
+        });
+        return {
+          result: null,
+          savedJob: nextJob,
+          searchPreferences: nextSearchPreferences,
+          campaignState: nextCampaignState,
+          discoveryState: {
+            ...current.discoveryState,
+            discoveryLedger: markSavedJobStatusInLedger({
+              ledger: current.discoveryState.discoveryLedger,
+              job: nextJob,
+              status: "skipped",
+              occurredAt,
+              skipReason: "Not interested: " + reasons.join(", ") + ".",
+            }),
+            pendingDiscoveryJobs:
+              current.discoveryState.pendingDiscoveryJobs.filter(
+                (job) => job.id !== input.jobId,
+              ),
+          },
+        };
+      },
+    );
+    await releaseFinishedApplicationPages({
+      ...ctx,
+      jobId: input.jobId,
+      removed: true,
+    });
+  }
+
+  async function restoreDismissedDiscoveryJobWithoutSnapshot(
+    jobId: string,
+    assertCurrent: () => void,
+  ): Promise<void> {
+    assertCurrent();
+    const requestedAt = new Date().toISOString();
+    await ctx.repository.commitDiscoveryFeedbackUpdate(jobId, (current) => {
+      assertCurrent();
+      const targetJob = current.job;
+      if (
+        !targetJob ||
+        current.jobIsPending ||
+        targetJob.status !== "archived"
+      ) {
+        throw new Error(
+          "Unable to restore unknown hidden job '" + jobId + "'.",
+        );
+      }
+      const recordedAt = targetJob.discoveryFeedback?.recordedAt ?? null;
+      if (recordedAt && Date.parse(recordedAt) > Date.parse(requestedAt)) {
+        throw new Error(
+          "The hidden-job decision changed while it was being restored.",
+        );
+      }
+      const feedbackPriorStatus =
+        targetJob.discoveryFeedback?.priorStatus ?? null;
+      const restoredJob = SavedJobSchema.parse({
+        ...targetJob,
+        status:
+          feedbackPriorStatus && feedbackPriorStatus !== "archived"
+            ? feedbackPriorStatus
+            : "discovered",
+        discoveryFeedback: null,
+      });
+      return {
+        result: null,
+        savedJob: restoredJob,
+        searchPreferences: current.searchPreferences,
+        campaignState: current.campaignState,
+        discoveryState: {
+          ...current.discoveryState,
+          discoveryLedger: markSavedJobStatusInLedger({
+            ledger: current.discoveryState.discoveryLedger,
+            job: restoredJob,
+            status: "seen",
+            occurredAt: requestedAt,
+            skipReason: null,
+          }),
+        },
+      };
+    });
+  }
+
   return {
     resumeApplicationUserAction,
     async resumeParkedApplyRuns(control, onFinished) {
@@ -4600,99 +5434,10 @@ export function createWorkspaceApplicationMethods(
       });
       return ctx.getWorkspaceSnapshot();
     },
+    queueJobsForReview,
     async queueJobForReview(jobId) {
-      const [
-        discoveryState,
-        settings,
-        searchPreferences,
-        savedJobs,
-        intelligence,
-        tailoredAssets,
-      ] = await Promise.all([
-        ctx.repository.getDiscoveryState(),
-        ctx.repository.getSettings(),
-        ctx.repository.getSearchPreferences(),
-        ctx.repository.listSavedJobs(),
-        ctx.repository.getIntelligenceState(),
-        ctx.repository.listTailoredAssets(),
-      ]);
-      const defaultResumeApplicationMode =
-        settings.resumeApplicationMode ?? DEFAULT_RESUME_APPLICATION_MODE;
-      const defaultResumeTailoringMode = searchPreferences.tailoringMode;
-      const pendingIndex = discoveryState.pendingDiscoveryJobs.findIndex(
-        (job) => job.id === jobId,
-      );
-      const activityJobs = [
-        ...savedJobs,
-        ...discoveryState.pendingDiscoveryJobs.filter(
-          (pendingJob) =>
-            !savedJobs.some((savedJob) => savedJob.id === pendingJob.id),
-        ),
-      ];
-      const currentJobView = projectDiscoveryJobViews({
-        jobs: activityJobs,
-        discoveryLedger: discoveryState.discoveryLedger,
-        listingSignals: intelligence.safeguards.listingSignals,
-        applicationAttempts: await ctx.repository.listApplicationAttempts(),
-      }).find((job) => job.id === jobId);
-
-      if (currentJobView?.listingActivity.status === "closed") {
-        throw new Error(
-          `Unable to shortlist closed job '${jobId}'. The listing has explicit closed evidence.`,
-        );
-      }
-
-      if (pendingIndex >= 0) {
-        const pendingJob = discoveryState.pendingDiscoveryJobs[pendingIndex];
-        if (!pendingJob) {
-          throw new Error(`Unable to shortlist unknown job '${jobId}'.`);
-        }
-        const nextJob = SavedJobSchema.parse({
-          ...pendingJob,
-          status: tailoredAssets.some(
-            (asset) => asset.jobId === jobId && asset.status === "ready",
-          )
-            ? "ready_for_review"
-            : "drafting",
-          resumeApplicationMode:
-            pendingJob.resumeApplicationMode ?? defaultResumeApplicationMode,
-          resumeTailoringMode:
-            pendingJob.resumeTailoringMode ?? defaultResumeTailoringMode,
-        });
-        await ctx.repository.commitSavedJobDelta({
-          upserts: [nextJob],
-          update: (currentJob) =>
-            currentJob.id === nextJob.id
-              ? (mergeSavedJobs([currentJob], [nextJob])[0] ?? currentJob)
-              : currentJob,
-          updateDiscoveryState: (current) => ({
-            ...current,
-            pendingDiscoveryJobs: current.pendingDiscoveryJobs.filter(
-              (job) => job.id !== jobId,
-            ),
-          }),
-        });
-      } else {
-        const asset = tailoredAssets.find((entry) => entry.jobId === jobId);
-
-        await ctx.updateJob(jobId, (job) => ({
-          ...job,
-          status: asset?.status === "ready" ? "ready_for_review" : "drafting",
-          resumeApplicationMode:
-            job.resumeApplicationMode ?? defaultResumeApplicationMode,
-          resumeTailoringMode:
-            job.resumeTailoringMode ?? defaultResumeTailoringMode,
-        }));
-      }
-
-      // Saving a shortlist choice must not wait for a full listing read.
-      ctx.listingAssessmentJobIds?.add(jobId);
-      const snapshot = await ctx.getWorkspaceSnapshot();
-      void readListingDetailForShortlistedJob(jobId).finally(() => {
-        ctx.listingAssessmentJobIds?.delete(jobId);
-        ctx.onListingAssessmentFinished?.();
-      });
-      return snapshot;
+      await queueJobsForReview([jobId]);
+      return ctx.getWorkspaceSnapshot();
     },
     async setJobResumeApplicationMode(
       jobId,
@@ -4710,8 +5455,18 @@ export function createWorkspaceApplicationMethods(
       return ctx.getWorkspaceSnapshot();
     },
     async saveResumeBatchCheckpoint(checkpoint) {
+      const generation = listingGeneration();
+      const priorGeneration = resumeCheckpointEpochs.get(checkpoint.id);
+      if (
+        !listingReadCurrent(generation) ||
+        (priorGeneration !== undefined && priorGeneration !== generation)
+      )
+        return;
+      resumeCheckpointEpochs.set(checkpoint.id, generation);
       await ctx.withIntelligenceTransition(async () => {
+        if (!listingReadCurrent(generation)) return;
         const current = await ctx.repository.getIntelligenceState();
+        if (!listingReadCurrent(generation)) return;
         const merged = mergeResumeBatchCheckpoints(
           current.resumeBatchCheckpoints ??
             (current.resumeBatchCheckpoint
@@ -4725,7 +5480,8 @@ export function createWorkspaceApplicationMethods(
           resumeBatchCheckpoints: merged.checkpoints,
         });
       });
-      markResumeBatchRunning(ctx.repository, checkpoint);
+      if (listingReadCurrent(generation))
+        markResumeBatchRunning(ctx.repository, checkpoint);
     },
     async removeJobFromReview(jobId) {
       removedResumeJobIds.add(jobId);
@@ -4738,139 +5494,67 @@ export function createWorkspaceApplicationMethods(
 
       return ctx.getWorkspaceSnapshot();
     },
+    async removeJobsFromReview(jobIds) {
+      for (const jobId of new Set(jobIds)) {
+        removedResumeJobIds.add(jobId);
+        await ctx.updateJob(jobId, (job) =>
+          SavedJobSchema.parse({
+            ...job,
+            status: "shortlisted",
+          }),
+        );
+      }
+    },
     async dismissDiscoveryJob(input) {
-      const occurredAt = new Date().toISOString();
-      const reasons = [...new Set(input.reasons)];
-      await ctx.repository.commitDiscoveryFeedbackUpdate(
-        input.jobId,
-        (current) => {
-          const targetJob = current.job;
-          if (!targetJob) {
-            throw new Error(
-              "Unable to hide unknown job '" + input.jobId + "'.",
+      await dismissDiscoveryJobWithoutSnapshot(input, feedbackFence());
+      return ctx.getWorkspaceSnapshot();
+    },
+    async dismissDiscoveryJobs(inputs, options) {
+      const byId = new Map(inputs.map((input) => [input.jobId, input]));
+      return runFeedbackBatch(
+        [...byId.keys()],
+        "hidden",
+        options,
+        (jobId, fence) =>
+          dismissDiscoveryJobWithoutSnapshot(byId.get(jobId)!, fence),
+      );
+    },
+    async excludeEmployerDiscoveryJobs(input, options) {
+      let excluded = false;
+      const jobIds = [...new Set([input.jobId, ...input.jobIds])];
+      return runFeedbackBatch(
+        jobIds,
+        "hidden",
+        options,
+        async (jobId, fence) => {
+          if (jobId !== input.jobId && !excluded) {
+            throw new FeedbackMutationHeldError(
+              "The employer exclusion was not applied.",
             );
           }
-
-          let nextSearchPreferences = current.searchPreferences;
-          let nextCampaignState = current.campaignState;
-          let employerExclusion =
-            targetJob.discoveryFeedback?.employerExclusion ?? null;
-          if (input.action === "hide_and_exclude_employer") {
-            const activeCampaign = current.campaignState?.campaigns.find(
-              (campaign) =>
-                campaign.id === current.campaignState?.activeCampaignId,
-            );
-            const activePreferences =
-              activeCampaign?.searchPreferences ?? current.searchPreferences;
-            const preview = resolveEmployerExclusionPreview({
-              job: targetJob,
-              searchPreferences: {
-                ...activePreferences,
-                companyWhitelist: uniqueStrings([
-                  ...current.searchPreferences.companyWhitelist,
-                  ...activePreferences.companyWhitelist,
-                ]),
-              },
-              companies: current.intelligenceState.companies,
-            });
-            if (preview.status !== "available") {
-              throw new Error(
-                `Employer exclusion is unavailable: ${preview.reason}.`,
-              );
-            }
-            if (
-              preview.normalizedCompanyName !==
-              input.expectedNormalizedCompanyName
-            ) {
-              throw new Error(
-                "The employer identity changed after preview. Review it again before excluding this employer.",
-              );
-            }
-            const appended = appendExactEmployerExclusion(
-              activePreferences.companyBlacklist,
-              preview.displayCompanyName,
-              preview.normalizedCompanyName,
-            );
-            nextSearchPreferences = {
-              ...current.searchPreferences,
-              companyBlacklist: appended.values,
-            };
-            employerExclusion = {
-              normalizedCompanyName: preview.normalizedCompanyName,
-              displayCompanyName: preview.displayCompanyName,
-              addedByThisFeedback: appended.added,
-              campaignId: activeCampaign?.id ?? null,
-            };
-            if (nextCampaignState !== null) {
-              nextCampaignState = {
-                ...nextCampaignState,
-                campaigns: nextCampaignState.campaigns.map((campaign) =>
-                  campaign.id === nextCampaignState!.activeCampaignId
-                    ? {
-                        ...campaign,
-                        searchPreferences: {
-                          ...campaign.searchPreferences,
-                          companyBlacklist: appended.values,
-                        },
-                      }
-                    : campaign,
-                ),
-              };
-            }
-          }
-
-          const priorStatus =
-            targetJob.status === "archived"
-              ? (targetJob.discoveryFeedback?.priorStatus ?? null)
-              : current.jobIsPending
-                ? null
-                : targetJob.status;
-          const nextJob = SavedJobSchema.parse({
-            ...targetJob,
-            status: "archived",
-            discoveryFeedback: {
-              version: 1,
-              revision: (targetJob.discoveryFeedback?.revision ?? 0) + 1,
-              reasons,
-              recordedAt: occurredAt,
-              priorStatus,
-              employerExclusion,
+          await dismissDiscoveryJobWithoutSnapshot(
+            {
+              jobId,
+              reasons: ["company"],
+              action:
+                jobId === input.jobId
+                  ? "hide_and_exclude_employer"
+                  : "hide_job",
+              expectedNormalizedCompanyName:
+                input.expectedNormalizedCompanyName,
             },
-          });
-          return {
-            result: null,
-            savedJob: nextJob,
-            searchPreferences: nextSearchPreferences,
-            campaignState: nextCampaignState,
-            discoveryState: {
-              ...current.discoveryState,
-              discoveryLedger: markSavedJobStatusInLedger({
-                ledger: current.discoveryState.discoveryLedger,
-                job: nextJob,
-                status: "skipped",
-                occurredAt,
-                skipReason: "Not interested: " + reasons.join(", ") + ".",
-              }),
-              pendingDiscoveryJobs:
-                current.discoveryState.pendingDiscoveryJobs.filter(
-                  (job) => job.id !== input.jobId,
-                ),
-            },
-          };
+            fence,
+            input.expectedNormalizedCompanyName,
+          );
+          if (jobId === input.jobId) excluded = true;
         },
       );
-      await releaseFinishedApplicationPages({
-        ...ctx,
-        jobId: input.jobId,
-        removed: true,
-      });
-      return ctx.getWorkspaceSnapshot();
     },
     async previewEmployerExclusion(jobId) {
       const [savedJobs, discoveryState, searchPreferences, intelligenceState] =
         await Promise.all([
-          ctx.repository.listSavedJobs(),
-          ctx.repository.getDiscoveryState(),
+          ctx.repository.listSavedJobsByIds([jobId]),
+          ctx.repository.readDiscoveryDisplayProjection(),
           ctx.repository.getSearchPreferences(),
           ctx.repository.getIntelligenceState(),
         ]);
@@ -4980,52 +5664,16 @@ export function createWorkspaceApplicationMethods(
       return ctx.getWorkspaceSnapshot();
     },
     async restoreDismissedDiscoveryJob(jobId) {
-      const requestedAt = new Date().toISOString();
-      await ctx.repository.commitDiscoveryFeedbackUpdate(jobId, (current) => {
-        const targetJob = current.job;
-        if (
-          !targetJob ||
-          current.jobIsPending ||
-          targetJob.status !== "archived"
-        ) {
-          throw new Error(
-            "Unable to restore unknown hidden job '" + jobId + "'.",
-          );
-        }
-        const recordedAt = targetJob.discoveryFeedback?.recordedAt ?? null;
-        if (recordedAt && Date.parse(recordedAt) > Date.parse(requestedAt)) {
-          throw new Error(
-            "The hidden-job decision changed while it was being restored.",
-          );
-        }
-        const feedbackPriorStatus =
-          targetJob.discoveryFeedback?.priorStatus ?? null;
-        const restoredJob = SavedJobSchema.parse({
-          ...targetJob,
-          status:
-            feedbackPriorStatus && feedbackPriorStatus !== "archived"
-              ? feedbackPriorStatus
-              : "discovered",
-          discoveryFeedback: null,
-        });
-        return {
-          result: null,
-          savedJob: restoredJob,
-          searchPreferences: current.searchPreferences,
-          campaignState: current.campaignState,
-          discoveryState: {
-            ...current.discoveryState,
-            discoveryLedger: markSavedJobStatusInLedger({
-              ledger: current.discoveryState.discoveryLedger,
-              job: restoredJob,
-              status: "seen",
-              occurredAt: requestedAt,
-              skipReason: null,
-            }),
-          },
-        };
-      });
+      await restoreDismissedDiscoveryJobWithoutSnapshot(jobId, feedbackFence());
       return ctx.getWorkspaceSnapshot();
+    },
+    async restoreDismissedDiscoveryJobs(jobIds, options) {
+      return runFeedbackBatch(
+        [...new Set(jobIds)],
+        "restored",
+        options,
+        restoreDismissedDiscoveryJobWithoutSnapshot,
+      );
     },
     async generateResume(jobId, options) {
       // A second "Create the resume" / "Try again" press while this job's
@@ -5039,15 +5687,24 @@ export function createWorkspaceApplicationMethods(
       // the long AI/render pipeline; holding this job's transition tail
       // serializes those writes against saves, exports, approvals, and other
       // generation runs so neither side can race or clobber the other.
-      const run = withResumeDraftTransition(jobId, () =>
-        runGenerateResume(jobId, options),
-      ).finally(() => {
-        if (inFlightResumeGenerations.get(jobId) === run) {
-          inFlightResumeGenerations.delete(jobId);
-        }
-      });
+      const run = startResumeGeneration(jobId, options)
+        .then(() => ctx.getWorkspaceSnapshot())
+        .finally(() => {
+          if (inFlightResumeGenerations.get(jobId) === run) {
+            inFlightResumeGenerations.delete(jobId);
+          }
+        });
       inFlightResumeGenerations.set(jobId, run);
       return run;
+    },
+    async generateResumeForBatch(jobId, options) {
+      try {
+        return await startResumeGeneration(jobId, options, options.regenerate);
+      } catch (error) {
+        const providerBlock = getAiProviderAccessFailure(error);
+        if (!providerBlock) throw error;
+        return { jobId, outcome: "blocked", providerBlock };
+      }
     },
     async getResumeWorkspace(jobId) {
       return buildResumeWorkspace(ctx, jobId);
@@ -5371,22 +6028,8 @@ export function createWorkspaceApplicationMethods(
       return ctx.getWorkspaceSnapshot();
     },
     async regenerateResumeDraft(jobId, options) {
-      // The locked-content gate reads persisted state, so it must share the
-      // same per-job transition as the generation it guards; otherwise a
-      // save or pin change could land after the check but before generation
-      // snapshots the draft. The core is called directly instead of through
-      // this.generateResume so the transition is never acquired twice.
-      return withResumeDraftTransition(jobId, async () => {
-        const existingDraft = await ctx.repository.getResumeDraftByJobId(jobId);
-
-        if (existingDraft && hasLockedResumeContent(existingDraft)) {
-          throw new Error(
-            "Unlock pinned resume sections or bullets before regenerating the full draft.",
-          );
-        }
-
-        return runGenerateResume(jobId, options);
-      });
+      await startResumeGeneration(jobId, options, true);
+      return ctx.getWorkspaceSnapshot();
     },
     async regenerateResumeSection(jobId, sectionId) {
       // Section proposals bind baseDraftUpdatedAt to the draft version they
@@ -6256,6 +6899,9 @@ export function createWorkspaceApplicationMethods(
       await ensureResumeDraft(ctx, jobId);
       return ctx.repository.listResumeAssistantMessages(jobId);
     },
+    getResumeAssistantHistory() {
+      return ctx.repository.listResumeAssistantMessages();
+    },
     async sendResumeAssistantMessage(jobId, content) {
       const workspaceState = await ensureResumeDraft(ctx, jobId);
       const messageTimestamp = createMonotonicTimestamp(
@@ -7031,6 +7677,7 @@ export function createWorkspaceApplicationMethods(
             // so a discovery run finishing during the browser flow cannot be
             // reverted by a stale pre-flow snapshot.
             await ctx.repository.commitSavedJobDelta({
+              updateJobIds: [jobId],
               update: (savedJob) =>
                 savedJob.id === jobId
                   ? SavedJobSchema.parse({
@@ -7057,6 +7704,7 @@ export function createWorkspaceApplicationMethods(
             });
           } else {
             await ctx.repository.commitSavedJobDelta({
+              updateJobIds: [jobId],
               update: (savedJob) =>
                 savedJob.id === jobId
                   ? SavedJobSchema.parse({
@@ -7682,6 +8330,7 @@ export function createWorkspaceApplicationMethods(
             },
           );
           await ctx.repository.commitSavedJobDelta({
+            updateJobIds: [jobId],
             update: (savedJob) =>
               savedJob.id === jobId
                 ? SavedJobSchema.parse({
@@ -7966,7 +8615,7 @@ export function createWorkspaceApplicationMethods(
         const overlap = await checkSameCompanySends({
           repository: ctx.repository,
           jobIds: uniqueJobIds,
-          transition: ctx.withIntelligenceTransition,
+          transition: ctx.withIntelligenceTransition.bind(ctx),
         });
         if (overlap) throw new Error(overlap);
       }

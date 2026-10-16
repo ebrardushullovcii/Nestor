@@ -43,7 +43,9 @@ function mergeReviewItems(
     if (storedItem.status !== "pending" && incomingItem.status !== "pending") {
       const storedResolvedAt = storedItem.resolvedAt ?? "";
       const incomingResolvedAt = incomingItem.resolvedAt ?? "";
-      merged.push(incomingResolvedAt >= storedResolvedAt ? incomingItem : storedItem);
+      merged.push(
+        incomingResolvedAt >= storedResolvedAt ? incomingItem : storedItem,
+      );
       continue;
     }
 
@@ -103,9 +105,11 @@ export async function deriveAndPersistProfileSetupState(
         })
       : []);
   const latestBundle = input.latestResumeImportRunId
-    ? (await ctx.repository.listResumeImportDocumentBundles({
-        runId: input.latestResumeImportRunId,
-      }))[0] ?? null
+    ? ((
+        await ctx.repository.listResumeImportDocumentBundles({
+          runId: input.latestResumeImportRunId,
+        })
+      )[0] ?? null)
     : null;
   const nextState = ProfileSetupStateSchema.parse({
     ...basePersistedState,
@@ -118,12 +122,16 @@ export async function deriveAndPersistProfileSetupState(
       searchPreferences: input.searchPreferences,
     }),
   });
-  const discoveryState = await ctx.repository.getDiscoveryState();
-  const derivedState = deriveProfileSetupState(input.profile, input.searchPreferences, {
-    currentState: nextState,
-    hasRunSearch: discoveryState.recentRuns.length > 0,
-    now,
-  });
+  const discoveryState = await ctx.repository.readDiscoveryDisplayProjection();
+  const derivedState = deriveProfileSetupState(
+    input.profile,
+    input.searchPreferences,
+    {
+      currentState: nextState,
+      hasRunSearch: discoveryState.recentRuns.length > 0,
+      now,
+    },
+  );
 
   if (
     input.persist !== false &&

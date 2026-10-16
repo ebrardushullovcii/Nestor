@@ -1,3 +1,4 @@
+import { createDiscoverySavedJobWriter } from "./discovery-saved-job-writer";
 import { buildDiscoveryRunReport } from "./workspace-discovery-run-helpers";
 import {
   withPlanAssessment,
@@ -125,7 +126,13 @@ import {
 import { createUniqueId, normalizeText, uniqueStrings } from "./shared";
 import { createJobIdentityIndex } from "./job-identity";
 import { assessJobPostingDetailQuality } from "./job-posting-detail-quality";
-import { jobNeedsFitJudgment, judgeJobFitsInBatches } from "./fit-judgment";
+import { JOB_FIT_JUDGING_BATCH_SIZE } from "@nordri/ai-providers";
+import {
+  fitPostingFingerprint,
+  compareFitJudgingPromise,
+  jobNeedsFitJudgment,
+  judgeJobFitsInBatches,
+} from "./fit-judgment";
 import {
   describeListingDetailEnrichment,
   createModelListingPageReader,
@@ -221,8 +228,16 @@ export function resolveListingLocation(
 }
 
 const DISCOVERY_ACTIVITY_SAMPLE_LIMIT = 3;
-/** Five model calls at most: twenty jobs judged per call (ADR 0041). */
-const FIT_JUDGMENTS_PER_RUN = 100;
+/**
+ * Every job a search keeps is judged (ADR 0041). Older jobs of the plan
+ * that need a new verdict, after the profile or goals changed, are judged
+ * up to this many per search: five calls of twenty.
+ */
+const OLDER_JOB_FIT_JUDGMENTS_PER_RUN = 100;
+/** Fit calls a running search keeps open beside its source agents. */
+const SEARCH_FIT_JUDGING_CONCURRENCY = 3;
+/** How long a kept job waits for a full batch before a smaller one goes. */
+const SEARCH_FIT_PARTIAL_BATCH_WAIT_MS = 20_000;
 const PUBLIC_API_PREFETCH_CONCURRENCY = 8;
 /**
  * How many sources one search works on at the same time. Each gets its own
@@ -773,13 +788,16 @@ function updateRunSummary(
   run: DiscoveryRunRecord,
   patch: Partial<DiscoveryRunRecord["summary"]>,
 ): DiscoveryRunRecord {
-  return DiscoveryRunRecordSchema.parse({
+  // This is the service-owned run accumulator. The repository validates the
+  // changed metadata when it commits; reparsing here copied its full activity
+  // and checkpoint history on every summary increment.
+  return {
     ...run,
     summary: {
       ...run.summary,
       ...patch,
     },
-  });
+  };
 }
 
 function selectTargets(
@@ -1520,7 +1538,10 @@ export function createWorkspaceDiscoveryMethods(
       ctx.repository.getProfile(),
       ctx.repository.getSearchPreferences(),
       ctx.repository.getSettings(),
-      ctx.repository.listSavedJobs(),
+      // The frozen display rows, not a fresh parse: a run only derives new
+      // jobs from these, and a second private copy of every saved job held
+      // about half a gigabyte for the whole search on 6,284 jobs.
+      ctx.repository.readSavedJobsProjection(),
       ctx.repository.getDiscoveryState(),
       ctx.repository.listUserActionRequests({ scopeType: "discovery_source" }),
     ]).catch((error: unknown) => {
@@ -1578,7 +1599,10 @@ export function createWorkspaceDiscoveryMethods(
     // Verdicts the model gave during this run, so a job judged to choose
     // which ones a result limit keeps is not judged again (ADR 0041).
     const runJudgments = new Map<string, FitJudgment>();
-    let fitJudgmentsAttempted = 0;
+    // What each job's listing was when this run asked the model about it, so
+    // a job it gave no verdict for is asked again only once the listing
+    // changes (a full read after the search), not twice in one run.
+    const fitAskedFingerprints = new Map<string, string>();
     const assessmentPlanId =
       effectiveCampaign?.campaignId ?? (await ctx.getActiveCampaignId());
     const plans = campaignState ?? (await ctx.repository.getCampaignState());
@@ -1663,9 +1687,6 @@ export function createWorkspaceDiscoveryMethods(
         readPlanAssessment(job, assessmentPlanId).matchAssessment,
       ),
     }));
-    const savedJobsAtLastCommitById = new Map(
-      startingSavedJobs.map((job) => [job.id, job]),
-    );
     let workingPendingJobs = startingDiscovery.pendingDiscoveryJobs.map(
       (job) => ({
         ...job,
@@ -1717,8 +1738,11 @@ export function createWorkspaceDiscoveryMethods(
     );
     // Working rows show this plan's verdict. Persist it only in that plan's
     // entry, leaving the shared assessment and other plans unchanged.
-    const storedJob = (job: SavedJob): SavedJob =>
-      withPlanAssessment(
+    const storedJobs = new WeakMap<SavedJob, SavedJob>();
+    const storedJob = (job: SavedJob): SavedJob => {
+      const cached = storedJobs.get(job);
+      if (cached) return cached;
+      const stored = withPlanAssessment(
         {
           ...job,
           matchAssessment:
@@ -1728,6 +1752,9 @@ export function createWorkspaceDiscoveryMethods(
         assessmentPlanId,
         job.matchAssessment,
       );
+      storedJobs.set(job, stored);
+      return stored;
+    };
     // Run-start snapshots define ownership for the whole run: ledger decisions
     // and pending-job removals that differ from these baselines while the run
     // is in flight belong to the user and must survive run persistence.
@@ -1736,40 +1763,25 @@ export function createWorkspaceDiscoveryMethods(
       startingDiscovery.pendingDiscoveryJobs.map((job) => job.id),
     );
 
-    const persistWorkingSavedJobs = async (
-      updateDiscoveryState?: (
-        current: JobFinderDiscoveryState,
-      ) => JobFinderDiscoveryState,
-    ): Promise<void> => {
-      const workingSavedJobsById = new Map(
-        workingSavedJobs.map((job) => [job.id, storedJob(job)]),
-      );
-      const newSavedJobs = workingSavedJobs
-        .filter((job) => !savedJobsAtLastCommitById.has(job.id))
-        .map(storedJob);
-
-      await ctx.repository.commitSavedJobDelta({
-        upserts: newSavedJobs,
-        update: (currentJob) => {
-          if (!touchedSavedJobIds.has(currentJob.id)) {
-            return currentJob;
-          }
-
-          const baselineJob = savedJobsAtLastCommitById.get(currentJob.id);
-          const intendedJob = workingSavedJobsById.get(currentJob.id);
-          if (!baselineJob || !intendedJob) {
-            return currentJob;
-          }
-
-          return applySavedJobDelta(currentJob, baselineJob, intendedJob);
-        },
-        ...(updateDiscoveryState ? { updateDiscoveryState } : {}),
-      });
-
-      for (const job of workingSavedJobs) {
-        savedJobsAtLastCommitById.set(job.id, storedJob(job));
-      }
+    const savedJobWriter = createDiscoverySavedJobWriter({
+      persistedJobs: startingSavedJobs,
+      toStoredJob: storedJob,
+      merge: applySavedJobDelta,
+      commit: (input) => ctx.repository.commitSavedJobDelta(input),
+      persistDiscovery: (update) => ctx.persistDiscoveryState(update),
+    });
+    const touchSavedJob = (job: SavedJob): SavedJob => {
+      touchedSavedJobIds.add(job.id);
+      savedJobWriter.stage(job);
+      return job;
     };
+    // Revalidation may change older plan assessments. Stage that inventory
+    // once, rather than reconsidering it at every source checkpoint.
+    for (const job of workingSavedJobs) {
+      if (touchedSavedJobIds.has(job.id)) savedJobWriter.stage(job);
+    }
+    const persistWorkingSavedJobs = savedJobWriter.persist;
+    const attachedPlanJobIds = new Set(planJobIds);
     const openedSessionSources = new Set<JobSource>();
     const sessionOpenings = new Map<JobSource, Promise<void>>();
     const parkedSessionSources = new Set<JobSource>();
@@ -1848,6 +1860,40 @@ export function createWorkspaceDiscoveryMethods(
         : {}),
     });
 
+    // Capture the run, ledger and pending references alongside the saved-job
+    // delta. A queued commit must not publish a later source's counters before
+    // that source's saved rows have reached the repository.
+    const captureRunForCommit = () => ({
+      ...activeRun,
+      activity: [...activeRun.activity],
+      targetExecutions: [...activeRun.targetExecutions],
+    });
+    const captureWorkingDiscoveryUpdate = () => {
+      const run = captureRunForCommit();
+      const ledger = workingLedger;
+      const pendingJobs = workingPendingJobs;
+      const pendingIds = new Set(touchedPendingJobIds);
+      return (current: JobFinderDiscoveryState): JobFinderDiscoveryState =>
+        finalizeDiscoveryState(
+          {
+            ...current,
+            pendingDiscoveryJobs: overlayTouchedPendingJobs(
+              current.pendingDiscoveryJobs,
+              pendingJobs.map(storedJob),
+              pendingIds,
+              baselinePendingJobIds,
+            ),
+            discoveryLedger: rebaseRunLedgerOntoPersisted({
+              baselineLedger,
+              workingLedger: ledger,
+              persistedLedger: current.discoveryLedger,
+            }),
+          },
+          run,
+          enrichedPreferences,
+        );
+    };
+
     const recordActivity = (event: DiscoveryActivityEvent) => {
       activeRun = appendDiscoveryEvent(activeRun, event);
     };
@@ -1857,6 +1903,164 @@ export function createWorkspaceDiscoveryMethods(
     const emitActivity = (event: DiscoveryActivityEvent) => {
       recordActivity(event);
       publishActivity(event);
+    };
+
+    // Puts the model's verdicts on the run's working jobs; the next persist
+    // saves them.
+    const applyRunVerdicts = (
+      judgments: ReadonlyMap<string, FitJudgment>,
+      fullAssessments: ReadonlyMap<string, MatchAssessment> = new Map(),
+    ): void => {
+      const pendingJobIds = new Set(workingPendingJobs.map((job) => job.id));
+      const applyVerdict = <T extends SavedJob>(job: T): T => {
+        const judgment = judgments.get(job.id);
+        const fullAssessment = fullAssessments.get(job.id);
+        if (!judgment && !fullAssessment) return job;
+        const next = readPlanAssessment(
+          withPlanAssessment(
+            job,
+            assessmentPlanId,
+            fullAssessment ?? assessmentSession.assess(job, judgment),
+          ),
+          assessmentPlanId,
+        );
+        if (pendingJobIds.has(job.id)) touchedPendingJobIds.add(job.id);
+        else touchSavedJob(next);
+        return next;
+      };
+      workingSavedJobs = workingSavedJobs.map(applyVerdict);
+      workingPendingJobs = workingPendingJobs.map(applyVerdict);
+    };
+
+    // Fit is judged while the search runs (ADR 0041): the jobs each source
+    // keeps go to the model in batches as they land, so a long search shows
+    // scores as it goes rather than after its last source.
+    const searchFitQueue: string[] = [];
+    const searchFitConsidered = new Set<string>();
+    const searchFitBatches = new Set<Promise<void>>();
+    let searchFitTimer: ReturnType<typeof setTimeout> | null = null;
+    let searchFitFlushing = false;
+    let searchFitClosed = false;
+    let searchFitJudged = 0;
+    const judgeSearchFitBatch = async (
+      jobIds: readonly string[],
+    ): Promise<void> => {
+      const byId = new Map(
+        mergeSavedJobs(workingSavedJobs, workingPendingJobs).map((job) => [
+          job.id,
+          job,
+        ]),
+      );
+      const jobs = jobIds.flatMap((jobId) => {
+        const job = byId.get(jobId);
+        if (!job || runJudgments.has(jobId)) return [];
+        const assessed = readPlanAssessment(storedJob(job), assessmentPlanId);
+        return assessed.matchAssessment.judgment?.source !== "full" &&
+          jobNeedsFitJudgment(assessed, assessmentSession.contextFingerprint)
+          ? [assessed]
+          : [];
+      });
+      if (jobs.length === 0) return;
+      for (const job of jobs) {
+        fitAskedFingerprints.set(job.id, fitPostingFingerprint(job));
+      }
+      const judgments = await judgeJobFitsInBatches({
+        aiClient: ctx.aiClient,
+        profile,
+        searchPreferences: enrichedPreferences,
+        jobs,
+        contextFingerprint: assessmentSession.contextFingerprint,
+        signal: executionSignal,
+        concurrency: 1,
+      });
+      if (searchFitClosed || judgments.size === 0) return;
+      for (const [jobId, judgment] of judgments) {
+        runJudgments.set(jobId, judgment);
+      }
+      applyRunVerdicts(judgments);
+      await persistWorkingSavedJobs();
+      searchFitJudged += judgments.size;
+      emitActivity(
+        createDiscoveryEvent({
+          runId,
+          timestamp: new Date().toISOString(),
+          kind: "info",
+          stage: "extraction",
+          targetId: null,
+          adapterKind: null,
+          resolvedAdapterKind: null,
+          message: `Judged fit for ${searchFitJudged} ${searchFitJudged === 1 ? "job" : "jobs"} so far.`,
+          url: null,
+          jobsFound: null,
+          jobsPersisted: null,
+          jobsStaged: null,
+          duplicatesMerged: null,
+          invalidSkipped: null,
+        }),
+      );
+    };
+    const startSearchFitBatches = (): void => {
+      while (
+        !searchFitClosed &&
+        searchFitBatches.size < SEARCH_FIT_JUDGING_CONCURRENCY &&
+        (searchFitQueue.length >= JOB_FIT_JUDGING_BATCH_SIZE ||
+          (searchFitFlushing && searchFitQueue.length > 0))
+      ) {
+        const batch: Promise<void> = judgeSearchFitBatch(
+          searchFitQueue.splice(0, JOB_FIT_JUDGING_BATCH_SIZE),
+        )
+          // A batch the model or the save failed leaves its jobs unjudged;
+          // the end of the run asks again if their listing changed.
+          .catch(() => undefined)
+          .finally(() => {
+            searchFitBatches.delete(batch);
+            startSearchFitBatches();
+          });
+        searchFitBatches.add(batch);
+      }
+      if (searchFitClosed || searchFitQueue.length === 0) {
+        if (searchFitTimer) clearTimeout(searchFitTimer);
+        searchFitTimer = null;
+      } else if (!searchFitTimer && !searchFitFlushing) {
+        // A smaller batch goes once the first waiting job has waited a while.
+        searchFitTimer = setTimeout(() => {
+          searchFitTimer = null;
+          if (searchFitFlushing) return;
+          searchFitFlushing = true;
+          startSearchFitBatches();
+          searchFitFlushing = false;
+        }, SEARCH_FIT_PARTIAL_BATCH_WAIT_MS);
+      }
+    };
+    const queueKeptJobsForFit = (): void => {
+      if (
+        searchFitClosed ||
+        !ctx.aiClient.judgeJobFits ||
+        executionSignal.aborted
+      ) {
+        return;
+      }
+      for (const jobId of runRetainedJobIds) {
+        if (searchFitConsidered.has(jobId) || runJudgments.has(jobId)) continue;
+        searchFitConsidered.add(jobId);
+        searchFitQueue.push(jobId);
+      }
+      startSearchFitBatches();
+    };
+    const finishSearchFitJudging = async (): Promise<void> => {
+      searchFitFlushing = true;
+      if (searchFitTimer) clearTimeout(searchFitTimer);
+      searchFitTimer = null;
+      startSearchFitBatches();
+      while (searchFitBatches.size > 0) {
+        await Promise.all([...searchFitBatches]);
+      }
+    };
+    const stopSearchFitJudging = (): void => {
+      searchFitClosed = true;
+      searchFitQueue.length = 0;
+      if (searchFitTimer) clearTimeout(searchFitTimer);
+      searchFitTimer = null;
     };
 
     const planningEvent = createDiscoveryEvent({
@@ -2372,12 +2576,18 @@ export function createWorkspaceDiscoveryMethods(
             mergeSeedJobs,
             toSightingIdentityInput,
           );
+          const batchSavedJobIds = new Set<string>();
+          const batchSavedJobs = new Map<string, SavedJob>();
           for (const posting of budgetedPostings) {
             const known = mergeIdentityIndex.find({
               ...posting,
               matchAcrossSources: true,
             });
-            if (known) runRetainedJobIds.add(known.id);
+            if (known) {
+              runRetainedJobIds.add(known.id);
+              batchSavedJobIds.add(known.id);
+              batchSavedJobs.set(known.id, known);
+            }
           }
           const mergeResult = mergeDiscoveredPostings(
             profile,
@@ -2412,20 +2622,14 @@ export function createWorkspaceDiscoveryMethods(
             },
             executionSignal,
             assessDiscoveryPosting,
-          );
-          const beforeMergeById = new Map(
-            mergeSeedJobs.map((job) => [job.id, job]),
-          );
-          mergeResult.mergedJobs = mergeResult.mergedJobs.map((job) =>
-            runRetainedJobIds.has(job.id)
-              ? job
-              : (beforeMergeById.get(job.id) ?? job),
+            batchSavedJobIds,
           );
           const landedIndex = createJobIdentityIndex(
             mergeResult.mergedJobs,
             toSightingIdentityInput,
           );
           const landed = landedJobIdsFor(target.id);
+          const landedJobs = new Map<string, SavedJob>();
           for (const posting of budgetedPostings) {
             const stored = landedIndex.find({
               ...posting,
@@ -2434,12 +2638,13 @@ export function createWorkspaceDiscoveryMethods(
             if (stored) {
               runRetainedJobIds.add(stored.id);
               landed.add(stored.id);
+              landedJobs.set(stored.id, stored);
             }
           }
           resumeAffectingChangedJobIds.push(
             ...collectResumeAffectingChangedJobIds(
-              mergeSeedJobs,
-              mergeResult.mergedJobs,
+              [...batchSavedJobs.values()],
+              [...landedJobs.values()],
             ),
           );
 
@@ -2463,18 +2668,14 @@ export function createWorkspaceDiscoveryMethods(
               nextPendingJobs,
             );
             jobsStaged = mergeResult.newJobs.length;
-            nextPendingJobs
-              .filter(belongsToSearchPlan)
-              .forEach((job) => touchedPendingJobIds.add(job.id));
-            workingSavedJobs
-              .filter(belongsToSearchPlan)
-              .forEach((job) => touchedSavedJobIds.add(job.id));
           } else {
             workingSavedJobs = mergeResult.mergedJobs;
-            mergeResult.mergedJobs
-              .filter(belongsToSearchPlan)
-              .forEach((job) => touchedSavedJobIds.add(job.id));
             jobsPersisted = mergeResult.newJobs.length;
+          }
+          for (const job of landedJobs.values()) {
+            if (settings.discoveryOnly && !persistedSavedJobIds.has(job.id)) {
+              touchedPendingJobIds.add(job.id);
+            } else touchSavedJob(job);
           }
 
           for (const posting of budgetedPostings) {
@@ -2542,32 +2743,20 @@ export function createWorkspaceDiscoveryMethods(
           ) {
             return;
           }
-          // Retention judgments must leave capacity for the jobs the person
-          // already supplied or selected, which the final phase checks first.
-          const reservedPersonJudgments = mergeSavedJobs(
-            workingSavedJobs,
-            workingPendingJobs,
-          ).filter(
-            (job) =>
-              belongsToSearchPlan(job) &&
-              personPickedJob(job) &&
-              !runJudgments.has(job.id) &&
-              (jobNeedsFitJudgment(job, assessmentSession.contextFingerprint) ||
-                jobNeedsListingDetail(job)),
-          ).length;
           const unjudged = postings
             .map((posting) => ({ ...posting, id: toSavedJobId(posting) }))
-            .filter((posting) => !runJudgments.has(posting.id))
-            .slice(
-              0,
-              Math.max(
-                0,
-                FIT_JUDGMENTS_PER_RUN -
-                  fitJudgmentsAttempted -
-                  reservedPersonJudgments,
-              ),
+            .filter(
+              (posting) =>
+                !runJudgments.has(posting.id) &&
+                fitAskedFingerprints.get(posting.id) !==
+                  fitPostingFingerprint(posting),
             );
-          fitJudgmentsAttempted += unjudged.length;
+          for (const posting of unjudged) {
+            fitAskedFingerprints.set(
+              posting.id,
+              fitPostingFingerprint(posting),
+            );
+          }
           const fitProgress = (completed: number, total: number) =>
             emitActivity(
               createDiscoveryEvent({
@@ -2617,12 +2806,8 @@ export function createWorkspaceDiscoveryMethods(
         ): Promise<void> => {
           const campaignId = activeRun.campaignId;
           if (!campaignId) return;
-          const keptIds = new Set([
-            ...workingSavedJobs.map((job) => job.id),
-            ...workingPendingJobs.map((job) => job.id),
-          ]);
           const jobIds = uniqueStrings(
-            candidateJobIds.filter((jobId) => keptIds.has(jobId)),
+            candidateJobIds.filter((jobId) => !attachedPlanJobIds.has(jobId)),
           );
           if (jobIds.length === 0) return;
           await ctx.withCampaignTransition(async () => {
@@ -2631,10 +2816,12 @@ export function createWorkspaceDiscoveryMethods(
               (candidate) => candidate.id === campaignId,
             );
             if (!state || !campaign) return;
-            const missing = jobIds.filter(
-              (jobId) => !campaign.jobIds.includes(jobId),
-            );
-            if (missing.length === 0) return;
+            const existing = new Set(campaign.jobIds);
+            const missing = jobIds.filter((jobId) => !existing.has(jobId));
+            if (missing.length === 0) {
+              for (const jobId of jobIds) attachedPlanJobIds.add(jobId);
+              return;
+            }
             await ctx.repository.saveCampaignState(
               JobSearchCampaignCollectionSchema.parse({
                 ...state,
@@ -2648,6 +2835,7 @@ export function createWorkspaceDiscoveryMethods(
                 ),
               }),
             );
+            for (const jobId of jobIds) attachedPlanJobIds.add(jobId);
           });
         };
 
@@ -2658,26 +2846,7 @@ export function createWorkspaceDiscoveryMethods(
               new Date().toISOString(),
             ),
           });
-          await persistWorkingSavedJobs((current) =>
-            finalizeDiscoveryState(
-              {
-                ...current,
-                pendingDiscoveryJobs: overlayTouchedPendingJobs(
-                  current.pendingDiscoveryJobs,
-                  workingPendingJobs.map(storedJob),
-                  touchedPendingJobIds,
-                  baselinePendingJobIds,
-                ),
-                discoveryLedger: rebaseRunLedgerOntoPersisted({
-                  baselineLedger,
-                  workingLedger,
-                  persistedLedger: current.discoveryLedger,
-                }),
-              },
-              activeRun,
-              enrichedPreferences,
-            ),
-          );
+          await persistWorkingSavedJobs(captureWorkingDiscoveryUpdate());
         };
 
         // Lightweight run-state-only save for checkpoints that carry no
@@ -2690,25 +2859,9 @@ export function createWorkspaceDiscoveryMethods(
               new Date().toISOString(),
             ),
           });
-          await ctx.persistDiscoveryState((current) =>
-            finalizeDiscoveryState(
-              {
-                ...current,
-                pendingDiscoveryJobs: overlayTouchedPendingJobs(
-                  current.pendingDiscoveryJobs,
-                  workingPendingJobs.map(storedJob),
-                  touchedPendingJobIds,
-                  baselinePendingJobIds,
-                ),
-                discoveryLedger: rebaseRunLedgerOntoPersisted({
-                  baselineLedger,
-                  workingLedger,
-                  persistedLedger: current.discoveryLedger,
-                }),
-              },
-              activeRun,
-              enrichedPreferences,
-            ),
+          const run = captureRunForCommit();
+          await persistWorkingSavedJobs((current) =>
+            finalizeDiscoveryState(current, run, enrichedPreferences),
           );
         };
 
@@ -2930,6 +3083,7 @@ export function createWorkspaceDiscoveryMethods(
             // number can name another site's job.
             await addKeptJobsToRunningPlan([...landedJobIdsFor(target.id)]);
             publishActivity(checkpointEvent);
+            queueKeptJobsForFit();
           } catch (error) {
             const interrupted =
               executionSignal.aborted ||
@@ -2944,6 +3098,9 @@ export function createWorkspaceDiscoveryMethods(
             titleTriageSkipSamples.length = samplePoolSnapshot;
             resumeAffectingChangedJobIds.length = resumeChangeIdsSnapshot;
             workingSavedJobs = stateBeforeAttempt.workingSavedJobs;
+            savedJobWriter.restoreWorkingRows(
+              workingSavedJobs.filter((job) => touchedSavedJobIds.has(job.id)),
+            );
             workingPendingJobs = stateBeforeAttempt.workingPendingJobs;
             workingLedger = stateBeforeAttempt.workingLedger;
             activeRun = stateBeforeAttempt.activeRun;
@@ -3341,6 +3498,13 @@ export function createWorkspaceDiscoveryMethods(
           collected.result.agentMetadata?.accessBlockerReason ||
           (collected.result.warning && collectedJobs.length === 0),
         );
+        // A finished source never resumes, so its checkpoint keeps its record
+        // but not the copies of every posting it collected; those are in the
+        // saved jobs and the ledger. Kept, they grew the run by a couple of
+        // kilobytes per posting seen, rewritten at every later checkpoint.
+        const finishedCheckpoint = activeRun.targetExecutions.find(
+          (entry) => entry.targetId === target.id,
+        )?.agentCheckpoint;
         activeRun = completeTargetExecution(
           activeRun,
           target.id,
@@ -3350,6 +3514,11 @@ export function createWorkspaceDiscoveryMethods(
               ? { pagesCovered: collected.result.agentMetadata.pagesCovered }
               : {}),
             state: targetFailed ? "failed" : "completed",
+            ...(!targetFailed && finishedCheckpoint
+              ? {
+                  agentCheckpoint: { ...finishedCheckpoint, collectedJobs: [] },
+                }
+              : {}),
             encounteredJobIds: uniqueStrings([
               ...(activeRun.targetExecutions.find(
                 (entry) => entry.targetId === target.id,
@@ -3439,26 +3608,7 @@ export function createWorkspaceDiscoveryMethods(
             changedJobIds,
           );
         }
-        await persistWorkingSavedJobs((current) =>
-          finalizeDiscoveryState(
-            {
-              ...current,
-              pendingDiscoveryJobs: overlayTouchedPendingJobs(
-                current.pendingDiscoveryJobs,
-                workingPendingJobs.map(storedJob),
-                touchedPendingJobIds,
-                baselinePendingJobIds,
-              ),
-              discoveryLedger: rebaseRunLedgerOntoPersisted({
-                baselineLedger,
-                workingLedger,
-                persistedLedger: current.discoveryLedger,
-              }),
-            },
-            activeRun,
-            enrichedPreferences,
-          ),
-        );
+        await persistWorkingSavedJobs(captureWorkingDiscoveryUpdate());
         const completedExecution = activeRun.targetExecutions.find(
           (execution) => execution.targetId === target.id,
         );
@@ -3484,6 +3634,7 @@ export function createWorkspaceDiscoveryMethods(
           }
         }
         publishActivity(targetCompletedEvent);
+        queueKeptJobsForFit();
 
         // Persistence and matching above can resolve entirely through
         // microtasks for fast API sources. Give Electron a real event-loop turn
@@ -3506,6 +3657,14 @@ export function createWorkspaceDiscoveryMethods(
         },
       );
       await Promise.all(workers);
+      // Stop may arrive while the last source's atomic write is settling.
+      // Keep that durable checkpoint, but do not report a completed search
+      // merely because no later listing read or fit call checks the signal.
+      executionSignal.throwIfAborted();
+      // The last sources' jobs are judged before their listings are read,
+      // so the reads go to the best fits first.
+      queueKeptJobsForFit();
+      await finishSearchFitJudging();
 
       // A browser handoff also ends this run's later HTTP reads on that host.
       const blockedSourceHosts = new Set(
@@ -3640,9 +3799,10 @@ export function createWorkspaceDiscoveryMethods(
             const enrichedById = new Map(
               enrichment.jobs.map((job) => [job.id, job]),
             );
-            workingSavedJobs = workingSavedJobs.map(
-              (job) => enrichedById.get(job.id) ?? job,
-            );
+            workingSavedJobs = workingSavedJobs.map((job) => {
+              const next = enrichedById.get(job.id);
+              return next && next !== job ? touchSavedJob(next) : job;
+            });
             workingPendingJobs = workingPendingJobs.map(
               (job) => enrichedById.get(job.id) ?? job,
             );
@@ -3765,9 +3925,10 @@ export function createWorkspaceDiscoveryMethods(
           }
         }
         if (reroutedById.size > 0) {
-          workingSavedJobs = workingSavedJobs.map(
-            (job) => reroutedById.get(job.id) ?? job,
-          );
+          workingSavedJobs = workingSavedJobs.map((job) => {
+            const next = reroutedById.get(job.id);
+            return next ? touchSavedJob(next) : job;
+          });
           workingPendingJobs = workingPendingJobs.map(
             (job) => reroutedById.get(job.id) ?? job,
           );
@@ -3796,25 +3957,40 @@ export function createWorkspaceDiscoveryMethods(
 
       // The model judges how the jobs fit the person (ADR 0041): many jobs
       // per call, only those never judged or judged before the profile, the
-      // goals or the listing changed, this run's jobs first. A job it does
-      // not answer for keeps the rule score until the next search.
+      // goals or the listing changed. Most of this run's jobs were judged
+      // while it searched; what is left here is a listing read in full since,
+      // a verdict that did not come, the jobs the person picked, and older
+      // jobs of the plan, those last ones capped per search. A job it does
+      // not answer for stays unjudged until the next search.
       if (!executionSignal.aborted && ctx.aiClient.judgeJobFits) {
+        let olderJobsLeft = OLDER_JOB_FIT_JUDGMENTS_PER_RUN;
         const toJudge = mergeSavedJobs(workingSavedJobs, workingPendingJobs)
           .filter(belongsToSearchPlan)
           .map((job) => readPlanAssessment(storedJob(job), assessmentPlanId))
-          .filter((job) =>
-            jobNeedsFitJudgment(job, assessmentSession.contextFingerprint),
+          .filter(
+            (job) =>
+              jobNeedsFitJudgment(job, assessmentSession.contextFingerprint) &&
+              fitAskedFingerprints.get(job.id) !== fitPostingFingerprint(job),
           )
+          // The capped older jobs are the likeliest fits, not whichever
+          // came first.
           .sort(
             (left, right) =>
               Number(personPickedJob(right)) - Number(personPickedJob(left)) ||
               Number(runRetainedJobIds.has(right.id)) -
-                Number(runRetainedJobIds.has(left.id)),
+                Number(runRetainedJobIds.has(left.id)) ||
+              compareFitJudgingPromise(left, right),
           )
-          // Jobs the person supplied or picked come first within the cap.
-          .slice(0, Math.max(0, FIT_JUDGMENTS_PER_RUN - fitJudgmentsAttempted));
+          .filter(
+            (job) =>
+              personPickedJob(job) ||
+              runRetainedJobIds.has(job.id) ||
+              olderJobsLeft-- > 0,
+          );
+        for (const job of toJudge) {
+          fitAskedFingerprints.set(job.id, fitPostingFingerprint(job));
+        }
         if (toJudge.length > 0) {
-          fitJudgmentsAttempted += toJudge.length;
           let fitCompleted = 0;
           const fitProgress = (completed: number) =>
             emitActivity(
@@ -3877,29 +4053,7 @@ export function createWorkspaceDiscoveryMethods(
               }),
             );
             if (judgments.size > 0 || fullAssessments.size > 0) {
-              const pendingJobIds = new Set(
-                workingPendingJobs.map((job) => job.id),
-              );
-              const applyJudgment = <T extends SavedJob>(job: T): T => {
-                const judgment = judgments.get(job.id);
-                const fullAssessment = fullAssessments.get(job.id);
-                if (!judgment && !fullAssessment) return job;
-                if (pendingJobIds.has(job.id)) {
-                  touchedPendingJobIds.add(job.id);
-                } else {
-                  touchedSavedJobIds.add(job.id);
-                }
-                return readPlanAssessment(
-                  withPlanAssessment(
-                    job,
-                    assessmentPlanId,
-                    fullAssessment ?? assessmentSession.assess(job, judgment),
-                  ),
-                  assessmentPlanId,
-                );
-              };
-              workingSavedJobs = workingSavedJobs.map(applyJudgment);
-              workingPendingJobs = workingPendingJobs.map(applyJudgment);
+              applyRunVerdicts(judgments, fullAssessments);
               await persistWorkingSavedJobs();
             }
             emitActivity(
@@ -3950,9 +4104,10 @@ export function createWorkspaceDiscoveryMethods(
           matchAssessment: assessDiscoveryPosting(correctedJob),
         });
       };
-      workingSavedJobs = workingSavedJobs.map((job) =>
-        reconcileCapturedSalary(job, touchedSavedJobIds),
-      );
+      workingSavedJobs = workingSavedJobs.map((job) => {
+        const next = reconcileCapturedSalary(job, touchedSavedJobIds);
+        return next !== job ? touchSavedJob(next) : job;
+      });
       workingPendingJobs = workingPendingJobs.map((job) =>
         reconcileCapturedSalary(job, touchedPendingJobIds),
       );
@@ -4011,9 +4166,10 @@ export function createWorkspaceDiscoveryMethods(
               matchAssessment: assessDiscoveryPosting(sanitizedJob),
             });
           };
-          workingSavedJobs = workingSavedJobs.map((job) =>
-            sanitizeFurnitureSalary(job, touchedSavedJobIds),
-          );
+          workingSavedJobs = workingSavedJobs.map((job) => {
+            const next = sanitizeFurnitureSalary(job, touchedSavedJobIds);
+            return next !== job ? touchSavedJob(next) : job;
+          });
           workingPendingJobs = workingPendingJobs.map((job) =>
             sanitizeFurnitureSalary(job, touchedPendingJobIds),
           );
@@ -4052,6 +4208,8 @@ export function createWorkspaceDiscoveryMethods(
         new Date().toISOString(),
       );
     } finally {
+      // Verdicts still on their way when a run stops are not saved after it.
+      stopSearchFitJudging();
       if (!keepSessionAlive) {
         for (const source of openedSessionSources) {
           // `closeRunBrowserSession` closes the shared browser host, not just
@@ -4114,26 +4272,7 @@ export function createWorkspaceDiscoveryMethods(
       new Date().toISOString(),
     );
 
-    await persistWorkingSavedJobs((current) =>
-      finalizeDiscoveryState(
-        {
-          ...current,
-          pendingDiscoveryJobs: overlayTouchedPendingJobs(
-            current.pendingDiscoveryJobs,
-            workingPendingJobs.map(storedJob),
-            touchedPendingJobIds,
-            baselinePendingJobIds,
-          ),
-          discoveryLedger: rebaseRunLedgerOntoPersisted({
-            baselineLedger,
-            workingLedger,
-            persistedLedger: current.discoveryLedger,
-          }),
-        },
-        activeRun,
-        enrichedPreferences,
-      ),
-    );
+    await persistWorkingSavedJobs(captureWorkingDiscoveryUpdate());
 
     if (terminalStatus === "failed") {
       throw caughtError instanceof Error

@@ -1,6 +1,6 @@
 import type {
   JobFinderWorkspaceDelta,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   JobFinderWorkspaceSyncResult,
   WorkspaceRevision,
 } from "@nordri/contracts";
@@ -10,35 +10,38 @@ type EntitySlice<T> = {
   removedIds: string[];
 };
 
-const DELTA_OR_IGNORED_KEYS = new Set<keyof JobFinderWorkspaceSnapshot>([
-  "generatedAt",
-  "discoveryRunState",
-  "activeDiscoveryRun",
-  "discoverySessions",
-  "sourceAccessPrompts",
-  "latestResumeImportRun",
-  "campaigns",
-  "activeCampaignId",
-  "campaignNotifications",
-  "dashboard",
-  "activityControl",
-  "intelligence",
-  "discoveryJobs",
-  "dismissedDiscoveryJobs",
-  "companyJobs",
-  "recentDiscoveryRuns",
-  "reviewQueue",
-  "applyRuns",
-  "applyJobResults",
-  "applicationRecords",
-  "applicationAttempts",
-  "userActionRequests",
-  "userActionEvents",
-  "selectedDiscoveryJobId",
-  "selectedReviewJobId",
-  "selectedApplyRunId",
-  "selectedApplicationRecordId",
-]);
+const DELTA_OR_IGNORED_KEYS = new Set<keyof JobFinderRendererWorkspaceSnapshot>(
+  [
+    "generatedAt",
+    "discoveryRunState",
+    "fitJudgmentProgress",
+    "activeDiscoveryRun",
+    "discoverySessions",
+    "sourceAccessPrompts",
+    "latestResumeImportRun",
+    "campaigns",
+    "activeCampaignId",
+    "campaignNotifications",
+    "dashboard",
+    "activityControl",
+    "intelligence",
+    "discoveryJobs",
+    "dismissedDiscoveryJobs",
+    "companyJobs",
+    "recentDiscoveryRuns",
+    "reviewQueue",
+    "applyRuns",
+    "applyJobResults",
+    "applicationRecords",
+    "applicationAttempts",
+    "userActionRequests",
+    "userActionEvents",
+    "selectedDiscoveryJobId",
+    "selectedReviewJobId",
+    "selectedApplyRunId",
+    "selectedApplicationRecordId",
+  ],
+);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -127,12 +130,15 @@ function buildEntitySlice<T>(
   return { upserts, removedIds };
 }
 
-function sameUntrackedValues(
-  previous: JobFinderWorkspaceSnapshot,
-  current: JobFinderWorkspaceSnapshot,
-): boolean {
+/** Top-level fields outside the delta's own slots that changed. */
+function changedUntrackedValues(
+  previous: JobFinderRendererWorkspaceSnapshot,
+  current: JobFinderRendererWorkspaceSnapshot,
+): Partial<JobFinderRendererWorkspaceSnapshot> | null {
+  const replaced: Record<string, unknown> = {};
+  let changed = false;
   for (const key of Object.keys(current) as Array<
-    keyof JobFinderWorkspaceSnapshot
+    keyof JobFinderRendererWorkspaceSnapshot
   >) {
     if (
       DELTA_OR_IGNORED_KEYS.has(key) ||
@@ -140,38 +146,86 @@ function sameUntrackedValues(
     ) {
       continue;
     }
-
-    return false;
+    replaced[key] = current[key];
+    changed = true;
   }
+  return changed
+    ? (replaced as Partial<JobFinderRendererWorkspaceSnapshot>)
+    : null;
+}
 
-  return true;
+/** The value when it changed since the receiver's copy, otherwise nothing. */
+function ifChanged<K extends keyof JobFinderRendererWorkspaceSnapshot>(
+  previous: JobFinderRendererWorkspaceSnapshot,
+  current: JobFinderRendererWorkspaceSnapshot,
+  key: K,
+): Partial<Pick<JobFinderRendererWorkspaceSnapshot, K>> {
+  return sameValue(previous[key], current[key])
+    ? {}
+    : ({ [key]: current[key] } as Pick<JobFinderRendererWorkspaceSnapshot, K>);
+}
+
+/**
+ * A running search's activity only grows. When the receiver holds the same
+ * run, only the events after the ones it has are sent; a long search would
+ * otherwise resend its whole history on every refresh.
+ */
+function activeRunForDelta(
+  previous: JobFinderRendererWorkspaceSnapshot["activeDiscoveryRun"],
+  current: JobFinderRendererWorkspaceSnapshot["activeDiscoveryRun"],
+): {
+  run: JobFinderRendererWorkspaceSnapshot["activeDiscoveryRun"];
+  activityFrom: number | null;
+} {
+  if (!previous || !current || previous.id !== current.id) {
+    return { run: current, activityFrom: null };
+  }
+  const from = previous.activity.length;
+  if (
+    current.activity.length < from ||
+    (from > 0 &&
+      current.activity[from - 1]?.id !== previous.activity[from - 1]?.id)
+  ) {
+    return { run: current, activityFrom: null };
+  }
+  return {
+    run: { ...current, activity: current.activity.slice(from) },
+    activityFrom: from,
+  };
 }
 
 export function buildJobFinderWorkspaceDelta(input: {
   baseRevision: WorkspaceRevision;
   currentRevision: WorkspaceRevision;
-  previous: JobFinderWorkspaceSnapshot;
-  current: JobFinderWorkspaceSnapshot;
+  previous: JobFinderRendererWorkspaceSnapshot;
+  current: JobFinderRendererWorkspaceSnapshot;
 }): JobFinderWorkspaceDelta | null {
-  if (!sameUntrackedValues(input.previous, input.current)) {
-    return null;
-  }
+  const replaced = changedUntrackedValues(input.previous, input.current);
+  const activeRun = activeRunForDelta(
+    input.previous.activeDiscoveryRun,
+    input.current.activeDiscoveryRun,
+  );
 
   return {
     baseRevision: input.baseRevision,
     currentRevision: input.currentRevision,
     generatedAt: input.current.generatedAt,
     discoveryRunState: input.current.discoveryRunState,
-    activeDiscoveryRun: input.current.activeDiscoveryRun,
-    discoverySessions: input.current.discoverySessions,
-    sourceAccessPrompts: input.current.sourceAccessPrompts,
-    latestResumeImportRun: input.current.latestResumeImportRun,
-    campaigns: input.current.campaigns,
+    fitJudgmentProgress: input.current.fitJudgmentProgress ?? null,
+    activeDiscoveryRun: activeRun.run,
+    activeDiscoveryRunActivityFrom: activeRun.activityFrom,
+    ...ifChanged(input.previous, input.current, "discoverySessions"),
+    ...ifChanged(input.previous, input.current, "sourceAccessPrompts"),
+    ...ifChanged(input.previous, input.current, "latestResumeImportRun"),
+    ...ifChanged(input.previous, input.current, "campaigns"),
     activeCampaignId: input.current.activeCampaignId,
-    campaignNotifications: input.current.campaignNotifications,
-    dashboard: input.current.dashboard,
-    activityControl: input.current.activityControl,
-    intelligence: input.current.intelligence,
+    ...ifChanged(input.previous, input.current, "campaignNotifications"),
+    ...ifChanged(input.previous, input.current, "dashboard"),
+    ...ifChanged(input.previous, input.current, "activityControl"),
+    ...(replaced ? { replaced } : {}),
+    ...(!sameValue(input.previous.intelligence, input.current.intelligence)
+      ? { intelligence: input.current.intelligence }
+      : {}),
     selectedDiscoveryJobId: input.current.selectedDiscoveryJobId,
     selectedReviewJobId: input.current.selectedReviewJobId,
     selectedApplyRunId: input.current.selectedApplyRunId,
@@ -236,16 +290,26 @@ export function buildJobFinderWorkspaceDelta(input: {
 
 export function createJobFinderWorkspaceDeltaTracker() {
   let currentRevision: WorkspaceRevision = 0;
-  let baseline: JobFinderWorkspaceSnapshot | null = null;
+  // Mutation replies and background updates can share a renderer revision.
+  // Keep a small window of shared immutable rows for those concurrent reads.
+  const baselines = new Map<
+    WorkspaceRevision,
+    JobFinderRendererWorkspaceSnapshot
+  >();
+  const remember = (snapshot: JobFinderRendererWorkspaceSnapshot) => {
+    baselines.set(currentRevision, snapshot);
+    while (baselines.size > 4) baselines.delete(baselines.keys().next().value!);
+  };
 
   return {
     synchronize(
       baseRevision: WorkspaceRevision | null,
-      current: JobFinderWorkspaceSnapshot,
+      current: JobFinderRendererWorkspaceSnapshot,
     ): JobFinderWorkspaceSyncResult {
-      if (baseline === null || baseRevision === null) {
+      if (baselines.size === 0 || baseRevision === null) {
+        baselines.clear();
         currentRevision += 1;
-        baseline = current;
+        remember(current);
         return {
           kind: "snapshot",
           currentRevision,
@@ -254,11 +318,12 @@ export function createJobFinderWorkspaceDeltaTracker() {
         };
       }
 
-      if (baseRevision !== currentRevision) {
+      const baseline = baselines.get(baseRevision);
+      if (!baseline) {
         const reason =
           baseRevision < currentRevision ? "stale_base" : "revision_gap";
         currentRevision += 1;
-        baseline = current;
+        remember(current);
         return {
           kind: "snapshot",
           currentRevision,
@@ -276,7 +341,7 @@ export function createJobFinderWorkspaceDeltaTracker() {
       });
 
       currentRevision = nextRevision;
-      baseline = current;
+      remember(current);
 
       return delta
         ? { kind: "delta", delta }

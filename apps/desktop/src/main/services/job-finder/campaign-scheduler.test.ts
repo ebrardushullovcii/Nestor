@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { getJobFinderWorkspaceService } from "./workspace-service";
+import { publishJobFinderWorkspaceUpdate } from "./workspace-updates";
 
 import {
   createCampaignScheduler,
@@ -8,6 +11,9 @@ import {
 
 vi.mock("./workspace-service", () => ({
   getJobFinderWorkspaceService: vi.fn(),
+}));
+vi.mock("./workspace-updates", () => ({
+  publishJobFinderWorkspaceUpdate: vi.fn(),
 }));
 
 interface FakeTimerHandle {
@@ -57,6 +63,75 @@ async function flush(): Promise<void> {
 }
 
 describe("campaign scheduler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("does not publish an idle tick when the workspace did not change", async () => {
+    const factory = createFakeTimerFactory();
+    const processDueScheduledCampaigns = vi.fn(() => Promise.resolve(false));
+    const runDueScheduledCampaigns = vi.fn();
+    vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
+      processDueScheduledCampaigns,
+      runDueScheduledCampaigns,
+    } as unknown as Awaited<ReturnType<typeof getJobFinderWorkspaceService>>);
+    const scheduler = createCampaignScheduler({
+      createTimer: factory.createTimer,
+    });
+
+    scheduler.start();
+    factory.fire(0);
+    await flush();
+
+    expect(processDueScheduledCampaigns).toHaveBeenCalledTimes(1);
+    expect(runDueScheduledCampaigns).not.toHaveBeenCalled();
+    expect(publishJobFinderWorkspaceUpdate).not.toHaveBeenCalled();
+    await scheduler.stop();
+  });
+
+  it("publishes a schedule change and live discovery activity", async () => {
+    const factory = createFakeTimerFactory();
+    const processDueScheduledCampaigns = vi.fn((
+      _now: string | undefined,
+      onActivity: () => void,
+    ) => {
+      onActivity();
+      return Promise.resolve(true);
+    });
+    vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
+      processDueScheduledCampaigns,
+    } as unknown as Awaited<ReturnType<typeof getJobFinderWorkspaceService>>);
+    const scheduler = createCampaignScheduler({
+      createTimer: factory.createTimer,
+    });
+
+    scheduler.start();
+    factory.fire(0);
+    await flush();
+
+    expect(publishJobFinderWorkspaceUpdate).toHaveBeenCalledTimes(2);
+    await scheduler.stop();
+  });
+
+  it("keeps the snapshot-returning service fallback compatible", async () => {
+    const factory = createFakeTimerFactory();
+    const runDueScheduledCampaigns = vi.fn(() => Promise.resolve());
+    vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
+      runDueScheduledCampaigns,
+    } as unknown as Awaited<ReturnType<typeof getJobFinderWorkspaceService>>);
+    const scheduler = createCampaignScheduler({
+      createTimer: factory.createTimer,
+    });
+
+    scheduler.start();
+    factory.fire(0);
+    await flush();
+
+    expect(runDueScheduledCampaigns).toHaveBeenCalledTimes(1);
+    expect(publishJobFinderWorkspaceUpdate).toHaveBeenCalledTimes(1);
+    await scheduler.stop();
+  });
+
   it("uses a 60s default interval and unrefs the timer when available", () => {
     const factory = createFakeTimerFactory();
     const tick = vi.fn(() => Promise.resolve());

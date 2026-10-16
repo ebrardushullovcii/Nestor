@@ -1,6 +1,5 @@
 import {
   CandidateProfileSchema,
-  JobSearchPreferencesSchema,
   ProfileSetupStateSchema,
   ResumeDocumentBundleSchema,
   type CandidateProfile,
@@ -288,7 +287,8 @@ export function createWorkspaceProfileSetupContextHelpers(
 
     return {
       profile: CandidateProfileSchema.parse(profile),
-      searchPreferences: JobSearchPreferencesSchema.parse(searchPreferences),
+      // Already validated, and owned by this read, by the normalization above.
+      searchPreferences,
       profileSetupState: ProfileSetupStateSchema.parse(profileSetupState),
       latestResumeImportRun: syncedImportState.latestResumeImportRun,
       latestResumeImportAllCandidates:

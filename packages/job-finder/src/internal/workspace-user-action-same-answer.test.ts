@@ -45,6 +45,7 @@ function fakeRepository(input: {
   return {
     listUserActionRequests: () => Promise.resolve(input.requests),
     listSavedJobs: () => Promise.resolve([]),
+    listSavedJobsByIds: () => Promise.resolve([]),
     listApplyJobResults: () => Promise.resolve([]),
     listApplicationQuestionRecords: (scope: { resultId: string }) =>
       Promise.resolve(
@@ -325,6 +326,16 @@ it.each(["pause_for_user", "answer_from_profile"] as const)(
             applicationUrl: "https://replica.test/apply",
           },
         ]),
+      listSavedJobsByIds: (ids: readonly string[]) =>
+        Promise.resolve(
+          [
+            {
+              id: "job_r_b",
+              canonicalUrl: "https://replica.test/job",
+              applicationUrl: "https://replica.test/apply",
+            },
+          ].filter((job) => ids.includes(job.id)),
+        ),
       listApplyJobResults: () =>
         Promise.resolve([
           { id: "r_b", privacyReceipt: { resume: { sha256 } } },

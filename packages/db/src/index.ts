@@ -8,6 +8,7 @@ export type {
   DiscoveryFeedbackCommitCurrent,
   DiscoveryFeedbackCommitNext,
   JobFinderRepository,
+  JobFinderDisplayCollections,
   JobFinderRepositorySeed,
   ProfileCommitOutcome,
   ProfileCopilotMessagePatchFlag,

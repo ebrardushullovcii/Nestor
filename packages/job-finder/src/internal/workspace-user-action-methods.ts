@@ -11,6 +11,7 @@ import {
   type UserActionRequest,
   JobFinderActivityControlSchema,
   type ApplicationQuestionRecord,
+  type ApplyJobResult,
 } from "@nordri/contracts";
 import {
   buildApplyFormObservation,
@@ -423,10 +424,25 @@ export async function findManualAnswerStepsCoveredBy(input: {
       Boolean(candidate.scope.applicationRecordId) &&
       (input.savedForFuture || candidate.scope.runId === runId),
   );
-  const covered: {
+  const matchingSteps: {
     request: UserActionRequest;
+    scope: {
+      runId: string;
+      jobId: string;
+      resultId: string;
+      applicationRecordId: string;
+    };
     answers: { questionId: string; answer: string }[];
+    salaryQuestions: ApplicationQuestionRecord[];
   }[] = [];
+  const isPayQuestion = (question: ApplicationQuestionRecord) =>
+    question.kind === "salary_expectation" ||
+    inferQuestionKind({
+      label: question.prompt,
+      groupLabel: question.description ?? "",
+      placeholder: "",
+      kind: "other",
+    }) === "salary_expectation";
   for (const candidate of candidates) {
     if (candidate.scope.type !== "application") continue;
     const scope = {
@@ -448,35 +464,11 @@ export async function findManualAnswerStepsCoveredBy(input: {
       (question) =>
         question.status === "detected" && !answeredIds.has(question.id),
     );
-    const isPayQuestion = (question: ApplicationQuestionRecord) =>
-      question.kind === "salary_expectation" ||
-      inferQuestionKind({
-        label: question.prompt,
-        groupLabel: question.description ?? "",
-        placeholder: "",
-        kind: "other",
-      }) === "salary_expectation";
-    let payDisclosed = false;
-    if (waiting.some(isPayQuestion)) {
-      const job = (await ctx.repository.listSavedJobs()).find(
-        (entry) => entry.id === scope.jobId,
-      );
-      if (job) {
-        const result = (await ctx.repository.listApplyJobResults()).find(
-          (entry) => entry.id === scope.resultId,
-        );
-        const { authority } = await resolveApplyAuthorityForJob({
-          repository: ctx.repository,
-          job,
-          resumeSha256: result?.privacyReceipt?.resume.sha256,
-          applicationUrl: job.applicationUrl ?? job.canonicalUrl,
-          now: new Date().toISOString(),
-        });
-        payDisclosed = authority.salaryDisclosure === "answer_from_profile";
-      }
-    }
     const answers = waiting.flatMap((question) => {
-      if (!payDisclosed && isPayQuestion(question)) return [];
+      const answer = answerByPrompt.get(
+        normalizeAnswerQuestion(question.prompt),
+      );
+      if (!answer) return [];
       if (
         question.kind === "work_authorization" ||
         question.kind === "visa_sponsorship"
@@ -499,10 +491,7 @@ export async function findManualAnswerStepsCoveredBy(input: {
         }) !== null
       )
         return [];
-      const answer = answerByPrompt.get(
-        normalizeAnswerQuestion(question.prompt),
-      );
-      return answer ? [{ questionId: question.id, answer }] : [];
+      return [{ questionId: question.id, answer }];
     });
     const everyRequiredCovered = waiting.every(
       (question) =>
@@ -510,8 +499,92 @@ export async function findManualAnswerStepsCoveredBy(input: {
         answers.some((entry) => entry.questionId === question.id),
     );
     if (answers.length > 0 && everyRequiredCovered) {
-      covered.push({ request: candidate, answers });
+      matchingSteps.push({
+        request: candidate,
+        scope,
+        answers,
+        salaryQuestions: waiting.filter(
+          (question) =>
+            answers.some((entry) => entry.questionId === question.id) &&
+            isPayQuestion(question),
+        ),
+      });
     }
+  }
+
+  // Snapshot recovery checks every pending step. Read salary facts only for
+  // prompts that can actually be answered, and never copy the full job store.
+  const salaryJobIds = [
+    ...new Set(
+      matchingSteps
+        .filter((step) => step.salaryQuestions.length > 0)
+        .map((step) => step.scope.jobId),
+    ),
+  ];
+  const salaryJobs = new Map(
+    (salaryJobIds.length > 0
+      ? await ctx.repository.listSavedJobsByIds(salaryJobIds)
+      : []
+    ).map((job) => [job.id, job]),
+  );
+  const resultsByApplication = new Map<string, readonly ApplyJobResult[]>();
+  const covered: {
+    request: UserActionRequest;
+    answers: { questionId: string; answer: string }[];
+  }[] = [];
+  for (const step of matchingSteps) {
+    let answers = step.answers;
+    if (step.salaryQuestions.length > 0) {
+      const { scope } = step;
+      const job = salaryJobs.get(scope.jobId);
+      let payDisclosed = false;
+      if (job) {
+        const resultKey = JSON.stringify([
+          scope.runId,
+          scope.jobId,
+          scope.applicationRecordId,
+        ]);
+        let results = resultsByApplication.get(resultKey);
+        if (!results) {
+          results = await ctx.repository.listApplyJobResults({
+            runId: scope.runId,
+            jobId: scope.jobId,
+            applicationRecordId: scope.applicationRecordId,
+          });
+          resultsByApplication.set(resultKey, results);
+        }
+        const result = results.find(
+          (entry) =>
+            entry.id === scope.resultId &&
+            entry.runId === scope.runId &&
+            entry.jobId === scope.jobId &&
+            entry.applicationRecordId === scope.applicationRecordId,
+        );
+        // Cache facts for this lookup only. Permission is checked separately
+        // for every step, so a changed pay choice takes effect immediately.
+        const { authority } = await resolveApplyAuthorityForJob({
+          repository: ctx.repository,
+          job,
+          resumeSha256: result?.privacyReceipt?.resume.sha256,
+          applicationUrl: job.applicationUrl ?? job.canonicalUrl,
+          now: new Date().toISOString(),
+        });
+        payDisclosed = authority.salaryDisclosure === "answer_from_profile";
+      }
+      if (!payDisclosed) {
+        if (
+          step.salaryQuestions.some((question) => question.isRequired !== false)
+        )
+          continue;
+        const salaryQuestionIds = new Set(
+          step.salaryQuestions.map((question) => question.id),
+        );
+        answers = answers.filter(
+          (answer) => !salaryQuestionIds.has(answer.questionId),
+        );
+      }
+    }
+    if (answers.length > 0) covered.push({ request: step.request, answers });
   }
   return covered;
 }

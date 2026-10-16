@@ -1,28 +1,28 @@
 // @vitest-environment jsdom
 
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useJobFinderWorkspace } from "./use-job-finder-workspace";
 
-function createWorkspace(generatedAt: string): JobFinderWorkspaceSnapshot {
+function createWorkspace(generatedAt: string): JobFinderRendererWorkspaceSnapshot {
   return {
     generatedAt,
     intelligence: { groupedDecisions: [] },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 describe("useJobFinderWorkspace grouped manual-answer actions", () => {
   const projectGroupedManualAnswer =
-    vi.fn<(command: unknown) => Promise<JobFinderWorkspaceSnapshot>>();
+    vi.fn<(command: unknown) => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const applyGroupedManualAnswer =
-    vi.fn<(input: unknown) => Promise<JobFinderWorkspaceSnapshot>>();
+    vi.fn<(input: unknown) => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const snoozeGroupedDecision =
-    vi.fn<(input: unknown) => Promise<JobFinderWorkspaceSnapshot>>();
+    vi.fn<(input: unknown) => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const syncWorkspace =
     vi.fn<(baseRevision: number | null) => Promise<unknown>>();
-  const getWorkspace = vi.fn<() => Promise<JobFinderWorkspaceSnapshot>>();
+  const getWorkspace = vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
 
   beforeEach(() => {
     vi.clearAllMocks();

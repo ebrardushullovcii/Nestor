@@ -455,8 +455,12 @@ describe("workspace application answer methods", () => {
     expect(profile.answerBank.customAnswers).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          question: expect.not.stringContaining("Application location:"),
-          applicationScope: expect.objectContaining({ location: "Remote" }),
+          question: expect.not.stringContaining(
+            "Application location:",
+          ) as unknown,
+          applicationScope: expect.objectContaining({
+            location: "Remote",
+          }) as unknown,
           answer: "No",
         }),
       ]),
@@ -494,8 +498,12 @@ describe("workspace application answer methods", () => {
     expect(profile.headline).toBe("Interleaved headline");
     expect(profile.answerBank.customAnswers).toEqual([
       expect.objectContaining({
-        question: expect.not.stringContaining("Application location:"),
-        applicationScope: expect.objectContaining({ location: "Remote" }),
+        question: expect.not.stringContaining(
+          "Application location:",
+        ) as unknown,
+        applicationScope: expect.objectContaining({
+          location: "Remote",
+        }) as unknown,
         answer: "No",
       }),
     ]);
@@ -527,8 +535,12 @@ describe("workspace application answer methods", () => {
     expect(profile.answerBank.customAnswers).toHaveLength(1);
     expect(profile.answerBank.customAnswers[0]).toEqual(
       expect.objectContaining({
-        question: expect.not.stringContaining("Application location:"),
-        applicationScope: expect.objectContaining({ location: "Remote" }),
+        question: expect.not.stringContaining(
+          "Application location:",
+        ) as unknown,
+        applicationScope: expect.objectContaining({
+          location: "Remote",
+        }) as unknown,
         answer: "No",
       }),
     );

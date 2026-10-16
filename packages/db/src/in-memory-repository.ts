@@ -42,10 +42,14 @@ import {
   type ApplicationAnswerRecord,
   type ApplicationQuestionRecord,
   type CandidateProfile,
+  type SavedJob,
+  type ResumeValidationResult,
   type UserActionRequest,
 } from "@nordri/contracts";
 
 import { cloneValue } from "./internal/state";
+import { freezeProjection } from "./internal/saved-job-projection";
+import { toDiscoveryDisplayProjection } from "./internal/discovery-display-projection";
 import { createApplicationAnswerSnapshotRepositoryMethods } from "./application-answer-snapshot-repository";
 import { createApplicationAuthorityRepositoryMethods } from "./application-authority-repository";
 import {
@@ -57,6 +61,7 @@ import {
   type GroupedManualAnswerCurrentSnapshot,
 } from "./grouped-manual-answer-support";
 import type { CommitGroupedManualAnswerInput } from "./grouped-manual-answer-types";
+import type { DiscoveryDisplayProjection } from "./repository-types";
 import {
   assertApplicationPreparationStartPreserved,
   matchesOptionalStringFilters,
@@ -122,6 +127,34 @@ export function createInMemoryJobFinderRepository(
   const state = JobFinderRepositoryStateSchema.parse(cloneValue(seed));
   assertAtMostOneActiveApplicationAuthority(state);
   let profileRevision = 1;
+  let discoveryProjectionSource: typeof state.discovery | null = null;
+  let discoveryProjection: DiscoveryDisplayProjection | null = null;
+  let intelligenceProjectionSource: typeof state.intelligence | null = null;
+  let intelligenceProjection: typeof state.intelligence | null = null;
+  let savedProjectionSource: typeof state.savedJobs | null = null;
+  let savedProjection: readonly SavedJob[] = [];
+  const savedProjectionRows = new WeakMap<SavedJob, SavedJob>();
+  const displayCollections = new WeakMap<object, readonly object[]>();
+  const displayRows = new WeakMap<object, object>();
+  function borrowDisplayRows<T extends object>(
+    source: readonly T[],
+    order: (rows: readonly T[]) => readonly T[] = (rows) => rows,
+  ): readonly T[] {
+    const cached = displayCollections.get(source);
+    if (cached) return cached as readonly T[];
+    const rows = Object.freeze(
+      order(source).map((value) => {
+        let borrowed = displayRows.get(value);
+        if (!borrowed) {
+          borrowed = freezeProjection(cloneValue(value));
+          displayRows.set(value, borrowed);
+        }
+        return borrowed as T;
+      }),
+    );
+    displayCollections.set(source, rows);
+    return rows;
+  }
 
   function readProfileWithRevision(): {
     profile: CandidateProfile;
@@ -182,6 +215,68 @@ export function createInMemoryJobFinderRepository(
       return Promise.resolve();
     },
     exportState: () => Promise.resolve(cloneValue(state)),
+    readDisplayCollections: () =>
+      Promise.resolve({
+        tailoredAssets: borrowDisplayRows(state.tailoredAssets),
+        resumeDrafts: borrowDisplayRows(state.resumeDrafts, sortResumeDrafts),
+        resumeExportArtifacts: borrowDisplayRows(
+          state.resumeExportArtifacts,
+          sortExports,
+        ),
+        resumeResearchArtifacts: borrowDisplayRows(
+          state.resumeResearchArtifacts,
+          sortResearch,
+        ),
+        applyRuns: borrowDisplayRows(state.applyRuns, sortApplyRuns),
+        applyJobResults: borrowDisplayRows(
+          state.applyJobResults,
+          sortApplyJobResults,
+        ),
+        applicationRecords: borrowDisplayRows(state.applicationRecords),
+        applicationAttempts: borrowDisplayRows(state.applicationAttempts),
+        sourceInstructionArtifacts: borrowDisplayRows(
+          state.sourceInstructionArtifacts,
+        ),
+        sourceDebugAttempts: borrowDisplayRows(state.sourceDebugAttempts),
+        profileCopilotMessages: borrowDisplayRows(
+          state.profileCopilotMessages,
+          sortMessages,
+        ),
+        profileRevisions: borrowDisplayRows(
+          state.profileRevisions,
+          sortNewestFirst,
+        ),
+        userActionRequests: borrowDisplayRows(
+          state.userActionRequests,
+          sortUserActionRequests,
+        ),
+        userActionEvents: borrowDisplayRows(
+          state.userActionEvents,
+          sortUserActionEvents,
+        ),
+        latestResumeValidationResults: borrowDisplayRows(
+          state.resumeValidationResults,
+          (values) => {
+            const latest = new Map<string, ResumeValidationResult>();
+            for (const value of sortValidationResults(values)) {
+              if (!latest.has(value.draftId)) latest.set(value.draftId, value);
+            }
+            return [...latest.values()];
+          },
+        ),
+      }),
+    getTailoredAssetById: (assetId) =>
+      Promise.resolve(
+        cloneValue(
+          state.tailoredAssets.find((asset) => asset.id === assetId) ?? null,
+        ),
+      ),
+    getTailoredAssetByJobId: (jobId) =>
+      Promise.resolve(
+        cloneValue(
+          state.tailoredAssets.find((asset) => asset.jobId === jobId) ?? null,
+        ),
+      ),
     reset(nextSeed) {
       const normalizedSeed = JobFinderRepositoryStateSchema.parse(
         cloneValue(nextSeed),
@@ -438,16 +533,72 @@ export function createInMemoryJobFinderRepository(
           : orderedJobs.slice(offset, offset + limit);
       return Promise.resolve(cloneValue(sliced));
     },
+    readSavedJobsProjection() {
+      if (savedProjectionSource !== state.savedJobs) {
+        const rows = [...state.savedJobs]
+          .sort((left, right) => left.id.localeCompare(right.id))
+          .map((job) => {
+            let row = savedProjectionRows.get(job);
+            if (!row) {
+              row = freezeProjection(cloneValue(job));
+              savedProjectionRows.set(job, row);
+            }
+            return row;
+          });
+        if (
+          rows.length !== savedProjection.length ||
+          rows.some((row, index) => row !== savedProjection[index])
+        ) {
+          savedProjection = Object.freeze(rows);
+        }
+        savedProjectionSource = state.savedJobs;
+      }
+      return Promise.resolve(savedProjection);
+    },
+    listSavedJobIds() {
+      return Promise.resolve(
+        state.savedJobs
+          .map((job) => job.id)
+          .sort((left, right) => left.localeCompare(right)),
+      );
+    },
+    listSavedJobsByIds(jobIds) {
+      const wanted = new Set(jobIds);
+      return Promise.resolve(
+        cloneValue(
+          state.savedJobs
+            .filter((job) => wanted.has(job.id))
+            .sort((left, right) => left.id.localeCompare(right.id)),
+        ),
+      );
+    },
     commitSavedJobDelta({
       upserts = [],
+      upsertsFromDiscovery,
+      upsertsFromBorrowedDiscovery,
       update,
+      updateJobIds,
       updateSettings,
       clearResumeApproval,
       updateDiscoveryState,
     }) {
       try {
+        const currentDiscoveryState =
+          upsertsFromDiscovery ||
+          upsertsFromBorrowedDiscovery ||
+          updateDiscoveryState
+            ? freezeProjection(state.discovery)
+            : null;
         const normalizedUpserts = SavedJobSchema.array().parse(
-          cloneValue([...upserts]),
+          cloneValue([
+            ...upserts,
+            ...(upsertsFromDiscovery && currentDiscoveryState
+              ? upsertsFromDiscovery(cloneValue(currentDiscoveryState))
+              : []),
+            ...(upsertsFromBorrowedDiscovery && currentDiscoveryState
+              ? upsertsFromBorrowedDiscovery(currentDiscoveryState)
+              : []),
+          ]),
         );
         const existingJobIds = new Set(state.savedJobs.map((job) => job.id));
         let previousJobForResumeApproval: ReturnType<
@@ -465,7 +616,17 @@ export function createInMemoryJobFinderRepository(
 
         let nextSavedJobs = state.savedJobs;
         if (update) {
+          const updatedJobIds = updateJobIds
+            ? new Set([
+                ...updateJobIds,
+                ...normalizedUpserts.map((job) => job.id),
+                ...(clearResumeApproval ? [clearResumeApproval.jobId] : []),
+              ])
+            : null;
           nextSavedJobs = state.savedJobs.map((currentJob) => {
+            if (updatedJobIds && !updatedJobIds.has(currentJob.id)) {
+              return currentJob;
+            }
             const nextJob = SavedJobSchema.parse(
               cloneValue(update(cloneValue(currentJob))),
             );
@@ -553,11 +714,12 @@ export function createInMemoryJobFinderRepository(
           }
         }
 
-        const nextDiscoveryState = updateDiscoveryState
-          ? JobFinderDiscoveryStateSchema.parse(
-              cloneValue(updateDiscoveryState(cloneValue(state.discovery))),
-            )
-          : null;
+        const nextDiscoveryState =
+          updateDiscoveryState && currentDiscoveryState
+            ? JobFinderDiscoveryStateSchema.parse(
+                cloneValue(updateDiscoveryState(currentDiscoveryState)),
+              )
+            : null;
 
         state.savedJobs = nextSavedJobs;
         state.resumeDrafts = nextResumeDrafts;
@@ -600,7 +762,7 @@ export function createInMemoryJobFinderRepository(
                   }),
                 ),
           intelligenceState: cloneValue(state.intelligence),
-          discoveryState: cloneValue(state.discovery),
+          discoveryState: freezeProjection(cloneValue(state.discovery)),
         });
         const nextSearchPreferences = JobSearchPreferencesSchema.parse(
           cloneValue(next.searchPreferences),
@@ -994,6 +1156,27 @@ export function createInMemoryJobFinderRepository(
           )
         : state.resumeValidationResults;
       return Promise.resolve(sortValidationResults(cloneValue(values)));
+    },
+    listLatestResumeValidationResults(draftIds) {
+      const wanted = new Set(draftIds);
+      const latestByDraftId = new Map<string, ResumeValidationResult>();
+      for (const result of state.resumeValidationResults) {
+        if (!wanted.has(result.draftId)) continue;
+        const latest = latestByDraftId.get(result.draftId);
+        const dateDelta = latest
+          ? Date.parse(result.validatedAt) - Date.parse(latest.validatedAt)
+          : 0;
+        if (
+          !latest ||
+          dateDelta > 0 ||
+          (dateDelta === 0 && result.id.localeCompare(latest.id) < 0)
+        ) {
+          latestByDraftId.set(result.draftId, result);
+        }
+      }
+      return Promise.resolve(
+        sortValidationResults(cloneValue([...latestByDraftId.values()])),
+      );
     },
     upsertResumeValidationResult(validationResult) {
       const normalizedValidation = ResumeValidationResultSchema.parse(
@@ -2132,13 +2315,23 @@ export function createInMemoryJobFinderRepository(
         );
       }
     },
+    readDiscoveryDisplayProjection() {
+      if (
+        discoveryProjectionSource !== state.discovery ||
+        !discoveryProjection
+      ) {
+        discoveryProjection = toDiscoveryDisplayProjection(state.discovery);
+        discoveryProjectionSource = state.discovery;
+      }
+      return Promise.resolve(discoveryProjection);
+    },
     getDiscoveryState() {
       return Promise.resolve(cloneValue(state.discovery));
     },
     commitDiscoveryStateUpdate(update) {
       try {
         const nextDiscoveryState = JobFinderDiscoveryStateSchema.parse(
-          cloneValue(update(cloneValue(state.discovery))),
+          cloneValue(update(freezeProjection(cloneValue(state.discovery)))),
         );
         state.discovery = nextDiscoveryState;
         return Promise.resolve(cloneValue(nextDiscoveryState));
@@ -2220,6 +2413,18 @@ export function createInMemoryJobFinderRepository(
           error instanceof Error ? error : new Error(String(error)),
         );
       }
+    },
+    readIntelligenceProjection() {
+      if (
+        intelligenceProjectionSource !== state.intelligence ||
+        !intelligenceProjection
+      ) {
+        intelligenceProjection = freezeProjection(
+          cloneValue(state.intelligence),
+        );
+        intelligenceProjectionSource = state.intelligence;
+      }
+      return Promise.resolve(intelligenceProjection);
     },
     getIntelligenceState() {
       return Promise.resolve(cloneValue(state.intelligence));

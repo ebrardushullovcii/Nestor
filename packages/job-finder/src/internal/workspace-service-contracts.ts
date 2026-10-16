@@ -1,4 +1,13 @@
-import type { ResumeBatchCheckpoint } from "@nordri/contracts";
+import type {
+  AddBrowserJobResult,
+  ApplicationDocumentRevision,
+  ApplicationQuestionRecord,
+  ApplicationRecord,
+  ResumeBatchGenerationResult,
+  ResumeBatchGenerationProgress,
+  ResumeBatchProviderBlock,
+  ResumeBatchCheckpoint,
+} from "@nordri/contracts";
 import type {
   JobFinderAiClient,
   ResumeVisionProvider,
@@ -25,6 +34,7 @@ import type {
   DeleteCampaignRuleInput,
   DeleteJobSearchCampaignInput,
   DiscoveryRunScope,
+  DiscoveryFeedbackBatchResult,
   CandidateProfile,
   DiscoveryActivityEvent,
   EditableSourceInstructionArtifact,
@@ -122,12 +132,36 @@ export interface JobFinderWorkspaceResetOptions {
   beforeStateReset?: () => Promise<void>;
 }
 
+export interface DiscoveryFeedbackBatchOptions {
+  signal?: AbortSignal;
+  /** Checked before every write, including inside the repository transaction. */
+  assertCurrent?: () => void;
+}
+
 export interface JobFinderWorkspaceService {
   refreshApprovedApplicationLetter(
-    document: import("@nordri/contracts").ApplicationDocumentRevision,
+    document: ApplicationDocumentRevision,
   ): Promise<void>;
   shutdown(): Promise<void>;
   getWorkspaceSnapshot(): Promise<JobFinderWorkspaceSnapshot>;
+  /** Read-only display projection; validated job rows may be shared in main. */
+  getWorkspaceProjection?(): Promise<JobFinderWorkspaceSnapshot>;
+  /**
+   * What an application's documents are written against: the profile, the
+   * one job, its application record and its newest result. Read by id, so
+   * opening Applications does not rebuild the whole workspace.
+   */
+  getApplicationDocumentContext?(
+    jobId: string,
+    applicationRecordId: string,
+  ): Promise<{
+    profile: JobFinderWorkspaceSnapshot["profile"];
+    job: SavedJob | null;
+    applicationRecord:
+      | JobFinderWorkspaceSnapshot["applicationRecords"][number]
+      | null;
+    latestResult: JobFinderWorkspaceSnapshot["applyJobResults"][number] | null;
+  }>;
   /**
    * Returns the small, shell-safe first paint. Deferred collections are empty
    * by design and are marked in the snapshot hydration metadata.
@@ -316,6 +350,11 @@ export interface JobFinderWorkspaceService {
     now?: string,
     onActivity?: (event: DiscoveryActivityEvent) => void,
   ): Promise<JobFinderWorkspaceSnapshot>;
+  /** Runs due schedules without building a workspace snapshot on an idle tick. */
+  processDueScheduledCampaigns?(
+    now?: string,
+    onActivity?: (event: DiscoveryActivityEvent) => void,
+  ): Promise<boolean>;
   /**
    * Marks a single in-app campaign notification read. Unknown ids are a
    * no-op; the timestamp comes from the caller (main supplies the ISO readAt).
@@ -381,6 +420,8 @@ export interface JobFinderWorkspaceService {
   ): Promise<JobFinderWorkspaceSnapshot>;
   assessJobListing(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
   queueJobForReview(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
+  /** One row-local shortlist commit, without constructing a workspace per job. */
+  queueJobsForReview?(jobIds: readonly string[]): Promise<void>;
   saveResumeBatchCheckpoint(checkpoint: ResumeBatchCheckpoint): Promise<void>;
   setJobResumeApplicationMode(
     jobId: string,
@@ -388,9 +429,23 @@ export interface JobFinderWorkspaceService {
     resumeTailoringMode?: TailoringMode | null,
   ): Promise<JobFinderWorkspaceSnapshot>;
   removeJobFromReview(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
+  /** Moves several jobs back to Find jobs, then reads the workspace once. */
+  removeJobsFromReview?(jobIds: readonly string[]): Promise<void>;
   dismissDiscoveryJob(
     input: JobFinderDismissDiscoveryJobInput,
   ): Promise<JobFinderWorkspaceSnapshot>;
+  dismissDiscoveryJobs?(
+    inputs: readonly JobFinderDismissDiscoveryJobInput[],
+    options?: DiscoveryFeedbackBatchOptions,
+  ): Promise<DiscoveryFeedbackBatchResult>;
+  excludeEmployerDiscoveryJobs?(
+    input: {
+      jobId: string;
+      jobIds: readonly string[];
+      expectedNormalizedCompanyName: string;
+    },
+    options?: DiscoveryFeedbackBatchOptions,
+  ): Promise<DiscoveryFeedbackBatchResult>;
   previewEmployerExclusion(jobId: string): Promise<EmployerExclusionPreview>;
   removeEmployerExclusion(
     input: RemoveEmployerExclusionInput,
@@ -398,6 +453,10 @@ export interface JobFinderWorkspaceService {
   restoreDismissedDiscoveryJob(
     jobId: string,
   ): Promise<JobFinderWorkspaceSnapshot>;
+  restoreDismissedDiscoveryJobs?(
+    jobIds: readonly string[],
+    options?: DiscoveryFeedbackBatchOptions,
+  ): Promise<DiscoveryFeedbackBatchResult>;
   mutateRapidReview(
     input: RapidReviewMutationInput,
   ): Promise<JobFinderWorkspaceSnapshot>;
@@ -459,6 +518,15 @@ export interface JobFinderWorkspaceService {
     jobId: string,
     options?: { language?: string | null },
   ): Promise<JobFinderWorkspaceSnapshot>;
+  generateResumeForBatch(
+    jobId: string,
+    options: {
+      regenerate?: boolean;
+      shouldStop: () => boolean;
+      onStage?: (stage: ResumeBatchGenerationProgress["stage"]) => void;
+      onProviderBlocked?: (block: ResumeBatchProviderBlock) => void;
+    },
+  ): Promise<ResumeBatchGenerationResult>;
   getResumeWorkspace(jobId: string): Promise<JobFinderResumeWorkspace>;
   previewResumeDraft(
     draft: ResumeDraft,
@@ -522,6 +590,8 @@ export interface JobFinderWorkspaceService {
   getResumeAssistantMessages(
     jobId: string,
   ): Promise<readonly ResumeAssistantMessage[]>;
+  /** Read the retired chats in order, without creating or loading resumes. */
+  getResumeAssistantHistory(): Promise<readonly ResumeAssistantMessage[]>;
   sendResumeAssistantMessage(
     jobId: string,
     content: string,
@@ -594,6 +664,8 @@ export interface JobFinderWorkspaceService {
    * they were handed (the site showed its confirmation). Returns how many.
    */
   recordApplicationsSentByPerson(): Promise<number>;
+  /** Judges every job of the active plan that has no current fit verdict. */
+  judgeUnjudgedJobs(): Promise<JobFinderWorkspaceSnapshot>;
   /**
    * Sends one application the person already looked over.
    *
@@ -668,7 +740,7 @@ export interface JobFinderWorkspaceService {
   addJobFromBrowserPage(input: {
     html: string;
     pageUrl: string;
-  }): Promise<import("@nordri/contracts").AddBrowserJobResult>;
+  }): Promise<AddBrowserJobResult>;
   extractJobsFromPageText(input: {
     pageText: string;
     pageUrl: string;
@@ -772,6 +844,8 @@ export interface JobFinderDocumentManager {
     templateId: ResumeTemplateId;
     settings: JobFinderSettings;
     targetPath?: string | null;
+    onQueueWait?: (milliseconds: number) => void;
+    signal?: AbortSignal;
   }): Promise<RenderedResumeArtifact>;
   /**
    * Renders a cover or motivation letter to a file, through the same path the
@@ -784,16 +858,16 @@ export interface JobFinderDocumentManager {
   getApprovedApplicationLetter?(
     jobId: string,
     applicationRecordId?: string,
-  ): Promise<import("@nordri/contracts").ApplicationDocumentRevision | null>;
+  ): Promise<ApplicationDocumentRevision | null>;
   /**
    * Keeps a letter the person wrote or accepted while answering a form's
    * letter question as this application's approved letter.
    */
   saveApprovedApplicationLetter?(input: {
-    profile: import("@nordri/contracts").CandidateProfile;
+    profile: CandidateProfile;
     job: SavedJob;
-    applicationRecord: import("@nordri/contracts").ApplicationRecord;
-    question: import("@nordri/contracts").ApplicationQuestionRecord;
+    applicationRecord: ApplicationRecord;
+    question: ApplicationQuestionRecord;
     text: string;
   }): Promise<void>;
   renderLetterArtifact?(input: {
@@ -842,6 +916,7 @@ export interface CandidateAssetResolver {
 }
 
 export interface CreateJobFinderWorkspaceServiceOptions {
+  onFitJudgmentProgress?: () => void;
   aiClient: JobFinderAiClient;
   visionProvider?: ResumeVisionProvider;
   documentManager: JobFinderDocumentManager;

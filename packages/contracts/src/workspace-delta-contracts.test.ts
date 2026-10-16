@@ -149,5 +149,25 @@ describe("workspace delta contracts", () => {
     expect(result.selectedDiscoveryJobId).toBe("job-2");
     expect(result.companyJobs).toEqual(emptySlice());
     expect(result.currentRevision).toBe(result.baseRevision + 1);
+    expect(
+      JobFinderWorkspaceDeltaSchema.parse({
+        ...result,
+        baseRevision: 1,
+        currentRevision: 3,
+      }).currentRevision,
+    ).toBe(3);
+    for (const currentRevision of [0, 1]) {
+      const parsed = JobFinderWorkspaceDeltaSchema.safeParse({
+        ...result,
+        baseRevision: 1,
+        currentRevision,
+      });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        expect(parsed.error.issues).toContainEqual(
+          expect.objectContaining({ path: ["currentRevision"] }),
+        );
+      }
+    }
   });
 });

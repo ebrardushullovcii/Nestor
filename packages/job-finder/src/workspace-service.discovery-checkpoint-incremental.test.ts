@@ -1,3 +1,4 @@
+import type { JudgeJobFitsInput } from "@nordri/ai-providers";
 import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
 import {
   JobPostingSchema,
@@ -13,6 +14,7 @@ import {
   createWorkspaceServiceHarness,
 } from "./workspace-service.test-support";
 import type { AgentDiscoveryOptions } from "@nordri/browser-runtime";
+import * as discoverySavedJobWriter from "./internal/discovery-saved-job-writer";
 
 function createCollectedJob(input: {
   token: string;
@@ -78,6 +80,7 @@ function createEmptyPhaseEvidence() {
 
 function createIncrementalRuntime(input: {
   onStarted?: (options: AgentDiscoveryOptions) => Promise<void>;
+  onCheckpointSaved?: (revision: number) => Promise<void>;
   checkpoints: Array<ReturnType<typeof JobPostingSchema.parse>[]>;
   finalJobs: ReturnType<typeof JobPostingSchema.parse>[];
   failAfterCheckpoints?: boolean;
@@ -103,6 +106,7 @@ function createIncrementalRuntime(input: {
           visitedUrls: ["https://example.com/jobs?page=2"],
           phaseEvidence: createEmptyPhaseEvidence(),
         });
+        await input.onCheckpointSaved?.(revision);
       }
 
       if (input.failAfterCheckpoints) {
@@ -123,9 +127,7 @@ function createIncrementalRuntime(input: {
   };
 }
 
-function createHarness(seedOverrides?: {
-  discoveryOnly?: boolean;
-}) {
+function createHarness(seedOverrides?: { discoveryOnly?: boolean }) {
   const seed = createSeed();
   seed.savedJobs = [];
   seed.discovery.pendingDiscoveryJobs = [];
@@ -387,7 +389,9 @@ describe("discovery checkpoint incremental persistence", () => {
     ]);
     // ...and never-persisted jobs do not appear.
     expect(
-      snapshot.discoveryJobs.some((job) => job.sourceJobId === jobB.sourceJobId),
+      snapshot.discoveryJobs.some(
+        (job) => job.sourceJobId === jobB.sourceJobId,
+      ),
     ).toBe(false);
 
     const run = snapshot.recentDiscoveryRuns[0]!;
@@ -758,11 +762,9 @@ describe("discovery checkpoint incremental persistence", () => {
       expect(execution.duplicatesMerged).toBe(0);
       expect(run.summary.jobsPersisted).toBe(2);
 
-      // Commit shape: one failed checkpoint commit, the legacy per-target and
-      // post-loop commits, and the paired campaign-membership/run-count
-      // finalization. The disabled-mode checkpoint and the retry never
-      // double-committed the same job.
-      expect(commitSpy.mock.calls.length).toBe(4);
+      // One failed checkpoint, one successful retry and the campaign's
+      // membership/count update. Terminal run-only saves do not visit rows.
+      expect(commitSpy.mock.calls.length).toBe(3);
       expect(simulatedFailures).toBe(1);
     } finally {
       commitSpy.mockRestore();
@@ -836,7 +838,10 @@ describe("discovery checkpoint incremental persistence", () => {
     });
 
     const browserRuntime = createIncrementalRuntime({
-      checkpoints: [[jobA, jobB], [jobA, jobB, jobC]],
+      checkpoints: [
+        [jobA, jobB],
+        [jobA, jobB, jobC],
+      ],
       finalJobs: [jobA, jobB, jobC],
     });
 
@@ -947,6 +952,268 @@ describe("discovery checkpoint incremental persistence", () => {
     ).toBe(false);
   });
 
+  test("the jobs a source keeps are judged for fit while it is still searching", async () => {
+    const jobs = Array.from({ length: 20 }, (_, index) =>
+      createCollectedJob({ token: `fit_live_${index}` }),
+    );
+    const judgeJobFits = vi.fn((input: JudgeJobFitsInput) =>
+      Promise.resolve(
+        input.jobs.map(({ jobId }) => ({
+          jobId,
+          score: 77,
+          recommendation: "strong_fit" as const,
+          role: "exact" as const,
+          roleExplanation: null,
+          preferences: "aligned" as const,
+          preferencesExplanation: null,
+          locationReach: "in_area" as const,
+          reasons: [],
+          gaps: [],
+          listingClosed: false,
+          listingClosedEvidence: null,
+        })),
+      ),
+    );
+    let judgedWhileSearching = 0;
+    const browserRuntime: BrowserSessionRuntime = {
+      ...createAgentBrowserRuntime([]),
+      async runAgentDiscovery(source, options) {
+        await emitRuntimeCheckpoint(options, {
+          revision: 1,
+          savedAt: "2026-03-20T10:00:03.000Z",
+          currentUrl: "https://example.com/jobs",
+          lastStableUrl: "https://example.com/jobs",
+          stepCount: 2,
+          collectedJobs: jobs,
+          visitedUrls: ["https://example.com/jobs"],
+          phaseEvidence: createEmptyPhaseEvidence(),
+        });
+        // The source keeps searching until the saved jobs carry verdicts.
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          const saved = [
+            ...(await repositoryRef.listSavedJobs()),
+            ...(await repositoryRef.getDiscoveryState()).pendingDiscoveryJobs,
+          ];
+          judgedWhileSearching = saved.filter(
+            (job) => job.matchAssessment.judgment?.score === 77,
+          ).length;
+          if (judgedWhileSearching === jobs.length) break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return {
+          source,
+          startedAt: "2026-03-20T10:00:00.000Z",
+          completedAt: "2026-03-20T10:00:05.000Z",
+          querySummary: "Fit while searching",
+          inventoryCompleteness: "partial" as const,
+          warning: null,
+          jobs,
+          agentMetadata: null,
+        };
+      },
+    };
+    const { seed } = createHarness();
+    const { workspaceService, repository: repositoryRef } =
+      createWorkspaceServiceHarness({
+        seed,
+        browserRuntime,
+        aiClient: { ...createAgentAiClient(), judgeJobFits },
+      });
+
+    await workspaceService.runDiscoveryForTarget(
+      "target_incremental",
+      () => {},
+      new AbortController().signal,
+    );
+
+    expect(judgedWhileSearching).toBe(jobs.length);
+    // One full batch while searching; nothing is asked again at the end.
+    expect(judgeJobFits).toHaveBeenCalledTimes(1);
+  });
+
+  test("a checkpoint reads back only the saved jobs it changed", async () => {
+    const jobA = createCollectedJob({ token: "scoped_a" });
+    const jobB = createCollectedJob({ token: "scoped_b" });
+    const { seed } = createHarness();
+    const { workspaceService, repository } = createWorkspaceServiceHarness({
+      seed,
+      browserRuntime: createIncrementalRuntime({
+        checkpoints: [[jobA], [jobA, jobB]],
+        finalJobs: [jobA, jobB],
+      }),
+      aiClient: createAgentAiClient(),
+    });
+    const commitSpy = vi.spyOn(repository, "commitSavedJobDelta");
+
+    const snapshot = await workspaceService.runDiscoveryForTarget(
+      "target_incremental",
+      () => {},
+      new AbortController().signal,
+    );
+
+    const savedJobA = snapshot.discoveryJobs.find(
+      (job) => job.sourceJobId === jobA.sourceJobId,
+    );
+    expect(savedJobA).toBeDefined();
+    const jobBCommit = commitSpy.mock.calls.find(([input]) =>
+      input.upserts?.some((job) => job.sourceJobId === jobB.sourceJobId),
+    )?.[0];
+    // The first checkpoint stored job A and the second left it as it was,
+    // so the second commit does not read it back.
+    expect(jobBCommit?.updateJobIds).toBeDefined();
+    expect(jobBCommit?.updateJobIds).not.toContain(savedJobA!.id);
+  });
+
+  test.each([3_000, 10_000])(
+    "successive checkpoints copy only their posting changes in a %i-job plan",
+    async (size) => {
+      const { seed } = createHarness();
+      const template = createSeed().savedJobs[0]!;
+      seed.savedJobs = Array.from({ length: size }, (_, index) => ({
+        ...template,
+        id: `checkpoint_seed_${index}`,
+        sourceJobId: `checkpoint_seed_${index}`,
+        canonicalUrl: `https://example.com/seed/${index}`,
+        applicationUrl: null,
+        company: `Synthetic company ${index % 30}`,
+        employerDomain: null,
+        employerWebsiteUrl: null,
+        status: "discovered" as const,
+      }));
+      let conversions = 0;
+      const createWriter =
+        discoverySavedJobWriter.createDiscoverySavedJobWriter;
+      const writerSpy = vi
+        .spyOn(discoverySavedJobWriter, "createDiscoverySavedJobWriter")
+        .mockImplementation((input) =>
+          createWriter({
+            ...input,
+            toStoredJob: (job) => {
+              conversions += 1;
+              return input.toStoredJob(job);
+            },
+          }),
+        );
+      const jobA = createCollectedJob({ token: "scale_new_a" });
+      const jobB = createCollectedJob({ token: "scale_new_b" });
+      const richerA = createCollectedJob({
+        token: "scale_new_a",
+        description:
+          "Grounded description with detailed scope, stakeholders, and delivery outcomes for the platform team.",
+        responsibilities: [
+          "Lead the design system roadmap",
+          "Partner with engineering on delivery",
+        ],
+      });
+      const conversionsAtCheckpoint: number[] = [];
+      const { workspaceService, repository } = createWorkspaceServiceHarness({
+        seed,
+        browserRuntime: createIncrementalRuntime({
+          checkpoints: [[jobA], [jobA, jobB], [richerA, jobB]],
+          finalJobs: [richerA, jobB],
+          onCheckpointSaved: () => {
+            conversionsAtCheckpoint.push(conversions);
+            return Promise.resolve();
+          },
+        }),
+        aiClient: createAgentAiClient(),
+      });
+      const commitSpy = vi.spyOn(repository, "commitSavedJobDelta");
+      try {
+        const snapshot = await workspaceService.runDiscoveryForTarget(
+          "target_incremental",
+          () => {},
+          new AbortController().signal,
+        );
+        expect(conversionsAtCheckpoint[1]! - conversionsAtCheckpoint[0]!).toBe(
+          1,
+        );
+        expect(conversionsAtCheckpoint[2]! - conversionsAtCheckpoint[1]!).toBe(
+          1,
+        );
+        const keptA = snapshot.discoveryJobs.find(
+          (job) => job.sourceJobId === jobA.sourceJobId,
+        )!;
+        const secondCommit = commitSpy.mock.calls.find(([input]) =>
+          input.upserts?.some((job) => job.sourceJobId === jobB.sourceJobId),
+        )![0];
+        expect(secondCommit.updateJobIds).toEqual([]);
+        const upgrade = commitSpy.mock.calls.find(
+          ([input]) =>
+            input.updateJobIds?.length === 1 &&
+            input.updateJobIds[0] === keptA.id,
+        );
+        expect(upgrade).toBeDefined();
+        expect(
+          commitSpy.mock.calls
+            .flatMap(([input]) => input.upserts ?? [])
+            .map((job) => job.sourceJobId),
+        ).toEqual([jobA.sourceJobId, jobB.sourceJobId]);
+        expect(snapshot.recentDiscoveryRuns[0]?.summary.jobsPersisted).toBe(2);
+        const savedIds = new Set(await repository.listSavedJobIds());
+        expect(savedIds.size).toBe(size + 2);
+        for (const job of seed.savedJobs)
+          expect(savedIds.has(job.id)).toBe(true);
+        expect(keptA.description).toBe(richerA.description);
+        expect(
+          (await repository.getDiscoveryState()).recentRuns[0]
+            ?.targetExecutions[0]?.agentCheckpoint?.collectedJobs,
+        ).toEqual([]);
+      } finally {
+        writerSpy.mockRestore();
+      }
+    },
+    // About 16 s alone; a full parallel run more than doubles it.
+    60_000,
+  );
+
+  test("a later checkpoint upgrade preserves a person's concurrent saved-job edit", async () => {
+    const { seed } = createHarness();
+    const weak = createCollectedJob({ token: "user_edit_checkpoint" });
+    const rich = createCollectedJob({
+      token: "user_edit_checkpoint",
+      description:
+        "Grounded description with detailed scope, stakeholders, and delivery outcomes for the platform team.",
+      responsibilities: [
+        "Lead the design system roadmap",
+        "Partner with engineering on delivery",
+      ],
+    });
+    let keptId = "";
+    const { workspaceService, repository } = createWorkspaceServiceHarness({
+      seed,
+      browserRuntime: createIncrementalRuntime({
+        checkpoints: [[weak], [rich]],
+        finalJobs: [rich],
+        onCheckpointSaved: async (revision) => {
+          if (revision === 1) {
+            keptId = (await repository.listSavedJobIds())[0]!;
+            await repository.commitSavedJobDelta({
+              updateJobIds: [keptId],
+              update: (current) => ({ ...current, status: "shortlisted" }),
+            });
+          } else {
+            expect(
+              (await repository.listSavedJobsByIds([keptId]))[0],
+            ).toMatchObject({
+              status: "shortlisted",
+              description: rich.description,
+            });
+          }
+        },
+      }),
+      aiClient: createAgentAiClient(),
+    });
+    await workspaceService.runDiscoveryForTarget(
+      "target_incremental",
+      () => {},
+      new AbortController().signal,
+    );
+    expect((await repository.listSavedJobsByIds([keptId]))[0]?.status).toBe(
+      "shortlisted",
+    );
+  });
+
   test("empty checkpoints skip saved-job delta commits while keeping resume-checkpoint durability", async () => {
     const jobA = createCollectedJob({ token: "empty_cp_a" });
     // Sampled inside the runtime between checkpoint phases; the spy is bound
@@ -1016,15 +1283,13 @@ describe("discovery checkpoint incremental persistence", () => {
     // Job persisted once by the single job-bearing checkpoint.
     expect(snapshot.discoveryJobs).toHaveLength(1);
 
-    // Saved-job delta shape: exactly ONE SUCCEEDING commit carried upserts
-    // (the job-bearing checkpoint flush); the remaining commits are the
-    // legacy terminal pair and final campaign-membership/run-count commit
-    // with no upserts.
+    // Only the kept batch and campaign membership touch saved rows. The
+    // terminal pair persists run state without empty saved-job updates.
     const jobBearingCommits = commitSpy.mock.calls.filter(
       ([input]) => (input.upserts?.length ?? 0) > 0,
     );
     expect(jobBearingCommits).toHaveLength(1);
-    expect(commitSpy.mock.calls.length).toBe(4);
+    expect(commitSpy.mock.calls.length).toBe(2);
 
     // Checkpoint-phase delta: the two identical duplicate-only checkpoints
     // moved the discovery-singleton commit count by exactly zero.
@@ -1032,21 +1297,19 @@ describe("discovery checkpoint incremental persistence", () => {
       singletonCommitsAfterDuplicatePhase - singletonCommitsAfterKeptBatch,
     ).toBe(0);
 
-    // Exact whole-run singleton total, decomposed: run-start planning persist
-    // (1) + browser session open status (1) + browser session close status
-    // (1) + the pipeline snapshot's session-refresh merge (1) + the
-    // scoped wrapper's company-intelligence refresh snapshot's session-refresh
-    // merge (1). Kept batches and the final membership/report update ride the
-    // atomic saved-job delta channel and never appear here; future lifecycle
-    // additions should extend this list rather than loosening the total.
+    // Planning, session open/close and the terminal pair. Kept batches and
+    // membership still pair their row changes with run state atomically.
     expect(discoveryCommitSpy.mock.calls.length).toBe(5);
 
-    // Terminal saves still carry the freshest in-memory checkpoint payload.
-    const execution = snapshot.recentDiscoveryRuns[0]!.targetExecutions.find(
+    // Terminal saves still carry the freshest checkpoint record; a finished
+    // source drops its copies of the postings, which the saved jobs hold.
+    const execution = (
+      await repository.getDiscoveryState()
+    ).recentRuns[0]!.targetExecutions.find(
       (entry) => entry.targetId === "target_incremental",
     )!;
     expect(execution.agentCheckpoint?.revision).toBe(3);
-    expect(execution.agentCheckpoint?.collectedJobs).toHaveLength(1);
+    expect(execution.agentCheckpoint?.collectedJobs).toHaveLength(0);
   });
 
   test("duplicate-only checkpoint sequences collapse to bounded heartbeat singleton commits", async () => {
@@ -1127,16 +1390,13 @@ describe("discovery checkpoint incremental persistence", () => {
       singletonCommitsAfterDuplicatePhase - singletonCommitsAfterKeptBatch,
     ).toBe(2);
 
-    // Exact whole-run singleton total, decomposed: the five fixed lifecycle
-    // commits (run-start planning, session open status, session close status,
-    // pipeline snapshot session refresh, scoped-wrapper company-intelligence
-    // refresh snapshot session refresh — see the empty-checkpoints test) plus
-    // the two heartbeats above.
+    // Five fixed lifecycle commits (see above) plus two heartbeats.
     expect(discoveryCommitSpy.mock.calls.length).toBe(7);
 
     // Terminal saves still carry the freshest in-memory resume metadata, and
-    // accounting stayed additive across the gated sequence.
-    const run = snapshot.recentDiscoveryRuns[0]!;
+    // accounting stayed additive across the gated sequence. Checkpoints are
+    // canonical persistence; mutation responses omit them from display.
+    const run = (await repository.getDiscoveryState()).recentRuns[0]!;
     expect(run.state).toBe("completed");
     const execution = run.targetExecutions.find(
       (entry) => entry.targetId === "target_incremental",
@@ -1267,7 +1527,8 @@ describe("discovery checkpoint incremental persistence", () => {
     expect(repeatExecution.duplicatesMerged).toBe(0);
     expect(repeatRun.summary.validJobsFound).toBe(1);
 
-    const previousRun = snapshot.recentDiscoveryRuns[2]!;
+    const previousRun = (await workspaceService.getWorkspaceSnapshot())
+      .recentDiscoveryRuns[2]!;
     const previousExecution = previousRun.targetExecutions.find(
       (entry) => entry.targetId === "target_incremental",
     )!;
@@ -1282,9 +1543,10 @@ describe("discovery checkpoint incremental persistence", () => {
     expect(snapshot.discoveryJobs.map((job) => job.sourceJobId).sort()).toEqual(
       [jobA.sourceJobId, jobB.sourceJobId, jobC.sourceJobId].sort(),
     );
-    expect(snapshot.discoveryJobs.find((job) => job.sourceJobId === jobA.sourceJobId)?.description).toBe(
-      richA.description,
-    );
+    expect(
+      snapshot.discoveryJobs.find((job) => job.sourceJobId === jobA.sourceJobId)
+        ?.description,
+    ).toBe(richA.description);
 
     const run = snapshot.recentDiscoveryRuns[0]!;
     const execution = run.targetExecutions.find(

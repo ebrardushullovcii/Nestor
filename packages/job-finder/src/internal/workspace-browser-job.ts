@@ -52,6 +52,7 @@ export async function addJobFromBrowserPage(
     })
     .sort((a, b) => b.startingUrl.length - a.startingUrl.length)[0];
   await ctx.repository.commitSavedJobDelta({
+    updateJobIds: [jobId],
     update: (job) =>
       job.id === jobId
         ? {
@@ -82,6 +83,7 @@ export async function addJobFromBrowserPage(
         posting,
       );
       await ctx.repository.commitSavedJobDelta({
+        updateJobIds: [jobId],
         update: (job) =>
           job.id === jobId
             ? withPlanAssessment(

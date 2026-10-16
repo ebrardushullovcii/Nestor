@@ -1,3 +1,8 @@
+import {
+  clearUiResumeBatch,
+  syncUiResumeBatch,
+  stopUiResumeBatch,
+} from "../services/assistant/ui-resume-batch";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,15 +12,21 @@ import {
   ApplicationPacketSchema,
   ApplicationCrmSettingsSchema,
   AppearanceThemeSchema,
+  ApplyRunSchema,
   DISCOVERY_NO_JOB_SITES_MESSAGE,
   getDefaultCampaignConfiguration,
   DiscoveryRunRecordSchema,
+  DiscoveryJobViewSchema,
+  JobFinderWorkspaceSyncResultSchema,
+  type JobFinderWorkspaceEntityMutationInput,
   JobFinderProfileCopilotPatchGroupActionInputSchema,
   JobFinderResumePreviewSchema,
   JobFinderSetResumeClaimConfirmationInputSchema,
   JobFinderSetWorkHistoryReviewAcknowledgmentInputSchema,
   JobFinderUndoProfileRevisionInputSchema,
   ResumeDraftSchema,
+  TailoredAssetSchema,
+  SavedJobSchema,
   JobFinderWorkspaceSnapshotSchema,
   MarkAllCampaignNotificationsReadInputSchema,
   MarkCampaignNotificationReadInputSchema,
@@ -27,6 +38,7 @@ import {
   resumeClaimOwnershipStatement,
 } from "@nordri/contracts";
 import { createEmptyJobFinderRepositoryState } from "../adapters/job-finder-initial-state";
+import { createResumeWorkspaceDemoState } from "../adapters/job-finder-demo-state";
 
 type RegisteredHandler = (
   event: { sender: object },
@@ -43,7 +55,7 @@ const {
   mockGetResumeWorkspace,
   mockPreviewResumeDraft,
   mockGetWorkspaceBootstrap,
-  mockGetWorkspaceSnapshot,
+  mockGetWorkspaceProjection,
   mockGetJobFinderWorkspaceService,
   mockGetJobFinderRepositoryForWorkspaceService,
   mockGetJobFinderApplicationAuthorityService,
@@ -91,7 +103,7 @@ const {
   mockGetResumeWorkspace: vi.fn(),
   mockPreviewResumeDraft: vi.fn(),
   mockGetWorkspaceBootstrap: vi.fn(),
-  mockGetWorkspaceSnapshot: vi.fn(),
+  mockGetWorkspaceProjection: vi.fn(),
   mockGetJobFinderWorkspaceService: vi.fn(),
   mockGetJobFinderRepositoryForWorkspaceService: vi.fn(() => null),
   mockGetJobFinderApplicationAuthorityService: vi.fn(),
@@ -215,6 +227,289 @@ const packet = ApplicationPacketSchema.parse({
   submissionOccurred: false,
 });
 
+describe("interactive routes use main workspace projections", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    mockGetJobFinderRepositoryForWorkspaceService.mockReturnValue(null);
+  });
+
+  function register(service: object) {
+    mockGetJobFinderWorkspaceService.mockResolvedValue(service);
+    const handlers = new Map<string, RegisteredHandler>();
+    registerJobFinderRouteHandlers({
+      handle: (channel: string, handler: RegisteredHandler) =>
+        handlers.set(channel, handler),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    } as unknown as IpcMain);
+    return handlers;
+  }
+
+  it("uses small batch receipts and a transaction-independent trusted Stop predicate", async () => {
+    clearUiResumeBatch();
+    syncUiResumeBatch({
+      id: "batch",
+      jobIds: ["job"],
+      activeJobIds: ["job"],
+      completedJobIds: [],
+      done: false,
+      stopRequested: false,
+      running: true,
+    });
+    const sender = { id: 1, isDestroyed: () => false, send: vi.fn() };
+    const owner = {
+      id: "window",
+      focus: vi.fn(),
+      show: vi.fn(),
+      isDestroyed: vi.fn(),
+      webContents: { id: 1 },
+    };
+    mockBrowserWindowFromWebContents.mockReturnValue(owner);
+    const getWorkspaceSnapshot = vi.fn();
+    const generateResumeForBatch = vi.fn(
+      (
+        jobId: string,
+        options: {
+          shouldStop: () => boolean;
+          onStage: (stage: "writing") => void;
+        },
+      ) => {
+        expect(options.shouldStop()).toBe(false);
+        options.onStage("writing");
+        stopUiResumeBatch();
+        expect(options.shouldStop()).toBe(true);
+        return Promise.resolve({ jobId, outcome: "written" });
+      },
+    );
+    const handlers = register({ generateResumeForBatch, getWorkspaceSnapshot });
+    expect(
+      await handlers.get("job-finder:generate-resume-for-batch")!(
+        { sender },
+        { batchId: "batch", jobId: "job" },
+      ),
+    ).toEqual({ jobId: "job", outcome: "written" });
+    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(sender.send).toHaveBeenCalledWith(
+      "job-finder:resume-batch-progress",
+      { batchId: "batch", jobId: "job", stage: "writing" },
+    );
+    expect(
+      await handlers.get("job-finder:generate-resume-for-batch")!(
+        { sender },
+        { batchId: "batch", jobId: "job" },
+      ),
+    ).toEqual({ jobId: "job", outcome: "not_started" });
+    expect(generateResumeForBatch).toHaveBeenCalledOnce();
+    await expect(
+      handlers.get("job-finder:generate-resume-for-batch")!(
+        { sender },
+        { batchId: "batch", jobId: "job", extra: true },
+      ),
+    ).rejects.toThrow();
+    clearUiResumeBatch();
+  });
+
+  it("a typed provider rejection stops the main queue before any later dispatch", async () => {
+    clearUiResumeBatch();
+    syncUiResumeBatch({
+      id: "funding-route",
+      jobIds: ["one", "two"],
+      activeJobIds: ["one"],
+      completedJobIds: [],
+      done: false,
+      stopRequested: false,
+      running: true,
+    });
+    const sender = { id: 1, isDestroyed: () => false, send: vi.fn() };
+    const owner = {
+      id: "window",
+      focus: vi.fn(),
+      show: vi.fn(),
+      isDestroyed: vi.fn(),
+      webContents: { id: 1 },
+    };
+    mockBrowserWindowFromWebContents.mockReturnValue(owner);
+    const providerBlock = {
+      reason: "funding" as const,
+      message: "The AI service is unavailable: insufficient funds.",
+    };
+    const generateResumeForBatch = vi.fn(
+      (
+        jobId: string,
+        options: {
+          shouldStop: () => boolean;
+          onProviderBlocked: (block: typeof providerBlock) => void;
+        },
+      ) => {
+        expect(options.shouldStop()).toBe(false);
+        options.onProviderBlocked(providerBlock);
+        expect(options.shouldStop()).toBe(true);
+        return Promise.resolve({ jobId, outcome: "blocked", providerBlock });
+      },
+    );
+    const handlers = register({ generateResumeForBatch });
+    const generate = handlers.get("job-finder:generate-resume-for-batch")!;
+    expect(
+      await generate({ sender }, { batchId: "funding-route", jobId: "one" }),
+    ).toEqual({ jobId: "one", outcome: "blocked", providerBlock });
+    expect(
+      await generate({ sender }, { batchId: "funding-route", jobId: "two" }),
+    ).toEqual({ jobId: "two", outcome: "not_started" });
+    expect(generateResumeForBatch).toHaveBeenCalledOnce();
+    clearUiResumeBatch();
+  });
+
+  it("reads only the selected complete tailored asset through typed detail IPC", async () => {
+    const asset = TailoredAssetSchema.parse({
+      id: "selected-asset",
+      jobId: "job",
+      kind: "resume",
+      status: "ready",
+      label: "Synthetic resume",
+      version: "1",
+      templateName: "Classic",
+      compatibilityScore: 90,
+      progressPercent: 100,
+      updatedAt: "2026-10-13T10:00:00.000Z",
+      contentText: "Complete selected document",
+      previewSections: [
+        { heading: "Summary", lines: ["Complete selected preview"] },
+      ],
+    });
+    const getTailoredAssetById = vi.fn().mockResolvedValue(asset);
+    mockGetJobFinderRepositoryForWorkspaceService.mockReturnValue({
+      getTailoredAssetById,
+    } as never);
+    const handlers = register({});
+    const read = handlers.get("job-finder:get-tailored-asset")!;
+    expect(await read({ sender: {} }, { assetId: asset.id })).toEqual(asset);
+    expect(getTailoredAssetById).toHaveBeenCalledExactlyOnceWith(asset.id);
+    await expect(read({ sender: {} }, { assetId: "" })).rejects.toThrow();
+    expect(getTailoredAssetById).toHaveBeenCalledTimes(1);
+  });
+
+  function workspace() {
+    const snapshot = createEmptyWorkspace("2026-10-13T12:00:00.000Z");
+    const seed = createResumeWorkspaceDemoState().savedJobs[0];
+    // Keep full listing evidence in main; the route builds the small IPC row.
+    const job = DiscoveryJobViewSchema.parse({
+      ...seed,
+      id: "selected-job",
+      title: "Synthetic role",
+      company: "Synthetic employer",
+      description: "Selected listing evidence that belongs only in main.",
+      listingActivity: { status: "unknown" },
+    });
+    snapshot.discoveryJobs = [job];
+    snapshot.selectedDiscoveryJobId = job.id;
+    const getWorkspaceProjection = vi.fn().mockResolvedValue(snapshot);
+    const getWorkspaceSnapshot = vi.fn(() => {
+      throw new Error("Canonical reads are forbidden in interactive routes");
+    });
+    return { snapshot, job, getWorkspaceProjection, getWorkspaceSnapshot };
+  }
+
+  it("returns the saved profile and settings through the projection, with full evidence confined to main", async () => {
+    mockGetJobFinderRepositoryForWorkspaceService.mockReturnValue(null);
+    const fixture = workspace();
+    const saveProfileAndSearchPreferences = vi
+      .fn()
+      .mockResolvedValue(fixture.snapshot);
+    const saveSettings = vi.fn().mockResolvedValue(fixture.snapshot);
+    const handlers = register({
+      ...fixture,
+      saveProfileAndSearchPreferences,
+      saveSettings,
+    });
+    const result = await handlers.get("job-finder:save-workspace-inputs")!(
+      { sender: {} },
+      {
+        profile: fixture.snapshot.profile,
+        searchPreferences: fixture.snapshot.searchPreferences,
+        settings: fixture.snapshot.settings,
+      },
+    );
+    expect(saveProfileAndSearchPreferences).toHaveBeenCalledWith(
+      fixture.snapshot.profile,
+      fixture.snapshot.searchPreferences,
+    );
+    expect(saveSettings).toHaveBeenCalledWith(fixture.snapshot.settings);
+    expect(result).toMatchObject({
+      profile: fixture.snapshot.profile,
+      settings: fixture.snapshot.settings,
+      selectedDiscoveryJobId: fixture.job.id,
+      discoveryJobs: [{ id: fixture.job.id }],
+    });
+    expect(JSON.stringify(result)).not.toContain(fixture.job.description);
+    expect(fixture.snapshot.discoveryJobs[0]?.description).toBe(
+      fixture.job.description,
+    );
+    expect(fixture.getWorkspaceProjection).toHaveBeenCalledTimes(1);
+    expect(fixture.getWorkspaceSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("returns the current selected state when a PDF export is cancelled without a canonical read or export", async () => {
+    const fixture = workspace();
+    const exportResumePdf = vi.fn();
+    const getResumeWorkspace = vi.fn().mockResolvedValue({
+      job: fixture.job,
+      draft: { generationMethod: "ai" },
+      tailoredAsset: null,
+    });
+    mockBrowserWindowFromWebContents.mockReturnValue(null);
+    mockShowSaveDialog.mockResolvedValue({ canceled: true });
+    const handlers = register({
+      ...fixture,
+      exportResumePdf,
+      getResumeWorkspace,
+    });
+    await expect(
+      handlers.get("job-finder:export-resume-pdf")!(
+        { sender: {} },
+        { jobId: fixture.job.id, intent: "download" },
+      ),
+    ).resolves.toMatchObject({
+      outcome: "cancelled",
+      outputPath: null,
+      snapshot: { selectedDiscoveryJobId: fixture.job.id },
+    });
+    expect(exportResumePdf).not.toHaveBeenCalled();
+    expect(fixture.getWorkspaceProjection).toHaveBeenCalledTimes(1);
+    expect(fixture.getWorkspaceSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("keeps an in-progress application batch unchanged on a second press and reads only its display projection", async () => {
+    const fixture = workspace();
+    const run = ApplyRunSchema.parse({
+      id: "running-batch",
+      mode: "queue_auto",
+      state: "running",
+      jobIds: [fixture.job.id],
+      summary: "Synthetic application is running.",
+      detail: "The repeated press must preserve this run.",
+      createdAt: fixture.snapshot.generatedAt,
+      updatedAt: fixture.snapshot.generatedAt,
+    });
+    fixture.snapshot.applyRuns = [run];
+    fixture.snapshot.selectedApplyRunId = run.id;
+    const startAutoApplyQueueRun = vi.fn();
+    mockGetJobFinderRepositoryForWorkspaceService.mockReturnValue({
+      listApplyRuns: vi.fn().mockResolvedValue([run]),
+      listApplyJobResults: vi.fn().mockResolvedValue([]),
+    } as never);
+    const handlers = register({ ...fixture, startAutoApplyQueueRun });
+    await expect(
+      handlers.get("job-finder:start-auto-apply-queue-run")!(
+        { sender: {} },
+        { jobIds: [fixture.job.id] },
+      ),
+    ).resolves.toMatchObject({ applyRuns: [run], selectedApplyRunId: run.id });
+    expect(startAutoApplyQueueRun).not.toHaveBeenCalled();
+    expect(fixture.getWorkspaceProjection).toHaveBeenCalledTimes(1);
+    expect(fixture.getWorkspaceSnapshot).not.toHaveBeenCalled();
+  });
+});
+
 describe("job-finder profile copilot patch-group routes", () => {
   const mockApplyProfileCopilotPatchGroup = vi.fn();
   const mockRejectProfileCopilotPatchGroup = vi.fn();
@@ -318,7 +613,7 @@ describe("job-finder profile copilot patch-group routes", () => {
   // once per user action and growing with every job the user has discovered.
   // The response must now be handed through untouched, while a malformed
   // main-process value still fails closed.
-  it("returns the exact service snapshot without re-walking it", async () => {
+  it("projects the service snapshot without re-validating its full collections", async () => {
     const snapshot = createEmptyWorkspace("2026-08-22T11:30:00.000Z");
     const parseSpy = vi.spyOn(JobFinderWorkspaceSnapshotSchema, "parse");
     mockUndoProfileRevision.mockResolvedValue(snapshot);
@@ -330,8 +625,8 @@ describe("job-finder profile copilot patch-group routes", () => {
       "job-finder:undo-profile-revision",
     )({ sender: {} }, { revisionId: "profile_revision_9" });
 
-    // Same object identity: nothing was re-parsed, re-cloned, or stripped.
-    expect(result).toBe(snapshot);
+    expect(result).toEqual(snapshot);
+    expect((result as typeof snapshot).profile).toBe(snapshot.profile);
     expect(parseSpy).not.toHaveBeenCalled();
     parseSpy.mockRestore();
   });
@@ -521,7 +816,9 @@ describe("job-finder Apply to all workspace updates", () => {
         getSearchPreferences: vi.fn().mockResolvedValue({
           tailoringMode: "balanced",
         }),
-        listApplyRuns: vi.fn(() => Promise.resolve(runs.map((run) => ({ ...run })))),
+        listApplyRuns: vi.fn(() =>
+          Promise.resolve(runs.map((run) => ({ ...run }))),
+        ),
       };
       // The press waits until the approved batch is running, then returns;
       // the rest of the batch finishes in the background.
@@ -548,7 +845,7 @@ describe("job-finder Apply to all workspace updates", () => {
         }),
         approveApplyRun,
         cancelApplyRun: vi.fn().mockResolvedValue(staged),
-        getWorkspaceSnapshot: vi.fn().mockResolvedValue(staged),
+        getWorkspaceProjection: vi.fn().mockResolvedValue(staged),
       });
       const consoleError = vi
         .spyOn(console, "error")
@@ -685,7 +982,7 @@ describe("job-finder resume import picker route", () => {
     const snapshot = createEmptyWorkspace("2026-08-30T10:00:30.000Z");
     const latestResumeImportRun = { id: "resume_import_cut_off" };
     mockGetJobFinderWorkspaceService.mockResolvedValue({
-      getWorkspaceSnapshot: vi
+      getWorkspaceProjection: vi
         .fn()
         .mockResolvedValue({ ...snapshot, latestResumeImportRun }),
     });
@@ -707,7 +1004,10 @@ describe("job-finder resume import picker route", () => {
 
     // An untyped flag is refused before anything runs.
     await expect(
-      handler({ sender }, { requestId: "resume_import_bad", retryInterrupted: "yes" }),
+      handler(
+        { sender },
+        { requestId: "resume_import_bad", retryInterrupted: "yes" },
+      ),
     ).rejects.toThrow();
     expect(mockRetryInterruptedResumeImport).toHaveBeenCalledOnce();
     expect(mockShowOpenDialog).not.toHaveBeenCalled();
@@ -805,7 +1105,7 @@ describe("job-finder resume import picker route", () => {
       }),
     );
     mockGetJobFinderWorkspaceService.mockResolvedValue({
-      getWorkspaceSnapshot: vi.fn().mockResolvedValue(snapshot),
+      getWorkspaceProjection: vi.fn().mockResolvedValue(snapshot),
     });
 
     const importPromise = registerAndFindHandler()(
@@ -1143,7 +1443,7 @@ describe("job-finder apply entry-point resume approval and authority", () => {
         getResumeWorkspace: vi
           .fn()
           .mockImplementation(() => Promise.resolve(workspace())),
-        getWorkspaceSnapshot: vi
+        getWorkspaceProjection: vi
           .fn()
           .mockResolvedValue(createEmptyWorkspace("2026-09-22T16:01:01.000Z")),
         startAutoApplyQueueRun,
@@ -1368,7 +1668,7 @@ describe("job-finder Apply to all with a resume that waits on the person", () =>
             : [],
         }),
       ),
-      getWorkspaceSnapshot: vi
+      getWorkspaceProjection: vi
         .fn()
         .mockResolvedValue(createEmptyWorkspace("2026-09-22T16:01:01.000Z")),
       startAutoApplyQueueRun,
@@ -1495,7 +1795,9 @@ describe("job-finder sending a form prepared earlier", () => {
             sha256: "a".repeat(64),
           },
         ]),
-        listSavedJobs: vi.fn().mockResolvedValue([job, { ...job, id: "job_other" }]),
+        listSavedJobs: vi
+          .fn()
+          .mockResolvedValue([job, { ...job, id: "job_other" }]),
         // Both forms were filled in by one run of three jobs.
         listApplyRuns: vi
           .fn()
@@ -1640,7 +1942,7 @@ describe("job-finder application packet export route", () => {
       path.join(os.tmpdir(), "nordri-application-packet-"),
     );
     mockBuildApplicationPacket.mockResolvedValue(packet);
-    mockGetWorkspaceSnapshot.mockResolvedValue(
+    mockGetWorkspaceProjection.mockResolvedValue(
       createEmptyWorkspace("2026-08-09T10:00:00.000Z"),
     );
     mockGetWorkspaceBootstrap.mockResolvedValue(
@@ -1664,7 +1966,7 @@ describe("job-finder application packet export route", () => {
       exportResumePdf: mockExportResumePdf,
       getResumeWorkspace: mockGetResumeWorkspace,
       getWorkspaceBootstrap: mockGetWorkspaceBootstrap,
-      getWorkspaceSnapshot: mockGetWorkspaceSnapshot,
+      getWorkspaceProjection: mockGetWorkspaceProjection,
       proposeProfileCopilotChange: mockProposeProfileCopilotChange,
       queueJobForReview: mockQueueJobForReview,
     });
@@ -1854,7 +2156,7 @@ describe("job-finder application packet export route", () => {
     expect(mockProposeProfileCopilotChange).not.toHaveBeenCalled();
   });
 
-  it("falls back to a revisioned snapshot when a mutation changes an unsupported scalar", async () => {
+  it("sends a changed untracked field as a replaced value in the mutation delta", async () => {
     await syncHandler({ sender: {} }, { baseRevision: null });
     const changed = createEmptyWorkspace("2026-08-09T10:01:00.000Z");
     mockQueueJobForReview.mockResolvedValueOnce(
@@ -1879,9 +2181,15 @@ describe("job-finder application packet export route", () => {
     );
 
     expect(result).toMatchObject({
-      kind: "snapshot",
-      currentRevision: 2,
-      reason: "unsupported_change",
+      kind: "delta",
+      delta: {
+        currentRevision: 2,
+        replaced: {
+          profile: {
+            summary: "Changed outside a delta-backed entity slice.",
+          },
+        },
+      },
     });
   });
 });
@@ -2445,15 +2753,17 @@ describe("job-finder scoped settings routes", () => {
     const input = UpdateAiBehaviorInputSchema.parse({
       aiBehavior: {
         profileAssistant: { initiative: "proactive", replyStyle: "brief" },
-        jobSearch: { selectivity: "wide_net", remoteCountsAsAnyLocation: false },
+        jobSearch: {
+          selectivity: "wide_net",
+          remoteCountsAsAnyLocation: false,
+        },
         applying: { coverLetterPolicy: "never", writtenAnswerLength: "full" },
       },
       resumeApproach: "aggressive",
     });
-    const result = await registerAndFindHandler("job-finder:update-ai-behavior")(
-      { sender: {} },
-      input,
-    );
+    const result = await registerAndFindHandler(
+      "job-finder:update-ai-behavior",
+    )({ sender: {} }, input);
 
     expect(mockUpdateAiBehavior).toHaveBeenCalledWith(input);
     expect(result).toEqual(snapshot);
@@ -3631,7 +3941,7 @@ describe("job-finder agent discovery outcome routes", () => {
     mockRunAgentDiscovery.mockResolvedValue(snapshot);
     mockGetJobFinderWorkspaceService.mockResolvedValue({
       runAgentDiscovery: mockRunAgentDiscovery,
-      getWorkspaceSnapshot: mockGetWorkspaceSnapshot,
+      getWorkspaceProjection: mockGetWorkspaceProjection,
     });
 
     const result = await registerAndFindDiscoveryHandler()(
@@ -3642,7 +3952,7 @@ describe("job-finder agent discovery outcome routes", () => {
     expect(result).toEqual({ outcome: "cancelled", snapshot });
     // Derivation came from the returned run state; the abort fallback never
     // ran.
-    expect(mockGetWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(mockGetWorkspaceProjection).not.toHaveBeenCalled();
   });
 
   it("classifies an escaped AbortError before any result as cancelled", async () => {
@@ -3650,10 +3960,10 @@ describe("job-finder agent discovery outcome routes", () => {
       new DOMException("Aborted", "AbortError"),
     );
     const freshSnapshot = createEmptyWorkspace("2026-08-26T10:06:00.000Z");
-    mockGetWorkspaceSnapshot.mockResolvedValue(freshSnapshot);
+    mockGetWorkspaceProjection.mockResolvedValue(freshSnapshot);
     mockGetJobFinderWorkspaceService.mockResolvedValue({
       runAgentDiscovery: mockRunAgentDiscovery,
-      getWorkspaceSnapshot: mockGetWorkspaceSnapshot,
+      getWorkspaceProjection: mockGetWorkspaceProjection,
     });
 
     const result = await registerAndFindDiscoveryHandler()(
@@ -3662,7 +3972,7 @@ describe("job-finder agent discovery outcome routes", () => {
     );
 
     expect(result).toEqual({ outcome: "cancelled", snapshot: freshSnapshot });
-    expect(mockGetWorkspaceSnapshot).toHaveBeenCalledTimes(1);
+    expect(mockGetWorkspaceProjection).toHaveBeenCalledTimes(1);
   });
 
   it("keeps outcome completed for a normally finished run", async () => {
@@ -3674,7 +3984,7 @@ describe("job-finder agent discovery outcome routes", () => {
     mockRunAgentDiscovery.mockResolvedValue(snapshot);
     mockGetJobFinderWorkspaceService.mockResolvedValue({
       runAgentDiscovery: mockRunAgentDiscovery,
-      getWorkspaceSnapshot: mockGetWorkspaceSnapshot,
+      getWorkspaceProjection: mockGetWorkspaceProjection,
     });
 
     const result = await registerAndFindDiscoveryHandler()(
@@ -3683,7 +3993,7 @@ describe("job-finder agent discovery outcome routes", () => {
     );
 
     expect(result).toEqual({ outcome: "completed", snapshot });
-    expect(mockGetWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(mockGetWorkspaceProjection).not.toHaveBeenCalled();
   });
 
   it("passes the person's search request to the discovery service", async () => {
@@ -3695,7 +4005,7 @@ describe("job-finder agent discovery outcome routes", () => {
     mockRunAgentDiscovery.mockResolvedValue(snapshot);
     mockGetJobFinderWorkspaceService.mockResolvedValue({
       runAgentDiscovery: mockRunAgentDiscovery,
-      getWorkspaceSnapshot: mockGetWorkspaceSnapshot,
+      getWorkspaceProjection: mockGetWorkspaceProjection,
     });
     const searchRequest = {
       intent: "around engineering",
@@ -3725,7 +4035,7 @@ describe("job-finder agent discovery outcome routes", () => {
     mockRunAgentDiscovery.mockRejectedValue(new Error("fetch failed"));
     mockGetJobFinderWorkspaceService.mockResolvedValue({
       runAgentDiscovery: mockRunAgentDiscovery,
-      getWorkspaceSnapshot: mockGetWorkspaceSnapshot,
+      getWorkspaceProjection: mockGetWorkspaceProjection,
     });
 
     await expect(
@@ -3734,7 +4044,7 @@ describe("job-finder agent discovery outcome routes", () => {
         { requestId: "agent_discovery_failed", targetId: null },
       ),
     ).rejects.toThrow("fetch failed");
-    expect(mockGetWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(mockGetWorkspaceProjection).not.toHaveBeenCalled();
   });
 });
 
@@ -3969,4 +4279,259 @@ it("publishes a browser-bar shortlist immediately while listing checks run", asy
   );
   expect(queueJobForReview).toHaveBeenCalledWith("synthetic_job");
   expect(sender.send).toHaveBeenCalled();
+});
+
+describe("local persisted job detail route", () => {
+  afterEach(() => vi.clearAllMocks());
+  function handler() {
+    const handlers = new Map<string, RegisteredHandler>();
+    registerJobFinderRouteHandlers(
+      {
+        handle: vi.fn((channel: string, read: RegisteredHandler) => {
+          handlers.set(channel, read);
+        }),
+      } as unknown as IpcMain,
+      { includeBootstrapRoutes: false },
+    );
+    return handlers.get("job-finder:get-job-detail")!;
+  }
+  it("reads only the requested persisted job, keeps its full text and resolves the selected plan without enrichment", async () => {
+    const stored = SavedJobSchema.parse({
+      id: "detail-1",
+      source: "target_site",
+      sourceJobId: "detail-1",
+      canonicalUrl: "https://example.test/detail-1",
+      title: "Engineer",
+      company: "Example",
+      location: "Remote",
+      workMode: ["remote"],
+      applyPath: "external_redirect",
+      easyApplyEligible: false,
+      salaryText: null,
+      description: "Complete persisted listing text. ".repeat(400),
+      responsibilities: ["Full narrative evidence"],
+      discoveredAt: "2026-10-13T00:00:00.000Z",
+      status: "discovered",
+      matchAssessment: { score: 80 },
+      planAssessments: { "other-plan": { score: 20 } },
+    });
+    const listSavedJobsByIds = vi.fn().mockResolvedValue([stored]);
+    const readDiscoveryDisplayProjection = vi.fn();
+    const getWorkspaceSnapshot = vi.fn();
+    const assessJobListing = vi.fn();
+    mockGetJobFinderWorkspaceService.mockResolvedValue({
+      getWorkspaceSnapshot,
+      assessJobListing,
+    });
+    mockGetJobFinderRepositoryForWorkspaceService.mockReturnValue({
+      listSavedJobsByIds,
+      readDiscoveryDisplayProjection,
+    } as never);
+    const result = await handler()(
+      { sender: {} },
+      { jobId: stored.id, planId: "other-plan" },
+    );
+    expect(listSavedJobsByIds).toHaveBeenCalledExactlyOnceWith([stored.id]);
+    expect(readDiscoveryDisplayProjection).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      planId: "other-plan",
+      job: {
+        id: stored.id,
+        description: stored.description,
+        responsibilities: stored.responsibilities,
+        matchAssessment: { score: 20 },
+      },
+    });
+    expect(stored.matchAssessment.score).toBe(80);
+    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(assessJobListing).not.toHaveBeenCalled();
+  });
+  it("reads a selected pending job's full body from the immutable display projection without enrichment", async () => {
+    const pending = Object.freeze(
+      SavedJobSchema.parse({
+        id: "pending-1",
+        source: "target_site",
+        sourceJobId: "pending-1",
+        canonicalUrl: "https://example.test/pending-1",
+        title: "Engineer",
+        company: "Example",
+        location: "Remote",
+        workMode: ["remote"],
+        applyPath: "external_redirect",
+        easyApplyEligible: false,
+        salaryText: null,
+        description: "Complete pending listing text. ".repeat(400),
+        responsibilities: ["Complete pending narrative evidence"],
+        discoveredAt: "2026-10-13T00:00:00.000Z",
+        status: "discovered",
+        matchAssessment: { score: 80 },
+        planAssessments: { "pending-plan": { score: 20 } },
+      }),
+    );
+    const listSavedJobsByIds = vi.fn().mockResolvedValue([]);
+    const readDiscoveryDisplayProjection = vi.fn().mockResolvedValue(
+      Object.freeze({
+        pendingDiscoveryJobs: Object.freeze([pending]),
+      }),
+    );
+    const getDiscoveryState = vi.fn();
+    const getWorkspaceSnapshot = vi.fn();
+    const assessJobListing = vi.fn();
+    mockGetJobFinderWorkspaceService.mockResolvedValue({
+      getWorkspaceSnapshot,
+      assessJobListing,
+    });
+    mockGetJobFinderRepositoryForWorkspaceService.mockReturnValue({
+      listSavedJobsByIds,
+      readDiscoveryDisplayProjection,
+      getDiscoveryState,
+    } as never);
+    const result = await handler()(
+      { sender: {} },
+      { jobId: pending.id, planId: "pending-plan" },
+    );
+    expect(result).toMatchObject({
+      planId: "pending-plan",
+      job: {
+        id: pending.id,
+        description: pending.description,
+        responsibilities: pending.responsibilities,
+        matchAssessment: { score: 20 },
+      },
+    });
+    expect(listSavedJobsByIds).toHaveBeenCalledExactlyOnceWith([pending.id]);
+    expect(readDiscoveryDisplayProjection).toHaveBeenCalledTimes(1);
+    expect(getDiscoveryState).not.toHaveBeenCalled();
+    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(assessJobListing).not.toHaveBeenCalled();
+    expect(pending.matchAssessment.score).toBe(80);
+  });
+  it("rejects malformed and missing detail targets", async () => {
+    const read = handler();
+    mockGetJobFinderWorkspaceService.mockClear();
+    await expect(
+      read({ sender: {} }, { jobId: "", planId: null }),
+    ).rejects.toThrow();
+    expect(mockGetJobFinderWorkspaceService).not.toHaveBeenCalled();
+    mockGetJobFinderWorkspaceService.mockResolvedValue({});
+    mockGetJobFinderRepositoryForWorkspaceService.mockReturnValue({
+      listSavedJobsByIds: vi.fn().mockResolvedValue([]),
+      readDiscoveryDisplayProjection: vi
+        .fn()
+        .mockResolvedValue({ pendingDiscoveryJobs: [] }),
+    } as never);
+    await expect(
+      read({ sender: {} }, { jobId: "missing", planId: null }),
+    ).rejects.toThrow("no longer in your workspace");
+  });
+});
+
+describe("typed bulk shortlist route at 3,003 jobs", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it("calls the batch service once and returns only 50 changed thin rows", async () => {
+    const seed = DiscoveryJobViewSchema.parse({
+      id: "job-0",
+      source: "target_site",
+      sourceJobId: "synthetic",
+      canonicalUrl: "https://example.test/synthetic",
+      title: "Engineer",
+      company: "Example",
+      location: "Remote",
+      workMode: ["remote"],
+      applyPath: "external_redirect",
+      easyApplyEligible: false,
+      salaryText: null,
+      description: "Full stored synthetic listing. ".repeat(400),
+      discoveredAt: "2026-10-13T00:00:00.000Z",
+      status: "discovered",
+      matchAssessment: { score: 80 },
+    });
+    const jobs = Array.from({ length: 3003 }, (_, index) =>
+      Object.freeze({ ...seed, id: `job-${index}` }),
+    );
+    const initial = {
+      ...createEmptyWorkspace("2026-10-13T00:00:00.000Z"),
+      discoveryJobs: jobs,
+    };
+    const selectedIds = jobs.slice(75, 125).map(({ id }) => id);
+    const selected = new Set(selectedIds);
+    const updated = {
+      ...initial,
+      discoveryJobs: jobs.map((job) =>
+        selected.has(job.id) ? { ...job, status: "shortlisted" as const } : job,
+      ),
+    };
+    const queueJobsForReview = vi
+      .fn()
+      .mockResolvedValue({ queuedJobIds: selectedIds });
+    const queueJobForReview = vi.fn();
+    const getWorkspaceSnapshot = vi.fn();
+    const getWorkspaceProjection = vi
+      .fn()
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(updated);
+    mockGetJobFinderWorkspaceService.mockResolvedValue({
+      queueJobsForReview,
+      queueJobForReview,
+      getWorkspaceSnapshot,
+      getWorkspaceProjection,
+    });
+    const handlers = new Map<string, RegisteredHandler>();
+    registerJobFinderRouteHandlers(
+      {
+        handle: (channel: string, read: RegisteredHandler) => {
+          handlers.set(channel, read);
+        },
+      } as unknown as IpcMain,
+      { includeBootstrapRoutes: false },
+    );
+    const baseline = JobFinderWorkspaceSyncResultSchema.parse(
+      await handlers.get("job-finder:sync-workspace")!(
+        { sender: {} },
+        { baseRevision: null },
+      ),
+    );
+    expect(baseline.kind).toBe("snapshot");
+    if (baseline.kind !== "snapshot")
+      throw new Error("Expected initial list snapshot");
+    const input: JobFinderWorkspaceEntityMutationInput = {
+      baseRevision: baseline.currentRevision,
+      mutation: { type: "queue_jobs_for_review", jobIds: selectedIds },
+    };
+    const result = JobFinderWorkspaceSyncResultSchema.parse(
+      await handlers.get("job-finder:mutate-workspace-entities")!(
+        { sender: {} },
+        input,
+      ),
+    );
+    expect(queueJobsForReview).toHaveBeenCalledExactlyOnceWith(selectedIds);
+    expect(queueJobForReview).not.toHaveBeenCalled();
+    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(getWorkspaceProjection).toHaveBeenCalledTimes(2);
+    expect(result.kind).toBe("delta");
+    if (result.kind !== "delta")
+      throw new Error("Expected thin mutation delta");
+    expect(result.delta.discoveryJobs.upserts.map(({ id }) => id)).toEqual(
+      selectedIds,
+    );
+    expect(
+      result.delta.discoveryJobs.upserts.every(
+        ({ status }) => status === "shortlisted",
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(result)).not.toContain(seed.description);
+    expect(jobs).toHaveLength(3003);
+    expect(jobs[75]?.status).toBe("discovered");
+    await expect(
+      handlers.get("job-finder:mutate-workspace-entities")!(
+        { sender: {} },
+        {
+          baseRevision: baseline.currentRevision,
+          mutation: { type: "queue_jobs_for_review", jobIds: [] },
+        },
+      ),
+    ).rejects.toThrow();
+    expect(queueJobsForReview).toHaveBeenCalledTimes(1);
+  });
 });

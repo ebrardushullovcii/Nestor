@@ -4,7 +4,6 @@ import {
   DISCOVERY_RUN_ALREADY_ACTIVE_MESSAGE,
   describeDiscoveryRunFailureReason,
   getDefaultCampaignConfiguration,
-  resolveCampaignSourceTargetIds,
   type CampaignDigest,
   type CampaignPauseWindow,
   type CampaignRuleFunnelProjection,
@@ -28,6 +27,10 @@ import {
   matchesCollectionSearch,
 } from "../../components/collection-search-toolbar";
 import { EmptyState } from "../../components/empty-state";
+import {
+  CollectionPagination,
+  COLLECTION_PAGE_SIZE,
+} from "../../components/collection-pagination";
 import { PageHeaderStack } from "../../components/page-header";
 import { usePersistedCollectionView } from "../../hooks/use-persisted-collection-view";
 import { CampaignConfirmDialog } from "./campaign-confirm-dialog";
@@ -58,6 +61,23 @@ function isHostOnlySourceLabel(label: string, startingUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+function resolvePlanSourceIds(
+  campaign: Pick<
+    JobSearchCampaign,
+    "searchPreferences" | "sourceTargetIds" | "sourceSelectionMode"
+  >,
+): string[] {
+  const selectedIds = new Set(campaign.sourceTargetIds ?? []);
+  const followsProfile =
+    campaign.sourceSelectionMode === "profile" ||
+    (campaign.sourceSelectionMode === undefined && selectedIds.size === 0);
+  return campaign.searchPreferences.discovery.targets
+    .filter((target) =>
+      followsProfile ? target.enabled : selectedIds.has(target.id),
+    )
+    .map((target) => target.id);
 }
 
 const jobFinderDateInputLocale = getJobFinderDateInputLocale();
@@ -537,9 +557,34 @@ function CampaignEditor(props: {
   runPending?: boolean;
 }) {
   const [draft, setDraft] = useState(props.campaign);
+  const [sourcePage, setSourcePage] = useState(1);
   // The same rule the run uses: the plan's own selection, or Profile's
   // Include in search when the plan has not chosen any.
-  const includedSourceIds = resolveCampaignSourceTargetIds(draft);
+  const includedSourceIds = useMemo(
+    () => resolvePlanSourceIds(draft),
+    [
+      draft.sourceTargetIds,
+      draft.sourceSelectionMode,
+      draft.searchPreferences.discovery.targets,
+    ],
+  );
+  const includedSourceIdSet = useMemo(
+    () => new Set(includedSourceIds),
+    [includedSourceIds],
+  );
+  const sources = draft.searchPreferences.discovery.targets;
+  const sourcePageCount = Math.max(
+    1,
+    Math.ceil(sources.length / COLLECTION_PAGE_SIZE),
+  );
+  const currentSourcePage = Math.min(sourcePage, sourcePageCount);
+  const pagedSources = sources.slice(
+    (currentSourcePage - 1) * COLLECTION_PAGE_SIZE,
+    currentSourcePage * COLLECTION_PAGE_SIZE,
+  );
+  useEffect(() => {
+    setSourcePage((current) => Math.min(current, sourcePageCount));
+  }, [sourcePageCount]);
   const plannedSourceCount = includedSourceIds.length;
   const followsProfileSources =
     draft.sourceSelectionMode === "profile" ||
@@ -986,7 +1031,7 @@ function CampaignEditor(props: {
                 Use enabled sources from Profile
               </label>
               <div className="grid max-h-44 gap-2 overflow-y-auto rounded-(--radius-field) border border-border-subtle p-3 sm:grid-cols-2">
-                {draft.searchPreferences.discovery.targets.map((target) => (
+                {pagedSources.map((target) => (
                   <label
                     className="flex items-center gap-2 text-sm"
                     key={target.id}
@@ -997,7 +1042,7 @@ function CampaignEditor(props: {
                           ? deriveJobSourceLabel(target.startingUrl)
                           : target.label
                       }
-                      checked={includedSourceIds.includes(target.id)}
+                      checked={includedSourceIdSet.has(target.id)}
                       onChange={(event) => {
                         setDraft({
                           ...draft,
@@ -1006,9 +1051,7 @@ function CampaignEditor(props: {
                           // and must not be rewritten by this checkbox.
                           sourceSelectionMode: "selected",
                           sourceTargetIds: event.target.checked
-                            ? [
-                                ...new Set([...includedSourceIds, target.id]),
-                              ]
+                            ? [...new Set([...includedSourceIds, target.id])]
                             : includedSourceIds.filter(
                                 (candidateId) => candidateId !== target.id,
                               ),
@@ -1022,8 +1065,7 @@ function CampaignEditor(props: {
                           ? deriveJobSourceLabel(target.startingUrl)
                           : target.label}
                       </span>
-                      {!target.enabled &&
-                      includedSourceIds.includes(target.id) ? (
+                      {!target.enabled && includedSourceIdSet.has(target.id) ? (
                         <span className="block text-xs text-foreground-muted">
                           Off in Profile; this plan still searches it
                         </span>
@@ -1035,6 +1077,13 @@ function CampaignEditor(props: {
                   </label>
                 ))}
               </div>
+              <CollectionPagination
+                itemLabel="sources"
+                onPageChange={setSourcePage}
+                page={currentSourcePage}
+                pageSize={COLLECTION_PAGE_SIZE}
+                totalCount={sources.length}
+              />
             </fieldset>
             <div className="grid gap-3 sm:grid-cols-4">
               <label className="grid gap-1 text-sm">
@@ -2124,9 +2173,9 @@ export function CampaignsScreen(props: {
                     {campaign.description || "No description yet."}
                   </p>
                   <p className="text-sm text-foreground-soft">
-                    Uses {resolveCampaignSourceTargetIds(campaign).length} of your{" "}
-                    {campaign.searchPreferences.discovery.targets.length}{" "}
-                    job sites.
+                    Uses {resolvePlanSourceIds(campaign).length} of your{" "}
+                    {campaign.searchPreferences.discovery.targets.length} job
+                    sites.
                   </p>
                   {describeScheduleStart(campaign.schedule) ? (
                     <p className="text-sm text-foreground-soft">

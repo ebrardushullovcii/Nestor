@@ -1,4 +1,13 @@
+import type {
+  ResumeBatchGenerationInput,
+  ResumeBatchGenerationResult,
+  ResumeBatchGenerationProgress,
+} from "@nordri/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  JobFinderWorkspaceEntityMutationInput,
+  JobFinderWorkspaceSyncResult,
+} from "@nordri/contracts";
 
 const {
   mockExposeInMainWorld,
@@ -29,6 +38,15 @@ vi.mock("electron", () => ({
 import "./index";
 
 type ExposedJobFinderApi = {
+  generateResumeForBatch: (
+    input: ResumeBatchGenerationInput,
+  ) => Promise<ResumeBatchGenerationResult>;
+  onResumeBatchProgress: (
+    listener: (progress: ResumeBatchGenerationProgress) => void,
+  ) => () => void;
+  mutateWorkspaceEntities: (
+    input: JobFinderWorkspaceEntityMutationInput,
+  ) => Promise<JobFinderWorkspaceSyncResult>;
   getApplicationAuthorityReadiness: (input?: unknown) => Promise<unknown>;
   approveCurrentApplicationAnswers: (input: unknown) => Promise<unknown>;
   listApplicationAuthorityEnvelopes: (input?: unknown) => Promise<unknown>;
@@ -737,4 +755,58 @@ describe("preload desktop test API boundary", () => {
       (exposedJobFinder as unknown as { test?: unknown }).test,
     ).toBeUndefined();
   });
+});
+
+describe("preload bulk shortlist boundary", () => {
+  it("sends all 50 selected IDs in one typed bulk shortlist IPC request", async () => {
+    const input: JobFinderWorkspaceEntityMutationInput = {
+      baseRevision: 7,
+      mutation: {
+        type: "queue_jobs_for_review",
+        jobIds: Array.from({ length: 50 }, (_, index) => `job-${index}`),
+      },
+    };
+    const response = {
+      kind: "delta",
+      delta: { baseRevision: 7, currentRevision: 8 },
+    };
+    // The lazy route-readiness handshake may already be cached, or may run
+    // first when this test is selected on its own. Count only the mutation.
+    mockInvoke.mockReset().mockResolvedValue(response);
+    try {
+      expect(await exposedJobFinder.mutateWorkspaceEntities(input)).toBe(
+        response,
+      );
+      expect(
+        mockInvoke.mock.calls.filter(
+          ([channel]) => channel === "job-finder:mutate-workspace-entities",
+        ),
+      ).toEqual([["job-finder:mutate-workspace-entities", input]]);
+    } finally {
+      mockInvoke.mockReset();
+    }
+  });
+});
+
+it("validates thin resume batch receipts and progress, then detaches its listener", async () => {
+  mockInvoke.mockResolvedValueOnce({ jobId: "job", outcome: "written" });
+  expect(
+    await exposedJobFinder.generateResumeForBatch({
+      batchId: "batch",
+      jobId: "job",
+    }),
+  ).toEqual({ jobId: "job", outcome: "written" });
+  const listener = vi.fn();
+  const unsubscribe = exposedJobFinder.onResumeBatchProgress(listener);
+  const handle = mockIpcRendererOn.mock.calls.findLast(
+    ([channel]) => channel === "job-finder:resume-batch-progress",
+  )![1] as (_event: unknown, payload: unknown) => void;
+  handle({}, { batchId: "batch", jobId: "job", stage: "writing" });
+  handle({}, { batchId: "batch", jobId: "job", stage: "bogus" });
+  expect(listener).toHaveBeenCalledOnce();
+  unsubscribe();
+  expect(mockIpcRendererOff).toHaveBeenCalledWith(
+    "job-finder:resume-batch-progress",
+    handle,
+  );
 });

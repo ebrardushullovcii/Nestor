@@ -75,6 +75,36 @@ import type { ApplicationAnswerSnapshotRepository } from "./application-answer-s
 
 export type JobFinderRepositorySeed = JobFinderRepositoryState;
 
+/** Frozen, validated rows borrowed by display/recovery readers, never write seeds. */
+export interface JobFinderDisplayCollections {
+  tailoredAssets: readonly TailoredAsset[];
+  resumeDrafts: readonly ResumeDraft[];
+  resumeExportArtifacts: readonly ResumeExportArtifact[];
+  resumeResearchArtifacts: readonly ResumeResearchArtifact[];
+  applyRuns: readonly ApplyRun[];
+  applyJobResults: readonly ApplyJobResult[];
+  applicationRecords: readonly ApplicationRecord[];
+  applicationAttempts: readonly ApplicationAttempt[];
+  sourceInstructionArtifacts: readonly SourceInstructionArtifact[];
+  sourceDebugAttempts: readonly SourceDebugWorkerAttempt[];
+  profileCopilotMessages: readonly ProfileCopilotMessage[];
+  profileRevisions: readonly ProfileRevision[];
+  userActionRequests: readonly UserActionRequest[];
+  userActionEvents: readonly UserActionEvent[];
+  latestResumeValidationResults: readonly ResumeValidationResult[];
+}
+
+declare const discoveryDisplayProjectionBrand: unique symbol;
+/** Commit callbacks borrow frozen canonical rows. Copy a row before changing it. */
+export type BorrowedDiscoveryState = Readonly<JobFinderDiscoveryState>;
+/** Display-only discovery data has no checkpoints and cannot be a write seed. */
+export type DiscoveryDisplayProjection = JobFinderDiscoveryState & {
+  readonly [discoveryDisplayProjectionBrand]: true;
+};
+type CanonicalDiscoveryWrite = JobFinderDiscoveryState & {
+  readonly [discoveryDisplayProjectionBrand]?: never;
+};
+
 /**
  * Outcome of a revision-checked profile commit. "applied" carries the
  * schema-parsed profile that was persisted together with the incremented
@@ -133,7 +163,7 @@ export interface DiscoveryFeedbackCommitCurrent {
   searchPreferences: JobSearchPreferences;
   campaignState: JobSearchCampaignCollection | null;
   intelligenceState: JobFinderIntelligenceState;
-  discoveryState: JobFinderDiscoveryState;
+  discoveryState: BorrowedDiscoveryState;
 }
 
 export interface DiscoveryFeedbackCommitNext<TResult> {
@@ -172,6 +202,12 @@ export interface CompanyIntelligenceCommitCurrent {
 
 export interface JobFinderRepository
   extends ApplicationAuthorityRepository, ApplicationAnswerSnapshotRepository {
+  /** Optional for custom repositories; ordinary reads remain caller-owned. */
+  readDisplayCollections?(): Promise<JobFinderDisplayCollections>;
+  /** One complete document for a selected preview; no workspace-wide body read. */
+  getTailoredAssetById(assetId: string): Promise<TailoredAsset | null>;
+  /** Caller-owned first asset in listTailoredAssets order for one selected job. */
+  getTailoredAssetByJobId(jobId: string): Promise<TailoredAsset | null>;
   exportState(): Promise<JobFinderRepositoryState>;
   close(): Promise<void>;
   reset(seed: JobFinderRepositorySeed): Promise<void>;
@@ -258,13 +294,47 @@ export interface JobFinderRepository
     limit?: number;
     offset?: number;
   }): Promise<readonly SavedJob[]>;
+  /** Validated immutable rows borrowed only for read-only display projections. */
+  readSavedJobsProjection(): Promise<readonly SavedJob[]>;
+  /** Saved-job ids in `listSavedJobs` order, without reading the jobs. */
+  listSavedJobIds(): Promise<readonly string[]>;
+  /** The saved jobs with these ids, in `listSavedJobs` order. */
+  listSavedJobsByIds(jobIds: readonly string[]): Promise<readonly SavedJob[]>;
   /**
    * Atomically applies row-local saved-job updates and/or inserts without
    * replacing rows that the caller did not intend to change.
    */
   commitSavedJobDelta(input: {
     upserts?: readonly SavedJob[];
+    /**
+     * Builds additional upserts from transaction-current canonical discovery
+     * state, after acquiring the write lock. Paired `updateDiscoveryState`
+     * receives that same state before any changes, so pending promotion and
+     * removal cannot discard a newer enrichment. These rows follow `upserts`
+     * precedence: with `update`, an existing saved row is updated instead.
+     * This factory receives its own mutable copy; the paired state updater
+     * borrows frozen rows, so factory edits cannot leak into that updater.
+     */
+    upsertsFromDiscovery?: (
+      current: JobFinderDiscoveryState,
+    ) => readonly SavedJob[];
+    /**
+     * Read-only alternative to the owned factory above. Borrows the same frozen,
+     * transaction-current canonical state as the paired updater without copying
+     * history. Return new rows for changes. When both factories are supplied,
+     * these rows follow the owned factory's rows with the same upsert precedence.
+     */
+    upsertsFromBorrowedDiscovery?: (
+      current: BorrowedDiscoveryState,
+    ) => readonly SavedJob[];
     update?: (job: SavedJob) => SavedJob;
+    /**
+     * Runs `update` only on these rows (and on stored rows an upsert names);
+     * every other row stays as stored without being read. Pass it only when
+     * `update` returns every other row unchanged. Without it `update` runs on
+     * every row.
+     */
+    updateJobIds?: readonly string[];
     /**
      * Synchronous transform merged into the latest persisted settings inside
      * the same transaction as the saved-job changes, so paired settings/job
@@ -284,8 +354,8 @@ export interface JobFinderRepository
      * job/ledger updates stay atomic against concurrent writers.
      */
     updateDiscoveryState?: (
-      current: JobFinderDiscoveryState,
-    ) => JobFinderDiscoveryState;
+      current: BorrowedDiscoveryState,
+    ) => CanonicalDiscoveryWrite;
   }): Promise<void>;
   /**
    * Applies discovery feedback against transaction-current job, preference,
@@ -310,7 +380,7 @@ export interface JobFinderRepository
    */
   replaceSavedJobsAndDiscoveryState(input: {
     savedJobs: readonly SavedJob[];
-    discoveryState: JobFinderDiscoveryState;
+    discoveryState: CanonicalDiscoveryWrite;
   }): Promise<void>;
   /**
    * Destructively replaces the complete saved-job collection while clearing
@@ -373,6 +443,10 @@ export interface JobFinderRepository
   }): Promise<ResumeImportFinalizationOutcome>;
   listResumeValidationResults(
     draftId?: string,
+  ): Promise<readonly ResumeValidationResult[]>;
+  /** At most one result per requested draft, using the history's latest-first order. */
+  listLatestResumeValidationResults(
+    draftIds: readonly string[],
   ): Promise<readonly ResumeValidationResult[]>;
   upsertResumeValidationResult(
     validationResult: ResumeValidationResult,
@@ -566,15 +640,22 @@ export interface JobFinderRepository
   ): Promise<JobFinderSettings>;
   getDiscoveryState(): Promise<JobFinderDiscoveryState>;
   /**
+   * Borrowed immutable display state, reused until discovery changes. Agent
+   * checkpoints stay in canonical storage and are null in this projection.
+   * Never use it for resume, export, or full-state replacement. Writes must
+   * use getDiscoveryState or the transaction-current commit updater instead.
+   */
+  readDiscoveryDisplayProjection(): Promise<DiscoveryDisplayProjection>;
+  /**
    * Atomically applies a synchronous transform to the currently stored
-   * discovery state. The updater receives a clone of the latest persisted
-   * state exactly once and its schema-parsed output replaces it inside one
-   * transaction, so concurrent writers cannot revert each other with stale
-   * full-state snapshots. A thrown updater or schema failure leaves the
-   * persisted state untouched and rejects.
+   * discovery state. The updater borrows frozen canonical rows and must return
+   * new rows for changes; untouched rows may retain their references. Only
+   * changed rows are validated and written inside the transaction. Use
+   * getDiscoveryState for an owned, mutable copy. A thrown updater or invalid
+   * output leaves the persisted state untouched and rejects.
    */
   commitDiscoveryStateUpdate(
-    update: (current: JobFinderDiscoveryState) => JobFinderDiscoveryState,
+    update: (current: BorrowedDiscoveryState) => CanonicalDiscoveryWrite,
   ): Promise<JobFinderDiscoveryState>;
   getCampaignState(): Promise<JobSearchCampaignCollection | null>;
   saveCampaignState(campaignState: JobSearchCampaignCollection): Promise<void>;
@@ -590,6 +671,8 @@ export interface JobFinderRepository
     ) => CampaignPreferencesCommitNext<TResult>,
   ): Promise<TResult>;
   getIntelligenceState(): Promise<JobFinderIntelligenceState>;
+  /** Borrowed immutable display state. Canonical reads remain caller-owned. */
+  readIntelligenceProjection?(): Promise<JobFinderIntelligenceState>;
   saveIntelligenceState(state: JobFinderIntelligenceState): Promise<void>;
   /**
    * Replaces intelligence state from a synchronous transform of the latest

@@ -1,3 +1,4 @@
+import { invalidateUiResumeBatch } from "../assistant/ui-resume-batch";
 import { randomUUID } from "node:crypto";
 import {
   mkdir,
@@ -1015,6 +1016,7 @@ export async function resetJobFinderBrowser() {
 }
 
 export async function resetJobFinderWorkspace() {
+  invalidateUiResumeBatch();
   const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
   // Stop all workspace work before closing pages so late completions cannot
   // repopulate the workspace. A failed clear must never report success.
