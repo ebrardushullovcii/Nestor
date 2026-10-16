@@ -1,8 +1,8 @@
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import { resolveApplyStatePresentation } from "../screens/applications/apply-state";
 
-type ApplyRun = NonNullable<JobFinderWorkspaceSnapshot["applyRuns"]>[number];
-type ApplyJobResult = JobFinderWorkspaceSnapshot["applyJobResults"][number];
+type ApplyRun = NonNullable<JobFinderRendererWorkspaceSnapshot["applyRuns"]>[number];
+type ApplyJobResult = JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
 
 /**
  * What an application run that reads "paused for review" is actually doing.
@@ -60,9 +60,9 @@ function isReadyToSend(result: ApplyJobResult): boolean {
 
 export function classifyPausedApplyRun(
   workspace: Pick<
-    JobFinderWorkspaceSnapshot,
+    JobFinderRendererWorkspaceSnapshot,
     "applyJobResults" | "userActionRequests" | "intelligence"
-  > & { applicationRecords?: JobFinderWorkspaceSnapshot["applicationRecords"] },
+  > & { applicationRecords?: JobFinderRendererWorkspaceSnapshot["applicationRecords"] },
   run: ApplyRun,
 ): ApplyRunPauseState | null {
   if (run.state !== "paused_for_user_review") return null;
@@ -163,7 +163,7 @@ export function classifyPausedApplyRun(
 }
 
 export function hasPendingSampleReview(
-  workspace: Pick<JobFinderWorkspaceSnapshot, "intelligence">,
+  workspace: Pick<JobFinderRendererWorkspaceSnapshot, "intelligence">,
   runId: string,
 ): boolean {
   return (
@@ -176,7 +176,7 @@ export function hasPendingSampleReview(
 /** Runs a safety limit stopped, the only ones Safeguards lists as pauses. */
 export function listApplyRunsStoppedBySafeguard(
   workspace: Pick<
-    JobFinderWorkspaceSnapshot,
+    JobFinderRendererWorkspaceSnapshot,
     | "applyRuns"
     | "applyJobResults"
     | "userActionRequests"

@@ -4,7 +4,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import {
+  JobListRowSchema,
+  type JobFinderRendererWorkspaceSnapshot,
+} from "@nordri/contracts";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -47,7 +50,23 @@ const windowControlsState = {
  * A workspace with something in every population the shell badges, so a
  * regression cannot hide behind an empty collection.
  */
-function createCountedWorkspace(): JobFinderWorkspaceSnapshot {
+function createCountedWorkspace(): JobFinderRendererWorkspaceSnapshot {
+  const job = JobListRowSchema.parse({
+    id: "job_1",
+    source: "target_site",
+    sourceJobId: "synthetic",
+    canonicalUrl: "https://example.test/synthetic",
+    title: "Engineer I",
+    company: "Acme",
+    location: "Remote",
+    workMode: ["remote"],
+    applyPath: "external_redirect",
+    easyApplyEligible: false,
+    salaryText: null,
+    discoveredAt: "2026-10-13T00:00:00.000Z",
+    status: "discovered",
+    matchAssessment: { score: 80 },
+  });
   return {
     applicationRecords: [{ jobId: "job_1" }, { jobId: "job_2" }],
     campaigns: [
@@ -57,8 +76,8 @@ function createCountedWorkspace(): JobFinderWorkspaceSnapshot {
     activeCampaignId: "campaign_1",
     campaignNotifications: [],
     discoveryJobs: [
-      { id: "job_1", company: "Acme", title: "Engineer I" },
-      { id: "job_2", company: "Globex", title: "Engineer II" },
+      job,
+      { ...job, id: "job_2", company: "Globex", title: "Engineer II" },
     ],
     intelligence: {
       companies: [
@@ -91,7 +110,7 @@ function createCountedWorkspace(): JobFinderWorkspaceSnapshot {
     },
     reviewQueue: [{ jobId: "job_1" }],
     userActionRequests: [{ id: "request_1", state: "pending" }],
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 /**
@@ -101,7 +120,7 @@ function createCountedWorkspace(): JobFinderWorkspaceSnapshot {
  * sees; the class strings this file compares are the ones that would paint at
  * 1439px (compact navigation) and 1441px (sidebar).
  */
-function renderShell(workspace: JobFinderWorkspaceSnapshot) {
+function renderShell(workspace: JobFinderRendererWorkspaceSnapshot) {
   return render(
     <MemoryRouter initialEntries={["/job-finder/home"]}>
       <JobFinderShell platform="win32" workspace={workspace}>

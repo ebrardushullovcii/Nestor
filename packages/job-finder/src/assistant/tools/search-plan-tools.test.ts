@@ -303,7 +303,7 @@ it("names the results plan and reads back Profile switches for explicitly select
         enabled: false,
         searchedByPlan: true,
       }),
-    ]),
+    ]) as unknown,
   });
   const after = await ctx.service.getWorkspaceSnapshot();
   expect(

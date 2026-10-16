@@ -123,7 +123,7 @@ it("continues an automatic-send timeout with recovery and no permission to resen
   expect(status.details).toMatchObject({
     results: [
       {
-        recovery: expect.stringContaining("Do not send again"),
+        recovery: expect.stringContaining("Do not send again") as unknown,
         sendPermission: "blocked_until_person_checks_outcome",
       },
     ],

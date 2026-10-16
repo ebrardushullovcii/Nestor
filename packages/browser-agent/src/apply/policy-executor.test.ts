@@ -3473,11 +3473,13 @@ test("a saved generic eligibility answer is checked again for this hiring countr
     },
   ];
   const choose = vi.spyOn(hands, "chooseOption");
-  const check = vi.fn(async () => ({
-    supported: false,
-    reason:
-      "Which country will hire you? Canadian work rights do not establish worldwide permission.",
-  }));
+  const check = vi.fn(() =>
+    Promise.resolve({
+      supported: false,
+      reason:
+        "Which country will hire you? Canadian work rights do not establish worldwide permission.",
+    }),
+  );
   const outcome = await executeApplyProposal(
     { tool: "select", ref: "c0", option: "Yes" },
     observationOf(page).signature,
@@ -3486,17 +3488,19 @@ test("a saved generic eligibility answer is checked again for this hiring countr
       now,
       guardState: createApplyGuardState(),
       checkWrittenAnswer: check,
-      classifyQuestions: async () =>
-        new Map([
-          [
-            "Are you authorized to work here?",
-            {
-              asksAboutPay: false,
-              eligibilityKind: "work_authorization" as const,
-              declarationKind: null,
-            },
-          ],
-        ]),
+      classifyQuestions: () =>
+        Promise.resolve(
+          new Map([
+            [
+              "Are you authorized to work here?",
+              {
+                asksAboutPay: false,
+                eligibilityKind: "work_authorization" as const,
+                declarationKind: null,
+              },
+            ],
+          ]),
+        ),
     },
   );
   expect(check).toHaveBeenCalledOnce();
@@ -3513,7 +3517,9 @@ test("private current salary is not filled or suggested from expected pay", asyn
   const { config, hands } = configFor(page);
   config.sources.profile.answerBank.salaryExpectations = "EUR 60000";
   const fill = vi.spyOn(hands, "fillText");
-  const check = vi.fn(async () => ({ supported: true, reason: "checked" }));
+  const check = vi.fn(() =>
+    Promise.resolve({ supported: true, reason: "checked" }),
+  );
   const outcome = await executeApplyProposal(
     { tool: "type", ref: "c0", text: "60000" },
     observationOf(page).signature,
@@ -3522,13 +3528,19 @@ test("private current salary is not filled or suggested from expected pay", asyn
       now,
       guardState: createApplyGuardState(),
       checkWrittenAnswer: check,
-      classifyQuestions: async () =>
-        new Map([
-          [
-            "Current salary",
-            { asksAboutPay: true, asksCurrentPay: true, declarationKind: null },
-          ],
-        ]),
+      classifyQuestions: () =>
+        Promise.resolve(
+          new Map([
+            [
+              "Current salary",
+              {
+                asksAboutPay: true,
+                asksCurrentPay: true,
+                declarationKind: null,
+              },
+            ],
+          ]),
+        ),
     },
   );
   expect(fill).not.toHaveBeenCalled();
@@ -4130,10 +4142,12 @@ test("the model's hiring-country question cannot copy residence without a check"
   const { config, hands } = configFor(page);
   config.sources.profile.currentCountry = "United Kingdom";
   const choose = vi.spyOn(hands, "chooseOption");
-  const check = vi.fn(async () => ({
-    supported: false,
-    reason: "Confirm which country will employ you for this role.",
-  }));
+  const check = vi.fn(() =>
+    Promise.resolve({
+      supported: false,
+      reason: "Confirm which country will employ you for this role.",
+    }),
+  );
   const outcome = await executeApplyProposal(
     {
       tool: "select",
@@ -4147,17 +4161,19 @@ test("the model's hiring-country question cannot copy residence without a check"
       now,
       guardState: createApplyGuardState(),
       checkWrittenAnswer: check,
-      classifyQuestions: async () =>
-        new Map([
-          [
-            "Where would you be employed?",
-            {
-              asksAboutPay: false,
-              asksHiringCountry: true,
-              declarationKind: null,
-            },
-          ],
-        ]),
+      classifyQuestions: () =>
+        Promise.resolve(
+          new Map([
+            [
+              "Where would you be employed?",
+              {
+                asksAboutPay: false,
+                asksHiringCountry: true,
+                declarationKind: null,
+              },
+            ],
+          ]),
+        ),
     },
   );
   expect(check).toHaveBeenCalledOnce();
@@ -4187,35 +4203,39 @@ test.each(["text", "file"] as const)(
         language: null,
         sample: null,
       },
-      provide: async (request) => ({
-        ok: true,
-        text: request.approvedText!,
-        document: {
-          id: "approved",
-          kind: "cover_letter",
-          label: "Approved letter",
-          fileName: "approved.txt",
-          mimeType: "text/plain",
-          loadBytes: async () => new TextEncoder().encode(request.approvedText),
-        },
-      }),
-    };
-    const chatWithTools = vi.fn(async () => ({
-      toolCalls: [
-        {
-          id: "classify",
-          type: "function" as const,
-          function: {
-            name: "report_question_kinds",
-            arguments: JSON.stringify({
-              questions: [
-                { index: 0, asksAboutPay: false, declarationKind: null },
-              ],
-            }),
+      provide: (request) =>
+        Promise.resolve({
+          ok: true,
+          text: request.approvedText!,
+          document: {
+            id: "approved",
+            kind: "cover_letter",
+            label: "Approved letter",
+            fileName: "approved.txt",
+            mimeType: "text/plain",
+            loadBytes: () =>
+              Promise.resolve(new TextEncoder().encode(request.approvedText)),
           },
-        },
-      ],
-    }));
+        }),
+    };
+    const chatWithTools = vi.fn(() =>
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: "classify",
+            type: "function" as const,
+            function: {
+              name: "report_question_kinds",
+              arguments: JSON.stringify({
+                questions: [
+                  { index: 0, asksAboutPay: false, declarationKind: null },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    );
     const fill = vi.spyOn(hands, "fillText");
     const upload = vi.spyOn(hands, "uploadFile");
     const click = vi.spyOn(hands, "clickAction");
@@ -4227,7 +4247,7 @@ test.each(["text", "file"] as const)(
     expect(result).not.toBeNull();
     expect(chatWithTools).toHaveBeenCalledTimes(1);
     if (delivery === "file")
-      expect(new TextDecoder().decode(upload.mock.calls[0]![1].bytes)).toBe(
+      expect(new TextDecoder().decode(upload.mock.calls[0][1].bytes)).toBe(
         config.sources.approvedLetterText,
       );
     else
@@ -4262,7 +4282,7 @@ test("keeps a generated numeric suggestion's real source for later review", () =
         }),
       ],
     }),
-  ).controls[0]!;
+  ).controls[0];
   const question = buildPendingQuestion({
     control,
     jobId: "synthetic",

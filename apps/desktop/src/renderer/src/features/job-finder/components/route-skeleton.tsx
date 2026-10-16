@@ -1,3 +1,4 @@
+import { LIST_DETAIL_COLUMNS_CLASS } from "./list-detail-columns";
 import { cn } from "@renderer/lib/cn";
 
 import { LockedScreenLayout } from "./locked-screen-layout";
@@ -108,9 +109,7 @@ export function RouteSkeleton({
           // The same `gap-4` two-column shape the locked routes declare, so
           // the muted panes sit where the real panes will.
           "grid min-w-0 items-stretch gap-4 pt-5 xl:h-full xl:min-h-0",
-          panes === 2
-            ? "xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]"
-            : "xl:grid-cols-1",
+          panes === 2 ? LIST_DETAIL_COLUMNS_CLASS : "xl:grid-cols-1",
           className,
         )}
         data-route-skeleton

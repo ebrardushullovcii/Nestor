@@ -28,7 +28,10 @@ import {
   decideApplySubmissionHandoff,
   type ApplySubmissionHandoff,
 } from "./apply-submission-handoff";
-import type { RenderedLetterArtifact } from "./workspace-service-contracts";
+import type {
+  JobFinderDocumentManager,
+  RenderedLetterArtifact,
+} from "./workspace-service-contracts";
 import type { ApplicationLetterDependencies } from "./application-letter-provider";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -875,7 +878,7 @@ export function buildApplyLetterDependencies(input: {
     ) => ReturnType<LLMClient["chatWithTools"]>;
   };
   documentManager: {
-    getApprovedApplicationLetter?: import("./workspace-service-contracts").JobFinderDocumentManager["getApprovedApplicationLetter"];
+    getApprovedApplicationLetter?: JobFinderDocumentManager["getApprovedApplicationLetter"];
     renderLetterArtifact?: (renderInput: {
       text: string;
       job: SavedJob;

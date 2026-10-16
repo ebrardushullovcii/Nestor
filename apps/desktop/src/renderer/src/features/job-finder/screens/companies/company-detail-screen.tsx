@@ -7,14 +7,10 @@ import type {
   CompanyNote,
   CompanyPreference,
   CompanySalaryOfferEvidence,
-  DiscoveryJobView,
   ReviewCompanyMergeInput,
-  SavedJob,
+  JobListRow,
 } from "@nordri/contracts";
-import {
-  isGenericCompanyName,
-  normalizeCompanyName,
-} from "@nordri/contracts";
+import { isGenericCompanyName, normalizeCompanyName } from "@nordri/contracts";
 import {
   projectCompanyApplicationHistory,
   projectCompanyDuplicateJobs,
@@ -33,6 +29,12 @@ import {
 import { presentListingActivity } from "../../lib/listing-activity-presentation";
 import { recordedJobSourceName } from "../../lib/job-source-display-name";
 import {
+  BoundedCollectionList,
+  BoundedCollectionPagination,
+  BOUNDED_COLLECTION_PAGE_SIZE,
+  useBoundedCollection,
+} from "../actions/bounded-collection";
+import {
   companyPreferenceLabels,
   companyPreferenceScopeDescription,
   companySalaryOfferEvidenceKindLabels,
@@ -46,7 +48,9 @@ interface CompanyDetailScreenProps {
   companies: readonly CompanyEntity[];
   company: CompanyEntity;
   companyId: string;
-  discoveryJobs: readonly SavedJob[];
+  discoveryJobs: readonly JobListRow[];
+  selectedJobId?: string | null;
+  selectedApplicationRecordId?: string | null;
   isMergePending: (companyId: string) => boolean;
   isMutationPending: (companyId: string) => boolean;
   isPreferencePending: (companyId: string) => boolean;
@@ -86,8 +90,7 @@ function SectionCard(props: {
   );
 }
 
-type CompanyDetailJob = SavedJob &
-  Partial<Pick<DiscoveryJobView, "listingActivity">>;
+type CompanyDetailJob = JobListRow;
 
 function JobRow(props: {
   job: CompanyDetailJob;
@@ -200,8 +203,14 @@ function ContactsSection(props: {
       title="Contacts"
     >
       {props.company.contacts.length > 0 ? (
-        <ul className="grid gap-2">
-          {props.company.contacts.map((contact) => (
+        <BoundedCollectionList
+          collection={props.company.contacts}
+          resetKey={props.company.id}
+          itemLabel="contacts"
+          getId={(contact) => contact.id}
+          selectedId={editingId}
+        >
+          {(contact) => (
             <li
               className="flex flex-wrap items-start justify-between gap-2 rounded-(--radius-field) border border-border-subtle px-3 py-2"
               key={contact.id}
@@ -252,8 +261,8 @@ function ContactsSection(props: {
                 </Button>
               </div>
             </li>
-          ))}
-        </ul>
+          )}
+        </BoundedCollectionList>
       ) : (
         <p className="text-(length:--text-small) text-foreground-soft">
           No contacts recorded yet.
@@ -362,8 +371,13 @@ function NotesSection(props: {
   return (
     <SectionCard description="Private notes about this employer." title="Notes">
       {props.company.notes.length > 0 ? (
-        <ul className="grid gap-2">
-          {props.company.notes.map((note) => (
+        <BoundedCollectionList
+          collection={props.company.notes}
+          resetKey={props.company.id}
+          itemLabel="notes"
+          getId={(note) => note.id}
+        >
+          {(note) => (
             <li
               className="flex items-start justify-between gap-2 rounded-(--radius-field) border border-border-subtle px-3 py-2"
               key={note.id}
@@ -390,8 +404,8 @@ function NotesSection(props: {
                 <Trash2 aria-hidden="true" className="size-4" />
               </Button>
             </li>
-          ))}
-        </ul>
+          )}
+        </BoundedCollectionList>
       ) : (
         <p className="text-(length:--text-small) text-foreground-soft">
           No notes yet.
@@ -433,7 +447,7 @@ function normalizeCompanyDomain(value: string): string {
 
 function resolveCurrentCompanyId(
   companies: readonly CompanyEntity[],
-  job: SavedJob,
+  job: JobListRow,
 ): string | null {
   const name = normalizeCompanyName(job.company);
   if (!name || isGenericCompanyName(name)) {
@@ -476,23 +490,64 @@ function EvidenceSection(props: {
   applicationRecords: readonly ApplicationRecord[];
   companies: readonly CompanyEntity[];
   company: CompanyEntity;
-  jobs: readonly SavedJob[];
+  jobs: readonly JobListRow[];
   isPending: boolean;
   onMutate: (command: CompanyIntelligenceMutationInput) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<Partial<CompanySalaryOfferEvidence>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
+  const jobIds = useMemo(
+    () => new Set(props.company.jobIds),
+    [props.company.jobIds],
+  );
+  const applicationIds = useMemo(
+    () => new Set(props.company.applicationRecordIds),
+    [props.company.applicationRecordIds],
+  );
   const companyJobs = props.jobs.filter(
     (job) =>
-      props.company.jobIds.includes(job.id) &&
+      jobIds.has(job.id) &&
       resolveCurrentCompanyId(props.companies, job) === props.company.id,
   );
   const selectedJobId = draft.jobId ?? "";
   const applicationRecords = props.applicationRecords.filter(
-    (record) =>
-      record.jobId === selectedJobId &&
-      props.company.applicationRecordIds.includes(record.id),
+    (record) => record.jobId === selectedJobId && applicationIds.has(record.id),
   );
+  const jobPage = useBoundedCollection(
+    companyJobs,
+    props.company.id,
+    companyJobs.findIndex((job) => job.id === selectedJobId),
+    selectedJobId,
+    selectedJobId && companyJobs.length > BOUNDED_COLLECTION_PAGE_SIZE
+      ? BOUNDED_COLLECTION_PAGE_SIZE - 1
+      : BOUNDED_COLLECTION_PAGE_SIZE,
+  );
+  const applicationPage = useBoundedCollection(
+    applicationRecords,
+    `${props.company.id}:${selectedJobId}`,
+    applicationRecords.findIndex(
+      (record) => record.id === draft.applicationRecordId,
+    ),
+    draft.applicationRecordId,
+    draft.applicationRecordId &&
+      applicationRecords.length > BOUNDED_COLLECTION_PAGE_SIZE
+      ? BOUNDED_COLLECTION_PAGE_SIZE - 1
+      : BOUNDED_COLLECTION_PAGE_SIZE,
+  );
+  // A chosen option stays in the native select while the person browses other
+  // pages. Selection remains a draft fact, independent of the visible window.
+  const selectedJob = companyJobs.find((job) => job.id === selectedJobId);
+  const selectedApplication = applicationRecords.find(
+    (record) => record.id === draft.applicationRecordId,
+  );
+  const jobOptions =
+    selectedJob && !jobPage.items.includes(selectedJob)
+      ? [selectedJob, ...jobPage.items]
+      : jobPage.items;
+  const applicationOptions =
+    selectedApplication && !applicationPage.items.includes(selectedApplication)
+      ? [selectedApplication, ...applicationPage.items]
+      : applicationPage.items;
   const requiresJob = draft.kind === "listed_salary" || draft.kind === "offer";
   const requiresApplication = draft.kind === "offer";
   const reset = () => {
@@ -543,8 +598,14 @@ function EvidenceSection(props: {
       title="Salary / offer evidence"
     >
       {props.company.salaryOfferEvidence.length > 0 ? (
-        <ul className="grid gap-2">
-          {props.company.salaryOfferEvidence.map((evidence) => (
+        <BoundedCollectionList
+          collection={props.company.salaryOfferEvidence}
+          resetKey={props.company.id}
+          itemLabel="salary / offer evidence"
+          getId={(evidence) => evidence.id}
+          selectedId={editingId}
+        >
+          {(evidence) => (
             <li
               className="flex flex-wrap items-start justify-between gap-2 rounded-(--radius-field) border border-border-subtle px-3 py-2"
               key={evidence.id}
@@ -602,8 +663,8 @@ function EvidenceSection(props: {
                 </Button>
               </div>
             </li>
-          ))}
-        </ul>
+          )}
+        </BoundedCollectionList>
       ) : (
         <p className="text-(length:--text-small) text-foreground-soft">
           No salary or offer evidence recorded yet. Offers are local facts and
@@ -759,7 +820,7 @@ function EvidenceSection(props: {
                 (job_target_site_weworkremotely_com_listing_ads_13_click)".
                 A stored id is not a name; the job is named by its title,
                 its employer, and where it came from. */}
-            {companyJobs.map((job) => (
+            {jobOptions.map((job) => (
               <option key={job.id} value={job.id}>
                 {`${job.title} · ${
                   job.company?.trim() || recordedJobSourceName(job.source)
@@ -768,6 +829,14 @@ function EvidenceSection(props: {
             ))}
           </select>
         </label>
+        {companyJobs.length > jobPage.pageSize ? (
+          <div className="sm:col-span-2">
+            <BoundedCollectionPagination
+              {...jobPage}
+              itemLabel="evidence jobs"
+            />
+          </div>
+        ) : null}
         {selectedJobId ? (
           <label className="grid gap-1 text-sm sm:col-span-2">
             <span>
@@ -790,13 +859,22 @@ function EvidenceSection(props: {
                   ? "No application records for this job"
                   : "Job only (not application-derived)"}
               </option>
-              {applicationRecords.map((record) => (
+              {applicationOptions.map((record) => (
                 <option key={record.id} value={record.id}>
                   {`${record.title} · ${record.company}`}
                 </option>
               ))}
             </select>
           </label>
+        ) : null}
+        {selectedJobId &&
+        applicationRecords.length > applicationPage.pageSize ? (
+          <div className="sm:col-span-2">
+            <BoundedCollectionPagination
+              {...applicationPage}
+              itemLabel="evidence application records"
+            />
+          </div>
         ) : null}
         <div className="flex justify-end gap-2 sm:col-span-2">
           {editingId ? (
@@ -843,8 +921,13 @@ function MergeReviewSection(props: {
       description="Merge only when certain; every alias, job, application, contact, note, and evidence record is preserved."
       title="Duplicate employer review"
     >
-      <ul className="grid gap-2">
-        {pending.map((candidate) => {
+      <BoundedCollectionList
+        collection={pending}
+        resetKey={props.company.id}
+        itemLabel="duplicate employers"
+        getId={(candidate) => candidate.candidateCompanyId}
+      >
+        {(candidate) => {
           const candidateCompany = props.companies.find(
             (company) => company.id === candidate.candidateCompanyId,
           );
@@ -899,8 +982,8 @@ function MergeReviewSection(props: {
               </div>
             </li>
           );
-        })}
-      </ul>
+        }}
+      </BoundedCollectionList>
     </SectionCard>
   );
 }
@@ -908,6 +991,11 @@ function MergeReviewSection(props: {
 export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
   const { company } = props;
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const domains = useBoundedCollection(company.domains, company.id);
+  const jobsById = useMemo(
+    () => new Map(props.discoveryJobs.map((job) => [job.id, job])),
+    [props.discoveryJobs],
+  );
 
   const openings = useMemo(
     () =>
@@ -970,7 +1058,7 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
           </h1>
           {company.domains.length > 0 ? (
             <p className="min-w-0 break-all text-(length:--text-tiny) text-foreground-muted">
-              {company.domains.map((domain, index) => (
+              {domains.items.map((domain, index) => (
                 <span key={domain.domain}>
                   {index > 0 ? ", " : null}
                   <ExternalUrlLink
@@ -980,6 +1068,12 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
                 </span>
               ))}
             </p>
+          ) : null}
+          {company.domains.length > domains.pageSize ? (
+            <BoundedCollectionPagination
+              {...domains}
+              itemLabel="company domains"
+            />
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1076,11 +1170,17 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
               <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
                 Last seen available
               </p>
-              <ul className="grid gap-2">
-                {openings.lastSeenAvailable.map((job) => (
+              <BoundedCollectionList
+                collection={openings.lastSeenAvailable}
+                resetKey={company.id}
+                itemLabel="last seen available openings"
+                getId={(job) => job.id}
+                selectedId={props.selectedJobId}
+              >
+                {(job) => (
                   <JobRow job={job} key={job.id} onOpen={props.onOpenJob} />
-                ))}
-              </ul>
+                )}
+              </BoundedCollectionList>
             </div>
           ) : (
             <p className="text-(length:--text-small) text-foreground-soft">
@@ -1092,11 +1192,17 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
               <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
                 Needs verification
               </p>
-              <ul className="grid gap-2">
-                {openings.needsVerification.map((job) => (
+              <BoundedCollectionList
+                collection={openings.needsVerification}
+                resetKey={company.id}
+                itemLabel="openings needing verification"
+                getId={(job) => job.id}
+                selectedId={props.selectedJobId}
+              >
+                {(job) => (
                   <JobRow job={job} key={job.id} onOpen={props.onOpenJob} />
-                ))}
-              </ul>
+                )}
+              </BoundedCollectionList>
             </div>
           ) : null}
           {openings.reportedClosed.length > 0 ? (
@@ -1104,11 +1210,17 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
               <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
                 Reported closed
               </p>
-              <ul className="grid gap-2">
-                {openings.reportedClosed.map((job) => (
+              <BoundedCollectionList
+                collection={openings.reportedClosed}
+                resetKey={company.id}
+                itemLabel="reported closed openings"
+                getId={(job) => job.id}
+                selectedId={props.selectedJobId}
+              >
+                {(job) => (
                   <JobRow job={job} key={job.id} onOpen={props.onOpenJob} />
-                ))}
-              </ul>
+                )}
+              </BoundedCollectionList>
             </div>
           ) : null}
           {openings.totalCount === 0 ? (
@@ -1123,15 +1235,21 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
           title={`Applications (${applicationHistory.totalCount})`}
         >
           {applicationHistory.records.length > 0 ? (
-            <ul className="grid gap-2">
-              {applicationHistory.records.map((record) => (
+            <BoundedCollectionList
+              collection={applicationHistory.records}
+              resetKey={company.id}
+              itemLabel="company applications"
+              getId={(record) => record.id}
+              selectedId={props.selectedApplicationRecordId}
+            >
+              {(record) => (
                 <ApplicationRow
                   key={record.id}
                   onOpen={props.onOpenApplication}
                   record={record}
                 />
-              ))}
-            </ul>
+              )}
+            </BoundedCollectionList>
           ) : (
             <p className="text-(length:--text-small) text-foreground-soft">
               No application records yet.
@@ -1144,8 +1262,13 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
           title={`Duplicate jobs (${duplicateGroups.length})`}
         >
           {duplicateGroups.length > 0 ? (
-            <ul className="grid gap-2">
-              {duplicateGroups.map((group) => (
+            <BoundedCollectionList
+              collection={duplicateGroups}
+              resetKey={company.id}
+              itemLabel="duplicate jobs"
+              getId={(group) => group.id}
+            >
+              {(group) => (
                 <li
                   className="grid gap-2 rounded-(--radius-field) border border-border-subtle px-3 py-2"
                   key={group.id}
@@ -1164,9 +1287,7 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
                   </p>
                   <ul className="flex flex-wrap gap-2">
                     {group.jobIds.map((jobId) => {
-                      const job = props.discoveryJobs.find(
-                        (entry) => entry.id === jobId,
-                      );
+                      const job = jobsById.get(jobId);
                       return (
                         <li key={jobId}>
                           <Button
@@ -1183,8 +1304,8 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
                     })}
                   </ul>
                 </li>
-              ))}
-            </ul>
+              )}
+            </BoundedCollectionList>
           ) : (
             <p className="text-(length:--text-small) text-foreground-soft">
               No duplicate postings detected for this employer.
@@ -1197,8 +1318,13 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
           title={`Source history (${company.sourceHistory.length})`}
         >
           {company.sourceHistory.length > 0 ? (
-            <ul className="grid gap-2">
-              {company.sourceHistory.map((ref) => (
+            <BoundedCollectionList
+              collection={company.sourceHistory}
+              resetKey={company.id}
+              itemLabel="source history"
+              getId={(ref) => ref.id}
+            >
+              {(ref) => (
                 <li
                   className="grid gap-0.5 rounded-(--radius-field) border border-border-subtle px-3 py-2"
                   key={ref.id}
@@ -1213,8 +1339,8 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
                     {ref.applicationRecordIds.length === 1 ? "" : "s"}
                   </p>
                 </li>
-              ))}
-            </ul>
+              )}
+            </BoundedCollectionList>
           ) : (
             <p className="text-(length:--text-small) text-foreground-soft">
               No source history yet.

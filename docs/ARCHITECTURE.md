@@ -76,8 +76,10 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
 - Whole-collection replacement APIs are reserved for authoritative reset/import
   boundaries whose caller owns the complete collection. They are not product
   read-modify-write primitives.
-- Singleton profile, search, setup, settings, and discovery writes update only
-  their owned SQLite value. They never rebuild unrelated collections.
+- Singleton profile, search, setup, and settings writes update only their owned
+  SQLite value. Discovery keeps its small active state in a singleton and its
+  runs, activity, checkpoints, ledger, and pending jobs in rows; ordinary
+  discovery commits write changed rows atomically with saved-job deltas.
 - Employer-application capacity uses an immutable SQLite-backed start mark on
   the exact apply result before browser/session work. In-flight reservations
   are serialized in memory within the desktop singleton process; persisted

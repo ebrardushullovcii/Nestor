@@ -311,11 +311,12 @@ test("single-job and chat send handoffs stop on the same-company decision before
   const repository = createInMemoryJobFinderRepository(seed);
   for (const mode of ["autonomous_submit", "confirm_before_submit"]) {
     const input = sendInput(vi.fn(), mode, mode === "confirm_before_submit");
+    const original = input.ctx.repository;
     input.ctx.repository = {
       ...repository,
-      getSettings: input.ctx.repository.getSettings,
+      getSettings: original.getSettings.bind(original),
       listApplicationAuthorityEnvelopes:
-        input.ctx.repository.listApplicationAuthorityEnvelopes,
+        original.listApplicationAuthorityEnvelopes.bind(original),
     };
     submitPreparedApplication.mockClear();
     const result = await sendPreparedApplicationIfAllowed(input);
@@ -358,11 +359,12 @@ test("checks a pair decision again at the final-action veto after revocation", a
   ];
   await repository.saveIntelligenceState(state);
   const input = sendInput(vi.fn());
+  const original = input.ctx.repository;
   input.ctx.repository = {
     ...repository,
-    getSettings: input.ctx.repository.getSettings,
+    getSettings: original.getSettings.bind(original),
     listApplicationAuthorityEnvelopes:
-      input.ctx.repository.listApplicationAuthorityEnvelopes,
+      original.listApplicationAuthorityEnvelopes.bind(original),
   };
   const execute = vi.fn<
     NonNullable<typeof input.ctx.browserRuntime.executeExactlyOneFinalAction>
@@ -402,21 +404,25 @@ test("checks a pair decision again at the final-action veto after revocation", a
 
 test("refuses to send when a newer approved letter differs from the prepared form", async () => {
   const input = sendInput(vi.fn());
+  const finalAction = vi.fn();
+  input.ctx.browserRuntime.executeExactlyOneFinalAction = finalAction;
   input.ctx.documentManager = {
-    getApprovedApplicationLetter: vi.fn(async () => ({
-      content: "Approved revision two",
-    })),
+    getApprovedApplicationLetter: vi.fn(() =>
+      Promise.resolve({
+        content: "Approved revision two",
+      }),
+    ),
   } as unknown as NonNullable<typeof input.ctx.documentManager>;
-  input.ctx.repository.listApplyJobResults = vi.fn(async () => [
-    { id: "result_1", reviewCard: { letter: { text: "Earlier revision" } } },
-  ]) as unknown as typeof input.ctx.repository.listApplyJobResults;
+  input.ctx.repository.listApplyJobResults = vi.fn(() =>
+    Promise.resolve([
+      { id: "result_1", reviewCard: { letter: { text: "Earlier revision" } } },
+    ]),
+  ) as unknown as typeof input.ctx.repository.listApplyJobResults;
   const result = await sendPreparedApplicationIfAllowed(input);
   expect(result).toMatchObject({
     sent: false,
     nextActionLabel: "Prepare again",
   });
   expect(result?.detail).toContain("form still holds the earlier letter");
-  expect(
-    input.ctx.browserRuntime.executeExactlyOneFinalAction,
-  ).not.toHaveBeenCalled();
+  expect(finalAction).not.toHaveBeenCalled();
 });

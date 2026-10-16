@@ -163,6 +163,8 @@ function renderDetail(
     onSetPreference?: ReturnType<typeof vi.fn>;
     onOpenJob?: ReturnType<typeof vi.fn>;
     onOpenApplication?: ReturnType<typeof vi.fn>;
+    selectedJobId?: string;
+    selectedApplicationRecordId?: string;
   } = {},
 ) {
   const company = overrides.company ?? makeCompany();
@@ -189,6 +191,12 @@ function renderDetail(
       onOpenJob={onOpenJob}
       onReviewCompanyMerge={onReviewMerge}
       onSetCompanyPreference={onSetPreference}
+      {...(overrides.selectedJobId
+        ? { selectedJobId: overrides.selectedJobId }
+        : {})}
+      {...(overrides.selectedApplicationRecordId
+        ? { selectedApplicationRecordId: overrides.selectedApplicationRecordId }
+        : {})}
     />,
   );
   return {
@@ -203,6 +211,293 @@ function renderDetail(
 }
 
 describe("CompanyDetailScreen", () => {
+  it("opens the selected late opening and application on their own pages", () => {
+    const jobs = Array.from({ length: 123 }, (_, index) =>
+      makeJob(`job_${String(index).padStart(3, "0")}`, {
+        title: `Role ${index}`,
+      }),
+    );
+    const records = jobs.map((job, index) =>
+      makeRecord(`app_${String(index).padStart(3, "0")}`, {
+        jobId: job.id,
+        title: `Application ${index}`,
+      }),
+    );
+    const { onOpenJob, onOpenApplication } = renderDetail({
+      company: makeCompany({
+        jobIds: jobs.map((job) => job.id),
+        applicationRecordIds: records.map((record) => record.id),
+      }),
+      discoveryJobs: jobs,
+      applicationRecords: records,
+      selectedJobId: "job_122",
+      selectedApplicationRecordId: "app_122",
+    });
+    const openings = screen.getByRole("list", {
+      name: "openings needing verification",
+    });
+    const applications = screen.getByRole("list", {
+      name: "company applications",
+    });
+    expect(openings.querySelectorAll("li")).toHaveLength(23);
+    expect(applications.querySelectorAll("li")).toHaveLength(23);
+    const job = within(openings).getByText("Role 122").closest("li")!;
+    fireEvent.click(within(job).getByRole("button"));
+    expect(onOpenJob).toHaveBeenCalledWith("job_122");
+    const record = within(applications)
+      .getByText("Application 122")
+      .closest("li")!;
+    fireEvent.click(within(record).getByRole("button"));
+    expect(onOpenApplication).toHaveBeenCalledWith("app_122");
+    expect(screen.getAllByText("Page 3 of 3")).toHaveLength(2);
+  });
+
+  it("keeps every evidence job reachable and preserves the selected job and unfinished note while paging", () => {
+    const jobs = Array.from({ length: 123 }, (_, index) =>
+      makeJob(`job_${index}`, { title: `Role ${index}` }),
+    );
+    renderDetail({
+      company: makeCompany({ jobIds: jobs.map((job) => job.id) }),
+      discoveryJobs: jobs,
+    });
+    fireEvent.change(screen.getByLabelText("New note"), {
+      target: { value: "Unfinished note" },
+    });
+    const select = screen.getByLabelText<HTMLSelectElement>("Evidence job");
+    fireEvent.change(select, { target: { value: "job_1" } });
+    const pagination = screen.getByRole("navigation", {
+      name: "evidence jobs pagination",
+    });
+    const seen = new Set<string>();
+    for (;;) {
+      optionValues(select)
+        .filter(Boolean)
+        .forEach((id) => seen.add(id));
+      expect(select.options.length).toBeLessThanOrEqual(51);
+      expect(select.value).toBe("job_1");
+      const next = within(pagination).getByRole<HTMLButtonElement>("button", {
+        name: "Next page",
+      });
+      if (next.disabled) break;
+      fireEvent.click(next);
+    }
+    expect(seen.size).toBe(jobs.length);
+    expect(seen.has("job_99")).toBe(true);
+    expect(screen.getByLabelText<HTMLInputElement>("New note").value).toBe(
+      "Unfinished note",
+    );
+    expect(
+      within(pagination).getByRole("button", { name: "Previous page" }),
+    ).toHaveProperty("disabled", false);
+  });
+
+  it("bounds company contacts and notes while preserving a contact draft", () => {
+    const contacts = Array.from({ length: 123 }, (_, index) => ({
+      id: `contact_${index}`,
+      name: `Person ${index}`,
+      role: null,
+      email: null,
+      phone: null,
+      notes: null,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    const notes = contacts.map((contact, index) => ({
+      id: `note_${index}`,
+      body: `Note ${index}`,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    renderDetail({ company: makeCompany({ contacts, notes }) });
+    expect(
+      screen.getByRole("list", { name: "contacts" }).querySelectorAll("li"),
+    ).toHaveLength(50);
+    expect(
+      screen.getByRole("list", { name: "notes" }).querySelectorAll("li"),
+    ).toHaveLength(50);
+    const first = within(screen.getByRole("list", { name: "contacts" }))
+      .getByText("Person 0")
+      .closest("li")!;
+    fireEvent.click(within(first).getByRole("button", { name: "Edit" }));
+    const name = screen.getByLabelText<HTMLInputElement>("Name");
+    fireEvent.change(name, { target: { value: "Unfinished edit" } });
+    fireEvent.click(
+      within(
+        screen.getByRole("navigation", { name: "contacts pagination" }),
+      ).getByRole("button", { name: "Next page" }),
+    );
+    expect(name.value).toBe("Unfinished edit");
+    expect(screen.getByRole("button", { name: "Save contact" })).toBeTruthy();
+  });
+
+  it("bounds duplicate jobs, source history, merge reviews and salary evidence independently", () => {
+    const jobs = Array.from({ length: 246 }, (_, index) =>
+      makeJob(`duplicate_${index}`, {
+        title: `Role ${index}`,
+        canonicalUrl: `https://jobs.example.com/pair_${Math.floor(index / 2)}`,
+      }),
+    );
+    const company = makeCompany({
+      jobIds: jobs.map((job) => job.id),
+      sourceHistory: Array.from({ length: 123 }, (_, index) => ({
+        id: `source_${index}`,
+        sourceId: `Source ${index}`,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        applicationRecordIds: [],
+      })),
+      mergeReviewCandidates: Array.from({ length: 123 }, (_, index) => ({
+        candidateCompanyId: `company_candidate_${index}`,
+        reason: `Review candidate ${index}`,
+        decision: "pending",
+        decidedAt: null,
+        requiresUserDecision: true,
+      })),
+      salaryOfferEvidence: Array.from({ length: 123 }, (_, index) => ({
+        id: `evidence_${index}`,
+        kind: "note",
+        summary: `Evidence ${index}`,
+        currency: null,
+        minimum: null,
+        maximum: null,
+        period: null,
+        offerStatus: null,
+        jobId: null,
+        applicationRecordId: null,
+        source: "manual",
+        recordedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })),
+    });
+    renderDetail({ company, discoveryJobs: jobs });
+    for (const label of [
+      "duplicate jobs",
+      "source history",
+      "duplicate employers",
+      "salary / offer evidence",
+    ]) {
+      const list = screen.getByRole("list", { name: label });
+      expect(list.children).toHaveLength(50);
+      const pagination = screen.getByRole("navigation", {
+        name: `${label} pagination`,
+      });
+      fireEvent.click(
+        within(pagination).getByRole("button", { name: "Next page" }),
+      );
+      fireEvent.click(
+        within(pagination).getByRole("button", { name: "Next page" }),
+      );
+      expect(list.children).toHaveLength(23);
+      expect(within(pagination).getByText("Page 3 of 3")).toBeTruthy();
+    }
+    expect(screen.getByText("Evidence 122", { exact: false })).toBeTruthy();
+    expect(screen.getByText("Review candidate 122")).toBeTruthy();
+    expect(screen.getByText("Source 122")).toBeTruthy();
+  });
+
+  it("keeps every evidence application reachable while the chosen record stays selected", () => {
+    const records = Array.from({ length: 123 }, (_, index) =>
+      makeRecord(`app_${index}`, { title: `Application ${index}` }),
+    );
+    renderDetail({
+      company: makeCompany({
+        applicationRecordIds: records.map((record) => record.id),
+      }),
+      applicationRecords: records,
+    });
+    fireEvent.change(screen.getByLabelText("Evidence job"), {
+      target: { value: "job_1" },
+    });
+    const select = screen.getByLabelText<HTMLSelectElement>(
+      "Evidence application record",
+    );
+    fireEvent.change(select, { target: { value: "app_1" } });
+    const navigation = screen.getByRole("navigation", {
+      name: "evidence application records pagination",
+    });
+    const seen = new Set<string>();
+    for (;;) {
+      optionValues(select)
+        .filter(Boolean)
+        .forEach((id) => seen.add(id));
+      expect(select.value).toBe("app_1");
+      expect(select.options.length).toBeLessThanOrEqual(51);
+      const next = within(navigation).getByRole<HTMLButtonElement>("button", {
+        name: "Next page",
+      });
+      if (next.disabled) break;
+      fireEvent.click(next);
+    }
+    expect(seen.size).toBe(records.length);
+    expect(seen.has("app_99")).toBe(true);
+  });
+
+  it.each([3000, 10000])(
+    "bounds %i company openings and applications",
+    (count) => {
+      const jobs = Array.from({ length: count }, (_, index) =>
+        makeJob(`job_${String(index).padStart(5, "0")}`, {
+          title: `Scale role ${index}`,
+          listingActivity:
+            index % 3 === 0
+              ? { status: "active", observedAt: now, evidence: "last_seen_at" }
+              : index % 3 === 1
+                ? { status: "unknown" }
+                : {
+                    status: "closed",
+                    observedAt: now,
+                    detail: null,
+                    confidence: 1,
+                    provenance: "provider",
+                    explanation: "The provider reported it closed.",
+                    signalId: `closed_${index}`,
+                  },
+        }),
+      );
+      const records = jobs.map((job, index) =>
+        makeRecord(`app_${String(index).padStart(5, "0")}`, {
+          jobId: job.id,
+          title: job.title,
+        }),
+      );
+      const { container } = renderDetail({
+        company: makeCompany({
+          jobIds: jobs.map((job) => job.id),
+          applicationRecordIds: records.map((record) => record.id),
+        }),
+        discoveryJobs: jobs,
+        applicationRecords: records,
+      });
+      const mounted = container.querySelectorAll("li").length;
+      for (const label of [
+        "last seen available openings",
+        "openings needing verification",
+        "reported closed openings",
+        "company applications",
+      ]) {
+        expect(
+          container.querySelector(`ul[aria-label="${label}"]`)?.children.length,
+        ).toBe(50);
+      }
+      const options = container
+        .querySelector('select[aria-label="Evidence job"]')
+        ?.querySelectorAll("option").length;
+      console.info(
+        JSON.stringify({
+          probe: "company details",
+          count,
+          mounted,
+          options,
+          nodes: container.querySelectorAll("*").length,
+        }),
+      );
+      expect(mounted).toBeLessThanOrEqual(200);
+      expect(options).toBeLessThanOrEqual(51);
+    },
+    60000,
+  );
+
   it("aggregates current openings, application history, and links to each record", () => {
     const { onOpenJob, onOpenApplication } = renderDetail();
 
@@ -811,9 +1106,9 @@ describe("CompanyDetailScreen", () => {
       discoveryJobs: [makeJob("job_new_name", { company: "New Name" })],
     });
 
-    expect(
-      optionValues(screen.getByLabelText("Evidence job")),
-    ).not.toContain("job_new_name");
+    expect(optionValues(screen.getByLabelText("Evidence job"))).not.toContain(
+      "job_new_name",
+    );
   });
 
   it("uses service-parity C++ and C# identity normalization for evidence candidates", () => {
@@ -864,9 +1159,9 @@ describe("CompanyDetailScreen", () => {
       ],
     });
 
-    expect(
-      optionValues(screen.getByLabelText("Evidence job")),
-    ).not.toContain("job_conflict");
+    expect(optionValues(screen.getByLabelText("Evidence job"))).not.toContain(
+      "job_conflict",
+    );
   });
 
   it("keeps a unique name match when its unique domain resolves to the same company", () => {

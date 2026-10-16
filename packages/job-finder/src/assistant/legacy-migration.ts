@@ -6,6 +6,7 @@ import type {
   ResumeAssistantMessage,
 } from "@nordri/contracts";
 import type { AssistantRepository } from "@nordri/db";
+import { setImmediate } from "node:timers/promises";
 
 /**
  * The two retired chats become archived conversations (plan §8).
@@ -19,6 +20,24 @@ import type { AssistantRepository } from "@nordri/db";
 export const PROFILE_ARCHIVE_CONVERSATION_ID = "assistant_archive_profile";
 export const resumeArchiveConversationId = (jobId: string) =>
   `assistant_archive_resume_${jobId}`;
+
+/** Async SQLite methods still run synchronously; let the host process events. */
+export function createLegacyMigrationCheckpoint(
+  shouldStop: () => boolean = () => false,
+): () => Promise<boolean> {
+  let records = 0;
+  let yieldedAt = performance.now();
+  return async () => {
+    if (shouldStop()) return false;
+    records += 1;
+    if (records >= 25 || performance.now() - yieldedAt >= 16) {
+      await setImmediate();
+      records = 0;
+      yieldedAt = performance.now();
+    }
+    return !shouldStop();
+  };
+}
 
 function profileParts(message: ProfileCopilotMessage): AssistantMessagePart[] {
   const parts: AssistantMessagePart[] = [
@@ -106,10 +125,12 @@ async function migrateMessages(
     parts: AssistantMessagePart[];
   }[],
   source: "profile_copilot" | "resume_assistant",
+  checkpoint: () => Promise<boolean>,
 ): Promise<number> {
   let added = 0;
   let last: string | null = null;
   for (const legacy of messages) {
+    if (!(await checkpoint())) break;
     last = legacy.createdAt;
     if (await repository.findMigratedMessage(source, legacy.id)) continue;
     const message: AssistantMessage = {
@@ -130,6 +151,8 @@ async function migrateMessages(
     added += 1;
   }
   if (added > 0) {
+    // A cooperative stop finishes this small metadata write before the host
+    // closes the store. Already written messages and their markers stay durable.
     const count = await repository.countMessages(conversation.id);
     await repository.upsertConversation({
       ...conversation,
@@ -149,9 +172,12 @@ export async function migrateLegacyChats(input: {
     { jobTitle: string; messages: readonly ResumeAssistantMessage[] }
   >;
   now: string;
+  checkpoint?: () => Promise<boolean>;
 }): Promise<{ conversations: number; messages: number }> {
   let conversations = 0;
   let messages = 0;
+  const checkpoint = input.checkpoint ?? createLegacyMigrationCheckpoint();
+  if (!(await checkpoint())) return { conversations, messages };
   if (input.profileMessages.length > 0) {
     const first = input.profileMessages[0]!;
     const conversation: AssistantConversation = {
@@ -178,12 +204,14 @@ export async function migrateLegacyChats(input: {
         parts: profileParts(message),
       })),
       "profile_copilot",
+      checkpoint,
     );
     conversations += 1;
     messages += added;
   }
   for (const [jobId, entry] of input.resumeMessagesByJob) {
     if (entry.messages.length === 0) continue;
+    if (!(await checkpoint())) break;
     const conversation: AssistantConversation = {
       id: resumeArchiveConversationId(jobId),
       title: `Resume chat: ${entry.jobTitle}`.slice(0, 160),
@@ -208,6 +236,7 @@ export async function migrateLegacyChats(input: {
         parts: resumeParts(message),
       })),
       "resume_assistant",
+      checkpoint,
     );
     conversations += 1;
     messages += added;

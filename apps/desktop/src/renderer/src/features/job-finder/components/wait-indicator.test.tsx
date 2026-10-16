@@ -298,10 +298,9 @@ describe("lazy-route fallback", () => {
       },
     ];
 
+    // The three list-and-details routes share one column split.
     for (const route of twoPaneRoutes) {
-      expect(readSource(route.source)).toMatch(
-        /xl:grid-cols-\[minmax\([^\]]*_minmax\([^\]]*\]/,
-      );
+      expect(readSource(route.source)).toContain("LIST_DETAIL_COLUMNS_CLASS");
       expect(getRouteSkeletonPanes(route.path)).toBe(2);
     }
 

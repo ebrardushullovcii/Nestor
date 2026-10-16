@@ -2524,9 +2524,9 @@ test("the final form read preserves a person's edited answer and newly filled po
   });
   const input = config(source);
   input.hands.scroll = () => {
-    source.controls[0]!.value =
+    source.controls[0].value =
       "Je souhaite contribuer à cette équipe avec mon expérience.";
-    source.controls[1]!.value = "https://synthetic.example/portfolio";
+    source.controls[1].value = "https://synthetic.example/portfolio";
     return Promise.resolve({ ok: true, observedValue: "down" });
   };
   const result = await runApplyAgent(
@@ -2540,7 +2540,7 @@ test("the final form read preserves a person's edited answer and newly filled po
   expect(
     result.reviewFilled?.find((entry) => entry.label === "Motivation")?.answer
       .value,
-  ).toBe(source.controls[0]!.value);
+  ).toBe(source.controls[0].value);
   expect(
     result.reviewFilled?.find((entry) => entry.label === "Portfolio")?.answer
       .value,
@@ -2612,7 +2612,7 @@ test("a required letter pause collects the other visible questions and explains 
       language: null,
       sample: null,
     },
-    provide: async () => ({ ok: false, reason: "Disabled" }),
+    provide: () => Promise.resolve({ ok: false, reason: "Disabled" }),
   };
   const result = await runApplyAgent(
     input,
@@ -2659,7 +2659,7 @@ test("finish accepts the unchanged TXT copy of the selected Markdown resume", as
       label: "Original resume",
       fileName: "resume.md",
       mimeType: "text/markdown",
-      loadBytes: async () => new Uint8Array([1]),
+      loadBytes: () => Promise.resolve(new Uint8Array([1])),
     },
   ];
   const result = await runApplyAgent(
@@ -4288,8 +4288,8 @@ test("renumbered handles keep current answers and two equal-worded questions dis
     source.controls.forEach((control, index) => {
       control.index = index + 10;
     });
-    source.controls[0]!.value = "new@example.test";
-    source.controls[2]!.value = "Changed second role";
+    source.controls[0].value = "new@example.test";
+    source.controls[2].value = "Changed second role";
     return Promise.resolve({ ok: true, observedValue: "down" });
   };
   const result = await runApplyAgent(
@@ -4693,7 +4693,7 @@ test("an explicit stored-fact reference with a changed value still gets checked"
   let checkCalls = 0;
   let turns = 0;
   const result = await runApplyAgent(input, {
-    chatWithTools: async (_messages, definitions) => {
+    chatWithTools: (_messages, definitions) => {
       const checking = definitions[0]?.function.name === "report_answer_checks";
       if (checking) checkCalls += 1;
       else turns += 1;
@@ -4724,7 +4724,7 @@ test("an explicit stored-fact reference with a changed value still gets checked"
               ],
             }
           : { reason: "Confirm your name.", needsPerson: true };
-      return {
+      return Promise.resolve({
         toolCalls: [
           {
             id: `call-${turns}-${checkCalls}`,
@@ -4732,7 +4732,7 @@ test("an explicit stored-fact reference with a changed value still gets checked"
             function: { name, arguments: JSON.stringify(args) },
           },
         ],
-      };
+      });
     },
   });
   expect(checkCalls).toBe(1);
@@ -4749,10 +4749,10 @@ test("the same question and value are checked only once across batch and single-
   let checkCalls = 0;
   let turns = 0;
   await runApplyAgent(input, {
-    chatWithTools: async (_messages, definitions) => {
+    chatWithTools: (_messages, definitions) => {
       if (definitions[0]?.function.name === "report_answer_checks") {
         checkCalls += 1;
-        return {
+        return Promise.resolve({
           toolCalls: [
             {
               id: "check",
@@ -4771,7 +4771,7 @@ test("the same question and value are checked only once across batch and single-
               },
             },
           ],
-        };
+        });
       }
       turns += 1;
       const name =
@@ -4781,7 +4781,7 @@ test("the same question and value are checked only once across batch and single-
         ref: "c0",
         text: "I have led space missions.",
       };
-      return {
+      return Promise.resolve({
         toolCalls: [
           {
             id: `turn-${turns}`,
@@ -4798,7 +4798,7 @@ test("the same question and value are checked only once across batch and single-
             },
           },
         ],
-      };
+      });
     },
   });
   expect(checkCalls).toBe(1);
@@ -4824,10 +4824,10 @@ test("an eligibility check is not reused for a different application page", asyn
   let checks = 0;
   let turns = 0;
   await runApplyAgent(input, {
-    chatWithTools: async (_messages, definitions) => {
+    chatWithTools: (_messages, definitions) => {
       if (definitions[0]?.function.name === "report_answer_checks") {
         checks += 1;
-        return {
+        return Promise.resolve({
           toolCalls: [
             {
               id: `check-${checks}`,
@@ -4846,7 +4846,7 @@ test("an eligibility check is not reused for a different application page", asyn
               },
             },
           ],
-        };
+        });
       }
       turns += 1;
       const name =
@@ -4869,7 +4869,7 @@ test("an eligibility check is not reused for a different application page", asyn
             : turns === 3
               ? field
               : { reason: "Confirm the hiring country.", needsPerson: true };
-      return {
+      return Promise.resolve({
         toolCalls: [
           {
             id: `turn-${turns}`,
@@ -4877,7 +4877,7 @@ test("an eligibility check is not reused for a different application page", asyn
             function: { name, arguments: JSON.stringify(args) },
           },
         ],
-      };
+      });
     },
   });
   expect(checks).toBe(2);

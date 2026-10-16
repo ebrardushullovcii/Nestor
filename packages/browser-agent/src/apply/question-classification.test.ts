@@ -222,7 +222,7 @@ test("reads only the new question when a conditional field appears and keeps ear
   const first = controls();
   await classify(first, "step1");
   const extra = {
-    ...controls("Why this role?", [])[0]!,
+    ...controls("Why this role?", [])[0],
     ref: "conditional",
     kind: "long_text" as const,
   };
@@ -246,7 +246,7 @@ test("reads only the new question when a conditional field appears and keeps ear
   expect(result.get("Pay")?.asksAboutPay).toBe(true);
   expect(result.get("Why this role?")?.asksAboutPay).toBe(false);
   const data = JSON.parse(
-    String(vi.mocked(client.chatWithTools).mock.calls[1]![0][1]!.content),
+    String(vi.mocked(client.chatWithTools).mock.calls[1][0][1].content),
   ) as Array<{ question: string }>;
   expect(data.map((entry) => entry.question)).toEqual(["Why this role?"]);
   await classify(first, "step1");

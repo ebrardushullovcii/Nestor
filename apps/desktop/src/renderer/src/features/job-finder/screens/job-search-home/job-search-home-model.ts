@@ -2,7 +2,7 @@ import type {
   ApplicationAutomationMode,
   DiscoveryRunRecord,
   JobFinderSearchRequest,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ReviewQueueItem,
   ProfileSetupStep,
 } from "@nordri/contracts";
@@ -165,7 +165,7 @@ interface JobSearchHomeModel {
 }
 
 export interface BuildJobSearchHomeModelInput {
-  workspace: JobFinderWorkspaceSnapshot;
+  workspace: JobFinderRendererWorkspaceSnapshot;
   tasks: JobFinderTaskCenterModel;
   tailoredDraftPreparation?: TailoredDraftPreparationViewState | null | undefined;
   /** A search request is in flight but the run has not been recorded yet. */
@@ -195,7 +195,7 @@ function joinParts(parts: readonly (string | null)[]): string | null {
 }
 
 function newestDiscoveryRun(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
 ): DiscoveryRunRecord | null {
   let newest: DiscoveryRunRecord | null = null;
   for (const run of workspace.recentDiscoveryRuns ?? []) {
@@ -212,7 +212,7 @@ function newestDiscoveryRun(
  * `null` means it was, but none of its sources is still enabled.
  */
 export function buildInterruptedSearchRetryRequest(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
 ): JobFinderSearchRequest | null | undefined {
   const run = newestDiscoveryRun(workspace);
   // A graceful app close cancels the live run before shutdown, so older and
@@ -447,7 +447,7 @@ interface ApplicationCounts {
 }
 
 function countApplications(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
   jobIds: ReadonlySet<string>,
   /** Jobs whose resume the person must approve first; a batch refuses them. */
   resumeReviewJobIds: ReadonlySet<string>,
@@ -489,7 +489,7 @@ function countApplications(
   const readApplyRunContext = buildApplyRunContextReader(workspace);
   const latestResultByRecordId = new Map<
     string,
-    JobFinderWorkspaceSnapshot["applyJobResults"][number]
+    JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
   >();
   for (const result of workspace.applyJobResults ?? []) {
     if (!result.applicationRecordId) continue;
@@ -641,7 +641,7 @@ interface ShortlistCounts {
 
 function countShortlist(
   queue: readonly ReviewQueueItem[],
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
 ): ShortlistCounts {
   const prepared = collectPreparedApplicationJobIds(
     workspace.applicationRecords,

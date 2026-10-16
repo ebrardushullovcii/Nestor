@@ -12,7 +12,7 @@ import type {
   RapidReviewDecisionLog,
   RapidReviewDecisionKind,
   RapidReviewMutationInput,
-  SavedJob,
+  JobListRow,
 } from "@nordri/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { Link } from "react-router-dom";
@@ -109,7 +109,7 @@ export function RapidReviewScreen(props: {
   campaignId: string;
   campaignName: string;
   error?: string | null;
-  jobs: readonly SavedJob[];
+  jobs: readonly JobListRow[];
   log: RapidReviewDecisionLog | null;
   onInspectJob: (jobId: string) => void;
   onMutate: (input: RapidReviewMutationInput) => Promise<unknown>;

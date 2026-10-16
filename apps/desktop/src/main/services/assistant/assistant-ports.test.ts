@@ -56,17 +56,25 @@ vi.mock("./assistant-browser-port", () => ({
   createAssistantBrowserPort: vi.fn(),
 }));
 
-import { ResumeExportArtifactSummarySchema } from "@nordri/contracts";
+import {
+  DiscoveryRunRecordSchema,
+  ResumeExportArtifactSummarySchema,
+} from "@nordri/contracts";
 import type { JobFinderWorkspaceService } from "@nordri/job-finder";
+import { getJobFinderRepositoryForWorkspaceService } from "../job-finder/create-workspace-service";
+import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
+import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { createAssistantHostPorts } from "./assistant-ports";
 
 let directory: string | null = null;
 afterEach(async () => {
   if (directory) await rm(directory, { recursive: true, force: true });
   directory = null;
+  vi.useRealTimers();
   vi.clearAllMocks();
+  vi.mocked(getJobFinderRepositoryForWorkspaceService).mockReturnValue(null);
 });
 
 async function approvedResume() {
@@ -106,25 +114,31 @@ async function approvedResume() {
     },
   ];
   const getResumeWorkspace = vi.fn(() => Promise.resolve({ draft, exports }));
-  const service = {
-    getWorkspaceSnapshot: () =>
-      Promise.resolve({
-        profile: { baseResume: {} },
-        resumeDrafts: [draft],
-        resumeExportArtifacts: exports,
-        reviewQueue: [
-          {
-            jobId: "job_1",
-            title: "Engineer",
-            company: "Cedar",
-            resumeReview: {
-              status: "approved",
-              approvedAt,
-              approvedFilePath: filePath,
-            },
+  const getWorkspaceSnapshot = vi.fn(() => {
+    throw new Error("Canonical reads are forbidden for assistant documents");
+  });
+  const getWorkspaceProjection = vi.fn(() =>
+    Promise.resolve({
+      profile: { baseResume: {} },
+      resumeDrafts: [draft],
+      resumeExportArtifacts: exports,
+      reviewQueue: [
+        {
+          jobId: "job_1",
+          title: "Engineer",
+          company: "Cedar",
+          resumeReview: {
+            status: "approved",
+            approvedAt,
+            approvedFilePath: filePath,
           },
-        ],
-      }),
+        },
+      ],
+    }),
+  );
+  const service = {
+    getWorkspaceSnapshot,
+    getWorkspaceProjection,
     getResumeWorkspace,
   } as unknown as JobFinderWorkspaceService;
   vi.mocked(getJobFinderWorkspaceService).mockResolvedValue(service);
@@ -135,6 +149,8 @@ async function approvedResume() {
     sha256,
     exported,
     getResumeWorkspace,
+    getWorkspaceSnapshot,
+    getWorkspaceProjection,
   };
 }
 
@@ -151,7 +167,8 @@ describe("assistant approved resume files", () => {
     // Shared synthetic bytes keep this a metadata/lookup test, without
     // creating a thousand files or hiding unselected reads behind failures.
     const service = {
-      getWorkspaceSnapshot: () =>
+      getWorkspaceSnapshot: fixture.getWorkspaceSnapshot,
+      getWorkspaceProjection: () =>
         Promise.resolve({
           profile: {
             baseResume: {
@@ -187,7 +204,8 @@ describe("assistant approved resume files", () => {
   }
 
   it("lists 1,000 approved resumes using metadata without reading file contents", async () => {
-    const { ports, sha256, bytes } = await thousandApprovedResumes();
+    const { ports, sha256, bytes, getWorkspaceSnapshot } =
+      await thousandApprovedResumes();
     const documents = await ports.listDocuments();
     expect(documents).toHaveLength(1_001);
     expect(documents[0]).toMatchObject({
@@ -201,6 +219,7 @@ describe("assistant approved resume files", () => {
       sha256,
     });
     expect(readFile).not.toHaveBeenCalled();
+    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
   });
 
   it.each(["original_resume", "approved_resume_job_999"])(
@@ -244,6 +263,152 @@ describe("assistant approved resume files", () => {
     await expect(
       ports.loadDocumentFile("approved_resume_job_1"),
     ).rejects.toThrow();
+  });
+});
+
+describe("assistant interactive workspace reads", () => {
+  it("polls search startup through the projection and forwards the same search request", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-13T12:00:00.000Z"));
+    const run = DiscoveryRunRecordSchema.parse({
+      id: "search-new",
+      state: "running",
+      startedAt: new Date().toISOString(),
+    });
+    const idle = { activeDiscoveryRun: null, recentDiscoveryRuns: [] };
+    const running = { activeDiscoveryRun: run, recentDiscoveryRuns: [] };
+    const getWorkspaceSnapshot = vi.fn(() => {
+      throw new Error(
+        "Canonical reads are forbidden while polling search startup",
+      );
+    });
+    const getWorkspaceProjection = vi
+      .fn()
+      .mockResolvedValueOnce(idle)
+      .mockResolvedValueOnce(idle)
+      .mockResolvedValueOnce(idle)
+      .mockResolvedValue(running);
+    let finish!: () => void;
+    const runAgentDiscovery = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
+      getWorkspaceSnapshot,
+      getWorkspaceProjection,
+      runAgentDiscovery,
+    } as unknown as JobFinderWorkspaceService);
+    const searchRequest = {
+      intent: "Software engineering",
+      breadth: "wide" as const,
+      freshness: "recent" as const,
+      sourceIds: ["synthetic-source"],
+    };
+    const ports = createAssistantHostPorts({ browserHost: "external" });
+    const started = ports.startSearch({
+      searchRequest,
+      targetId: "synthetic-source",
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    await expect(started).resolves.toEqual({
+      runId: run.id,
+      message: "The search started.",
+    });
+    expect(getWorkspaceProjection).toHaveBeenCalledTimes(4);
+    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(runAgentDiscovery).toHaveBeenCalledWith(
+      expect.any(Function),
+      undefined,
+      "synthetic-source",
+      searchRequest,
+    );
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+  it("reports an already running search without starting another run", async () => {
+    const run = DiscoveryRunRecordSchema.parse({
+      id: "existing-search",
+      state: "running",
+      startedAt: "2026-10-13T12:00:00.000Z",
+    });
+    const getWorkspaceSnapshot = vi.fn();
+    const runAgentDiscovery = vi.fn();
+    vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
+      getWorkspaceSnapshot,
+      getWorkspaceProjection: vi
+        .fn()
+        .mockResolvedValue({ activeDiscoveryRun: run }),
+      runAgentDiscovery,
+    } as unknown as JobFinderWorkspaceService);
+    const ports = createAssistantHostPorts({ browserHost: "external" });
+    await expect(
+      ports.startSearch({
+        targetId: null,
+        searchRequest: {
+          intent: "Engineering",
+          breadth: "wide",
+          freshness: "recent",
+          sourceIds: [],
+        },
+      }),
+    ).resolves.toEqual({
+      runId: run.id,
+      message: "A search is already running.",
+    });
+    expect(runAgentDiscovery).not.toHaveBeenCalled();
+    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("reads the original resume text from the stored profile without projecting the workspace", async () => {
+    const profile = createEmptyJobFinderRepositoryState().profile;
+    profile.baseResume.textContent = "Synthetic original resume text.";
+    const getProfile = vi.fn().mockResolvedValue(profile);
+    vi.mocked(getJobFinderRepositoryForWorkspaceService).mockReturnValue({
+      getProfile,
+    } as unknown as NonNullable<
+      ReturnType<typeof getJobFinderRepositoryForWorkspaceService>
+    >);
+    const getWorkspaceSnapshot = vi.fn();
+    const getWorkspaceProjection = vi.fn();
+    vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
+      getWorkspaceSnapshot,
+      getWorkspaceProjection,
+    } as unknown as JobFinderWorkspaceService);
+    const ports = createAssistantHostPorts({ browserHost: "external" });
+    await expect(ports.readDocumentText("original_resume")).resolves.toBe(
+      profile.baseResume.textContent,
+    );
+    expect(getProfile).toHaveBeenCalledTimes(1);
+    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(getWorkspaceProjection).not.toHaveBeenCalled();
+  });
+
+  it("gives the browser lease the full main projection rather than a renderer row or canonical snapshot", async () => {
+    const view = {
+      applyJobResults: [
+        {
+          id: "prepared-result",
+          applicationRecordId: "application",
+          state: "awaiting_review",
+        },
+      ],
+    };
+    const getWorkspaceProjection = vi.fn().mockResolvedValue(view);
+    const getWorkspaceSnapshot = vi.fn();
+    vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
+      getWorkspaceSnapshot,
+      getWorkspaceProjection,
+    } as unknown as JobFinderWorkspaceService);
+    createAssistantHostPorts({ browserHost: "embedded" });
+    const readWorkspace = vi
+      .mocked(createAssistantBrowserPort)
+      .mock.calls.at(-1)![1];
+    await expect(readWorkspace()).resolves.toBe(view);
+    expect(getWorkspaceProjection).toHaveBeenCalledTimes(1);
+    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
   });
 });
 

@@ -11,6 +11,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useTransition,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -24,6 +25,7 @@ import {
   House,
   Keyboard,
   Layers3,
+  LoaderCircle,
   Minus,
   Search,
   Settings,
@@ -37,7 +39,7 @@ import type {
   DesktopWindowControlsState,
   DiscoveryActivityEvent,
   GroupedManualAnswerDecision,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ResumeImportProgressEvent,
   SuiteModule,
 } from "@nordri/contracts";
@@ -121,7 +123,7 @@ interface JobFinderShellProps {
   resumeImportProgress?: ResumeImportProgressEvent | null;
   saveState?: JobFinderSaveState;
   tailoredDraftPreparation?: TailoredDraftPreparationViewState | null;
-  workspace: JobFinderWorkspaceSnapshot;
+  workspace: JobFinderRendererWorkspaceSnapshot;
 }
 
 const screenRouteMap: Record<
@@ -164,7 +166,9 @@ const screenLabelMap: Record<JobFinderScreen, string> = {
  * so existing callers and tests read the same helper.
  */
 export function countUnresolvedUserActions(
-  requests: JobFinderWorkspaceSnapshot["userActionRequests"] | undefined,
+  requests:
+    | JobFinderRendererWorkspaceSnapshot["userActionRequests"]
+    | undefined,
   groupedDecisions?: readonly GroupedManualAnswerDecision[],
 ): number {
   return countNeedsYouItems({ groupedDecisions, requests });
@@ -352,13 +356,13 @@ export const SHELL_ROOT_CLASS =
 export const SHELL_CONTENT_CLASS =
   "flex min-h-0 min-w-0 flex-1 flex-col sm:pt-[7.25rem] min-[1440px]:!pt-14 min-[1440px]:pl-(--job-finder-side-width)";
 export const SHELL_MAIN_SCROLLING_CLASS = cn(
-  "min-h-0 min-w-0 flex-1 overflow-x-hidden outline-none",
+  "relative min-h-0 min-w-0 flex-1 overflow-x-hidden outline-none",
   "screen-scroll-area overflow-y-auto px-3 min-[1440px]:px-4",
   SHELL_SCROLLING_ROUTE_TOP_GUTTER_CLASS,
   SHELL_SCROLLING_ROUTE_BOTTOM_GUTTER_CLASS,
 );
 export const SHELL_MAIN_LOCKED_CLASS = cn(
-  "min-h-0 min-w-0 flex-1 overflow-x-hidden outline-none",
+  "relative min-h-0 min-w-0 flex-1 overflow-x-hidden outline-none",
   // Important for the same reason the header reserves above: `sm:px-3` still
   // matches at >=1440px and Tailwind v4 emits it after every arbitrary
   // variant, so a plain `min-[1440px]:px-4` silently lost and the wide layout
@@ -564,6 +568,8 @@ export function JobFinderShell({
       isMinimizable: true,
     });
   const [routeAnnouncement, setRouteAnnouncement] = useState("");
+  const [isNavigationPending, startNavigationTransition] = useTransition();
+  const [openingScreenLabel, setOpeningScreenLabel] = useState("");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
     getInitialSidebarCollapsedState,
   );
@@ -1063,12 +1069,14 @@ export function JobFinderShell({
       // Navigation timing is diagnostic only and must never block routing.
     }
 
-    if (onNavigate) {
-      onNavigate(nextPath);
-      return;
-    }
-
-    void navigate(nextPath);
+    setOpeningScreenLabel(screenLabelMap[nextScreen as JobFinderScreen]);
+    startNavigationTransition(() => {
+      if (onNavigate) {
+        onNavigate(nextPath);
+      } else {
+        void navigate(nextPath);
+      }
+    });
   }
 
   // The switch's only destination: the other module. Selecting the module the
@@ -1787,7 +1795,9 @@ export function JobFinderShell({
             />
             <AssistantToggle platform={platform} />
             <BrowserPeek
-              onRecordSend={() => { void navigate("/job-finder/applications"); }}
+              onRecordSend={() => {
+                void navigate("/job-finder/applications");
+              }}
               chromeInsetStart={
                 isMac && !windowControlsState.isFullScreen
                   ? MACOS_TRAFFIC_LIGHT_INSET
@@ -1853,7 +1863,9 @@ export function JobFinderShell({
             style={{ ...noDragRegionStyle }}
           >
             {!isSidebarCollapsed ? (
-              <span className="job-finder-sidebar-heading">Your job search</span>
+              <span className="job-finder-sidebar-heading">
+                Your job search
+              </span>
             ) : null}
             <Tooltip delayDuration={0}>
               <TooltipTrigger asChild>
@@ -2035,6 +2047,7 @@ export function JobFinderShell({
         }}
       >
         <main
+          aria-busy={isNavigationPending}
           aria-label={activeScreenLabel}
           className={
             usesLockedScreenLayout
@@ -2044,6 +2057,18 @@ export function JobFinderShell({
           ref={mainRef}
           tabIndex={-1}
         >
+          {isNavigationPending ? (
+            <div
+              className="pointer-events-none absolute right-5 top-3 z-20 flex items-center gap-2 rounded-(--radius-field) border border-(--surface-panel-border) bg-(--surface-panel) px-3 py-2 text-xs text-foreground-soft"
+              role="status"
+            >
+              <LoaderCircle
+                aria-hidden="true"
+                className="size-3 motion-safe:animate-spin"
+              />
+              Opening {openingScreenLabel}…
+            </div>
+          ) : null}
           <div
             className={cn(
               SHELL_ROUTE_CONTAINER_BASE_CLASS,

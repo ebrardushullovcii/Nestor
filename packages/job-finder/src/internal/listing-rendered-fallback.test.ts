@@ -22,7 +22,10 @@ it("asks for the rendered page only when the model found no listing text in HTTP
     readRenderedPage,
   });
   expect(readRenderedPage).toHaveBeenCalledTimes(1);
-  expect(readPage.mock.calls[1]?.[0].pageText).toContain("Variable hours");
+  const secondRead = readPage.mock.calls[1]?.[0] as
+    | { pageText: string }
+    | undefined;
+  expect(secondRead?.pageText).toContain("Variable hours");
   expect(detail?.description).toContain("portfolio");
 });
 it("leaves ordinary HTTP listing reads alone", async () => {

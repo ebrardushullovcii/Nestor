@@ -2,7 +2,7 @@ import type {
   ApplyRunSummary,
   DiscoveryActivityEvent,
   DiscoveryRunRecord,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ResumeImportProgressEvent,
   ResumeImportRun,
   SourceDebugRunRecord,
@@ -72,7 +72,7 @@ export interface JobFinderTaskCenterModel {
 }
 
 export interface BuildJobFinderTaskCenterModelInput {
-  workspace: JobFinderWorkspaceSnapshot;
+  workspace: JobFinderRendererWorkspaceSnapshot;
   isDiscoveryPending: boolean;
   isResumeImportPending: boolean;
   liveDiscoveryEvents?: readonly DiscoveryActivityEvent[] | undefined;
@@ -220,7 +220,7 @@ function sameTargetCounts(
 }
 
 function targetSourceLabel(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
   targetIds: readonly string[],
 ): string {
   const targetLabels = new Map(
@@ -564,7 +564,7 @@ function applyStatus(run: ApplyRunSummary): JobFinderTaskStatus {
 }
 
 function applySourceLabel(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
   jobId: string | null,
 ): string {
   if (!jobId) {
@@ -599,7 +599,7 @@ function buildApplyTasks(
 ): JobFinderTaskCenterItem[] {
   const latestResultByRecordId = new Map<
     string,
-    JobFinderWorkspaceSnapshot["applyJobResults"][number]
+    JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
   >();
   for (const result of input.workspace.applyJobResults ?? []) {
     if (!result.applicationRecordId) continue;

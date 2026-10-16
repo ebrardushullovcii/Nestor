@@ -1,7 +1,15 @@
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import {
+  JobListRowSchema,
+  ReviewQueueItemSchema,
+  type JobFinderRendererWorkspaceSnapshot,
+} from "@nordri/contracts";
 import { describe, expect, it } from "vitest";
 import { buildJobFinderGlobalSearchEntries } from "./build-job-finder-global-search-entries";
 import { searchJobFinderEntries } from "./job-finder-global-search";
+import {
+  countDiscoveryVisibleJobs,
+  countShortlistedJobs,
+} from "./destination-counts";
 
 function buildWorkspaceFixture(activeCampaignId: string | null) {
   return {
@@ -101,7 +109,7 @@ function buildWorkspaceFixture(activeCampaignId: string | null) {
         label: "Active plan resume",
         status: "ready",
         templateName: "Modern",
-        version: 1,
+        version: "v1",
       },
       {
         id: "asset-other",
@@ -109,14 +117,78 @@ function buildWorkspaceFixture(activeCampaignId: string | null) {
         label: "Other plan resume",
         status: "ready",
         templateName: "Classic",
-        version: 1,
+        version: "v1",
       },
     ],
     activeCampaignId,
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 describe("buildJobFinderGlobalSearchEntries", () => {
+  it("keeps all 3,003 thin rows searchable while counts retain active-plan scope", () => {
+    const seed = JobListRowSchema.parse({
+      id: "job-0",
+      source: "target_site",
+      sourceJobId: "synthetic",
+      canonicalUrl: "https://example.test/synthetic",
+      title: "Engineer",
+      company: "Example",
+      location: "Remote",
+      workMode: ["remote"],
+      applyPath: "external_redirect",
+      easyApplyEligible: false,
+      salaryText: null,
+      discoveredAt: "2026-10-13T00:00:00.000Z",
+      status: "discovered",
+      matchAssessment: { score: 80 },
+      detailRevision: "synthetic-revision",
+    });
+    const jobs = Array.from({ length: 3003 }, (_, index) => ({
+      ...seed,
+      id: `job-${index}`,
+      title: `Engineer ${index}`,
+    }));
+    const workspace = {
+      ...buildWorkspaceFixture("campaign-active"),
+      discoveryJobs: jobs,
+      campaigns: buildWorkspaceFixture("campaign-active").campaigns.map(
+        (campaign, index) => ({
+          ...campaign,
+          jobIds: jobs.slice(index * 50, (index + 1) * 50).map(({ id }) => id),
+        }),
+      ),
+      reviewQueue: jobs.slice(0, 75).map((job) =>
+        ReviewQueueItemSchema.parse({
+          jobId: job.id,
+          title: job.title,
+          company: job.company,
+          location: job.location,
+          matchScore: 80,
+          applicationStatus: "shortlisted",
+          assetStatus: "not_started",
+          progressPercent: null,
+          resumeAssetId: null,
+          updatedAt: seed.discoveredAt,
+        }),
+      ),
+    };
+    const entries = buildJobFinderGlobalSearchEntries(workspace);
+    expect(entries.filter(({ kind }) => kind === "job")).toHaveLength(3003);
+    const lastJob = searchJobFinderEntries(entries, "Engineer 3002")
+      .find(({ kind }) => kind === "job")
+      ?.entries.find(({ id }) => id === "job-3002");
+    expect(lastJob?.href).toBe("/job-finder/discovery?jobId=job-3002");
+    expect(lastJob?.subtitle).toContain(
+      "Saved on this device, not in this search plan",
+    );
+    expect(countDiscoveryVisibleJobs(workspace)).toBe(50);
+    expect(countShortlistedJobs(workspace)).toBe(50);
+    const planless = { ...workspace, activeCampaignId: "missing" };
+    expect(countDiscoveryVisibleJobs(planless)).toBe(3003);
+    expect(countShortlistedJobs(planless)).toBe(75);
+    expect(jobs[3002]).not.toHaveProperty("description");
+  });
+
   it("keeps the exact job and application context in search links", () => {
     const workspace = {
       campaigns: [],
@@ -146,7 +218,7 @@ describe("buildJobFinderGlobalSearchEntries", () => {
       intelligence: { companies: [] },
       resumeExportArtifacts: [],
       tailoredAssets: [],
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
 
     const entries = buildJobFinderGlobalSearchEntries(workspace);
 
@@ -187,7 +259,7 @@ describe("buildJobFinderGlobalSearchEntries", () => {
       },
       resumeExportArtifacts: [],
       tailoredAssets: [],
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
 
     const companyIds = buildJobFinderGlobalSearchEntries(workspace)
       .filter((entry) => entry.kind === "company")

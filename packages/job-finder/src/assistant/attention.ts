@@ -16,13 +16,13 @@ export {
 import {
   isApplicationTrackedAsSentByPerson,
   isApplicationWithdrawnByPerson,
-  type JobFinderWorkspaceSnapshot,
+  type JobFinderRendererWorkspaceSnapshot,
   type GroupedManualAnswerDecision,
 } from "@nordri/contracts";
 import { projectPlanSafeguardPauses } from "../plan-safeguard-pauses";
 
 type AttentionSnapshot = Pick<
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   | "reviewQueue"
   | "applicationRecords"
   | "applyJobResults"
@@ -214,7 +214,15 @@ export function projectNeedsYou(input: {
 }
 
 export function projectWorkspaceAttention(
-  snapshot: JobFinderWorkspaceSnapshot,
+  snapshot: Pick<
+    JobFinderRendererWorkspaceSnapshot,
+    | "reviewQueue"
+    | "applicationRecords"
+    | "applyJobResults"
+    | "userActionRequests"
+    | "intelligence"
+    | "campaigns"
+  >,
 ) {
   const needsYou = projectNeedsYou({
     applicationRecords: snapshot.applicationRecords,

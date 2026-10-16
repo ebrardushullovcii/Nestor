@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   DiscoveryActivityEvent,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ResumeImportProgressEvent,
 } from "@nordri/contracts";
 import { ListChecks, X } from "lucide-react";
@@ -17,7 +17,7 @@ import {
 } from "./job-finder-task-center-model";
 
 interface JobFinderTaskCenterProps {
-  workspace: JobFinderWorkspaceSnapshot;
+  workspace: JobFinderRendererWorkspaceSnapshot;
   isDiscoveryPending: boolean;
   isResumeImportPending: boolean;
   liveDiscoveryEvents?: readonly DiscoveryActivityEvent[] | undefined;

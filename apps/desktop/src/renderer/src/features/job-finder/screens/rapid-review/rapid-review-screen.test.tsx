@@ -112,11 +112,19 @@ describe("RapidReviewScreen readability", () => {
     expect(document.body.textContent).not.toContain("2026-03-20T09:00:00.000Z");
   });
 
-  it("prefers the source posted text over the formatted timestamp", () => {
-    renderRapidReview([createJob({ postedAtText: "2 days ago" })]);
+  it("shows the source posted text when no posting date was stored", () => {
+    renderRapidReview([
+      createJob({ postedAt: null, postedAtText: "2 days ago" }),
+    ]);
 
     expect(screen.getByText(/2 days ago/)).toBeTruthy();
-    expect(screen.queryByText(/Mar 2026/)).toBeNull();
+  });
+
+  it("prefers the stored posting date over aging site text", () => {
+    renderRapidReview([createJob({ postedAtText: "2 days ago" })]);
+
+    expect(screen.getByText(/20 Mar 2026/)).toBeTruthy();
+    expect(screen.queryByText(/2 days ago/)).toBeNull();
   });
 
   it("labels provider-only freshness as updated", () => {

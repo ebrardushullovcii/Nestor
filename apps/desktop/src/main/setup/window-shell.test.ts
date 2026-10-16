@@ -203,7 +203,11 @@ vi.mock("electron", () => ({
   BrowserWindow: function FakeBrowserWindow(options: unknown) {
     return electronMock.createWindow(options);
   },
-  app: { getPath: () => "/fake-nordri-user-data", isPackaged: false },
+  app: {
+    getPath: () => "/fake-nordri-user-data",
+    getAppPath: () => "/fake-nordri-app",
+    isPackaged: false,
+  },
   dialog: {},
   Menu: {
     buildFromTemplate: vi.fn((template: unknown) => template),

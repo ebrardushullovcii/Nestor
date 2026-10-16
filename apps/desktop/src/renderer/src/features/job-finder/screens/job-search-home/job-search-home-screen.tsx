@@ -5,7 +5,7 @@ import type {
   CampaignNotification,
   DiscoveryActivityEvent,
   JobFinderSearchRequest,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ProfileSetupStep,
   ResumeImportProgressEvent,
 } from "@nordri/contracts";
@@ -31,7 +31,7 @@ import {
 export { buildInterruptedSearchRetryRequest } from "./job-search-home-model";
 
 export interface JobSearchHomeScreenProps {
-  workspace: JobFinderWorkspaceSnapshot;
+  workspace: JobFinderRendererWorkspaceSnapshot;
   /**
    * What the last press on this page came to, in a sentence. A refusal
    * (Apply held back by a resume, a send that could not start) is shown here
@@ -81,7 +81,7 @@ export interface JobSearchHomeScreenProps {
 export function listCurrentUnreadNotifications(
   notifications: readonly CampaignNotification[],
   workspace: Pick<
-    JobFinderWorkspaceSnapshot,
+    JobFinderRendererWorkspaceSnapshot,
     | "applicationRecords"
     | "userActionRequests"
     | "applyJobResults"

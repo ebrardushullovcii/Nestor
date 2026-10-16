@@ -1,4 +1,4 @@
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import type { JobFinderGlobalSearchEntry } from "./job-finder-global-search";
 import { buildJobFinderContextRoute } from "./job-finder-context-navigation";
 import { buildResumeWorkspaceRoute } from "./resume-workspace-route";
@@ -12,7 +12,7 @@ import {
 } from "./job-employer-location-display";
 
 export function buildJobFinderGlobalSearchEntries(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
 ): readonly JobFinderGlobalSearchEntry[] {
   const campaigns = workspace.campaigns ?? [];
   const discoveryJobs = workspace.discoveryJobs ?? [];

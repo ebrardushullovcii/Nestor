@@ -602,7 +602,7 @@ export function DiscoveryFiltersFooter(props: {
               className="h-9 w-fit whitespace-nowrap px-3.5 text-center text-xs normal-case tracking-normal"
               disabled={!canRunDiscovery}
               pending={isDiscoveryAllPending}
-              onClick={onRunAgentDiscovery}
+              onClick={() => onRunAgentDiscovery()}
               size="sm"
               type="button"
               variant={canRunDiscovery ? "primary" : "secondary"}

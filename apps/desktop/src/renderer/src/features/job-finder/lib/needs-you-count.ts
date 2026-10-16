@@ -1,6 +1,6 @@
 import type {
   GroupedManualAnswerDecision,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import {
   projectNeedsYou,
@@ -30,7 +30,7 @@ const FINAL_ACTION_REQUEST_STATES: readonly string[] = [
 ];
 
 export interface NeedsYouCountInput {
-  reviewQueue?: readonly JobFinderWorkspaceSnapshot["reviewQueue"][number][];
+  reviewQueue?: readonly JobFinderRendererWorkspaceSnapshot["reviewQueue"][number][];
   /**
    * Applications the Applications screen badges "Needs you". They belong to
    * the same population: an application paused on a site step the person has
@@ -38,14 +38,14 @@ export interface NeedsYouCountInput {
    * because it only ever counted live browser-step requests.
    */
   applicationRecords?:
-    | readonly JobFinderWorkspaceSnapshot["applicationRecords"][number][]
+    | readonly JobFinderRendererWorkspaceSnapshot["applicationRecords"][number][]
     | undefined;
   applyJobResults?:
-    | readonly JobFinderWorkspaceSnapshot["applyJobResults"][number][]
+    | readonly JobFinderRendererWorkspaceSnapshot["applyJobResults"][number][]
     | undefined;
   groupedDecisions?: readonly GroupedManualAnswerDecision[] | undefined;
   requests?:
-    | readonly JobFinderWorkspaceSnapshot["userActionRequests"][number][]
+    | readonly JobFinderRendererWorkspaceSnapshot["userActionRequests"][number][]
     | undefined;
 }
 
@@ -69,7 +69,7 @@ export function listApplicationsAwaitingUser({
 }: Pick<
   NeedsYouCountInput,
   "applicationRecords" | "applyJobResults" | "requests"
->): readonly JobFinderWorkspaceSnapshot["applicationRecords"][number][] {
+>): readonly JobFinderRendererWorkspaceSnapshot["applicationRecords"][number][] {
   return projectNeedsYou({ applicationRecords, applyJobResults, requests })
     .applications;
 }
@@ -123,7 +123,7 @@ export function countApplyRunItemsNeedingYou({
 
 /** Convenience reader for callers that already hold the whole snapshot. */
 export function countWorkspaceNeedsYouItems(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
 ): number {
   return projectWorkspaceAttention(workspace).count;
 }

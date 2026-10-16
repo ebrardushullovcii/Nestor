@@ -1,4 +1,4 @@
-import type { NormalizedCompensation, SavedJob } from "@nordri/contracts";
+import type { NormalizedCompensation, JobListRow } from "@nordri/contracts";
 
 export function formatNormalizedCompensation(
   compensation: NormalizedCompensation | null | undefined,
@@ -52,7 +52,7 @@ export function formatNormalizedCompensation(
  * absence label instead.
  */
 export function formatStatedNormalizedCompensation(
-  job: Pick<SavedJob, "salaryText" | "normalizedCompensation"> | null | undefined,
+  job: Pick<JobListRow, "salaryText" | "normalizedCompensation"> | null | undefined,
 ): string | null {
   return job?.salaryText
     ? formatNormalizedCompensation(job.normalizedCompensation)

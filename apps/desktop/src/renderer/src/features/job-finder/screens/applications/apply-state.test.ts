@@ -5,7 +5,7 @@ import {
   ApplicationCrmDataSchema,
 } from "@nordri/contracts";
 import { describe, expect, it } from "vitest";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import {
   applyActionLabel,
   applyAllActionLabel,
@@ -13,7 +13,7 @@ import {
   resolveApplyStatePresentation,
 } from "./apply-state";
 
-type ApplyResult = JobFinderWorkspaceSnapshot["applyJobResults"][number];
+type ApplyResult = JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
 
 function buildResult(overrides: Partial<ApplyResult>): ApplyResult {
   return {

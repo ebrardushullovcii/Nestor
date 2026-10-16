@@ -53,7 +53,6 @@ import {
   storedFactFor,
   storedFacts,
 } from "./application-facts";
-import { normalizeSignal } from "./control-classification";
 import {
   checkFormReadiness,
   runSubmitPreflight,

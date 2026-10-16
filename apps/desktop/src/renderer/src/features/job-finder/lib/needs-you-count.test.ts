@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 
 import {
   countWorkspaceNeedsYouItems,
@@ -41,7 +41,7 @@ describe("newest application result in Needs you", () => {
     lastUpdatedAt: "2026-03-20T10:00:00.000Z",
     questionSummary: { total: 0, answered: 0 },
     consentSummary: { status: "approved" },
-  } as JobFinderWorkspaceSnapshot["applicationRecords"][number];
+  } as JobFinderRendererWorkspaceSnapshot["applicationRecords"][number];
   const otherRecord = {
     ...record,
     id: "application_two",
@@ -63,7 +63,7 @@ describe("newest application result in Needs you", () => {
       privacyReceipt: uncertain
         ? { submissionOutcome: { outcome: "outcome_uncertain" } }
         : null,
-    }) as JobFinderWorkspaceSnapshot["applyJobResults"][number];
+    }) as JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
 
   it("drops a stale paused record once its newest result is ready", () => {
     const applyJobResults = [
@@ -126,7 +126,7 @@ describe("one apply run's share of the Needs you population", () => {
       replaySummary: {},
       events: [],
       crm: null,
-    } as unknown as JobFinderWorkspaceSnapshot["applicationRecords"][number];
+    } as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"][number];
   }
 
   it("gives the run summary and the header badge the same number", () => {
@@ -163,7 +163,7 @@ describe("one apply run's share of the Needs you population", () => {
           applicationRecordId: "application_1",
         },
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"];
 
     expect(
       countApplyRunItemsNeedingYou({
@@ -204,7 +204,7 @@ it("keeps resume drafts out of Needs you while the assistant can report them sep
           resumeReview: { status: "needs_review" },
           resumeApplicationMode: "tailored_per_job",
         },
-      ] as JobFinderWorkspaceSnapshot["reviewQueue"],
+      ] as JobFinderRendererWorkspaceSnapshot["reviewQueue"],
       requests: [],
       applicationRecords: [],
     }),
@@ -216,6 +216,6 @@ it("counts a partially hydrated workspace without reading missing collections", 
     countWorkspaceNeedsYouItems({
       applicationRecords: [],
       userActionRequests: [],
-    } as unknown as JobFinderWorkspaceSnapshot),
+    } as unknown as JobFinderRendererWorkspaceSnapshot),
   ).toBe(0);
 });
