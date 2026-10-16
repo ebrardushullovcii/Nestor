@@ -1074,7 +1074,7 @@ it("sorts comparable Best match scores highest first and explains the priority",
   ).toContain("reachable places come first, then fit score");
 });
 
-it("assesses the ranked unjudged listings on the current page first, inside their group", () => {
+it("keeps assessment in the toolbar and reads the current page's unjudged listings first", () => {
   const jobs = Array.from({ length: 70 }, (_, index) =>
     job({ id: `unread_${index}`, score: 0, titleOnly: true }),
   );
@@ -1097,7 +1097,12 @@ it("assesses the ranked unjudged listings on the current page first, inside thei
   });
   expect(
     screen.getByTestId("discovery-results-group-unchecked").contains(button),
-  ).toBe(true);
+  ).toBe(false);
+  expect(
+    button.compareDocumentPosition(
+      screen.getByTestId("discovery-results-group-unchecked"),
+    ) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).not.toBe(0);
   expect(screen.queryByTestId("discovery-best-match-order")).toBeNull();
   fireEvent.click(button);
   expect(onAssess).toHaveBeenCalledWith(firstId);

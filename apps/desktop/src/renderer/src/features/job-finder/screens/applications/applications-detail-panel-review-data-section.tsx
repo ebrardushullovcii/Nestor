@@ -6,7 +6,7 @@ import type {
   BrowserVisualEvidenceSummary,
   CandidateAsset,
   ClearApplicationAnswerCommandInput,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   JobFinderApplyConsentActionInput,
   SaveApplicationAnswerCommandInput,
 } from "@nordri/contracts";
@@ -54,7 +54,7 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
   ) => Promise<void>;
   selectedApplyRunDetails: ApplyRunDetails | null;
   visibleApplyResult:
-    | JobFinderWorkspaceSnapshot["applyJobResults"][number]
+    | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
     | null;
 }) {
   const {

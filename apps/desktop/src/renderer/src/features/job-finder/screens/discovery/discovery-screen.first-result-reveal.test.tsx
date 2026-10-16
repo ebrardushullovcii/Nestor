@@ -11,6 +11,17 @@ import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// Job details load over IPC in the app; here the listed row is the detail.
+vi.mock("../../hooks/use-job-detail", () => ({
+  useJobDetail: (row: unknown) => ({
+    job: row,
+    error: null,
+    loading: false,
+    retry: () => undefined,
+  }),
+  clearJobDetailCache: () => undefined,
+}));
+
 const state = vi.hoisted(() => ({
   latestRunVerdicts: [] as unknown[],
   alsoFoundShown: [] as unknown[],

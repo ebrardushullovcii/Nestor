@@ -2,7 +2,7 @@
 
 import type {
   CandidateProfile,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import { StrictMode } from "react";
 import {
@@ -63,7 +63,7 @@ afterAll(() => {
   vi.unstubAllGlobals();
 });
 
-function createReadyWorkspace(): JobFinderWorkspaceSnapshot {
+function createReadyWorkspace(): JobFinderRendererWorkspaceSnapshot {
   return {
     hydration: { phase: "complete", deferredCollections: [] },
     activeCampaignId: "campaign_1",
@@ -87,11 +87,11 @@ function createReadyWorkspace(): JobFinderWorkspaceSnapshot {
     settings: { appearanceTheme: "system" },
     profileSetupState: { status: "completed", reviewItems: [] },
     profileCopilotMessages: [],
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function configureWindowNordri(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
   overrides?: {
     jobFinder?: Record<string, unknown>;
     setCloseGuardState?: ReturnType<typeof vi.fn>;

@@ -1,16 +1,16 @@
 import type {
-  ApplicationAttempt,
+  ApplicationAttemptListRow,
   ApplicationRecord,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import { ApplicationsDetailFactStrip } from "./applications-detail-fact-strip";
 import type { PlannedApplyStanding } from "./applications-recovery-state";
 
 export function ApplicationsDetailPanelOverviewSections(props: {
-  selectedAttempt: ApplicationAttempt | null;
+  selectedAttempt: ApplicationAttemptListRow | null;
   selectedRecord: ApplicationRecord;
   visibleApplyResult:
-    | JobFinderWorkspaceSnapshot["applyJobResults"][number]
+    | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
     | null;
   visibleApplyRunId: string | null;
   showFactStrip?: boolean;

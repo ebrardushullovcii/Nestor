@@ -61,9 +61,7 @@ describe("DiscoveryResultsPanel newest-run empty-state verdicts", () => {
       },
     });
 
-    expect(
-      screen.getByText("Job Finder cannot search right now"),
-    ).toBeTruthy();
+    expect(screen.getByText("Job Finder cannot search right now")).toBeTruthy();
     const emptyState = screen.getByRole("heading", {
       name: "Job Finder cannot search right now",
     }).parentElement?.parentElement;
@@ -158,7 +156,10 @@ describe("DiscoveryResultsPanel newest-run empty-state verdicts", () => {
     expect(screen.getByText(/Select Search now to try again\./)).toBeTruthy();
     cleanup();
 
-    renderEmptyResults({ latestRunVerdict: verdict, failureCalloutShown: true });
+    renderEmptyResults({
+      latestRunVerdict: verdict,
+      failureCalloutShown: true,
+    });
     expect(screen.queryByText(/Select Search now to try again/)).toBeNull();
     expect(
       screen.getByText(/The message above says what to do next\./),
@@ -293,14 +294,17 @@ it("keeps recorded source explanations and coverage after a no-match search", ()
       />
     </MemoryRouter>,
   );
+  expect(
+    screen.getByTestId("discovery-source-summaries").hasAttribute("open"),
+  ).toBe(false);
+  fireEvent.click(
+    screen.getByTestId("discovery-source-summaries").querySelector("summary")!,
+  );
   expect(screen.getByText("No listings were published.")).toBeTruthy();
   expect(
     screen.getByText("No project management roles in the listings read."),
   ).toBeTruthy();
   expect(screen.getAllByText(/inspected not recorded/)).toHaveLength(2);
-  expect(
-    screen.getByTestId("discovery-source-summaries").hasAttribute("open"),
-  ).toBe(false);
 });
 
 it("shows partial results and retries the failed source directly", () => {
@@ -396,6 +400,42 @@ it.each(["running", "cancelled"] as const)(
       expect(screen.getByText(/Not searched/)).toBeTruthy();
   },
 );
+
+it("searches again from an interrupted run without passing the click along", () => {
+  const run = DiscoveryRunRecordSchema.parse({
+    id: "interrupted",
+    state: "failed",
+    runPhase: "interrupted",
+    scope: "run_all",
+    startedAt: "2026-08-23T10:00:00.000Z",
+    completedAt: "2026-08-23T10:01:00.000Z",
+    targetIds: ["board"],
+    targetExecutions: [
+      { targetId: "board", adapterKind: "auto", state: "failed" },
+    ],
+    summary: { outcome: "failed", targetsPlanned: 1, targetsCompleted: 0 },
+  });
+  const onSearchAgain = vi.fn();
+  render(
+    <MemoryRouter>
+      <DiscoveryResultsPanel
+        browserSession={browserSession}
+        jobs={[]}
+        onSelectJob={vi.fn()}
+        selectedJob={null}
+        latestRun={run}
+        onSearchAgain={onSearchAgain}
+      />
+    </MemoryRouter>,
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "Search again from here" }),
+  );
+  // The click event used to arrive as the search request, which the app
+  // cannot receive.
+  expect(onSearchAgain).toHaveBeenCalledWith();
+});
 
 it("names a background plan even while the current plan has no results", () => {
   render(

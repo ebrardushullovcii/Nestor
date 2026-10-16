@@ -1,12 +1,18 @@
 import {
   clearUiResumeBatch,
+  blockUiResumeBatch,
   stopUiResumeBatch,
   syncUiResumeBatch,
 } from "../../../main/services/assistant/ui-resume-batch";
-import type { AssistantResumeBatchState } from "@nordri/contracts";
+import type {
+  AssistantResumeBatchState,
+  ResumeBatchGenerationResult,
+  ResumeBatchGenerationProgress,
+} from "@nordri/contracts";
 import {
   ApplicationCrmBulkStageMutationInputSchema,
   JobFinderIntelligenceStateSchema,
+  RESUME_PIPELINE_CAPACITY,
 } from "@nordri/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MutableRefObject, SetStateAction } from "react";
@@ -19,7 +25,7 @@ import { jobFinderPendingActions } from "./job-finder-pending-actions";
 import { buildJobFinderPageContext } from "./use-job-finder-page-controller-context";
 import type {
   JobFinderSetResumeClaimConfirmationInput,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ReviewQueueItem,
 } from "@nordri/contracts";
 import type { TailoredDraftPreparationViewState } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
@@ -29,10 +35,26 @@ import { createJobFinderSaveCoordinator } from "./job-finder-save-state";
 import { runJobFinderApplicationBrowserHandoff } from "./job-finder-page-routes";
 import { formatJobFinderBrowserHandoffFailedStatus } from "@renderer/features/job-finder/lib/job-finder-browser-handoff-copy";
 
+type BatchGenerate = Window["nordri"]["jobFinder"]["generateResumeForBatch"];
+type BatchProgressListener = (progress: ResumeBatchGenerationProgress) => void;
+const progressListeners = new Set<BatchProgressListener>();
+const unsubscribeProgress = vi.fn();
+
 beforeEach(() => {
   clearUiResumeBatch();
+  progressListeners.clear();
+  unsubscribeProgress.mockClear();
   vi.stubGlobal("window", {
     nordri: {
+      jobFinder: {
+        onResumeBatchProgress: (listener: BatchProgressListener) => {
+          progressListeners.add(listener);
+          return () => {
+            progressListeners.delete(listener);
+            unsubscribeProgress();
+          };
+        },
+      },
       assistant: {
         syncResumeBatch: (state: AssistantResumeBatchState) =>
           Promise.resolve(syncUiResumeBatch(state)),
@@ -41,7 +63,7 @@ beforeEach(() => {
   });
 });
 async function flushBatchDispatch() {
-  for (let count = 0; count < 12; count += 1) await Promise.resolve();
+  for (let count = 0; count < 24; count += 1) await Promise.resolve();
 }
 
 function createIdleTailoredDraftPreparation(): TailoredDraftPreparationViewState {
@@ -58,11 +80,12 @@ function createIdleTailoredDraftPreparation(): TailoredDraftPreparationViewState
 
 function buildContext(overrides: {
   actions: Partial<JobFinderShellActions>;
-  workspace?: JobFinderWorkspaceSnapshot;
+  batchGenerate?: BatchGenerate;
+  workspace?: JobFinderRendererWorkspaceSnapshot;
   tailoredDraftPreparationRunRef?: MutableRefObject<boolean>;
   tailoredDraftPreparationStopRequestedRef?: MutableRefObject<boolean>;
   tailoredDraftPreparationDisposedRef?: MutableRefObject<boolean>;
-  latestWorkspaceRef?: MutableRefObject<JobFinderWorkspaceSnapshot | null>;
+  latestWorkspaceRef?: MutableRefObject<JobFinderRendererWorkspaceSnapshot | null>;
 }) {
   let actionState: ActionState = { message: null };
   const actionMessages: (string | null)[] = [];
@@ -72,7 +95,22 @@ function buildContext(overrides: {
   let tailoredDraftPreparationWriteCount = 0;
   const workspace =
     overrides.workspace ??
-    ({ activeCampaignId: "campaign_active" } as JobFinderWorkspaceSnapshot);
+    ({
+      activeCampaignId: "campaign_active",
+    } as JobFinderRendererWorkspaceSnapshot);
+  // Existing command stubs represent the service's work. The controller talks
+  // only to the new typed receipt bridge and receives no workspace per job.
+  const generateResumeForBatch = vi.fn<BatchGenerate>(
+    overrides.batchGenerate ??
+      (async ({ jobId }) => {
+        if (!overrides.actions.generateResume)
+          throw new Error("This test must provide a batch generation stub.");
+        await overrides.actions.generateResume(jobId);
+        return { jobId, outcome: "written" };
+      }),
+  );
+  if (window.nordri.jobFinder)
+    window.nordri.jobFinder.generateResumeForBatch = generateResumeForBatch;
   const setActionState = (next: SetStateAction<ActionState>) => {
     actionState = typeof next === "function" ? next(actionState) : next;
     actionMessages.push(actionState.message);
@@ -169,6 +207,7 @@ function buildContext(overrides: {
     getTailoredDraftPreparation: () => tailoredDraftPreparation,
     getTailoredDraftPreparationWriteCount: () =>
       tailoredDraftPreparationWriteCount,
+    generateResumeForBatch,
   };
 }
 
@@ -176,7 +215,7 @@ describe("buildJobFinderPageContext campaign schedule and notifications", () => 
   it("exposes onRunCampaignNow through the page controller with a pending scope", async () => {
     const runCampaignNow = vi
       .fn<JobFinderShellActions["runCampaignNow"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const { context, getPendingActionState, getActionState } = buildContext({
       actions: { runCampaignNow },
     });
@@ -195,12 +234,12 @@ describe("buildJobFinderPageContext campaign schedule and notifications", () => 
   it("defaults run-now to the active campaign when no id is supplied", async () => {
     const runCampaignNow = vi
       .fn<JobFinderShellActions["runCampaignNow"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const { context } = buildContext({
       actions: { runCampaignNow },
       workspace: {
         activeCampaignId: "campaign_active",
-      } as JobFinderWorkspaceSnapshot,
+      } as JobFinderRendererWorkspaceSnapshot,
     });
 
     await context.onRunCampaignNow();
@@ -230,7 +269,7 @@ describe("buildJobFinderPageContext campaign schedule and notifications", () => 
             },
           },
         ],
-      } as unknown as JobFinderWorkspaceSnapshot);
+      } as unknown as JobFinderRendererWorkspaceSnapshot);
     const { context, getDiscoveryRunFeedback } = buildContext({
       actions: { runCampaignNow },
     });
@@ -248,8 +287,9 @@ describe("buildJobFinderPageContext campaign schedule and notifications", () => 
       .fn<JobFinderShellActions["runCampaignNow"]>()
       .mockImplementation(
         () =>
-          new Promise<JobFinderWorkspaceSnapshot>((resolve) => {
-            resolveRun = () => resolve({} as JobFinderWorkspaceSnapshot);
+          new Promise<JobFinderRendererWorkspaceSnapshot>((resolve) => {
+            resolveRun = () =>
+              resolve({} as JobFinderRendererWorkspaceSnapshot);
           }),
       );
     const { context, getPendingActionState } = buildContext({
@@ -269,10 +309,10 @@ describe("buildJobFinderPageContext campaign schedule and notifications", () => 
   it("exposes mark-read and mark-all-read through the page controller", async () => {
     const markCampaignNotificationRead = vi
       .fn<JobFinderShellActions["markCampaignNotificationRead"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const markAllCampaignNotificationsRead = vi
       .fn<JobFinderShellActions["markAllCampaignNotificationsRead"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const { context, getActionState } = buildContext({
       actions: {
         markCampaignNotificationRead,
@@ -298,7 +338,7 @@ describe("buildJobFinderPageContext outcome recording and suggestions", () => {
   it("records a manual outcome through the shell action with a pending scope", async () => {
     const recordOutcome = vi
       .fn<JobFinderShellActions["recordOutcome"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const { context, getPendingActionState, getActionState } = buildContext({
       actions: { recordOutcome },
     });
@@ -329,8 +369,9 @@ describe("buildJobFinderPageContext outcome recording and suggestions", () => {
       .fn<JobFinderShellActions["recordOutcome"]>()
       .mockImplementation(
         () =>
-          new Promise<JobFinderWorkspaceSnapshot>((resolve) => {
-            resolveRecord = () => resolve({} as JobFinderWorkspaceSnapshot);
+          new Promise<JobFinderRendererWorkspaceSnapshot>((resolve) => {
+            resolveRecord = () =>
+              resolve({} as JobFinderRendererWorkspaceSnapshot);
           }),
       );
     const { context, getPendingActionState } = buildContext({
@@ -372,7 +413,7 @@ describe("buildJobFinderPageContext outcome recording and suggestions", () => {
   it("disables a suggestion through the shell action with a pending scope", async () => {
     const setOutcomeSuggestionEnabled = vi
       .fn<JobFinderShellActions["setOutcomeSuggestionEnabled"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const { context, getPendingActionState, getActionState } = buildContext({
       actions: { setOutcomeSuggestionEnabled },
     });
@@ -399,7 +440,7 @@ describe("buildJobFinderPageContext outcome recording and suggestions", () => {
   it("resets a suggestion with the reset flag and re-evaluation message", async () => {
     const setOutcomeSuggestionEnabled = vi
       .fn<JobFinderShellActions["setOutcomeSuggestionEnabled"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const { context, getActionState } = buildContext({
       actions: { setOutcomeSuggestionEnabled },
     });
@@ -446,14 +487,29 @@ function createReviewQueueItem(
 
 function createBatchWorkspace(
   reviewQueue: readonly ReviewQueueItem[],
-): JobFinderWorkspaceSnapshot {
+): JobFinderRendererWorkspaceSnapshot {
   return {
     activeCampaignId: "campaign_1",
     campaigns: [
       { id: "campaign_1", jobIds: reviewQueue.map((item) => item.jobId) },
     ],
     reviewQueue,
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
+}
+
+function createLargeBatchWorkspace() {
+  return createBatchWorkspace(
+    Array.from({ length: RESUME_PIPELINE_CAPACITY + 1 }, (_, index) =>
+      createReviewQueueItem(`job_${index + 1}`),
+    ),
+  );
+}
+
+function admittedJobIds() {
+  return Array.from(
+    { length: RESUME_PIPELINE_CAPACITY },
+    (_, index) => `job_${index + 1}`,
+  );
 }
 
 describe("buildJobFinderPageContext tailored draft batch", () => {
@@ -464,28 +520,29 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
       .mockImplementation(
         () =>
           new Promise((resolve) =>
-            resolvers.push(() => resolve({} as JobFinderWorkspaceSnapshot)),
+            resolvers.push(() =>
+              resolve({} as JobFinderRendererWorkspaceSnapshot),
+            ),
           ),
       );
     const run = buildContext({
       actions: { generateResume },
-      workspace: createBatchWorkspace([
-        createReviewQueueItem("one"),
-        createReviewQueueItem("two"),
-        createReviewQueueItem("three"),
-        createReviewQueueItem("four"),
-      ]),
+      workspace: createLargeBatchWorkspace(),
     });
     run.context.onPrepareTailoredDrafts();
-    await vi.waitFor(() => expect(generateResume).toHaveBeenCalledTimes(2));
-    expect(stopUiResumeBatch()?.activeJobIds).toEqual(["one", "two"]);
+    await vi.waitFor(() =>
+      expect(generateResume).toHaveBeenCalledTimes(RESUME_PIPELINE_CAPACITY),
+    );
+    expect(stopUiResumeBatch()?.activeJobIds).toEqual(admittedJobIds());
     resolvers.forEach((resolve) => resolve());
     await vi.waitFor(() =>
       expect(run.getTailoredDraftPreparation().status).toBe("stopped"),
     );
-    expect(generateResume.mock.calls.map(([id]) => id)).toEqual(["one", "two"]);
+    expect(generateResume.mock.calls.map(([id]) => id)).toEqual(
+      admittedJobIds(),
+    );
     expect(run.getTailoredDraftPreparation()).toMatchObject({
-      completedCount: 2,
+      completedCount: RESUME_PIPELINE_CAPACITY,
       failedCount: 0,
     });
   });
@@ -497,7 +554,7 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
       .mockImplementation(
         () =>
           new Promise((resolve) => {
-            finish = () => resolve({} as JobFinderWorkspaceSnapshot);
+            finish = () => resolve({} as JobFinderRendererWorkspaceSnapshot);
           }),
       );
     const workspace = createBatchWorkspace([
@@ -544,7 +601,7 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
   it("runs eligible jobs with bounded parallelism with quiet pending scopes and one final aggregate message", async () => {
     const generateResume = vi
       .fn<JobFinderShellActions["generateResume"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const {
       context,
       getActionMessages,
@@ -593,12 +650,14 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
       .fn<JobFinderShellActions["generateResume"]>()
       .mockImplementation((jobId: string) => {
         if (jobId === "job_1") {
-          return new Promise<JobFinderWorkspaceSnapshot>((resolve) => {
-            resolveFirst = () => resolve({} as JobFinderWorkspaceSnapshot);
+          return new Promise<JobFinderRendererWorkspaceSnapshot>((resolve) => {
+            resolveFirst = () =>
+              resolve({} as JobFinderRendererWorkspaceSnapshot);
           });
         }
-        return new Promise<JobFinderWorkspaceSnapshot>((resolve) => {
-          resolveSecond = () => resolve({} as JobFinderWorkspaceSnapshot);
+        return new Promise<JobFinderRendererWorkspaceSnapshot>((resolve) => {
+          resolveSecond = () =>
+            resolve({} as JobFinderRendererWorkspaceSnapshot);
         });
       });
     const {
@@ -646,11 +705,12 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
       .fn<JobFinderShellActions["generateResume"]>()
       .mockImplementation((jobId: string) => {
         if (jobId === "job_1") {
-          return new Promise<JobFinderWorkspaceSnapshot>((resolve) => {
-            resolveFirst = () => resolve({} as JobFinderWorkspaceSnapshot);
+          return new Promise<JobFinderRendererWorkspaceSnapshot>((resolve) => {
+            resolveFirst = () =>
+              resolve({} as JobFinderRendererWorkspaceSnapshot);
           });
         }
-        return Promise.resolve({} as JobFinderWorkspaceSnapshot);
+        return Promise.resolve({} as JobFinderRendererWorkspaceSnapshot);
       });
     // The page controller owns these refs once and passes the same objects to
     // every context rebuild; a route change reuses them instead of resetting.
@@ -697,7 +757,7 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
       .mockImplementation((jobId: string) =>
         jobId === "job_2"
           ? Promise.reject(new Error("generation failed"))
-          : Promise.resolve({} as JobFinderWorkspaceSnapshot),
+          : Promise.resolve({} as JobFinderRendererWorkspaceSnapshot),
       );
     const { context, getActionMessages, getTailoredDraftPreparation } =
       buildContext({
@@ -731,28 +791,26 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
     expect(batchMessage).toMatch(/run it again to retry the failed job/i);
   });
 
-  it("finishes both active resumes after Stop and leaves the third unstarted", async () => {
+  it("finishes admitted resumes after Stop and leaves the next job unstarted", async () => {
     const activeResolvers: (() => void)[] = [];
     const generateResume = vi
       .fn<JobFinderShellActions["generateResume"]>()
       .mockImplementation(() => {
-        return new Promise<JobFinderWorkspaceSnapshot>((resolve) => {
-          activeResolvers.push(() => resolve({} as JobFinderWorkspaceSnapshot));
+        return new Promise<JobFinderRendererWorkspaceSnapshot>((resolve) => {
+          activeResolvers.push(() =>
+            resolve({} as JobFinderRendererWorkspaceSnapshot),
+          );
         });
       });
     const { context, getActionMessages, getTailoredDraftPreparation } =
       buildContext({
         actions: { generateResume },
-        workspace: createBatchWorkspace([
-          createReviewQueueItem("job_1"),
-          createReviewQueueItem("job_2"),
-          createReviewQueueItem("job_3"),
-        ]),
+        workspace: createLargeBatchWorkspace(),
       });
 
     context.onPrepareTailoredDrafts();
     await flushBatchDispatch();
-    expect(generateResume).toHaveBeenCalledTimes(2);
+    expect(generateResume).toHaveBeenCalledTimes(RESUME_PIPELINE_CAPACITY);
 
     context.onStopTailoredDraftPreparation();
     activeResolvers.forEach((resolve) => resolve());
@@ -761,18 +819,20 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
       expect(getTailoredDraftPreparation().status).toBe("stopped"),
     );
 
-    expect(generateResume).toHaveBeenCalledTimes(2);
+    expect(generateResume).toHaveBeenCalledTimes(RESUME_PIPELINE_CAPACITY);
     expect(getTailoredDraftPreparation()).toMatchObject({
-      attemptedCount: 2,
-      completedCount: 2,
+      attemptedCount: RESUME_PIPELINE_CAPACITY,
+      completedCount: RESUME_PIPELINE_CAPACITY,
       failedCount: 0,
       status: "stopped",
-      totalCount: 3,
+      totalCount: RESUME_PIPELINE_CAPACITY + 1,
     });
     const batchMessage = getActionMessages().find(
       (message) => message !== null && /stopped after/i.test(message),
     );
-    expect(batchMessage).toMatch(/Stopped after 2 resumes/);
+    expect(batchMessage).toContain(
+      `Stopped after ${RESUME_PIPELINE_CAPACITY} resumes`,
+    );
   });
 
   it("accepts Stop from a remounted controller whose refs are fresh", async () => {
@@ -781,22 +841,18 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
       .fn<JobFinderShellActions["generateResume"]>()
       .mockImplementation(
         () =>
-          new Promise<JobFinderWorkspaceSnapshot>((resolve) => {
+          new Promise<JobFinderRendererWorkspaceSnapshot>((resolve) => {
             activeResolvers.push(() =>
-              resolve({} as JobFinderWorkspaceSnapshot),
+              resolve({} as JobFinderRendererWorkspaceSnapshot),
             );
           }),
       );
-    const workspace = createBatchWorkspace([
-      createReviewQueueItem("job_1"),
-      createReviewQueueItem("job_2"),
-      createReviewQueueItem("job_3"),
-    ]);
+    const workspace = createLargeBatchWorkspace();
     const started = buildContext({ actions: { generateResume }, workspace });
 
     started.context.onPrepareTailoredDrafts();
     await flushBatchDispatch();
-    expect(generateResume).toHaveBeenCalledTimes(2);
+    expect(generateResume).toHaveBeenCalledTimes(RESUME_PIPELINE_CAPACITY);
 
     // A remount builds a controller with its own refs, all back to false. The
     // batch is still running on the module-level guard, so its Stop has to
@@ -809,7 +865,7 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
     await vi.waitFor(() =>
       expect(started.getTailoredDraftPreparation().status).toBe("stopped"),
     );
-    expect(generateResume).toHaveBeenCalledTimes(2);
+    expect(generateResume).toHaveBeenCalledTimes(RESUME_PIPELINE_CAPACITY);
   });
 
   it("keeps the batch alive across route changes: the task center tracks it away from Shortlisted and Stop from any route finishes only the active jobs", async () => {
@@ -817,8 +873,10 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
     const generateResume = vi
       .fn<JobFinderShellActions["generateResume"]>()
       .mockImplementation(() => {
-        return new Promise<JobFinderWorkspaceSnapshot>((resolve) => {
-          activeResolvers.push(() => resolve({} as JobFinderWorkspaceSnapshot));
+        return new Promise<JobFinderRendererWorkspaceSnapshot>((resolve) => {
+          activeResolvers.push(() =>
+            resolve({} as JobFinderRendererWorkspaceSnapshot),
+          );
         });
       });
     // Route changes rebuild the page context but reuse the controller's refs,
@@ -826,11 +884,7 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
     const sharedRunRef = { current: false };
     const sharedStopRef = { current: false };
     const sharedDisposedRef = { current: false };
-    const workspace = createBatchWorkspace([
-      createReviewQueueItem("job_1"),
-      createReviewQueueItem("job_2"),
-      createReviewQueueItem("job_3"),
-    ]);
+    const workspace = createLargeBatchWorkspace();
     const reviewQueueRoute = buildContext({
       actions: { generateResume },
       workspace,
@@ -848,7 +902,7 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
 
     reviewQueueRoute.context.onPrepareTailoredDrafts();
     await flushBatchDispatch();
-    expect(generateResume).toHaveBeenCalledTimes(2);
+    expect(generateResume).toHaveBeenCalledTimes(RESUME_PIPELINE_CAPACITY);
 
     // Away from Shortlisted, the task center still reports the active batch
     // and routes its Stop control through the same controller refs.
@@ -863,7 +917,7 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
     ]);
     expect(taskModel.items[0]).toMatchObject({
       status: "active",
-      countLabel: "0 of 3 prepared",
+      countLabel: `0 of ${RESUME_PIPELINE_CAPACITY + 1} prepared`,
       canCancel: true,
       cancelKind: "tailored_drafts",
       resumeRoute: "/job-finder/review-queue",
@@ -879,20 +933,22 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
     );
 
     // Returning to Shortlisted shows accurate final state; no next item ran.
-    expect(generateResume).toHaveBeenCalledTimes(2);
+    expect(generateResume).toHaveBeenCalledTimes(RESUME_PIPELINE_CAPACITY);
     expect(sharedRunRef.current).toBe(false);
     expect(sharedDisposedRef.current).toBe(false);
     expect(reviewQueueRoute.getTailoredDraftPreparation()).toMatchObject({
-      attemptedCount: 2,
-      completedCount: 2,
+      attemptedCount: RESUME_PIPELINE_CAPACITY,
+      completedCount: RESUME_PIPELINE_CAPACITY,
       currentIndex: null,
       status: "stopped",
-      totalCount: 3,
+      totalCount: RESUME_PIPELINE_CAPACITY + 1,
     });
     const batchMessage = reviewQueueRoute
       .getActionMessages()
       .find((message) => message !== null && /stopped after/i.test(message));
-    expect(batchMessage).toMatch(/Stopped after 2 resumes/);
+    expect(batchMessage).toContain(
+      `Stopped after ${RESUME_PIPELINE_CAPACITY} resumes`,
+    );
     const settledTaskModel = buildJobFinderTaskCenterModel({
       isDiscoveryPending: false,
       isResumeImportPending: false,
@@ -907,7 +963,7 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
   it("reruns only still-eligible jobs from durable workspace state, keeping failed jobs retryable under the cap", async () => {
     const generateResume = vi
       .fn<JobFinderShellActions["generateResume"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const firstRun = buildContext({
       actions: { generateResume },
       workspace: createBatchWorkspace([
@@ -956,7 +1012,7 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
   it("queues all missing resumes in one run", async () => {
     const generateResume = vi
       .fn<JobFinderShellActions["generateResume"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const { context, getActionMessages, getTailoredDraftPreparation } =
       buildContext({
         actions: { generateResume },
@@ -990,7 +1046,7 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
   it("treats a start with no eligible jobs as a deterministic no-op", async () => {
     const generateResume = vi
       .fn<JobFinderShellActions["generateResume"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const { context, getActionMessages, getTailoredDraftPreparation } =
       buildContext({
         actions: { generateResume },
@@ -1016,44 +1072,46 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
       .fn<JobFinderShellActions["generateResume"]>()
       .mockImplementation(
         () =>
-          new Promise<JobFinderWorkspaceSnapshot>((resolve) => {
+          new Promise<JobFinderRendererWorkspaceSnapshot>((resolve) => {
             activeResolvers.push(() =>
-              resolve({} as JobFinderWorkspaceSnapshot),
+              resolve({} as JobFinderRendererWorkspaceSnapshot),
             );
           }),
       );
 
-    // The controller starts the batch and parks on job_1 and job_2; teardown of
-    // the owning controller then marks it disposed mid-flight.
+    // Teardown happens while every admitted receipt is still in flight.
     const runRef = { current: false };
     const disposedRef = { current: false };
     const mounted = buildContext({
       actions: { generateResume },
-      workspace: createBatchWorkspace([
-        createReviewQueueItem("job_1"),
-        createReviewQueueItem("job_2"),
-        createReviewQueueItem("job_3"),
-      ]),
+      workspace: createLargeBatchWorkspace(),
       tailoredDraftPreparationRunRef: runRef,
       tailoredDraftPreparationDisposedRef: disposedRef,
     });
     mounted.context.onPrepareTailoredDrafts();
     await flushBatchDispatch();
-    expect(generateResume).toHaveBeenCalledTimes(2);
+    expect(generateResume).toHaveBeenCalledTimes(RESUME_PIPELINE_CAPACITY);
 
     disposedRef.current = true;
     const messagesAtDisposal = mounted.getActionMessages().length;
     const writesAtDisposal = mounted.getTailoredDraftPreparationWriteCount();
+    const batchId = mounted.generateResumeForBatch.mock.calls[0]![0].batchId;
+    for (const listener of progressListeners)
+      listener({ batchId, jobId: "job_1", stage: "processing" });
+    expect(mounted.getTailoredDraftPreparationWriteCount()).toBe(
+      writesAtDisposal,
+    );
 
-    // Active jobs settle, then the loop must not schedule job_3, and the
+    // Admitted jobs settle, then the loop must not schedule the next job, and the
     // orphaned run must stay silent instead of writing into dead state.
     activeResolvers.forEach((resolve) => resolve());
     await vi.waitFor(() => expect(runRef.current).toBe(false));
 
-    expect(generateResume.mock.calls.map(([jobId]) => jobId)).toEqual([
-      "job_1",
-      "job_2",
-    ]);
+    expect(generateResume.mock.calls.map(([jobId]) => jobId)).toEqual(
+      admittedJobIds(),
+    );
+    expect(unsubscribeProgress).toHaveBeenCalledOnce();
+    expect(progressListeners.size).toBe(0);
     expect(mounted.getActionMessages()).toHaveLength(messagesAtDisposal);
     expect(mounted.getTailoredDraftPreparationWriteCount()).toBe(
       writesAtDisposal,
@@ -1066,36 +1124,32 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
     let hasParkedFirstCall = false;
     const generateResume = vi
       .fn<JobFinderShellActions["generateResume"]>()
-      .mockImplementation((jobId: string) => {
-        if (["job_1", "job_2"].includes(jobId) && !hasParkedFirstCall) {
-          return new Promise<JobFinderWorkspaceSnapshot>((resolve) => {
+      .mockImplementation(() => {
+        if (!hasParkedFirstCall) {
+          return new Promise<JobFinderRendererWorkspaceSnapshot>((resolve) => {
             parked.push(() => {
               hasParkedFirstCall = true;
-              resolve({} as JobFinderWorkspaceSnapshot);
+              resolve({} as JobFinderRendererWorkspaceSnapshot);
             });
           });
         }
-        return Promise.resolve({} as JobFinderWorkspaceSnapshot);
+        return Promise.resolve({} as JobFinderRendererWorkspaceSnapshot);
       });
 
-    // First controller mount owns these refs; starting parks on job_1.
+    // The first controller owns the refs while every admitted job is parked.
     const firstRunRef = { current: false };
     const firstStopRef = { current: false };
     const firstDisposedRef = { current: false };
     const mounted = buildContext({
       actions: { generateResume },
-      workspace: createBatchWorkspace([
-        createReviewQueueItem("job_1"),
-        createReviewQueueItem("job_2"),
-        createReviewQueueItem("job_3"),
-      ]),
+      workspace: createLargeBatchWorkspace(),
       tailoredDraftPreparationRunRef: firstRunRef,
       tailoredDraftPreparationStopRequestedRef: firstStopRef,
       tailoredDraftPreparationDisposedRef: firstDisposedRef,
     });
     mounted.context.onPrepareTailoredDrafts();
     await flushBatchDispatch();
-    expect(generateResume).toHaveBeenCalledTimes(2);
+    expect(generateResume).toHaveBeenCalledTimes(RESUME_PIPELINE_CAPACITY);
     expect(firstRunRef.current).toBe(true);
 
     // True teardown disposes the owning controller; a later remount builds a
@@ -1107,11 +1161,7 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
     const remountedDisposedRef = { current: false };
     const remounted = buildContext({
       actions: { generateResume },
-      workspace: createBatchWorkspace([
-        createReviewQueueItem("job_1"),
-        createReviewQueueItem("job_2"),
-        createReviewQueueItem("job_3"),
-      ]),
+      workspace: createLargeBatchWorkspace(),
       tailoredDraftPreparationRunRef: remountedRunRef,
       tailoredDraftPreparationStopRequestedRef: remountedStopRef,
       tailoredDraftPreparationDisposedRef: remountedDisposedRef,
@@ -1119,20 +1169,19 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
 
     remounted.context.onPrepareTailoredDrafts();
     await flushBatchDispatch();
-    expect(generateResume).toHaveBeenCalledTimes(2);
+    expect(generateResume).toHaveBeenCalledTimes(RESUME_PIPELINE_CAPACITY);
     expect(remountedRunRef.current).toBe(false);
     expect(remounted.getTailoredDraftPreparation().status).toBe("idle");
     expect(
       remounted.getActionMessages().filter((message) => message !== null),
     ).toEqual([]);
 
-    // Settling job_1 ends the disposed run without starting job_3.
+    // Settling all admitted jobs ends the disposed run without starting its tail.
     resolveParked?.();
     await vi.waitFor(() => expect(firstRunRef.current).toBe(false));
-    expect(generateResume.mock.calls.map(([jobId]) => jobId)).toEqual([
-      "job_1",
-      "job_2",
-    ]);
+    expect(generateResume.mock.calls.map(([jobId]) => jobId)).toEqual(
+      admittedJobIds(),
+    );
 
     // Guard released by the stopped orphan: the fresh controller runs again.
     remounted.context.onPrepareTailoredDrafts();
@@ -1142,13 +1191,10 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
       expect(remounted.getTailoredDraftPreparation().status).toBe("completed"),
     );
     expect(generateResume.mock.calls.map(([jobId]) => jobId)).toEqual([
-      "job_1",
-      "job_2",
-      "job_1",
-      "job_2",
-      "job_3",
+      ...admittedJobIds(),
+      ...createLargeBatchWorkspace().reviewQueue.map((item) => item.jobId),
     ]);
-    expect(remountedRunRef.current).toBe(false);
+    await vi.waitFor(() => expect(remountedRunRef.current).toBe(false));
   });
 
   it("recomputes the final eligible remainder from the latest workspace after jobs change while the run is parked", async () => {
@@ -1157,14 +1203,15 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
       .fn<JobFinderShellActions["generateResume"]>()
       .mockImplementation((jobId: string) => {
         if (jobId === "job_1") {
-          return new Promise<JobFinderWorkspaceSnapshot>((resolve) => {
-            resolveParked = () => resolve({} as JobFinderWorkspaceSnapshot);
+          return new Promise<JobFinderRendererWorkspaceSnapshot>((resolve) => {
+            resolveParked = () =>
+              resolve({} as JobFinderRendererWorkspaceSnapshot);
           });
         }
-        return Promise.resolve({} as JobFinderWorkspaceSnapshot);
+        return Promise.resolve({} as JobFinderRendererWorkspaceSnapshot);
       });
 
-    const latestWorkspaceRef: MutableRefObject<JobFinderWorkspaceSnapshot | null> =
+    const latestWorkspaceRef: MutableRefObject<JobFinderRendererWorkspaceSnapshot | null> =
       { current: null };
     const startWorkspace = createBatchWorkspace([
       createReviewQueueItem("job_1"),
@@ -1226,11 +1273,145 @@ describe("buildJobFinderPageContext tailored draft batch", () => {
     expect(batchMessage).toMatch(/Wrote 3 resumes/);
     expect(batchMessage).not.toMatch(/more job still needs a resume/);
   });
+
+  it("counts phase events and out-of-order typed receipts without loading a workspace per job", async () => {
+    const settle = new Map<
+      string,
+      (result: ResumeBatchGenerationResult) => void
+    >();
+    const batchGenerate = vi.fn<BatchGenerate>(
+      ({ jobId }) => new Promise((resolve) => settle.set(jobId, resolve)),
+    );
+    const generateResume = vi.fn<JobFinderShellActions["generateResume"]>();
+    const regenerateResumeDraft =
+      vi.fn<JobFinderShellActions["regenerateResumeDraft"]>();
+    const run = buildContext({
+      actions: { generateResume, regenerateResumeDraft },
+      batchGenerate,
+      workspace: createBatchWorkspace([
+        createReviewQueueItem("job_1"),
+        createReviewQueueItem("job_2"),
+        createReviewQueueItem("job_3"),
+      ]),
+    });
+    run.context.onPrepareTailoredDrafts();
+    await flushBatchDispatch();
+    expect(batchGenerate).toHaveBeenCalledTimes(3);
+    const batchId = batchGenerate.mock.calls[0]![0].batchId;
+    const emit = (
+      jobId: string,
+      stage: ResumeBatchGenerationProgress["stage"],
+      id = batchId,
+    ) => {
+      for (const listener of progressListeners)
+        listener({ batchId: id, jobId, stage });
+    };
+    emit("job_1", "queued");
+    emit("job_1", "writing");
+    emit("job_2", "writing");
+    emit("job_1", "processing");
+    emit("job_1", "processing");
+    emit("job_3", "queued");
+    emit("other", "writing", "another_batch");
+    expect(run.getTailoredDraftPreparation()).toMatchObject({
+      writingCount: 1,
+      processingCount: 1,
+      waitingCount: 1,
+      completedCount: 0,
+      failedCount: 0,
+    });
+    emit("job_2", "finished");
+    settle.get("job_2")!({
+      jobId: "job_2",
+      outcome: "failed",
+      failureMessage: "Synthetic failure",
+    });
+    await vi.waitFor(() =>
+      expect(run.getTailoredDraftPreparation()).toMatchObject({
+        writingCount: 0,
+        processingCount: 1,
+        waitingCount: 1,
+        completedCount: 0,
+        failedCount: 1,
+        status: "running",
+      }),
+    );
+    emit("job_3", "finished");
+    settle.get("job_3")!({ jobId: "job_3", outcome: "fallback" });
+    await vi.waitFor(() =>
+      expect(run.getTailoredDraftPreparation()).toMatchObject({
+        completedCount: 1,
+        fallbackCount: 1,
+        failedCount: 1,
+      }),
+    );
+    emit("job_1", "finished");
+    settle.get("job_1")!({ jobId: "job_1", outcome: "written" });
+    await vi.waitFor(() =>
+      expect(run.getTailoredDraftPreparation()).toMatchObject({
+        status: "failed",
+        attemptedCount: 3,
+        completedCount: 2,
+        failedCount: 1,
+        fallbackCount: 1,
+        eligibleRemainingCount: 1,
+      }),
+    );
+    await flushBatchDispatch();
+    expect(generateResume).not.toHaveBeenCalled();
+    expect(regenerateResumeDraft).not.toHaveBeenCalled();
+    expect(batchGenerate.mock.calls.map(([input]) => input.jobId)).toEqual([
+      "job_1",
+      "job_2",
+      "job_3",
+    ]);
+    expect(unsubscribeProgress).toHaveBeenCalledOnce();
+    expect(progressListeners.size).toBe(0);
+    const writes = run.getTailoredDraftPreparationWriteCount();
+    emit("job_1", "writing");
+    expect(run.getTailoredDraftPreparationWriteCount()).toBe(writes);
+  });
+
+  it("does not retry a not-started receipt or admit the batch tail after it stops", async () => {
+    const settle = new Map<
+      string,
+      (result: ResumeBatchGenerationResult) => void
+    >();
+    const batchGenerate = vi.fn<BatchGenerate>(
+      ({ jobId }) => new Promise((resolve) => settle.set(jobId, resolve)),
+    );
+    const run = buildContext({
+      actions: {},
+      batchGenerate,
+      workspace: createLargeBatchWorkspace(),
+    });
+    run.context.onPrepareTailoredDrafts();
+    await flushBatchDispatch();
+    expect(batchGenerate).toHaveBeenCalledTimes(RESUME_PIPELINE_CAPACITY);
+    settle.get("job_57")!({ jobId: "job_57", outcome: "not_started" });
+    await flushBatchDispatch();
+    for (const [jobId, resolve] of settle)
+      if (jobId !== "job_57") resolve({ jobId, outcome: "written" });
+    await vi.waitFor(() =>
+      expect(run.getTailoredDraftPreparation()).toMatchObject({
+        status: "stopped",
+        attemptedCount: RESUME_PIPELINE_CAPACITY - 1,
+        completedCount: RESUME_PIPELINE_CAPACITY - 1,
+        failedCount: 0,
+        eligibleRemainingCount: 2,
+        totalCount: RESUME_PIPELINE_CAPACITY + 1,
+      }),
+    );
+    expect(batchGenerate.mock.calls.map(([input]) => input.jobId)).toEqual(
+      admittedJobIds(),
+    );
+    expect(unsubscribeProgress).toHaveBeenCalledOnce();
+  });
 });
 
 describe("buildJobFinderPageContext scoped settings saves", () => {
   it("saves application tracker settings through updateTrackerCrm without a whole-settings merge", async () => {
-    const snapshot = {} as JobFinderWorkspaceSnapshot;
+    const snapshot = {} as JobFinderRendererWorkspaceSnapshot;
     const saveSettings = vi.fn<JobFinderShellActions["saveSettings"]>();
     const updateTrackerCrm = vi
       .fn<JobFinderShellActions["updateTrackerCrm"]>()
@@ -1273,7 +1454,7 @@ describe("buildJobFinderPageContext scoped settings saves", () => {
 
 describe("buildJobFinderPageContext resume claim confirmation passthrough", () => {
   it("exposes the fenced shell command unchanged for the Resume workspace", async () => {
-    const snapshot = {} as JobFinderWorkspaceSnapshot;
+    const snapshot = {} as JobFinderRendererWorkspaceSnapshot;
     const setResumeClaimConfirmation = vi
       .fn<JobFinderShellActions["setResumeClaimConfirmation"]>()
       .mockResolvedValue(snapshot);
@@ -1326,7 +1507,7 @@ describe("Applications browser hand-off failure reporting", () => {
           applicationRecordId: "record_a",
         },
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"];
   }
 
   it("carries the real cause into the failed status when the open-page command rejects", async () => {
@@ -1373,13 +1554,13 @@ describe("Applications browser hand-off failure reporting", () => {
             lastActionLabel: "The prepared application page is no longer open.",
           },
         ],
-      } as unknown as JobFinderWorkspaceSnapshot);
+      } as unknown as JobFinderRendererWorkspaceSnapshot);
     const { context } = buildContext({
       actions: { performUserAction },
       workspace: {
         activeCampaignId: "campaign_active",
         userActionRequests: pendingRequests(),
-      } as JobFinderWorkspaceSnapshot,
+      } as JobFinderRendererWorkspaceSnapshot,
     });
 
     const outcome = await runJobFinderApplicationBrowserHandoff({
@@ -1410,13 +1591,13 @@ describe("Applications browser hand-off failure reporting", () => {
         .mockResolvedValue({
           userActionRequests: pendingRequests(),
           applicationRecords: [],
-        } as unknown as JobFinderWorkspaceSnapshot);
+        } as unknown as JobFinderRendererWorkspaceSnapshot);
       const { context } = buildContext({
         actions: { performUserAction },
         workspace: {
           activeCampaignId: "campaign_active",
           userActionRequests: pendingRequests(),
-        } as JobFinderWorkspaceSnapshot,
+        } as JobFinderRendererWorkspaceSnapshot,
       });
 
       await context.onPerformUserAction(
@@ -1464,18 +1645,18 @@ describe("Applications browser hand-off failure reporting", () => {
             },
           },
         },
-      ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"];
+      ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"];
       const performUserAction = vi
         .fn<JobFinderShellActions["performUserAction"]>()
         .mockResolvedValue({
           userActionRequests: requests,
-        } as unknown as JobFinderWorkspaceSnapshot);
+        } as unknown as JobFinderRendererWorkspaceSnapshot);
       const { context } = buildContext({
         actions: { performUserAction },
         workspace: {
           activeCampaignId: "campaign_active",
           userActionRequests: requests,
-        } as JobFinderWorkspaceSnapshot,
+        } as JobFinderRendererWorkspaceSnapshot,
       });
 
       await context.onPerformUserAction(
@@ -1516,7 +1697,7 @@ describe("Applications browser hand-off failure reporting", () => {
       onPerformUserAction: (command) =>
         context.onPerformUserAction(command, { rethrowError: true }),
       requests:
-        [] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"],
+        [] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"],
       target,
     });
 
@@ -1560,12 +1741,15 @@ describe("Applications browser hand-off failure reporting", () => {
 });
 
 it("does not count a removed in-flight job as a written resume", async () => {
-  const generateResume = vi
-    .fn<JobFinderShellActions["generateResume"]>()
-    .mockResolvedValue(createBatchWorkspace([]));
+  const generateResume = vi.fn<JobFinderShellActions["generateResume"]>();
   const { context, getTailoredDraftPreparation, getActionState } = buildContext(
     {
       actions: { generateResume },
+      batchGenerate: ({ jobId }) =>
+        Promise.resolve<ResumeBatchGenerationResult>({
+          jobId,
+          outcome: "cancelled",
+        }),
       workspace: createBatchWorkspace([createReviewQueueItem("removed")]),
     },
   );
@@ -1574,6 +1758,7 @@ it("does not count a removed in-flight job as a written resume", async () => {
     expect(getTailoredDraftPreparation().status).toBe("completed"),
   );
   expect(getTailoredDraftPreparation().cancelledCount).toBe(1);
+  expect(generateResume).not.toHaveBeenCalled();
   expect(getActionState().message).toBe(
     "Wrote 0 resumes · 1 removed from the shortlist.",
   );
@@ -1587,7 +1772,7 @@ describe("tracker bulk notices and reset completion", () => {
         .fn<JobFinderShellActions["mutateApplicationCrmBulkStage"]>()
         .mockResolvedValue({
           activeCampaignId: null,
-        } as unknown as JobFinderWorkspaceSnapshot);
+        } as unknown as JobFinderRendererWorkspaceSnapshot);
       const { context, getActionMessages } = buildContext({
         actions: { mutateApplicationCrmBulkStage },
       });
@@ -1623,12 +1808,13 @@ it("R3-183 continues an interrupted existing rewrite with its saved level and la
   const workspace = createBatchWorkspace([
     createReviewQueueItem("old", {
       assetStatus: "ready",
+      resumeApplicationMode: "original_resume",
       resumeReview: { status: "draft" },
     }),
   ]);
   workspace.resumeDrafts = [
     { jobId: "old" },
-  ] as JobFinderWorkspaceSnapshot["resumeDrafts"];
+  ] as JobFinderRendererWorkspaceSnapshot["resumeDrafts"];
   workspace.intelligence = JobFinderIntelligenceStateSchema.parse({
     resumeBatchCheckpoint: {
       id: "assistant_batch",
@@ -1644,15 +1830,24 @@ it("R3-183 continues an interrupted existing rewrite with its saved level and la
       durationsMs: [150000, 180000],
     },
   });
-  const regenerateResumeDraft = vi.fn().mockResolvedValue(workspace);
-  const setJobResumeApplicationMode = vi.fn().mockResolvedValue(workspace);
-  const generateResume = vi.fn();
+  const regenerateResumeDraft = vi
+    .fn<JobFinderShellActions["regenerateResumeDraft"]>()
+    .mockResolvedValue(workspace);
+  const setJobResumeApplicationMode = vi
+    .fn<JobFinderShellActions["setJobResumeApplicationMode"]>()
+    .mockResolvedValue(workspace);
+  const generateResume = vi.fn<JobFinderShellActions["generateResume"]>();
   const sync = vi.fn((batch: AssistantResumeBatchState) =>
     Promise.resolve(syncUiResumeBatch(batch)),
   );
   window.nordri.assistant.syncResumeBatch = sync;
   const run = buildContext({
     workspace,
+    batchGenerate: ({ jobId }) =>
+      Promise.resolve<ResumeBatchGenerationResult>({
+        jobId,
+        outcome: "written",
+      }),
     actions: {
       regenerateResumeDraft,
       setJobResumeApplicationMode,
@@ -1663,17 +1858,175 @@ it("R3-183 continues an interrupted existing rewrite with its saved level and la
   await vi.waitFor(() =>
     expect(run.getTailoredDraftPreparation().status).toBe("completed"),
   );
-  expect(regenerateResumeDraft).toHaveBeenCalledWith("old");
+  expect(run.generateResumeForBatch).toHaveBeenCalledWith({
+    batchId: sync.mock.calls[0]![0].id,
+    jobId: "old",
+    regenerate: true,
+  });
+  expect(regenerateResumeDraft).not.toHaveBeenCalled();
   expect(generateResume).not.toHaveBeenCalled();
-  expect(setJobResumeApplicationMode).toHaveBeenCalledWith(
-    "old",
-    "tailored_per_job",
-    "conservative",
-  );
+  expect(setJobResumeApplicationMode).not.toHaveBeenCalled();
   expect(sync.mock.calls[0]![0]).toMatchObject({
     resumedBatchIds: ["assistant_batch"],
     requests: [
       { jobId: "old", language: "German", level: "light", regenerate: true },
     ],
   });
+});
+
+it("keeps failed first drafts and failed existing rewrites unfinished with their saved retry choices", async () => {
+  for (const rewriting of [false, true]) {
+    clearUiResumeBatch();
+    const workspace = createBatchWorkspace([
+      createReviewQueueItem(
+        "retry",
+        rewriting
+          ? { assetStatus: "ready", resumeReview: { status: "draft" } }
+          : {},
+      ),
+    ]);
+    if (rewriting) {
+      workspace.resumeDrafts = [
+        { jobId: "retry" },
+      ] as JobFinderRendererWorkspaceSnapshot["resumeDrafts"];
+      workspace.intelligence = JobFinderIntelligenceStateSchema.parse({
+        resumeBatchCheckpoint: {
+          id: "failed_rewrite",
+          jobIds: ["retry"],
+          activeJobIds: [],
+          completedJobIds: [],
+          done: false,
+          stopRequested: false,
+          running: false,
+          requests: [
+            {
+              jobId: "retry",
+              regenerate: true,
+              level: "light",
+              language: "German",
+            },
+          ],
+        },
+      });
+    }
+    const sync = vi.fn((batch: AssistantResumeBatchState) =>
+      Promise.resolve(syncUiResumeBatch(batch)),
+    );
+    window.nordri.assistant.syncResumeBatch = sync;
+    const run = buildContext({
+      workspace,
+      actions: {},
+      batchGenerate: ({ jobId }) =>
+        Promise.resolve<ResumeBatchGenerationResult>({
+          jobId,
+          outcome: "failed",
+        }),
+    });
+    run.context.onPrepareTailoredDrafts(rewriting ? ["retry"] : undefined);
+    await vi.waitFor(() =>
+      expect(run.getTailoredDraftPreparation().status).toBe("failed"),
+    );
+    await vi.waitFor(() =>
+      expect(sync.mock.calls.at(-1)?.[0].running).toBe(false),
+    );
+    const saved = sync.mock.calls.at(-1)![0];
+    expect(saved).toMatchObject({
+      jobIds: ["retry"],
+      completedJobIds: [],
+      done: false,
+      running: false,
+    });
+    if (rewriting)
+      expect(saved.requests).toEqual([
+        {
+          jobId: "retry",
+          regenerate: true,
+          level: "light",
+          language: "German",
+        },
+      ]);
+  }
+});
+
+it("pauses a200-job provider-blocked queue, persists its reason, and continues only on another explicit action", async () => {
+  const items = Array.from({ length: 200 }, (_, index) =>
+    createReviewQueueItem(`provider_${index}`),
+  );
+  const workspace = createBatchWorkspace(items);
+  const providerBlock = {
+    reason: "funding" as const,
+    message:
+      "The AI service is unavailable because its provider rejected the request for insufficient funds. Try again after the service is restored.",
+  };
+  const sync = vi.fn((batch: AssistantResumeBatchState) =>
+    Promise.resolve(syncUiResumeBatch(batch)),
+  );
+  window.nordri.assistant.syncResumeBatch = sync;
+  const run = buildContext({
+    workspace,
+    actions: {},
+    batchGenerate: ({ batchId, jobId }) => {
+      blockUiResumeBatch(batchId, providerBlock);
+      return Promise.resolve<ResumeBatchGenerationResult>({
+        jobId,
+        outcome: "blocked",
+        providerBlock,
+      });
+    },
+  });
+  run.context.onPrepareTailoredDrafts();
+  await vi.waitFor(() =>
+    expect(run.getTailoredDraftPreparation().status).toBe("stopped"),
+  );
+  await vi.waitFor(() =>
+    expect(sync.mock.calls.at(-1)?.[0].running).toBe(false),
+  );
+  expect(run.getTailoredDraftPreparation()).toMatchObject({
+    completedCount: 0,
+    failedCount: 0,
+    totalCount: 200,
+    providerBlock,
+  });
+  expect(run.generateResumeForBatch.mock.calls.length).toBeLessThanOrEqual(100);
+  const saved = sync.mock.calls.at(-1)![0];
+  expect(saved).toMatchObject({
+    done: false,
+    running: false,
+    stopRequested: true,
+    completedJobIds: [],
+    providerBlock,
+  });
+  expect(saved.jobIds).toHaveLength(200);
+  expect(run.getActionMessages().at(-1)).toBeNull();
+  expect(
+    run.getActionMessages().some((message) => message?.includes("200 failed")),
+  ).toBe(false);
+  clearUiResumeBatch();
+  workspace.resumeDrafts = [];
+  workspace.intelligence = JobFinderIntelligenceStateSchema.parse({
+    resumeBatchCheckpoint: saved,
+  });
+  const continued = buildContext({
+    workspace,
+    actions: {},
+    batchGenerate: ({ jobId }) =>
+      Promise.resolve<ResumeBatchGenerationResult>({
+        jobId,
+        outcome: "written",
+      }),
+  });
+  expect(continued.generateResumeForBatch).not.toHaveBeenCalled();
+  continued.context.onPrepareTailoredDrafts(saved.jobIds);
+  await vi.waitFor(() =>
+    expect(continued.getTailoredDraftPreparation().status).toBe("completed"),
+  );
+  await vi.waitFor(() =>
+    expect(sync.mock.calls.at(-1)?.[0].running).toBe(false),
+  );
+  expect(continued.generateResumeForBatch).toHaveBeenCalledTimes(200);
+  expect(sync.mock.calls.at(-1)![0]).toMatchObject({
+    done: true,
+    completedJobIds: saved.jobIds,
+  });
+  expect(sync.mock.calls.at(-1)![0].providerBlock).toBeUndefined();
 });

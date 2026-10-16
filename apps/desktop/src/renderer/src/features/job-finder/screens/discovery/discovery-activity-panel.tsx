@@ -21,6 +21,7 @@ import {
   CollectionNoMatches,
   CollectionSearchToolbar,
   matchesCollectionSearch,
+  normalizeCollectionSearch,
 } from "../../components/collection-search-toolbar";
 import { isImeComposingEvent } from "../../lib/job-finder-shortcuts";
 import { useJobFinderOverlayOwnership } from "../../lib/job-finder-overlay-ownership";
@@ -233,27 +234,28 @@ export function DiscoveryHistoryModal(props: {
     "comfortable",
   );
   const deferredHistoryQuery = useDeferredValue(historyView.query);
-  const visibleRunOptions = useMemo(
-    () =>
-      runOptions.filter((run) => {
-        const targetText = run.targetExecutions
-          .map(
-            (execution) =>
-              props.targets.find((target) => target.id === execution.targetId)
-                ?.label,
-          )
-          .filter(Boolean)
-          .join(" ");
-        return matchesCollectionSearch(deferredHistoryQuery, [
-          formatOutcomeLabel(run.summary.outcome),
-          formatScopeLabel(run.scope),
-          targetText,
-          ...run.summary.warnings,
-          ...run.activity.map((event) => event.message),
-        ]);
-      }),
-    [deferredHistoryQuery, props.targets, runOptions],
-  );
+  const visibleRunOptions = useMemo(() => {
+    // With no search there is nothing to match. Building each run's source
+    // text looked up every one of hundreds of sources for every run on each
+    // render, closed dialog included.
+    if (!normalizeCollectionSearch(deferredHistoryQuery)) return runOptions;
+    const targetLabels = new Map(
+      props.targets.map((target) => [target.id, target.label] as const),
+    );
+    return runOptions.filter((run) => {
+      const targetText = run.targetExecutions
+        .map((execution) => targetLabels.get(execution.targetId))
+        .filter(Boolean)
+        .join(" ");
+      return matchesCollectionSearch(deferredHistoryQuery, [
+        formatOutcomeLabel(run.summary.outcome),
+        formatScopeLabel(run.scope),
+        targetText,
+        ...run.summary.warnings,
+        ...run.activity.map((event) => event.message),
+      ]);
+    });
+  }, [deferredHistoryQuery, props.targets, runOptions]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(
     runOptions[0]?.id ?? null,
   );

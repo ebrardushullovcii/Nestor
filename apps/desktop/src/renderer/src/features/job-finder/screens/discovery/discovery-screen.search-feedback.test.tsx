@@ -75,6 +75,7 @@ vi.mock("./discovery-results-panel", () => ({
   ),
 }));
 
+import { clearJobDetailCache } from "../../hooks/use-job-detail";
 import { DiscoveryScreen } from "./discovery-screen";
 import {
   createDiscoveryRunFailedFeedback,
@@ -196,6 +197,22 @@ function buildScreen(overrides?: {
   selectedJob?: SavedJob;
   searchSelectivity?: "wide_net" | "best_matches";
 }) {
+  const jobs = overrides?.jobs ?? [createJob("strong")];
+  Object.defineProperty(window, "nordri", {
+    configurable: true,
+    value: {
+      ...window.nordri,
+      jobFinder: {
+        ...window.nordri?.jobFinder,
+        getJobDetail: vi.fn((jobId: string, planId: string | null) =>
+          Promise.resolve({
+            job: jobs.find((job) => job.id === jobId),
+            planId,
+          }),
+        ),
+      },
+    },
+  });
   return (
     <MemoryRouter>
       <DiscoveryScreen
@@ -243,6 +260,39 @@ function renderScreen(overrides?: Parameters<typeof buildScreen>[0]) {
 
 afterEach(() => {
   cleanup();
+  clearJobDetailCache();
+  window.localStorage.clear();
+});
+
+it("keeps a dismissed failure gone after remount and shows a different run's failure", () => {
+  const feedback = createDiscoveryRunFailedFeedback({
+    detail: "Something unexpected stopped this search.",
+    targetLabel: null,
+  });
+  const run = DiscoveryRunRecordSchema.parse({
+    id: "dismissed-run",
+    state: "failed",
+    startedAt: "2026-10-13T01:00:00.000Z",
+  });
+  const view = renderScreen({
+    discoveryRunFeedback: feedback,
+    recentRuns: [run],
+  });
+  expect(screen.getByTestId("discovery-run-feedback")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss this notice" }));
+  view.unmount();
+  const reopened = renderScreen({
+    discoveryRunFeedback: feedback,
+    recentRuns: [run],
+  });
+  expect(screen.queryByTestId("discovery-run-feedback")).toBeNull();
+  reopened.rerender(
+    buildScreen({
+      discoveryRunFeedback: feedback,
+      recentRuns: [{ ...run, id: "new-run" }],
+    }),
+  );
+  expect(screen.getByTestId("discovery-run-feedback")).toBeTruthy();
 });
 
 describe("DiscoveryScreen Search now truthful feedback", () => {
@@ -320,6 +370,7 @@ describe("DiscoveryScreen Search now truthful feedback", () => {
     fireEvent.click(button);
     expect(onRunAgentDiscovery).toHaveBeenCalledTimes(1);
     cleanup();
+    clearJobDetailCache();
 
     renderScreen({ activeRun: runningRun, onRunAgentDiscovery });
     const runningButton = screen.getByRole("button", { name: "Searching" });
@@ -444,7 +495,7 @@ describe("DiscoveryScreen Results-mode shortlist feedback", () => {
     renderScreen({ onQueueJob });
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Mock shortlist decision" }),
+      await screen.findByRole("button", { name: "Mock shortlist decision" }),
     );
     expect(onQueueJob).toHaveBeenCalledWith("strong");
 
@@ -464,7 +515,7 @@ describe("DiscoveryScreen Results-mode shortlist feedback", () => {
     renderScreen({ onQueueJob });
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Mock shortlist decision" }),
+      await screen.findByRole("button", { name: "Mock shortlist decision" }),
     );
 
     const alert = await screen.findByRole("alert");
@@ -490,7 +541,7 @@ describe("DiscoveryScreen Results-mode shortlist feedback", () => {
     });
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Mock shortlist decision" }),
+      await screen.findByRole("button", { name: "Mock shortlist decision" }),
     );
     expect(await screen.findByRole("status").then((el) => el.textContent)).toBe(
       "Job added to Shortlisted. (strong_a)",
@@ -527,7 +578,7 @@ describe("DiscoveryScreen Results-mode shortlist feedback", () => {
     const { rerender } = renderScreen({ onQueueJob });
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Mock shortlist decision" }),
+      await screen.findByRole("button", { name: "Mock shortlist decision" }),
     );
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByTestId("mock-queue-action-message")).toBeNull();
@@ -654,13 +705,13 @@ describe("DiscoveryScreen Results-mode shortlist feedback", () => {
     });
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Mock shortlist decision" }),
+      await screen.findByRole("button", { name: "Mock shortlist decision" }),
     );
     rerender(
       buildScreen({ jobs: [jobA, jobB], onQueueJob, selectedJob: jobB }),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: "Mock shortlist decision" }),
+      await screen.findByRole("button", { name: "Mock shortlist decision" }),
     );
 
     // B fails first while A is still in flight: B's failure shows on B.

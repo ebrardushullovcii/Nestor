@@ -1,5 +1,5 @@
 import * as React from "react";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, MinusIcon } from "lucide-react";
 import { Checkbox as CheckboxPrimitive } from "radix-ui";
 
 import { cn } from "@renderer/lib/utils";
@@ -22,7 +22,9 @@ function Checkbox({
         // `disabled:data-[state=checked]:` selectors outrank the single-variant
         // checked rules, so a disabled checked box keeps its shape instead of
         // staying a washed-out --primary block.
-        "peer size-4 shrink-0 rounded-none border border-(--control-border) bg-input outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:border-(--disabled-border) disabled:bg-(--disabled-surface) disabled:text-(--disabled-foreground) data-[state=checked]:border-primary-fill data-[state=checked]:bg-primary-fill data-[state=checked]:text-primary-fill-foreground disabled:data-[state=checked]:border-(--disabled-border) disabled:data-[state=checked]:bg-(--disabled-surface) disabled:data-[state=checked]:text-(--disabled-foreground)",
+        // A partly selected group ("indeterminate") uses the checked fill with
+        // a dash, so "some" reads as a state of its own rather than "none".
+        "peer size-4 shrink-0 rounded-none border border-(--control-border) bg-input outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:border-(--disabled-border) disabled:bg-(--disabled-surface) disabled:text-(--disabled-foreground) data-[state=checked]:border-primary-fill data-[state=checked]:bg-primary-fill data-[state=checked]:text-primary-fill-foreground data-[state=indeterminate]:border-primary-fill data-[state=indeterminate]:bg-primary-fill data-[state=indeterminate]:text-primary-fill-foreground disabled:data-[state=checked]:border-(--disabled-border) disabled:data-[state=checked]:bg-(--disabled-surface) disabled:data-[state=checked]:text-(--disabled-foreground)",
         className,
       )}
       {...props}
@@ -31,7 +33,11 @@ function Checkbox({
         data-slot="checkbox-indicator"
         className="grid place-content-center text-current transition-none"
       >
-        <CheckIcon className="size-3" />
+        {props.checked === "indeterminate" ? (
+          <MinusIcon className="size-3" />
+        ) : (
+          <CheckIcon className="size-3" />
+        )}
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   );

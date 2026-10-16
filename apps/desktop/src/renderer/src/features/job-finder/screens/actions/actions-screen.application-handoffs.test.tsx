@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import {
   UserActionRequestSchema,
-  type JobFinderWorkspaceSnapshot,
+  type JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -90,7 +90,7 @@ describe("Needs you application hand-offs that carry on by themselves", () => {
         ],
         updatedAt: "2026-09-23T08:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationAttempts"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationAttempts"];
     const { getByRole, getByTestId } = render(
       <ActionsScreen
         applicationAttempts={applicationAttempts}
@@ -139,7 +139,7 @@ describe("Needs you application hand-offs that carry on by themselves", () => {
         ],
         updatedAt: "2026-09-23T08:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationAttempts"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationAttempts"];
     const { queryByTestId, getByRole } = render(
       <ActionsScreen
         applicationAttempts={applicationAttempts}
@@ -230,13 +230,13 @@ describe("a checked step behind another application on the same site", () => {
           applyJobResults={
             [
               { jobId: "job_2", state: "filling" },
-            ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"]
+            ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"]
           }
           discoveryJobs={
             [
               job("job_1"),
               job("job_2"),
-            ] as unknown as JobFinderWorkspaceSnapshot["discoveryJobs"]
+            ] as unknown as JobFinderRendererWorkspaceSnapshot["discoveryJobs"]
           }
           isPending={() => false}
           onCommand={vi.fn()}

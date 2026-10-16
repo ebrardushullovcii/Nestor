@@ -138,6 +138,46 @@ describe("active-run result stability", () => {
     expect(completed.jobs[0]?.matchAssessment.score).toBe(20);
     expect(completed.snapshot).toBeNull();
   });
+
+  it("shows a row's first verdict as soon as it is judged, then holds it", () => {
+    const unjudged = createSavedJob("job", "review_before_applying", 0);
+    const started = updateStableDiscoveryRunSnapshot({
+      current: null,
+      jobs: [unjudged],
+      runId: "run_1",
+    });
+    const judged = {
+      ...unjudged,
+      matchAssessment: {
+        ...unjudged.matchAssessment,
+        score: 72,
+        judgment: { score: 72 },
+      },
+    } as unknown as SavedJob;
+    const firstVerdict = updateStableDiscoveryRunSnapshot({
+      current: started.snapshot,
+      jobs: [judged],
+      runId: "run_1",
+    });
+    expect(firstVerdict.jobs[0]?.matchAssessment.score).toBe(72);
+
+    // A rescore later in the same run (a listing read in full) waits for
+    // the run to end, so rows do not jump while the search goes on.
+    const rescored = {
+      ...judged,
+      matchAssessment: {
+        ...judged.matchAssessment,
+        score: 40,
+        judgment: { score: 40 },
+      },
+    } as unknown as SavedJob;
+    const held = updateStableDiscoveryRunSnapshot({
+      current: firstVerdict.snapshot,
+      jobs: [rescored],
+      runId: "run_1",
+    });
+    expect(held.jobs[0]?.matchAssessment.score).toBe(72);
+  });
 });
 
 describe("getDiscoveryConfiguredFilters", () => {

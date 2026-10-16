@@ -25,7 +25,7 @@ import type {
   JobFinderResumePreview,
   JobFinderResumeWorkspace,
   JobFinderSetResumeClaimConfirmationInput,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   JobSearchPreferences,
   ProfileCopilotContext,
   ProfileSetupReviewActionOptions,
@@ -154,6 +154,7 @@ export interface JobFinderPageContext {
     options?: { selectAfter?: boolean },
   ) => Promise<boolean>;
   onRemoveReviewJob: (jobId: string) => void;
+  onRemoveReviewJobs?: (jobIds: readonly string[]) => Promise<void>;
   onMutateRapidReview: (input: RapidReviewMutationInput) => Promise<void>;
   onMutateSafeguards: (input: SafeguardMutationInput) => Promise<boolean>;
   onApproveCurrentResume: (jobId: string) => void;
@@ -171,7 +172,7 @@ export interface JobFinderPageContext {
    */
   onSetResumeClaimConfirmation: (
     input: JobFinderSetResumeClaimConfirmationInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   onExportResumePdf: (jobId: string) => void;
   /** Records that the imported resume is this person's own document. */
   onClaimResumeIdentity: () => void;
@@ -269,7 +270,12 @@ export interface JobFinderPageContext {
   onSettingsDraftEdited: () => void;
   profileCopilotPendingContextKey: string | null;
   onAssessJobListing: (jobId: string) => Promise<void>;
+  onJudgeUnjudgedJobs?: () => Promise<void>;
   onQueueJob: (jobId: string) => Promise<JobFinderQueuedJobOutcome>;
+  onQueueJobs?: (
+    jobIds: readonly string[],
+  ) => Promise<JobFinderQueuedJobOutcome>;
+  onDismissJobs?: (jobIds: readonly string[]) => Promise<void>;
   onSetJobResumeApplicationMode: (
     jobId: string,
     resumeApplicationMode: ResumeApplicationMode,
@@ -405,21 +411,25 @@ export interface JobFinderPageContext {
   onSnoozeGroupedDecision: (input: SnoozeGroupedDecisionInput) => void;
   onVerifySourceInstructions: (targetId: string, instructionId: string) => void;
   selectedApplicationAttempt:
-    | JobFinderWorkspaceSnapshot["applicationAttempts"][number]
+    | JobFinderRendererWorkspaceSnapshot["applicationAttempts"][number]
     | null;
   selectedApplicationRecord:
-    | JobFinderWorkspaceSnapshot["applicationRecords"][number]
+    | JobFinderRendererWorkspaceSnapshot["applicationRecords"][number]
     | null;
   selectedDiscoveryJob:
-    | JobFinderWorkspaceSnapshot["discoveryJobs"][number]
+    | JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number]
     | null;
-  selectedReviewItem: JobFinderWorkspaceSnapshot["reviewQueue"][number] | null;
-  selectedReviewJob: JobFinderWorkspaceSnapshot["discoveryJobs"][number] | null;
+  selectedReviewItem:
+    | JobFinderRendererWorkspaceSnapshot["reviewQueue"][number]
+    | null;
+  selectedReviewJob:
+    | JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number]
+    | null;
   selectedTailoredAsset:
-    | JobFinderWorkspaceSnapshot["tailoredAssets"][number]
+    | JobFinderRendererWorkspaceSnapshot["tailoredAssets"][number]
     | null;
   resumeAssistantMessages: readonly ResumeAssistantMessage[];
   resumeAssistantPending: boolean;
   resumeWorkspace: JobFinderResumeWorkspace | null;
-  workspace: JobFinderWorkspaceSnapshot;
+  workspace: JobFinderRendererWorkspaceSnapshot;
 }

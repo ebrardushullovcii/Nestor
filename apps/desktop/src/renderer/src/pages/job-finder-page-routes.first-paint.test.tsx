@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import { JobSearchCampaignSchema } from "@nordri/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
@@ -56,7 +56,7 @@ const activeCampaign = JobSearchCampaignSchema.parse({
   progress: { lastUpdatedAt: "2026-08-20T00:00:00.000Z" },
 });
 
-function createWorkspace(): JobFinderWorkspaceSnapshot {
+function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
   return {
     hydration: { phase: "ready", deferredCollections: [] },
     activeCampaignId: "campaign_1",
@@ -253,7 +253,7 @@ function createWorkspace(): JobFinderWorkspaceSnapshot {
     // Home filters the open action requests on every render; the contract
     // defaults the list, so a parsed snapshot always has it.
     userActionRequests: [],
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function createContext(): JobFinderPageContext {

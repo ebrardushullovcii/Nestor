@@ -18,7 +18,7 @@ import type {
   ApplicationAttempt,
   ApplicationRecord,
   BrowserVisualEvidenceSummary,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import {
   ApplyRunDetailsSchema,
@@ -648,7 +648,7 @@ describe("ApplicationsScreen", () => {
                   applicationRecordId: "record_waiting",
                 },
               },
-            ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"]
+            ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"]
           }
         />
       </MemoryRouter>,
@@ -956,7 +956,7 @@ describe("ApplicationsScreen", () => {
                   applicationRecordId: a.id,
                 },
               },
-            ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"]
+            ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"]
           }
         />
       </MemoryRouter>,
@@ -1383,7 +1383,7 @@ describe("ApplicationsScreen", () => {
                     applicationRecordId: null,
                   },
                 },
-              ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"]
+              ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"]
             }
           />
         </MemoryRouter>,

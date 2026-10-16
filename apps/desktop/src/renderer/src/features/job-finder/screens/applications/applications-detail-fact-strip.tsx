@@ -1,8 +1,8 @@
 import { ApplicationsDisclosureSummary } from "./applications-disclosure-summary";
 import type {
-  ApplicationAttempt,
+  ApplicationAttemptListRow,
   ApplicationRecord,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import type { ReactNode } from "react";
 import {
@@ -72,10 +72,10 @@ function DetailFactCell({ fact }: { fact: DetailFact }) {
 }
 
 export function ApplicationsDetailFactStrip(props: {
-  selectedAttempt: ApplicationAttempt | null;
+  selectedAttempt: ApplicationAttemptListRow | null;
   selectedRecord: ApplicationRecord;
   visibleApplyResult:
-    | JobFinderWorkspaceSnapshot["applyJobResults"][number]
+    | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
     | null;
   visibleApplyRunId: string | null;
   waitingOnSafetyLimitReview?: boolean;

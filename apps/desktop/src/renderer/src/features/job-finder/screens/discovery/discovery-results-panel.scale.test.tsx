@@ -4,6 +4,7 @@ import { performance } from "node:perf_hooks";
 
 import { SavedJobSchema, type SavedJob } from "@nordri/contracts";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -116,6 +117,42 @@ afterEach(() => {
 });
 
 describe("DiscoveryResultsPanel workspace scale", () => {
+  it("keeps a bulk shortlist single-flight until its mutation finishes", async () => {
+    const jobs = createJobs().slice(0, DISCOVERY_RESULTS_PAGE_SIZE + 10);
+    let finish!: () => void;
+    const onShortlistJobs = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(
+      <DiscoveryResultsPanel
+        browserSession={browserSession}
+        jobs={jobs}
+        onSelectJob={vi.fn()}
+        onShortlistJobs={onShortlistJobs}
+        selectedJob={jobs[0] ?? null}
+      />,
+    );
+    // The page checkbox ticks every row on the page at once.
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /^Select the [0-9]+ jobs on this page$/,
+      }),
+    );
+    const button = screen.getByRole("button", {
+      name: "Shortlist 50 selected",
+    });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(onShortlistJobs).toHaveBeenCalledTimes(1);
+    expect(button.hasAttribute("disabled")).toBe(true);
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+    });
+  });
   it("shortlists exactly the rows shown on the current page", () => {
     const jobs = createJobs().slice(0, DISCOVERY_RESULTS_PAGE_SIZE + 10);
     const onShortlistJobs = vi.fn();
@@ -129,13 +166,15 @@ describe("DiscoveryResultsPanel workspace scale", () => {
       />,
     );
 
-    // Bulk actions show once a row is ticked.
+    // The page checkbox ticks every row on the page at once.
     fireEvent.click(
-      screen.getAllByRole("checkbox", { name: /^Select / })[0] as HTMLElement,
+      screen.getByRole("checkbox", {
+        name: /^Select the [0-9]+ jobs on this page$/,
+      }),
     );
     fireEvent.click(
       screen.getByRole("button", {
-        name: `Shortlist all ${DISCOVERY_RESULTS_PAGE_SIZE} shown`,
+        name: `Shortlist ${DISCOVERY_RESULTS_PAGE_SIZE} selected`,
       }),
     );
     expect(onShortlistJobs).toHaveBeenCalledWith(
@@ -606,5 +645,46 @@ it("lets a short result list take its content height below the split-pane width"
   const stack = document.querySelector("[data-job-results-stack]")!;
   expect(stack.querySelector("ul")?.parentElement?.className).not.toMatch(
     /(?:^|\s)min-h-\[/u,
+  );
+});
+
+it("selects all shown without a first tick and keeps the whole selection across a direct page jump", async () => {
+  const jobs = createJobs();
+  const onShortlistJobs = vi.fn(() => Promise.resolve());
+  const { container } = render(
+    <DiscoveryResultsPanel
+      browserSession={browserSession}
+      jobs={jobs}
+      onSelectJob={vi.fn()}
+      onShortlistJobs={onShortlistJobs}
+      selectedJob={null}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole("checkbox", {
+      name: /^Select the [0-9]+ jobs on this page$/,
+    }),
+  );
+  expect(screen.getByText("50 selected")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Page 20" }));
+  expect(screen.getByText("951–1000 of 1000")).toBeTruthy();
+  expect(container.querySelectorAll("button[data-job-result-id]")).toHaveLength(
+    50,
+  );
+  fireEvent.click(
+    screen.getByRole("checkbox", {
+      name: /^Select the [0-9]+ jobs on this page$/,
+    }),
+  );
+  expect(screen.getByText("100 selected")).toBeTruthy();
+  await act(() =>
+    Promise.resolve(
+      fireEvent.click(
+        screen.getByRole("button", { name: "Shortlist 100 selected" }),
+      ),
+    ),
+  );
+  expect(onShortlistJobs).toHaveBeenCalledExactlyOnceWith(
+    [...jobs.slice(0, 50), ...jobs.slice(950)].map((job) => job.id),
   );
 });

@@ -1,4 +1,4 @@
-import type { ApplicationAttempt } from "@nordri/contracts";
+import type { ApplicationAttemptListRow } from "@nordri/contracts";
 import {
   formatDuration,
   formatStatusLabel,
@@ -14,7 +14,7 @@ import {
 import { APPLICATION_DETAIL_FACT_LABEL_CLASS } from "./applications-detail-fact-strip";
 
 const executionTimingLabels: Record<
-  ApplicationAttempt["executionTimings"][number]["stage"],
+  ApplicationAttemptListRow["executionTimings"][number]["stage"],
   string
 > = {
   browser_preparation: "Browser setup",
@@ -24,7 +24,7 @@ const executionTimingLabels: Record<
 };
 
 export function ApplicationsDetailPanelAttemptSection(props: {
-  selectedAttempt: ApplicationAttempt | null;
+  selectedAttempt: ApplicationAttemptListRow | null;
 }) {
   const { selectedAttempt } = props;
   const attemptSummary = getCustomerFacingApplyText(selectedAttempt?.summary);

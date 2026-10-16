@@ -1,3 +1,6 @@
+import { LIST_DETAIL_COLUMNS_CLASS } from "../../components/list-detail-columns";
+import { useJobDetail } from "../../hooks/use-job-detail";
+import { useStableCallback } from "../../hooks/use-stable-callback";
 import { campaignPlanEditorHref } from "../../lib/job-finder-route-hrefs";
 import {
   useCallback,
@@ -10,6 +13,7 @@ import {
 import { Link } from "react-router-dom";
 import type {
   BrowserSessionState,
+  FitJudgmentProgress,
   ApplicationRecord,
   CompanyEntity,
   DiscoveryAdapterSessionState,
@@ -24,7 +28,7 @@ import type {
   PlanSafeguardPause,
   ReviewQueueItem,
   SourceAccessPrompt,
-  SavedJob,
+  JobListRow,
 } from "@nordri/contracts";
 import {
   resolveCampaignSourceTargetIds,
@@ -155,16 +159,16 @@ export function getNewestRunForCampaign(
 }
 
 export function getDiscoveryResultVisibility(
-  jobs: readonly SavedJob[],
-  selectedJob: SavedJob | null,
+  jobs: readonly JobListRow[],
+  selectedJob: JobListRow | null,
   showAlsoFound: boolean,
   preserveSelectedJob = false,
   stableOrderIds?: readonly string[],
 ): {
   alsoFoundCount: number;
   hiddenAlsoFoundCount: number;
-  jobs: readonly SavedJob[];
-  selectedJob: SavedJob | null;
+  jobs: readonly JobListRow[];
+  selectedJob: JobListRow | null;
 } {
   // Weaker matches and clear mismatches are one "also found" pool. Presenting
   // them beside the leading band made the headline count describe jobs the
@@ -218,20 +222,27 @@ export function getDiscoveryResultVisibility(
 export interface StableDiscoveryRunSnapshot {
   runId: string;
   jobIds: readonly string[];
-  jobsById: ReadonlyMap<string, SavedJob>;
+  /** Only the verdict each row shows; holding whole jobs kept a second copy. */
+  assessmentsById: ReadonlyMap<string, JobListRow["matchAssessment"]>;
 }
 
 /**
- * Freezes rows already shown during a run and appends only genuinely new
- * rows. The terminal render receives the current objects once, so rescoring
- * and band changes happen together after the run rather than flickering while
- * listing pages are still being read.
+ * Keeps rows in the order they were first shown during a run, appends only
+ * genuinely new rows, and holds each row's verdict once it has one, so a
+ * rescore after a listing read does not reshuffle the list mid-search. A row
+ * still waiting for its first verdict shows it as soon as the model gives it:
+ * fit is judged while the search runs (ADR 0041), and freezing the unjudged
+ * state hid every one of those scores until the search ended. The terminal
+ * render receives the current objects once.
  */
 export function updateStableDiscoveryRunSnapshot(input: {
   current: StableDiscoveryRunSnapshot | null;
-  jobs: readonly SavedJob[];
+  jobs: readonly JobListRow[];
   runId: string | null;
-}): { jobs: readonly SavedJob[]; snapshot: StableDiscoveryRunSnapshot | null } {
+}): {
+  jobs: readonly JobListRow[];
+  snapshot: StableDiscoveryRunSnapshot | null;
+} {
   if (!input.runId) {
     return { jobs: input.jobs, snapshot: null };
   }
@@ -243,33 +254,48 @@ export function updateStableDiscoveryRunSnapshot(input: {
       snapshot: {
         runId: input.runId,
         jobIds: ordered.map((job) => job.id),
-        jobsById: new Map(ordered.map((job) => [job.id, job])),
+        assessmentsById: new Map(
+          ordered.map((job) => [job.id, job.matchAssessment]),
+        ),
       },
     };
   }
 
-  const appended = input.jobs.filter(
-    (job) => !input.current?.jobsById.has(job.id),
-  );
+  const current = input.current;
+  const appended: JobListRow[] = [];
+  const firstVerdicts: JobListRow[] = [];
+  for (const job of input.jobs) {
+    const held = current.assessmentsById.get(job.id);
+    if (!held) appended.push(job);
+    else if (!held.judgment && job.matchAssessment.judgment) {
+      firstVerdicts.push(job);
+    }
+  }
   const snapshot =
-    appended.length === 0
-      ? input.current
+    appended.length === 0 && firstVerdicts.length === 0
+      ? current
       : {
           runId: input.runId,
-          jobIds: [...input.current.jobIds, ...appended.map((job) => job.id)],
-          jobsById: new Map([
-            ...input.current.jobsById,
-            ...appended.map((job) => [job.id, job] as const),
+          jobIds:
+            appended.length === 0
+              ? current.jobIds
+              : [...current.jobIds, ...appended.map((job) => job.id)],
+          assessmentsById: new Map([
+            ...current.assessmentsById,
+            ...[...appended, ...firstVerdicts].map(
+              (job) => [job.id, job.matchAssessment] as const,
+            ),
           ]),
         };
   const currentJobsById = new Map(input.jobs.map((job) => [job.id, job]));
   return {
     jobs: snapshot.jobIds.flatMap((id) => {
       const currentJob = currentJobsById.get(id);
-      const frozenJob = snapshot.jobsById.get(id);
-      return currentJob && frozenJob
-        ? [{ ...currentJob, matchAssessment: frozenJob.matchAssessment }]
-        : [];
+      const heldAssessment = snapshot.assessmentsById.get(id);
+      if (!currentJob || !heldAssessment) return [];
+      return heldAssessment === currentJob.matchAssessment
+        ? [currentJob]
+        : [{ ...currentJob, matchAssessment: heldAssessment }];
     }),
     snapshot,
   };
@@ -284,10 +310,10 @@ export function updateStableDiscoveryRunSnapshot(input: {
  * keep describing a row the user cannot see.
  */
 export function getDiscoveryInspectedJob(
-  rankedJobs: readonly SavedJob[],
+  rankedJobs: readonly JobListRow[],
   requestedJobId: string | null,
   displayedJobId: string | null | undefined,
-): SavedJob | null {
+): JobListRow | null {
   if (displayedJobId === undefined) {
     const requested = requestedJobId
       ? rankedJobs.find((job) => job.id === requestedJobId)
@@ -299,6 +325,13 @@ export function getDiscoveryInspectedJob(
   }
   return rankedJobs.find((job) => job.id === displayedJobId) ?? null;
 }
+
+/**
+ * The person's own Show/Hide weaker matches choice per plan and opening rule,
+ * kept for this app session. Without it every visit to Find jobs reset the
+ * list, so the total jumped between the strong matches and all jobs.
+ */
+const weakerMatchesChoices = new Map<string, boolean>();
 
 export function DiscoveryScreen(props: {
   actionState: Pick<ActionState, "message" | "actionLink">;
@@ -319,6 +352,7 @@ export function DiscoveryScreen(props: {
   browserSession: BrowserSessionState;
   companies?: readonly CompanyEntity[];
   discoveryRunFeedback?: DiscoveryRunFeedback | null;
+  fitJudgmentProgress?: FitJudgmentProgress | null;
   discoverySessions: readonly DiscoveryAdapterSessionState[];
   isBrowserSessionPending: boolean;
   isBrowserSessionPendingForTarget: (targetId: string) => boolean;
@@ -326,8 +360,8 @@ export function DiscoveryScreen(props: {
   isActivityPausePending?: boolean;
   isJobPending: (jobId: string) => boolean;
   isTargetPending: (targetId: string) => boolean;
-  jobs: readonly SavedJob[];
-  dismissedJobs: readonly SavedJob[];
+  jobs: readonly JobListRow[];
+  dismissedJobs: readonly JobListRow[];
   liveEvents: readonly DiscoveryActivityEvent[];
   onBackToRapidReview?: () => void;
   /** Cancels the active run through the same fenced request the Task Center uses. */
@@ -354,7 +388,13 @@ export function DiscoveryScreen(props: {
   /** Opens a job's original listing page in the Job Finder browser. */
   onOpenListing?: (url: string) => void;
   onAssessJobListing?: (jobId: string) => Promise<void>;
+  onJudgeUnjudgedJobs?: () => Promise<void>;
   onQueueJob: (jobId: string) => void | Promise<JobFinderQueuedJobOutcome>;
+  onQueueJobs?: (
+    jobIds: readonly string[],
+  ) => Promise<JobFinderQueuedJobOutcome>;
+  /** Hides every selected job as Not interested, in one request. */
+  onDismissJobs?: (jobIds: readonly string[]) => Promise<void>;
   onRunAgentDiscovery:
     | ((searchRequest?: JobFinderSearchRequest) => void)
     | undefined;
@@ -365,7 +405,7 @@ export function DiscoveryScreen(props: {
   /** How picky the search is, from Settings, AI behavior; shown read-only. */
   searchSelectivity?: JobSearchSelectivity | null;
   preserveSelectedJob?: boolean;
-  selectedJob: SavedJob | null;
+  selectedJob: JobListRow | null;
   selectedSourceTargetId?: string | null;
   sourceAccessPrompts: readonly SourceAccessPrompt[];
 }) {
@@ -406,7 +446,10 @@ export function DiscoveryScreen(props: {
     onOpenApplication,
     onOpenListing,
     onQueueJob,
+    onQueueJobs,
+    onDismissJobs,
     onAssessJobListing,
+    onJudgeUnjudgedJobs,
     onRunAgentDiscovery,
     onSelectJob,
     recentRuns,
@@ -457,10 +500,24 @@ export function DiscoveryScreen(props: {
     searchSelectivity,
     activeCampaignMode,
   );
-  const [showAlsoFound, setShowAlsoFound] = useState(() => opensWide);
+  const weakerMatchesChoiceKey = `${activeCampaignId ?? ""}|${opensWide}`;
+  const [showAlsoFound, setShowAlsoFoundState] = useState(
+    () => weakerMatchesChoices.get(weakerMatchesChoiceKey) ?? opensWide,
+  );
   useEffect(() => {
-    setShowAlsoFound(opensWide);
-  }, [activeCampaignId, opensWide]);
+    setShowAlsoFoundState(
+      weakerMatchesChoices.get(weakerMatchesChoiceKey) ?? opensWide,
+    );
+  }, [weakerMatchesChoiceKey, opensWide]);
+  const setShowAlsoFound = useStableCallback(
+    (next: boolean | ((current: boolean) => boolean)) => {
+      setShowAlsoFoundState((current) => {
+        const value = typeof next === "function" ? next(current) : next;
+        weakerMatchesChoices.set(weakerMatchesChoiceKey, value);
+        return value;
+      });
+    },
+  );
   // What the results panel actually displays on its current filtered and
   // paginated page. Null state means "not reported yet"; an explicit null
   // jobId means the panel is showing no results at all.
@@ -488,7 +545,7 @@ export function DiscoveryScreen(props: {
       // Request-local attribution: each click owns its own resolved outcome,
       // so overlapping shortlists, search completions, and shared route
       // messages can never cross-label another row.
-      void Promise.resolve(onQueueJob(jobId))
+      return Promise.resolve(onQueueJob(jobId))
         .then((outcome) => {
           if (!outcome) {
             return;
@@ -610,9 +667,23 @@ export function DiscoveryScreen(props: {
       : selectedPlanRunFeedback;
   // A dismissed banner stays gone for that exact verdict; the next run, or
   // the same run changing state, brings a fresh one.
-  const [dismissedFeedbackKey, setDismissedFeedbackKey] = useState<
-    string | null
-  >(null);
+  const [dismissedFeedbackKeys, setDismissedFeedbackKeys] = useState<string[]>(
+    () => {
+      try {
+        const stored: unknown = JSON.parse(
+          window.localStorage.getItem("nordri.discovery.dismissed-feedback") ??
+            "[]",
+        );
+        return Array.isArray(stored)
+          ? stored
+              .filter((key): key is string => typeof key === "string")
+              .slice(-100)
+          : [];
+      } catch {
+        return [];
+      }
+    },
+  );
   const currentFeedbackKey = currentDiscoveryRunFeedback
     ? `${currentDiscoveryRunFeedback.status}|${currentDiscoveryRunFeedback.headline}|${activeRun?.id ?? selectedPlanLatestRun?.id ?? ""}`
     : null;
@@ -685,7 +756,7 @@ export function DiscoveryScreen(props: {
   }, [activeRun, activeCampaignId, props.jobs, showAlsoFound, showToast]);
   const assessedRequest = useRef<{
     id: string;
-    previous: SavedJob["matchAssessment"];
+    previous: JobListRow["matchAssessment"];
   } | null>(null);
   const assessJobWithFeedback = onAssessJobListing
     ? async (id: string) => {
@@ -743,7 +814,8 @@ export function DiscoveryScreen(props: {
     });
   }, [currentDiscoveryRunFeedback, currentFeedbackKey, showToast]);
   const visibleDiscoveryRunFeedback =
-    currentFeedbackKey !== null && currentFeedbackKey === dismissedFeedbackKey
+    currentFeedbackKey !== null &&
+    dismissedFeedbackKeys.includes(currentFeedbackKey)
       ? null
       : currentDiscoveryRunFeedback;
   const [dismissedActionMessage, setDismissedActionMessage] = useState<
@@ -881,12 +953,19 @@ export function DiscoveryScreen(props: {
   const stableReadStageSnapshotRef = useRef<StableDiscoveryRunSnapshot | null>(
     null,
   );
-  const stableReadStage = updateStableDiscoveryRunSnapshot({
-    current: stableReadStageSnapshotRef.current,
-    jobs,
-    runId: activeRun?.state === "running" ? activeRun.id : null,
-  });
-  stableReadStageSnapshotRef.current = stableReadStage.snapshot;
+  const stableRunId = activeRun?.state === "running" ? activeRun.id : null;
+  // Recomputed only when the jobs or the run change: live search events
+  // re-render this screen several times a second, and a new list each time
+  // made the results re-filter and re-sort every job.
+  const stableReadStage = useMemo(() => {
+    const next = updateStableDiscoveryRunSnapshot({
+      current: stableReadStageSnapshotRef.current,
+      jobs,
+      runId: stableRunId,
+    });
+    stableReadStageSnapshotRef.current = next.snapshot;
+    return next;
+  }, [jobs, stableRunId]);
   const stableJobs = stableReadStage.jobs;
   const stableSelectedJob = selectedJob
     ? (stableJobs.find((job) => job.id === selectedJob.id) ?? selectedJob)
@@ -920,6 +999,7 @@ export function DiscoveryScreen(props: {
       ? displayedSelection?.jobId
       : undefined,
   );
+  const inspectedDetail = useJobDetail(inspectedJob, activeCampaignId);
   // What "this job" means for the assistant (ADR 0037): the inspected row is
   // focus. The results panel publishes the list and the ticked rows.
   useAssistantContextSource("discovery-focus", () => ({
@@ -1169,7 +1249,24 @@ export function DiscoveryScreen(props: {
         feedback={visibleDiscoveryRunFeedback}
         isRecoveryPending={isBrowserSessionPending}
         notices={latestRunNotices}
-        onDismiss={() => setDismissedFeedbackKey(currentFeedbackKey)}
+        onDismiss={() => {
+          if (!currentFeedbackKey) return;
+          const next = [
+            ...dismissedFeedbackKeys.filter(
+              (key) => key !== currentFeedbackKey,
+            ),
+            currentFeedbackKey,
+          ].slice(-100);
+          setDismissedFeedbackKeys(next);
+          try {
+            window.localStorage.setItem(
+              "nordri.discovery.dismissed-feedback",
+              JSON.stringify(next),
+            );
+          } catch {
+            /* Dismissal still works for this visit. */
+          }
+        }}
         onOpenBrowserSession={onOpenBrowserSession}
         suppressBrowserRecovery={runtimeProjection.isOffline}
       />
@@ -1276,9 +1373,7 @@ export function DiscoveryScreen(props: {
     <div
       className={cn(
         "grid min-h-0 min-w-0 grid-cols-1 items-stretch gap-4 xl:h-full xl:min-h-0 xl:overflow-hidden",
-        hasInspectableJob
-          ? "xl:grid-cols-[minmax(30rem,1.35fr)_minmax(25rem,0.9fr)] assistant-docked:xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.9fr)]"
-          : "xl:grid-cols-1",
+        hasInspectableJob ? LIST_DETAIL_COLUMNS_CLASS : "xl:grid-cols-1",
       )}
       id="discovery-workspace-content"
     >
@@ -1349,6 +1444,12 @@ export function DiscoveryScreen(props: {
           {...(assessJobWithFeedback
             ? { onAssessJobListing: assessJobWithFeedback }
             : {})}
+          {...(onJudgeUnjudgedJobs ? { onJudgeUnjudgedJobs } : {})}
+          fitJudgmentProgress={
+            props.fitJudgmentProgress?.planId === activeCampaignId
+              ? props.fitJudgmentProgress
+              : null
+          }
           planName={
             campaigns?.find((plan) => plan.id === activeCampaignId)?.name ??
             null
@@ -1414,11 +1515,21 @@ export function DiscoveryScreen(props: {
             onSelectJob(jobId);
             if (jobId === inspectedJob?.id) revealSelectedDetail();
           }}
-          onShortlistJobs={(jobIds) => {
-            for (const jobId of jobIds) {
-              handleQueueJob(jobId);
+          onShortlistJobs={async (jobIds) => {
+            if (onQueueJobs) {
+              const outcome = await onQueueJobs(jobIds);
+              setQueueOutcomesByJobId((current) => {
+                const next = new Map(current);
+                for (const id of jobIds) next.set(id, outcome);
+                return next;
+              });
+            } else {
+              // Older hosts remain bounded rather than launching one full
+              // workspace mutation for every visible row at the same time.
+              for (const jobId of jobIds) await handleQueueJob(jobId);
             }
           }}
+          {...(onDismissJobs ? { onDismissJobs } : {})}
           searchSetupBlocker={searchSetupBlocker}
           selectedJob={resultVisibility.selectedJob}
           {...recoveryActionProps}
@@ -1426,41 +1537,53 @@ export function DiscoveryScreen(props: {
       </div>
       {hasInspectableJob ? (
         <div className="min-h-0 min-w-0" ref={detailPanelRef}>
-          <DiscoveryDetailPanel
-            applicationRecords={applicationRecords}
-            reviewQueue={reviewQueue}
-            discoveryTargets={searchPreferences.discovery.targets}
-            isJobPending={isJobPending}
-            onDismissJob={onDismissJob}
-            {...(onPreviewEmployerExclusion
-              ? { onPreviewEmployerExclusion }
-              : {})}
-            {...(onOpenCompany ? { onOpenCompany } : {})}
-            onOpenApplication={onOpenApplication ?? (() => undefined)}
-            {...(onOpenListing ? { onOpenListing } : {})}
-            {...(assessJobWithFeedback
-              ? { onAssessJobListing: assessJobWithFeedback }
-              : {})}
-            onBackToResults={() => {
-              const row = Array.from(
-                document.querySelectorAll<HTMLElement>(
-                  "[data-collection-item-id]",
-                ),
-              ).find(
-                (element) =>
-                  element.dataset.collectionItemId === inspectedJob?.id,
-              );
-              row?.scrollIntoView?.({ block: "center" });
-              (row instanceof HTMLButtonElement
-                ? row
-                : row?.querySelector<HTMLElement>("button")
-              )?.focus({ preventScroll: true });
-            }}
-            onQueueJob={handleQueueJob}
-            queueFeedback={inspectedJobQueueFeedback}
-            selectedJob={inspectedJob}
-            selectedJobCompanyId={selectedJobCompanyId}
-          />
+          {inspectedDetail.job ? (
+            <DiscoveryDetailPanel
+              applicationRecords={applicationRecords}
+              reviewQueue={reviewQueue}
+              discoveryTargets={searchPreferences.discovery.targets}
+              isJobPending={isJobPending}
+              onDismissJob={onDismissJob}
+              {...(onPreviewEmployerExclusion
+                ? { onPreviewEmployerExclusion }
+                : {})}
+              {...(onOpenCompany ? { onOpenCompany } : {})}
+              onOpenApplication={onOpenApplication ?? (() => undefined)}
+              {...(onOpenListing ? { onOpenListing } : {})}
+              {...(assessJobWithFeedback
+                ? { onAssessJobListing: assessJobWithFeedback }
+                : {})}
+              onBackToResults={() => {
+                const row = Array.from(
+                  document.querySelectorAll<HTMLElement>(
+                    "[data-collection-item-id]",
+                  ),
+                ).find(
+                  (element) =>
+                    element.dataset.collectionItemId === inspectedJob?.id,
+                );
+                row?.scrollIntoView?.({ block: "center" });
+                (row instanceof HTMLButtonElement
+                  ? row
+                  : row?.querySelector<HTMLElement>("button")
+                )?.focus({ preventScroll: true });
+              }}
+              onQueueJob={(jobId) => {
+                void handleQueueJob(jobId);
+              }}
+              queueFeedback={inspectedJobQueueFeedback}
+              selectedJob={inspectedDetail.job}
+              selectedJobCompanyId={selectedJobCompanyId}
+            />
+          ) : (
+            <section className="surface-panel-shell p-6" aria-live="polite">
+              <h2>{inspectedJob?.title}</h2>
+              <p>{inspectedDetail.error ?? "Loading job details…"}</p>
+              {inspectedDetail.error ? (
+                <Button onClick={inspectedDetail.retry}>Retry</Button>
+              ) : null}
+            </section>
+          )}
         </div>
       ) : null}
     </div>

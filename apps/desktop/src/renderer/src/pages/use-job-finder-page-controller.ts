@@ -7,7 +7,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type {
   DiscoveryActivityEvent,
   JobFinderResumeWorkspace,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ProfileCopilotMessage,
   ResumeAssistantMessage,
   ResumeImportProgressEvent,
@@ -60,6 +60,15 @@ import {
   useRetainedSelection,
 } from "./use-job-finder-page-controller-helpers";
 import { applyJobFinderWindowCloseGuard } from "./job-finder-window-close-guard";
+import {
+  getDiscoverySelectionIndex,
+  getReviewSelectionIndex,
+  getTailoredAssetIndex,
+} from "./job-finder-page-selection";
+
+const EMPTY_RESUME_ASSISTANT_MESSAGES: readonly ResumeAssistantMessage[] = [];
+const EMPTY_REVIEW_QUEUE: Readonly<JobFinderRendererWorkspaceSnapshot["reviewQueue"]> =
+  [];
 
 export type ApplyCopilotVisualCheckpointRequest = {
   jobId: string;
@@ -493,7 +502,7 @@ export function useJobFinderPageController() {
   const tailoredDraftPreparationStopRequestedRef = useRef(false);
   const tailoredDraftPreparationDisposedRef = useRef(false);
   const sourceDebugRunIdRef = useRef(0);
-  const latestWorkspaceRef = useRef<JobFinderWorkspaceSnapshot | null>(null);
+  const latestWorkspaceRef = useRef<JobFinderRendererWorkspaceSnapshot | null>(null);
   const activeResumeWorkspaceJobId = getActiveResumeWorkspaceJobId(
     location.pathname,
   );
@@ -566,7 +575,10 @@ export function useJobFinderPageController() {
   const [selectedDiscoveryJobId, setSelectedDiscoveryJobId] =
     useRetainedSelection({
       snapshotValue: readyWorkspaceSnapshot?.selectedDiscoveryJobId ?? null,
-      validIds: readyWorkspaceSnapshot?.discoveryJobs.map((job) => job.id),
+      validIds: readyWorkspaceSnapshot
+        ? getDiscoverySelectionIndex(readyWorkspaceSnapshot.discoveryJobs)
+            .validIds
+        : undefined,
       activeCampaignId: readyWorkspaceSnapshot?.activeCampaignId ?? null,
       persistedSelection: {
         storage: window.localStorage,
@@ -576,7 +588,9 @@ export function useJobFinderPageController() {
     });
   const [selectedReviewJobId, setSelectedReviewJobId] = useRetainedSelection({
     snapshotValue: readyWorkspaceSnapshot?.selectedReviewJobId ?? null,
-    validIds: readyWorkspaceSnapshot?.reviewQueue.map((item) => item.jobId),
+    validIds: readyWorkspaceSnapshot
+      ? getReviewSelectionIndex(readyWorkspaceSnapshot.reviewQueue).validIds
+      : undefined,
     activeCampaignId: readyWorkspaceSnapshot?.activeCampaignId ?? null,
     persistedSelection: {
       storage: window.localStorage,
@@ -598,7 +612,7 @@ export function useJobFinderPageController() {
       : null;
   const activeRouteResumeAssistantMessages = activeRouteResumeWorkspace
     ? resumeAssistantMessages
-    : [];
+    : EMPTY_RESUME_ASSISTANT_MESSAGES;
   const activeRouteResumeAssistantPending = activeRouteResumeWorkspace
     ? resumeAssistantPending
     : false;
@@ -680,11 +694,14 @@ export function useJobFinderPageController() {
     [pendingActionState],
   );
 
+  const isResumeJobPending = useCallback(
+    (jobId: string) =>
+      isPendingAction(jobFinderPendingActions.resumeJob(jobId)),
+    [isPendingAction],
+  );
   const resumeOperationStarts = useResumeOperationStarts(
-    workspaceState.status === "ready"
-      ? workspaceState.workspace.reviewQueue
-      : [],
-    (jobId) => isPendingAction(jobFinderPendingActions.resumeJob(jobId)),
+    readyWorkspaceSnapshot?.reviewQueue ?? EMPTY_REVIEW_QUEUE,
+    isResumeJobPending,
   );
 
   // Action-level counterpart to the router blocker below: an action that
@@ -880,7 +897,7 @@ export function useJobFinderPageController() {
     (workspaceState.status === "ready" ? workspaceState.platform : undefined);
   const workspace = readyWorkspaceState?.workspace ?? null;
   const workspaceWithOptimisticProfileCopilot =
-    useMemo<JobFinderWorkspaceSnapshot | null>(() => {
+    useMemo<JobFinderRendererWorkspaceSnapshot | null>(() => {
       if (!workspace) {
         return null;
       }
@@ -1217,14 +1234,21 @@ export function useJobFinderPageController() {
               selectedReviewItem: null,
               selectedReviewJob: null,
             },
-      [selectedDiscoveryJobId, selectedReviewJobId, workspace],
+      [
+        selectedDiscoveryJobId,
+        selectedReviewJobId,
+        workspace?.discoveryJobs,
+        workspace?.reviewQueue,
+      ],
     );
 
   const selectedTailoredAsset = useMemo(
     () =>
-      workspace?.tailoredAssets.find(
-        (asset) => asset.id === selectedReviewItem?.resumeAssetId,
-      ) ?? null,
+      workspace && selectedReviewItem?.resumeAssetId
+        ? (getTailoredAssetIndex(workspace.tailoredAssets).get(
+            selectedReviewItem.resumeAssetId,
+          ) ?? null)
+        : null,
     [selectedReviewItem?.resumeAssetId, workspace?.tailoredAssets],
   );
 
@@ -1233,7 +1257,11 @@ export function useJobFinderPageController() {
       workspace
         ? getLatestApplicationAttempt(workspace, selectedApplicationRecordId)
         : { selectedApplicationAttempt: null, selectedApplicationRecord: null },
-    [selectedApplicationRecordId, workspace],
+    [
+      selectedApplicationRecordId,
+      workspace?.applicationRecords,
+      workspace?.applicationAttempts,
+    ],
   );
 
   // Route-scoped view of the page action status: a message is visible only on

@@ -3,7 +3,7 @@ import {
   ApplicationPrivacyReceiptSchema,
   APPLICATION_SKIPPED_BY_PERSON_LABEL,
   PREPARED_PAGE_CLOSED_SUMMARY,
-  type JobFinderWorkspaceSnapshot,
+  type JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import {
   applyResultStoppedStructurally,
@@ -13,7 +13,7 @@ import {
   resolveApplicationRecoveryPresentation,
 } from "./applications-recovery-state";
 
-type ApplyResult = JobFinderWorkspaceSnapshot["applyJobResults"][number];
+type ApplyResult = JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
 
 function buildResult(overrides: Partial<ApplyResult>): ApplyResult {
   return {
@@ -533,7 +533,7 @@ describe("a planned job's standing in its batch", () => {
     const read = buildApplyRunContextReader({
       applyRuns: [
         { id: "run_1", state: "running" },
-      ] as unknown as JobFinderWorkspaceSnapshot["applyRuns"],
+      ] as unknown as JobFinderRendererWorkspaceSnapshot["applyRuns"],
       applyJobResults: [
         buildResult({
           id: "result_0",

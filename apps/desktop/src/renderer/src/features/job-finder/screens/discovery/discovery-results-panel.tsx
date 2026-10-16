@@ -1,3 +1,9 @@
+import { JOB_LIST_PAGE_SIZE } from "../../components/collection-pagination";
+import { PageNavigation } from "../../components/page-navigation";
+import {
+  DiscoveryResultFilters,
+  type DiscoveryFilterGroup,
+} from "./discovery-result-filters";
 import {
   getDiscoverySourceRunCountLabel,
   formatDiscoveryRunReportLabel,
@@ -12,15 +18,16 @@ import {
   useMemo,
   useRef,
   useState,
+  useTransition,
   type KeyboardEvent,
 } from "react";
 import type {
   BrowserSessionState,
-  DiscoveryJobView,
   DiscoveryRunRecord,
+  FitJudgmentProgress,
   JobDiscoveryTarget,
   ListingActivity,
-  SavedJob,
+  JobListRow,
   WorkMode,
 } from "@nordri/contracts";
 import {
@@ -31,6 +38,12 @@ import {
 } from "@nordri/contracts";
 import { DiscoveryAssessmentContinuation } from "./discovery-assessment-continuation";
 import { jobSourceLabel } from "../../lib/job-source-display-name";
+import {
+  applySelectionRange,
+  isSelectionClick,
+  ListPageSelectionBar,
+  ListRowSelectionCell,
+} from "../../components/list-selection";
 import { discoverySourceFailureCopy } from "./discovery-source-failure-copy";
 import { ChevronDown, LoaderCircle } from "lucide-react";
 import { Badge } from "@renderer/components/ui/badge";
@@ -113,6 +126,8 @@ interface DiscoveryResultsPanelProps {
   hiddenJobsControl?: React.ReactNode;
   planName?: string | null;
   onAssessJobListing?: (jobId: string) => Promise<void>;
+  onJudgeUnjudgedJobs?: () => Promise<void>;
+  fitJudgmentProgress?: FitJudgmentProgress | null;
   alsoFoundCount?: number;
   areAlsoFoundShown?: boolean;
   browserSession: BrowserSessionState;
@@ -124,7 +139,7 @@ interface DiscoveryResultsPanelProps {
   facetScopeId?: string | null;
   hasCompletedSearch?: boolean;
   hiddenAlsoFoundCount?: number;
-  hiddenAlsoFoundJobs?: readonly SavedJob[];
+  hiddenAlsoFoundJobs?: readonly JobListRow[];
   inAreaJobCount?: number;
   pendingLocationJobCount?: number;
   isSearchInProgress?: boolean;
@@ -134,7 +149,7 @@ interface DiscoveryResultsPanelProps {
    * takes minutes per source, so the page must never look idle meanwhile.
    */
   liveStatusLine?: string | null;
-  jobs: readonly SavedJob[];
+  jobs: readonly JobListRow[];
   preferredLocations?: readonly string[];
   remoteIncluded?: boolean;
   totalLocationJobCount?: number;
@@ -171,6 +186,8 @@ interface DiscoveryResultsPanelProps {
   onToggleAlsoFound?: (() => void) | null;
   onSelectJob: (jobId: string) => void;
   onShortlistJobs?: (jobIds: readonly string[]) => void | Promise<void>;
+  /** Hides the selected jobs as Not interested. */
+  onDismissJobs?: (jobIds: readonly string[]) => Promise<void>;
   recoveryActionLabel?: string | null;
   recoveryActionNextStep?: string | null;
   recoveryActionPending?: boolean;
@@ -184,10 +201,9 @@ interface DiscoveryResultsPanelProps {
   selectedJob: DiscoveryResultJob | null;
 }
 
-type DiscoveryResultJob = SavedJob &
-  Partial<Pick<DiscoveryJobView, "listingActivity">>;
+type DiscoveryResultJob = JobListRow;
 
-export const DISCOVERY_RESULTS_PAGE_SIZE = 50;
+export const DISCOVERY_RESULTS_PAGE_SIZE = JOB_LIST_PAGE_SIZE;
 export const DISCOVERY_OFFLINE_CATALOG_NOTICE_ID =
   "discovery-offline-catalog-notice";
 export const DISCOVERY_SEARCH_SETUP_BLOCKER_ID =
@@ -437,9 +453,9 @@ function toggleFilterValue(
 }
 
 export function getDiscoveryResultsPage(
-  jobs: readonly SavedJob[],
+  jobs: readonly JobListRow[],
   page: number,
-): readonly SavedJob[] {
+): readonly JobListRow[] {
   const pageCount = Math.max(
     1,
     Math.ceil(jobs.length / DISCOVERY_RESULTS_PAGE_SIZE),
@@ -496,7 +512,7 @@ export function getDiscoveryListingDateBadge(input: {
 }
 
 function getSelectedJobPage(
-  jobs: readonly SavedJob[],
+  jobs: readonly JobListRow[],
   selectedJobId: string | null,
 ): number {
   if (!selectedJobId) {
@@ -612,6 +628,8 @@ export function DiscoveryResultsPanel({
   hiddenJobsControl,
   planName = null,
   onAssessJobListing,
+  onJudgeUnjudgedJobs,
+  fitJudgmentProgress,
   alsoFoundCount = 0,
   hiddenAlsoFoundJobs = [],
   areAlsoFoundShown = false,
@@ -639,6 +657,7 @@ export function DiscoveryResultsPanel({
   onToggleAlsoFound,
   onSelectJob,
   onShortlistJobs,
+  onDismissJobs,
   recoveryActionLabel,
   recoveryActionNextStep,
   recoveryActionPending = false,
@@ -657,6 +676,9 @@ export function DiscoveryResultsPanel({
   // navigation and restarts. The scope key keeps each search plan's filters
   // separate.
   const facetScopeKey = normalizeFacetScopeKey(facetScopeId);
+  // The per-source list is built only while it is open: with hundreds of
+  // sources it cost about 400 ms on every page change while folded away.
+  const [sourceSummariesOpen, setSourceSummariesOpen] = useState(false);
   const [persistedFacetFilters] = useState(() =>
     readScopedFacetFilters(facetScopeKey),
   );
@@ -863,8 +885,8 @@ export function DiscoveryResultsPanel({
   const resultsSort = useDiscoveryResultsSort();
   const sortDirection = resultsSort.sort.direction;
   const sortField = resultsSort.sort.field;
-  // The default fit ranking arrives pre-sorted from the discovery screen, so
-  // skip re-sorting (and re-allocating) the full result set entirely.
+  // Keep the shared fit order and result bands, including when this panel is
+  // supplied with a refreshed or independently filtered result collection.
   const orderedJobs = useMemo(() => {
     if (sortDirection === "desc" && sortField === "fit") {
       return orderDiscoveryResultsByGroup(
@@ -914,14 +936,15 @@ export function DiscoveryResultsPanel({
     latestRun?.targetExecutions?.filter((source) => source.state === "failed")
       .length ?? 0;
   const jobCount = filteredJobs.length;
-  const pendingLocationJobCount = filteredJobs.filter(
-    (job) => !job.matchAssessment.judgment,
-  ).length;
-  const inAreaJobCount = filteredJobs.filter(
-    (job) =>
-      Boolean(job.matchAssessment.judgment) &&
-      job.matchAssessment.locationReach === "in_area",
-  ).length;
+  const [pendingLocationJobCount, inAreaJobCount] = useMemo(() => {
+    let pending = 0;
+    let inArea = 0;
+    for (const job of filteredJobs) {
+      if (!job.matchAssessment.judgment) pending += 1;
+      else if (job.matchAssessment.locationReach === "in_area") inArea += 1;
+    }
+    return [pending, inArea];
+  }, [filteredJobs]);
   const locationCountLabel =
     preferredLocations.length > 0 && !remoteIncluded
       ? `${inAreaJobCount} of ${filteredJobs.length - pendingLocationJobCount} assessed jobs in or near ${preferredLocations.join(" or ")}${pendingLocationJobCount > 0 ? ` · ${pendingLocationJobCount} awaiting place checks` : ""}`
@@ -935,6 +958,7 @@ export function DiscoveryResultsPanel({
     page: getSelectedJobPage(orderedJobs, selectedJobId),
     selectedJobId,
   }));
+  const [isPagePending, startPageTransition] = useTransition();
   // Tracks which plan scope the facet state currently mirrors so the restore
   // effect above only fires on real scope changes.
   const lastFacetScopeRef = useRef(facetScopeKey);
@@ -946,15 +970,11 @@ export function DiscoveryResultsPanel({
   const [bulkSelectedJobIds, setBulkSelectedJobIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [isShortlisting, setIsShortlisting] = useState(false);
+  const shortlistInFlight = useRef(false);
   const [acknowledgedRescoreJobIds, setAcknowledgedRescoreJobIds] = useState<
     Set<string>
   >(() => new Set());
-  const shortlistableJobs = visibleJobs.filter(
-    (job) =>
-      !["drafting", "ready_for_review", "approved"].includes(job.status) &&
-      job.status !== "submitted" &&
-      getListingActivity(job).status !== "closed",
-  );
   // The list for the assistant (ADR 0037): ticked rows are the selection,
   // the page is what is displayed, and the filtered, sorted set is "all".
   useAssistantContextSource(
@@ -978,22 +998,100 @@ export function DiscoveryResultsPanel({
     { priority: 1 },
   );
   const shortlistSelected = async () => {
-    const jobIds = shortlistableJobs
+    if (shortlistInFlight.current) return;
+    const jobIds = selectedShortlistableJobs.map((job) => job.id);
+    if (jobIds.length === 0 || !onShortlistJobs) return;
+    shortlistInFlight.current = true;
+    setIsShortlisting(true);
+    try {
+      await onShortlistJobs(jobIds);
+      setBulkSelectedJobIds(new Set());
+    } finally {
+      shortlistInFlight.current = false;
+      setIsShortlisting(false);
+    }
+  };
+  const isSelectingAny = bulkSelectedJobIds.size > 0;
+  const dismissSelected = async () => {
+    if (shortlistInFlight.current || !onDismissJobs) return;
+    const jobIds = orderedJobs
       .filter((job) => bulkSelectedJobIds.has(job.id))
       .map((job) => job.id);
-    if (jobIds.length === 0 || !onShortlistJobs) return;
-    await onShortlistJobs(jobIds);
-    setBulkSelectedJobIds(new Set());
+    if (jobIds.length === 0) return;
+    shortlistInFlight.current = true;
+    setIsShortlisting(true);
+    try {
+      await onDismissJobs(jobIds);
+      setBulkSelectedJobIds(new Set());
+    } catch {
+      // The route message names what failed; the selection stays for a retry.
+    } finally {
+      shortlistInFlight.current = false;
+      setIsShortlisting(false);
+    }
   };
-  const shortlistAllShown = async () => {
-    if (shortlistableJobs.length === 0 || !onShortlistJobs) return;
-    await onShortlistJobs(shortlistableJobs.map((job) => job.id));
-    setBulkSelectedJobIds(new Set());
+  // Every job the filters and search match, on every page, that a bulk
+  // action can still act on.
+  const selectableMatchingJobIds = isSelectingAny
+    ? orderedJobs
+        .filter(
+          (job) =>
+            !["drafting", "ready_for_review", "approved", "submitted"].includes(
+              job.status,
+            ),
+        )
+        .map((job) => job.id)
+    : [];
+  const selectAllMatching = () => {
+    setBulkSelectedJobIds(new Set(selectableMatchingJobIds));
   };
   const isSelecting = Boolean(onShortlistJobs) && bulkSelectedJobIds.size > 0;
-  const selectedShortlistableCount = shortlistableJobs.filter((job) =>
-    bulkSelectedJobIds.has(job.id),
-  ).length;
+  const selectedShortlistableJobs =
+    bulkSelectedJobIds.size === 0
+      ? []
+      : orderedJobs.filter(
+          (job) =>
+            bulkSelectedJobIds.has(job.id) &&
+            !["drafting", "ready_for_review", "approved", "submitted"].includes(
+              job.status,
+            ) &&
+            getListingActivity(job).status !== "closed",
+        );
+  const selectedShortlistableCount = selectedShortlistableJobs.length;
+  // Rows that carry a checkbox on this page, in the order shown.
+  const selectablePageJobIds = visibleJobs
+    .filter(
+      (job) =>
+        !["drafting", "ready_for_review", "approved", "submitted"].includes(
+          job.status,
+        ),
+    )
+    .map((job) => job.id);
+  const selectionAnchorRef = useRef<string | null>(null);
+  const toggleJobSelection = (jobId: string, shiftKey: boolean) => {
+    const anchor = selectionAnchorRef.current;
+    setBulkSelectedJobIds((current) => {
+      const checked = !current.has(jobId);
+      return applySelectionRange(
+        current,
+        selectablePageJobIds,
+        shiftKey ? anchor : null,
+        jobId,
+        checked,
+      );
+    });
+    selectionAnchorRef.current = jobId;
+  };
+  const selectPage = () =>
+    setBulkSelectedJobIds(
+      (current) => new Set([...current, ...selectablePageJobIds]),
+    );
+  const clearPage = () =>
+    setBulkSelectedJobIds((current) => {
+      const next = new Set(current);
+      for (const jobId of selectablePageJobIds) next.delete(jobId);
+      return next;
+    });
   // Band dividers only make sense while the list is in its canonical
   // best-match order; any other sort re-interleaves the bands. Headings are
   // built from the rows actually on screen so every page keeps its dividers
@@ -1078,14 +1176,71 @@ export function DiscoveryResultsPanel({
   );
 
   const moveToPage = useCallback((page: number) => {
-    setPagination((current) => ({
-      ...current,
-      page,
-    }));
+    startPageTransition(() => {
+      setPagination((current) => ({
+        ...current,
+        page,
+      }));
+    });
     if (resultsScrollRegionRef.current) {
       resultsScrollRegionRef.current.scrollTop = 0;
     }
   }, []);
+  const resultFilterGroups: DiscoveryFilterGroup[] = [];
+  if (filterGroups.recommendation)
+    resultFilterGroups.push({
+      label: "Fit",
+      options: recommendationOptions.map((recommendation) => ({
+        label: fitRecommendationCopy[recommendation].label,
+        selected: recommendationFilters.has(recommendation),
+        onToggle: () => {
+          setRecommendationFilters((current) =>
+            toggleFilterValue(current, recommendation),
+          );
+          moveToPage(0);
+        },
+      })),
+    });
+  if (filterGroups.source)
+    resultFilterGroups.push({
+      label: "Source",
+      searchable: true,
+      options: sourceOptions.map((source) => ({
+        label: source,
+        selected: sourceFilters.has(source),
+        onToggle: () => {
+          setSourceFilters((current) => toggleFilterValue(current, source));
+          moveToPage(0);
+        },
+      })),
+    });
+  if (filterGroups.workMode)
+    resultFilterGroups.push({
+      label: "Work mode",
+      options: workModeOptions.map((workMode) => ({
+        label:
+          workMode === WORK_MODE_UNSPECIFIED_FILTER
+            ? workMode
+            : formatWorkModeLabel(workMode as WorkMode),
+        selected: workModeFilters.has(workMode),
+        onToggle: () => {
+          setWorkModeFilters((current) => toggleFilterValue(current, workMode));
+          moveToPage(0);
+        },
+      })),
+    });
+  if (filterGroups.activity)
+    resultFilterGroups.push({
+      label: "Listing status",
+      options: activityOptions.map((status) => ({
+        label: formatStatusLabel(status),
+        selected: activityFilters.has(status),
+        onToggle: () => {
+          setActivityFilters((current) => toggleFilterValue(current, status));
+          moveToPage(0);
+        },
+      })),
+    });
   const clearFilters = useCallback(() => {
     setRecommendationFilters(new Set());
     setSourceFilters(new Set());
@@ -1276,23 +1431,38 @@ export function DiscoveryResultsPanel({
               {bulkSelectedJobIds.size} selected
             </span>
             <Button
-              aria-label={`Shortlist ${bulkSelectedJobIds.size} selected`}
-              disabled={selectedShortlistableCount === 0}
+              aria-label={`Shortlist ${selectedShortlistableCount} selected`}
+              disabled={isShortlisting || selectedShortlistableCount === 0}
               onClick={() => void shortlistSelected()}
               size="toolbar"
               type="button"
               variant="secondary"
             >
-              Shortlist
+              Shortlist {selectedShortlistableCount}
             </Button>
-            {shortlistableJobs.length > 0 ? (
+            {onDismissJobs ? (
               <Button
-                onClick={() => void shortlistAllShown()}
+                aria-label={`Mark ${bulkSelectedJobIds.size} selected as not interested`}
+                disabled={isShortlisting}
+                onClick={() => void dismissSelected()}
                 size="toolbar"
                 type="button"
                 variant="outline"
               >
-                Shortlist all {shortlistableJobs.length} shown
+                Not interested
+              </Button>
+            ) : null}
+            {selectableMatchingJobIds.some(
+              (jobId) => !bulkSelectedJobIds.has(jobId),
+            ) ? (
+              <Button
+                disabled={isShortlisting}
+                onClick={selectAllMatching}
+                size="toolbar"
+                type="button"
+                variant="ghost"
+              >
+                Select all {selectableMatchingJobIds.length}
               </Button>
             ) : null}
             <Button
@@ -1327,177 +1497,14 @@ export function DiscoveryResultsPanel({
                 data-testid="discovery-results-toolbar"
               >
                 {hasFilterGroups ? (
-                  <details className="group relative min-w-0">
-                    {/* `--control-border` rather than the inert
-                  `--surface-panel-border`: this border is the disclosure's
-                  entire boundary, so it has to read as a control beside the
-                  sort field. */}
-                    <summary
-                      className={cn(
-                        DISCOVERY_RESULTS_TOOLBAR_CONTROL_CLASS,
-                        "flex w-fit cursor-pointer list-none items-center gap-2 whitespace-nowrap border border-(--control-border) px-3 text-foreground-soft outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/30 [&::-webkit-details-marker]:hidden",
-                      )}
-                    >
-                      Filters
-                      {activeFilterCount > 0 ? (
-                        <span
-                          aria-label={`${activeFilterCount} active ${activeFilterCount === 1 ? "filter" : "filters"}`}
-                          className="rounded-full bg-accent px-1.5 py-0.5 tabular-nums text-accent-foreground"
-                        >
-                          {activeFilterCount}
-                        </span>
-                      ) : null}
-                    </summary>
-                    {/* Columns follow the groups actually shown: a lone Source group
-                  used to get a quarter of the row and broke source addresses
-                  mid-word. */}
-                    <div
-                      className="mt-2 grid max-h-[min(22rem,45dvh)] grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-3 overflow-y-auto overscroll-contain rounded-(--radius-field) border border-(--surface-panel-border) bg-(--surface-panel-raised) p-3"
-                      data-testid="discovery-results-filter-groups"
-                    >
-                      {filterGroups.recommendation ? (
-                        <fieldset className="min-w-0">
-                          <legend className="mb-2 text-xs font-semibold text-foreground">
-                            Fit
-                          </legend>
-                          <div className="grid gap-2">
-                            {recommendationOptions.map((recommendation) => (
-                              <label
-                                className="flex min-w-0 items-start gap-2 text-xs leading-6 text-foreground-soft"
-                                key={recommendation}
-                              >
-                                <input
-                                  checked={recommendationFilters.has(
-                                    recommendation,
-                                  )}
-                                  className="size-6 shrink-0 accent-current"
-                                  onChange={() => {
-                                    setRecommendationFilters((current) =>
-                                      toggleFilterValue(
-                                        current,
-                                        recommendation,
-                                      ),
-                                    );
-                                    moveToPage(0);
-                                  }}
-                                  type="checkbox"
-                                />
-                                <span className="min-w-0 break-words">
-                                  {fitRecommendationCopy[recommendation].label}
-                                </span>
-                              </label>
-                            ))}
-                          </div>
-                        </fieldset>
-                      ) : null}
-                      {filterGroups.source ? (
-                        <fieldset className="min-w-0">
-                          <legend className="mb-2 text-xs font-semibold text-foreground">
-                            Source
-                          </legend>
-                          <div className="grid gap-2">
-                            {sourceOptions.map((source) => (
-                              <label
-                                className="flex min-w-0 items-start gap-2 text-xs leading-6 text-foreground-soft"
-                                key={source}
-                                title={source}
-                              >
-                                <input
-                                  checked={sourceFilters.has(source)}
-                                  className="size-6 shrink-0 accent-current"
-                                  onChange={() => {
-                                    setSourceFilters((current) =>
-                                      toggleFilterValue(current, source),
-                                    );
-                                    moveToPage(0);
-                                  }}
-                                  type="checkbox"
-                                />
-                                <span className="min-w-0 break-words">
-                                  {source}
-                                </span>
-                              </label>
-                            ))}
-                          </div>
-                        </fieldset>
-                      ) : null}
-                      {filterGroups.workMode ? (
-                        <fieldset className="min-w-0">
-                          <legend className="mb-2 text-xs font-semibold text-foreground">
-                            Work mode
-                          </legend>
-                          <div className="grid gap-2">
-                            {workModeOptions.map((workMode) => (
-                              <label
-                                className="flex min-w-0 items-start gap-2 text-xs leading-6 text-foreground-soft"
-                                key={workMode}
-                              >
-                                <input
-                                  checked={workModeFilters.has(workMode)}
-                                  className="size-6 shrink-0 accent-current"
-                                  onChange={() => {
-                                    setWorkModeFilters((current) =>
-                                      toggleFilterValue(current, workMode),
-                                    );
-                                    moveToPage(0);
-                                  }}
-                                  type="checkbox"
-                                />
-                                <span className="min-w-0 break-words">
-                                  {workMode === WORK_MODE_UNSPECIFIED_FILTER
-                                    ? workMode
-                                    : formatWorkModeLabel(workMode as WorkMode)}
-                                </span>
-                              </label>
-                            ))}
-                          </div>
-                        </fieldset>
-                      ) : null}
-                      {filterGroups.activity ? (
-                        <fieldset className="min-w-0">
-                          <legend className="mb-2 text-xs font-semibold text-foreground">
-                            Listing status
-                          </legend>
-                          <div className="grid gap-2">
-                            {activityOptions.map((status) => (
-                              <label
-                                className="flex min-w-0 items-start gap-2 text-xs leading-6 text-foreground-soft"
-                                key={status}
-                              >
-                                <input
-                                  checked={activityFilters.has(status)}
-                                  className="size-6 shrink-0 accent-current"
-                                  onChange={() => {
-                                    setActivityFilters((current) =>
-                                      toggleFilterValue(current, status),
-                                    );
-                                    moveToPage(0);
-                                  }}
-                                  type="checkbox"
-                                />
-                                <span>{formatStatusLabel(status)}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </fieldset>
-                      ) : null}
-                      {activeFilterCount > 0 ? (
-                        <div className="sm:col-span-2 xl:col-span-4">
-                          <Button
-                            onClick={clearFilters}
-                            size="xs"
-                            type="button"
-                            variant="ghost"
-                          >
-                            Clear filters
-                          </Button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </details>
-                ) : (
-                  <span />
-                )}
+                  <DiscoveryResultFilters
+                    groups={resultFilterGroups}
+                    activeCount={activeFilterCount}
+                    matchingCount={filteredJobs.length}
+                    totalCount={jobs.length}
+                    onClear={clearFilters}
+                  />
+                ) : null}
                 <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
                   <select
                     aria-label="Sort results"
@@ -1551,11 +1558,35 @@ export function DiscoveryResultsPanel({
             </span>
           </p>
         ) : null}
+        {onJudgeUnjudgedJobs || onAssessJobListing ? (
+          <div className="px-3 pb-2">
+            <DiscoveryAssessmentContinuation
+              jobs={jobs}
+              preferredJobs={visibleJobs}
+              isSearchRunning={isSearchInProgress}
+              fitJudgmentProgress={fitJudgmentProgress ?? null}
+              {...(onJudgeUnjudgedJobs
+                ? { onJudgeAll: onJudgeUnjudgedJobs }
+                : {})}
+              {...(onAssessJobListing ? { onAssess: onAssessJobListing } : {})}
+            />
+          </div>
+        ) : null}
         {hiddenJobsControl ? (
           <div className="px-3 pb-2">{hiddenJobsControl}</div>
         ) : null}
       </header>
+      {onShortlistJobs && selectablePageJobIds.length > 0 ? (
+        <ListPageSelectionBar
+          noun="jobs"
+          onClearPage={clearPage}
+          onSelectPage={selectPage}
+          pageIds={selectablePageJobIds}
+          selectedIds={bulkSelectedJobIds}
+        />
+      ) : null}
       <div
+        aria-busy={isPagePending}
         className="overscroll-contain xl:min-h-[360px] xl:flex-1 xl:overflow-y-auto"
         data-locked-pane-scroll-region
         data-job-results-scroll-region
@@ -1563,13 +1594,33 @@ export function DiscoveryResultsPanel({
         role="region"
         aria-label="Job results list"
         tabIndex={0}
+        onKeyDown={(event) => {
+          if (!onShortlistJobs) return;
+          if (
+            (event.ctrlKey || event.metaKey) &&
+            event.key.toLowerCase() === "a"
+          ) {
+            event.preventDefault();
+            selectPage();
+          } else if (event.key === "Escape" && bulkSelectedJobIds.size > 0) {
+            event.preventDefault();
+            setBulkSelectedJobIds(new Set());
+          }
+        }}
       >
         {latestRun?.targetExecutions?.length ? (
           <details
             className="shrink-0 px-5 py-2 text-xs text-foreground-soft"
             data-testid="discovery-source-summaries"
+            open={sourceSummariesOpen}
           >
-            <summary className="cursor-pointer">
+            <summary
+              className="cursor-pointer"
+              onClick={(event) => {
+                event.preventDefault();
+                setSourceSummariesOpen((open) => !open);
+              }}
+            >
               {latestRun.state === "cancelled" ||
               getDiscoveryRunPhase(latestRun) === "interrupted"
                 ? "Search stopped"
@@ -1580,59 +1631,14 @@ export function DiscoveryResultsPanel({
                 ? ` · ${formatTimestamp(latestRun.startedAt)}`
                 : ""}
             </summary>
-            <ul className="mt-2 grid gap-2">
-              {latestRun.targetExecutions.map((source) => {
-                const label = jobSourceLabel(source.targetId, discoveryTargets);
-                const note = latestRun.activity?.findLast(
-                  (event) =>
-                    event.targetId === source.targetId &&
-                    event.terminalState === "completed",
-                )?.message;
-                return (
-                  <li key={source.targetId}>
-                    <p className="font-medium">
-                      {label}:{" "}
-                      {source.state === "failed"
-                        ? "Could not finish"
-                        : source.state === "cancelled"
-                          ? "Stopped"
-                          : source.state === "completed"
-                            ? "Completed"
-                            : latestRun.state === "cancelled" ||
-                                getDiscoveryRunPhase(latestRun) ===
-                                  "interrupted"
-                              ? "Not searched"
-                              : "Waiting"}
-                    </p>
-                    <p>
-                      {getDiscoverySourceRunCountLabel(
-                        latestRun,
-                        source.targetId,
-                      )}
-                      .
-                    </p>
-                    {note ? <p className="break-words">{note}</p> : null}
-                    {source.state === "failed" ? (
-                      <div className="flex items-center gap-2">
-                        <span>
-                          {discoverySourceFailureCopy(source.warning)}
-                        </span>
-                        {onRetrySource ? (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={isSearchInProgress}
-                            onClick={() => onRetrySource(source.targetId)}
-                          >
-                            Retry {label}
-                          </Button>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
+            {sourceSummariesOpen ? (
+              <DiscoverySourceSummaryList
+                discoveryTargets={discoveryTargets}
+                isSearchInProgress={isSearchInProgress}
+                latestRun={latestRun}
+                onRetrySource={onRetrySource}
+              />
+            ) : null}
           </details>
         ) : null}
 
@@ -1641,7 +1647,7 @@ export function DiscoveryResultsPanel({
         {!isSearchInProgress &&
         latestRun &&
         getDiscoveryRunPhase(latestRun) === "interrupted" ? (
-          <div className="px-5 pt-4">
+          <div className="px-5 py-4">
             <div
               className="flex flex-wrap items-center justify-between gap-3 rounded-(--radius-field) border border-(--warning-border) bg-(--warning-surface) px-4 py-3 text-(length:--text-small) leading-6 text-(--warning-text)"
               data-testid="discovery-interrupted-run-banner"
@@ -1652,7 +1658,10 @@ export function DiscoveryResultsPanel({
               </p>
               {onSearchAgain ? (
                 <Button
-                  onClick={onSearchAgain}
+                  // Called with nothing: handed straight to onClick, the
+                  // click event became the search request and could not be
+                  // sent to the app, so the button did nothing.
+                  onClick={() => onSearchAgain()}
                   size="compact"
                   type="button"
                   variant="secondary"
@@ -2044,14 +2053,7 @@ export function DiscoveryResultsPanel({
                   const groupHeading = groupHeadingsByJobId.get(job.id);
                   const wasRescoredAfterRead =
                     !acknowledgedRescoreJobIds.has(job.id) &&
-                    Boolean(
-                      job.latestMatchAssessmentAudit?.inputChanges.some(
-                        (change) => change.code === "listing_evidence_changed",
-                      ) &&
-                      job.latestMatchAssessmentAudit.outputChanges.some(
-                        (change) => change.code === "score_changed",
-                      ),
-                    );
+                    Boolean(job.rescoredAfterListingRead);
 
                   return [
                     groupHeading ? (
@@ -2063,46 +2065,28 @@ export function DiscoveryResultsPanel({
                         <span className="text-(length:--text-small) font-semibold text-(--text-headline)">
                           {groupHeading.label} ({groupHeading.count})
                         </span>
-                        {groupHeading.id === "unchecked" &&
-                        onAssessJobListing ? (
-                          <DiscoveryAssessmentContinuation
-                            jobs={[
-                              ...visibleJobs,
-                              ...orderedJobs.filter(
-                                (entry) =>
-                                  !visibleJobs.some(
-                                    (visible) => visible.id === entry.id,
-                                  ),
-                              ),
-                            ]}
-                            isSearchRunning={isSearchInProgress}
-                            onAssess={onAssessJobListing}
-                          />
-                        ) : null}
                       </li>
                     ) : null,
                     <li key={job.id} className="relative min-w-0 pl-10">
-                      {onShortlistJobs &&
-                      !["drafting", "ready_for_review", "approved"].includes(
-                        job.status,
-                      ) &&
-                      job.status !== "submitted" ? (
-                        <label className="absolute left-3 top-4 z-10 inline-flex size-7 items-center justify-center rounded-(--radius-small) focus-within:ring-[3px] focus-within:ring-ring/40">
-                          <span className="sr-only">Select {job.title}</span>
-                          <input
-                            aria-label={`Select ${job.title}`}
+                      {onShortlistJobs ? (
+                        selectablePageJobIds.includes(job.id) ? (
+                          <ListRowSelectionCell
                             checked={bulkSelectedJobIds.has(job.id)}
-                            onChange={(event) => {
-                              setBulkSelectedJobIds((current) => {
-                                const next = new Set(current);
-                                if (event.target.checked) next.add(job.id);
-                                else next.delete(job.id);
-                                return next;
-                              });
-                            }}
-                            type="checkbox"
+                            label={`Select ${job.title}`}
+                            onToggle={({ shiftKey }) =>
+                              toggleJobSelection(job.id, shiftKey)
+                            }
                           />
-                        </label>
+                        ) : (
+                          // Jobs already in Shortlisted keep the checkbox
+                          // column filled, so the list reads as one grid.
+                          <ListRowSelectionCell
+                            checked={false}
+                            disabled
+                            label={`${job.title} is already in Shortlisted`}
+                            onToggle={() => undefined}
+                          />
+                        )
                       ) : null}
                       <SelectableRow
                         aria-controls={DISCOVERY_DETAIL_REGION_ID}
@@ -2111,6 +2095,15 @@ export function DiscoveryResultsPanel({
                         aria-keyshortcuts="ArrowUp ArrowDown Home End"
                         data-collection-item-id={job.id}
                         onClick={(event) => {
+                          if (
+                            onShortlistJobs &&
+                            isSelectionClick(event) &&
+                            selectablePageJobIds.includes(job.id)
+                          ) {
+                            event.preventDefault();
+                            toggleJobSelection(job.id, event.shiftKey);
+                            return;
+                          }
                           if (wasRescoredAfterRead) {
                             setAcknowledgedRescoreJobIds((current) =>
                               new Set(current).add(job.id),
@@ -2399,40 +2392,136 @@ export function DiscoveryResultsPanel({
             {pageCount > 1 ? (
               <nav
                 aria-label="Job result pages"
-                className="sticky bottom-0 z-10 flex h-11 shrink-0 items-center justify-between gap-3 border-t border-(--surface-panel-border) bg-(--surface-panel) px-3"
+                className="@container sticky bottom-0 z-10 flex h-11 shrink-0 items-center justify-between gap-3 border-t border-(--surface-panel-border) bg-(--surface-panel) px-3"
                 data-job-results-pagination
               >
-                <Button
-                  disabled={currentPage === 0}
-                  onClick={() => moveToPage(Math.max(0, currentPage - 1))}
-                  size="xs"
-                  type="button"
-                  variant="outline"
-                >
-                  Previous
-                </Button>
                 <span
                   aria-live="polite"
-                  className="text-center text-(length:--text-small) text-foreground-muted"
+                  className="inline-flex min-w-0 items-center gap-2 truncate whitespace-nowrap text-(length:--text-small) text-foreground-muted"
                 >
-                  {firstVisibleJobNumber}–{lastVisibleJobNumber} of {jobCount}
+                  {isPagePending ? (
+                    <>
+                      <LoaderCircle
+                        aria-hidden="true"
+                        className="size-3 motion-safe:animate-spin"
+                      />
+                      Loading results…
+                    </>
+                  ) : (
+                    `${firstVisibleJobNumber}–${lastVisibleJobNumber} of ${jobCount}`
+                  )}
                 </span>
-                <Button
-                  disabled={currentPage >= pageCount - 1}
-                  onClick={() =>
-                    moveToPage(Math.min(pageCount - 1, currentPage + 1))
-                  }
-                  size="xs"
-                  type="button"
-                  variant="outline"
-                >
-                  Next
-                </Button>
+                <PageNavigation
+                  page={currentPage + 1}
+                  pageCount={pageCount}
+                  pending={isPagePending}
+                  previousLabel="Previous"
+                  nextLabel="Next"
+                  onPageChange={(nextPage) => moveToPage(nextPage - 1)}
+                />
               </nav>
             ) : null}
           </div>
         ) : null}
       </div>
     </section>
+  );
+}
+
+/**
+ * What each source of the latest run did. Labels, counts and last notes are
+ * looked up through maps built once, not by scanning every source and every
+ * activity event for each row.
+ */
+function DiscoverySourceSummaryList({
+  discoveryTargets,
+  isSearchInProgress,
+  latestRun,
+  onRetrySource,
+}: {
+  discoveryTargets: Parameters<typeof jobSourceLabel>[1];
+  isSearchInProgress: boolean;
+  latestRun: NonNullable<DiscoveryResultsPanelProps["latestRun"]>;
+  onRetrySource?: DiscoveryResultsPanelProps["onRetrySource"];
+}) {
+  const rows = useMemo(() => {
+    const targetsById = new Map(
+      discoveryTargets.map((target) => [target.id, target]),
+    );
+    const lastNoteByTargetId = new Map<string, string>();
+    for (const event of latestRun.activity ?? []) {
+      if (event.targetId && event.terminalState === "completed")
+        lastNoteByTargetId.set(event.targetId, event.message);
+    }
+    const reportedSources = new Map(
+      (latestRun.summary.report?.sources ?? []).map((source) => [
+        source.targetId,
+        source,
+      ]),
+    );
+    return (latestRun.targetExecutions ?? []).map((source) => {
+      const target = targetsById.get(source.targetId.trim());
+      const reported = reportedSources.get(source.targetId);
+      return {
+        source,
+        label: jobSourceLabel(source.targetId, target ? [target] : []),
+        note: lastNoteByTargetId.get(source.targetId),
+        countLabel: getDiscoverySourceRunCountLabel(
+          {
+            summary: {
+              ...latestRun.summary,
+              report: latestRun.summary.report
+                ? {
+                    ...latestRun.summary.report,
+                    sources: reported ? [reported] : [],
+                  }
+                : latestRun.summary.report,
+            },
+            targetExecutions: [source],
+          },
+          source.targetId,
+        ),
+      };
+    });
+  }, [discoveryTargets, latestRun]);
+  return (
+    <ul className="mt-2 grid gap-2">
+      {rows.map(({ source, label, note, countLabel }) => {
+        return (
+          <li key={source.targetId}>
+            <p className="font-medium">
+              {label}:{" "}
+              {source.state === "failed"
+                ? "Could not finish"
+                : source.state === "cancelled"
+                  ? "Stopped"
+                  : source.state === "completed"
+                    ? "Completed"
+                    : latestRun.state === "cancelled" ||
+                        getDiscoveryRunPhase(latestRun) === "interrupted"
+                      ? "Not searched"
+                      : "Waiting"}
+            </p>
+            <p>{countLabel}.</p>
+            {note ? <p className="break-words">{note}</p> : null}
+            {source.state === "failed" ? (
+              <div className="flex items-center gap-2">
+                <span>{discoverySourceFailureCopy(source.warning)}</span>
+                {onRetrySource ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={isSearchInProgress}
+                    onClick={() => onRetrySource(source.targetId)}
+                  >
+                    Retry {label}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
   );
 }

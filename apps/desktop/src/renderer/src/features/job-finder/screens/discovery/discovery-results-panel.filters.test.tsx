@@ -1,11 +1,6 @@
 // @vitest-environment jsdom
 
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   JobDiscoveryTargetSchema,
   SavedJobSchema,
@@ -13,6 +8,7 @@ import {
   type JobDiscoveryTarget,
   type ListingActivity,
   type SavedJob,
+  type JobListRow,
   type WorkMode,
 } from "@nordri/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -86,7 +82,7 @@ function createJob(
 }
 
 function renderResults(
-  jobs: readonly SavedJob[],
+  jobs: readonly JobListRow[],
   options?: {
     facetScopeId?: string | null;
     onDisplayedSelectedJobIdChange?: (jobId: string | null) => void;
@@ -113,7 +109,7 @@ function renderResults(
 }
 
 function openFilters() {
-  fireEvent.click(screen.getByText("Filters"));
+  fireEvent.click(screen.getByRole("button", { name: /^Filters/ }));
 }
 
 afterEach(() => {
@@ -169,7 +165,9 @@ describe("DiscoveryResultsPanel triage filters", () => {
         ],
       },
     };
-    const { container } = renderResults([rescored]);
+    const { container } = renderResults([
+      { ...rescored, rescoredAfterListingRead: true },
+    ]);
 
     expect(screen.getByText("Rescored after reading the listing")).toBeTruthy();
     const row = container.querySelector<HTMLButtonElement>(
@@ -177,9 +175,7 @@ describe("DiscoveryResultsPanel triage filters", () => {
     );
     expect(row).not.toBeNull();
     fireEvent.click(row as HTMLButtonElement);
-    expect(
-      screen.queryByText("Rescored after reading the listing"),
-    ).toBeNull();
+    expect(screen.queryByText("Rescored after reading the listing")).toBeNull();
   });
 
   it("shortlists selected rows and every shown row with keyboard-operable controls", () => {
@@ -234,9 +230,44 @@ describe("DiscoveryResultsPanel triage filters", () => {
     expect(bar.textContent).toContain("1 selected");
     expect(screen.queryByRole("searchbox")).toBeNull();
     fireEvent.click(
-      screen.getByRole("button", { name: "Shortlist all 2 shown" }),
+      screen.getByRole("checkbox", { name: "Select the 2 jobs on this page" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Shortlist 2 selected" }),
     );
     expect(onShortlistJobs).toHaveBeenCalledWith(["one", "two"]);
+  });
+
+  it("hides every matching job as not interested, across pages, in one request", async () => {
+    const jobs = [
+      createJob("one", "strong_fit", ["remote"], primarySource),
+      createJob("two", "review_before_applying", ["hybrid"], longSource),
+    ];
+    const onDismissJobs = vi.fn(() => Promise.resolve());
+    render(
+      <DiscoveryResultsPanel
+        browserSession={browserSession}
+        discoveryTargets={[primarySource, longSource]}
+        hasCompletedSearch
+        jobs={jobs}
+        onDismissJobs={onDismissJobs}
+        onSelectJob={vi.fn()}
+        onShortlistJobs={vi.fn()}
+        selectedJob={null}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Select Engineer one" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select all 2" }));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Mark 2 selected as not interested",
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(onDismissJobs).toHaveBeenCalledExactlyOnceWith(["one", "two"]),
+    );
   });
 
   it("clears the selection and brings the search toolbar back", () => {
@@ -345,29 +376,37 @@ describe("DiscoveryResultsPanel triage filters", () => {
     expect(screen.getByText("1 of 2 jobs")).toBeTruthy();
   });
 
-  it("sizes filter columns to the groups shown, so a lone Source group gets the row", () => {
-    // Same fit and work mode: only the Source facet has more than one value.
-    renderResults([
+  it("opens filters outside the toolbar and searches long source lists without clearing selections", () => {
+    const { container } = renderResults([
       createJob("specialist", "strong_fit", ["remote"], longSource),
       createJob("generalist", "strong_fit", ["remote"], primarySource),
     ]);
+    const trigger = screen.getByRole("button", { name: /^Filters/ });
     openFilters();
-
-    const groups = screen.getByTestId("discovery-results-filter-groups");
-    expect(groups.querySelectorAll("fieldset")).toHaveLength(1);
-    expect(groups.className).not.toContain("max-h-40");
-    // The filters open in the header row above the list, so a long source
-    // list scrolls inside its own bounded box instead of pushing the list
-    // out of view.
-    expect(groups.closest("header")).toBeTruthy();
-    expect(groups.className).toContain("overflow-y-auto");
-    expect(groups.className).toContain("max-h-[min(22rem,45dvh)]");
-    expect(groups.className).toContain(
-      "grid-cols-[repeat(auto-fit,minmax(12rem,1fr))]",
+    const popup = screen.getByRole("dialog", { name: "Filter jobs" });
+    expect(container.contains(popup)).toBe(false);
+    expect(
+      screen
+        .getByTestId("discovery-results-filter-groups")
+        .querySelectorAll("fieldset"),
+    ).toHaveLength(1);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Primary board" }));
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search sources" }),
+      { target: { value: "specialist" } },
     );
-    expect(groups.className).not.toContain("xl:grid-cols-4");
+    expect(
+      screen.queryByRole("checkbox", { name: "Primary board" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("checkbox", { name: longSource.label }),
+    ).toBeTruthy();
+    expect(screen.getByText("1 of 2 jobs")).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Filter jobs" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(screen.getByText("1 of 2 jobs")).toBeTruthy();
   });
-
   it("resets pagination and retains a selected job that matches the filter", () => {
     const jobs = Array.from({ length: 55 }, (_, index) =>
       createJob(
@@ -497,7 +536,7 @@ function readFacetScopesById(): Record<string, Record<string, unknown>> {
 
 describe("DiscoveryResultsPanel facet target size", () => {
   it("gives every facet checkbox a >=24px square hit area inside spaced rows", () => {
-    const { container } = renderResults([
+    renderResults([
       createJob("strong-remote", "strong_fit", ["remote"], primarySource),
       createJob(
         "review-hybrid",
@@ -509,18 +548,20 @@ describe("DiscoveryResultsPanel facet target size", () => {
     openFilters();
 
     // Every row shares one listing status, so that facet is not offered.
-    const fieldsets = container.querySelectorAll("fieldset");
+    const fieldsets = screen
+      .getByTestId("discovery-results-filter-groups")
+      .querySelectorAll("fieldset");
     expect(fieldsets).toHaveLength(3);
 
     let checkboxCount = 0;
     for (const fieldset of fieldsets) {
       const rows = fieldset.querySelector(".grid");
       // Row spacing keeps the enlarged targets visually separated.
-      expect(rows?.className).toContain("gap-2");
+      expect(rows?.className).toContain("gap-1");
       for (const input of fieldset.querySelectorAll('input[type="checkbox"]')) {
         checkboxCount += 1;
         // WCAG 2.5.8: every pointer target is at least 24x24 CSS pixels.
-        expect(input.className).toContain("size-6");
+        expect(input.closest("label")?.className).toContain("min-h-8");
       }
     }
     expect(checkboxCount).toBe(6);

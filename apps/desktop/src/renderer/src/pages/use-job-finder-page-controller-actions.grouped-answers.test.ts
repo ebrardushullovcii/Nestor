@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SetStateAction } from "react";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import type {
   ActionState,
   JobFinderShellActions,
@@ -38,7 +38,7 @@ describe("buildJobFinderPageContext grouped manual-answer handlers", () => {
   it("projects a grouped answer through the action runner with its own pending scope", async () => {
     const projectGroupedManualAnswer =
       vi.fn<JobFinderShellActions["projectGroupedManualAnswer"]>();
-    let resolveProject: (value: JobFinderWorkspaceSnapshot) => void = () =>
+    let resolveProject: (value: JobFinderRendererWorkspaceSnapshot) => void = () =>
       undefined;
     projectGroupedManualAnswer.mockReturnValue(
       new Promise((resolve) => {
@@ -62,7 +62,7 @@ describe("buildJobFinderPageContext grouped manual-answer handlers", () => {
     });
     expect(readActionState().message).toBeNull();
 
-    resolveProject({} as JobFinderWorkspaceSnapshot);
+    resolveProject({} as JobFinderRendererWorkspaceSnapshot);
     await vi.waitFor(() => {
       expect(readPendingActionState()).toEqual({});
       expect(readActionState().message).toMatch(/created for review/i);
@@ -79,7 +79,7 @@ describe("buildJobFinderPageContext grouped manual-answer handlers", () => {
   it("applies a grouped answer with a distinct fill-only message and decision scope", async () => {
     const applyGroupedManualAnswer = vi
       .fn<JobFinderShellActions["applyGroupedManualAnswer"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const { context, readActionState, readPendingActionState } = createContext({
       applyGroupedManualAnswer,
     });
@@ -104,7 +104,7 @@ describe("buildJobFinderPageContext grouped manual-answer handlers", () => {
   it("snoozes a grouped decision with a note-aware message", async () => {
     const snoozeGroupedDecision = vi
       .fn<JobFinderShellActions["snoozeGroupedDecision"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const { context, readActionState, readPendingActionState } = createContext({
       snoozeGroupedDecision,
     });
