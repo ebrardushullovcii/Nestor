@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type {
   InterviewChatImageAttachmentInput,
   InterviewHotkeyAction,
-  InterviewWorkspaceSnapshot,
+  InterviewWorkspaceView,
 } from "@nordri/contracts";
 import { interviewChatLimits } from "@nordri/contracts";
 import {
@@ -36,9 +36,9 @@ interface InterviewVisibleChatProps {
   onPerform: (action: InterviewHotkeyAction) => Promise<void>;
   onGoToReview: () => void;
   onGoToSetup: () => void;
-  onWorkspaceChange: (workspace: InterviewWorkspaceSnapshot) => void;
+  onWorkspaceChange: (workspace: InterviewWorkspaceView) => void;
   pendingAction: string | null;
-  workspace: InterviewWorkspaceSnapshot;
+  workspace: InterviewWorkspaceView;
 }
 
 const supportedImageTypes = new Set(["image/png", "image/jpeg", "image/webp"]);

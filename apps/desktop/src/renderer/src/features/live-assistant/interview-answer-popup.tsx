@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   InterviewChatImageAttachmentInput,
-  InterviewWorkspaceSnapshot,
+  InterviewWorkspaceView,
 } from "@nordri/contracts";
 import { interviewChatLimits } from "@nordri/contracts";
 import {
@@ -29,8 +29,8 @@ interface PendingImage {
 }
 
 interface InterviewAnswerPopupProps {
-  onWorkspaceChange: (workspace: InterviewWorkspaceSnapshot) => void;
-  workspace: InterviewWorkspaceSnapshot;
+  onWorkspaceChange: (workspace: InterviewWorkspaceView) => void;
+  workspace: InterviewWorkspaceView;
 }
 
 const supportedImageTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -54,7 +54,7 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
-function getCopyableAnswer(workspace: InterviewWorkspaceSnapshot) {
+function getCopyableAnswer(workspace: InterviewWorkspaceView) {
   const session = workspace.activeSession;
   const latestAssistantMessage = session?.chatConversation?.messages
     .filter((message) => message.role === "assistant")

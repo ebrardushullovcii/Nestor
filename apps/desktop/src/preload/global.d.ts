@@ -75,7 +75,8 @@ import type {
   InterviewPrepArtifactFromCueInput,
   InterviewTranscriptAnnotationInput,
   InterviewTranscriptSegmentInput,
-  InterviewWorkspaceSnapshot,
+  InterviewWorkspaceView,
+  InterviewLiveSession,
   SaveInterviewSetupInput,
   SendInterviewChatMessageInput,
   UpdateInterviewOverlayPreferenceInput,
@@ -181,46 +182,45 @@ declare global {
         ) => () => void;
       };
       liveAssistant: {
-        getWorkspace: () => Promise<InterviewWorkspaceSnapshot>;
+        getWorkspace: () => Promise<InterviewWorkspaceView>;
+        getSession: (sessionId: string) => Promise<InterviewLiveSession | null>;
         onWorkspaceChange: (
-          listener: (workspace: InterviewWorkspaceSnapshot) => void,
+          listener: (workspace: InterviewWorkspaceView) => void,
         ) => () => void;
         saveSetup: (
           input: SaveInterviewSetupInput,
-        ) => Promise<InterviewWorkspaceSnapshot>;
-        runRehearsal: () => Promise<InterviewWorkspaceSnapshot>;
-        startSession: () => Promise<InterviewWorkspaceSnapshot>;
-        beginReconfiguration: () => Promise<InterviewWorkspaceSnapshot>;
-        finishReconfiguration: () => Promise<InterviewWorkspaceSnapshot>;
+        ) => Promise<InterviewWorkspaceView>;
+        runRehearsal: () => Promise<InterviewWorkspaceView>;
+        startSession: () => Promise<InterviewWorkspaceView>;
+        beginReconfiguration: () => Promise<InterviewWorkspaceView>;
+        finishReconfiguration: () => Promise<InterviewWorkspaceView>;
         performAction: (
           action: InterviewHotkeyAction,
-        ) => Promise<InterviewWorkspaceSnapshot>;
+        ) => Promise<InterviewWorkspaceView>;
         moveOverlayWindow: (
           input: InterviewOverlayMoveInput,
         ) => Promise<{ moved: boolean }>;
         updateOverlayPreference: (
           input: UpdateInterviewOverlayPreferenceInput,
-        ) => Promise<InterviewWorkspaceSnapshot>;
-        deleteSession: (
-          sessionId: string,
-        ) => Promise<InterviewWorkspaceSnapshot>;
+        ) => Promise<InterviewWorkspaceView>;
+        deleteSession: (sessionId: string) => Promise<InterviewWorkspaceView>;
         saveCueAsPrepArtifact: (
           input: InterviewPrepArtifactFromCueInput,
-        ) => Promise<InterviewWorkspaceSnapshot>;
+        ) => Promise<InterviewWorkspaceView>;
         addTranscriptAnnotation: (
           input: InterviewTranscriptAnnotationInput,
-        ) => Promise<InterviewWorkspaceSnapshot>;
+        ) => Promise<InterviewWorkspaceView>;
         addTranscriptSegment: (
           input: InterviewTranscriptSegmentInput,
-        ) => Promise<InterviewWorkspaceSnapshot>;
+        ) => Promise<InterviewWorkspaceView>;
         sendChatMessage: (
           input: SendInterviewChatMessageInput,
         ) => Promise<InterviewChatTurn>;
         transcribeAudioChunk: (
           input: InterviewAudioTranscriptionInput,
-        ) => Promise<InterviewWorkspaceSnapshot>;
-        verifyOverlayProtection: () => Promise<InterviewWorkspaceSnapshot>;
-        resetOverlayPreferences: () => Promise<InterviewWorkspaceSnapshot>;
+        ) => Promise<InterviewWorkspaceView>;
+        verifyOverlayProtection: () => Promise<InterviewWorkspaceView>;
+        resetOverlayPreferences: () => Promise<InterviewWorkspaceView>;
         readClipboardText: () => Promise<InterviewClipboardTextResult>;
         writeClipboardText: (
           input: InterviewClipboardWriteInput,

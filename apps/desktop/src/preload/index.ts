@@ -67,7 +67,8 @@ import type {
   InterviewPrepArtifactFromCueInput,
   InterviewTranscriptAnnotationInput,
   InterviewTranscriptSegmentInput,
-  InterviewWorkspaceSnapshot,
+  InterviewWorkspaceView,
+  InterviewLiveSession,
   SaveInterviewSetupInput,
   SendInterviewChatMessageInput,
   UpdateInterviewOverlayPreferenceInput,
@@ -204,8 +205,7 @@ const jobFinderAssetChannels = new Set([
 function isDeferredFeatureChannel(channel: unknown): channel is string {
   return (
     typeof channel === "string" &&
-    (channel.startsWith("job-finder:") ||
-      channel.startsWith("live-assistant:"))
+    (channel.startsWith("job-finder:") || channel.startsWith("live-assistant:"))
   );
 }
 
@@ -293,9 +293,9 @@ function isSaveWorkspaceInputsPayload(
   return "profile" in profileOrInput && "searchPreferences" in profileOrInput;
 }
 
-function isInterviewWorkspaceSnapshot(
+function isInterviewWorkspaceView(
   value: unknown,
-): value is InterviewWorkspaceSnapshot {
+): value is InterviewWorkspaceView {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
   return (
@@ -400,18 +400,22 @@ const desktopApi = {
     },
   },
   liveAssistant: {
+    getSession: (sessionId: string) =>
+      ipcRenderer.invoke("live-assistant:get-session", {
+        sessionId,
+      }) as Promise<InterviewLiveSession | null>,
     getWorkspace: () =>
       ipcRenderer.invoke(
         "live-assistant:get-workspace",
-      ) as Promise<InterviewWorkspaceSnapshot>,
+      ) as Promise<InterviewWorkspaceView>,
     onWorkspaceChange: (
-      listener: (workspace: InterviewWorkspaceSnapshot) => void,
+      listener: (workspace: InterviewWorkspaceView) => void,
     ) => {
       const handler = (
         _event: Electron.IpcRendererEvent,
         workspace: unknown,
       ) => {
-        if (isInterviewWorkspaceSnapshot(workspace)) listener(workspace);
+        if (isInterviewWorkspaceView(workspace)) listener(workspace);
       };
 
       ipcRenderer.on("live-assistant:workspace-changed", handler);
@@ -424,27 +428,27 @@ const desktopApi = {
       ipcRenderer.invoke(
         "live-assistant:save-setup",
         input,
-      ) as Promise<InterviewWorkspaceSnapshot>,
+      ) as Promise<InterviewWorkspaceView>,
     runRehearsal: () =>
       ipcRenderer.invoke(
         "live-assistant:run-rehearsal",
-      ) as Promise<InterviewWorkspaceSnapshot>,
+      ) as Promise<InterviewWorkspaceView>,
     startSession: () =>
       ipcRenderer.invoke(
         "live-assistant:start-session",
-      ) as Promise<InterviewWorkspaceSnapshot>,
+      ) as Promise<InterviewWorkspaceView>,
     beginReconfiguration: () =>
       ipcRenderer.invoke(
         "live-assistant:begin-reconfiguration",
-      ) as Promise<InterviewWorkspaceSnapshot>,
+      ) as Promise<InterviewWorkspaceView>,
     finishReconfiguration: () =>
       ipcRenderer.invoke(
         "live-assistant:finish-reconfiguration",
-      ) as Promise<InterviewWorkspaceSnapshot>,
+      ) as Promise<InterviewWorkspaceView>,
     performAction: (action: InterviewHotkeyAction) =>
       ipcRenderer.invoke("live-assistant:perform-action", {
         action,
-      }) as Promise<InterviewWorkspaceSnapshot>,
+      }) as Promise<InterviewWorkspaceView>,
     moveOverlayWindow: (input: InterviewOverlayMoveInput) =>
       ipcRenderer.invoke(
         "live-assistant:move-overlay-window",
@@ -454,26 +458,26 @@ const desktopApi = {
       ipcRenderer.invoke(
         "live-assistant:update-overlay-preference",
         input,
-      ) as Promise<InterviewWorkspaceSnapshot>,
+      ) as Promise<InterviewWorkspaceView>,
     deleteSession: (sessionId: string) =>
       ipcRenderer.invoke("live-assistant:delete-session", {
         sessionId,
-      }) as Promise<InterviewWorkspaceSnapshot>,
+      }) as Promise<InterviewWorkspaceView>,
     saveCueAsPrepArtifact: (input: InterviewPrepArtifactFromCueInput) =>
       ipcRenderer.invoke(
         "live-assistant:save-cue-as-prep-artifact",
         input,
-      ) as Promise<InterviewWorkspaceSnapshot>,
+      ) as Promise<InterviewWorkspaceView>,
     addTranscriptAnnotation: (input: InterviewTranscriptAnnotationInput) =>
       ipcRenderer.invoke(
         "live-assistant:add-transcript-annotation",
         input,
-      ) as Promise<InterviewWorkspaceSnapshot>,
+      ) as Promise<InterviewWorkspaceView>,
     addTranscriptSegment: (input: InterviewTranscriptSegmentInput) =>
       ipcRenderer.invoke(
         "live-assistant:add-transcript-segment",
         input,
-      ) as Promise<InterviewWorkspaceSnapshot>,
+      ) as Promise<InterviewWorkspaceView>,
     sendChatMessage: (input: SendInterviewChatMessageInput) =>
       ipcRenderer.invoke(
         "live-assistant:send-chat-message",
@@ -483,15 +487,15 @@ const desktopApi = {
       ipcRenderer.invoke(
         "live-assistant:transcribe-audio-chunk",
         input,
-      ) as Promise<InterviewWorkspaceSnapshot>,
+      ) as Promise<InterviewWorkspaceView>,
     verifyOverlayProtection: () =>
       ipcRenderer.invoke(
         "live-assistant:verify-overlay-protection",
-      ) as Promise<InterviewWorkspaceSnapshot>,
+      ) as Promise<InterviewWorkspaceView>,
     resetOverlayPreferences: () =>
       ipcRenderer.invoke(
         "live-assistant:reset-overlay-preferences",
-      ) as Promise<InterviewWorkspaceSnapshot>,
+      ) as Promise<InterviewWorkspaceView>,
     readClipboardText: () =>
       ipcRenderer.invoke(
         "live-assistant:read-clipboard-text",

@@ -52,6 +52,7 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0043](0043-bulk-work-queues-the-whole-selection.md) | accepted | Bulk work queues the whole selection or says what remains; toasts with Undo stay about twenty seconds |
 | [0044](0044-page-conditions-on-the-header-status-line.md) | accepted | Page-level conditions owned elsewhere are toned items on a one-row header's status line, not boxes |
 | [0045](0045-resume-batches-continue-after-restart.md) | accepted | Resume batches save their queue; after a restart the person can Continue batch, with a time-left estimate |
+| [0047](0047-live-assistant-session-storage.md) | accepted | Live Assistant stores complete session bodies separately and sends archive summaries in live updates |
 
 ## Policy
 

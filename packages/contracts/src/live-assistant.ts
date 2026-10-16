@@ -550,6 +550,42 @@ export type InterviewWorkspaceSnapshot = z.infer<
   typeof InterviewWorkspaceSnapshotSchema
 >;
 
+// Live updates carry the archive index. Full bodies are loaded explicitly for
+// review/export; the canonical snapshot above remains the lossless archive API.
+export const InterviewSessionSummarySchema = InterviewLiveSessionSchema.pick({
+  id: true,
+  status: true,
+  targetContext: true,
+  startedAt: true,
+  endedAt: true,
+  listening: true,
+}).extend({
+  targetContext: InterviewTargetContextSchema.pick({
+    kind: true,
+    id: true,
+    label: true,
+    role: true,
+    company: true,
+  }),
+});
+export type InterviewSessionSummary = z.infer<
+  typeof InterviewSessionSummarySchema
+>;
+
+export function summarizeInterviewSession(
+  session: InterviewLiveSession,
+): InterviewSessionSummary {
+  return InterviewSessionSummarySchema.parse(session);
+}
+
+export const InterviewWorkspaceViewSchema =
+  InterviewWorkspaceSnapshotSchema.extend({
+    recentSessions: z.array(InterviewSessionSummarySchema).default([]),
+  });
+export type InterviewWorkspaceView = z.infer<
+  typeof InterviewWorkspaceViewSchema
+>;
+
 export const SaveInterviewSetupInputSchema = z.object({
   consent: InterviewSetupConsentSchema.optional(),
   targetContext: InterviewTargetContextSchema.nullable().optional(),

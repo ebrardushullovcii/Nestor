@@ -14,11 +14,12 @@ import type {
   InterviewOverlaySnapshot,
   InterviewProtectedSurface,
   InterviewProtectedSurfaceKind,
-  InterviewWorkspaceSnapshot,
+  InterviewWorkspaceView,
 } from "@nordri/contracts";
 import { getLiveAssistantService } from "../services/live-assistant";
 import { resolveBrandIconPaths } from "./brand-icons";
 import { resolveVisibleInterviewPopupInputMode } from "./interview-surface-mode";
+import { publishLiveAssistantWorkspace } from "./publish-live-assistant-workspace";
 
 type InterviewOverlayKind = "answer" | "transcript";
 type InterviewDisplayChangeReason =
@@ -34,16 +35,17 @@ interface InterviewOverlayWindowEntry {
 }
 
 let currentDirForOverlays: string | null = null;
-let lastSnapshot: InterviewWorkspaceSnapshot | null = null;
+let lastSnapshot: InterviewWorkspaceView | null = null;
 let overlayEntries: InterviewOverlayWindowEntry[] = [];
 let applyingSnapshot = false;
 let overlayLayoutPersistenceChain =
-  Promise.resolve<InterviewWorkspaceSnapshot | null>(null);
+  Promise.resolve<InterviewWorkspaceView | null>(null);
 const overlayLayoutTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>();
 const programmaticOverlayCloses = new WeakSet<BrowserWindow>();
 let displayRevalidationTimer: NodeJS.Timeout | null = null;
-let displayRevalidationChain =
-  Promise.resolve<InterviewWorkspaceSnapshot | null>(null);
+let displayRevalidationChain = Promise.resolve<InterviewWorkspaceView | null>(
+  null,
+);
 let displayRevalidationListenersRegistered = false;
 
 function toSurfaceKind(
@@ -277,10 +279,9 @@ export function initializeInterviewOverlayWindows(currentDir: string) {
   registerDisplayChangeRevalidation();
 }
 
-export function syncInterviewOverlayWindows(
-  snapshot: InterviewWorkspaceSnapshot,
-) {
+export function syncInterviewOverlayWindows(snapshot: InterviewWorkspaceView) {
   lastSnapshot = snapshot;
+  publishLiveAssistantWorkspace(snapshot, BrowserWindow.getAllWindows());
   const activeSession = snapshot.activeSession;
 
   if (!currentDirForOverlays) {
@@ -307,12 +308,6 @@ export function syncInterviewOverlayWindows(
       (item) => item.surfaceKind === toSurfaceKind(entry.kind),
     );
     applyOverlaySnapshot(entry, overlay, preference, overlay.visible);
-  }
-
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed() && !window.webContents.isLoading()) {
-      window.webContents.send("live-assistant:workspace-changed", snapshot);
-    }
   }
 }
 

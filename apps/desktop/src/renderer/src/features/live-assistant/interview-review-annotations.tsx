@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type {
   InterviewLiveSession,
   InterviewTranscriptAnnotationInput,
-  InterviewWorkspaceSnapshot,
+  InterviewWorkspaceView,
 } from "@nordri/contracts";
 import { MessageSquarePlus } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
@@ -10,7 +10,7 @@ import { formatInterviewTranscriptSource } from "./interview-transcript-source-l
 
 export function TranscriptAnnotationPanel(props: {
   session: InterviewLiveSession;
-  onWorkspaceChange: (workspace: InterviewWorkspaceSnapshot) => void;
+  onWorkspaceChange: (workspace: InterviewWorkspaceView) => void;
 }) {
   const firstSegmentId = props.session.transcriptSegments[0]?.id ?? null;
   const [kind, setKind] =

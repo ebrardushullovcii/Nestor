@@ -1,5 +1,5 @@
 import type {
-  InterviewWorkspaceSnapshot,
+  InterviewWorkspaceView,
   SaveInterviewSetupInput,
 } from "@nordri/contracts";
 import { Camera, Languages, SlidersHorizontal } from "lucide-react";
@@ -27,7 +27,7 @@ const cueSensitivityOptions = [
 ] as const;
 
 export function InterviewSessionPreferences(props: {
-  workspace: InterviewWorkspaceSnapshot;
+  workspace: InterviewWorkspaceView;
   pending: boolean;
   onSave: (input: SaveInterviewSetupInput) => void;
 }) {

@@ -17,12 +17,50 @@ import {
   createDeterministicInterviewTranscriptionProvider,
   type InterviewTranscriptionProvider,
 } from "@nordri/ai-providers";
-import type { InterviewWorkspaceSnapshot } from "@nordri/contracts";
+import {
+  summarizeInterviewSession,
+  type InterviewWorkspaceSnapshot,
+} from "@nordri/contracts";
 
 function createMemoryRepository(): LiveAssistantRepository {
   let snapshot: InterviewWorkspaceSnapshot | null = null;
 
   return {
+    loadWorkspace() {
+      return Promise.resolve(
+        snapshot
+          ? {
+              ...snapshot,
+              recentSessions: snapshot.recentSessions.map(
+                summarizeInterviewSession,
+              ),
+            }
+          : null,
+      );
+    },
+    loadSession(sessionId) {
+      return Promise.resolve(
+        snapshot?.activeSession?.id === sessionId
+          ? snapshot.activeSession
+          : (snapshot?.recentSessions.find(
+              (session) => session.id === sessionId,
+            ) ?? null),
+      );
+    },
+    saveWorkspace(workspace, changedArchiveSessions = []) {
+      const bodies = new Map(
+        snapshot?.recentSessions.map((session) => [session.id, session]) ?? [],
+      );
+      for (const session of changedArchiveSessions)
+        bodies.set(session.id, session);
+      snapshot = {
+        ...workspace,
+        recentSessions: workspace.recentSessions.map(
+          (summary) => bodies.get(summary.id)!,
+        ),
+      };
+      return Promise.resolve();
+    },
     load() {
       return Promise.resolve(snapshot);
     },
@@ -293,7 +331,7 @@ describe("live assistant service", () => {
       engineKind: "platform_local",
     });
     const ended = await service.performAction({ action: "end_session" });
-    const session = ended.recentSessions[0];
+    const session = await service.getSession(ended.recentSessions[0]!.id);
     const segment = session?.transcriptSegments[0];
     if (!session || !segment) {
       throw new Error("Expected an ended session with transcript segments.");
@@ -306,7 +344,9 @@ describe("live assistant service", () => {
       body: "The interviewer asked about Electron IPC isolation.",
     });
 
-    const annotatedSession = annotated.recentSessions[0];
+    const annotatedSession = await service.getSession(
+      annotated.recentSessions[0]!.id,
+    );
     expect(annotatedSession?.transcriptSegments[0]?.text).toBe(segment.text);
     expect(annotatedSession?.transcriptAnnotations).toHaveLength(1);
     expect(annotatedSession?.transcriptAnnotations[0]?.originalText).toBe(
@@ -455,7 +495,10 @@ describe("live assistant service", () => {
 
     expect(ended.activeSession).toBeNull();
     expect(ended.recentSessions[0]?.id).toBe(session.id);
-    expect(ended.recentSessions[0]?.chatConversation?.messages).toHaveLength(2);
+    expect(
+      (await service.getSession(ended.recentSessions[0]!.id))?.chatConversation
+        ?.messages,
+    ).toHaveLength(2);
   });
 
   test("preserves queued session mutations behind an in-flight chat response", async () => {
@@ -1164,8 +1207,10 @@ describe("live assistant service", () => {
     expect(recovered.activeSession).toBeNull();
     expect(recovered.recentSessions[0]?.status).toBe("interrupted");
     expect(recovered.recentSessions[0]?.listening).toBe(false);
-    expect(recovered.recentSessions[0]?.diagnostics.at(-1)?.label).toContain(
-      "interrupted",
-    );
+    expect(
+      (
+        await restartedService.getSession(recovered.recentSessions[0]!.id)
+      )?.diagnostics.at(-1)?.label,
+    ).toContain("interrupted");
   });
 });

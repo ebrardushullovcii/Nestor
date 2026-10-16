@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Mic, MicOff, Monitor, Radio } from "lucide-react";
 import type {
   InterviewTranscriptSource,
-  InterviewWorkspaceSnapshot,
+  InterviewWorkspaceView,
 } from "@nordri/contracts";
 import { Button } from "@renderer/components/ui/button";
 import {
@@ -172,8 +172,8 @@ export function InterviewMediaStreamProbes(props: {
   audioTranscriptionAvailable: boolean;
   microphoneCaptureAllowed: boolean;
   meetingAudioCaptureAllowed: boolean;
-  onWorkspaceChange?: (workspace: InterviewWorkspaceSnapshot) => void;
-  workspace?: InterviewWorkspaceSnapshot;
+  onWorkspaceChange?: (workspace: InterviewWorkspaceView) => void;
+  workspace?: InterviewWorkspaceView;
 }) {
   const [microphoneStatus, setMicrophoneStatus] = useState<ProbeStatus>("idle");
   const [microphoneDetail, setMicrophoneDetail] = useState("Not checked yet.");
