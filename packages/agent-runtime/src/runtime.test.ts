@@ -1,9 +1,73 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 
 import { runAgentTask } from "./runtime";
 
 describe("agent task runtime", () => {
+  test("preserves private provider continuation across tool turns without putting it in receipts", async () => {
+    const continuation = {
+      kind: "reasoning_content" as const,
+      route: "test-model",
+      text: "private synthetic continuation",
+    };
+    let turns = 0;
+    const result = await runAgentTask({
+      taskId: "continuation",
+      capability: "resume_generation",
+      systemPrompt: "Use the tools.",
+      state: {},
+      initialDraft: {},
+      model: {
+        chat(input) {
+          if (++turns === 1)
+            return Promise.resolve({
+              continuation,
+              toolCalls: [
+                {
+                  id: "read",
+                  type: "function" as const,
+                  function: { name: "read", arguments: "{}" },
+                },
+              ],
+            });
+          expect(
+            input.messages.find((message) => message.role === "assistant"),
+          ).toMatchObject({ continuation });
+          return Promise.resolve({
+            toolCalls: [
+              {
+                id: "finish",
+                type: "function" as const,
+                function: { name: "finish_task", arguments: "{}" },
+              },
+            ],
+          });
+        },
+      },
+      tools: [
+        {
+          name: "read",
+          description: "Read",
+          inputSchema: z.object({}),
+          parameters: { type: "object", properties: {} },
+          permission: "read",
+          execute: () => ({ summary: "Read", value: {} }),
+        },
+        {
+          name: "finish_task",
+          description: "Finish",
+          inputSchema: z.object({}),
+          parameters: { type: "object", properties: {} },
+          permission: "read",
+          execute: () => ({ summary: "Finished", finish: true }),
+        },
+      ],
+      validate: () => [],
+      buildContext: () => ({}),
+    });
+    expect(result.receipt.stopReason).toBe("completed");
+    expect(JSON.stringify(result)).not.toContain(continuation.text);
+  });
   test("repairs a rejected tool call and finishes a valid draft", async () => {
     let call = 0;
     const result = await runAgentTask({
@@ -108,7 +172,10 @@ describe("agent task runtime", () => {
           required: ["value"],
         },
         permission: "draft_write" as const,
-        execute(input: { value: string }, context: { draft: { value: string } }) {
+        execute(
+          input: { value: string },
+          context: { draft: { value: string } },
+        ) {
           return {
             draft: { ...context.draft, value: input.value },
             summary: "Value set",
@@ -180,7 +247,10 @@ describe("agent task runtime", () => {
         draft.value
           ? []
           : [{ code: "required", message: "Value required", path: ["value"] }],
-      buildContext: ({ draft, validationIssues }) => ({ draft, validationIssues }),
+      buildContext: ({ draft, validationIssues }) => ({
+        draft,
+        validationIssues,
+      }),
     });
 
     expect(result.receipt.stopReason).toBe("completed");
@@ -422,6 +492,73 @@ describe("agent task runtime", () => {
     expect(progress).toContain(
       "The assistant did not answer before this turn's time limit",
     );
+  });
+
+  test("excludes local queue wait but counts rendering and bounds the next model turn", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    let excludedMs = 0;
+    let calls = 0;
+    let settled = false;
+    try {
+      const run = runAgentTask({
+        taskId: "task_local_queue",
+        capability: "bounded_task",
+        systemPrompt: "Render, then finish.",
+        state: {},
+        initialDraft: {},
+        timeBudgetMs: 1_000,
+        getExcludedElapsedMs: () => excludedMs,
+        model: {
+          chat() {
+            calls += 1;
+            if (calls > 1) return new Promise(() => {});
+            vi.setSystemTime(100);
+            return Promise.resolve({
+              toolCalls: [
+                {
+                  id: "render",
+                  type: "function" as const,
+                  function: { name: "render", arguments: "{}" },
+                },
+              ],
+            });
+          },
+        },
+        tools: [
+          {
+            name: "render",
+            description: "Render a local artifact",
+            inputSchema: z.object({}),
+            parameters: { type: "object", properties: {} },
+            permission: "read",
+            execute() {
+              vi.setSystemTime(2_600);
+              excludedMs = 2_500;
+              vi.setSystemTime(3_000);
+              return { summary: "Rendered", progressMade: true };
+            },
+          },
+        ],
+        validate: () => [],
+        buildContext: () => ({}),
+      }).then((result) => {
+        settled = true;
+        return result;
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls).toBe(2);
+      await vi.advanceTimersByTimeAsync(499);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await run;
+      expect(result.receipt.stopReason).toBe("time_budget");
+      expect(result.receipt.durationMs).toBe(3_500);
+      expect(result.receipt.toolReceipts[0]?.durationMs).toBe(2_900);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("keeps the assistant tool-call message when the recent tail contains many tool results", async () => {

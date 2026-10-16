@@ -351,7 +351,8 @@ describe("ResumeWorkspaceEditorPanel", () => {
     );
     expect(card?.getAttribute("data-resume-editor-entry-hidden")).toBe("true");
     expect(
-      card?.querySelector("[data-resume-editor-entry-hidden-note]")?.textContent,
+      card?.querySelector("[data-resume-editor-entry-hidden-note]")
+        ?.textContent,
     ).toBe(
       "Hidden — this entry stays in your draft but is left off the resume.",
     );

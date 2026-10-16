@@ -21,12 +21,18 @@ function describeEffectiveApproachLine(
   source: "strategy" | "default",
 ): string {
   const label = resumeApproachLabels[strength];
-  return source === "default" ? `Your default: ${label}` : `This draft: ${label}`;
+  return source === "default"
+    ? `Your default: ${label}`
+    : `This draft: ${label}`;
 }
 
 export function ResumeStrategyContextPanel(props: {
   context: JobFinderResumeWorkspaceStrategyContext | null;
-  effectiveTailoringStrength?: "conservative" | "balanced" | "aggressive" | null;
+  effectiveTailoringStrength?:
+    | "conservative"
+    | "balanced"
+    | "aggressive"
+    | null;
 }) {
   const { context } = props;
 
@@ -74,31 +80,31 @@ export function ResumeStrategyContextPanel(props: {
   return (
     <details className="group min-w-0">
       <summary className="surface-panel-shell flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-2 outline-none [&::-webkit-details-marker]:hidden focus-visible:ring-[3px] focus-visible:ring-ring/40">
-          <span className="grid min-w-0 gap-0.5">
-            <span className="font-display text-(length:--text-label) font-bold uppercase tracking-(--tracking-caps) text-primary">
-              Resume approach
-            </span>
-            <span className="min-w-0 text-(length:--text-small) leading-5 text-foreground-soft [overflow-wrap:anywhere]">
-              {hasRecommendation
-                ? `Recommended: ${context.recommendedStrategyName ?? "an approach"}. Advisory only — it never approves this resume.`
-                : "No resume approach recommended for this job. Advisory only — it never approves this resume."}
-            </span>
-            {context.tailoringStrength ? (
-              <span className="min-w-0 text-(length:--text-small) leading-5 text-foreground-soft [overflow-wrap:anywhere]">
-                {describeEffectiveApproachLine(
-                  context.tailoringStrength,
-                  "strategy",
-                )}
-              </span>
-            ) : props.effectiveTailoringStrength ? (
-              <span className="min-w-0 text-(length:--text-small) leading-5 text-foreground-soft [overflow-wrap:anywhere]">
-                {describeEffectiveApproachLine(
-                  props.effectiveTailoringStrength,
-                  "default",
-                )}
-              </span>
-            ) : null}
+        <span className="grid min-w-0 gap-0.5">
+          <span className="font-display text-(length:--text-label) font-bold uppercase tracking-(--tracking-caps) text-primary">
+            Resume approach
           </span>
+          <span className="min-w-0 text-(length:--text-small) leading-5 text-foreground-soft [overflow-wrap:anywhere]">
+            {hasRecommendation
+              ? `Recommended: ${context.recommendedStrategyName ?? "an approach"}. Advisory only — it never approves this resume.`
+              : "No resume approach recommended for this job. Advisory only — it never approves this resume."}
+          </span>
+          {context.tailoringStrength ? (
+            <span className="min-w-0 text-(length:--text-small) leading-5 text-foreground-soft [overflow-wrap:anywhere]">
+              {describeEffectiveApproachLine(
+                context.tailoringStrength,
+                "strategy",
+              )}
+            </span>
+          ) : props.effectiveTailoringStrength ? (
+            <span className="min-w-0 text-(length:--text-small) leading-5 text-foreground-soft [overflow-wrap:anywhere]">
+              {describeEffectiveApproachLine(
+                props.effectiveTailoringStrength,
+                "default",
+              )}
+            </span>
+          ) : null}
+        </span>
       </summary>
       <div className="grid gap-3 pt-2">
         <div className="surface-panel-shell grid min-w-0 gap-3 rounded-(--radius-field) border border-(--surface-panel-border) p-4">

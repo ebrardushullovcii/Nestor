@@ -1,5 +1,6 @@
 import {
   FitRecommendationSchema,
+  JobPostingSchema,
   MatchLocationReachSchema,
   PreferenceAlignmentStateSchema,
   RoleSuitabilityStateSchema,
@@ -22,6 +23,7 @@ export const JOB_FIT_JUDGING_BATCH_SIZE = 20;
 /** Shared by preliminary and full reads so a rescore keeps the same constraints. */
 export function buildFitEvidenceInstructions(): string {
   return [
+    "Write every sentence you return (reasons, gaps, summary and explanations) to the person, in the second person: you and your, never he, she, they or the candidate.",
     "Use the person's plain labels in explanations. Write Yes and No facts as ordinary sentences, never field names, key=value text or true/false flags.",
     "Read Limited work permissions by country: Conditions describe present permission, and Will need sponsorship later describes future work, not necessarily the present job. Compare the job type, hours and dates with every permit condition. Limited permission is neither unrestricted authorization nor absent permission. Unresolved conditions require review_before_applying with a clear question for the person.",
     "Compare country-limited remote work with the person's current location, countries where they can work, sponsorship needs and saved eligibility answers. Remote does not mean worldwide: Accepting remote work outside preferred places never overrides a country restriction or work permission. Do not infer authorization from residence, education or past employers.",
@@ -195,6 +197,12 @@ export function buildJobFitAssessmentPayload(
 ) {
   return {
     ...input,
+    // SavedJob callers also carry prior sightings and assessment history.
+    // The full fit read needs the current listing, not discovery diagnostics.
+    job: JobPostingSchema.omit({
+      sourceIntelligence: true,
+      listingDetailFetch: true,
+    }).parse(input.job),
     profile: {
       ...input.profile,
       workEligibility: plainEligibility(input.profile),

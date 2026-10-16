@@ -4,6 +4,7 @@ import {
   JobRequirementAssessmentSchema,
   type AiProfileAssistantBehavior,
   type AgentProviderStatus,
+  type AgentTaskValidationIssue,
   AgentTaskExecutionReceiptSchema,
   BrowserVisualObservationSetSchema,
   type BrowserVisualAnalysisInput,
@@ -47,6 +48,7 @@ import {
   type TailoringMode,
   type Tool,
   type ToolCall,
+  type ModelContinuation,
 } from "@nordri/contracts";
 import { z } from "zod";
 import {
@@ -384,7 +386,24 @@ export interface TailorResumeInput {
   resumeText: string | null;
 }
 
+/** Invalid writer output can be repaired; provider and local execution failures cannot. */
+export class ResumeProposalValidationError extends Error {
+  override readonly name = "ResumeProposalValidationError";
+
+  constructor(
+    message: string,
+    readonly issues: readonly AgentTaskValidationIssue[],
+    readonly languageFields?: readonly { id: string; text: string }[],
+  ) {
+    super(message);
+  }
+}
+
 export interface CreateResumeDraftInput extends TailorResumeInput {
+  /** Trusted local PDF-slot queue wait only; rendering and AI validation still count. */
+  getExcludedElapsedMs?: () => number;
+  /** Workspace replacement/shutdown cancels obsolete writers; ordinary batch Stop does not. */
+  signal?: AbortSignal;
   availableTemplates?: readonly ResumeTemplateDefinition[];
   selectedTemplateId?: string | null;
   templateSelectionLocked?: boolean;
@@ -394,6 +413,8 @@ export interface CreateResumeDraftInput extends TailorResumeInput {
   renderPreview?: (input: {
     draft: TailoredResumeDraft;
     templateId: string;
+    signal?: AbortSignal;
+    getRemainingBudgetMs?: () => number;
   }) => Promise<{
     templateId: string;
     pageCount: number | null;
@@ -642,6 +663,8 @@ export interface JudgeJobFitsInput {
 /** Resume lines the model checks against the candidate's evidence. */
 export interface ResumeClaimCheckInput {
   signal?: AbortSignal;
+  /** Remaining writer budget for this nested validation call. */
+  timeoutMs?: number;
   /** How far the person allowed the resume to stretch. */
   tailoringStrength: string;
   job: {
@@ -699,17 +722,7 @@ export interface ExtractResumeImportStageTransportInput extends ExtractResumeImp
   documentBundle: ResumeDocumentBundle;
 }
 
-/**
- * Private model state that must go back to the same route on later tool
- * turns (DeepSeek thinking mode's `reasoning_content`). Never shown to the
- * person and never sent to a different model.
- */
-export interface ModelContinuation {
-  kind: "reasoning_content";
-  /** The model id that produced it; another route drops it. */
-  route: string;
-  text: string;
-}
+export type { ModelContinuation } from "@nordri/contracts";
 
 export interface ModelTurnUsage {
   inputTokens: number;

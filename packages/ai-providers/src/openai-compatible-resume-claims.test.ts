@@ -1,4 +1,6 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import { createJobFinderAiClientFromEnvironment } from "./openai-compatible";
+import { createEnvironment } from "./test-fixtures";
 
 import {
   buildResumeClaimCheckPayload,
@@ -20,6 +22,51 @@ const input = {
 };
 
 describe("resume claim checks", () => {
+  test("keeps Aggressive validation on its dedicated provider and other levels on primary", async () => {
+    const models: string[] = [];
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((_url, init) => {
+        const body = JSON.parse(
+          typeof init?.body === "string" ? init.body : "{}",
+        ) as { model: string };
+        models.push(body.model);
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: { content: JSON.stringify({ checks: [] }) },
+                  finish_reason: "stop",
+                },
+              ],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      });
+    try {
+      const client = createJobFinderAiClientFromEnvironment(
+        createEnvironment({
+          NORDRI_AI_MODEL: "primary-model",
+          NORDRI_AI_AGGRESSIVE_MODEL: "aggressive-model",
+          NORDRI_AI_AGGRESSIVE_API_MODE: "chat_completions",
+        }),
+      );
+      await client.checkResumeClaims?.({
+        ...input,
+        tailoringStrength: "aggressive",
+        timeoutMs: 500,
+      });
+      await client.checkResumeClaims?.({
+        ...input,
+        tailoringStrength: "balanced",
+      });
+      expect(models).toEqual(["aggressive-model", "primary-model"]);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
   test("keeps verdicts for asked claims and cited evidence only", () => {
     expect(
       normalizeResumeClaimChecks(

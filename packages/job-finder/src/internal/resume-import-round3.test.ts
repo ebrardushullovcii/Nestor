@@ -96,16 +96,16 @@ describe("round-three resume import regressions", () => {
       aiClient: {
         ...ai,
         getStatus: () => ({ ...ai.getStatus(), kind: "openai_compatible" }),
-        extractResumeImportStage: async (input) => {
+        extractResumeImportStage: (input) => {
           if (input.stage !== "shared_memory")
-            throw new Error("connection refused");
-          return {
+            return Promise.reject(new Error("connection refused"));
+          return Promise.resolve({
             stage: input.stage,
             analysisProviderKind: "deterministic",
             analysisProviderLabel: "Context",
             candidates: [],
             notes: [],
-          };
+          });
         },
       },
     });
@@ -186,7 +186,7 @@ describe("round-three resume import regressions", () => {
   ])(
     "R3-053/R3-086 keeps imported %s reviewable until confirmation",
     (key, values) => {
-      const proposed = candidate("search_preferences", key as string, values);
+      const proposed = candidate("search_preferences", key, values);
       const reconciled = reconcileCandidates(
         fresh(),
         { ...seed.searchPreferences, workModes: [], targetRoles: [] },
@@ -615,9 +615,9 @@ test("an empty evidence stage is retried once and then reported as failed", asyn
     aiClient: {
       ...ai,
       getStatus: () => ({ ...ai.getStatus(), kind: "openai_compatible" }),
-      extractResumeImportStage: async (input) => {
+      extractResumeImportStage: (input) => {
         if (input.stage === "shared_memory") evidenceCalls += 1;
-        return {
+        return Promise.resolve({
           stage: input.stage,
           analysisProviderKind: "openai_compatible",
           analysisProviderLabel: "Test",
@@ -639,7 +639,7 @@ test("an empty evidence stage is retried once and then reported as failed", asyn
                 ]
               : [],
           notes: [],
-        };
+        });
       },
     },
   });

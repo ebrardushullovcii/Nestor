@@ -1,6 +1,8 @@
 import {
   RESUME_CLAIM_CHECK_BATCH_SIZE,
+  getAiProviderAccessFailure,
   type JobFinderAiClient,
+  type ResumeClaimCheckInput,
 } from "@nordri/ai-providers";
 import type {
   CandidateProfile,
@@ -37,6 +39,84 @@ type ResumeLine = Parameters<
 >[0];
 const sessionChecks = new Map<string, ResumeClaimCheck>();
 
+class ResumeClaimBudgetExceededError extends Error {
+  constructor() {
+    super(
+      "Resume claim checking timed out: exceeded the remaining writing budget.",
+    );
+    this.name = "TimeoutError";
+  }
+}
+
+type ClaimCheckTransaction = {
+  signal?: AbortSignal;
+  getRemainingBudgetMs?: () => number;
+};
+
+/** Each batch/retry consumes the same writer clock, including nested checks. */
+async function checkWithinWritingBudget(
+  transaction: ClaimCheckTransaction,
+  request: ResumeClaimCheckInput,
+  check: NonNullable<JobFinderAiClient["checkResumeClaims"]>,
+) {
+  transaction.signal?.throwIfAborted();
+  const remaining = transaction.getRemainingBudgetMs?.();
+  if (
+    remaining !== undefined &&
+    (!Number.isFinite(remaining) || remaining <= 0)
+  )
+    throw new ResumeClaimBudgetExceededError();
+  const timeoutMs =
+    remaining === undefined ? undefined : Math.max(1, Math.floor(remaining));
+  const deadline = timeoutMs === undefined ? undefined : new AbortController();
+  const signal = deadline
+    ? transaction.signal
+      ? AbortSignal.any([transaction.signal, deadline.signal])
+      : deadline.signal
+    : transaction.signal;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const aborted = signal
+    ? new Promise<never>((_resolve, reject) => {
+        onAbort = () => {
+          const reason: unknown = signal.reason;
+          reject(
+            reason instanceof Error
+              ? reason
+              : new DOMException(
+                  "Resume claim checking was cancelled.",
+                  "AbortError",
+                ),
+          );
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+      })
+    : undefined;
+  // A synchronous provider can abort and throw before the race is attached.
+  void aborted?.catch(() => {});
+  try {
+    signal?.throwIfAborted();
+    if (deadline && timeoutMs !== undefined)
+      timer = setTimeout(
+        () => deadline.abort(new ResumeClaimBudgetExceededError()),
+        timeoutMs,
+      );
+    const checking = check({
+      ...request,
+      ...(signal ? { signal } : {}),
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    });
+    const results = await (aborted
+      ? Promise.race([checking, aborted])
+      : checking);
+    signal?.throwIfAborted();
+    return results;
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+  }
+}
+
 function remember(key: string, check: ResumeClaimCheck): void {
   sessionChecks.delete(key);
   sessionChecks.set(key, check);
@@ -54,7 +134,9 @@ export async function withResumeClaimChecks(input: {
   tailoringStrength?: string | null;
   now?: () => string;
   signal?: AbortSignal;
+  getRemainingBudgetMs?: () => number;
 }): Promise<ResumeDraft> {
+  input.signal?.throwIfAborted();
   const { draft, profile } = input;
   const isPersonsOwn = buildPersonsOwnResumeClaimMatcher({ draft, profile });
   const allLines = buildResumeClaimDescriptors(draft);
@@ -94,7 +176,17 @@ export async function withResumeClaimChecks(input: {
   // resume stretch. A change to either has the lines checked again.
   const evidenceKey = fnv1a32(
     JSON.stringify([
-      "resume-fact-check-2026-10-05-context-v2",
+      "resume-fact-check-2026-10-14-context-v3",
+      [
+        input.job.title,
+        input.job.company,
+        input.job.description,
+        [
+          ...input.job.responsibilities,
+          ...input.job.minimumQualifications,
+          ...input.job.preferredQualifications,
+        ],
+      ],
       resumeLines.map((line) => [
         line.section,
         resumeClaimContentHash(line.text),
@@ -136,8 +228,7 @@ export async function withResumeClaimChecks(input: {
       const hashById = new Map(
         batch.map(([contentHash], index) => [`line_${index + 1}`, contentHash]),
       );
-      const request = {
-        ...(input.signal ? { signal: input.signal } : {}),
+      const request: ResumeClaimCheckInput = {
         tailoringStrength,
         job: {
           title: input.job.title,
@@ -160,17 +251,22 @@ export async function withResumeClaimChecks(input: {
           text: claim.text,
         })),
       };
-      // A call that fails for a passing reason is asked once more.
-      const results = await checkResumeClaims(request).catch(
-        (error: unknown) => {
-          if (input.signal?.aborted) throw error;
-          return checkResumeClaims(request).catch((retryError: unknown) => {
-            if (input.signal?.aborted) throw retryError;
-            // These lines stay unchecked and go to the person.
-            return [];
-          });
-        },
-      );
+      // The provider transport already retries transient requests within its budget.
+      // Repeating that whole operation here doubles failed paid attempts without
+      // giving the model new feedback. Unchecked lines still go to the person.
+      const results = await checkWithinWritingBudget(
+        input,
+        request,
+        checkResumeClaims,
+      ).catch((error: unknown) => {
+        if (
+          input.signal?.aborted ||
+          error instanceof ResumeClaimBudgetExceededError ||
+          getAiProviderAccessFailure(error) !== null
+        )
+          throw error;
+        return [];
+      });
       const checkedAt = now();
       for (const result of results) {
         const contentHash = hashById.get(result.id);
@@ -207,6 +303,7 @@ export async function withResumeClaimFixes(
     stretchesAreThePersons: boolean;
   },
 ): Promise<ResumeDraft> {
+  input.signal?.throwIfAborted();
   const { draft } = input;
   const checks = new Map(
     (draft.claimChecks ?? []).map((check) => [check.contentHash, check]),

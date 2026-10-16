@@ -20,6 +20,7 @@ import {
 import { CandidateAssetLibraryError } from "../services/job-finder/candidate-asset-library";
 import type { CandidateAssetLibrary } from "../services/job-finder/candidate-asset-library";
 import { getCandidateAssetLibrary } from "../services/job-finder/candidate-asset-library-instance";
+import { getJobFinderRepositoryForWorkspaceService } from "../services/job-finder/create-workspace-service";
 
 interface CandidateAssetRouteDependencies {
   library: CandidateAssetLibrary;
@@ -118,9 +119,12 @@ export function registerCandidateAssetRouteHandlers(
     getResumeSource: async () => {
       const { getJobFinderWorkspaceService } =
         await import("../services/job-finder/workspace-service");
-      return (
-        await (await getJobFinderWorkspaceService()).getWorkspaceSnapshot()
-      ).profile.baseResume;
+      const workspace = await getJobFinderWorkspaceService();
+      const repository = getJobFinderRepositoryForWorkspaceService(workspace);
+      if (!repository) {
+        throw new CandidateAssetLibraryError("Resume storage is unavailable.");
+      }
+      return (await repository.getProfile()).baseResume;
     },
   },
 ) {

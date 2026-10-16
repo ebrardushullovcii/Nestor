@@ -151,7 +151,9 @@ describe("ResumeClaimTrustPanel", () => {
       }),
     ]);
 
-    expect(container?.textContent).toContain("Your wording, kept word for word");
+    expect(container?.textContent).toContain(
+      "Your wording, kept word for word",
+    );
     // The reworded line is still credited to the generator.
     expect(container?.textContent).toContain("AI generated");
   });

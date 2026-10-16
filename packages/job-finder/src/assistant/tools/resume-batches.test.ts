@@ -130,8 +130,11 @@ describe("sidebar resume batches", () => {
       "tailored_per_job",
       "aggressive",
     );
-    expect(ctx.regenerate.mock.calls.map(([id]) => id)).toEqual(ctx.ids);
-    expect(final.completedJobIds).toEqual(ctx.ids);
+    // Parallel writers finish in either order.
+    expect(ctx.regenerate.mock.calls.map(([id]) => id).sort()).toEqual(
+      [...ctx.ids].sort(),
+    );
+    expect([...final.completedJobIds].sort()).toEqual([...ctx.ids].sort());
     expect(final.failures).toEqual([]);
   });
 
@@ -263,7 +266,9 @@ describe("sidebar resume batches", () => {
     gate.resolve();
     const final = await finished(ctx.runs[0]!);
     expect(ctx.generate).toHaveBeenCalledTimes(2);
-    expect(final.completedJobIds).toEqual(ctx.ids.slice(0, 2));
+    expect([...final.completedJobIds].sort()).toEqual(
+      ctx.ids.slice(0, 2).sort(),
+    );
     expect(final.failures).toEqual([]);
     await finished(ctx.runs[1]!);
     expect(ctx.regenerate).not.toHaveBeenCalled();
@@ -411,7 +416,7 @@ it("R3-183 persists assistant requests before dispatch and keeps cancelled unfin
     expect(save.mock.calls.at(-1)![0]).toMatchObject({
       done: false,
       stopRequested: true,
-      completedJobIds: ctx.ids.slice(0, 2),
+      completedJobIds: expect.arrayContaining(ctx.ids.slice(0, 2)) as unknown,
     }),
   );
   expect(save.mock.calls.at(-1)![0].durationsMs).toHaveLength(2);

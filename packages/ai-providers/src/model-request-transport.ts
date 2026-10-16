@@ -420,6 +420,7 @@ async function readStreamedPayload(
   let buffered = "";
   let dataLines: string[] = [];
   let sawDone = false;
+  let reachedEof = false;
   const chat: ChatStreamState = {
     content: "",
     reasoningContent: "",
@@ -483,6 +484,9 @@ async function readStreamedPayload(
           },
           "responses",
         );
+      }
+      if (parsed.response !== undefined && !isRecord(parsed.response)) {
+        throw new ModelStreamIncompleteError("malformed completed response");
       }
       rejectIncompleteOutput(parsed.response, "responses");
       if (isRecord(parsed.response)) {
@@ -557,27 +561,34 @@ async function readStreamedPayload(
   };
 
   try {
-    while (true) {
+    while (!sawDone) {
       const { value, done } = await reader.read();
       if (done) {
+        reachedEof = true;
         break;
       }
       onActivity();
       buffered += decoder.decode(value, { stream: true });
       let newlineIndex = buffered.indexOf("\n");
-      while (newlineIndex >= 0) {
+      while (newlineIndex >= 0 && !sawDone) {
         consumeLine(buffered.slice(0, newlineIndex));
         buffered = buffered.slice(newlineIndex + 1);
         newlineIndex = buffered.indexOf("\n");
       }
     }
-    buffered += decoder.decode();
-    if (buffered) {
-      consumeLine(buffered);
+    if (!sawDone) {
+      buffered += decoder.decode();
+      if (buffered) {
+        consumeLine(buffered);
+      }
+      flushEvent();
     }
-    flushEvent();
   } finally {
     signal.removeEventListener("abort", cancelOnAbort);
+    // A protocol completion marker ends the response, even when a gateway
+    // keeps the connection open. Cancel that body (and bodies rejected by
+    // the parser) without waiting for network EOF or cancellation to settle.
+    if (!reachedEof) void reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 

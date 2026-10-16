@@ -30,11 +30,7 @@ const RESERVED_GROUNDING_ANCHOR_ID_PREFIX = "profile:skillGroup:";
 // One representative per candidate-critical non-experience scope is reserved
 // so heavy work-history catalogs cannot fully crowd out project, proof, and
 // imported-resume context.
-const REPRESENTATIVE_GROUNDING_SCOPES = [
-  "project",
-  "proof",
-  "import_evidence",
-];
+const REPRESENTATIVE_GROUNDING_SCOPES = ["project", "proof", "import_evidence"];
 // Redundant per-record facets are the first in-scope items to drop.
 const REDUNDANT_EVIDENCE_ID_SUFFIXES = [":domainTags"];
 
@@ -105,7 +101,10 @@ function truncateMiddle(value: string, maxChars: number): string {
   return `${value.slice(0, headLength)}${marker}${value.slice(value.length - tailLength)}`;
 }
 
-function matchesPathSuffix(path: readonly string[], suffix: readonly string[]): boolean {
+function matchesPathSuffix(
+  path: readonly string[],
+  suffix: readonly string[],
+): boolean {
   if (suffix.length > path.length) {
     return false;
   }
@@ -170,17 +169,26 @@ function stringLimitForPath(path: readonly string[], level: number): number {
     return pickLevelValue(level, [1_400, 800, 500]);
   }
 
-  if (key === "valuePreview" || key === "reason" || key === "supportingContext") {
+  if (
+    key === "valuePreview" ||
+    key === "reason" ||
+    key === "supportingContext"
+  ) {
     return pickLevelValue(level, [800, 500, 300]);
   }
 
   return pickLevelValue(level, [600, 360, 220]);
 }
 
-function arrayLimitForPath(path: readonly string[], level: number, value: readonly unknown[]): number {
+function arrayLimitForPath(
+  path: readonly string[],
+  level: number,
+  value: readonly unknown[],
+): number {
   const key = path[path.length - 1] ?? "";
   const containsObjects = value.some(
-    (entry) => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
+    (entry) =>
+      Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
   );
 
   if (!Number.isFinite(level) || level < 1) {
@@ -281,7 +289,11 @@ function shouldDropKey(path: readonly string[], level: number): boolean {
     return false;
   }
 
-  if (key === "sourceRefs" || key === "alternatives" || key === "confidenceBreakdown") {
+  if (
+    key === "sourceRefs" ||
+    key === "alternatives" ||
+    key === "confidenceBreakdown"
+  ) {
     return true;
   }
 
@@ -565,10 +577,16 @@ function computeUserPayloadCharBudget(input: {
 }): number {
   const modelContextWindowTokens =
     input.modelContextWindowTokens ?? DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS;
-  const reservedOutputTokens = responseHeadroomTokensForOperation(input.operation);
-  const promptTokens = Math.ceil(input.systemPrompt.length / APPROX_CHARS_PER_TOKEN);
+  const reservedOutputTokens = responseHeadroomTokensForOperation(
+    input.operation,
+  );
+  const promptTokens = Math.ceil(
+    input.systemPrompt.length / APPROX_CHARS_PER_TOKEN,
+  );
   const availableInputTokens =
-    Math.floor(modelContextWindowTokens * INPUT_BUDGET_RATIO) - reservedOutputTokens - promptTokens;
+    Math.floor(modelContextWindowTokens * INPUT_BUDGET_RATIO) -
+    reservedOutputTokens -
+    promptTokens;
 
   if (availableInputTokens * APPROX_CHARS_PER_TOKEN < MIN_USER_PAYLOAD_CHARS) {
     throw new Error(
@@ -594,9 +612,8 @@ function withGroundingEvidenceCompactionMetadata(
     return payload;
   }
 
-  const groundingEvidence = (
-    payload as Record<string, ResumeImportJsonValue>
-  ).groundingEvidence;
+  const groundingEvidence = (payload as Record<string, ResumeImportJsonValue>)
+    .groundingEvidence;
 
   if (
     !groundingEvidence ||
@@ -615,20 +632,21 @@ function withGroundingEvidenceCompactionMetadata(
   };
 }
 
-const PRESIZED_OPERATIONS: ReadonlySet<OpenAiCompatibleJsonOperation> = new Set([
-  "extractJobsFromPage",
-  "judgeJobFits",
-  "checkResumeClaims",
-  "assessJobFit",
-]);
+const PRESIZED_OPERATIONS: ReadonlySet<OpenAiCompatibleJsonOperation> = new Set(
+  ["extractJobsFromPage", "judgeJobFits", "checkResumeClaims", "assessJobFit"],
+);
 
 export function compactOpenAiCompatibleUserPayload(input: {
   operation: OpenAiCompatibleJsonOperation;
   modelContextWindowTokens: number | null;
   systemPrompt: string;
   userPayload: unknown;
+  /** Supplied facts must fit intact; report an oversized request instead of dropping them. */
+  preserveFullPayload?: boolean;
 }): ResumeImportJsonValue {
-  const parsedPayload = ResumeImportJsonValueSchema.safeParse(input.userPayload);
+  const parsedPayload = ResumeImportJsonValueSchema.safeParse(
+    input.userPayload,
+  );
 
   if (!parsedPayload.success) {
     throw new Error(
@@ -638,6 +656,13 @@ export function compactOpenAiCompatibleUserPayload(input: {
 
   const charBudget = computeUserPayloadCharBudget(input);
   const originalSize = estimateSerializedLength(parsedPayload.data);
+
+  if (input.preserveFullPayload) {
+    if (originalSize <= charBudget) return parsedPayload.data;
+    throw new Error(
+      `The complete context for ${input.operation} exceeds the model's input limit; no candidate facts or listing details were omitted.`,
+    );
+  }
 
   // Operations whose payload builders already size every list skip
   // normalization while within budget: the level-one array bounds would

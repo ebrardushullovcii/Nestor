@@ -1,8 +1,8 @@
 import type {
   ResumeSourceDocument,
   ReviewQueueItem,
-  SavedJob,
-  TailoredAsset,
+  JobListRow,
+  TailoredAssetSummary,
 } from "@nordri/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { ProgressBar } from "@renderer/components/ui";
@@ -24,6 +24,7 @@ import {
 } from "./review-queue-status";
 import { formatDateOnly } from "../../lib/job-finder-utils";
 import { describeUntailorableListing } from "./resume-workspace-utils";
+import { useTailoredAssetDetail } from "../../hooks/use-tailored-asset-detail";
 
 interface ReviewQueuePreviewPanelProps {
   /** Seconds the current preparation has been running. */
@@ -46,9 +47,9 @@ interface ReviewQueuePreviewPanelProps {
   applicationPreparingJobIds?: ReadonlySet<string>;
   previewState: PreviewState;
   queue: readonly ReviewQueueItem[];
-  selectedAsset: TailoredAsset | null;
+  selectedAsset: TailoredAssetSummary | null;
   selectedItem: ReviewQueueItem | null;
-  selectedJob: SavedJob | null;
+  selectedJob: JobListRow | null;
 }
 
 type PreviewState = "missing" | null;
@@ -81,6 +82,12 @@ export function ReviewQueuePreviewPanel({
     (isResumeGenerationInProgress(selectedItem) || isSelectedJobPending);
   const showGenerationState =
     needsGeneration || isGenerating || hasGenerationFailure;
+  const preview = useTailoredAssetDetail(
+    !showGenerationState &&
+      selectedItem?.resumeApplicationMode !== "original_resume"
+      ? selectedAsset
+      : null,
+  );
   const workflowStatus = getReviewQueueWorkflowStatus(
     selectedItem,
     selectedAsset,
@@ -438,7 +445,22 @@ export function ReviewQueuePreviewPanel({
                 Edit resume
               </Button>
             ) : null}
-            {selectedAsset.previewSections.map((section, sectionIndex) => (
+            {preview.loading ? (
+              <p role="status">Loading resume preview…</p>
+            ) : null}
+            {preview.error ? (
+              <div role="alert">
+                <p>{preview.error}</p>
+                <Button
+                  onClick={preview.retry}
+                  variant="secondary"
+                  size="compact"
+                >
+                  Retry preview
+                </Button>
+              </div>
+            ) : null}
+            {preview.asset?.previewSections.map((section, sectionIndex) => (
               <div
                 key={`${section.heading}-${sectionIndex}`}
                 className="grid gap-2"

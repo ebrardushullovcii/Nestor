@@ -16,6 +16,7 @@ import {
 } from "@nordri/contracts";
 
 import { secureDatabaseFile } from "./internal/migrations";
+import { TAILORED_ASSET_JOB_ID_SQL } from "./internal/tailored-asset-storage";
 import {
   cloneValue,
   getSingletonValue,
@@ -36,6 +37,8 @@ import {
 type FileRepositoryResumeMethods = Pick<
   JobFinderRepository,
   | "listTailoredAssets"
+  | "getTailoredAssetById"
+  | "getTailoredAssetByJobId"
   | "upsertTailoredAsset"
   | "listResumeDrafts"
   | "getResumeDraftByJobId"
@@ -54,6 +57,7 @@ type FileRepositoryResumeMethods = Pick<
   | "replaceResumeImportRunArtifacts"
   | "finalizeResumeImportRun"
   | "listResumeValidationResults"
+  | "listLatestResumeValidationResults"
   | "upsertResumeValidationResult"
   | "listResumeAssistantMessages"
   | "upsertResumeAssistantMessage"
@@ -74,6 +78,26 @@ export function createFileRepositoryResumeMethods(
     context;
 
   return {
+    getTailoredAssetById(assetId) {
+      return Promise.resolve(
+        listCollectionValues(database, "tailored_assets", TailoredAssetSchema, {
+          whereSql: "id = ?",
+          params: [assetId],
+          orderBySql: "id",
+          limit: 1,
+        })[0] ?? null,
+      );
+    },
+    getTailoredAssetByJobId(jobId) {
+      return Promise.resolve(
+        listCollectionValues(database, "tailored_assets", TailoredAssetSchema, {
+          whereSql: `${TAILORED_ASSET_JOB_ID_SQL} = ?`,
+          params: [jobId],
+          orderBySql: "id",
+          limit: 1,
+        })[0] ?? null,
+      );
+    },
     listTailoredAssets() {
       return Promise.resolve(
         cloneValue(
@@ -524,6 +548,27 @@ export function createFileRepositoryResumeMethods(
                 }
               : { orderBySql: "validated_at DESC, id ASC" },
           ),
+        ),
+      );
+    },
+    listLatestResumeValidationResults(draftIds) {
+      if (draftIds.length === 0) return Promise.resolve([]);
+      return Promise.resolve(
+        listCollectionValues(
+          database,
+          "resume_validation_results",
+          ResumeValidationResultSchema,
+          {
+            whereSql: `id IN (
+            SELECT (
+              SELECT id FROM resume_validation_results
+              WHERE draft_id = requested.value
+              ORDER BY validated_at DESC, id ASC LIMIT 1
+            ) FROM json_each(?) AS requested
+          )`,
+            params: [JSON.stringify([...new Set(draftIds)])],
+            orderBySql: "validated_at DESC, id ASC",
+          },
         ),
       );
     },

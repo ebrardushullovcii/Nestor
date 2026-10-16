@@ -701,7 +701,9 @@ describe("resume draft versioning", () => {
       (entry) => entry.entries.length > 0 && entry.id !== section.id,
     );
     if (!experience) {
-      throw new Error("Expected an experience section in the generated resume.");
+      throw new Error(
+        "Expected an experience section in the generated resume.",
+      );
     }
 
     // Turn A: a model-authored reorder claiming user origin is refused when
@@ -720,7 +722,9 @@ describe("resume draft versioning", () => {
     expect(
       (await workspaceService.getResumeWorkspace("job_ready")).draft,
     ).toEqual(initial.draft);
-    expect(await repository.listResumeDraftRevisions(initial.draft.id)).toHaveLength(0);
+    expect(
+      await repository.listResumeDraftRevisions(initial.draft.id),
+    ).toHaveLength(0);
 
     // Turn B: a normal text rewrite is stored as a pending assistant
     // proposal even though the model claimed user origin.
@@ -767,9 +771,12 @@ describe("resume draft versioning", () => {
       ),
     ).rejects.toThrow(/changed after this proposal was created/i);
     const afterLock = await workspaceService.getResumeWorkspace("job_ready");
-    expect(afterLock.draft.sections.find((entry) => entry.id === section.id))
-      .toMatchObject({ locked: true, text: section.text ?? null });
-    expect(await repository.listResumeDraftRevisions(afterLock.draft.id)).toHaveLength(1);
+    expect(
+      afterLock.draft.sections.find((entry) => entry.id === section.id),
+    ).toMatchObject({ locked: true, text: section.text ?? null });
+    expect(
+      await repository.listResumeDraftRevisions(afterLock.draft.id),
+    ).toHaveLength(1);
 
     // A fresh proposal targeting the now-locked section is refused outright
     // under assistant lock semantics instead of being stored.
@@ -789,10 +796,12 @@ describe("resume draft versioning", () => {
         (message) => message.proposalStatus === "pending",
       )?.id,
     ).toBe(proposal!.id);
-    expect((await workspaceService.getResumeWorkspace("job_ready")).draft).toEqual(
-      afterLock.draft,
-    );
-    expect(await repository.listResumeDraftRevisions(afterLock.draft.id)).toHaveLength(1);
+    expect(
+      (await workspaceService.getResumeWorkspace("job_ready")).draft,
+    ).toEqual(afterLock.draft);
+    expect(
+      await repository.listResumeDraftRevisions(afterLock.draft.id),
+    ).toHaveLength(1);
   });
 
   test("section regeneration stores canonical assistant origin even when the model claims user authorship", async () => {
@@ -836,7 +845,9 @@ describe("resume draft versioning", () => {
 
     const proposed = await workspaceService.getResumeWorkspace("job_ready");
     expect(proposed.draft).toEqual(before.draft);
-    expect(await repository.listResumeDraftRevisions(before.draft.id)).toHaveLength(0);
+    expect(
+      await repository.listResumeDraftRevisions(before.draft.id),
+    ).toHaveLength(0);
 
     const proposal = (
       await workspaceService.getResumeAssistantMessages("job_ready")
@@ -1196,8 +1207,10 @@ describe("resume draft versioning", () => {
       ),
     ).toEqual({
       ...approvedAsset,
-      failureMessage: expect.stringContaining("Your previous resume was kept"),
-      failedAt: expect.any(String),
+      failureMessage: expect.stringContaining(
+        "Your previous resume was kept",
+      ) as unknown,
+      failedAt: expect.any(String) as unknown,
     });
     expect(
       (await workspaceService.getResumeWorkspace("job_ready")).draft,

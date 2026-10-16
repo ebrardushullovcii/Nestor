@@ -1,4 +1,6 @@
 import { describe, expect, test } from "vitest";
+import { SourceIntelligenceArtifactSchema } from "@nordri/contracts";
+import { createOpenAiCompatibleJobFinderAiClient } from "./openai-compatible";
 
 import {
   buildFitEvidenceInstructions,
@@ -12,6 +14,7 @@ import {
   createProfile,
   createPreferences,
   createJobPosting,
+  mockCapturingJsonFetch,
 } from "./test-fixtures";
 
 describe("batch fit judging", () => {
@@ -329,8 +332,7 @@ test("R3-065, R3-105 and R3-138 give the judge permit, schedule and OTE facts", 
   expect(payload.person.workEligibility["Limited work permissions"]).toEqual([
     {
       Country: "Germany",
-      Conditions:
-        profile.workEligibility.limitedWorkPermissions![0]!.conditions,
+      Conditions: profile.workEligibility.limitedWorkPermissions[0]!.conditions,
       "Will need sponsorship later": "Yes",
     },
   ]);
@@ -410,7 +412,11 @@ test("the full listing judge gets plain preferences and keeps all listing and pr
     preferences.companyBlacklist,
   );
   expect(payload).toEqual(JSON.parse(JSON.stringify(payload)));
-  expect(payload.job).toBe(job);
+  expect({
+    ...payload.job,
+    sourceIntelligence: job.sourceIntelligence,
+    listingDetailFetch: job.listingDetailFetch,
+  }).toEqual(job);
   expect(payload.profile.experiences).toBe(profile.experiences);
   expect(payload.profile.baseResume).toBe(profile.baseResume);
   expect(JSON.stringify(payload)).not.toMatch(
@@ -419,4 +425,109 @@ test("the full listing judge gets plain preferences and keeps all listing and pr
   expect(buildFitEvidenceInstructions()).toContain(
     "never field names, key=value text or true/false flags",
   );
+});
+
+test("a full fit request keeps current evidence and goals while excluding saved sightings and source diagnostics", async () => {
+  const profile = createProfile();
+  profile.summary = "Full saved candidate fact. ".repeat(100);
+  profile.baseResume.textContent = "Full imported resume fact. ".repeat(300);
+  const preferences = createPreferences();
+  const source = preferences.discovery.targets[0]!;
+  preferences.discovery.targets = Array.from({ length: 897 }, (_, index) => ({
+    ...source,
+    id: `source_${index}`,
+    customInstructions: `SEARCH_CATALOG_ONLY_${index}`,
+  }));
+  preferences.discovery.remoteCountsAsAnyLocation = false;
+  preferences.locations = ["Kosovo"];
+  const job = {
+    ...createJobPosting(),
+    description:
+      "Complete current listing. ".repeat(500) + "Required: Dutch C1.",
+    minimumQualifications: Array.from(
+      { length: 25 },
+      (_, index) => `Current qualification ${index}`,
+    ),
+    sourceIntelligence: SourceIntelligenceArtifactSchema.parse({
+      reliability: {
+        failureFingerprints: ["SOURCE_DIAGNOSTICS_ONLY".repeat(100)],
+      },
+    }),
+    id: "saved_job",
+    campaignIds: ["campaign_one"],
+    matchAssessment: { summary: "OLD_ASSESSMENT_ONLY", score: 99 },
+    provenance: Array.from({ length: 12 }, (_, index) => ({
+      targetId: `source_${index}`,
+      adapterKind: "auto",
+      startingUrl: `https://example.com/${index}`,
+      discoveredAt: "2026-10-13T10:00:00.000Z",
+      listingFacts: {
+        title: "Old title",
+        company: "Old company",
+        location: "Old place",
+        salaryText: null,
+        seniority: null,
+        summary: null,
+        description: "OLD_SOURCE_HISTORY_ONLY".repeat(1_000),
+      },
+    })),
+  };
+  const mock = mockCapturingJsonFetch({
+    choices: [
+      {
+        message: {
+          content: JSON.stringify({
+            score: 81,
+            reasons: ["Current model verdict"],
+            gaps: [],
+          }),
+        },
+      },
+    ],
+  });
+  try {
+    const client = createOpenAiCompatibleJobFinderAiClient({
+      apiKey: "synthetic-key",
+      baseUrl: "https://example.com/v1",
+      model: "synthetic-model",
+      apiMode: "chat_completions",
+      streaming: false,
+      maxAttempts: 1,
+    });
+    const result = await client.assessJobFit({
+      assessmentDate: "2026-10-13",
+      profile,
+      searchPreferences: preferences,
+      job,
+    });
+    const body = JSON.parse(mock.getCapturedBody()) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const payload = JSON.parse(
+      body.messages.find((message) => message.role === "user")!.content,
+    ) as {
+      profile: typeof profile;
+      job: typeof job;
+      searchPreferences: Record<string, unknown>;
+    };
+    expect(payload.profile.summary).toBe(profile.summary);
+    expect(payload.profile.baseResume).toEqual(profile.baseResume);
+    expect(payload.job.description).toBe(job.description);
+    expect(payload.job.minimumQualifications).toEqual(
+      job.minimumQualifications,
+    );
+    expect(payload.searchPreferences["Preferred places"]).toEqual(["Kosovo"]);
+    expect(
+      payload.searchPreferences["Remote work can be outside preferred places"],
+    ).toBe("No");
+    expect(JSON.stringify(payload)).not.toMatch(
+      /SEARCH_CATALOG_ONLY|SOURCE_DIAGNOSTICS_ONLY|OLD_ASSESSMENT_ONLY|OLD_SOURCE_HISTORY_ONLY/,
+    );
+    expect(payload.job).not.toHaveProperty("provenance");
+    expect(payload.job).not.toHaveProperty("sourceIntelligence");
+    expect(payload.job).not.toHaveProperty("listingDetailFetch");
+    expect(result?.score).toBe(81);
+  } finally {
+    mock.restore();
+  }
 });

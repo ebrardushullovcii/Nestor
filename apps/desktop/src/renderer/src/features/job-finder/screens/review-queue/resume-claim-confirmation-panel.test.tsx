@@ -413,11 +413,15 @@ describe("ResumeClaimConfirmationPanel", () => {
     expect(container.textContent).not.toContain("fnv1a32");
 
     fireEvent.click(
-      screen.getByRole("button", { name: `Remove “${confirmNeededBullet.claimText}” · ${bulletTargetLabel}` }),
+      screen.getByRole("button", {
+        name: `Remove “${confirmNeededBullet.claimText}” · ${bulletTargetLabel}`,
+      }),
     );
     expect(onRejectClaim).toHaveBeenCalledWith(confirmNeededBullet);
     fireEvent.click(
-      screen.getByRole("button", { name: `Edit “${confirmNeededBullet.claimText}” · ${bulletTargetLabel}` }),
+      screen.getByRole("button", {
+        name: `Edit “${confirmNeededBullet.claimText}” · ${bulletTargetLabel}`,
+      }),
     );
     expect(onEditClaim).toHaveBeenCalledWith(confirmNeededBullet);
   });

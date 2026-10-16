@@ -1,4 +1,5 @@
 export * from "./shared";
+export * from "./ai-provider-access-failure";
 export * from "./resume-import";
 export * from "./resume-vision";
 export * from "./browser-visual-analysis";

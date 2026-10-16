@@ -363,79 +363,79 @@ export function ResumeClaimConfirmationPanel(
     // "Keep · Core Skills · Bullet 4" did not say which skill was kept.
     const lineName = `“${abbreviateClaimText(row.assessment.claimText)}” · ${row.targetLabel}`;
     return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {row.confirmation ? (
-        <Button
-          aria-label={`Undo keeping ${lineName}`}
-          disabled={requestInFlight}
-          onClick={() => {
-            void runRequest(
-              {
-                intent: "remove",
-                confirmationId: row.confirmation!.id,
-              },
-              `remove:${row.confirmation!.id}`,
-              null,
-            );
-          }}
-          pending={requestInFlight}
-          size="compact"
-          type="button"
-          variant="ghost"
-        >
-          Undo
-        </Button>
-      ) : (
-        <>
-          {/* Pending keeps the control exposed but inert instead of natively
-              disabled, so focus survives the in-flight request. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {row.confirmation ? (
           <Button
-            aria-label={`Keep ${lineName}`}
-            data-resume-claim-keep={row.requestKey}
+            aria-label={`Undo keeping ${lineName}`}
             disabled={requestInFlight}
             onClick={() => {
               void runRequest(
-                { intent: "add", target: row.assessment },
-                row.requestKey,
+                {
+                  intent: "remove",
+                  confirmationId: row.confirmation!.id,
+                },
+                `remove:${row.confirmation!.id}`,
                 null,
               );
             }}
             pending={requestInFlight}
             size="compact"
             type="button"
-            variant="primary"
+            variant="ghost"
           >
-            Keep
+            Undo
           </Button>
-          {props.onRejectClaim && row.assessment.bulletId ? (
+        ) : (
+          <>
+            {/* Pending keeps the control exposed but inert instead of natively
+              disabled, so focus survives the in-flight request. */}
             <Button
-              aria-label={`Remove ${lineName}`}
-              data-resume-claim-reject={row.requestKey}
+              aria-label={`Keep ${lineName}`}
+              data-resume-claim-keep={row.requestKey}
               disabled={requestInFlight}
-              onClick={() => props.onRejectClaim?.(row.assessment)}
+              onClick={() => {
+                void runRequest(
+                  { intent: "add", target: row.assessment },
+                  row.requestKey,
+                  null,
+                );
+              }}
+              pending={requestInFlight}
               size="compact"
               type="button"
-              variant="secondary"
+              variant="primary"
             >
-              Remove
+              Keep
             </Button>
-          ) : null}
-          {props.onEditClaim && !row.isSkill ? (
-            <Button
-              aria-label={`Edit ${lineName}`}
-              data-resume-claim-edit={row.requestKey}
-              disabled={requestInFlight}
-              onClick={() => props.onEditClaim?.(row.assessment)}
-              size="compact"
-              type="button"
-              variant="ghost"
-            >
-              Edit
-            </Button>
-          ) : null}
-        </>
-      )}
-    </div>
+            {props.onRejectClaim && row.assessment.bulletId ? (
+              <Button
+                aria-label={`Remove ${lineName}`}
+                data-resume-claim-reject={row.requestKey}
+                disabled={requestInFlight}
+                onClick={() => props.onRejectClaim?.(row.assessment)}
+                size="compact"
+                type="button"
+                variant="secondary"
+              >
+                Remove
+              </Button>
+            ) : null}
+            {props.onEditClaim && !row.isSkill ? (
+              <Button
+                aria-label={`Edit ${lineName}`}
+                data-resume-claim-edit={row.requestKey}
+                disabled={requestInFlight}
+                onClick={() => props.onEditClaim?.(row.assessment)}
+                size="compact"
+                type="button"
+                variant="ghost"
+              >
+                Edit
+              </Button>
+            ) : null}
+          </>
+        )}
+      </div>
     );
   };
 

@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import JSZip from "jszip";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { createLocalJobFinderDocumentManager } from "./job-finder-document-manager";
+
+vi.mock("electron", () => ({ BrowserWindow: vi.fn() }));
 
 describe("application document DOCX rendering", () => {
   test("writes a valid Word package containing the generated text", async () => {

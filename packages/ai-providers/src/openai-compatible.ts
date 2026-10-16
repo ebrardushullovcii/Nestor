@@ -94,6 +94,7 @@ import {
   runResumeGenerationAgentTask,
   runResumeImportStageAgentTask,
 } from "./agent-capabilities";
+import { getAiProviderAccessFailure } from "./ai-provider-access-failure";
 import {
   buildModelRequestHeaders,
   createInstanceConversationKey,
@@ -652,7 +653,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
       );
     },
     async checkResumeClaims(input) {
-      const { signal, ...rest } = input;
+      const { signal, timeoutMs, ...rest } = input;
       if (rest.claims.length === 0) {
         return [];
       }
@@ -661,6 +662,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
         buildResumeClaimCheckPrompt(),
         buildResumeClaimCheckPayload(rest),
         {
+          ...(timeoutMs !== undefined ? { timeoutMs } : {}),
           ...(signal ? { signal } : {}),
           reasoningEffort: agentReasoningEffort,
         },
@@ -962,6 +964,8 @@ const RESUME_EDIT_PLACEHOLDER_CONTENT =
  * place (ADR 0041): the job keeps the resume it had and the person is told.
  */
 function resumeWritingFailed(error: unknown): Error {
+  const accessFailure = getAiProviderAccessFailure(error);
+  if (accessFailure) return new Error(accessFailure.message, { cause: error });
   const timedOut = /timed out/i.test(summarizeError(error));
   return new Error(
     timedOut
@@ -1109,8 +1113,7 @@ export function createJobFinderAiClientFromEnvironment(
     baseUrl: env.NORDRI_AI_BASE_URL ?? DEFAULT_OPENCODE_GO_BASE_URL,
     model: env.NORDRI_AI_MODEL ?? DEFAULT_TEXT_MODEL,
     apiMode:
-      parseModelApiMode(env.NORDRI_AI_API_MODE) ??
-      DEFAULT_TEXT_MODEL_API_MODE,
+      parseModelApiMode(env.NORDRI_AI_API_MODE) ?? DEFAULT_TEXT_MODEL_API_MODE,
     reasoningEffort:
       parseModelReasoningEffort(env.NORDRI_AI_REASONING_EFFORT) ??
       DEFAULT_TEXT_MODEL_REASONING_EFFORT,
@@ -1130,15 +1133,13 @@ export function createJobFinderAiClientFromEnvironment(
     apiKey,
     baseUrl: env.NORDRI_AI_BASE_URL ?? DEFAULT_OPENCODE_GO_BASE_URL,
     model:
-      env.NORDRI_AI_AGGRESSIVE_MODEL?.trim() ||
-      DEFAULT_AGGRESSIVE_RESUME_MODEL,
+      env.NORDRI_AI_AGGRESSIVE_MODEL?.trim() || DEFAULT_AGGRESSIVE_RESUME_MODEL,
     apiMode:
       parseModelApiMode(env.NORDRI_AI_AGGRESSIVE_API_MODE) ??
       DEFAULT_AGGRESSIVE_RESUME_MODEL_API_MODE,
     reasoningEffort:
-      parseModelReasoningEffort(
-        env.NORDRI_AI_AGGRESSIVE_REASONING_EFFORT,
-      ) ?? DEFAULT_AGGRESSIVE_RESUME_MODEL_REASONING_EFFORT,
+      parseModelReasoningEffort(env.NORDRI_AI_AGGRESSIVE_REASONING_EFFORT) ??
+      DEFAULT_AGGRESSIVE_RESUME_MODEL_REASONING_EFFORT,
     label: "Aggressive AI resume agent",
     requestTimeoutMs: parsedRequestTimeoutMs,
     resumeExtractionTimeoutMs: parsedResumeExtractionTimeoutMs,
@@ -1456,7 +1457,10 @@ export function createJobFinderAiClientFromEnvironment(
       try {
         return await primaryClient.assessJobFit(input);
       } catch (error) {
-        if (input.signal?.aborted || error instanceof FullFitEvidenceBudgetError) {
+        if (
+          input.signal?.aborted ||
+          error instanceof FullFitEvidenceBudgetError
+        ) {
           throw error;
         }
         // No verdict stands in: the job stays as it was and says so.
@@ -1467,8 +1471,12 @@ export function createJobFinderAiClientFromEnvironment(
     // A failed check leaves the lines unchecked for the person to look at;
     // no rule stands in for the model's verdict (ADR 0041).
     checkResumeClaims(input) {
-      return primaryClient.checkResumeClaims
-        ? primaryClient.checkResumeClaims(input)
+      const claimClient =
+        input.tailoringStrength === "aggressive"
+          ? aggressiveClient
+          : primaryClient;
+      return claimClient.checkResumeClaims
+        ? claimClient.checkResumeClaims(input)
         : Promise.resolve([]);
     },
     async judgeJobFits(input) {

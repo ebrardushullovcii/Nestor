@@ -8,15 +8,15 @@ import type {
   ApplicationAutomationMode,
   CandidateProfile,
   JobFinderApplicationStartTarget,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   BrowserSessionState,
   GlobalDailyApplicationPreparationCapacity,
   ResumeApplicationMode,
   TailoringMode,
   ResumeSourceDocument,
   ReviewQueueItem,
-  SavedJob,
-  TailoredAsset,
+  JobListRow,
+  TailoredAssetSummary,
 } from "@nordri/contracts";
 import { Button, ProgressBar } from "@renderer/components/ui";
 import { cn } from "@renderer/lib/cn";
@@ -64,7 +64,7 @@ interface ReviewQueueMissionPanelProps {
   /** Takes the person to Safeguards when one is holding preparation back. */
   onOpenSafeguards?: () => void;
   /** Live apply results, so the start control follows the run record. */
-  applyJobResults?: JobFinderWorkspaceSnapshot["applyJobResults"];
+  applyJobResults?: JobFinderRendererWorkspaceSnapshot["applyJobResults"];
   /** A safeguard holding preparation back, in plain words. */
   safeguardBlocker?: string | null;
   onClaimResumeIdentity?: () => void;
@@ -77,9 +77,11 @@ interface ReviewQueueMissionPanelProps {
   ) => void;
   originalResume?: ResumeSourceDocument;
   profile?: CandidateProfile;
-  selectedAsset: TailoredAsset | null;
+  selectedAsset: TailoredAssetSummary | null;
   selectedItem: ReviewQueueItem | null;
-  selectedJob: SavedJob | null;
+  selectedJob: JobListRow | null;
+  /** The written preference verdict, read with the job detail. */
+  preferenceExplanation?: string | null;
 }
 
 /** The four resume levels a job can be sent with, in order of how far they go. */
@@ -169,6 +171,7 @@ export function ReviewQueueMissionPanel({
   selectedAsset,
   selectedItem,
   selectedJob,
+  preferenceExplanation = null,
 }: ReviewQueueMissionPanelProps) {
   const {
     isGenerating,
@@ -548,8 +551,7 @@ export function ReviewQueueMissionPanel({
             >
               {selectedJob.matchAssessment.recommendation === "skip"
                 ? selectedJob.matchAssessment.recommendationRationale
-                : selectedJob.matchAssessment.dimensions?.preferenceAlignment
-                    .explanation}
+                : preferenceExplanation}
               {selectedJob.matchAssessment.gaps.length > 0
                 ? ` ${selectedJob.matchAssessment.gaps.join(" ")}`
                 : ""}

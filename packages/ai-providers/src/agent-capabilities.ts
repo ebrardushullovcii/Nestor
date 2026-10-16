@@ -14,6 +14,7 @@ import {
   ProfileWorkEligibilityPatchFieldsSchema,
   ProfileCopilotReplySchema,
   ResumeDraftPatchSchema,
+  ResumeLanguageTranslationSchema,
   ResumeImportFieldCandidateDraftSchema,
   type AgentTaskValidationIssue,
   type CandidateProfile,
@@ -29,6 +30,7 @@ import { buildResumeImportStageInstructions } from "./openai-compatible-resume-i
 
 import {
   ResumeAssistantReplySchema,
+  ResumeProposalValidationError,
   TailoredResumeDraftSchema,
   type AgentCapableJobFinderAiClient,
   type ResumeAssistantReply,
@@ -74,6 +76,7 @@ const ResumeBulletIncludedInputSchema = z.object({
 });
 const ResumeGenerationProposalInputSchema = z.object({
   proposal: z.record(z.string(), z.unknown()),
+  templateId: z.string().trim().min(1).optional(),
   reasonForRevision: z.string().trim().min(1).optional(),
 });
 const ResumeImportCandidateSetInputSchema = z.object({
@@ -293,6 +296,9 @@ function createModelAdapter(
                 role: "assistant" as const,
                 content: message.content,
                 ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
+                ...(message.continuation
+                  ? { continuation: message.continuation }
+                  : {}),
               };
             }
             return { role: message.role, content: message.content };
@@ -412,10 +418,14 @@ export function findBulletsOnTwoCards(
 }
 
 /**
- * Gives resume generation a bounded working loop instead of treating the
- * model as a one-shot JSON endpoint. The model owns the useful writing work;
- * the existing completion layer still owns identity, chronology, and the
- * final typed draft contract.
+ * Resume generation in as few model calls as the writing needs. The model
+ * sends the complete proposal once; the same tool call renders it and runs the
+ * checks, and a clean render ends the task. A flagged render goes back to the
+ * model with exactly the lines to repair. The old loop (read the context, read
+ * the templates, compose, render, inspect, finish) resent the whole profile
+ * and listing on every turn, took about six calls per resume and often ran out
+ * of its ten minutes on slow models. The completion layer still owns
+ * identity, chronology and the final typed draft.
  */
 export async function runResumeGenerationAgentTask(input: {
   client: AgentCapableJobFinderAiClient;
@@ -426,55 +436,278 @@ export async function runResumeGenerationAgentTask(input: {
     input.request.selectedTemplateId ?? input.request.settings.resumeTemplateId;
   let hasComposedProposal = false;
   let hasRenderedPreview = false;
-  let hasInspectedRenderedPreview = false;
-  // Stall warning: a run that keeps rewording flagged lines render after
-  // render used to reach its budget with no clean draft and fall back to the
-  // built-in resume. From the third flagged render, or half the budget, the
-  // model is told to drop the flagged lines instead.
   const generationStartedAtMs = Date.now();
   const generationBudgetMs = 600_000;
-  let flaggedRenderCount = 0;
-  const describeRepairStall = (repairCount: number): string | null => {
-    const elapsedMs = Date.now() - generationStartedAtMs;
-    if (
-      repairCount === 0 ||
-      (flaggedRenderCount < 3 && elapsedMs < generationBudgetMs / 2)
-    ) {
-      return null;
-    }
-    const secondsLeft = Math.max(
-      0,
-      Math.round((generationBudgetMs - elapsedMs) / 1_000),
-    );
-    return `This is flagged render ${flaggedRenderCount} and about ${secondsLeft}s are left. Stop rewording: remove each line named in requiredModelRepairs, or put back the candidate's saved wording for it, then render once more and finish. A run that ends without a clean render loses all of your work to the built-in resume.`;
+  const generationElapsedMs = () => {
+    const elapsedMs = Math.max(0, Date.now() - generationStartedAtMs);
+    const excludedMs = input.request.getExcludedElapsedMs?.() ?? 0;
+    return Number.isFinite(excludedMs)
+      ? elapsedMs - Math.min(elapsedMs, Math.max(0, excludedMs))
+      : elapsedMs;
   };
-  // The same warning for the other way a run stalls: live Aggressive runs
-  // rendered clean drafts and rewrote them again without inspecting, render
-  // after render, until the call ceiling ended the run.
-  let cleanRenderCount = 0;
-  const describeCleanRenderStall = (repairCount: number): string | null =>
-    repairCount === 0 && cleanRenderCount >= 3
-      ? `This is clean render ${cleanRenderCount} in this run. The draft is ready to keep: call finish_task now, after inspect_completed_resume if you have not inspected this render. Rewriting a clean draft again uses up the run without improving what the person gets.`
-      : null;
-  let lastRenderedPreview: Awaited<
+  type ToolResult = {
+    draft?: Record<string, unknown>;
+    value?: unknown;
+    summary: string;
+    progressMade?: boolean;
+    validationIssues?: readonly AgentTaskValidationIssue[];
+    finish?: boolean;
+  };
+  let flaggedRenderCount = 0;
+  type RenderedPreview = Awaited<
     ReturnType<NonNullable<typeof input.request.renderPreview>>
-  > | null = null;
-  // The newest proposal whose render needed no model repair. A run that is
-  // still polishing when its time or call budget ends keeps this checked
-  // draft instead of dropping all of the AI's work for the built-in resume.
+  >;
+  let lastRenderedPreview: RenderedPreview | null = null;
+  let lastRenderResult: ToolResult | null = null;
+  let proposalValidationIssues: AgentTaskValidationIssue[] = [];
+  let currentLanguageFields = input.request.languageFields;
+  // The newest proposal whose render needed no model repair. A run that ends
+  // on its time or call budget keeps this checked draft instead of dropping
+  // all of the AI's work.
   let lastCheckedProposal: Record<string, unknown> | null = null;
-  const groundedResumePayload = buildGroundedResumeRewriteModelPayload(
-    input.request,
-  );
+  // The newest proposal that rendered with lines still flagged. When no
+  // clean draft came, this is kept for the person to decide those lines in
+  // review: three calls of writing are not thrown away over a few lines.
+  let lastFlaggedProposal: Record<string, unknown> | null = null;
+  // What each flagged render was flagged for, by category, for the stop log.
+  const flaggedRenderCategories: Record<string, number>[] = [];
+
+  const rejectInvalidProposal = (
+    error: ResumeProposalValidationError | z.ZodError,
+  ): ToolResult => {
+    hasRenderedPreview = false;
+    lastRenderedPreview = null;
+    proposalValidationIssues =
+      error instanceof ResumeProposalValidationError
+        ? [...error.issues]
+        : zodIssues(error).map((issue) => ({
+            ...issue,
+            path: ["proposal", ...issue.path],
+          }));
+    if (
+      error instanceof ResumeProposalValidationError &&
+      error.languageFields
+    ) {
+      currentLanguageFields = [...error.languageFields];
+    }
+    return {
+      summary: "The writing proposal needs repair before it can be rendered",
+      validationIssues: proposalValidationIssues,
+      value: {
+        validationIssues: proposalValidationIssues,
+        languageFields: currentLanguageFields,
+        nextAction:
+          "Call compose_resume_proposal again with the complete corrected proposal. For translations, use each exact current languageFields ID at most once and omit unchanged fields. Do not invent candidate facts or bypass claim checks.",
+      },
+      progressMade: false,
+    };
+  };
+
+  /** Renders a proposal and checks it; a clean render finishes the task. */
+  const renderAndCheck = async (
+    proposal: Record<string, unknown>,
+    state: CreateResumeDraftInput,
+    signal: AbortSignal | undefined,
+  ): Promise<ToolResult> => {
+    try {
+      if ("language" in input.request) {
+        const presentation = ResumeLanguageTranslationSchema.safeParse(
+          proposal.languagePresentation,
+        );
+        if (!presentation.success) {
+          return rejectInvalidProposal(
+            new ResumeProposalValidationError(
+              "Include a valid languagePresentation object in the writing proposal.",
+              zodIssues(presentation.error).map((issue) => ({
+                ...issue,
+                path: ["proposal", "languagePresentation", ...issue.path],
+              })),
+            ),
+          );
+        }
+      }
+      const preview = completeTailoredResumeDraft(proposal, state);
+      const rendered = await Promise.resolve(
+        state.renderPreview
+          ? state.renderPreview({
+              draft: preview,
+              templateId: selectedTemplateId,
+              ...(signal ? { signal } : {}),
+              getRemainingBudgetMs: () =>
+                Math.max(0, generationBudgetMs - generationElapsedMs()),
+            })
+          : null,
+      );
+      hasRenderedPreview = true;
+      lastRenderedPreview = rendered;
+      proposalValidationIssues = [];
+      if (rendered?.languageFields)
+        currentLanguageFields = [...rendered.languageFields];
+      const repairs = rendered?.requiredModelRepairs ?? [];
+      if (repairs.length === 0) {
+        lastCheckedProposal = structuredClone(proposal);
+        return {
+          summary: "Resume rendered and checked; nothing needs repair",
+          value: {
+            selectedTemplateId,
+            pageCount: rendered?.pageCount ?? null,
+            personConfirmationCount: rendered?.personConfirmationCount ?? 0,
+          },
+          progressMade: false,
+          finish: true,
+        };
+      }
+      flaggedRenderCount += 1;
+      lastFlaggedProposal = structuredClone(proposal);
+      const categories: Record<string, number> = {};
+      for (const repair of repairs) {
+        categories[repair.category] = (categories[repair.category] ?? 0) + 1;
+      }
+      flaggedRenderCategories.push(categories);
+      const repairAction =
+        flaggedRenderCount >= 2
+          ? "This is the second flagged render. Remove each line named in requiredModelRepairs, or put back the candidate's saved wording for it, and call compose_resume_proposal once more with the complete proposal."
+          : "Repair every requiredModelRepairs item by removing or rephrasing the flagged wording, then call compose_resume_proposal again with the complete corrected proposal. Never invent facts, dates or chronology. Do not resolve person confirmation items.";
+      // "Too long" alone does not say by how much; drafts came back at three
+      // pages after every repair until the call budget ran out.
+      const pageCount = rendered?.pageCount ?? null;
+      const lengthAction =
+        pageCount !== null &&
+        repairs.some((repair) => repair.category === "page_overflow")
+          ? ` The resume renders at ${pageCount} pages and must fit on at most 2. Shorten it by about ${Math.round((1 - 2 / pageCount) * 100)}%: keep the three or four bullets per recent role that best match the listing, one or two for older roles, a summary of at most three sentences, and drop the rest. Shortening is the repair; do not reword to fit.`
+          : "";
+      const nextAction = `${repairAction}${lengthAction}`;
+      return {
+        summary: `Resume rendered; ${repairs.length} line${repairs.length === 1 ? "" : "s"} must be repaired`,
+        value: {
+          nextAction,
+          selectedTemplateId,
+          pageCount: rendered?.pageCount ?? null,
+          warnings: rendered?.warnings ?? [],
+          requiredModelRepairs: repairs,
+          personConfirmationCount: rendered?.personConfirmationCount ?? 0,
+          ...(rendered?.languageFields
+            ? { languageFields: rendered.languageFields }
+            : {}),
+        },
+        progressMade: false,
+      };
+    } catch (error) {
+      if (
+        error instanceof ResumeProposalValidationError ||
+        error instanceof z.ZodError
+      ) {
+        return rejectInvalidProposal(error);
+      }
+      throw error;
+    }
+  };
+
+  const selectTemplate = (
+    templateId: string,
+    state: CreateResumeDraftInput,
+  ): boolean => {
+    if (state.templateSelectionLocked) return false;
+    const template = state.availableTemplates?.find(
+      (candidate) => candidate.id === templateId,
+    );
+    if (!template || template.applyEligible === false) {
+      throw new Error(
+        `Template '${templateId}' is unavailable or not eligible for application use.`,
+      );
+    }
+    const changed = selectedTemplateId !== templateId;
+    selectedTemplateId = templateId;
+    if (changed) {
+      hasRenderedPreview = false;
+      lastRenderedPreview = null;
+      lastRenderResult = null;
+    }
+    return changed;
+  };
+
+  const { baseResumeText, ...groundedResumePayload } =
+    buildGroundedResumeRewriteModelPayload(input.request);
+  const { textContent: profileResumeText, ...profileResumeMetadata } =
+    input.request.profile.baseResume;
+  // Keep the complete selected source once, under its canonical evidence ID.
+  // The request used by completion and grounding stays unchanged. A different
+  // profile base is separate evidence and must keep its own complete text.
+  const candidateProfile =
+    baseResumeText !== undefined && baseResumeText === profileResumeText
+      ? {
+          ...input.request.profile,
+          baseResume: {
+            ...profileResumeMetadata,
+            textContentEvidenceRef: "baseResume:text",
+          },
+        }
+      : input.request.profile;
+  const { discovery, ...searchPreferences } = input.request.searchPreferences;
+  // Send the current listing once. Browser navigation/fetch diagnostics and
+  // the search source catalog are operational state, not resume evidence.
+  // Candidate facts and listing prose are kept intact, including long fields.
+  const job = input.request.job;
+  const resumeGenerationContext = {
+    ...groundedResumePayload,
+    ...(baseResumeText === undefined
+      ? {}
+      : { baseResumeEvidenceRef: "baseResume:text" }),
+    groundingEvidence: {
+      ...groundedResumePayload.groundingEvidence,
+      items: groundedResumePayload.groundingEvidence.items.map((item) =>
+        item.id === "baseResume:text" && baseResumeText !== undefined
+          ? { ...item, text: baseResumeText }
+          : item,
+      ),
+    },
+    targetJob: {
+      ...groundedResumePayload.targetJob,
+      source: job.source,
+      sourceJobId: job.sourceJobId,
+      canonicalUrl: job.canonicalUrl,
+      applicationUrl: job.applicationUrl,
+      location: job.location,
+      workMode: job.workMode,
+      postedAt: job.postedAt,
+      postedAtText: job.postedAtText,
+      salaryText: job.salaryText,
+      normalizedCompensation: job.normalizedCompensation,
+      detailQuality: job.detailQuality,
+      summary: job.summary,
+      description: job.description,
+      seniority: job.seniority,
+      employmentType: job.employmentType,
+      department: job.department,
+      team: job.team,
+      employerWebsiteUrl: job.employerWebsiteUrl,
+      employerDomain: job.employerDomain,
+      screeningHints: job.screeningHints,
+      benefits: job.benefits,
+    },
+    candidateProfile,
+    searchPreferences: {
+      ...searchPreferences,
+      remoteCountsAsAnyLocation: discovery.remoteCountsAsAnyLocation ?? true,
+    },
+    settings: {
+      resumeFormat: input.request.settings.resumeFormat,
+      fontPreset: input.request.settings.fontPreset,
+      humanReviewRequired: input.request.settings.humanReviewRequired,
+    },
+  };
+  const templateOptions = (input.request.availableTemplates ?? [])
+    .filter((template) => template.applyEligible !== false)
+    .map((template) => ({ id: template.id, label: template.label }));
   const result = await runAgentTask({
     taskId: `resume_generation_${Date.now()}`,
     capability: "resume_generation",
     systemPrompt: [
       input.substantivePrompt,
-      "Work through the task tools instead of returning a final JSON object.",
-      "Read the complete context and template options, compose a material proposal, render and inspect the resulting full-text preview, revise the proposal when the inspection exposes a weak result, then finish.",
-      "The rendered preview can report requiredModelRepairs and personConfirmationCount. Repair every requiredModelRepairs item by removing or rephrasing unsupported model wording; never invent missing candidate facts, dates, or chronology. Aggressive person confirmations are deliberate review decisions for the person, not defects for you to erase or confirm.",
-      "When the current proposal has been rendered and inspected with no validation issue, call finish_task unless the inspection exposed a concrete defect. If you revise, name the defect you are fixing, render and inspect that revision, then finish when it is acceptable. Do not keep restyling an already valid preview.",
+      "baseResumeEvidenceRef and candidateProfile.baseResume.textContentEvidenceRef point to groundingEvidence item IDs. Read that item's complete text as the referenced resume source. The evidence IDs and selected base resume are unchanged; a distinct profile base resume is included separately.",
+      "Everything you need is in the task payload. Write the complete proposal in one compose_resume_proposal call; do not call any other tool first.",
+      "compose_resume_proposal renders the resume and checks it in the same call. A clean check ends the task. When it returns requiredModelRepairs, repair exactly those lines by removing or rephrasing the unsupported wording and call compose_resume_proposal again with the complete corrected proposal. Never invent missing candidate facts, dates, or chronology. Aggressive person confirmations are deliberate review decisions for the person, not defects for you to erase or confirm.",
+      "To use a different template, pass its templateId to compose_resume_proposal when templateSelection.selectionLocked is false.",
       "The runtime preserves identity, chronology, selected strategy, and the final typed resume shape. Your job is to do the actual job-targeted writing within the mode-specific instructions above.",
     ].join(" "),
     state: input.request,
@@ -502,19 +735,6 @@ export async function runResumeGenerationAgentTask(input: {
                   arguments: JSON.stringify({ proposal }),
                 },
               },
-              {
-                id: `resume_preview_${Date.now()}`,
-                type: "function",
-                function: {
-                  name: "render_resume_preview",
-                  arguments: "{}",
-                },
-              },
-              {
-                id: `resume_finish_${Date.now()}`,
-                type: "function",
-                function: { name: "finish_task", arguments: "{}" },
-              },
             ];
           } catch {
             return null;
@@ -524,48 +744,73 @@ export async function runResumeGenerationAgentTask(input: {
     ),
     tools: [
       {
-        name: "read_resume_generation_context",
+        name: "compose_resume_proposal",
         description:
-          "Read the complete target job, candidate profile, selected base resume text, saved preferences, strategy, and settings.",
-        inputSchema: EmptyInputSchema,
-        parameters: jsonObject({}),
-        permission: "read",
-        parallelSafe: true,
-        execute(_toolInput, context) {
-          return {
-            summary: "Resume generation context read",
-            value: {
-              ...context.state,
-              ...groundedResumePayload,
+          "Send the complete sparse job-targeted resume proposal (the exact shape described in the task instructions). The proposal is rendered and checked in the same call: a clean check finishes the task, otherwise the result lists the lines to repair.",
+        inputSchema: ResumeGenerationProposalInputSchema,
+        parameters: jsonObject(
+          {
+            proposal: {
+              type: "object",
+              additionalProperties: true,
+              description:
+                "Sparse summary, experienceEntries, projectEntries, and optional coreSkills proposal from the task instructions.",
             },
-            progressMade: false,
+            templateId: {
+              type: "string",
+              description:
+                "Optional. One of templateSelection.availableTemplates, only when the selection is not locked.",
+            },
+          },
+          ["proposal"],
+        ),
+        permission: "draft_write",
+        async execute(toolInput, context) {
+          const parsed = ResumeGenerationProposalInputSchema.parse(toolInput);
+          if (parsed.templateId)
+            selectTemplate(parsed.templateId, context.state);
+          hasComposedProposal = true;
+          const rendered = await renderAndCheck(
+            parsed.proposal,
+            context.state,
+            context.signal,
+          );
+          lastRenderResult = rendered;
+          return {
+            ...rendered,
+            draft: parsed.proposal,
+            progressMade:
+              JSON.stringify(context.draft) !== JSON.stringify(parsed.proposal),
           };
         },
       },
       {
-        name: "read_resume_templates",
+        name: "render_resume_preview",
         description:
-          "Read the available resume templates and the template already selected by saved strategy, existing draft, or settings. Template selection stays governed by that saved policy.",
+          "Render and check the current proposal again. compose_resume_proposal already does this, so call it only after select_resume_template changed the template.",
         inputSchema: EmptyInputSchema,
         parameters: jsonObject({}),
         permission: "read",
-        parallelSafe: true,
-        execute(_toolInput, context) {
-          return {
-            summary: "Resume template options read",
-            value: {
-              selectedTemplateId,
-              selectionLocked: context.state.templateSelectionLocked === true,
-              availableTemplates: context.state.availableTemplates ?? [],
-            },
-            progressMade: false,
-          };
+        async execute(_toolInput, context) {
+          if (hasRenderedPreview && lastRenderResult) return lastRenderResult;
+          if (!hasComposedProposal) {
+            return {
+              summary: "Nothing to render yet; call compose_resume_proposal",
+              progressMade: false,
+            };
+          }
+          lastRenderResult = await renderAndCheck(
+            context.draft,
+            context.state,
+            context.signal,
+          );
+          return lastRenderResult;
         },
       },
       {
         name: "select_resume_template",
         description:
-          "Choose the best eligible template for this job and content when the person has not locked a template through an existing draft or saved strategy. An explicit choice is never overridden.",
+          "Choose the best eligible template when the person has not locked one. compose_resume_proposal also accepts templateId, which saves a call.",
         inputSchema: z.object({ templateId: z.string().trim().min(1) }),
         parameters: jsonObject({ templateId: { type: "string" } }, [
           "templateId",
@@ -582,198 +827,18 @@ export async function runResumeGenerationAgentTask(input: {
               progressMade: false,
             };
           }
-          const template = context.state.availableTemplates?.find(
-            (candidate) => candidate.id === templateId,
-          );
-          if (!template || template.applyEligible === false) {
-            throw new Error(
-              `Template '${templateId}' is unavailable or not eligible for application use.`,
-            );
-          }
-          const changed = selectedTemplateId !== templateId;
-          selectedTemplateId = templateId;
-          if (changed) {
-            hasRenderedPreview = false;
-            hasInspectedRenderedPreview = false;
-            lastRenderedPreview = null;
-          }
+          const changed = selectTemplate(templateId, context.state);
           return {
-            summary: `Resume template selected: ${template.label}`,
+            summary: `Resume template selected: ${templateId}`,
             value: { selectedTemplateId },
             progressMade: changed,
           };
         },
       },
       {
-        name: "compose_resume_proposal",
-        description:
-          "Write or revise the sparse job-targeted resume proposal. Use the exact proposal shape described in the task instructions. After inspecting a rendered preview, call this again only to fix a concrete defect and name that defect in reasonForRevision.",
-        inputSchema: ResumeGenerationProposalInputSchema,
-        parameters: jsonObject(
-          {
-            proposal: {
-              type: "object",
-              additionalProperties: true,
-              description:
-                "Sparse summary, experienceEntries, projectEntries, and optional coreSkills proposal from the task instructions.",
-            },
-            reasonForRevision: {
-              type: "string",
-              description:
-                "Required only when revising an already rendered and inspected proposal: name the concrete defect this revision fixes.",
-            },
-          },
-          ["proposal"],
-        ),
-        permission: "draft_write",
-        execute(toolInput, context) {
-          const parsed = ResumeGenerationProposalInputSchema.parse(toolInput);
-          if (
-            hasInspectedRenderedPreview &&
-            parsed.reasonForRevision === undefined
-          ) {
-            return {
-              summary:
-                "Revision not applied: name a concrete preview defect, or finish the valid inspected proposal",
-              validationIssues: [
-                {
-                  code: "resume_revision_reason_required",
-                  message:
-                    "The current proposal is already rendered and inspected. Call finish_task if it is acceptable. To revise it, call compose_resume_proposal with reasonForRevision naming the concrete defect you are fixing.",
-                  path: ["reasonForRevision"],
-                },
-              ],
-              progressMade: false,
-            };
-          }
-          hasComposedProposal = true;
-          hasRenderedPreview = false;
-          hasInspectedRenderedPreview = false;
-          lastRenderedPreview = null;
-          return {
-            draft: parsed.proposal,
-            summary: "Resume proposal composed",
-            progressMade:
-              JSON.stringify(context.draft) !== JSON.stringify(parsed.proposal),
-          };
-        },
-      },
-      {
-        name: "render_resume_preview",
-        description:
-          "Render the current proposal into the complete typed, full-text resume preview using the selected base resume and saved generation strategy. Inspect all sections and revise before finishing when needed.",
-        inputSchema: EmptyInputSchema,
-        parameters: jsonObject({}),
-        permission: "read",
-        execute(_toolInput, context) {
-          const preview = completeTailoredResumeDraft(
-            context.draft,
-            context.state,
-          );
-          return Promise.resolve(
-            context.state.renderPreview
-              ? context.state.renderPreview({
-                  draft: preview,
-                  templateId: selectedTemplateId,
-                })
-              : null,
-          ).then((rendered) => {
-            hasRenderedPreview = true;
-            lastRenderedPreview = rendered;
-            const repairCount = rendered?.requiredModelRepairs?.length ?? 0;
-            if (repairCount === 0) {
-              cleanRenderCount += 1;
-              lastCheckedProposal = structuredClone(context.draft);
-            } else {
-              flaggedRenderCount += 1;
-            }
-            const stallWarning =
-              describeRepairStall(repairCount) ??
-              describeCleanRenderStall(repairCount);
-            const nextAction =
-              stallWarning ??
-              (repairCount > 0
-                ? "Repair every requiredModelRepairs item, then render again. Do not resolve person confirmation items."
-                : "This render is clean. Call inspect_completed_resume, then finish_task unless the inspection shows a concrete defect.");
-            return {
-              summary: rendered
-                ? stallWarning
-                  ? `Formatted resume preview rendered. ${stallWarning}`
-                  : "Formatted resume preview rendered"
-                : "Resume content preview rendered",
-              value: {
-                ...(stallWarning ? { stallWarning } : {}),
-                nextAction,
-                selectedTemplateId,
-                formattedArtifact: rendered,
-                label: preview.label,
-                fullText: preview.fullText,
-                summary: preview.summary,
-                experienceEntries: preview.experienceEntries,
-                projectEntries: preview.projectEntries,
-                educationEntries: preview.educationEntries,
-                certificationEntries: preview.certificationEntries,
-                coreSkills: preview.coreSkills,
-                targetedKeywords: preview.targetedKeywords,
-                coverageMetadata: preview.coverageMetadata,
-                generationQuality: preview.generationQuality,
-                notes: preview.notes,
-              },
-              progressMade: false,
-            };
-          });
-        },
-      },
-      {
-        name: "inspect_completed_resume",
-        description:
-          "Inspect the complete typed resume that the current writing proposal produces, including notes, coverage metadata, provenance, and every rendered content section. Use this feedback to revise weak or incomplete writing before finishing.",
-        inputSchema: EmptyInputSchema,
-        parameters: jsonObject({}),
-        permission: "read",
-        execute(_toolInput, context) {
-          if (hasRenderedPreview) hasInspectedRenderedPreview = true;
-          return {
-            summary: hasRenderedPreview
-              ? "Completed resume inspected; call finish_task now unless you found a concrete defect"
-              : "No current rendered preview to inspect; render it before finishing",
-            value: {
-              resume: completeTailoredResumeDraft(context.draft, context.state),
-              formattedArtifact: lastRenderedPreview,
-              resumeGenerationPhase: {
-                proposalComposed: hasComposedProposal,
-                previewRenderedForCurrentProposal: hasRenderedPreview,
-                previewInspectedForCurrentProposal: hasInspectedRenderedPreview,
-                readyToFinish:
-                  hasComposedProposal &&
-                  hasRenderedPreview &&
-                  hasInspectedRenderedPreview &&
-                  (lastRenderedPreview?.requiredModelRepairs?.length ?? 0) ===
-                    0,
-                nextAction:
-                  hasComposedProposal &&
-                  hasRenderedPreview &&
-                  hasInspectedRenderedPreview &&
-                  (lastRenderedPreview?.requiredModelRepairs?.length ?? 0) === 0
-                    ? "Call finish_task unless inspection found a concrete defect. To revise, call compose_resume_proposal with reasonForRevision naming that defect."
-                    : (lastRenderedPreview?.requiredModelRepairs?.length ?? 0) >
-                        0
-                      ? (describeRepairStall(
-                          lastRenderedPreview?.requiredModelRepairs?.length ??
-                            0,
-                        ) ??
-                        "Repair every requiredModelRepairs item, then render and inspect the revision. Do not resolve person confirmation items.")
-                      : "Render and inspect the current proposal before finishing.",
-              },
-            },
-            progressMade: false,
-          };
-        },
-      },
-      {
         name: "finish_task",
         description:
-          "Finish after composing, rendering, and inspecting a useful resume proposal. This is the required next action when the inspected preview is acceptable.",
+          "Finish after a clean check. compose_resume_proposal finishes on its own when the check is clean, so this is rarely needed.",
         inputSchema: EmptyInputSchema,
         parameters: jsonObject({}),
         permission: "read",
@@ -783,6 +848,7 @@ export async function runResumeGenerationAgentTask(input: {
       },
     ],
     validate: () => [
+      ...proposalValidationIssues,
       ...(!hasComposedProposal
         ? [
             {
@@ -792,12 +858,12 @@ export async function runResumeGenerationAgentTask(input: {
             },
           ]
         : []),
-      ...(!hasRenderedPreview
+      ...(hasComposedProposal && !hasRenderedPreview
         ? [
             {
               code: "resume_preview_required",
               message:
-                "Render and inspect the current resume preview before finishing.",
+                "The current proposal has not rendered cleanly yet; call compose_resume_proposal with the corrected proposal.",
               path: ["preview"],
             },
           ]
@@ -815,48 +881,50 @@ export async function runResumeGenerationAgentTask(input: {
         ],
       })),
     ],
-    buildContext: ({ state, draft, validationIssues }) =>
+    buildContext: ({ draft, validationIssues }) =>
       compactOpenAiCompatibleUserPayload({
         operation: "createResumeDraft",
         modelContextWindowTokens: 196_000,
         systemPrompt: input.substantivePrompt,
+        preserveFullPayload: true,
         userPayload: jsonSafe({
-          ...groundedResumePayload,
-          fullTargetJob: state.job,
-          candidateProfile: state.profile,
-          selectedBaseResumeText: state.resumeText,
-          searchPreferences: state.searchPreferences,
-          generationStrategy: state.strategy ?? null,
-          settings: state.settings,
-          workingProposal: draft,
-          resumeGenerationPhase: {
-            proposalComposed: hasComposedProposal,
-            previewRenderedForCurrentProposal: hasRenderedPreview,
-            previewInspectedForCurrentProposal: hasInspectedRenderedPreview,
-            formattedArtifact: lastRenderedPreview,
-            readyToFinish:
-              hasComposedProposal &&
-              hasRenderedPreview &&
-              hasInspectedRenderedPreview &&
-              (lastRenderedPreview?.requiredModelRepairs?.length ?? 0) === 0 &&
-              validationIssues.length === 0,
-            validationIssues,
+          ...resumeGenerationContext,
+          languageFields: currentLanguageFields,
+          templateSelection: {
+            selectedTemplateId,
+            selectionLocked: input.request.templateSelectionLocked === true,
+            availableTemplates: templateOptions,
           },
+          ...(hasComposedProposal ? { workingProposal: draft } : {}),
+          ...(hasComposedProposal
+            ? {
+                lastCheck: {
+                  renderedCleanly:
+                    hasRenderedPreview &&
+                    (lastRenderedPreview?.requiredModelRepairs?.length ?? 0) ===
+                      0,
+                  requiredModelRepairs:
+                    lastRenderedPreview?.requiredModelRepairs ?? [],
+                  validationIssues,
+                },
+              }
+            : {}),
         }),
       }),
     timeBudgetMs: generationBudgetMs,
-    providerCallBudget: 40,
-    noProgressLimit: 6,
-    emergencyCeiling: 24,
+    ...(input.request.signal ? { signal: input.request.signal } : {}),
+    ...(input.request.getExcludedElapsedMs
+      ? { getExcludedElapsedMs: input.request.getExcludedElapsedMs }
+      : {}),
+    // One call normally; up to two repairs. A run that needs more is circling.
+    providerCallBudget: 3,
+    noProgressLimit: 2,
+    emergencyCeiling: 4,
   });
 
-  // A stopped agent task is not model output. Returning its partial (or still
-  // empty) draft made a provider timeout look like writing that had been
-  // evaluated and rejected as `provider_output_unverified`. Keep that label
-  // for completed model work only so the outer provider boundary can record
-  // the real timeout/failure provenance. The one exception is a run that had
-  // already rendered a proposal cleanly and was only still revising when a
-  // budget ended: that checked draft is kept (above), not thrown away.
+  // A stopped agent task is not model output. Keep the last draft that
+  // rendered cleanly when a budget ended a run that was still revising;
+  // otherwise report the real stop so the outer provider boundary records it.
   const checkedProposal = lastCheckedProposal as Record<string, unknown> | null;
   if (
     result.receipt.stopReason !== "completed" &&
@@ -881,6 +949,55 @@ export async function runResumeGenerationAgentTask(input: {
   }
 
   if (result.receipt.stopReason !== "completed") {
+    console.warn(
+      "[AI Provider] Resume writer stopped",
+      JSON.stringify({
+        reason: result.receipt.stopReason,
+        providerCalls: result.receipt.providerCalls,
+        elapsedMs: result.receipt.durationMs,
+        flaggedRenders: flaggedRenderCount,
+        flaggedCategories: flaggedRenderCategories,
+        keptFlaggedDraft: Boolean(
+          lastFlaggedProposal && result.receipt.stopReason !== "cancelled",
+        ),
+        slowestTools: [...result.receipt.toolReceipts]
+          .sort((a, b) => b.durationMs - a.durationMs)
+          .slice(0, 3)
+          .map(({ toolName, durationMs, outcome }) => ({
+            toolName,
+            durationMs,
+            outcome,
+          })),
+      }),
+    );
+    const flaggedProposal = lastFlaggedProposal as Record<
+      string,
+      unknown
+    > | null;
+    if (
+      flaggedProposal &&
+      [
+        "time_budget",
+        "cost_budget",
+        "no_progress",
+        "emergency_ceiling",
+      ].includes(result.receipt.stopReason)
+    ) {
+      // The draft's own validation marks the lines the writer could not
+      // support, and approval waits until the person decides each of them.
+      const completed = completeTailoredResumeDraft(
+        flaggedProposal,
+        input.request,
+      );
+      return TailoredResumeDraftSchema.parse({
+        ...completed,
+        notes: [
+          ...completed.notes,
+          "The AI could not clear every flagged line in three tries. Those lines are marked for your review before this resume can be approved.",
+        ],
+        recommendedTemplateId: selectedTemplateId,
+      });
+    }
     if (result.receipt.stopReason === "time_budget") {
       const seconds = Math.max(1, Math.ceil(result.receipt.durationMs / 1_000));
       throw new Error(

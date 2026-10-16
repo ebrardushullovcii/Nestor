@@ -89,8 +89,10 @@ describe("tailored resume generation failure durability", () => {
       ),
     ).toMatchObject({
       ...before.asset,
-      failureMessage: expect.stringContaining("Your previous resume was kept."),
-      failedAt: expect.any(String),
+      failureMessage: expect.stringContaining(
+        "Your previous resume was kept.",
+      ) as unknown,
+      failedAt: expect.any(String) as unknown,
     });
     expect(await repository.getResumeDraftByJobId("job_ready")).toEqual(
       before.draft,
