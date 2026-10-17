@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createRequire } = require('node:module');
-const runtime = process.env.NORDRI_ASSET_NODE_MODULES;
+const runtime = process.env.NESTOR_ASSET_NODE_MODULES;
 const sharp = runtime ? createRequire(path.join(runtime, '_asset_loader.cjs'))('sharp') : require('sharp');
 const root = __dirname;
 const inventory = [];
@@ -26,8 +26,8 @@ async function main() {
   for (const n of [16, 20, 24, 32, 40, 48, 64, 96, 128, 256, 512, 1024])
     await render(n <= 48 ? 'app-icon-small.svg' : 'app-icon.svg', `desktop/windows/icon-${n}.png`, n);
   for (const n of [16, 32, 128, 256, 512]) {
-    await render(n <= 32 ? 'app-icon-small.svg' : 'app-icon.svg', `desktop/macos/Nordri.iconset/icon_${n}x${n}.png`, n);
-    await render(n <= 16 ? 'app-icon-small.svg' : 'app-icon.svg', `desktop/macos/Nordri.iconset/icon_${n}x${n}@2x.png`, n * 2);
+    await render(n <= 32 ? 'app-icon-small.svg' : 'app-icon.svg', `desktop/macos/Nestor.iconset/icon_${n}x${n}.png`, n);
+    await render(n <= 16 ? 'app-icon-small.svg' : 'app-icon.svg', `desktop/macos/Nestor.iconset/icon_${n}x${n}@2x.png`, n * 2);
   }
   for (const n of [16, 24, 32, 48, 64, 96, 128, 256, 512, 1024])
     await render(n <= 48 ? 'app-icon-small.svg' : 'app-icon.svg', `desktop/linux/${n}x${n}.png`, n);
@@ -50,9 +50,14 @@ async function main() {
     fs.copyFileSync(path.join(root, 'source', `${name}.svg`), path.join(root, 'in-app', `${name}.svg`));
   const word = fs.readFileSync(path.join(root, 'source/wordmark.svg'), 'utf8');
   const content = word.slice(word.indexOf('</title>') + 8, word.lastIndexOf('</svg>'));
-  const social = (w, h, x, y, logoWidth) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="#f5f2eb"/><g transform="translate(${x} ${y}) scale(${logoWidth / 2070}) translate(-52 -152)">${content}</g></svg>`;
-  fs.writeFileSync(path.join(root, 'source/social-card.svg'), social(1200, 630, 170, 228, 860));
-  fs.writeFileSync(path.join(root, 'source/social-square.svg'), social(1080, 1080, 120, 455, 840));
+  const [wordX, wordY, wordWidth, wordHeight] = word.match(/viewBox="([^"]+)"/)[1].split(' ').map(Number);
+  const social = (w, h, logoWidth) => {
+    const scale = logoWidth / wordWidth;
+    const x = (w - logoWidth) / 2, y = (h - wordHeight * scale) / 2;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="#f5f2eb"/><g transform="translate(${x} ${y}) scale(${scale}) translate(${-wordX} ${-wordY})">${content}</g></svg>`;
+  };
+  fs.writeFileSync(path.join(root, 'source/social-card.svg'), social(1200, 630, 860));
+  fs.writeFileSync(path.join(root, 'source/social-square.svg'), social(1080, 1080, 840));
   await render('social-card.svg', 'social/og-image.png', 1200, true, 630);
   await render('social-square.svg', 'social/square.png', 1080, true, 1080);
   await sharp(path.join(root, 'social/og-image.png')).jpeg({ quality: 95, chromaSubsampling: '4:4:4' }).withIccProfile('srgb').toFile(path.join(root, 'social/og-image.jpg'));

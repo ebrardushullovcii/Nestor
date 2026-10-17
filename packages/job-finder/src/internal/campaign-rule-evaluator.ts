@@ -7,7 +7,7 @@ import {
   type CampaignRuleKind,
   type CampaignRuleOperator,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { normalizeText } from "./shared";
 

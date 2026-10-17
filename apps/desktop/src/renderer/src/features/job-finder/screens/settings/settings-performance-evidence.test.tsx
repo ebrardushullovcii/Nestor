@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { JobFinderPerformanceSnapshotSchema } from "@nordri/contracts";
+import { JobFinderPerformanceSnapshotSchema } from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsPerformanceEvidence } from "./settings-performance-evidence";
@@ -122,7 +122,7 @@ describe("SettingsPerformanceEvidence", () => {
       ],
     });
     const getPerformanceSnapshot = vi.fn().mockResolvedValue(snapshot);
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: { jobFinder: { getPerformanceSnapshot } },
     });
@@ -205,7 +205,7 @@ it.each([0, 1, 2])(
         evidence: [],
       }),
     );
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: { jobFinder: { getPerformanceSnapshot } },
     });

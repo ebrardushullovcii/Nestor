@@ -9,7 +9,7 @@ import {
   type SafeguardMutationInput,
   type SafeguardsOverview,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   applyCompanyApplicationEvidence,

@@ -3,7 +3,7 @@ import type {
   ApplicationAttemptQuestion,
   ApplicationRecord,
   ApplyJobResultListRow,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   formatStatusLabel,
   getApplicationTone,

@@ -1,6 +1,6 @@
 import { sortApplicationCrmRecords } from "./applications-crm-model";
 import { describe, expect, test } from "vitest";
-import { ApplicationRecordSchema } from "@nordri/contracts";
+import { ApplicationRecordSchema } from "@nestor/contracts";
 
 import {
   APPLICATION_CRM_STAGE_LABELS,

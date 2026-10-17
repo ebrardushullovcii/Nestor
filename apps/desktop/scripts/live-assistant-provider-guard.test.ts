@@ -19,15 +19,15 @@ const fastWrapperName = "capture-live-assistant-fast.mjs";
 // Narrowly named live-AI opt-in for Live Assistant under the desktop test
 // API. Must stay identical across the provider factory, the Live Assistant
 // capture harness, and the release acceptance harness.
-const OPT_IN_ENV = "NORDRI_INTERVIEW_TEST_USE_LIVE_AI";
+const OPT_IN_ENV = "NESTOR_INTERVIEW_TEST_USE_LIVE_AI";
 const INTERVIEW_CREDENTIAL_NAMES = [
-  "NORDRI_INTERVIEW_AI_API_KEY",
-  "NORDRI_INTERVIEW_VISION_API_KEY",
+  "NESTOR_INTERVIEW_AI_API_KEY",
+  "NESTOR_INTERVIEW_VISION_API_KEY",
 ];
 const SHARED_CREDENTIAL_NAMES = [
-  "NORDRI_AI_API_KEY",
-  "NORDRI_AI_VISION_API_KEY",
-  "NORDRI_RESUME_VISION_API_KEY",
+  "NESTOR_AI_API_KEY",
+  "NESTOR_AI_VISION_API_KEY",
+  "NESTOR_RESUME_VISION_API_KEY",
 ];
 const ALL_CREDENTIAL_NAMES = [
   ...INTERVIEW_CREDENTIAL_NAMES,
@@ -43,7 +43,7 @@ describe("release acceptance environment", () => {
     const poisonedNames = [
       ...ALL_CREDENTIAL_NAMES,
       // Future interview key variants must fall under the wildcard sweep.
-      "NORDRI_INTERVIEW_TRANSCRIPTION_API_KEY",
+      "NESTOR_INTERVIEW_TRANSCRIPTION_API_KEY",
       OPT_IN_ENV,
     ];
     const saved = new Map<string, string | undefined>();
@@ -53,7 +53,7 @@ describe("release acceptance environment", () => {
     }
     try {
       const env = acceptanceEnvironment({
-        NORDRI_USER_DATA_DIR: "/isolated/acceptance-user-data",
+        NESTOR_USER_DATA_DIR: "/isolated/acceptance-user-data",
       });
 
       for (const name of poisonedNames) {
@@ -62,9 +62,9 @@ describe("release acceptance environment", () => {
           `${name} must never survive into the acceptance environment`,
         ).toBe(false);
       }
-      expect(env.NORDRI_ENABLE_TEST_API).toBe("1");
-      expect(env.NORDRI_BROWSER_AGENT).toBe("0");
-      expect(env.NORDRI_USER_DATA_DIR).toBe(
+      expect(env.NESTOR_ENABLE_TEST_API).toBe("1");
+      expect(env.NESTOR_BROWSER_AGENT).toBe("0");
+      expect(env.NESTOR_USER_DATA_DIR).toBe(
         "/isolated/acceptance-user-data",
       );
     } finally {
@@ -85,7 +85,7 @@ describe("release acceptance environment", () => {
     );
 
     expect(source).toContain(
-      'ACCEPTANCE_INTERVIEW_CREDENTIAL_PREFIX = "NORDRI_INTERVIEW_"',
+      'ACCEPTANCE_INTERVIEW_CREDENTIAL_PREFIX = "NESTOR_INTERVIEW_"',
     );
     expect(source).toContain('ACCEPTANCE_CREDENTIAL_SUFFIX = "_API_KEY"');
     for (const name of SHARED_CREDENTIAL_NAMES) {
@@ -142,7 +142,7 @@ describe("Live Assistant capture harness provider defaults", () => {
       ).toBe(true);
     }
     expect(
-      blankList.includes('NORDRI_INTERVIEW_LOCAL_STT_COMMAND: ""'),
+      blankList.includes('NESTOR_INTERVIEW_LOCAL_STT_COMMAND: ""'),
     ).toBe(true);
   });
 
@@ -215,7 +215,7 @@ describe("Live Assistant test-API live-AI boundary consistency", () => {
   it("gates Live Assistant provider construction on the desktop test API flag", async () => {
     const providerSource = await readFile(providerSourcePath, "utf8");
 
-    expect(providerSource).toContain('"NORDRI_ENABLE_TEST_API"');
+    expect(providerSource).toContain('"NESTOR_ENABLE_TEST_API"');
     expect(providerSource).toContain(
       "Desktop test API forces deterministic Live Assistant AI providers",
     );

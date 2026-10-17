@@ -109,7 +109,7 @@ export async function acquireLease(
   }
   const lock = path.join(
     os.tmpdir(),
-    `nordri-agent-qa-${Buffer.from(root).toString("base64url")}.lock`,
+    `nestor-agent-qa-${Buffer.from(root).toString("base64url")}.lock`,
   );
   const ownerPath = path.join(lock, "owner.json");
   const guard = `${lock}.mutation`;
@@ -238,7 +238,7 @@ export async function snapshotBuild(runDir) {
   const source = path.join(desktopDir, "out");
   await stat(path.join(source, "main/index.cjs")).catch(() => {
     throw new Error(
-      "No desktop build. When other agents are not building, run pnpm --filter @nordri/desktop build once, then retry.",
+      "No desktop build. When other agents are not building, run pnpm --filter @nestor/desktop build once, then retry.",
     );
   });
   const before = await inventory(source);
@@ -300,20 +300,20 @@ export async function sessionEnvironment(provider, overrides = {}) {
   delete env.ELECTRON_RENDERER_URL;
   delete env.NODE_OPTIONS;
   // Test hooks retain the legacy external host unless QA explicitly selects one.
-  env.NORDRI_BROWSER_HOST ||= "embedded";
+  env.NESTOR_BROWSER_HOST ||= "embedded";
   // Test APIs otherwise force deterministic providers despite valid credentials.
   // The selected mode wins over ambient flags from another QA session.
-  env.NORDRI_TEST_API_USE_LIVE_AI = provider === "configured" ? "1" : "0";
-  env.NORDRI_INTERVIEW_TEST_USE_LIVE_AI = provider === "configured" ? "1" : "0";
+  env.NESTOR_TEST_API_USE_LIVE_AI = provider === "configured" ? "1" : "0";
+  env.NESTOR_INTERVIEW_TEST_USE_LIVE_AI = provider === "configured" ? "1" : "0";
   if (provider === "deterministic") {
     for (const key of Object.keys(env)) {
       if (/(?:API_KEY|TOKEN|SECRET|PASSWORD)$/.test(key)) env[key] = "";
     }
     for (const key of [
-      "NORDRI_AI_API_KEY",
-      "NORDRI_AI_VISION_API_KEY",
-      "NORDRI_INTERVIEW_AI_API_KEY",
-      "NORDRI_INTERVIEW_VISION_API_KEY",
+      "NESTOR_AI_API_KEY",
+      "NESTOR_AI_VISION_API_KEY",
+      "NESTOR_INTERVIEW_AI_API_KEY",
+      "NESTOR_INTERVIEW_VISION_API_KEY",
     ])
       env[key] = "";
   }
@@ -359,7 +359,7 @@ export async function startFixtureSites(runDir) {
       env: {
         ...process.env,
         PORT: "0",
-        NORDRI_FIXTURE_SUBMISSIONS_LOG: log,
+        NESTOR_FIXTURE_SUBMISSIONS_LOG: log,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -401,7 +401,7 @@ export async function startFixtureSites(runDir) {
 }
 
 export async function newRunDirectory() {
-  return mkdtemp(path.join(os.tmpdir(), "nordri-agent-qa-"));
+  return mkdtemp(path.join(os.tmpdir(), "nestor-agent-qa-"));
 }
 
 export function journal(runDir, env) {

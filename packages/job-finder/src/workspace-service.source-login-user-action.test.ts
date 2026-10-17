@@ -5,11 +5,11 @@ import {
   SourceDebugRunRecordSchema,
   type JobSearchCampaign,
   type SaveJobSearchCampaignInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   AgentDiscoveryOptions,
   BrowserSessionRuntime,
-} from "@nordri/browser-runtime";
+} from "@nestor/browser-runtime";
 import { describe, expect, test, vi } from "vitest";
 
 import {

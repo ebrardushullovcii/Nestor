@@ -49,7 +49,7 @@ import {
   type Tool,
   type ToolCall,
   type ModelContinuation,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { z } from "zod";
 import {
   modelApiModes,
@@ -726,7 +726,7 @@ export interface ExtractResumeImportStageTransportInput extends ExtractResumeImp
   documentBundle: ResumeDocumentBundle;
 }
 
-export type { ModelContinuation } from "@nordri/contracts";
+export type { ModelContinuation } from "@nestor/contracts";
 
 export interface ModelTurnUsage {
   inputTokens: number;

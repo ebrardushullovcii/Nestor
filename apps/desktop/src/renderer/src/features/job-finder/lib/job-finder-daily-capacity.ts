@@ -1,5 +1,5 @@
-import type { ApplyJobResultListRow } from "@nordri/contracts";
-import type { GlobalDailyApplicationPreparationCapacity } from "@nordri/contracts";
+import type { ApplyJobResultListRow } from "@nestor/contracts";
+import type { GlobalDailyApplicationPreparationCapacity } from "@nestor/contracts";
 
 /**
  * Truthful daily-capacity presentation shared by every surface that can start

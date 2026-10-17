@@ -16,8 +16,8 @@ import type {
   JobFinderRendererWorkspaceSnapshot,
   SafeguardMutationInput,
   SetJobFinderActivityControlInput,
-} from "@nordri/contracts";
-import { JobFinderIntelligenceSafeguardsSchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { JobFinderIntelligenceSafeguardsSchema } from "@nestor/contracts";
 import { SafeguardsScreen } from "./safeguards-screen";
 
 const now = "2026-08-15T10:00:00.000Z";
@@ -677,7 +677,7 @@ describe("SafeguardsScreen", () => {
       .fn()
       .mockResolvedValueOnce([envelope])
       .mockResolvedValue([{ ...envelope, status: "revoked" }]);
-    (window as unknown as Record<string, unknown>).nordri = {
+    (window as unknown as Record<string, unknown>).nestor = {
       jobFinder: {
         listApplicationAuthorityEnvelopes,
         revokeApplicationAuthorityEnvelope,
@@ -711,7 +711,7 @@ describe("SafeguardsScreen", () => {
       ).toBeTruthy();
     });
 
-    delete (window as unknown as Record<string, unknown>).nordri;
+    delete (window as unknown as Record<string, unknown>).nestor;
   });
 });
 

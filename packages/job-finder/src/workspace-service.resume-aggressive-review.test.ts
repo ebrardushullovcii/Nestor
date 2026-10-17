@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { completeTailoredResumeDraft } from "@nordri/ai-providers";
+import { completeTailoredResumeDraft } from "@nestor/ai-providers";
 import {
   createAiClient,
   fakeResumeClaimCheck,

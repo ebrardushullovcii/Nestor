@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   JobSearchCampaignScheduleSchema,
   type CampaignRunFacts,
@@ -9,12 +9,12 @@ import {
   type JobSearchCampaignSchedule,
   type JobSearchPreferences,
   type SaveJobSearchCampaignInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createInMemoryJobFinderRepository,
   type JobFinderRepository,
   type JobFinderRepositorySeed,
-} from "@nordri/db";
+} from "@nestor/db";
 
 import { createJobFinderWorkspaceService } from "./index";
 import { buildInstructionGuidance } from "./internal/workspace-helpers";

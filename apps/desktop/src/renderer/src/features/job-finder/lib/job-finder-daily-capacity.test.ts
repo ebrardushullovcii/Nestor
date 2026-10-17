@@ -1,6 +1,6 @@
-import { ApplyJobResultSchema } from "@nordri/contracts";
+import { ApplyJobResultSchema } from "@nestor/contracts";
 import { describeDailyPreparationUsage } from "./job-finder-daily-capacity";
-import type { GlobalDailyApplicationPreparationCapacity } from "@nordri/contracts";
+import type { GlobalDailyApplicationPreparationCapacity } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import {
   FALLBACK_DAILY_APPLICATION_PREPARATION_LIMIT,

@@ -1,4 +1,4 @@
-import type { CandidateProfile, ToolCall } from "@nordri/contracts";
+import type { CandidateProfile, ToolCall } from "@nestor/contracts";
 import type { Page } from "playwright";
 import type { AgentConfig } from "./types";
 

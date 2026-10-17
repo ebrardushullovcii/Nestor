@@ -46,7 +46,7 @@ export function applyJobFinderWindowCloseGuard(
   }
 
   try {
-    void window.nordri.window.setCloseGuardState({
+    void window.nestor.window.setCloseGuardState({
       blocked: confirmation !== null,
     });
   } catch {
@@ -78,7 +78,7 @@ function sendCloseResolution(
   decision: CloseDecision,
 ): void {
   try {
-    void window.nordri.window
+    void window.nestor.window
       .resolveCloseRequest({ requestId, decision })
       .catch(() => {
         // The native window may already be gone; the main-process watchdog
@@ -110,7 +110,7 @@ export function JobFinderWindowCloseGuard() {
     let unsubscribe: (() => void) | null = null;
 
     try {
-      unsubscribe = window.nordri.window.onCloseRequest((request) => {
+      unsubscribe = window.nestor.window.onCloseRequest((request) => {
         if (heldRef.current.kind !== "idle") {
           // Main keeps one close request outstanding; a duplicate must never
           // overwrite the held decision or resolve twice.
@@ -201,7 +201,7 @@ export function JobFinderWindowCloseGuard() {
   return (
     <JobFinderUnsavedChangesDialog
       confirmation={{
-        title: "Close Nordri?",
+        title: "Close Nestor?",
         description: "Your unsaved changes will be lost.",
         reasons: held.confirmation.reasons,
       }}

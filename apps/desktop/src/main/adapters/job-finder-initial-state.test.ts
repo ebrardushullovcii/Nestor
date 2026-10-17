@@ -4,7 +4,7 @@ import {
   STARTER_JOB_SOURCES,
   evaluateProfileSetupReadiness,
   isRunnableJobDiscoveryTarget,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createEmptyJobFinderRepositoryState } from "./job-finder-initial-state";
 
 describe("createEmptyJobFinderRepositoryState fresh seed", () => {

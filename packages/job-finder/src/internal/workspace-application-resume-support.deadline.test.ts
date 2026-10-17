@@ -1,4 +1,4 @@
-import { ResumeDraftSchema } from "@nordri/contracts";
+import { ResumeDraftSchema } from "@nestor/contracts";
 import { beforeEach, expect, test, vi } from "vitest";
 import type {
   withResumeClaimChecks,

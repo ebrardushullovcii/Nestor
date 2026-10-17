@@ -1,6 +1,6 @@
-import { buildApplyFormObservation } from "@nordri/browser-agent";
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
-import type { UserActionRequest } from "@nordri/contracts";
+import { buildApplyFormObservation } from "@nestor/browser-agent";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
+import type { UserActionRequest } from "@nestor/contracts";
 
 /**
  * Blockers that still need the person on an application page. A page that

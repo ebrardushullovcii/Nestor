@@ -21,7 +21,7 @@ import {
   type ApplicationCrmStageDefinition,
   type ApplicationRecord,
   type ApplyJobResultListRow,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   applicationCrmDataForView,
   applicationCrmStageLabelForView,

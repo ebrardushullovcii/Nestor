@@ -1,4 +1,4 @@
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderWorkspaceSnapshot } from "@nestor/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";

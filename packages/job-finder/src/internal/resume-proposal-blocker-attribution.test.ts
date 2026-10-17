@@ -1,4 +1,4 @@
-import type { ResumeDraftPatch } from "@nordri/contracts";
+import type { ResumeDraftPatch } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import { findResumeProposalPatchForBlocker } from "./resume-workspace-helpers";

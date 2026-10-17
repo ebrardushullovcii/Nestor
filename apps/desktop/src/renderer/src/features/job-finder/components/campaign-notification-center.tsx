@@ -1,4 +1,4 @@
-import type { CampaignNotification } from "@nordri/contracts";
+import type { CampaignNotification } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { buildJobFinderContextRoute } from "../lib/job-finder-context-navigation";
 import { JOB_FINDER_ROUTE_PATHS } from "../lib/job-finder-route-hrefs";

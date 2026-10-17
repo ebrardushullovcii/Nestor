@@ -7,12 +7,12 @@ import type {
   JobSearchPreferences,
   PlanSafeguardPause,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   DiscoveryRunRecordSchema,
   DiscoveryTargetExecutionSchema,
   buildDiscoveryCardOnlyEvidenceWarning,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { ToastProvider } from "@renderer/components/ui/toast";
@@ -198,12 +198,12 @@ function buildScreen(overrides?: {
   searchSelectivity?: "wide_net" | "best_matches";
 }) {
   const jobs = overrides?.jobs ?? [createJob("strong")];
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
-      ...window.nordri,
+      ...window.nestor,
       jobFinder: {
-        ...window.nordri?.jobFinder,
+        ...window.nestor?.jobFinder,
         getJobDetail: vi.fn((jobId: string, planId: string | null) =>
           Promise.resolve({
             job: jobs.find((job) => job.id === jobId),

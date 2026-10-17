@@ -4,8 +4,8 @@ import type {
   AssistantMessagePart,
   ProfileCopilotMessage,
   ResumeAssistantMessage,
-} from "@nordri/contracts";
-import type { AssistantRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { AssistantRepository } from "@nestor/db";
 import { setImmediate } from "node:timers/promises";
 
 /**

@@ -1,7 +1,7 @@
 import {
   JobFinderRepositoryStateSchema,
   type JobFinderRepositoryState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   JOB_FINDER_DEMO_CONSENT_RESUME_PATH,
   JOB_FINDER_DEMO_EXPORT_RESUME_SHA256,

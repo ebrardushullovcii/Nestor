@@ -1,4 +1,4 @@
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 
 type DiscoveryJobs = Readonly<JobFinderRendererWorkspaceSnapshot["discoveryJobs"]>;
 type ReviewQueue = Readonly<JobFinderRendererWorkspaceSnapshot["reviewQueue"]>;

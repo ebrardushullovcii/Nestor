@@ -48,9 +48,9 @@ describe("resume claim checks", () => {
     try {
       const client = createJobFinderAiClientFromEnvironment(
         createEnvironment({
-          NORDRI_AI_MODEL: "primary-model",
-          NORDRI_AI_AGGRESSIVE_MODEL: "aggressive-model",
-          NORDRI_AI_AGGRESSIVE_API_MODE: "chat_completions",
+          NESTOR_AI_MODEL: "primary-model",
+          NESTOR_AI_AGGRESSIVE_MODEL: "aggressive-model",
+          NESTOR_AI_AGGRESSIVE_API_MODE: "chat_completions",
         }),
       );
       await client.checkResumeClaims?.({

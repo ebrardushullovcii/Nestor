@@ -6,14 +6,14 @@ import type {
   SafeguardEntryKind,
   SafeguardMutationInput,
   JobListRow,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { BadgeTone } from "../../lib/job-finder-types";
 import { buildJobFinderContextRoute } from "../../lib/job-finder-context-navigation";
 import {
   hasPendingSampleReview,
   listApplyRunsStoppedBySafeguard,
 } from "../../lib/apply-run-pause-state";
-import { AUTOMATIC_APPLICATION_FAILURE_PAUSE_ID } from "@nordri/job-finder/plan-safeguard-pauses";
+import { AUTOMATIC_APPLICATION_FAILURE_PAUSE_ID } from "@nestor/job-finder/plan-safeguard-pauses";
 
 /**
  * Stable per-mutation key used for pending-action scopes so the Safeguards

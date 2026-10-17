@@ -1,6 +1,6 @@
-<p><img src="assets/brand/in-app/wordmark.svg" alt="Nordri" width="240"></p>
+<p><img src="assets/brand/in-app/wordmark.svg" alt="Nestor" width="240"></p>
 
-# Nordri
+# Nestor
 
 Agent-first desktop monorepo for:
 - `Job Finder`

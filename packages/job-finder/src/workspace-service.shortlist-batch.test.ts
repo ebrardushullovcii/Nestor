@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { SavedJobSchema } from "@nordri/contracts";
+import { SavedJobSchema } from "@nestor/contracts";
 import type { ListingHtmlFetchResult } from "./internal/listing-detail-enrichment";
 import {
   createSeed,

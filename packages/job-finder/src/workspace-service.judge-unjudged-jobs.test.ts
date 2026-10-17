@@ -2,8 +2,8 @@ import { expect, test, vi } from "vitest";
 import type {
   JudgeJobFitsInput,
   JobFitJudgmentResult,
-} from "@nordri/ai-providers";
-import { SavedJobSchema } from "@nordri/contracts";
+} from "@nestor/ai-providers";
+import { SavedJobSchema } from "@nestor/contracts";
 import {
   createAiClient,
   createSeed,

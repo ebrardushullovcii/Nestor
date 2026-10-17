@@ -1,4 +1,4 @@
-import { AiBehaviorPreferenceSchema } from "@nordri/contracts";
+import { AiBehaviorPreferenceSchema } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";

@@ -3,7 +3,7 @@ import {
   AssistantEventSchema,
   AssistantMessageSchema,
   AssistantTurnSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   buildListContext,

@@ -4,8 +4,8 @@ import {
   SubmissionIdempotencyRecordSchema,
   SubmissionPreflightRecordSchema,
   type SubmissionPreflightRecord,
-} from "@nordri/contracts";
-import type { SubmissionPreflightCommitResult } from "@nordri/db";
+} from "@nestor/contracts";
+import type { SubmissionPreflightCommitResult } from "@nestor/db";
 import { describe, expect, test } from "vitest";
 
 import {

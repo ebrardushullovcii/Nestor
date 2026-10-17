@@ -4,7 +4,7 @@ import { act } from "react";
 import type {
   JobFinderSettings,
   ResumeTemplateDefinition,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createRoot, type Root } from "react-dom/client";
 import {
   afterAll,

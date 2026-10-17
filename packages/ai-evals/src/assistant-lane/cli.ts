@@ -6,11 +6,11 @@ import { formatAssistantLaneReport, runAssistantLane } from "./run";
 import type { AssistantLaneModel } from "./world";
 
 /**
- * `pnpm --filter @nordri/ai-evals assistant-lane -- --model live`
+ * `pnpm --filter @nestor/ai-evals assistant-lane -- --model live`
  *
  * Options: `--model scripted|live` (default scripted), `--case <id prefix>`
  * (repeatable), `--out <dir>` for the Markdown and JSON report. Live runs
- * read the assistant route from `.env.local` (`NORDRI_AI_ASSISTANT_*`).
+ * read the assistant route from `.env.local` (`NESTOR_AI_ASSISTANT_*`).
  */
 export async function runAssistantLaneCli(
   argv: readonly string[],
@@ -43,7 +43,7 @@ export async function runAssistantLaneCli(
   );
   const label =
     model === "live"
-      ? (process.env.NORDRI_AI_ASSISTANT_MODEL ?? "default assistant model")
+      ? (process.env.NESTOR_AI_ASSISTANT_MODEL ?? "default assistant model")
       : "scripted";
   console.log(
     `Running ${cases.length} assistant cases on ${label}, one at a time.`,

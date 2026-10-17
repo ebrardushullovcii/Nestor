@@ -1,4 +1,4 @@
-import { DiscoveryRunRecordSchema } from "@nordri/contracts";
+import { DiscoveryRunRecordSchema } from "@nestor/contracts";
 
 export function round3SearchRun() {
   return DiscoveryRunRecordSchema.parse({

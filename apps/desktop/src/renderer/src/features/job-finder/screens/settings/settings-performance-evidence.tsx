@@ -4,7 +4,7 @@ import type {
   PerformanceEvidenceArea,
   PerformanceEvidenceBudgetStatus,
   PerformanceEvidenceStageId,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 
 const areaLabels: Record<PerformanceEvidenceArea, string> = {
@@ -98,7 +98,7 @@ export function SettingsPerformanceEvidence() {
     }
     setState("loading");
     try {
-      const next = await window.nordri.jobFinder.getPerformanceSnapshot();
+      const next = await window.nestor.jobFinder.getPerformanceSnapshot();
       setSnapshot(next);
       setState("ready");
     } catch {

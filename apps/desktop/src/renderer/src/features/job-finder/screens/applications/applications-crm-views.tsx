@@ -18,7 +18,7 @@ import type {
   ApplicationCrmStage,
   ApplicationCrmStageDefinition,
   ApplicationRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { useToast } from "@renderer/components/ui/toast";
 import { Info } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
@@ -322,7 +322,7 @@ export function ApplicationsCrmViews(props: {
   const [savedView, setSavedView] = useState<CrmSavedView>(() => {
     try {
       const stored = window.localStorage.getItem(
-        "nordri.job-finder.applications-crm.saved-view.v1",
+        "nestor.job-finder.applications-crm.saved-view.v1",
       );
       return crmSavedViewValues.includes(stored as CrmSavedView)
         ? (stored as CrmSavedView)
@@ -336,10 +336,10 @@ export function ApplicationsCrmViews(props: {
       try {
         const stored = JSON.parse(
           window.localStorage.getItem(
-            "nordri.job-finder.applications-crm.columns.v2",
+            "nestor.job-finder.applications-crm.columns.v2",
           ) ??
             window.localStorage.getItem(
-              "nordri.job-finder.applications-crm.columns.v1",
+              "nestor.job-finder.applications-crm.columns.v1",
             ) ??
             "null",
         ) as unknown;
@@ -349,7 +349,7 @@ export function ApplicationsCrmViews(props: {
                 stored.includes(column) ||
                 (column === "applied" &&
                   !window.localStorage.getItem(
-                    "nordri.job-finder.applications-crm.columns.v2",
+                    "nestor.job-finder.applications-crm.columns.v2",
                   )),
             )
           : columnValues;
@@ -411,11 +411,11 @@ export function ApplicationsCrmViews(props: {
   useEffect(() => {
     try {
       window.localStorage.setItem(
-        "nordri.job-finder.applications-crm.saved-view.v1",
+        "nestor.job-finder.applications-crm.saved-view.v1",
         savedView,
       );
       window.localStorage.setItem(
-        "nordri.job-finder.applications-crm.columns.v2",
+        "nestor.job-finder.applications-crm.columns.v2",
         JSON.stringify(visibleColumns),
       );
     } catch {

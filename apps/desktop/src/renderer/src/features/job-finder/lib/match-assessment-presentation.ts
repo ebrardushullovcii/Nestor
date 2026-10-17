@@ -5,14 +5,14 @@ import type {
   RoleSuitabilityState,
   JobListRow,
   TitleFamilyMatch,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { BadgeTone } from "./job-finder-types";
-import { isProvisionalMatchAssessment } from "@nordri/job-finder/discovery-ordering";
+import { isProvisionalMatchAssessment } from "@nestor/job-finder/discovery-ordering";
 import {
   FIT_NOT_JUDGED_REASON,
   getFitEvidenceDepth,
   type FitEvidenceDepth,
-} from "@nordri/job-finder/discovery-result-bands";
+} from "@nestor/job-finder/discovery-result-bands";
 
 export const fitRecommendationCopy: Record<
   FitRecommendation,
@@ -29,7 +29,7 @@ export const fitRecommendationCopy: Record<
 
 /**
  * Evidence depth and the not-judged reason now live in
- * `@nordri/job-finder/discovery-result-bands`, so a finished run's frozen
+ * `@nestor/job-finder/discovery-result-bands`, so a finished run's frozen
  * counts and this screen apply one rule. Re-exported because the renderer
  * already imports both from here.
  */

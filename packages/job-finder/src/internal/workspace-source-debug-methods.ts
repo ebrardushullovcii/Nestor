@@ -3,7 +3,7 @@ import type {
   SourceDebugProgressEvent,
   SourceDebugRunDetails,
   SourceDebugRunRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   persistAutomaticSourceDebugSafeguard,
   persistSourceDebugCampaignNotifications,

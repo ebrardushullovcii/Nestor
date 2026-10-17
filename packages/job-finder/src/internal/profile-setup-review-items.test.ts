@@ -4,7 +4,7 @@ import {
   ResumeImportFieldCandidateSchema,
   createFreshStartCandidateProfile,
   type ResumeImportFieldCandidate,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createSeed } from "../workspace-service.test-support";
 import {
   buildProfileSetupReviewItems,

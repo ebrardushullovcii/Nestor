@@ -4,7 +4,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { useFieldArray, useForm } from "react-hook-form";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CandidateProfileSchema } from "@nordri/contracts";
+import { CandidateProfileSchema } from "@nestor/contracts";
 import {
   createProfileEditorValues,
   type ProfileEditorValues,

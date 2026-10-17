@@ -7,7 +7,7 @@ import {
   serializeApprovedApplicationAnswerSnapshotForDigest,
   type ApprovedApplicationAnswerSnapshot,
   type JobFinderRepositoryState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { cloneValue } from "./internal/state";
 import type {

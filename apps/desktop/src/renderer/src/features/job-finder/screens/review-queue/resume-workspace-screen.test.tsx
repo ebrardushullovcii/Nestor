@@ -10,12 +10,12 @@ import type {
   ResumeAssistantMessage,
   ResumeTemplateDefinition,
   WorkHistoryReviewAcknowledgment,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   getResumeIdentityTargetId,
   ResumeDraftRevisionSchema,
-} from "@nordri/contracts";
-import { JobFinderResumeWorkspaceSchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { JobFinderResumeWorkspaceSchema } from "@nestor/contracts";
 import {
   afterAll,
   afterEach,

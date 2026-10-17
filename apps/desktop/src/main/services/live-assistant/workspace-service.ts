@@ -1,7 +1,7 @@
-import { createLiveAssistantProvidersFromEnvironment } from '@nordri/ai-providers'
-import { createFileLiveAssistantRepository } from '@nordri/db'
-import { createLiveAssistantService } from '@nordri/live-assistant'
-import { createStaticProtectedOverlaySurfaceAdapter } from '@nordri/os-integration'
+import { createLiveAssistantProvidersFromEnvironment } from '@nestor/ai-providers'
+import { createFileLiveAssistantRepository } from '@nestor/db'
+import { createLiveAssistantService } from '@nestor/live-assistant'
+import { createStaticProtectedOverlaySurfaceAdapter } from '@nestor/os-integration'
 import { createElectronDesktopAudioCaptureAdapter } from './electron-audio-capture-adapter'
 import { createElectronDesktopScreenshotCaptureAdapter } from './electron-screenshot-adapter'
 import {

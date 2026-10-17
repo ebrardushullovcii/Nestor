@@ -7,8 +7,8 @@ import {
   ApplicationQuestionRecordSchema,
   ApplicationAnswerRecordSchema,
   SavedJobSchema,
-} from "@nordri/contracts";
-import { createInMemoryJobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -21,7 +21,7 @@ import { buildPersonalWorkspaceExport } from "./build-diagnostic-export";
 import type {
   JobFinderWorkspaceSnapshot,
   PersonalWorkspaceExport,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 vi.mock("electron", () => ({ app: { getPath: () => "/synthetic" } }));
 
@@ -200,7 +200,7 @@ test("export round trip restores profile, jobs, applications, answers, documents
 
 test("refuses unknown versions, older incomplete exports, traversal and damaged bytes", () => {
   expect(() => parsePersonalWorkspaceExport('{"schemaVersion":99}')).toThrow(
-    "version Nordri cannot restore",
+    "version Nestor cannot restore",
   );
   expect(() => parsePersonalWorkspaceExport('{"schemaVersion":1}')).toThrow(
     "older export",

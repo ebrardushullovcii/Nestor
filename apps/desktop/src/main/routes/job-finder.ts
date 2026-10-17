@@ -2,7 +2,7 @@ import {
   ResumeBatchGenerationInputSchema,
   ResumeBatchGenerationResultSchema,
   ResumeBatchGenerationProgressSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   readUiResumeBatch,
   blockUiResumeBatch,
@@ -154,18 +154,18 @@ import {
   UserActionCommandSchema,
   WriteClipboardTextInputSchema,
   WriteClipboardTextResultSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   JobFinderApplyQueueActionInput,
   JobFinderWorkspaceSnapshot,
   JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   recordApplicationAuthoritySuccessor,
   resolveApplicationAuthoritySuccessorId,
   resolveTailoredAssetLabel,
   withApplicationAuthorityGate,
-} from "@nordri/job-finder";
+} from "@nestor/job-finder";
 import {
   buildJobFinderDiagnosticExport,
   buildPersonalWorkspaceExport,
@@ -809,7 +809,7 @@ function buildApplicationPacketExportDefaultPath(
 /**
  * Mutation responses carry the exact workspace snapshot the service just
  * produced. `getWorkspaceSnapshot` already schema-parses that value inside
- * `@nordri/job-finder`, so re-parsing it in every route handler validated
+ * `@nestor/job-finder`, so re-parsing it in every route handler validated
  * every job, application record, and stored answer a second time on every
  * user action. That cost grows linearly with everything the user has ever
  * discovered — the repository's own scale gate is 5,000 jobs / 1,001
@@ -940,7 +940,7 @@ export function registerJobFinderRouteHandlers(
   /**
    * Registers one protected save channel. The only behavior it adds is the
    * desktop test API's one-shot synthetic save failure, which is inert unless
-   * a tester armed that exact surface while NORDRI_ENABLE_TEST_API is set.
+   * a tester armed that exact surface while NESTOR_ENABLE_TEST_API is set.
    * Production builds run the listener verbatim.
    */
   function handleJobFinderSaveRoute<TResult>(
@@ -1719,7 +1719,7 @@ export function registerJobFinderRouteHandlers(
     async (_event, payload: unknown) => {
       if (!isDesktopTestApiEnabled()) {
         throw new Error(
-          "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+          "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
         );
       }
 
@@ -1740,7 +1740,7 @@ export function registerJobFinderRouteHandlers(
   ipcMain.handle("job-finder:test-load-resume-workspace-demo", async () => {
     if (!isDesktopTestApiEnabled()) {
       throw new Error(
-        "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+        "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
       );
     }
 
@@ -1756,13 +1756,13 @@ export function registerJobFinderRouteHandlers(
     async (_event, payload: unknown) => {
       if (!isDesktopTestApiEnabled()) {
         throw new Error(
-          "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+          "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
         );
       }
 
       const mode = JobFinderResumePreviewModeSchema.parse(payload);
       await setJobFinderWorkspaceServiceTestEnv({
-        NORDRI_TEST_RESUME_PREVIEW: mode,
+        NESTOR_TEST_RESUME_PREVIEW: mode,
       });
 
       return DesktopTestOkResponseSchema.parse({ ok: true });
@@ -1772,7 +1772,7 @@ export function registerJobFinderRouteHandlers(
   ipcMain.handle("job-finder:test-load-apply-queue-demo", async () => {
     if (!isDesktopTestApiEnabled()) {
       throw new Error(
-        "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+        "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
       );
     }
 
@@ -1786,7 +1786,7 @@ export function registerJobFinderRouteHandlers(
   ipcMain.handle("job-finder:test-load-work-history-review-demo", async () => {
     if (!isDesktopTestApiEnabled()) {
       throw new Error(
-        "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+        "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
       );
     }
 
@@ -1802,7 +1802,7 @@ export function registerJobFinderRouteHandlers(
     async (_event, rawInput: unknown) => {
       if (!isDesktopTestApiEnabled()) {
         throw new Error(
-          "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+          "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
         );
       }
       if (!rawInput || typeof rawInput !== "object") {
@@ -1859,7 +1859,7 @@ export function registerJobFinderRouteHandlers(
     (_event, payload: unknown) => {
       if (!isDesktopTestApiEnabled()) {
         throw new Error(
-          "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+          "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
         );
       }
 
@@ -1885,7 +1885,7 @@ export function registerJobFinderRouteHandlers(
   ipcMain.handle("job-finder:test-get-performance-snapshot", async () => {
     if (!isDesktopTestApiEnabled()) {
       throw new Error(
-        "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+        "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
       );
     }
     const service = await getJobFinderWorkspaceService();
@@ -1902,7 +1902,7 @@ export function registerJobFinderRouteHandlers(
     async (_event, payload: unknown) => {
       if (!isDesktopTestApiEnabled()) {
         throw new Error(
-          "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+          "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
         );
       }
 
@@ -1933,7 +1933,7 @@ export function registerJobFinderRouteHandlers(
   ipcMain.handle("job-finder:test-get-resume-import-benchmark-cases", () => {
     if (!isDesktopTestApiEnabled()) {
       throw new Error(
-        "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+        "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
       );
     }
 
@@ -1943,7 +1943,7 @@ export function registerJobFinderRouteHandlers(
   ipcMain.handle("job-finder:test-get-resume-import-state", async () => {
     if (!isDesktopTestApiEnabled()) {
       throw new Error(
-        "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+        "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
       );
     }
 
@@ -1969,7 +1969,7 @@ export function registerJobFinderRouteHandlers(
     async (_event, payload: unknown) => {
       if (!isDesktopTestApiEnabled()) {
         throw new Error(
-          "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+          "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
         );
       }
 
@@ -2005,7 +2005,7 @@ export function registerJobFinderRouteHandlers(
     async (_event, payload: unknown) => {
       if (!isDesktopTestApiEnabled()) {
         throw new Error(
-          "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+          "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
         );
       }
 
@@ -2601,7 +2601,7 @@ export function registerJobFinderRouteHandlers(
       const picker: OpenDialogOptions = {
         title: "Restore from a workspace export",
         properties: ["openFile"],
-        filters: [{ name: "Nordri workspace export", extensions: ["json"] }],
+        filters: [{ name: "Nestor workspace export", extensions: ["json"] }],
       };
       const picked = browserWindow
         ? await dialog.showOpenDialog(browserWindow, picker)
@@ -2641,7 +2641,7 @@ export function registerJobFinderRouteHandlers(
       workspaceRestorePending = true;
       const safetyExportPath = path.join(
         app.getPath("documents"),
-        `nordri-before-restore-${Date.now()}-${randomUUID()}.json`,
+        `nestor-before-restore-${Date.now()}-${randomUUID()}.json`,
       );
       try {
         const service = await getJobFinderWorkspaceService();
@@ -2784,7 +2784,7 @@ export function registerJobFinderRouteHandlers(
     }
     const browserWindow = BrowserWindow.fromWebContents(event.sender);
     const options: SaveDialogOptions = {
-      defaultPath: "nordri-job-finder-diagnostics.json",
+      defaultPath: "nestor-job-finder-diagnostics.json",
       filters: [{ name: "JSON", extensions: ["json"] }],
       properties: ["createDirectory", "showOverwriteConfirmation"],
       title: "Export Job Finder diagnostics",

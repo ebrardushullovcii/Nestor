@@ -15,7 +15,7 @@ import {
   UserActionRequestSchema,
   type GroupedManualAnswerDecision,
   type ApplyGroupedManualAnswerInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActionsScreen } from "./actions-screen";
 
@@ -93,7 +93,7 @@ describe("Needs you bounded collection behavior", () => {
 
   it("preserves an unfinished application answer when its card is paged out and back", async () => {
     const saveDraft = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("nordri", {
+    vi.stubGlobal("nestor", {
       jobFinder: { saveUserActionAnswerDraft: saveDraft },
     });
     const requests = Array.from({ length: 51 }, (_, i) =>

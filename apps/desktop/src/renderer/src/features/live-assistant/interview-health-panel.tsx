@@ -1,7 +1,7 @@
 import type {
   InterviewHealthStatus,
   InterviewSessionHealth,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Activity, AlertTriangle, CheckCircle2 } from "lucide-react";
 
 function statusClass(status: InterviewHealthStatus) {

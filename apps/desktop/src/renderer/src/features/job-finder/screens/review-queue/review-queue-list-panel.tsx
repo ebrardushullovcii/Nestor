@@ -1,5 +1,5 @@
-import { estimateResumeBatchMinutesLeft } from "@nordri/contracts";
-import type { ReviewQueueItem, TailoredAssetSummary } from "@nordri/contracts";
+import { estimateResumeBatchMinutesLeft } from "@nestor/contracts";
+import type { ReviewQueueItem, TailoredAssetSummary } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui";
 import { SegmentedControl } from "@renderer/components/ui/segmented-control";
 import { cn } from "@renderer/lib/cn";

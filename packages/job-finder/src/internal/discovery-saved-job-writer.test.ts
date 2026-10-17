@@ -1,5 +1,5 @@
-import type { SavedJob } from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+import type { SavedJob } from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 import { describe, expect, test, vi } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import { createDiscoverySavedJobWriter } from "./discovery-saved-job-writer";

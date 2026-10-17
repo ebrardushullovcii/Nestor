@@ -7,7 +7,7 @@ import {
   JobFinderIntelligenceStateSchema,
   JobSearchCampaignCollectionSchema,
   JobSearchCampaignSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   createFileJobFinderRepository,
@@ -145,7 +145,7 @@ describe("campaign and activity persistence", () => {
   });
 
   test("commits campaign preferences atomically in SQLite and survives restart", async () => {
-    const temp = await createTempRepository("nordri-db-campaign-atomic-");
+    const temp = await createTempRepository("nestor-db-campaign-atomic-");
     let repository = await temp.createRepository();
     try {
       await expectCampaignPreferencesCommitAtomicity(repository);
@@ -225,7 +225,7 @@ describe("campaign and activity persistence", () => {
   });
 
   test("persists the workspace activity pause separately from campaigns", async () => {
-    const temp = await createTempRepository("nordri-db-activity-");
+    const temp = await createTempRepository("nestor-db-activity-");
     let repository = await temp.createRepository();
 
     try {
@@ -249,7 +249,7 @@ describe("campaign and activity persistence", () => {
   });
 
   test("persists additive Job Finder intelligence without a database migration", async () => {
-    const temp = await createTempRepository("nordri-db-intelligence-");
+    const temp = await createTempRepository("nestor-db-intelligence-");
     let repository = await temp.createRepository();
     const intelligence = JobFinderIntelligenceStateSchema.parse({
       updatedAt: "2026-08-15T10:00:00.000Z",
@@ -270,7 +270,7 @@ describe("campaign and activity persistence", () => {
   });
 
   test("reset with a campaign-free seed clears a stale persisted campaign singleton", async () => {
-    const temp = await createTempRepository("nordri-db-campaign-reset-");
+    const temp = await createTempRepository("nestor-db-campaign-reset-");
     const repository = await temp.createRepository();
     try {
       const seed = createSeed();
@@ -310,7 +310,7 @@ describe("campaign and activity persistence", () => {
   });
 
   test("reset keeps campaign state when the seed carries one", async () => {
-    const temp = await createTempRepository("nordri-db-campaign-keep-");
+    const temp = await createTempRepository("nestor-db-campaign-keep-");
     let repository = await temp.createRepository();
     try {
       const seed = createSeed();
@@ -346,7 +346,7 @@ describe("campaign and activity persistence", () => {
   });
 
   test("bootstrap rejects a seed with campaigns and a null active pointer before writing", async () => {
-    const temp = await createTempRepository("nordri-db-campaign-seed-null-");
+    const temp = await createTempRepository("nestor-db-campaign-seed-null-");
     try {
       const seed = createSeed();
       const campaign = createPersistedCampaign(
@@ -368,7 +368,7 @@ describe("campaign and activity persistence", () => {
   });
 
   test("bootstrap rejects a seed whose active pointer is missing from the campaigns", async () => {
-    const temp = await createTempRepository("nordri-db-campaign-seed-unknown-");
+    const temp = await createTempRepository("nestor-db-campaign-seed-unknown-");
     try {
       const seed = createSeed();
       const campaign = createPersistedCampaign(
@@ -394,7 +394,7 @@ describe("campaign and activity persistence", () => {
   });
 
   test("reset with a malformed campaign pointer fails before deleting persisted campaigns", async () => {
-    const temp = await createTempRepository("nordri-db-campaign-reset-guard-");
+    const temp = await createTempRepository("nestor-db-campaign-reset-guard-");
     const repository = await temp.createRepository();
     try {
       const seed = createSeed();

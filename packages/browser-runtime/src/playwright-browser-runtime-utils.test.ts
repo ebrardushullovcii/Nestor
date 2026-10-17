@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { JobFinderAiClient } from "@nordri/ai-providers";
+import type { JobFinderAiClient } from "@nestor/ai-providers";
 import { describe, expect, test, vi } from "vitest";
 import {
   bringPageToFrontBestEffort,
@@ -110,7 +110,7 @@ describe("playwright browser runtime utils", () => {
   });
 
   test("reads the active devtools port from the Chrome profile directory", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "nordri-devtools-port-"));
+    const tempDir = await mkdtemp(join(tmpdir(), "nestor-devtools-port-"));
 
     try {
       await writeFile(
@@ -125,7 +125,7 @@ describe("playwright browser runtime utils", () => {
   });
 
   test("returns null when the devtools active port file is missing or invalid", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "nordri-devtools-port-"));
+    const tempDir = await mkdtemp(join(tmpdir(), "nestor-devtools-port-"));
 
     try {
       await expect(readDevToolsActivePort(tempDir)).resolves.toBeNull();
@@ -141,12 +141,12 @@ describe("playwright browser runtime utils", () => {
   test("parses running Chrome debug sessions from command lines", () => {
     expect(
       parseRunningChromeDebugSession(
-        '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9333 --user-data-dir="C:\\Users\\elian\\AppData\\Roaming\\@nordri\\desktop\\browser-agent\\default" --new-window about:blank',
+        '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9333 --user-data-dir="C:\\Users\\elian\\AppData\\Roaming\\@nestor\\desktop\\browser-agent\\default" --new-window about:blank',
       ),
     ).toEqual({
       debugPort: 9333,
       userDataDir:
-        "C:\\Users\\elian\\AppData\\Roaming\\@nordri\\desktop\\browser-agent\\default",
+        "C:\\Users\\elian\\AppData\\Roaming\\@nestor\\desktop\\browser-agent\\default",
     });
 
     expect(
@@ -174,10 +174,10 @@ describe("playwright browser runtime utils", () => {
     expect(
       findRunningChromeDebugPortInCommandLines(
         [
-          '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9333 --user-data-dir="C:\\Users\\elian\\AppData\\Roaming\\@nordri\\desktop\\browser-agent\\default"',
+          '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9333 --user-data-dir="C:\\Users\\elian\\AppData\\Roaming\\@nestor\\desktop\\browser-agent\\default"',
           '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9555 --user-data-dir="C:\\Users\\elian\\AppData\\Local\\Temp\\other-profile"',
         ],
-        "C:\\Users\\elian\\AppData\\Roaming\\@nordri\\desktop\\browser-agent\\default",
+        "C:\\Users\\elian\\AppData\\Roaming\\@nestor\\desktop\\browser-agent\\default",
       ),
     ).toBe(9333);
 
@@ -186,7 +186,7 @@ describe("playwright browser runtime utils", () => {
         [
           '"chrome.exe" --remote-debugging-port=9555 --user-data-dir="C:\\Users\\elian\\AppData\\Local\\Temp\\other-profile"',
         ],
-        "C:\\Users\\elian\\AppData\\Roaming\\@nordri\\desktop\\browser-agent\\default",
+        "C:\\Users\\elian\\AppData\\Roaming\\@nestor\\desktop\\browser-agent\\default",
       ),
     ).toBeNull();
   });

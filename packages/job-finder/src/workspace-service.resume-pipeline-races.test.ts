@@ -1,9 +1,9 @@
-import { RESUME_AI_CONCURRENCY } from "@nordri/contracts";
+import { RESUME_AI_CONCURRENCY } from "@nestor/contracts";
 import type {
   JobFinderIntelligenceState,
   ResumeBatchCheckpoint,
   ResumeBatchGenerationResult,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import {
   createAiClient,

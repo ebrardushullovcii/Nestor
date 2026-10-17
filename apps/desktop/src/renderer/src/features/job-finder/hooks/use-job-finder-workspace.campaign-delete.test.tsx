@@ -3,7 +3,7 @@
 import type {
   JobFinderRendererWorkspaceSnapshot,
   JobFinderWorkspaceSyncResult,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -92,7 +92,7 @@ describe("useJobFinderWorkspace campaign deletion", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         ping: vi.fn(() => Promise.resolve({ platform: "win32" as const })),
@@ -102,13 +102,13 @@ describe("useJobFinderWorkspace campaign deletion", () => {
           getWorkspace,
           checkBrowserSession,
         },
-      } as unknown as Window["nordri"],
+      } as unknown as Window["nestor"],
     });
   });
 
   afterEach(() => {
     cleanup();
-    Reflect.deleteProperty(window, "nordri");
+    Reflect.deleteProperty(window, "nestor");
   });
 
   async function renderReadyWorkspace(

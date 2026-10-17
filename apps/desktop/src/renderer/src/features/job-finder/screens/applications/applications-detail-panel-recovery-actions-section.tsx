@@ -2,7 +2,7 @@ import type {
   GlobalDailyApplicationPreparationCapacity,
   JobFinderExactApplicationTarget,
   JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { useId, useState } from "react";
 import {
   ApplicationAnswerStepCard,
@@ -379,7 +379,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
     const resultId = visibleApplyResult.id;
     const reportOutcome = (outcome: FinishInBrowserOutcome | void) => {
       if (outcome?.kind === "opened_application_page") {
-        void window.nordri?.browser?.command({ type: "open" });
+        void window.nestor?.browser?.command({ type: "open" });
       }
       setFinishInBrowserReport(outcome ? { resultId, outcome } : null);
     };
@@ -568,7 +568,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
                   className={RECOVERY_PRIMARY_ACTION_CLASS_NAME}
                   data-testid="applications-recovery-primary-action-button"
                   onClick={() =>
-                    void window.nordri?.browser?.command({
+                    void window.nestor?.browser?.command({
                       type: "close_finished_tabs",
                     })
                   }

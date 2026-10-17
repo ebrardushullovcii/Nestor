@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type {
   JobFinderDiscoveryState,
   DiscoveryRunRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { normalizeLegacyDiscoveryState } from "./legacy";
 import { cloneValue, parsePersistedRowValue } from "./state";
 import { freezeProjection } from "./saved-job-projection";

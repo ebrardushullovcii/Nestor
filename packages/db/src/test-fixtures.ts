@@ -1,5 +1,5 @@
 import type { JobFinderRepositorySeed } from "./index";
-import { JobFinderIntelligenceStateSchema } from "@nordri/contracts";
+import { JobFinderIntelligenceStateSchema } from "@nestor/contracts";
 
 export function createSeed(): JobFinderRepositorySeed {
   return {

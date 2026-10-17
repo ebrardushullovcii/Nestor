@@ -7,7 +7,7 @@ import {
   normalizeCompanyName,
   type DiscoveryJobView,
   type DiscoveryFeedbackBatchOutcome,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { z } from "zod";
 
 import { AssistantToolError, defineTool, json } from "../tool-kit";

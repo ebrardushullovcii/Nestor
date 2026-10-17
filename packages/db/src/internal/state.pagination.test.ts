@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   ProfileCopilotMessageSchema,
   SavedJobSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { listCollectionValues, listValues, stateTableNames } from "./state";
 

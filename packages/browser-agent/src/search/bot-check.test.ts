@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import type { Page } from "playwright";
 import { buildApplyFormObservation } from "../apply/page-hands";
-import type { RawApplyPage } from "@nordri/contracts";
+import type { RawApplyPage } from "@nestor/contracts";
 import {
   createBotCheckTracker,
   inspectBotCheckInterstitial,

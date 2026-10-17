@@ -1,8 +1,8 @@
-import { buildValuePreview } from "@nordri/ai-providers";
+import { buildValuePreview } from "@nestor/ai-providers";
 import type {
   ResumeDocumentBundle,
   ResumeImportFieldCandidate,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   isObject,

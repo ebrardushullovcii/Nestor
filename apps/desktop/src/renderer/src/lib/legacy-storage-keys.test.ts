@@ -17,21 +17,36 @@ describe("migrateLegacyStorageKeys", () => {
 
     migrateLegacyStorageKeys(window.localStorage);
 
-    expect(window.localStorage.getItem("nordri.appearance-theme")).toBe("dark");
+    expect(window.localStorage.getItem("nestor.appearance-theme")).toBe("dark");
     expect(
-      window.localStorage.getItem("nordri.live-assistant.last-job-finder-route"),
+      window.localStorage.getItem("nestor.live-assistant.last-job-finder-route"),
     ).toBe("/job-finder/applications");
     expect(window.localStorage.getItem("unemployed.appearance-theme")).toBeNull();
     expect(window.localStorage.getItem("unrelated")).toBe("kept");
   });
 
-  test("keeps a value already saved under the current key", () => {
-    window.localStorage.setItem("unemployed.appearance-theme", "dark");
+  test("moves Nordri preferences and prefers them over older UnEmployed ones", () => {
     window.localStorage.setItem("nordri.appearance-theme", "light");
+    window.localStorage.setItem("unemployed.appearance-theme", "dark");
+    window.localStorage.setItem("nordri.job-finder.sidebar-collapsed.v1", "true");
 
     migrateLegacyStorageKeys(window.localStorage);
 
-    expect(window.localStorage.getItem("nordri.appearance-theme")).toBe("light");
+    expect(window.localStorage.getItem("nestor.appearance-theme")).toBe("light");
+    expect(window.localStorage.getItem("nestor.job-finder.sidebar-collapsed.v1")).toBe(
+      "true",
+    );
+    expect(window.localStorage.getItem("nordri.appearance-theme")).toBeNull();
+    expect(window.localStorage.getItem("unemployed.appearance-theme")).toBeNull();
+  });
+
+  test("keeps a value already saved under the current key", () => {
+    window.localStorage.setItem("unemployed.appearance-theme", "dark");
+    window.localStorage.setItem("nestor.appearance-theme", "light");
+
+    migrateLegacyStorageKeys(window.localStorage);
+
+    expect(window.localStorage.getItem("nestor.appearance-theme")).toBe("light");
     expect(window.localStorage.getItem("unemployed.appearance-theme")).toBeNull();
   });
 });

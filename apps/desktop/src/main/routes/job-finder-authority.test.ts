@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ApplicationAuthorityEnvelopeSchema,
   ApplicationAuthorityReadinessSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { JobFinderApplicationAuthorityService } from "../services/job-finder";
 import { registerJobFinderAuthorityRouteHandlers } from "./job-finder-authority";
 

@@ -2,7 +2,7 @@
 
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, test } from "vitest";
-import type { InterviewOverlaySnapshot } from "@nordri/contracts";
+import type { InterviewOverlaySnapshot } from "@nestor/contracts";
 
 import {
   AnswerCueOverlay,

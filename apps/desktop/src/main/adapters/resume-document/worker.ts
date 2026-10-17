@@ -8,7 +8,7 @@ import {
   type ResumeDocumentParserKind,
   type ResumeParserWorkerRequest,
   type ResumeParserWorkerResponse,
-} from '@nordri/contracts'
+} from '@nestor/contracts'
 import { extractDocxTextWithTextutil } from '../resume-document-macos'
 import { buildBundleFromText, buildDocumentQualitySignal, normalizeExtractedText } from '../resume-document-utils'
 import { runResumeParserSidecar } from '../resume-document-sidecar'
@@ -81,7 +81,7 @@ export function createResumeParserWorkerRequest(filePath: string): ResumeParserW
 }
 
 function shouldAttemptSidecar(fileKind: ResumeDocumentFileKind): boolean {
-  if (process.env.NORDRI_RESUME_PARSER_SIDECAR === '0') {
+  if (process.env.NESTOR_RESUME_PARSER_SIDECAR === '0') {
     return false
   }
 

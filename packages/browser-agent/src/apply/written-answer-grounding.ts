@@ -1,5 +1,5 @@
-import { parseToolArguments } from "@nordri/agent-runtime";
-import type { AgentLoopToolDefinition } from "@nordri/agent-runtime";
+import { parseToolArguments } from "@nestor/agent-runtime";
+import type { AgentLoopToolDefinition } from "@nestor/agent-runtime";
 import type { LLMClient } from "../agent/contracts";
 import { applicationFacts, plainAnswerCheckFacts } from "./application-facts";
 import type { ApplyAnswerSources } from "./types";

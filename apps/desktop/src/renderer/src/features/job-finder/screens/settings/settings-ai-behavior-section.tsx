@@ -17,7 +17,7 @@ import {
   type ResumeApproach,
   type UpdateAiBehaviorInput,
   type WrittenAnswerLength,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Field, FieldLabel } from "@renderer/components/ui/field";
 import { Input } from "@renderer/components/ui/input";
 import { Textarea } from "@renderer/components/ui/textarea";

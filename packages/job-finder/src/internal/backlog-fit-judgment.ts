@@ -2,7 +2,7 @@ import type {
   FitJudgment,
   FitJudgmentProgress,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import {

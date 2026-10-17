@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { ResumeImportStageUnreadError } from "@nordri/ai-providers";
-import type { ResumeImportFieldCandidate } from "@nordri/contracts";
+import { ResumeImportStageUnreadError } from "@nestor/ai-providers";
+import type { ResumeImportFieldCandidate } from "@nestor/contracts";
 
 import {
   createAiClient,

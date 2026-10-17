@@ -7,7 +7,7 @@
  * 100/125/150/200% and records header geometry, overlap candidates, horizontal
  * overflow, and More-menu reachability at compact widths.
  *
- * Usage (after `pnpm --filter @nordri/desktop build`):
+ * Usage (after `pnpm --filter @nestor/desktop build`):
  *   node ./scripts/capture-shell-zoom-sweep.mjs
  */
 
@@ -278,7 +278,7 @@ async function seedWorkspace(page) {
     try {
       await page.evaluate(
         async (state) =>
-          window.nordri.jobFinder.test.resetWorkspaceState(state),
+          window.nestor.jobFinder.test.resetWorkspaceState(state),
         seededState,
       );
       lastError = null;
@@ -309,7 +309,7 @@ async function seedWorkspace(page) {
 async function run() {
   await mkdir(outputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-shell-zoom-"),
+    path.join(os.tmpdir(), "nestor-shell-zoom-"),
   );
   const report = {
     startedAt: new Date().toISOString(),
@@ -327,16 +327,16 @@ async function run() {
       cwd: desktopDir,
       env: {
         ...process.env,
-        NORDRI_BROWSER_AGENT: "0",
-        NORDRI_ENABLE_TEST_API: "1",
-        NORDRI_TEST_SYSTEM_THEME: "dark",
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_BROWSER_AGENT: "0",
+        NESTOR_ENABLE_TEST_API: "1",
+        NESTOR_TEST_SYSTEM_THEME: "dark",
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       },
     });
     const page = await app.firstWindow();
     await page.waitForLoadState("domcontentloaded");
     await page.waitForFunction(
-      () => Boolean(window.nordri?.jobFinder?.test),
+      () => Boolean(window.nestor?.jobFinder?.test),
       undefined,
       { timeout: 30_000 },
     );
@@ -348,7 +348,7 @@ async function run() {
     await seedWorkspace(page);
     await page.waitForLoadState("domcontentloaded");
     await page.waitForFunction(
-      () => Boolean(window.nordri?.jobFinder?.test),
+      () => Boolean(window.nestor?.jobFinder?.test),
       undefined,
       { timeout: 30_000 },
     );

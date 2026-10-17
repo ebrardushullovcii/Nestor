@@ -20,11 +20,11 @@ const outputDir = path.join(desktopDir, "test-artifacts", "ui", runLabel);
 // credentials can never reach live Live Assistant providers during a
 // capture run. Configured/live mode requires the explicit env opt-in below
 // and is announced on stdout; it additionally sets
-// NORDRI_INTERVIEW_TEST_USE_LIVE_AI=1 because the desktop test API is
+// NESTOR_INTERVIEW_TEST_USE_LIVE_AI=1 because the desktop test API is
 // always enabled here and otherwise forces deterministic providers (see
 // packages/ai-providers/src/live-assistant.ts).
 const PROVIDER_MODE_ENV = "UI_LIVE_ASSISTANT_PROVIDER_MODE";
-const INTERVIEW_TEST_LIVE_AI_OPT_IN_ENV = "NORDRI_INTERVIEW_TEST_USE_LIVE_AI";
+const INTERVIEW_TEST_LIVE_AI_OPT_IN_ENV = "NESTOR_INTERVIEW_TEST_USE_LIVE_AI";
 const requestedProviderMode = process.env[PROVIDER_MODE_ENV] ?? "deterministic";
 if (
   requestedProviderMode !== "deterministic" &&
@@ -37,7 +37,7 @@ if (
 const providerMode = requestedProviderMode;
 if (providerMode === "configured") {
   console.log(
-    `[capture-live-assistant] Configured/live provider mode requested explicitly via ${PROVIDER_MODE_ENV}=configured; setting ${INTERVIEW_TEST_LIVE_AI_OPT_IN_ENV}=1 so Live Assistant may use ambient interview/shared AI credentials despite NORDRI_ENABLE_TEST_API=1.`,
+    `[capture-live-assistant] Configured/live provider mode requested explicitly via ${PROVIDER_MODE_ENV}=configured; setting ${INTERVIEW_TEST_LIVE_AI_OPT_IN_ENV}=1 so Live Assistant may use ambient interview/shared AI credentials despite NESTOR_ENABLE_TEST_API=1.`,
   );
 } else {
   console.log(
@@ -45,12 +45,12 @@ if (providerMode === "configured") {
   );
 }
 const deterministicProviderEnv = {
-  NORDRI_AI_API_KEY: "",
-  NORDRI_AI_VISION_API_KEY: "",
-  NORDRI_RESUME_VISION_API_KEY: "",
-  NORDRI_INTERVIEW_AI_API_KEY: "",
-  NORDRI_INTERVIEW_VISION_API_KEY: "",
-  NORDRI_INTERVIEW_LOCAL_STT_COMMAND: "",
+  NESTOR_AI_API_KEY: "",
+  NESTOR_AI_VISION_API_KEY: "",
+  NESTOR_RESUME_VISION_API_KEY: "",
+  NESTOR_INTERVIEW_AI_API_KEY: "",
+  NESTOR_INTERVIEW_VISION_API_KEY: "",
+  NESTOR_INTERVIEW_LOCAL_STT_COMMAND: "",
 };
 const providerModeAppEnv =
   providerMode === "configured"
@@ -77,12 +77,12 @@ async function waitForInterviewWorkspace(window) {
 }
 
 async function getWorkspace(window) {
-  return window.evaluate(() => window.nordri.liveAssistant.getWorkspace());
+  return window.evaluate(() => window.nestor.liveAssistant.getWorkspace());
 }
 
 async function performInterviewAction(window, action) {
   return window.evaluate(
-    (action) => window.nordri.liveAssistant.performAction(action),
+    (action) => window.nestor.liveAssistant.performAction(action),
     action,
   );
 }
@@ -121,7 +121,7 @@ async function capture(window, fileName) {
 }
 
 async function createSpeechAudioChunk(input) {
-  const ffmpegPath = process.env.NORDRI_FFMPEG_PATH ?? "ffmpeg";
+  const ffmpegPath = process.env.NESTOR_FFMPEG_PATH ?? "ffmpeg";
   const filePath = path.join(
     input.directory,
     `${input.name.replace(/[^a-z0-9_-]/gi, "-")}.wav`,
@@ -321,7 +321,7 @@ async function getOverlayWindowBounds(app, routePart) {
 async function runCapture() {
   await mkdir(outputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-live-assistant-"),
+    path.join(os.tmpdir(), "nestor-live-assistant-"),
   );
 
   const app = await electron.launch({
@@ -331,9 +331,9 @@ async function runCapture() {
       ...process.env,
       ...(providerMode === "deterministic" ? deterministicProviderEnv : {}),
       ...providerModeAppEnv,
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_TEST_SYSTEM_THEME: process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark",
-      NORDRI_USER_DATA_DIR: userDataDirectory,
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_TEST_SYSTEM_THEME: process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
     },
   });
 
@@ -344,14 +344,14 @@ async function runCapture() {
     await waitForInterviewWorkspace(window);
     await window.setViewportSize({ width, height });
     const jobFinderApplicationRecord = await window.evaluate(async () => {
-      if (!window.nordri.jobFinder.test) {
+      if (!window.nestor.jobFinder.test) {
         throw new Error(
           "Expected Job Finder test API for Live Assistant harness.",
         );
       }
 
-      await window.nordri.jobFinder.test.loadApplyQueueDemo();
-      const snapshot = await window.nordri.jobFinder.startApplyCopilotRun({
+      await window.nestor.jobFinder.test.loadApplyQueueDemo();
+      const snapshot = await window.nestor.jobFinder.startApplyCopilotRun({
         jobId: "job_ready",
         visualCheckpointsEnabled: false,
       });
@@ -616,7 +616,7 @@ async function runCapture() {
       });
       localSttMicWorkspace = await window.evaluate(
         ({ sessionId, audioBase64 }) =>
-          window.nordri.liveAssistant.transcribeAudioChunk({
+          window.nestor.liveAssistant.transcribeAudioChunk({
             sessionId,
             source: "microphone",
             mimeType: "audio/wav",
@@ -632,7 +632,7 @@ async function runCapture() {
       );
       localSttSystemWorkspace = await window.evaluate(
         ({ sessionId, audioBase64 }) =>
-          window.nordri.liveAssistant.transcribeAudioChunk({
+          window.nestor.liveAssistant.transcribeAudioChunk({
             sessionId,
             source: "meeting_audio",
             mimeType: "audio/wav",
@@ -881,7 +881,7 @@ async function runCapture() {
         const sessionId = workspace.recentSessions[0]?.id;
         if (!sessionId) return false;
         const session = await window.evaluate(
-          (id) => window.nordri.liveAssistant.getSession(id),
+          (id) => window.nestor.liveAssistant.getSession(id),
           sessionId,
         );
         return (session?.transcriptAnnotations.length ?? 0) > 0;
@@ -889,7 +889,7 @@ async function runCapture() {
       "saved transcript annotation",
     );
     const annotatedSession = await window.evaluate(
-      (id) => window.nordri.liveAssistant.getSession(id),
+      (id) => window.nestor.liveAssistant.getSession(id),
       annotatedWorkspace.recentSessions[0]?.id,
     );
     if (!annotatedSession) {
@@ -900,12 +900,12 @@ async function runCapture() {
 
     const exportResult = await window.evaluate(
       ({ sessionId, format }) =>
-        window.nordri.liveAssistant.exportSession(sessionId, format),
+        window.nestor.liveAssistant.exportSession(sessionId, format),
       { sessionId: annotatedSession.id, format: "markdown" },
     );
     const artifactWorkspace = await window.evaluate(
       ({ sessionId, cueCardId }) =>
-        window.nordri.liveAssistant.saveCueAsPrepArtifact({
+        window.nestor.liveAssistant.saveCueAsPrepArtifact({
           sessionId,
           cueCardId,
         }),
@@ -927,14 +927,14 @@ async function runCapture() {
         timeout: 10000,
       });
     const jobFinderWriteBackWorkspace = await window.evaluate(() =>
-      window.nordri.jobFinder.getWorkspace(),
+      window.nestor.jobFinder.getWorkspace(),
     );
     const writeBackApplicationRecord =
       jobFinderWriteBackWorkspace.applicationRecords.find(
         (record) => record.id === jobFinderApplicationRecord.id,
       );
     await window.evaluate(
-      (sessionId) => window.nordri.liveAssistant.deleteSession(sessionId),
+      (sessionId) => window.nestor.liveAssistant.deleteSession(sessionId),
       annotatedSession.id,
     );
     const deletedWorkspace = await getWorkspace(window);

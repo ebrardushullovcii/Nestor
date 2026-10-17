@@ -2,7 +2,7 @@ import type {
   EditableSourceInstructionArtifact,
   SourceDebugRunRecord,
   SourceInstructionArtifact,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 export { buildLearnedInstructionIntelligenceSummaries } from "../../lib/source-intelligence-utils";
 export type { LearnedInstructionIntelligenceSummary } from "../../lib/source-intelligence-utils";
 

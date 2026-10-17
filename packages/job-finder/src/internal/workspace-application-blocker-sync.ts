@@ -4,9 +4,9 @@ import {
   type ResumeDraft,
   type ResumeExportArtifact,
   type TailoredAsset,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
-import type { JobFinderRepository } from "@nordri/db";
+import type { JobFinderRepository } from "@nestor/db";
 
 import { withApplicationRecordTransition } from "./application-crm";
 import { isApprovedTailoredResumeReadyForApply } from "./matching-review-queue";

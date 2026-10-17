@@ -9,18 +9,18 @@ import {
   createStaticDesktopAudioCaptureAdapter,
   createStaticDesktopScreenshotCaptureAdapter,
   createStaticProtectedOverlaySurfaceAdapter,
-} from "@nordri/os-integration";
+} from "@nestor/os-integration";
 import {
   createDeterministicInterviewCueCardProvider,
   createDeterministicInterviewScreenshotVisionProvider,
   createDeterministicInterviewSummaryProvider,
   createDeterministicInterviewTranscriptionProvider,
   type InterviewTranscriptionProvider,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import {
   summarizeInterviewSession,
   type InterviewWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 function createMemoryRepository(): LiveAssistantRepository {
   let snapshot: InterviewWorkspaceSnapshot | null = null;

@@ -6,7 +6,7 @@ import {
   type ResumeDocumentFileKind,
   type ResumeDocumentParserKind,
   type ResumeParserWorkerResponse,
-} from '@nordri/contracts'
+} from '@nestor/contracts'
 import {
   buildBundleFromPages,
   buildDocumentQualitySignal,

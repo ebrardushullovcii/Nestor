@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { afterEach, expect, test, vi } from "vitest";
-import { createFileJobFinderRepository } from "@nordri/db";
+import { createFileJobFinderRepository } from "@nestor/db";
 import { createJobFinderWorkspaceService } from "./index";
 import {
   createAiClient,
@@ -31,8 +31,8 @@ test("synthetic scale employers do not inherit another company's domain evidence
       (record) => record.company === jobsById.get(record.jobId)?.company,
     ),
   ).toBe(true);
-  if (process.env.NORDRI_HISTORY_SEED_PATH) {
-    const output = path.resolve(process.env.NORDRI_HISTORY_SEED_PATH);
+  if (process.env.NESTOR_HISTORY_SEED_PATH) {
+    const output = path.resolve(process.env.NESTOR_HISTORY_SEED_PATH);
     await mkdir(path.dirname(output), { recursive: true });
     await writeFile(output, JSON.stringify(seed));
   }
@@ -40,7 +40,7 @@ test("synthetic scale employers do not inherit another company's domain evidence
 for (const jobCount of [3000, 10000]) {
   test(`${jobCount} jobs and 1000 full documents/applications: 100 warm display refreshes never parse/clone unchanged history`, async () => {
     const seed = createHistoryScaleSeed(jobCount);
-    const temp = await mkdtemp(path.join(os.tmpdir(), "nordri-history-scale-"));
+    const temp = await mkdtemp(path.join(os.tmpdir(), "nestor-history-scale-"));
     const repo = await createFileJobFinderRepository({
       filePath: path.join(temp, "workspace.sqlite"),
       seed,
@@ -68,7 +68,7 @@ for (const jobCount of [3000, 10000]) {
           ? Rest
           : never
       ) => {
-        if (/NORDRI_SCALE_(DOCUMENT|APPLICATION|VISUAL)/.test(raw)) {
+        if (/NESTOR_SCALE_(DOCUMENT|APPLICATION|VISUAL)/.test(raw)) {
           bodyParses += 1;
           const kind = raw.includes('"sections"')
             ? "draft"
@@ -89,7 +89,7 @@ for (const jobCount of [3000, 10000]) {
         options?: StructuredSerializeOptions,
       ): T => {
         if (
-          /NORDRI_SCALE_(DOCUMENT|APPLICATION|VISUAL)/.test(
+          /NESTOR_SCALE_(DOCUMENT|APPLICATION|VISUAL)/.test(
             JSON.stringify(value),
           )
         )
@@ -149,7 +149,7 @@ for (const jobCount of [3000, 10000]) {
       }
       await repo.upsertTailoredAsset({
         ...seed.tailoredAssets[25]!,
-        contentText: "NORDRI_SCALE_DOCUMENT_BODY Changed row",
+        contentText: "NESTOR_SCALE_DOCUMENT_BODY Changed row",
         updatedAt: "2026-10-13T11:00:00.000Z",
       });
       const changedParses = vi.spyOn(JSON, "parse");
@@ -157,7 +157,7 @@ for (const jobCount of [3000, 10000]) {
       const changedBodyParses = changedParses.mock.calls.filter(
         ([raw]) =>
           typeof raw === "string" &&
-          /NORDRI_SCALE_(DOCUMENT|APPLICATION|VISUAL)/.test(raw),
+          /NESTOR_SCALE_(DOCUMENT|APPLICATION|VISUAL)/.test(raw),
       ).length;
       changedParses.mockRestore();
       expect(changedBodyParses).toBe(1);

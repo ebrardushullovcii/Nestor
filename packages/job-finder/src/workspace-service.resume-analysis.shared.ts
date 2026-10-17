@@ -1,7 +1,7 @@
 import type {
   ResumeDocumentBundle,
   ResumeImportFieldCandidate,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { createWorkspaceServiceHarness } from "./workspace-service.test-support";
 
 export function createTestBundle(input: {

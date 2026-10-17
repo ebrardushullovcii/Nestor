@@ -1,7 +1,7 @@
 import {
   JobFinderRepositoryStateSchema,
   SavedJobSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createSeed } from "./workspace-service.test-fixtures";
 
 /** Synthetic only. Parse the complete fixture so built QA can reuse its JSON. */
@@ -9,11 +9,11 @@ export function createHistoryScaleSeed(jobCount = 3000, historyCount = 1000) {
   const seed = createSeed();
   const at = "2026-10-13T10:00:00.000Z";
   const documentBody =
-    "NORDRI_SCALE_DOCUMENT_BODY Synthetic resume paragraph. ".repeat(180);
+    "NESTOR_SCALE_DOCUMENT_BODY Synthetic resume paragraph. ".repeat(180);
   const activityBody =
-    "NORDRI_SCALE_APPLICATION_BODY Synthetic retained activity. ".repeat(180);
+    "NESTOR_SCALE_APPLICATION_BODY Synthetic retained activity. ".repeat(180);
   const visualBody =
-    "NORDRI_SCALE_VISUAL_HISTORY Synthetic captured observation. ".repeat(100);
+    "NESTOR_SCALE_VISUAL_HISTORY Synthetic captured observation. ".repeat(100);
   seed.savedJobs = Array.from({ length: jobCount }, (_, i) =>
     SavedJobSchema.parse({
       ...seed.savedJobs[0],
@@ -39,7 +39,7 @@ export function createHistoryScaleSeed(jobCount = 3000, historyCount = 1000) {
       // The first selected document is short enough for an ordinary export QA.
       const body =
         i === 0
-          ? "NORDRI_SCALE_DOCUMENT_BODY Synthetic candidate who builds reliable software."
+          ? "NESTOR_SCALE_DOCUMENT_BODY Synthetic candidate who builds reliable software."
           : documentBody;
       const observation = {
         id: `scale_observation_${i}`,

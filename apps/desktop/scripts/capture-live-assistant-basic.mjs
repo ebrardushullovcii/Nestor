@@ -20,7 +20,7 @@ function assertInvariant(condition, message) {
 
 async function getWorkspace(window) {
   return window.evaluate(() =>
-    window.nordri.liveAssistant.getWorkspace(),
+    window.nestor.liveAssistant.getWorkspace(),
   );
 }
 
@@ -43,7 +43,7 @@ async function waitForOverlayWindows(app) {
 async function waitForCueCount(window, expectedMinimum) {
   await window.waitForFunction(
     async (minimum) => {
-      const workspace = await window.nordri.liveAssistant.getWorkspace();
+      const workspace = await window.nestor.liveAssistant.getWorkspace();
       return (workspace.activeSession?.cueCards.length ?? 0) >= minimum;
     },
     expectedMinimum,
@@ -54,7 +54,7 @@ async function waitForCueCount(window, expectedMinimum) {
 async function run() {
   await mkdir(outputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-live-assistant-basic-"),
+    path.join(os.tmpdir(), "nestor-live-assistant-basic-"),
   );
   const attachmentPath = path.join(userDataDirectory, "architecture.png");
   await writeFile(
@@ -70,10 +70,10 @@ async function run() {
     cwd: desktopDir,
     env: {
       ...process.env,
-      NORDRI_AI_API_KEY: "",
-      NORDRI_AI_VISION_API_KEY: "",
-      NORDRI_INTERVIEW_AI_API_KEY: "",
-      NORDRI_USER_DATA_DIR: userDataDirectory,
+      NESTOR_AI_API_KEY: "",
+      NESTOR_AI_VISION_API_KEY: "",
+      NESTOR_INTERVIEW_AI_API_KEY: "",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
     },
   });
 
@@ -150,7 +150,7 @@ async function run() {
     );
     await popupComposer.fill("Use this screenshot to improve the answer");
     await window.evaluate(() =>
-      window.nordri.liveAssistant.performAction("toggle_listening"),
+      window.nestor.liveAssistant.performAction("toggle_listening"),
     );
     await answerOverlayWindow.waitForFunction(() =>
       document
@@ -158,7 +158,7 @@ async function run() {
         ?.value.includes("Use this screenshot"),
     );
     await window.evaluate(() =>
-      window.nordri.liveAssistant.performAction("toggle_listening"),
+      window.nestor.liveAssistant.performAction("toggle_listening"),
     );
 
     const imageInput = answerOverlayWindow.locator(
@@ -184,25 +184,25 @@ async function run() {
       .getByRole("button", { name: /^Copy answer$/ })
       .click();
     const copiedAnswer = await window.evaluate(() =>
-      window.nordri.liveAssistant.readClipboardText(),
+      window.nestor.liveAssistant.readClipboardText(),
     );
     await transcriptOverlayWindow
       .getByRole("button", { name: /^Copy transcript$/ })
       .click();
     const copiedTranscript = await window.evaluate(() =>
-      window.nordri.liveAssistant.readClipboardText(),
+      window.nestor.liveAssistant.readClipboardText(),
     );
 
     await answerOverlayWindow
       .getByRole("button", { name: "Hide answer popup" })
       .click();
     await window.waitForFunction(async () => {
-      const workspace = await window.nordri.liveAssistant.getWorkspace();
+      const workspace = await window.nestor.liveAssistant.getWorkspace();
       return workspace.answerOverlay.visible === false;
     });
     await window.getByRole("button", { name: "Open answer popup" }).click();
     await window.waitForFunction(async () => {
-      const workspace = await window.nordri.liveAssistant.getWorkspace();
+      const workspace = await window.nestor.liveAssistant.getWorkspace();
       return workspace.answerOverlay.visible === true;
     });
 
@@ -301,7 +301,7 @@ async function run() {
       .waitFor();
     await window.getByRole("button", { name: "End", exact: true }).click();
     await window.waitForFunction(() =>
-      window.nordri.liveAssistant
+      window.nestor.liveAssistant
         .getWorkspace()
         .then((workspace) => workspace.activeSession === null),
     );
@@ -310,7 +310,7 @@ async function run() {
     await window.getByRole("button", { name: "Save prep" }).click();
     await window.waitForFunction(
       (expectedMinimum) =>
-        window.nordri.liveAssistant
+        window.nestor.liveAssistant
           .getWorkspace()
           .then(
             (workspace) =>

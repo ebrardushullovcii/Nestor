@@ -446,7 +446,7 @@ async function run() {
   await ensureFreshOutputDir(outputDir);
   await verifyAcceptanceArtifacts(acceptance);
   const userDataDirectory = await makeIsolatedUserDataDirectory(
-    "nordri-job-finder-error-recovery-",
+    "nestor-job-finder-error-recovery-",
   );
   report.safety.isolatedUserDataDir = userDataDirectory;
   let app = null;
@@ -461,7 +461,7 @@ async function run() {
       args: ["."],
       cwd: desktopDir,
       env: acceptanceEnvironment({
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       }),
     });
     processOutputState = attachProcessOutput(app, report);
@@ -481,17 +481,17 @@ async function run() {
     await page.waitForLoadState("domcontentloaded");
     await assertFileRenderer(page);
     await page.waitForFunction(
-      () => Boolean(window.nordri?.jobFinder?.test),
+      () => Boolean(window.nestor?.jobFinder?.test),
       undefined,
       { timeout: 15_000 },
     );
     await page.evaluate(() =>
-      window.nordri.jobFinder.test.setSystemThemeOverride("dark"),
+      window.nestor.jobFinder.test.setSystemThemeOverride("dark"),
     );
     const browserWindow = await resolveStartupBrowserWindow(app, page);
     const baseSnapshot = await page.evaluate(async () => {
-      await window.nordri.jobFinder.test.setResumePreviewMode("fail_once");
-      return window.nordri.jobFinder.test.loadResumeWorkspaceDemo();
+      await window.nestor.jobFinder.test.setResumePreviewMode("fail_once");
+      return window.nestor.jobFinder.test.loadResumeWorkspaceDemo();
     });
     const jobId = baseSnapshot.reviewQueue?.[0]?.jobId;
     assert(
@@ -503,7 +503,7 @@ async function run() {
     await assertFileRenderer(page);
     await page.waitForSelector("[data-job-finder-shell]", { timeout: 20_000 });
     await page.evaluate(() =>
-      window.nordri.jobFinder.test.setResumePreviewMode("fail_once"),
+      window.nestor.jobFinder.test.setResumePreviewMode("fail_once"),
     );
     await page.setViewportSize({ width: 1440, height: 920 });
     await browserWindow.evaluate((win) => win.webContents.setZoomFactor(1));
@@ -582,7 +582,7 @@ async function run() {
       viewport: "minimum",
     };
     const finalWorkspace = await page.evaluate(() =>
-      window.nordri.jobFinder.getWorkspace(),
+      window.nestor.jobFinder.getWorkspace(),
     );
     report.safety.observedSafetyEvents = observedSafetyEvents;
     const requests = finalWorkspace.userActionRequests;

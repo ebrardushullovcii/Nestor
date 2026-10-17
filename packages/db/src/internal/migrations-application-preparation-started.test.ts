@@ -21,7 +21,7 @@ const baseResult = {
 describe("durable application preparation start migration", () => {
   test("adds v13 columns and index without fabricating legacy JSON fields", async () => {
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-preparation-migration-"),
+      path.join(os.tmpdir(), "nestor-preparation-migration-"),
     );
     const filePath = path.join(directory, "workspace.sqlite");
     let database = new DatabaseSync(filePath);
@@ -115,7 +115,7 @@ describe("durable application preparation start migration", () => {
 
   test("keeps migrating when a legacy row drifted from the current apply schema", async () => {
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-preparation-migration-drift-"),
+      path.join(os.tmpdir(), "nestor-preparation-migration-drift-"),
     );
     const filePath = path.join(directory, "workspace.sqlite");
     const database = new DatabaseSync(filePath);
@@ -205,7 +205,7 @@ describe("durable application preparation start migration", () => {
 
   test("leaves a half-set legacy preparation start unknown instead of inventing the missing half", async () => {
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-preparation-migration-partial-"),
+      path.join(os.tmpdir(), "nestor-preparation-migration-partial-"),
     );
     const filePath = path.join(directory, "workspace.sqlite");
     const database = new DatabaseSync(filePath);

@@ -1,6 +1,6 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import type { ApplyBlockedAttempt } from "@nordri/contracts";
+import type { ApplyBlockedAttempt } from "@nestor/contracts";
 import {
   chromium,
   type Browser,
@@ -213,7 +213,7 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
         expect(
           await page.evaluate(() => {
             const state = (window as unknown as Record<string, unknown>)[
-              "__nordriPrepareOnlyMutationGuardV1"
+              "__nestorPrepareOnlyMutationGuardV1"
             ] as { authorizedFormActionWindow: { expiresAtMs: number } };
             return state.authorizedFormActionWindow.expiresAtMs;
           }),
@@ -294,14 +294,14 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
           () =>
             (
               (window as unknown as Record<string, unknown>)[
-                "__nordriPrepareOnlyMutationGuardV1"
+                "__nestorPrepareOnlyMutationGuardV1"
               ] as { finalActionAllowed?: boolean }
             ).finalActionAllowed,
         );
       // What the embedded browser does when it hands the tab to the person.
       await page.evaluate(() => {
         const state = (window as unknown as Record<string, unknown>)[
-          "__nordriPrepareOnlyMutationGuardV1"
+          "__nestorPrepareOnlyMutationGuardV1"
         ] as { finalActionAllowed?: boolean };
         state.finalActionAllowed = true;
       });
@@ -1349,7 +1349,7 @@ test.each(["click", "enter"] as const)(
     if (action === "click") await page.click("#send");
     else await page.press("#send", "Enter");
     expect(requestHitsFor(app.hits, "/manual-send")).toHaveLength(0);
-    expect(await page.locator("#nordri-send-review-required").count()).toBe(0);
+    expect(await page.locator("#nestor-send-review-required").count()).toBe(0);
     await openPrepareOnlyFinalActionWindow(page);
     await page.click("#send");
     await page.waitForTimeout(200);

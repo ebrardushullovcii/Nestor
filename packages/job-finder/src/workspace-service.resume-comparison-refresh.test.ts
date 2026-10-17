@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ResumeValidationResultSchema } from "@nordri/contracts";
+import { ResumeValidationResultSchema } from "@nestor/contracts";
 import { buildResumeCoverageComparison } from "./internal/resume-workspace-helpers";
 import { createWorkspaceServiceHarness } from "./workspace-service.test-support";
 

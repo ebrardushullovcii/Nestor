@@ -2,7 +2,7 @@ import {
   listResumeReviewsNeeded,
   listFinalApplicationActions,
 } from "../attention";
-import { APPLICATION_SKIPPED_BY_PERSON_LABEL } from "@nordri/contracts";
+import { APPLICATION_SKIPPED_BY_PERSON_LABEL } from "@nestor/contracts";
 import { isProvisionalMatchAssessment } from "../../discovery-ordering";
 import { getFitEvidenceDepth } from "../../discovery-result-bands";
 import type {
@@ -13,7 +13,7 @@ import type {
   JobFinderWorkspaceSnapshot,
   ReviewQueueItem,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * Compact shapes for the model and the rows the person sees. Every read is

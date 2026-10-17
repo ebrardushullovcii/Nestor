@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   ResumeImportFieldCandidateSchema,
   ResumeImportRunSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createSeed,
   createWorkspaceServiceHarness,

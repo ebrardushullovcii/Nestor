@@ -14,15 +14,15 @@ export default async function smoke(qa) {
   assert.equal((await fetch(qa.sites.url)).status, 200);
   // Deliberate backend setup; UI-flow tests should press the actual Save button.
   await qa.page.evaluate(async () => {
-    const state = await window.nordri.jobFinder.getWorkspace();
-    await window.nordri.jobFinder.saveProfile({
+    const state = await window.nestor.jobFinder.getWorkspace();
+    await window.nestor.jobFinder.saveProfile({
       ...state.profile,
       fullName: "Harness Synthetic Tester",
     });
   });
   await qa.restart();
   const state = await qa.page.evaluate(() =>
-    window.nordri.jobFinder.getWorkspace(),
+    window.nestor.jobFinder.getWorkspace(),
   );
   assert.equal(state.profile.fullName, "Harness Synthetic Tester");
   await qa.page.getByRole("button", { name: "Home", exact: true }).click();

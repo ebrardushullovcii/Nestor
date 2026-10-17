@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import {
   JobFinderHydrationGate,
   WorkspaceStateScreen,

@@ -1,7 +1,7 @@
 import {
   ApplicationAnswerRecordSchema,
   ApplicationQuestionRecordSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import { mergeApplicationAnswersIntoExecutionProfile } from "./workspace-application-answer-execution";

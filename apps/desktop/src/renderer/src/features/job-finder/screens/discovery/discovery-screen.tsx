@@ -29,11 +29,11 @@ import type {
   ReviewQueueItem,
   SourceAccessPrompt,
   JobListRow,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   resolveCampaignSourceTargetIds,
   isListableCompanyName,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { X } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
 import { useToast } from "@renderer/components/ui/toast";
@@ -671,7 +671,7 @@ export function DiscoveryScreen(props: {
     () => {
       try {
         const stored: unknown = JSON.parse(
-          window.localStorage.getItem("nordri.discovery.dismissed-feedback") ??
+          window.localStorage.getItem("nestor.discovery.dismissed-feedback") ??
             "[]",
         );
         return Array.isArray(stored)
@@ -1252,7 +1252,7 @@ export function DiscoveryScreen(props: {
           setDismissedFeedbackKeys(next);
           try {
             window.localStorage.setItem(
-              "nordri.discovery.dismissed-feedback",
+              "nestor.discovery.dismissed-feedback",
               JSON.stringify(next),
             );
           } catch {

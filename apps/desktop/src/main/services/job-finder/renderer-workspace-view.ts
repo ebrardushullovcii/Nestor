@@ -3,7 +3,7 @@ import {
   TailoredAssetSummarySchema,
   ApplyJobResultListRowSchema,
   ApplicationAttemptListRowSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   DiscoveryRunRecord,
   JobFinderWorkspaceSnapshot,
@@ -19,7 +19,7 @@ import type {
   ApplyJobResultListRow,
   ApplicationAttempt,
   ApplicationAttemptListRow,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 const listRows = new WeakMap<DiscoveryJobView, JobListRow>();
 

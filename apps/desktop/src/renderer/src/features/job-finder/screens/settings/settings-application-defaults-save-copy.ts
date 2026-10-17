@@ -1,7 +1,7 @@
 import type {
   ApplicationAutomationMode,
   UpdateApplicationDefaultsInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 const APPLY_MODE_SAVED: Record<ApplicationAutomationMode, string> = {
   prepare_only:

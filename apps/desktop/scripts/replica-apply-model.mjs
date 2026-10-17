@@ -185,14 +185,14 @@ export async function startReplicaModel() {
       beforeAction = callback;
     },
     env: {
-      NORDRI_AI_API_KEY: "synthetic-replica-only",
-      NORDRI_AI_BASE_URL: `http://127.0.0.1:${server.address().port}/v1`,
-      NORDRI_AI_MODEL: "scripted-replica-apply",
-      NORDRI_AI_API_MODE: "chat_completions",
-      NORDRI_AI_STREAMING: "0",
-      NORDRI_AI_MAX_ATTEMPTS: "1",
-      NORDRI_BROWSER_HOST: "embedded",
-      NORDRI_ENABLE_TEST_API: "1",
+      NESTOR_AI_API_KEY: "synthetic-replica-only",
+      NESTOR_AI_BASE_URL: `http://127.0.0.1:${server.address().port}/v1`,
+      NESTOR_AI_MODEL: "scripted-replica-apply",
+      NESTOR_AI_API_MODE: "chat_completions",
+      NESTOR_AI_STREAMING: "0",
+      NESTOR_AI_MAX_ATTEMPTS: "1",
+      NESTOR_BROWSER_HOST: "embedded",
+      NESTOR_ENABLE_TEST_API: "1",
     },
     close: () => new Promise((resolve) => server.close(resolve)),
   };

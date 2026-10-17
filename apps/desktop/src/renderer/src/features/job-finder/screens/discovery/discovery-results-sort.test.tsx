@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from "vitest";
-import type { SavedJob } from "@nordri/contracts";
+import type { SavedJob } from "@nestor/contracts";
 import {
   compareDiscoveryResults,
   DISCOVERY_RESULTS_DEFAULT_SORT,
@@ -360,7 +360,7 @@ describe("useDiscoveryResultsSort", () => {
 
   it("ignores corrupted persisted preferences and falls back to fit", () => {
     window.localStorage.setItem(
-      "nordri.job-finder.discovery.results-sort.v1",
+      "nestor.job-finder.discovery.results-sort.v1",
       JSON.stringify({ direction: "sideways", field: "salary" }),
     );
 

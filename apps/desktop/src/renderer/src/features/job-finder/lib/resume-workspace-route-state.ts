@@ -1,4 +1,4 @@
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 
 export const RESUME_WORKSPACE_REQUIRED_COLLECTIONS = [
   "discovery_jobs",

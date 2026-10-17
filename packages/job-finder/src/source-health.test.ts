@@ -19,7 +19,7 @@ import {
 import type {
   DiscoveryTargetExecutionState,
   SourceInstructionStatus,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 function run(
   executions: readonly {

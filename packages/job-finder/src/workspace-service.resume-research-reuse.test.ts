@@ -1,4 +1,4 @@
-import type { ResumeResearchArtifact } from "@nordri/contracts";
+import type { ResumeResearchArtifact } from "@nestor/contracts";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createSeed } from "./workspace-service.test-fixtures";
 import { createWorkspaceServiceHarness } from "./workspace-service.test-harness";

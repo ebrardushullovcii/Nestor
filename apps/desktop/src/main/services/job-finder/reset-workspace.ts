@@ -12,8 +12,8 @@ import {
 } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
-import type { JobFinderRepository } from "@nordri/db";
-import { JobFinderWorkspaceSnapshotSchema } from "@nordri/contracts";
+import type { JobFinderRepository } from "@nestor/db";
+import { JobFinderWorkspaceSnapshotSchema } from "@nestor/contracts";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import type { JobFinderStartupResetRecoveryFact } from "../../../shared/job-finder-startup-reset-recovery";
 import {
@@ -991,7 +991,7 @@ async function clearBrowserSession() {
           () =>
             reject(
               new Error(
-                "The browser took too long to clear. Your workspace was not deleted. Restart Nordri and try again.",
+                "The browser took too long to clear. Your workspace was not deleted. Restart Nestor and try again.",
               ),
             ),
           BROWSER_CLEAR_TIMEOUT_MS,

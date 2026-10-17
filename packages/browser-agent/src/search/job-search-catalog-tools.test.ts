@@ -1,4 +1,4 @@
-import { JobPostingSchema } from "@nordri/contracts";
+import { JobPostingSchema } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 import { createSearchCatalogTools } from "./job-search-catalog-tools";
 

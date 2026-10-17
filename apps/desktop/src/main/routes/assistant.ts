@@ -25,7 +25,7 @@ import {
   AssistantUndoChangeInputSchema,
   AssistantUndoChangeResultSchema,
   type CandidateAssetKind,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   clearUiResumeBatch,

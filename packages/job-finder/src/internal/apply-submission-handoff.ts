@@ -1,10 +1,10 @@
-import type { ApplyAgentResult } from "@nordri/browser-agent";
+import type { ApplyAgentResult } from "@nestor/browser-agent";
 import {
   ApplyExecutionResultSchema,
   type ApplicationAuthorityEnvelope,
   type ApplicationAutomationMode,
   type ApplyExecutionResult,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import type {
   SubmissionPreflightCapacityFacts,

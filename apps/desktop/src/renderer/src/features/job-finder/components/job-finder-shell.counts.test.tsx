@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   JobListRowSchema,
   type JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -139,7 +139,7 @@ function getSidebar(): HTMLElement {
 }
 
 beforeEach(() => {
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       window: {

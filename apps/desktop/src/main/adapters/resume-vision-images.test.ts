@@ -124,8 +124,8 @@ describe("resume vision image generation", () => {
       runId: "run_2",
       sourceResumeId: "resume_2",
       env: {
-        NORDRI_RESUME_VISION_RETAIN_ARTIFACTS: "debug",
-        NORDRI_RESUME_VISION_IMAGE_TIMEOUT_MS: "12000",
+        NESTOR_RESUME_VISION_RETAIN_ARTIFACTS: "debug",
+        NESTOR_RESUME_VISION_IMAGE_TIMEOUT_MS: "12000",
       },
     });
 

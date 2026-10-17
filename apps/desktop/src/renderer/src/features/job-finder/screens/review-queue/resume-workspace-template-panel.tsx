@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import type {
   ResumeTemplateDefinition,
   ResumeTemplateId,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   getResumeTemplateAtsConfidence,
   getResumeTemplateDeliveryLane,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";

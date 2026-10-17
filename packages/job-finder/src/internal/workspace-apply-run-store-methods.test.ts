@@ -6,8 +6,8 @@ import {
   ApplicationReplayCheckpointSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
-} from "@nordri/contracts";
-import { createInMemoryJobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { describe, expect, it } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import { createWorkspaceApplyRunStoreMethods } from "./workspace-apply-run-store-methods";

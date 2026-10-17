@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { readPlanAssessment } from "./internal/plan-assessment";
-import type { JudgeJobFitsInput } from "@nordri/ai-providers";
-import { JobDiscoveryTargetSchema } from "@nordri/contracts";
+import type { JudgeJobFitsInput } from "@nestor/ai-providers";
+import { JobDiscoveryTargetSchema } from "@nestor/contracts";
 import {
   createAiClient,
   createSeed,

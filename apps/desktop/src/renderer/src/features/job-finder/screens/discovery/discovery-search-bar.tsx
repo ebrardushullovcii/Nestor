@@ -4,7 +4,7 @@ import type {
   JobFinderSearchRequest,
   JobSearchCampaign,
   JobSearchPreferences,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@renderer/components/ui/button";

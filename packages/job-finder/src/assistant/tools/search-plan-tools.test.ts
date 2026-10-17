@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   AssistantChangeReceiptSchema,
   SaveJobSearchCampaignInputSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
 import type { AssistantHostPorts } from "../ports";

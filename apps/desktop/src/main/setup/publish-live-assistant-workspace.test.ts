@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { InterviewWorkspaceViewSchema } from "@nordri/contracts";
+import { InterviewWorkspaceViewSchema } from "@nestor/contracts";
 import { publishLiveAssistantWorkspace } from "./publish-live-assistant-workspace";
 
 test("publishes live state only to loaded Live Assistant surfaces, including session end", () => {

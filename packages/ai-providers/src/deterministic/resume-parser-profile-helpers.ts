@@ -2,7 +2,7 @@ import type {
   CandidateLinkKind,
   CandidateProfile,
   JobSearchPreferences,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { dateRangePattern, projectSectionAliases } from "./constants";
 import {

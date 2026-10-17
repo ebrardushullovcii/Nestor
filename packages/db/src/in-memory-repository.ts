@@ -45,7 +45,7 @@ import {
   type SavedJob,
   type ResumeValidationResult,
   type UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { cloneValue } from "./internal/state";
 import { freezeProjection } from "./internal/saved-job-projection";

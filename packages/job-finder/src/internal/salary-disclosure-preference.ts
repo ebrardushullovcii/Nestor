@@ -2,7 +2,7 @@ import type {
   ApplicationSalaryDisclosureRule,
   JobFinderSettings,
   ApplicationAuthorityEnvelope,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /** Migrate the old pay choice once; sending permission never controls it. */
 export async function readSalaryDisclosurePreference(repository: {

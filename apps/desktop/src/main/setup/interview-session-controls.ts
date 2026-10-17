@@ -1,5 +1,5 @@
 import { app, Menu, Tray, dialog, globalShortcut, nativeImage } from 'electron'
-import type { InterviewHotkeyAction } from '@nordri/contracts'
+import type { InterviewHotkeyAction } from '@nestor/contracts'
 import { getLiveAssistantService } from '../services/live-assistant'
 import { resolveBrandIconPaths } from './brand-icons'
 import { syncInterviewOverlayWindows } from './interview-overlay-windows'

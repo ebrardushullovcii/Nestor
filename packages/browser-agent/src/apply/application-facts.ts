@@ -1,4 +1,4 @@
-import type { CandidateReusableAnswer } from "@nordri/contracts";
+import type { CandidateReusableAnswer } from "@nestor/contracts";
 
 import { normalizeSignal } from "./control-classification";
 import type {

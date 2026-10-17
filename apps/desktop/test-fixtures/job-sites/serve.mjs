@@ -375,7 +375,7 @@ function logPost(path, fields) {
       (key, value) => (/password/i.test(key) ? "[redacted]" : value),
     ) + "\n";
   appendFileSync(
-    process.env.NORDRI_FIXTURE_SUBMISSIONS_LOG ||
+    process.env.NESTOR_FIXTURE_SUBMISSIONS_LOG ||
       new URL("submissions.log", import.meta.url),
     line,
   );

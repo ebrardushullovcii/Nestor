@@ -1,4 +1,4 @@
-import type { JobPosting } from "@nordri/contracts";
+import type { JobPosting } from "@nestor/contracts";
 import type { AgentConfig, AgentResult } from "../types";
 
 /** Session-local, bounded reuse of model judgments after a fresh complete feed read. */

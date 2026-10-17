@@ -2,7 +2,7 @@ import type {
   FitJudgment,
   MatchAssessment,
   TitleFamilyMatch,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * The model decides fit (ADR 0041). The rule scorer still builds an

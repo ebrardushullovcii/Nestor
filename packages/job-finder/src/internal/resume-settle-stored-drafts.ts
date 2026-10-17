@@ -1,4 +1,4 @@
-import { isBlockingResumeClaimAssessment } from "@nordri/contracts";
+import { isBlockingResumeClaimAssessment } from "@nestor/contracts";
 
 import {
   createMonotonicTimestamp,

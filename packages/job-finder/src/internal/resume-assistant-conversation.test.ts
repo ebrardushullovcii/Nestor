@@ -5,7 +5,7 @@ import {
   ResumeDraftPatchSchema,
   ResumeDraftSchema,
   SavedJobSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   buildRecentResumeAssistantConversation,
   checkResumeAssistantProposal,

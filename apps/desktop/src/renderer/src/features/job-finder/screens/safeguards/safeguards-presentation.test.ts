@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import {
   ApplicationRecordSchema,
   JobFinderIntelligenceSafeguardsSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   buildSafeguardsPresentationModel,
   describeSampleReviewExplanation,

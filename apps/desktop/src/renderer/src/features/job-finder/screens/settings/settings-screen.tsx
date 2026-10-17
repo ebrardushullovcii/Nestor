@@ -8,8 +8,8 @@ import type {
   UpdateAiBehaviorInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
-} from "@nordri/contracts";
-import { ApplicationCrmSettingsSchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { ApplicationCrmSettingsSchema } from "@nestor/contracts";
 import {
   Activity,
   AppWindow,

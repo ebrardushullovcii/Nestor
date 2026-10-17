@@ -1,4 +1,4 @@
-import { JobSearchPreferencesSchema } from "@nordri/contracts";
+import { JobSearchPreferencesSchema } from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {

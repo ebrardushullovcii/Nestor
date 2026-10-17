@@ -14,7 +14,7 @@ import type {
   MatchAssessmentChangeAudit,
   ReviewQueueItem,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   useCallback,
   useEffect,
@@ -1638,7 +1638,7 @@ export function DiscoveryDetailPanel({
               )}
               <Button
                 onClick={() => {
-                  void window.nordri.jobFinder
+                  void window.nestor.jobFinder
                     .writeClipboardText(selectedJob.canonicalUrl)
                     .then(() => {
                       setCopiedListingJobId(selectedJob.id);

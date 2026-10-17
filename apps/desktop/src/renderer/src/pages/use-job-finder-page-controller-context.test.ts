@@ -8,12 +8,12 @@ import type {
   AssistantResumeBatchState,
   ResumeBatchGenerationResult,
   ResumeBatchGenerationProgress,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   ApplicationCrmBulkStageMutationInputSchema,
   JobFinderIntelligenceStateSchema,
   RESUME_PIPELINE_CAPACITY,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MutableRefObject, SetStateAction } from "react";
 import type {
@@ -27,7 +27,7 @@ import type {
   JobFinderSetResumeClaimConfirmationInput,
   JobFinderRendererWorkspaceSnapshot,
   ReviewQueueItem,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { TailoredDraftPreparationViewState } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
 import type { DiscoveryRunFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
 import { buildJobFinderTaskCenterModel } from "@renderer/features/job-finder/components/task-center/job-finder-task-center-model";
@@ -35,7 +35,7 @@ import { createJobFinderSaveCoordinator } from "./job-finder-save-state";
 import { runJobFinderApplicationBrowserHandoff } from "./job-finder-page-routes";
 import { formatJobFinderBrowserHandoffFailedStatus } from "@renderer/features/job-finder/lib/job-finder-browser-handoff-copy";
 
-type BatchGenerate = Window["nordri"]["jobFinder"]["generateResumeForBatch"];
+type BatchGenerate = Window["nestor"]["jobFinder"]["generateResumeForBatch"];
 type BatchProgressListener = (progress: ResumeBatchGenerationProgress) => void;
 const progressListeners = new Set<BatchProgressListener>();
 const unsubscribeProgress = vi.fn();
@@ -45,7 +45,7 @@ beforeEach(() => {
   progressListeners.clear();
   unsubscribeProgress.mockClear();
   vi.stubGlobal("window", {
-    nordri: {
+    nestor: {
       jobFinder: {
         onResumeBatchProgress: (listener: BatchProgressListener) => {
           progressListeners.add(listener);
@@ -109,8 +109,8 @@ function buildContext(overrides: {
         return { jobId, outcome: "written" };
       }),
   );
-  if (window.nordri.jobFinder)
-    window.nordri.jobFinder.generateResumeForBatch = generateResumeForBatch;
+  if (window.nestor.jobFinder)
+    window.nestor.jobFinder.generateResumeForBatch = generateResumeForBatch;
   const setActionState = (next: SetStateAction<ActionState>) => {
     actionState = typeof next === "function" ? next(actionState) : next;
     actionMessages.push(actionState.message);
@@ -1583,7 +1583,7 @@ describe("Applications browser hand-off failure reporting", () => {
     const command = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("window", {
       ...globalThis.window,
-      nordri: { browser: { command, getState: vi.fn() } },
+      nestor: { browser: { command, getState: vi.fn() } },
     });
     try {
       const performUserAction = vi
@@ -1627,7 +1627,7 @@ describe("Applications browser hand-off failure reporting", () => {
     });
     vi.stubGlobal("window", {
       ...globalThis.window,
-      nordri: { browser: { command, getState } },
+      nestor: { browser: { command, getState } },
     });
     try {
       const requests = [
@@ -1840,7 +1840,7 @@ it("R3-183 continues an interrupted existing rewrite with its saved level and la
   const sync = vi.fn((batch: AssistantResumeBatchState) =>
     Promise.resolve(syncUiResumeBatch(batch)),
   );
-  window.nordri.assistant.syncResumeBatch = sync;
+  window.nestor.assistant.syncResumeBatch = sync;
   const run = buildContext({
     workspace,
     batchGenerate: ({ jobId }) =>
@@ -1912,7 +1912,7 @@ it("keeps failed first drafts and failed existing rewrites unfinished with their
     const sync = vi.fn((batch: AssistantResumeBatchState) =>
       Promise.resolve(syncUiResumeBatch(batch)),
     );
-    window.nordri.assistant.syncResumeBatch = sync;
+    window.nestor.assistant.syncResumeBatch = sync;
     const run = buildContext({
       workspace,
       actions: {},
@@ -1961,7 +1961,7 @@ it("pauses a200-job provider-blocked queue, persists its reason, and continues o
   const sync = vi.fn((batch: AssistantResumeBatchState) =>
     Promise.resolve(syncUiResumeBatch(batch)),
   );
-  window.nordri.assistant.syncResumeBatch = sync;
+  window.nestor.assistant.syncResumeBatch = sync;
   const run = buildContext({
     workspace,
     actions: {},

@@ -14,7 +14,7 @@ import type {
   CompanyIntelligenceMutationInput,
   ListingActivity,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CompanyDetailScreen } from "./company-detail-screen";
 import { describeCompanySalaryOfferEvidence } from "./company-presentation";

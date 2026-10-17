@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { PrintToPDFOptions } from "electron";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { JobFinderDocumentManager } from "@nordri/job-finder";
+import type { JobFinderDocumentManager } from "@nestor/job-finder";
 import { createLocalJobFinderDocumentManager } from "./job-finder-document-manager";
 import { createApplyQueueDemoState } from "./job-finder-demo-state";
 import { renderResumeTemplateHtml } from "../../shared/job-finder-resume-renderer";

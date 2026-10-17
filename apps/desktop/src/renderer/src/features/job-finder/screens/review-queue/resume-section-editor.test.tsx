@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ResumeDraftSectionSchema } from "@nordri/contracts";
+import { ResumeDraftSectionSchema } from "@nestor/contracts";
 import { ResumeSectionEditor } from "./resume-section-editor";
 
 function renderEditor() {

@@ -1,4 +1,4 @@
-import { buildValuePreview } from "@nordri/ai-providers";
+import { buildValuePreview } from "@nestor/ai-providers";
 import {
   ResumeImportFieldCandidateSchema,
   hasProfileSetupPlaceholderValue,
@@ -8,7 +8,7 @@ import {
   type ResumeDocumentBundle,
   type ResumeImportConflictChoice,
   type ResumeImportFieldCandidate,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   areEquivalentRecordCandidates,

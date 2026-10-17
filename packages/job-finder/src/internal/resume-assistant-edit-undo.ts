@@ -1,4 +1,4 @@
-import type { ResumeDraft, ResumeDraftRevision } from "@nordri/contracts";
+import type { ResumeDraft, ResumeDraftRevision } from "@nestor/contracts";
 
 type Json = unknown;
 

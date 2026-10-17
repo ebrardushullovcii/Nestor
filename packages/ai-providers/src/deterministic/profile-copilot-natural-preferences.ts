@@ -3,7 +3,7 @@ import {
   type CompensationCurrencyStatus,
   type CompensationInterval,
   type ProfileCopilotReply,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import type { ReviseCandidateProfileInput } from "../shared";
 import { createUniqueId, normalizeFactText } from "./profile-copilot-helpers";

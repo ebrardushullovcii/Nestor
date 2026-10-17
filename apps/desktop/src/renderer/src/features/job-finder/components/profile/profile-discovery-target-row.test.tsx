@@ -16,7 +16,7 @@ import type {
   SourceAccessPrompt,
   SourceDebugRunDetails,
   SourceDebugRunRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { ToastProvider } from "@renderer/components/ui/toast";
 import { ProfileDiscoveryTargetRow } from "./profile-discovery-target-row";
 

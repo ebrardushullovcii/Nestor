@@ -10,7 +10,7 @@ import {
   type SavedJob,
   type JobListRow,
   type WorkMode,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DiscoveryResultsPanel } from "./discovery-results-panel";
@@ -517,9 +517,9 @@ describe("DiscoveryResultsPanel triage filters", () => {
 });
 
 const FACET_FILTERS_STORAGE_KEY =
-  "nordri.job-finder.discovery.result-filters.v2";
+  "nestor.job-finder.discovery.result-filters.v2";
 const LEGACY_FACET_FILTERS_STORAGE_KEY =
-  "nordri.job-finder.discovery.result-filters.v1";
+  "nestor.job-finder.discovery.result-filters.v1";
 
 function readFacetScopesById(): Record<string, Record<string, unknown>> {
   const raw = window.localStorage.getItem(FACET_FILTERS_STORAGE_KEY);

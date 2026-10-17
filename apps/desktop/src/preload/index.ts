@@ -3,7 +3,7 @@ import {
   ResumeBatchGenerationProgressSchema,
   type ResumeBatchGenerationInput,
   type ResumeBatchGenerationProgress,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   contextBridge,
   ipcRenderer as nativeIpcRenderer,
@@ -161,7 +161,7 @@ import type {
   WriteClipboardTextResult,
   SaveUserActionAnswerDraftInput,
   UserActionCommandInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { SYSTEM_THEME_CHANGE_EVENT } from "../shared/system-theme";
 import {
   ApplicationAuthorityEnvelopeMutationResultSchema,
@@ -182,19 +182,19 @@ import {
   ResolveSubmissionOutcomeInputSchema,
   ResolveSubmissionOutcomeResultSchema,
   UpdateApplicationAuthorityEnvelopeInputSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 let activeAgentDiscoveryRequestId: string | null = null;
 let activeResumeImportRequestId: string | null = null;
 let activeSourceDebugRequestId: string | null = null;
 
 const testApiEnabled =
-  process.env.NORDRI_ENABLE_TEST_API === "1" ||
-  process.env.NORDRI_ENABLE_TEST_API === "true";
+  process.env.NESTOR_ENABLE_TEST_API === "1" ||
+  process.env.NESTOR_ENABLE_TEST_API === "true";
 const configuredSystemThemeOverride =
-  process.env.NORDRI_TEST_SYSTEM_THEME === "dark" ||
-  process.env.NORDRI_TEST_SYSTEM_THEME === "light"
-    ? process.env.NORDRI_TEST_SYSTEM_THEME
+  process.env.NESTOR_TEST_SYSTEM_THEME === "dark" ||
+  process.env.NESTOR_TEST_SYSTEM_THEME === "light"
+    ? process.env.NESTOR_TEST_SYSTEM_THEME
     : null;
 let currentSystemThemeOverride: "dark" | "light" | null =
   configuredSystemThemeOverride;
@@ -1579,4 +1579,4 @@ const desktopApi = {
   },
 };
 
-contextBridge.exposeInMainWorld("nordri", desktopApi);
+contextBridge.exposeInMainWorld("nestor", desktopApi);

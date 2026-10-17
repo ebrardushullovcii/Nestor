@@ -8,7 +8,7 @@ import {
   ResumeDraftRevisionSchema,
   ResumeDraftSchema,
   type ResumeDraftRevision,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { ResumeVersionHistoryPanel } from "./resume-version-history-panel";
 
 function createDraft(updatedAt = "2026-07-30T12:00:00.000Z") {

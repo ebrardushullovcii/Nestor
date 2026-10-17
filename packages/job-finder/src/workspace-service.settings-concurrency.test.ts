@@ -1,9 +1,9 @@
-import type { ApplicationRecord } from "@nordri/contracts";
-import { ApplicationCrmSettingsSchema } from "@nordri/contracts";
+import type { ApplicationRecord } from "@nestor/contracts";
+import { ApplicationCrmSettingsSchema } from "@nestor/contracts";
 import {
   createInMemoryJobFinderRepository,
   type JobFinderRepository,
-} from "@nordri/db";
+} from "@nestor/db";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createJobFinderWorkspaceService } from "./index";

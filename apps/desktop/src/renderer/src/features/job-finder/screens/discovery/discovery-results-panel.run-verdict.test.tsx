@@ -2,8 +2,8 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { DiscoveryRunRecordSchema } from "@nordri/contracts";
-import type { BrowserSessionState } from "@nordri/contracts";
+import { DiscoveryRunRecordSchema } from "@nestor/contracts";
+import type { BrowserSessionState } from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DiscoveryResultsPanel } from "./discovery-results-panel";

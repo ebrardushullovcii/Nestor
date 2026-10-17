@@ -4,7 +4,7 @@ import {
   type JobSearchCampaignHistoryEntry,
   type JobSearchPreferences,
   type ProfileSetupState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * One-time adoption of disabled starter sources for legacy workspaces that

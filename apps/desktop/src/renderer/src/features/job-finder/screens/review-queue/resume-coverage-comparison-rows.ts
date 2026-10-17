@@ -1,7 +1,7 @@
 import type {
   ResumeCoverageClaimChange,
   ResumeCoverageRoleComparison,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * Pairs each line the tailored resume dropped with the line that replaced it.

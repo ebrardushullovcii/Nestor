@@ -1,8 +1,8 @@
-import type { JobFinderAiClient } from "@nordri/ai-providers";
+import type { JobFinderAiClient } from "@nestor/ai-providers";
 import type {
   ResumeAssistantConversationTurn,
   ResumeProposalCheckResult,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import {
   isBlockingResumeClaimAssessment,
   type CandidateProfile,
@@ -11,7 +11,7 @@ import {
   type ResumeDraft,
   type ResumeDraftPatch,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { sanitizeResumeDraft } from "./resume-workspace-helpers";
 import { evaluateCheckedResumeProposalGrounding } from "./resume-claim-checks";
 import { applyPatchToResumeDraft } from "./resume-workspace-patches";

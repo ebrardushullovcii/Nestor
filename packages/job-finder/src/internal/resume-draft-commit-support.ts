@@ -3,7 +3,7 @@ import {
   type ResumeDraft,
   type ResumeValidationIssue,
   type ResumeValidationResult,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * A timestamp strictly after `previousIso`, so a draft revision written in

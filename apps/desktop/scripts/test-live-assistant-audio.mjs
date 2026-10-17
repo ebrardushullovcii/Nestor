@@ -31,7 +31,7 @@ async function waitForTranscriptSource(
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const workspace = await window.evaluate(() =>
-      window.nordri.liveAssistant.getWorkspace(),
+      window.nestor.liveAssistant.getWorkspace(),
     );
     const count =
       workspace.activeSession?.transcriptSegments.filter(
@@ -58,7 +58,7 @@ async function run() {
   }
 
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-interview-audio-"),
+    path.join(os.tmpdir(), "nestor-interview-audio-"),
   );
   const microphoneAudioPath = path.join(userDataDirectory, "microphone.wav");
   const systemAudioPath = path.join(userDataDirectory, "system.wav");
@@ -85,11 +85,11 @@ async function run() {
     cwd: desktopDir,
     env: {
       ...process.env,
-      NORDRI_AI_API_KEY: "",
-      NORDRI_AI_VISION_API_KEY: "",
-      NORDRI_INTERVIEW_AI_API_KEY: "",
-      NORDRI_INTERVIEW_ADVANCED_SURFACES: "",
-      NORDRI_USER_DATA_DIR: userDataDirectory,
+      NESTOR_AI_API_KEY: "",
+      NESTOR_AI_VISION_API_KEY: "",
+      NESTOR_INTERVIEW_AI_API_KEY: "",
+      NESTOR_INTERVIEW_ADVANCED_SURFACES: "",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
     },
   });
 
@@ -100,7 +100,7 @@ async function run() {
       window.location.hash = "/live-assistant";
     });
     await window.evaluate(async () => {
-      await window.nordri.liveAssistant.saveSetup({
+      await window.nestor.liveAssistant.saveSetup({
         consent: {
           microphoneCapture: true,
           meetingAudioCapture: true,
@@ -111,15 +111,15 @@ async function run() {
           acceptedAt: new Date().toISOString(),
         },
       });
-      await window.nordri.liveAssistant.runRehearsal();
-      await window.nordri.liveAssistant.startSession();
+      await window.nestor.liveAssistant.runRehearsal();
+      await window.nestor.liveAssistant.startSession();
     });
     await window.reload();
     await window.waitForLoadState("domcontentloaded");
     await window.getByRole("heading", { name: "Audio inputs" }).waitFor();
 
     const initialWorkspace = await window.evaluate(() =>
-      window.nordri.liveAssistant.getWorkspace(),
+      window.nestor.liveAssistant.getWorkspace(),
     );
     const initialMicrophoneCount =
       initialWorkspace.activeSession?.transcriptSegments.filter(
@@ -137,7 +137,7 @@ async function run() {
       initialMicrophoneCount + 1,
     );
     const workspaceAfterMicrophone = await window.evaluate(() =>
-      window.nordri.liveAssistant.getWorkspace(),
+      window.nestor.liveAssistant.getWorkspace(),
     );
     await window.getByRole("button", { name: "Stop audio" }).click();
     await window.getByRole("button", { name: "Start mic audio" }).waitFor({
@@ -158,14 +158,14 @@ async function run() {
       initialSystemCount + 1,
     );
     const workspaceAfterSystem = await window.evaluate(() =>
-      window.nordri.liveAssistant.getWorkspace(),
+      window.nestor.liveAssistant.getWorkspace(),
     );
     await window.getByRole("button", { name: "Pause" }).click();
     await window
       .getByText("System audio transcription stopped.", { exact: true })
       .waitFor();
     const pausedWorkspace = await window.evaluate(() =>
-      window.nordri.liveAssistant.getWorkspace(),
+      window.nestor.liveAssistant.getWorkspace(),
     );
     const pauseStopsActiveAudio =
       pausedWorkspace.activeSession?.status === "paused" &&
@@ -173,7 +173,7 @@ async function run() {
     await window.getByRole("button", { name: "Resume" }).click();
 
     const workspace = await window.evaluate(() =>
-      window.nordri.liveAssistant.getWorkspace(),
+      window.nestor.liveAssistant.getWorkspace(),
     );
     const microphoneSegments =
       workspaceAfterMicrophone.activeSession?.transcriptSegments.filter(

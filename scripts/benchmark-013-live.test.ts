@@ -4,20 +4,20 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
-import { createJobFinderAiClientFromEnvironment } from '@nordri/ai-providers'
-import { createBrowserAgentRuntime } from '@nordri/browser-runtime'
+import { createJobFinderAiClientFromEnvironment } from '@nestor/ai-providers'
+import { createBrowserAgentRuntime } from '@nestor/browser-runtime'
 import {
   CandidateProfileSchema,
   JobFinderSettingsSchema,
   JobSearchPreferencesSchema,
-} from '@nordri/contracts'
-import { createInMemoryJobFinderRepository } from '@nordri/db'
+} from '@nestor/contracts'
+import { createInMemoryJobFinderRepository } from '@nestor/db'
 import {
   buildBenchmarkRepositoryState,
   createJobFinderWorkspaceService,
   type JobFinderDocumentManager,
   type JobFinderWorkspaceService,
-} from '@nordri/job-finder'
+} from '@nestor/job-finder'
 
 const currentFile = fileURLToPath(import.meta.url)
 const repoRoot = path.resolve(path.dirname(currentFile), '..')
@@ -26,8 +26,8 @@ const outputDir = process.env.BENCHMARK_OUTPUT_DIR
   ? path.resolve(process.env.BENCHMARK_OUTPUT_DIR)
   : defaultOutputDir
 const outputVariant = process.env.BENCHMARK_VARIANT ?? 'after'
-const headless = (process.env.NORDRI_BROWSER_HEADLESS ?? '1') === '1'
-const runLiveBenchmark = process.env.NORDRI_RUN_013_LIVE_BENCHMARK === '1'
+const headless = (process.env.NESTOR_BROWSER_HEADLESS ?? '1') === '1'
+const runLiveBenchmark = process.env.NESTOR_RUN_013_LIVE_BENCHMARK === '1'
 
 function getDefaultChromeExecutablePath(): string {
   if (process.platform === 'win32') {
@@ -43,9 +43,9 @@ function getDefaultChromeExecutablePath(): string {
 }
 
 const chromeExecutablePath =
-  process.env.NORDRI_CHROME_PATH ?? getDefaultChromeExecutablePath()
-const rawChromeDebugPort = process.env.NORDRI_CHROME_DEBUG_PORT
-  ? Number.parseInt(process.env.NORDRI_CHROME_DEBUG_PORT, 10)
+  process.env.NESTOR_CHROME_PATH ?? getDefaultChromeExecutablePath()
+const rawChromeDebugPort = process.env.NESTOR_CHROME_DEBUG_PORT
+  ? Number.parseInt(process.env.NESTOR_CHROME_DEBUG_PORT, 10)
   : null
 const chromeDebugPort =
   rawChromeDebugPort !== null &&
@@ -880,7 +880,7 @@ describe.sequential('013 live before/after benchmark harness', () => {
         const seed = buildSeed(fixture, target)
         const repository = createInMemoryJobFinderRepository(seed)
         const userDataDir = await mkdtemp(
-          path.join(os.tmpdir(), `nordri-013-benchmark-${outputVariant}-${target.id}-`),
+          path.join(os.tmpdir(), `nestor-013-benchmark-${outputVariant}-${target.id}-`),
         )
         const browserRuntime = createBrowserAgentRuntime({
           userDataDir,

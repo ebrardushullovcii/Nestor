@@ -5,7 +5,7 @@ import {
   DesktopBrowserCommandSchema,
   DesktopBrowserImportInputSchema,
   DesktopBrowserViewportSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
 import {
   importSignInsFromBrowser,

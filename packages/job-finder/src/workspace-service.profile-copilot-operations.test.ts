@@ -1,7 +1,7 @@
 import {
   createDeterministicJobFinderAiClient,
   type JobFinderAiClient,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import type {
   CandidateProfile,
   JobSearchPreferences,
@@ -9,12 +9,12 @@ import type {
   ProfileCopilotPatchGroup,
   ProfileCopilotPatchOperation,
   ProfileSetupState,
-} from "@nordri/contracts";
-import { ProfileCopilotPatchGroupSchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { ProfileCopilotPatchGroupSchema } from "@nestor/contracts";
 import type {
   JobFinderRepository,
   JobFinderRepositorySeed,
-} from "@nordri/db";
+} from "@nestor/db";
 import { describe, expect, test } from "vitest";
 
 import {

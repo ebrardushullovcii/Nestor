@@ -5,7 +5,7 @@ import {
   ResumeDraftPatchSchema,
   assessJobPostingDetailQuality,
   type ProfileCopilotReply,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   JobFitAssessmentSchema,
   OpenAiCompatibleJobFinderAiClientOptionsSchema,
@@ -1035,20 +1035,20 @@ function waitBeforeResumeImportRetry(attempt: number): Promise<void> {
 export function createJobFinderAiClientFromEnvironment(
   env: StringMap = process.env,
 ): JobFinderAiClient {
-  const apiKey = env.NORDRI_AI_API_KEY;
+  const apiKey = env.NESTOR_AI_API_KEY;
   const parsedRequestTimeoutMs = parseConfiguredTimeoutMs(
-    env.NORDRI_AI_TIMEOUT_MS,
+    env.NESTOR_AI_TIMEOUT_MS,
   );
   const parsedResumeExtractionTimeoutMs = parseConfiguredTimeoutMs(
-    env.NORDRI_AI_RESUME_TIMEOUT_MS,
+    env.NESTOR_AI_RESUME_TIMEOUT_MS,
   );
   // Liveness and retry knobs shared by every model route (see ADR 0020).
   const parsedResilience = {
-    idleTimeoutMs: parseConfiguredTimeoutMs(env.NORDRI_AI_IDLE_TIMEOUT_MS),
-    maxAttempts: parseConfiguredPositiveInteger(env.NORDRI_AI_MAX_ATTEMPTS),
-    streaming: parseConfiguredBoolean(env.NORDRI_AI_STREAMING),
+    idleTimeoutMs: parseConfiguredTimeoutMs(env.NESTOR_AI_IDLE_TIMEOUT_MS),
+    maxAttempts: parseConfiguredPositiveInteger(env.NESTOR_AI_MAX_ATTEMPTS),
+    streaming: parseConfiguredBoolean(env.NESTOR_AI_STREAMING),
     retryBaseDelayMs: parseConfiguredPositiveInteger(
-      env.NORDRI_AI_RETRY_BASE_DELAY_MS,
+      env.NESTOR_AI_RETRY_BASE_DELAY_MS,
       0,
     ),
   };
@@ -1110,15 +1110,15 @@ export function createJobFinderAiClientFromEnvironment(
 
   const primaryClient = createOpenAiCompatibleJobFinderAiClient({
     apiKey,
-    baseUrl: env.NORDRI_AI_BASE_URL ?? DEFAULT_OPENCODE_GO_BASE_URL,
-    model: env.NORDRI_AI_MODEL ?? DEFAULT_TEXT_MODEL,
+    baseUrl: env.NESTOR_AI_BASE_URL ?? DEFAULT_OPENCODE_GO_BASE_URL,
+    model: env.NESTOR_AI_MODEL ?? DEFAULT_TEXT_MODEL,
     apiMode:
-      parseModelApiMode(env.NORDRI_AI_API_MODE) ?? DEFAULT_TEXT_MODEL_API_MODE,
+      parseModelApiMode(env.NESTOR_AI_API_MODE) ?? DEFAULT_TEXT_MODEL_API_MODE,
     reasoningEffort:
-      parseModelReasoningEffort(env.NORDRI_AI_REASONING_EFFORT) ??
+      parseModelReasoningEffort(env.NESTOR_AI_REASONING_EFFORT) ??
       DEFAULT_TEXT_MODEL_REASONING_EFFORT,
     agentReasoningEffort:
-      parseModelReasoningEffort(env.NORDRI_AI_AGENT_REASONING_EFFORT) ??
+      parseModelReasoningEffort(env.NESTOR_AI_AGENT_REASONING_EFFORT) ??
       DEFAULT_AGENT_TURN_REASONING_EFFORT,
     label: "AI resume agent",
     requestTimeoutMs: parsedRequestTimeoutMs,
@@ -1131,14 +1131,14 @@ export function createJobFinderAiClientFromEnvironment(
   // always applied (defaults to `high` when not configured). See ADR 0019.
   const aggressiveClient = createOpenAiCompatibleJobFinderAiClient({
     apiKey,
-    baseUrl: env.NORDRI_AI_BASE_URL ?? DEFAULT_OPENCODE_GO_BASE_URL,
+    baseUrl: env.NESTOR_AI_BASE_URL ?? DEFAULT_OPENCODE_GO_BASE_URL,
     model:
-      env.NORDRI_AI_AGGRESSIVE_MODEL?.trim() || DEFAULT_AGGRESSIVE_RESUME_MODEL,
+      env.NESTOR_AI_AGGRESSIVE_MODEL?.trim() || DEFAULT_AGGRESSIVE_RESUME_MODEL,
     apiMode:
-      parseModelApiMode(env.NORDRI_AI_AGGRESSIVE_API_MODE) ??
+      parseModelApiMode(env.NESTOR_AI_AGGRESSIVE_API_MODE) ??
       DEFAULT_AGGRESSIVE_RESUME_MODEL_API_MODE,
     reasoningEffort:
-      parseModelReasoningEffort(env.NORDRI_AI_AGGRESSIVE_REASONING_EFFORT) ??
+      parseModelReasoningEffort(env.NESTOR_AI_AGGRESSIVE_REASONING_EFFORT) ??
       DEFAULT_AGGRESSIVE_RESUME_MODEL_REASONING_EFFORT,
     label: "Aggressive AI resume agent",
     requestTimeoutMs: parsedRequestTimeoutMs,

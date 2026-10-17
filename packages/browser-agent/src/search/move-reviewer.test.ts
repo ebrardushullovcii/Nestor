@@ -1,4 +1,4 @@
-import { CandidateProfileSchema } from "@nordri/contracts";
+import { CandidateProfileSchema } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 
 import type { LLMClient } from "../agent/contracts";

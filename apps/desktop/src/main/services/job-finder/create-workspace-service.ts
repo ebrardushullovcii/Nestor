@@ -14,31 +14,31 @@ import {
   createJobFinderAiClientFromEnvironment,
   createDeterministicResumeVisionProvider,
   createResumeVisionProviderFromEnvironment,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import { randomUUID } from "node:crypto";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   createBrowserAgentRuntime,
   createCatalogBrowserSessionRuntime,
-} from "@nordri/browser-runtime";
+} from "@nestor/browser-runtime";
 import type {
   BrowserSessionRuntime,
   OpenBrowserSessionOptions,
-} from "@nordri/browser-runtime";
-import type { BrowserSessionState } from "@nordri/contracts";
-import { JobFinderStartupDatabaseRecoveryFactSchema } from "@nordri/contracts";
+} from "@nestor/browser-runtime";
+import type { BrowserSessionState } from "@nestor/contracts";
+import { JobFinderStartupDatabaseRecoveryFactSchema } from "@nestor/contracts";
 import {
   createFileJobFinderRepository,
   WorkspaceDatabaseRecoveryRequiredError,
   type JobFinderRepository,
   type WorkspaceDatabaseRecoveryRequiredDetails,
   type WorkspaceDatabaseRestoreTelemetryEvent,
-} from "@nordri/db";
+} from "@nestor/db";
 import {
   createDefaultListingHtmlFetcher,
   createJobFinderWorkspaceService,
-} from "@nordri/job-finder";
+} from "@nestor/job-finder";
 import { createLocalJobFinderDocumentManager } from "../../adapters/job-finder-document-manager";
 import { createLocalResumeExportFileVerifier } from "../../adapters/job-finder-export-file-verifier";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
@@ -369,7 +369,7 @@ export function createDesktopJobFinderAiClient(
   env: NodeJS.ProcessEnv = process.env,
 ) {
   const desktopTestApiEnabled = isDesktopTestApiEnabled(env);
-  const forceLiveAiDuringTestApi = isEnabled(env.NORDRI_TEST_API_USE_LIVE_AI);
+  const forceLiveAiDuringTestApi = isEnabled(env.NESTOR_TEST_API_USE_LIVE_AI);
 
   if (desktopTestApiEnabled && !forceLiveAiDuringTestApi) {
     return createDeterministicJobFinderAiClient(
@@ -398,7 +398,7 @@ export function createDesktopResumeVisionProvider(
   env: NodeJS.ProcessEnv = process.env,
 ) {
   const desktopTestApiEnabled = isDesktopTestApiEnabled(env);
-  const forceLiveAiDuringTestApi = isEnabled(env.NORDRI_TEST_API_USE_LIVE_AI);
+  const forceLiveAiDuringTestApi = isEnabled(env.NESTOR_TEST_API_USE_LIVE_AI);
 
   if (desktopTestApiEnabled && !forceLiveAiDuringTestApi) {
     return createDeterministicResumeVisionProvider(
@@ -419,8 +419,8 @@ export function createDesktopBrowserRuntime(
   const env = input.env ?? process.env;
   const desktopTestApiEnabled =
     input.desktopTestApiEnabled ?? isDesktopTestApiEnabled(env);
-  const rawPort = env.NORDRI_CHROME_DEBUG_PORT
-    ? Number.parseInt(env.NORDRI_CHROME_DEBUG_PORT, 10)
+  const rawPort = env.NESTOR_CHROME_DEBUG_PORT
+    ? Number.parseInt(env.NESTOR_CHROME_DEBUG_PORT, 10)
     : null;
   const chromeDebugPort =
     rawPort !== null &&
@@ -433,15 +433,15 @@ export function createDesktopBrowserRuntime(
   if (isBrowserAgentEnabled(env)) {
     const aiClient = input.aiClient ?? createDesktopJobFinderAiClient(env);
     const embedded =
-      env.NORDRI_BROWSER_HOST === "external" ||
-      (desktopTestApiEnabled && env.NORDRI_BROWSER_HOST !== "embedded")
+      env.NESTOR_BROWSER_HOST === "external" ||
+      (desktopTestApiEnabled && env.NESTOR_BROWSER_HOST !== "embedded")
         ? null
         : getEmbeddedBrowser();
     const baseRuntime = createBrowserAgentRuntime({
       userDataDir: getBrowserAgentProfileDirectory(),
       headless: isBrowserHeadlessEnabled(env),
-      ...(env.NORDRI_CHROME_PATH
-        ? { chromeExecutablePath: env.NORDRI_CHROME_PATH }
+      ...(env.NESTOR_CHROME_PATH
+        ? { chromeExecutablePath: env.NESTOR_CHROME_PATH }
         : {}),
       ...(chromeDebugPort !== null ? { debugPort: chromeDebugPort } : {}),
       jobExtractor: (runtimeInput) =>
@@ -468,7 +468,7 @@ export function createDesktopBrowserRuntime(
 
     if (
       desktopTestApiEnabled &&
-      isEnabled(env.NORDRI_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES)
+      isEnabled(env.NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES)
     ) {
       return {
         ...runtime,
@@ -595,8 +595,8 @@ export async function createJobFinderWorkspaceServiceAsync(
     : createDesktopResumeResearchAdapter();
 
   const usesEmbeddedBrowser =
-    env.NORDRI_BROWSER_HOST !== "external" &&
-    (!desktopTestApiEnabled || env.NORDRI_BROWSER_HOST === "embedded");
+    env.NESTOR_BROWSER_HOST !== "external" &&
+    (!desktopTestApiEnabled || env.NESTOR_BROWSER_HOST === "embedded");
   publishOnUserActionChanges(jobFinderRepository, () =>
     publishJobFinderWorkspaceUpdate(),
   );

@@ -3,8 +3,8 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { BrowserWindow } from "electron";
-import { createConcurrencyLimiter } from "@nordri/core";
-import type { JobFinderDocumentManager } from "@nordri/job-finder";
+import { createConcurrencyLimiter } from "@nestor/core";
+import type { JobFinderDocumentManager } from "@nestor/job-finder";
 import JSZip from "jszip";
 import { getApplicationDocumentLibrary } from "../services/job-finder/application-document-library-instance";
 
@@ -255,7 +255,7 @@ function createPreviewPageCounter() {
       if (queuedCount !== undefined) return queuedCount;
       const directory = path.join(
         tmpdir(),
-        `nordri-preview-pages-${randomUUID()}`,
+        `nestor-preview-pages-${randomUUID()}`,
       );
       try {
         throwIfPreviewAborted(controller.signal);

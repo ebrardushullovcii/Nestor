@@ -1,4 +1,4 @@
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 
 import { isDiscoveryAlsoFoundResult } from "../screens/discovery/discovery-result-groups";
 import { countActiveSafeguardBlockers } from "./safeguards-blocker-count";

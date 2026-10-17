@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { AssistantMessageSchema } from "@nordri/contracts";
+import { AssistantMessageSchema } from "@nestor/contracts";
 import { verifyPersonAnswerAuthority } from "./person-answer-authority";
 import { editProfileTool } from "./tools/profile-tools";
 import { createWorkspaceServiceHarness } from "../workspace-service.test-support";

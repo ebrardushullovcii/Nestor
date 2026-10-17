@@ -1,4 +1,4 @@
-import type { AssistantResumeBatchState } from "@nordri/contracts";
+import type { AssistantResumeBatchState } from "@nestor/contracts";
 import { expect, it, vi } from "vitest";
 import { createAssistantBridge } from "./assistant";
 

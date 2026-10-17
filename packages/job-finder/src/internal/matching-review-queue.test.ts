@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { SavedJob } from "@nordri/contracts";
+import type { SavedJob } from "@nestor/contracts";
 
 import { createSeed } from "../workspace-service.test-fixtures";
 import { compareDiscoveryJobs as compareDiscoveryJobsShared } from "../discovery-ordering";

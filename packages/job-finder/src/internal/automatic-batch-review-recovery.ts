@@ -1,4 +1,4 @@
-import { JobFinderIntelligenceStateSchema } from "@nordri/contracts";
+import { JobFinderIntelligenceStateSchema } from "@nestor/contracts";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 
 /**

@@ -1,4 +1,4 @@
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import type { JobFinderGlobalSearchEntry } from "./job-finder-global-search";
 import { buildJobFinderContextRoute } from "./job-finder-context-navigation";
 import { buildResumeWorkspaceRoute } from "./resume-workspace-route";

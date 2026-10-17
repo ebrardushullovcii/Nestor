@@ -6,7 +6,7 @@ import type {
   SourceAccessPrompt,
   JobSearchPreferences,
   JobSearchSelectivity,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { AppWindow, Ban, CircleCheck, KeyRound } from "lucide-react";
 import {
   DISCOVERY_OFFLINE_RUNTIME_LABEL,

@@ -3,15 +3,15 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { DesktopPlatformPing } from "@nordri/contracts";
+import type { DesktopPlatformPing } from "@nestor/contracts";
 import type { JobFinderStartupDatabaseRecoveryFact } from "../../../shared/job-finder-startup-db-recovery";
 import { JobFinderPage } from "./job-finder-page";
 
-function configureWindowNordri(input: {
+function configureWindowNestor(input: {
   getWorkspaceBootstrapError: Error;
   recoveryFact: JobFinderStartupDatabaseRecoveryFact;
 }) {
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       ping: vi.fn<() => Promise<DesktopPlatformPing>>(() =>
@@ -51,12 +51,12 @@ function renderJobFinderPage() {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  delete (window as { nordri?: unknown }).nordri;
+  delete (window as { nestor?: unknown }).nestor;
 });
 
 describe("JobFinderPage startup database recovery blocking", () => {
   it("blocks on the typed incident without offering a file-mutating retry", async () => {
-    configureWindowNordri({
+    configureWindowNestor({
       getWorkspaceBootstrapError: new Error(
         "Workspace database recovery required (salvage-required). Automatic recovery could not restore the previous workspace safely.",
       ),
@@ -80,7 +80,7 @@ describe("JobFinderPage startup database recovery blocking", () => {
   });
 
   it("keeps the generic retryable error for failures without a typed incident", async () => {
-    configureWindowNordri({
+    configureWindowNestor({
       getWorkspaceBootstrapError: new Error("Unable to load the workspace."),
       recoveryFact: { status: "idle" },
     });

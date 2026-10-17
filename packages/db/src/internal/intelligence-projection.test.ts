@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { JobFinderIntelligenceStateSchema } from "@nordri/contracts";
+import { JobFinderIntelligenceStateSchema } from "@nestor/contracts";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createInMemoryJobFinderRepository } from "../index";
 import {
@@ -30,7 +30,7 @@ for (const mode of ["memory", "file"] as const) {
     test("warm reads reuse frozen state without parsing/cloning; canonical reads and updaters stay owned", async () => {
       const temp =
         mode === "file"
-          ? await createTempRepository("nordri-intelligence-projection-")
+          ? await createTempRepository("nestor-intelligence-projection-")
           : null;
       const repo = temp
         ? await temp.createRepository()
@@ -124,7 +124,7 @@ for (const mode of ["memory", "file"] as const) {
 }
 
 test("singleton cache observes local writes, key removal, external commits, and rolled-back revision reuse", async () => {
-  const temp = await createTempRepository("nordri-intelligence-cache-epoch-");
+  const temp = await createTempRepository("nestor-intelligence-cache-epoch-");
   const repo = await temp.createRepository();
   await repo.saveIntelligenceState(intelligence());
   await repo.close();

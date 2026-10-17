@@ -5,7 +5,7 @@ import {
   JobPostingSchema,
   type DiscoveryLedgerEntry,
   type JobPosting,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   createDiscoveryLedgerIndex,

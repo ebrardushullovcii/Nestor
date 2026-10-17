@@ -5,8 +5,8 @@ import { readFile } from "node:fs/promises";
  * Built-app re-check of the assistant tester's findings, with the configured
  * (live) model:
  *
- *   pnpm --filter @nordri/desktop build
- *   pnpm --filter @nordri/desktop qa --provider configured --script scripts/test-job-finder-assistant-fixes.mjs
+ *   pnpm --filter @nestor/desktop build
+ *   pnpm --filter @nestor/desktop qa --provider configured --script scripts/test-job-finder-assistant-fixes.mjs
  *
  * Sends go only to the private replica site the qa launcher started; the
  * harness refuses any other target before sending.
@@ -27,13 +27,13 @@ function assertReplicaTarget(url, sitesUrl) {
 }
 
 const workspace = (qa) =>
-  qa.page.evaluate(() => window.nordri.jobFinder.getWorkspace());
+  qa.page.evaluate(() => window.nestor.jobFinder.getWorkspace());
 
 async function currentConversation(qa) {
   return qa.page.evaluate(async () => {
-    const list = await window.nordri.assistant.listConversations();
+    const list = await window.nestor.assistant.listConversations();
     if (!list.currentConversationId) return null;
-    return window.nordri.assistant.readConversation({
+    return window.nestor.assistant.readConversation({
       conversationId: list.currentConversationId,
     });
   });
@@ -89,7 +89,7 @@ async function newChat(qa) {
   // Each journey starts clean: a browser left open by the one before covers
   // the page with its backdrop and swallows the next journey's clicks.
   await qa.page
-    .evaluate(() => window.nordri.browser.command({ type: "minimize" }))
+    .evaluate(() => window.nestor.browser.command({ type: "minimize" }))
     .catch(() => undefined);
   await qa.page.keyboard.press("Escape").catch(() => undefined);
   await qa.page.waitForTimeout(600);
@@ -106,8 +106,8 @@ export default async function fixesHarness(qa) {
     console.log(`${verdict} ${id}${detail ? `: ${detail}` : ""}`);
   };
   const site = (path) => new URL(path, qa.sites.url).href;
-  // NORDRI_QA_ONLY=M4 runs one journey (comma-separated ids).
-  const only = (process.env.NORDRI_QA_ONLY ?? "")
+  // NESTOR_QA_ONLY=M4 runs one journey (comma-separated ids).
+  const only = (process.env.NESTOR_QA_ONLY ?? "")
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
@@ -132,18 +132,18 @@ export default async function fixesHarness(qa) {
       await qa.capture(`crash-${id}`).catch(() => undefined);
     }
   };
-  // NORDRI_QA_BOARD=lever points the two apply jobs at the Lever replica.
+  // NESTOR_QA_BOARD=lever points the two apply jobs at the Lever replica.
   const board =
-    process.env.NORDRI_QA_BOARD === "lever" ? "lever" : "greenhouse";
+    process.env.NESTOR_QA_BOARD === "lever" ? "lever" : "greenhouse";
 
   await qa.page.waitForFunction(
     () =>
-      typeof window.nordri?.jobFinder?.test?.loadAgentOwnedBrowserDemo ===
+      typeof window.nestor?.jobFinder?.test?.loadAgentOwnedBrowserDemo ===
       "function",
   );
   await qa.page.evaluate(
     (input) =>
-      window.nordri.jobFinder.test.loadAgentOwnedBrowserDemo(input),
+      window.nestor.jobFinder.test.loadAgentOwnedBrowserDemo(input),
     {
       sourceUrl: site(`/${board}/`),
       applicationUrl: site(`/${board}/apply/3`),
@@ -197,12 +197,12 @@ export default async function fixesHarness(qa) {
         const outcomes = [];
         for (const call of [
           () =>
-            window.nordri.jobFinder.sendProfileCopilotMessage(
+            window.nestor.jobFinder.sendProfileCopilotMessage(
               "Change my headline",
               { surface: "profile", section: "basics" },
             ),
           () =>
-            window.nordri.jobFinder.sendResumeAssistantMessage(
+            window.nestor.jobFinder.sendResumeAssistantMessage(
               "job_ready",
               "Tighten the summary.",
             ),
@@ -300,7 +300,7 @@ export default async function fixesHarness(qa) {
       });
       await qa.page.waitForTimeout(2500);
       const before = await qa.page.evaluate(() =>
-        window.nordri.jobFinder.getResumeWorkspace("job_ready"),
+        window.nestor.jobFinder.getResumeWorkspace("job_ready"),
       );
       const summaryBefore =
         before.draft.sections.find((section) => section.kind === "summary")
@@ -310,7 +310,7 @@ export default async function fixesHarness(qa) {
         "For this job, add a line to my resume summary saying I care about platform reliability.",
       );
       const after = await qa.page.evaluate(() =>
-        window.nordri.jobFinder.getResumeWorkspace("job_ready"),
+        window.nestor.jobFinder.getResumeWorkspace("job_ready"),
       );
       const summaryAfter =
         after.draft.sections.find((section) => section.kind === "summary")
@@ -440,7 +440,7 @@ export default async function fixesHarness(qa) {
         record(
           "N1",
           "SKIP",
-          "Platform Engineer was already sent by an earlier journey in this session; run this one in a fresh session (NORDRI_QA_ONLY=N1).",
+          "Platform Engineer was already sent by an earlier journey in this session; run this one in a fresh session (NESTOR_QA_ONLY=N1).",
         );
         return;
       }
@@ -574,7 +574,7 @@ export default async function fixesHarness(qa) {
         .concat(beforeJobs.companyJobs)
         .find((job) => job.id === "job_consent_queue");
       await qa.page.evaluate(
-        (url) => window.nordri.browser.command({ type: "open", url }),
+        (url) => window.nestor.browser.command({ type: "open", url }),
         site("/greenhouse/"),
       );
       await qa.page.waitForTimeout(3000);
@@ -613,13 +613,13 @@ export default async function fixesHarness(qa) {
       // already saved (under another company name) and then skipped.
       await qa.page
         .evaluate(() =>
-          window.nordri.jobFinder.dismissDiscoveryJob("job_found_5", [
+          window.nestor.jobFinder.dismissDiscoveryJob("job_found_5", [
             "role",
           ]),
         )
         .catch(() => undefined);
       const skippedBefore = await qa.page.evaluate(async () => {
-        const state = await window.nordri.jobFinder.getWorkspace();
+        const state = await window.nestor.jobFinder.getWorkspace();
         const hidden = (state.dismissedDiscoveryJobs ?? []).some(
           (job) => job.id === "job_found_5",
         );
@@ -640,7 +640,7 @@ export default async function fixesHarness(qa) {
       });
       await newChat(qa);
       await qa.page.evaluate(
-        (url) => window.nordri.browser.command({ type: "open", url }),
+        (url) => window.nestor.browser.command({ type: "open", url }),
         site("/lever/"),
       );
       await qa.page.waitForTimeout(3000);
@@ -648,7 +648,7 @@ export default async function fixesHarness(qa) {
         timeoutMs: 300_000,
       });
       const skippedAfter = await qa.page.evaluate(async () => {
-        const state = await window.nordri.jobFinder.getWorkspace();
+        const state = await window.nestor.jobFinder.getWorkspace();
         const hidden = (state.dismissedDiscoveryJobs ?? []).some(
           (job) => job.id === "job_found_5",
         );
@@ -692,8 +692,8 @@ export default async function fixesHarness(qa) {
       });
       const field = qa.page.locator("main textarea:visible").first();
       await field.waitFor({ timeout: 30_000 });
-      // NORDRI_QA_DEBUG=1 logs every selection and focus event.
-      if (process.env.NORDRI_QA_DEBUG)
+      // NESTOR_QA_DEBUG=1 logs every selection and focus event.
+      if (process.env.NESTOR_QA_DEBUG)
         await qa.page.evaluate(() => {
           window.__selLog = [];
           const log = (event) => {
@@ -735,7 +735,7 @@ export default async function fixesHarness(qa) {
       const context = sent?.context ?? null;
       const selected = context?.selectedText ?? null;
       await qa.capture("m5-selection");
-      if (process.env.NORDRI_QA_DEBUG)
+      if (process.env.NESTOR_QA_DEBUG)
         console.log(
           JSON.stringify(
             await qa.page.evaluate(() => window.__selLog),
@@ -759,7 +759,7 @@ export default async function fixesHarness(qa) {
     await journey("R2", async () => {
       await newChat(qa);
       await qa.page.evaluate(() =>
-        window.nordri.jobFinder.setActivityControl({
+        window.nestor.jobFinder.setActivityControl({
           paused: true,
           reason: null,
         }),
@@ -788,7 +788,7 @@ export default async function fixesHarness(qa) {
         `paused after=${stillPaused}; new runs ${runsAfter - runsBefore}; reply: ${(replyText(reply) || JSON.stringify(reply.messages.at(-1)?.parts ?? [])).slice(0, 240)}`,
       );
       await qa.page.evaluate(() =>
-        window.nordri.jobFinder.setActivityControl({ paused: false }),
+        window.nestor.jobFinder.setActivityControl({ paused: false }),
       );
     });
 
@@ -828,7 +828,7 @@ export default async function fixesHarness(qa) {
         record(
           "R7",
           "SKIP",
-          "Platform Engineer was already sent by an earlier journey in this session; run this one in a fresh session (NORDRI_QA_ONLY=R7).",
+          "Platform Engineer was already sent by an earlier journey in this session; run this one in a fresh session (NESTOR_QA_ONLY=R7).",
         );
         return;
       }
@@ -928,7 +928,7 @@ export default async function fixesHarness(qa) {
         record(
           "NC",
           "SKIP",
-          "Platform Engineer was already sent by an earlier journey in this session; run this one in a fresh session (NORDRI_QA_ONLY=NC).",
+          "Platform Engineer was already sent by an earlier journey in this session; run this one in a fresh session (NESTOR_QA_ONLY=NC).",
         );
         return;
       }
@@ -937,9 +937,9 @@ export default async function fixesHarness(qa) {
       // match the imported resume, which Job Finder rightly refuses.
       const linkedin = "https://www.linkedin.com/in/alex-vanguard-test-2026";
       const stored = await qa.page.evaluate(async (url) => {
-        const state = await window.nordri.jobFinder.getWorkspace();
+        const state = await window.nestor.jobFinder.getWorkspace();
         const profile = state.profile;
-        await window.nordri.jobFinder.saveProfile({
+        await window.nestor.jobFinder.saveProfile({
           ...profile,
           linkedinUrl: url,
           links: [

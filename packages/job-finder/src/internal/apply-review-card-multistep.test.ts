@@ -1,4 +1,4 @@
-import { ApplicationReviewCardSchema } from "@nordri/contracts";
+import { ApplicationReviewCardSchema } from "@nestor/contracts";
 import { expect, test } from "vitest";
 import { mergeApplyReviewCards } from "./agent-application-preparation";
 

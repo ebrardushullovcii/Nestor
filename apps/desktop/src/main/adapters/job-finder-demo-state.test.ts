@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   JobFinderRepositoryStateSchema,
   SavedJobDiscoveryProvenanceSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   createAggressiveTailoringDriveState,

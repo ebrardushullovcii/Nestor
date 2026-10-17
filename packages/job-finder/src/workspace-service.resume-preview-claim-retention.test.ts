@@ -1,5 +1,5 @@
-import { createOpenAiCompatibleJobFinderAiClient } from "@nordri/ai-providers";
-import { ResumeDraftSchema } from "@nordri/contracts";
+import { createOpenAiCompatibleJobFinderAiClient } from "@nestor/ai-providers";
+import { ResumeDraftSchema } from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 
 import { withResumeClaimChecks } from "./internal/resume-claim-checks";

@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import type {
   JobFinderRendererWorkspaceSnapshot,
   ProfileCopilotMessage,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { JobFinderShellActions } from "@renderer/features/job-finder/lib/job-finder-types";
 import { createPrimaryPageActions } from "./use-job-finder-page-controller-actions";
 

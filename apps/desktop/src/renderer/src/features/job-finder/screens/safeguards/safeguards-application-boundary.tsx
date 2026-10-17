@@ -1,4 +1,4 @@
-import type { ApplicationAuthorityEnvelope } from "@nordri/contracts";
+import type { ApplicationAuthorityEnvelope } from "@nestor/contracts";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Button } from "@renderer/components/ui/button";
 import { StatusBadge } from "@renderer/features/job-finder/components/status-badge";
@@ -27,13 +27,13 @@ export function describeEnvelopeMode(
 export const APPLICATION_BOUNDARY_SENTENCE =
   "Job Finder fills applications and sends them only with your permission. It never asks for a password. If you provide sign-in details and authorize their use, it may use them for that task without saving them. You control account creation; CAPTCHA and MFA stay with you.";
 
-type AuthorityApi = Window["nordri"]["jobFinder"];
+type AuthorityApi = Window["nestor"]["jobFinder"];
 
 function authorityApi(): AuthorityApi | null {
   if (typeof window === "undefined") {
     return null;
   }
-  return window.nordri?.jobFinder ?? null;
+  return window.nestor?.jobFinder ?? null;
 }
 
 function describeEnvelope(envelope: ApplicationAuthorityEnvelope): string {

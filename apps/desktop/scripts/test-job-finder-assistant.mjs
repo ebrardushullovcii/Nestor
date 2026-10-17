@@ -4,12 +4,12 @@ import { readFile } from "node:fs/promises";
 /**
  * Built-app check of the app-wide assistant sidebar (ADR 0037-0039).
  *
- *   pnpm --filter @nordri/desktop build
- *   pnpm --filter @nordri/desktop qa --script scripts/test-job-finder-assistant.mjs
- *   pnpm --filter @nordri/desktop qa --provider configured --script scripts/test-job-finder-assistant.mjs
+ *   pnpm --filter @nestor/desktop build
+ *   pnpm --filter @nestor/desktop qa --script scripts/test-job-finder-assistant.mjs
+ *   pnpm --filter @nestor/desktop qa --provider configured --script scripts/test-job-finder-assistant.mjs
  *
  * Deterministic runs use the scripted assistant model; set
- * NORDRI_TEST_ASSISTANT_DELAY_MS=600 so Stop has a running turn to stop.
+ * NESTOR_TEST_ASSISTANT_DELAY_MS=600 so Stop has a running turn to stop.
  * Configured runs use the real assistant model and also send one
  * application, only to the private local replica site the qa launcher
  * started. Before that send the harness refuses any target that is not a
@@ -36,14 +36,14 @@ function assertReplicaTarget(url, sitesUrl) {
 }
 
 async function workspace(qa) {
-  return qa.page.evaluate(() => window.nordri.jobFinder.getWorkspace());
+  return qa.page.evaluate(() => window.nestor.jobFinder.getWorkspace());
 }
 
 async function currentConversation(qa) {
   return qa.page.evaluate(async () => {
-    const list = await window.nordri.assistant.listConversations();
+    const list = await window.nestor.assistant.listConversations();
     if (!list.currentConversationId) return null;
-    return window.nordri.assistant.readConversation({
+    return window.nestor.assistant.readConversation({
       conversationId: list.currentConversationId,
     });
   });
@@ -119,12 +119,12 @@ export default async function assistantHarness(qa) {
   const applicationUrl = new URL("/greenhouse/apply/3", qa.sites.url).href;
   await qa.page.waitForFunction(
     () =>
-      typeof window.nordri?.jobFinder?.test?.loadAgentOwnedBrowserDemo ===
+      typeof window.nestor?.jobFinder?.test?.loadAgentOwnedBrowserDemo ===
       "function",
   );
   await qa.page.evaluate(
     (input) =>
-      window.nordri.jobFinder.test.loadAgentOwnedBrowserDemo(input),
+      window.nestor.jobFinder.test.loadAgentOwnedBrowserDemo(input),
     {
       sourceUrl,
       applicationUrl,
@@ -306,7 +306,7 @@ export default async function assistantHarness(qa) {
     state.reviewQueue.find((entry) => entry.jobId === "job_ready");
   assert.ok(job, "the replica job is missing from the workspace");
   const saved = await qa.page.evaluate(async () => {
-    const snapshot = await window.nordri.jobFinder.getWorkspace();
+    const snapshot = await window.nestor.jobFinder.getWorkspace();
     return (
       snapshot.discoveryJobs.find((entry) => entry.id === "job_ready") ?? null
     );

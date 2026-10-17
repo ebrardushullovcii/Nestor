@@ -1,9 +1,9 @@
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
-import { SourceDebugRunRecordSchema } from "@nordri/contracts";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
+import { SourceDebugRunRecordSchema } from "@nestor/contracts";
 import {
   createInMemoryJobFinderRepository,
   type JobFinderRepository,
-} from "@nordri/db";
+} from "@nestor/db";
 import { describe, expect, test } from "vitest";
 
 import { createJobFinderWorkspaceService } from "./index";

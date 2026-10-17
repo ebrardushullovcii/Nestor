@@ -42,7 +42,7 @@ async function waitForProfileOrSetupHeading(window) {
 }
 
 async function getWorkspace(window) {
-  return window.evaluate(() => window.nordri.jobFinder.getWorkspace())
+  return window.evaluate(() => window.nestor.jobFinder.getWorkspace())
 }
 
 function getApplyResultForJob(workspace, jobId) {
@@ -58,7 +58,7 @@ function getApplyResultForJob(workspace, jobId) {
 
 async function getSelectedApplyReviewData(window) {
   return window.evaluate(async () => {
-    const snapshot = await window.nordri.jobFinder.getWorkspace()
+    const snapshot = await window.nestor.jobFinder.getWorkspace()
     const selectedRecord =
       snapshot.applicationRecords.find((record) => record.id === snapshot.selectedApplicationRecordId) ??
       snapshot.applicationRecords[0] ??
@@ -83,7 +83,7 @@ async function getSelectedApplyReviewData(window) {
       return null
     }
 
-    const details = await window.nordri.jobFinder.getApplyRunDetails(
+    const details = await window.nestor.jobFinder.getApplyRunDetails(
       selectedApplyResult.runId,
       selectedRecord.jobId,
     )
@@ -100,11 +100,11 @@ async function getSelectedApplyReviewData(window) {
 
 async function loadQueueDemo(window) {
   await window.evaluate(async () => {
-    if (!window.nordri.jobFinder.test) {
+    if (!window.nestor.jobFinder.test) {
       throw new Error('Desktop test API is unavailable in the renderer.')
     }
 
-    return window.nordri.jobFinder.test.loadApplyQueueDemo()
+    return window.nestor.jobFinder.test.loadApplyQueueDemo()
   })
   await window.reload()
   await window.waitForLoadState('domcontentloaded')
@@ -139,7 +139,7 @@ async function approveCurrentRun(window) {
 
 async function captureApplyQueueControls() {
   await mkdir(outputDir, { recursive: true })
-  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nordri-apply-queue-controls-'))
+  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nestor-apply-queue-controls-'))
 
   let app
 
@@ -149,22 +149,22 @@ async function captureApplyQueueControls() {
       cwd: desktopDir,
       env: {
         ...process.env,
-        NORDRI_BROWSER_AGENT: '0',
-        NORDRI_ENABLE_TEST_API: '1',
-        NORDRI_TEST_SYSTEM_THEME: process.env.NORDRI_TEST_SYSTEM_THEME ?? 'dark',
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_BROWSER_AGENT: '0',
+        NESTOR_ENABLE_TEST_API: '1',
+        NESTOR_TEST_SYSTEM_THEME: process.env.NESTOR_TEST_SYSTEM_THEME ?? 'dark',
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       },
     })
 
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
     await window.evaluate(async (theme) => {
-      if (!window.nordri.jobFinder.test) {
+      if (!window.nestor.jobFinder.test) {
         throw new Error('Desktop test API is unavailable in the renderer.')
       }
 
-      await window.nordri.jobFinder.test.setSystemThemeOverride(theme)
-    }, process.env.NORDRI_TEST_SYSTEM_THEME ?? 'dark')
+      await window.nestor.jobFinder.test.setSystemThemeOverride(theme)
+    }, process.env.NESTOR_TEST_SYSTEM_THEME ?? 'dark')
     await waitForProfileOrSetupHeading(window)
     await window.setViewportSize({ width, height })
 

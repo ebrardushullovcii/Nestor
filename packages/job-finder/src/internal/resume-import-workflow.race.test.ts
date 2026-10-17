@@ -1,8 +1,8 @@
 import {
   createInMemoryJobFinderRepository,
   type JobFinderRepository,
-} from "@nordri/db";
-import type { ResumeVisionProvider } from "@nordri/ai-providers";
+} from "@nestor/db";
+import type { ResumeVisionProvider } from "@nestor/ai-providers";
 import { describe, expect, test, vi } from "vitest";
 
 import { createJobFinderWorkspaceService } from "../index";

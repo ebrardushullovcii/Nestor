@@ -5,7 +5,7 @@ import {
   type EmployerExclusionPreview,
   type JobSearchPreferences,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 function normalizeDomain(value: string): string {
   return value

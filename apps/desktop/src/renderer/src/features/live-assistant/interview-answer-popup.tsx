@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type {
   InterviewChatImageAttachmentInput,
   InterviewWorkspaceView,
-} from "@nordri/contracts";
-import { interviewChatLimits } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { interviewChatLimits } from "@nestor/contracts";
 import {
   Camera,
   Check,
@@ -152,7 +152,7 @@ export function InterviewAnswerPopup(props: InterviewAnswerPopupProps) {
     setSending(true);
     setErrorMessage(null);
     try {
-      await window.nordri.liveAssistant.sendChatMessage({
+      await window.nestor.liveAssistant.sendChatMessage({
         conversationId: `interview_${session.id}`,
         sessionId: session.id,
         content: draft,
@@ -162,7 +162,7 @@ export function InterviewAnswerPopup(props: InterviewAnswerPopupProps) {
       for (const image of pendingImages) URL.revokeObjectURL(image.previewUrl);
       setPendingImages([]);
       props.onWorkspaceChange(
-        await window.nordri.liveAssistant.getWorkspace(),
+        await window.nestor.liveAssistant.getWorkspace(),
       );
     } catch (error) {
       setErrorMessage(
@@ -179,7 +179,7 @@ export function InterviewAnswerPopup(props: InterviewAnswerPopupProps) {
     setErrorMessage(null);
     try {
       props.onWorkspaceChange(
-        await window.nordri.liveAssistant.performAction(
+        await window.nestor.liveAssistant.performAction(
           "capture_screenshot",
         ),
       );
@@ -195,14 +195,14 @@ export function InterviewAnswerPopup(props: InterviewAnswerPopupProps) {
   async function copyAnswer() {
     const text = getCopyableAnswer(props.workspace);
     if (!text) return;
-    await window.nordri.liveAssistant.writeClipboardText({ text });
+    await window.nestor.liveAssistant.writeClipboardText({ text });
     setCopyLabel("Copied");
     window.setTimeout(() => setCopyLabel("Copy answer"), 1_500);
   }
 
   async function hidePopup() {
     props.onWorkspaceChange(
-      await window.nordri.liveAssistant.updateOverlayPreference({
+      await window.nestor.liveAssistant.updateOverlayPreference({
         surfaceKind: "live_answer_overlay",
         visible: false,
       }),

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, renderHook } from "@testing-library/react";
-import { ReviewQueueItemSchema } from "@nordri/contracts";
+import { ReviewQueueItemSchema } from "@nestor/contracts";
 import { afterEach, expect, it, vi } from "vitest";
 import { useResumeOperationStarts } from "./use-resume-operation-starts";
 

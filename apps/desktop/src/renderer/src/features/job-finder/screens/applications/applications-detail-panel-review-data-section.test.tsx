@@ -14,7 +14,7 @@ import {
   ApplyRunDetailsSchema,
   ApplyRunSchema,
   CandidateAssetSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { ApplicationsDetailPanelReviewDataSection } from "./applications-detail-panel-review-data-section";
@@ -91,7 +91,7 @@ function createDetails(withAnswer = false) {
 describe("application question answer review", () => {
   afterEach(() => {
     cleanup();
-    Reflect.deleteProperty(window, "nordri");
+    Reflect.deleteProperty(window, "nestor");
   });
 
   it("saves an exact employer option without authorizing submission", async () => {
@@ -257,7 +257,7 @@ describe("application question answer review", () => {
       retention: "until_deleted",
     });
     const onSave = vi.fn(() => Promise.resolve());
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         jobFinder: {
@@ -343,7 +343,7 @@ describe("application question answer review", () => {
         },
       ],
     });
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         jobFinder: {
@@ -673,7 +673,7 @@ describe("application question answer review", () => {
       consentScope: "job_application_attachment",
       retention: "until_deleted",
     });
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         jobFinder: {

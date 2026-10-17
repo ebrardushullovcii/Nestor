@@ -11,7 +11,7 @@ import {
   type ClearApplicationAnswerCommand,
   type SaveApplicationAnswerCommand,
   type UserActionCommand,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createReusableAnswerForQuestion,
   eligibilityAnswerScope,

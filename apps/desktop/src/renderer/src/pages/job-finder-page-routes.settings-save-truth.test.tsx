@@ -7,8 +7,8 @@ import type {
   JobFinderSettings,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
-} from "@nordri/contracts";
-import { JobFinderSettingsSchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { JobFinderSettingsSchema } from "@nestor/contracts";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import {

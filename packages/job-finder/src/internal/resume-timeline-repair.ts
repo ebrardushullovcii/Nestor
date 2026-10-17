@@ -11,9 +11,9 @@ import {
   type ResumeTimelineRepairEvidence,
   type ResumeTimelineRepairIssueKind,
   type ResumeTimelineRepairProposal,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
-import type { JobFinderRepository } from "@nordri/db";
+import type { JobFinderRepository } from "@nestor/db";
 
 import { isObject } from "./resume-import-common";
 import { normalizeText, uniqueStrings } from "./shared";

@@ -627,7 +627,7 @@ def iso_now() -> str:
 
 
 def detect_retention_mode(request: Dict[str, Any]) -> str:
-    raw = request.get("retention") or os.environ.get("NORDRI_RESUME_VISION_RETAIN_ARTIFACTS", "")
+    raw = request.get("retention") or os.environ.get("NESTOR_RESUME_VISION_RETAIN_ARTIFACTS", "")
     normalized = str(raw).strip().lower()
     if normalized in {"debug", "debug_retained", "1", "true"}:
         return "debug_retained"

@@ -267,7 +267,7 @@ async function captureFindJobsRunOneSource(page, viewport, report) {
 async function captureSourceSignInPrompts() {
   await mkdir(outputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-source-sign-in-prompts-"),
+    path.join(os.tmpdir(), "nestor-source-sign-in-prompts-"),
   );
 
   let app = null;
@@ -278,33 +278,33 @@ async function captureSourceSignInPrompts() {
       cwd: desktopDir,
       env: {
         ...process.env,
-        NORDRI_ENABLE_TEST_API: "1",
-        NORDRI_BROWSER_AGENT: "0",
-        NORDRI_TEST_BROWSER_SESSION_STATUS: "login_required",
-        NORDRI_TEST_BROWSER_SESSION_LABEL: "Browser session needs sign-in",
-        NORDRI_TEST_BROWSER_SESSION_DETAIL:
+        NESTOR_ENABLE_TEST_API: "1",
+        NESTOR_BROWSER_AGENT: "0",
+        NESTOR_TEST_BROWSER_SESSION_STATUS: "login_required",
+        NESTOR_TEST_BROWSER_SESSION_LABEL: "Browser session needs sign-in",
+        NESTOR_TEST_BROWSER_SESSION_DETAIL:
           "A saved source needs sign-in before the next search can continue.",
-        NORDRI_TEST_SYSTEM_THEME:
-          process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark",
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_TEST_SYSTEM_THEME:
+          process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       },
     });
 
     const page = await app.firstWindow();
     await page.waitForLoadState("domcontentloaded");
     await page.evaluate(async (theme) => {
-      await window.nordri.jobFinder.test?.setSystemThemeOverride(theme);
-    }, process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark");
+      await window.nestor.jobFinder.test?.setSystemThemeOverride(theme);
+    }, process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark");
 
     const state = JSON.parse(await readFile(snapshotPath, "utf8"));
     await page.evaluate(async (workspaceState) => {
-      if (!window.nordri.jobFinder.test) {
+      if (!window.nestor.jobFinder.test) {
         throw new Error(
           "Desktop test API is not available in the renderer context.",
         );
       }
 
-      return window.nordri.jobFinder.test.resetWorkspaceState(
+      return window.nestor.jobFinder.test.resetWorkspaceState(
         workspaceState,
       );
     }, state);

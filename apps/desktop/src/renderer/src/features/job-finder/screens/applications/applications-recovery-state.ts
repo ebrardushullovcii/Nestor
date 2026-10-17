@@ -5,7 +5,7 @@ import {
   applyResultNeedsSecurityCheck,
   looksLikeAccountWall,
   looksLikeSignInWall,
-} from "@nordri/job-finder/assistant-attention";
+} from "@nestor/job-finder/assistant-attention";
 export {
   getPausedQuestionText,
   formatQuestionPrompt,
@@ -14,13 +14,13 @@ export {
   applyResultNeedsSecurityCheck,
   looksLikeAccountWall,
   looksLikeSignInWall,
-} from "@nordri/job-finder/assistant-attention";
+} from "@nestor/job-finder/assistant-attention";
 import {
   APPLICATION_SKIPPED_BY_PERSON_LABEL,
   PREPARED_PAGE_CLOSED_SUMMARY,
   WITHDRAWAL_UNDONE_SUMMARY,
   type JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   JOB_FINDER_BROWSER_NAME,
   OPEN_JOB_FINDER_BROWSER_ACTION,

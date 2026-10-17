@@ -3,8 +3,8 @@ import type {
   ResumeDraftPatch,
   ResumeDraftSection,
   WorkHistoryReviewSuggestion,
-} from "@nordri/contracts";
-import { getResumeSectionTextTargetId } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { getResumeSectionTextTargetId } from "@nestor/contracts";
 import { Field, FieldLabel } from "@renderer/components/ui/field";
 import { Textarea } from "@renderer/components/ui/textarea";
 import { cn } from "@renderer/lib/cn";

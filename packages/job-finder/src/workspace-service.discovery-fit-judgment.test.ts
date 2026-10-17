@@ -1,9 +1,9 @@
 import { afterEach, expect, test, vi } from "vitest";
-import type { JudgeJobFitsInput } from "@nordri/ai-providers";
+import type { JudgeJobFitsInput } from "@nestor/ai-providers";
 import {
   JobDiscoveryTargetSchema,
   SaveJobSearchCampaignInputSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createAiClient,
   createSeed,

@@ -32,8 +32,8 @@ import type {
   AssistantEntityRef,
   AssistantMentionCandidate,
   AssistantMessage,
-} from "@nordri/contracts";
-import { ASSISTANT_MESSAGE_MAX_CHARS } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { ASSISTANT_MESSAGE_MAX_CHARS } from "@nestor/contracts";
 
 import { cn } from "@renderer/lib/cn";
 import { isImeComposingEvent } from "../lib/job-finder-shortcuts";
@@ -113,7 +113,7 @@ function useHeaderBottom(): number {
 function useVisibleBrowserTitle(): string | null {
   const [title, setTitle] = useState<string | null>(null);
   useEffect(() => {
-    const browser = window.nordri?.browser;
+    const browser = window.nestor?.browser;
     if (!browser) return undefined;
     const read = (state: Awaited<ReturnType<typeof browser.getState>>) => {
       const tab = state.tabs.find((entry) => entry.id === state.activeTabId);
@@ -449,7 +449,7 @@ function AssistantSidebarPanel() {
     if (mentionQuery === null) return undefined;
     let cancelled = false;
     const timer = setTimeout(() => {
-      void window.nordri?.assistant
+      void window.nestor?.assistant
         ?.searchMentions(mentionQuery)
         .then((result) => {
           if (!cancelled) {
@@ -534,7 +534,7 @@ function AssistantSidebarPanel() {
   };
 
   const attach = async (file?: File | null) => {
-    const bridge = window.nordri?.assistant;
+    const bridge = window.nestor?.assistant;
     if (!bridge) return;
     setAttachNote("Attaching…");
     try {

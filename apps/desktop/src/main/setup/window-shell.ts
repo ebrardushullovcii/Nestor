@@ -10,7 +10,7 @@ import {
 } from "electron";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { DesktopWindowControlsStateSchema } from "@nordri/contracts";
+import { DesktopWindowControlsStateSchema } from "@nestor/contracts";
 import {
   bindMainWindowStatePersistence,
   loadMainWindowState,
@@ -34,10 +34,10 @@ const defaultMainWindowBounds = {
   height: 920,
 } as const;
 
-const startupWindowWidthEnvName = "NORDRI_STARTUP_WINDOW_WIDTH";
-const startupWindowHeightEnvName = "NORDRI_STARTUP_WINDOW_HEIGHT";
-const startupZoomFactorEnvName = "NORDRI_STARTUP_ZOOM_FACTOR";
-const testerSessionGeometryEnvName = "NORDRI_TESTER_SESSION_GEOMETRY";
+const startupWindowWidthEnvName = "NESTOR_STARTUP_WINDOW_WIDTH";
+const startupWindowHeightEnvName = "NESTOR_STARTUP_WINDOW_HEIGHT";
+const startupZoomFactorEnvName = "NESTOR_STARTUP_ZOOM_FACTOR";
+const testerSessionGeometryEnvName = "NESTOR_TESTER_SESSION_GEOMETRY";
 
 export const STARTUP_WINDOW_MIN_DIMENSION_PX = 400;
 export const STARTUP_ZOOM_MIN_FACTOR = 1;
@@ -116,7 +116,7 @@ export function parseStartupWindowGeometryRequest(
 ): StartupWindowGeometryRequest | null {
   // The strict startup-geometry surface belongs to launcher-driven tester
   // sessions only. Without the explicit tester marker, ambient
-  // NORDRI_STARTUP_* variables (for example from a developer's shell or a
+  // NESTOR_STARTUP_* variables (for example from a developer's shell or a
   // .env file) are ignored entirely so normal startup behavior never changes.
   const marker = env[testerSessionGeometryEnvName];
   if (marker === undefined) {
@@ -390,15 +390,15 @@ function bindWindowControlsState(window: BrowserWindow) {
 function getMainWindowFailureTitle(failure: MainWindowFailure): string {
   switch (failure.reason) {
     case "renderer-unresponsive":
-      return "Nordri stopped responding";
+      return "Nestor stopped responding";
     case "renderer-crashed":
-      return "Nordri encountered a window error";
+      return "Nestor encountered a window error";
     case "startup-load-timeout":
-      return "Nordri is taking too long to start";
+      return "Nestor is taking too long to start";
     case "renderer-recovery-failed":
-      return "Nordri could not recover the window";
+      return "Nestor could not recover the window";
     case "renderer-load-failed":
-      return "Nordri could not load the window";
+      return "Nestor could not load the window";
   }
 }
 
@@ -505,7 +505,7 @@ export function createMainWindow(currentDir: string) {
     minWidth: 1024,
     minHeight: 720,
     show: true,
-    title: "Nordri",
+    title: "Nestor",
     ...(brandIcons ? { icon: brandIcons.appIcon } : {}),
     backgroundColor: "#0e1726",
     autoHideMenuBar: true,

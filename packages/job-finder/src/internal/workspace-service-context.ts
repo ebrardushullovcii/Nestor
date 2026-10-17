@@ -1,11 +1,11 @@
 import type {
   JobFinderAiClient,
   ResumeVisionProvider,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import type {
   BrowserSessionRuntime,
   OpenBrowserSessionOptions,
-} from "@nordri/browser-runtime";
+} from "@nestor/browser-runtime";
 import type {
   ApplyJobResult,
   JobFinderDiscoveryState,
@@ -18,8 +18,8 @@ import type {
   SavedJob,
   SourceDebugRunRecord,
   UserActionRequest,
-} from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 import type {
   CandidateAssetResolver,
   JobFinderDocumentManager,

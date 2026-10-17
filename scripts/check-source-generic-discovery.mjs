@@ -741,7 +741,7 @@ export function evaluateImportEdges(
 
   const deepImportViolations = [];
   const directionFindings = [];
-  const workspacePrefix = "@nordri/";
+  const workspacePrefix = "@nestor/";
 
   for (const edge of edges) {
     if (!edge.specifier.startsWith(workspacePrefix)) {
@@ -969,7 +969,7 @@ async function main() {
     );
     for (const violation of result.deepImportViolations) {
       deepImportFailures.push(
-        `${relativePath}:${violation.line} deep import "${violation.specifier}" (${violation.kind}) targets a non-exported subpath of @nordri/${violation.targetPackage}`,
+        `${relativePath}:${violation.line} deep import "${violation.specifier}" (${violation.kind}) targets a non-exported subpath of @nestor/${violation.targetPackage}`,
       );
     }
     for (const finding of result.directionFindings) {

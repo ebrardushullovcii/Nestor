@@ -3,7 +3,7 @@ import {
   type AssistantContextReference,
   type AssistantEntityRef,
   type AssistantScreen,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * What "this" means when a message is sent (plan §4). The renderer attaches

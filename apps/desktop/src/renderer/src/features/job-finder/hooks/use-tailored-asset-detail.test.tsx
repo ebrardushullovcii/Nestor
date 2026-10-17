@@ -5,7 +5,7 @@ import {
   TailoredAssetSchema,
   type TailoredAsset,
   type TailoredAssetSummary,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   clearTailoredAssetDetailCache,
   useTailoredAssetDetail,
@@ -51,7 +51,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 function bridge(read: (id: string) => Promise<TailoredAsset | null>) {
-  vi.stubGlobal("nordri", { jobFinder: { getTailoredAsset: read } });
+  vi.stubGlobal("nestor", { jobFinder: { getTailoredAsset: read } });
 }
 
 test("loads only the selected complete document and fences late replies after selection changes", async () => {

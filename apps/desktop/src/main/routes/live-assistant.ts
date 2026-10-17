@@ -16,7 +16,7 @@ import {
   InterviewTranscriptSegmentInputSchema,
   SaveInterviewSetupInputSchema,
   UpdateInterviewOverlayPreferenceInputSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { getJobFinderWorkspaceService } from "../services/job-finder";
 import { getLiveAssistantService } from "../services/live-assistant";
 import {

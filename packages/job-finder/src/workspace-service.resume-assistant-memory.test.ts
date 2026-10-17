@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { ReviseResumeDraftInput } from "@nordri/ai-providers";
+import type { ReviseResumeDraftInput } from "@nestor/ai-providers";
 import {
   createAiClient,
   fakeResumeClaimCheck,

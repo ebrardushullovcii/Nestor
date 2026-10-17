@@ -2,11 +2,11 @@ import type {
   JobFinderPerformanceSnapshot,
   JobFinderWorkspaceSnapshot,
   WaitingFormMemory,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   buildJobFinderPerformanceSnapshot,
   type JobFinderWorkspaceService,
-} from "@nordri/job-finder";
+} from "@nestor/job-finder";
 
 type PerformanceWorkspaceService = Pick<
   JobFinderWorkspaceService,

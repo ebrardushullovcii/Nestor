@@ -1,6 +1,6 @@
 # Product
 
-`Nordri` is one local-first desktop app with two modules:
+`Nestor` is one local-first desktop app with two modules:
 
 - `Job Finder`
 - `Live Assistant`

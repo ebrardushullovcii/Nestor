@@ -8,8 +8,8 @@ import {
   type JobFinderAiClient,
   type TailoredResumeDraft,
   TailoredResumeDraftSchema,
-} from '@nordri/ai-providers'
-import { createCatalogBrowserSessionRuntime } from '@nordri/browser-runtime'
+} from '@nestor/ai-providers'
+import { createCatalogBrowserSessionRuntime } from '@nestor/browser-runtime'
 import {
   CandidateProfileSchema,
   type JobPosting,
@@ -30,12 +30,12 @@ import {
   type ResumeTemplateDefinition,
   type ResumeTemplateId,
   type SavedJob,
-} from '@nordri/contracts'
-import { createInMemoryJobFinderRepository } from '@nordri/db'
+} from '@nestor/contracts'
+import { createInMemoryJobFinderRepository } from '@nestor/db'
 import {
   buildBenchmarkAiClient as buildResumeImportBenchmarkAiClient,
   createJobFinderWorkspaceService,
-} from '@nordri/job-finder'
+} from '@nestor/job-finder'
 
 import { createLocalJobFinderDocumentManager } from '../../adapters/job-finder-document-manager'
 import { createEmptyJobFinderRepositoryState } from '../../adapters/job-finder-initial-state'
@@ -1360,7 +1360,7 @@ async function importRealFixtureProfile(input: { fixtureId: string; resumePath: 
     sessions: [],
     catalog: [],
   })
-  const tempOutputDirectory = await mkdtemp(path.join(os.tmpdir(), `nordri-quality-import-${input.fixtureId}-`))
+  const tempOutputDirectory = await mkdtemp(path.join(os.tmpdir(), `nestor-quality-import-${input.fixtureId}-`))
   const documentManager = createLocalJobFinderDocumentManager({
     outputDirectory: tempOutputDirectory,
   })
@@ -1931,7 +1931,7 @@ export async function runDesktopResumeQualityBenchmark(
     throw new Error('Resume quality benchmark requires at least one benchmark-eligible template.')
   }
 
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'nordri-resume-quality-'))
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'nestor-resume-quality-'))
 
   try {
     for (const fixture of fixtures) {

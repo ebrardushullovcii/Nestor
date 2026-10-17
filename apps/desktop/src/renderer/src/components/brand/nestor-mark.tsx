@@ -1,6 +1,6 @@
-export function NordriMark({
+export function NestorMark({
   className,
-  title = "Nordri",
+  title = "Nestor",
 }: {
   className?: string;
   title?: string;

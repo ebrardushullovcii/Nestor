@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, within } from "@testing-library/react";
-import { MatchAssessmentSchema } from "@nordri/contracts";
+import { MatchAssessmentSchema } from "@nestor/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { MatchEvidenceMatrix } from "./match-evidence-matrix";
 

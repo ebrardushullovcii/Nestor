@@ -11,8 +11,8 @@ import {
   type AssistantEvent,
   type AssistantMessage,
   type UserActionRequest,
-} from "@nordri/contracts";
-import { createAssistantRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import { createAssistantRepository } from "@nestor/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -27,7 +27,7 @@ import {
   createTokenCalibrator,
   estimateJsonTokens,
   estimateTokens,
-} from "@nordri/agent-runtime";
+} from "@nestor/agent-runtime";
 
 import { assembleModelInput } from "./context-assembly";
 import { ASSISTANT_SYSTEM_PROMPT, buildProfileDigest } from "./prompt";

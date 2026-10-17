@@ -107,7 +107,7 @@ function encodeContractSegment(value) {
 async function getResumeWorkspace(window, jobId) {
   return window.evaluate(
     async (currentJobId) =>
-      window.nordri.jobFinder.getResumeWorkspace(currentJobId),
+      window.nestor.jobFinder.getResumeWorkspace(currentJobId),
     jobId,
   );
 }
@@ -115,13 +115,13 @@ async function getResumeWorkspace(window, jobId) {
 async function getResumeAssistantMessages(window, jobId) {
   return window.evaluate(
     async (currentJobId) =>
-      window.nordri.jobFinder.getResumeAssistantMessages(currentJobId),
+      window.nestor.jobFinder.getResumeAssistantMessages(currentJobId),
     jobId,
   );
 }
 
 async function getWorkspace(window) {
-  return window.evaluate(() => window.nordri.jobFinder.getWorkspace());
+  return window.evaluate(() => window.nestor.jobFinder.getWorkspace());
 }
 
 function getDraftSummaryText(workspace) {
@@ -329,7 +329,7 @@ function getLatestBy(items, getTimestamp) {
 
 async function waitForProfileOrSetupHeading(window) {
   await window.waitForFunction(
-    () => Boolean(window.nordri?.jobFinder?.test),
+    () => Boolean(window.nestor?.jobFinder?.test),
     undefined,
     { timeout: 15000 },
   );
@@ -351,7 +351,7 @@ async function waitForProfileOrSetupHeading(window) {
     await window.reload();
     await window.waitForLoadState("domcontentloaded");
     await window.waitForFunction(
-      () => Boolean(window.nordri?.jobFinder?.test),
+      () => Boolean(window.nestor?.jobFinder?.test),
       undefined,
       { timeout: 15000 },
     );
@@ -398,12 +398,12 @@ function assistantField(window) {
 
 async function loadResumeWorkspaceDemo(window, previewMode = "ok") {
   const state = await window.evaluate(async (mode) => {
-    if (!window.nordri.jobFinder.test) {
+    if (!window.nestor.jobFinder.test) {
       throw new Error("Desktop test API is unavailable in the renderer.");
     }
 
-    await window.nordri.jobFinder.test.setResumePreviewMode(mode);
-    return window.nordri.jobFinder.test.loadResumeWorkspaceDemo();
+    await window.nestor.jobFinder.test.setResumePreviewMode(mode);
+    return window.nestor.jobFinder.test.loadResumeWorkspaceDemo();
   }, previewMode);
 
   await window.reload();
@@ -592,7 +592,7 @@ async function captureResumeWorkspace() {
   await rm(outputDir, { recursive: true, force: true });
   await mkdir(outputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-resume-workspace-"),
+    path.join(os.tmpdir(), "nestor-resume-workspace-"),
   );
 
   let app;
@@ -603,24 +603,24 @@ async function captureResumeWorkspace() {
       cwd: desktopDir,
       env: {
         ...process.env,
-        NORDRI_BROWSER_AGENT: "0",
-        NORDRI_ENABLE_TEST_API: "1",
-        NORDRI_TEST_SYSTEM_THEME:
-          process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark",
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_BROWSER_AGENT: "0",
+        NESTOR_ENABLE_TEST_API: "1",
+        NESTOR_TEST_SYSTEM_THEME:
+          process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       },
     });
 
     const window = await app.firstWindow();
     await window.waitForLoadState("domcontentloaded");
     await window.waitForFunction(
-      () => Boolean(window.nordri?.jobFinder?.test),
+      () => Boolean(window.nestor?.jobFinder?.test),
       undefined,
       { timeout: 15_000 },
     );
     await window.evaluate(async (theme) => {
-      await window.nordri.jobFinder.test?.setSystemThemeOverride(theme);
-    }, process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark");
+      await window.nestor.jobFinder.test?.setSystemThemeOverride(theme);
+    }, process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark");
     await waitForProfileOrSetupHeading(window);
     await window.setViewportSize({ width, height });
 

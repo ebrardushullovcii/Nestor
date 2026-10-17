@@ -1,4 +1,4 @@
-import type { SourceAccessPrompt } from "@nordri/contracts";
+import type { SourceAccessPrompt } from "@nestor/contracts";
 import { History, Search } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@renderer/components/ui/button";

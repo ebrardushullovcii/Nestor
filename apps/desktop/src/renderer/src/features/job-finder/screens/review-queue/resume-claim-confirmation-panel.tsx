@@ -2,11 +2,11 @@ import type {
   JobFinderSetResumeClaimConfirmationInput,
   ResumeClaimAssessment,
   ResumeDraft,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   isResumeClaimAssessmentApprovable,
   resumeClaimOwnershipStatement,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * Approving a flagged line as accurate. Only an unbacked generated line can

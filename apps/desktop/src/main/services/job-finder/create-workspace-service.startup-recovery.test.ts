@@ -20,8 +20,8 @@ import {
   SubmissionExecutionGrantSchema,
   SubmissionPreflightRecordSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
-} from "@nordri/contracts";
-import { createFileJobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import { createFileJobFinderRepository } from "@nestor/db";
 import { afterEach, describe, expect, test } from "vitest";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { createJobFinderWorkspaceServiceAsync } from "./create-workspace-service";
@@ -33,9 +33,9 @@ import { missingResumeSourceWarning } from "./migrate-resume-source";
 
 const temporaryDirectories: string[] = [];
 const originalEnv: Record<string, string | undefined> = {
-  NORDRI_USER_DATA_DIR: process.env.NORDRI_USER_DATA_DIR,
-  NORDRI_ENABLE_TEST_API: process.env.NORDRI_ENABLE_TEST_API,
-  NORDRI_BROWSER_AGENT: process.env.NORDRI_BROWSER_AGENT,
+  NESTOR_USER_DATA_DIR: process.env.NESTOR_USER_DATA_DIR,
+  NESTOR_ENABLE_TEST_API: process.env.NESTOR_ENABLE_TEST_API,
+  NESTOR_BROWSER_AGENT: process.env.NESTOR_BROWSER_AGENT,
 };
 
 afterEach(async () => {
@@ -59,13 +59,13 @@ describe("startup reset recovery before workspace exposure", () => {
     "preserves the app-owned %s returning resume across reset and startup",
     async (personaId) => {
       const temporaryRoot = await mkdtemp(
-        path.join(os.tmpdir(), "nordri-returning-resume-startup-"),
+        path.join(os.tmpdir(), "nestor-returning-resume-startup-"),
       );
       temporaryDirectories.push(temporaryRoot);
       const userDataDirectory = path.join(temporaryRoot, "user-data");
-      process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
-      process.env.NORDRI_ENABLE_TEST_API = "1";
-      process.env.NORDRI_BROWSER_AGENT = "0";
+      process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
+      process.env.NESTOR_ENABLE_TEST_API = "1";
+      process.env.NESTOR_BROWSER_AGENT = "0";
 
       const documentsDirectory = path.join(
         userDataDirectory,
@@ -115,9 +115,9 @@ describe("startup reset recovery before workspace exposure", () => {
       await initialRepository.close();
 
       const firstService = await createJobFinderWorkspaceServiceAsync({
-        NORDRI_USER_DATA_DIR: userDataDirectory,
-        NORDRI_ENABLE_TEST_API: "1",
-        NORDRI_BROWSER_AGENT: "0",
+        NESTOR_USER_DATA_DIR: userDataDirectory,
+        NESTOR_ENABLE_TEST_API: "1",
+        NESTOR_BROWSER_AGENT: "0",
       });
       try {
         await firstService.resetWorkspace(seed);
@@ -126,9 +126,9 @@ describe("startup reset recovery before workspace exposure", () => {
       }
 
       const secondService = await createJobFinderWorkspaceServiceAsync({
-        NORDRI_USER_DATA_DIR: userDataDirectory,
-        NORDRI_ENABLE_TEST_API: "1",
-        NORDRI_BROWSER_AGENT: "0",
+        NESTOR_USER_DATA_DIR: userDataDirectory,
+        NESTOR_ENABLE_TEST_API: "1",
+        NESTOR_BROWSER_AGENT: "0",
       });
       try {
         const snapshot = await secondService.getWorkspaceSnapshot();
@@ -150,13 +150,13 @@ describe("startup reset recovery before workspace exposure", () => {
 
   test("clears a legacy relative returning-resume path during real startup recovery", async () => {
     const temporaryRoot = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-returning-resume-legacy-startup-"),
+      path.join(os.tmpdir(), "nestor-returning-resume-legacy-startup-"),
     );
     temporaryDirectories.push(temporaryRoot);
     const userDataDirectory = path.join(temporaryRoot, "user-data");
-    process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
-    process.env.NORDRI_ENABLE_TEST_API = "1";
-    process.env.NORDRI_BROWSER_AGENT = "0";
+    process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
+    process.env.NESTOR_ENABLE_TEST_API = "1";
+    process.env.NESTOR_BROWSER_AGENT = "0";
 
     const relativeResumePath = "persona-assets/resume/P13-returning.txt";
     const sourcePath = path.join(userDataDirectory, relativeResumePath);
@@ -191,9 +191,9 @@ describe("startup reset recovery before workspace exposure", () => {
     await initialRepository.close();
 
     const firstService = await createJobFinderWorkspaceServiceAsync({
-      NORDRI_USER_DATA_DIR: userDataDirectory,
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_BROWSER_AGENT: "0",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_BROWSER_AGENT: "0",
     });
     try {
       await firstService.resetWorkspace(seed);
@@ -202,9 +202,9 @@ describe("startup reset recovery before workspace exposure", () => {
     }
 
     const secondService = await createJobFinderWorkspaceServiceAsync({
-      NORDRI_USER_DATA_DIR: userDataDirectory,
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_BROWSER_AGENT: "0",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_BROWSER_AGENT: "0",
     });
     try {
       const snapshot = await secondService.getWorkspaceSnapshot();
@@ -221,13 +221,13 @@ describe("startup reset recovery before workspace exposure", () => {
 
   test("completes a pending crash-interrupted reset while creating the workspace service", async () => {
     const temporaryRoot = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-startup-recovery-"),
+      path.join(os.tmpdir(), "nestor-startup-recovery-"),
     );
     temporaryDirectories.push(temporaryRoot);
     const userDataDirectory = path.join(temporaryRoot, "user-data");
-    process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
-    process.env.NORDRI_ENABLE_TEST_API = "1";
-    process.env.NORDRI_BROWSER_AGENT = "0";
+    process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
+    process.env.NESTOR_ENABLE_TEST_API = "1";
+    process.env.NESTOR_BROWSER_AGENT = "0";
 
     const documentsDirectory = path.join(
       userDataDirectory,
@@ -303,9 +303,9 @@ describe("startup reset recovery before workspace exposure", () => {
     );
 
     const workspaceService = await createJobFinderWorkspaceServiceAsync({
-      NORDRI_USER_DATA_DIR: userDataDirectory,
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_BROWSER_AGENT: "0",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_BROWSER_AGENT: "0",
     });
 
     try {
@@ -352,13 +352,13 @@ describe("startup reset recovery before workspace exposure", () => {
 
   test("boots with a degraded recovery fact when the pending marker is malformed and quarantines it", async () => {
     const temporaryRoot = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-startup-recovery-"),
+      path.join(os.tmpdir(), "nestor-startup-recovery-"),
     );
     temporaryDirectories.push(temporaryRoot);
     const userDataDirectory = path.join(temporaryRoot, "user-data");
-    process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
-    process.env.NORDRI_ENABLE_TEST_API = "1";
-    process.env.NORDRI_BROWSER_AGENT = "0";
+    process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
+    process.env.NESTOR_ENABLE_TEST_API = "1";
+    process.env.NESTOR_BROWSER_AGENT = "0";
 
     const documentsDirectory = path.join(
       userDataDirectory,
@@ -379,9 +379,9 @@ describe("startup reset recovery before workspace exposure", () => {
     );
 
     const workspaceService = await createJobFinderWorkspaceServiceAsync({
-      NORDRI_USER_DATA_DIR: userDataDirectory,
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_BROWSER_AGENT: "0",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_BROWSER_AGENT: "0",
     });
 
     try {
@@ -417,13 +417,13 @@ describe("startup reset recovery before workspace exposure", () => {
 
   test("boots with a degraded recovery fact when the pending marker is oversized and never reads it as a reset intent", async () => {
     const temporaryRoot = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-startup-recovery-"),
+      path.join(os.tmpdir(), "nestor-startup-recovery-"),
     );
     temporaryDirectories.push(temporaryRoot);
     const userDataDirectory = path.join(temporaryRoot, "user-data");
-    process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
-    process.env.NORDRI_ENABLE_TEST_API = "1";
-    process.env.NORDRI_BROWSER_AGENT = "0";
+    process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
+    process.env.NESTOR_ENABLE_TEST_API = "1";
+    process.env.NESTOR_BROWSER_AGENT = "0";
 
     const documentsDirectory = path.join(
       userDataDirectory,
@@ -444,9 +444,9 @@ describe("startup reset recovery before workspace exposure", () => {
     );
 
     const workspaceService = await createJobFinderWorkspaceServiceAsync({
-      NORDRI_USER_DATA_DIR: userDataDirectory,
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_BROWSER_AGENT: "0",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_BROWSER_AGENT: "0",
     });
 
     try {
@@ -471,13 +471,13 @@ describe("startup reset recovery before workspace exposure", () => {
 
   test("recovers armed submission attempts before exposing the workspace service and stays idempotent", async () => {
     const temporaryRoot = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-startup-authority-recovery-"),
+      path.join(os.tmpdir(), "nestor-startup-authority-recovery-"),
     );
     temporaryDirectories.push(temporaryRoot);
     const userDataDirectory = path.join(temporaryRoot, "user-data");
-    process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
-    process.env.NORDRI_ENABLE_TEST_API = "1";
-    process.env.NORDRI_BROWSER_AGENT = "0";
+    process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
+    process.env.NESTOR_ENABLE_TEST_API = "1";
+    process.env.NESTOR_BROWSER_AGENT = "0";
 
     const filePath = path.join(
       userDataDirectory,
@@ -672,9 +672,9 @@ describe("startup reset recovery before workspace exposure", () => {
     await seededRepository.close();
 
     const firstService = await createJobFinderWorkspaceServiceAsync({
-      NORDRI_USER_DATA_DIR: userDataDirectory,
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_BROWSER_AGENT: "0",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_BROWSER_AGENT: "0",
     });
     try {
       const snapshot = await firstService.getWorkspaceSnapshot();
@@ -709,9 +709,9 @@ describe("startup reset recovery before workspace exposure", () => {
     }
 
     const secondService = await createJobFinderWorkspaceServiceAsync({
-      NORDRI_USER_DATA_DIR: userDataDirectory,
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_BROWSER_AGENT: "0",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_BROWSER_AGENT: "0",
     });
     try {
       await secondService.getWorkspaceSnapshot();
@@ -739,13 +739,13 @@ describe("startup reset recovery before workspace exposure", () => {
 
   test("pauses recovery with retained files and durable evidence when an invalid marker coexists with set-aside reset trash", async () => {
     const temporaryRoot = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-startup-recovery-"),
+      path.join(os.tmpdir(), "nestor-startup-recovery-"),
     );
     temporaryDirectories.push(temporaryRoot);
     const userDataDirectory = path.join(temporaryRoot, "user-data");
-    process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
-    process.env.NORDRI_ENABLE_TEST_API = "1";
-    process.env.NORDRI_BROWSER_AGENT = "0";
+    process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
+    process.env.NESTOR_ENABLE_TEST_API = "1";
+    process.env.NESTOR_BROWSER_AGENT = "0";
 
     const documentsDirectory = path.join(
       userDataDirectory,
@@ -781,9 +781,9 @@ describe("startup reset recovery before workspace exposure", () => {
     );
 
     const workspaceService = await createJobFinderWorkspaceServiceAsync({
-      NORDRI_USER_DATA_DIR: userDataDirectory,
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_BROWSER_AGENT: "0",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_BROWSER_AGENT: "0",
     });
 
     try {

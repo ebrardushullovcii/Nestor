@@ -1,7 +1,7 @@
 import {
   JobFinderTestSaveSurfaceSchema,
   type JobFinderTestSaveSurface,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { isDesktopTestApiEnabled } from "./test-api";
 
@@ -77,7 +77,7 @@ export function armJobFinderTestSaveFailure(
 ): JobFinderTestSaveSurface {
   if (!isDesktopTestApiEnabled(env)) {
     throw new Error(
-      "Desktop test API is disabled. Set NORDRI_ENABLE_TEST_API=1 to enable scripted UI flows.",
+      "Desktop test API is disabled. Set NESTOR_ENABLE_TEST_API=1 to enable scripted UI flows.",
     );
   }
 

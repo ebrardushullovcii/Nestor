@@ -7,7 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { ResumeSourceDocumentSchema } from "@nordri/contracts";
+import { ResumeSourceDocumentSchema } from "@nestor/contracts";
 import { OriginalResumeFilePanel } from "./original-resume-file-panel";
 
 afterEach(() => {
@@ -33,7 +33,7 @@ it.each(["pdf", "docx"])(
         importedAt: source.uploadedAt,
       },
     });
-    vi.stubGlobal("nordri", {
+    vi.stubGlobal("nestor", {
       jobFinder: { openCandidateAsset, listCandidateAssets },
     });
     render(<OriginalResumeFilePanel source={source} />);

@@ -1,5 +1,5 @@
 import { ApplicationsDisclosureSummary } from "./applications-disclosure-summary";
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { cn } from "@renderer/lib/utils";
 import {
   formatTimestamp,
@@ -13,7 +13,7 @@ import {
   getCustomerFacingApplyText,
 } from "./applications-detail-panel-helpers";
 import { resolveApplicationRecoveryPresentation } from "./applications-recovery-state";
-import { PREPARED_PAGE_CLOSED_SUMMARY } from "@nordri/contracts";
+import { PREPARED_PAGE_CLOSED_SUMMARY } from "@nestor/contracts";
 import { APPLICATION_DETAIL_FACT_LABEL_CLASS } from "./applications-detail-fact-strip";
 
 function RunHistoryEntry(props: {

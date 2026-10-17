@@ -1,5 +1,5 @@
 {
-  "name": "@nordri/live-assistant",
+  "name": "@nestor/live-assistant",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,11 +7,11 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@nordri/contracts": "workspace:*",
-    "@nordri/os-integration": "workspace:*"
+    "@nestor/contracts": "workspace:*",
+    "@nestor/os-integration": "workspace:*"
   },
   "devDependencies": {
-    "@nordri/ai-providers": "workspace:*"
+    "@nestor/ai-providers": "workspace:*"
   },
   "scripts": {
     "build": "tsc --noEmit",

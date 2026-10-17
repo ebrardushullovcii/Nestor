@@ -6,7 +6,7 @@ import {
   SavedJobSchema,
   type JobDiscoveryTarget,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DiscoveryResultsPanel } from "./discovery-results-panel";

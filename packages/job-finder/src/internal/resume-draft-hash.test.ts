@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest";
 import type {
   ResumeDraft,
   WorkHistoryReviewAcknowledgment,
-} from "@nordri/contracts";
-import { fnv1a32 } from "@nordri/core";
+} from "@nestor/contracts";
+import { fnv1a32 } from "@nestor/core";
 
 import {
   buildResumeDraftContentHash,

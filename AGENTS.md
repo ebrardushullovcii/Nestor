@@ -1,4 +1,4 @@
-# Nordri
+# Nestor
 
 Local-first Electron monorepo (pnpm + turbo) with two modules: `Job Finder` and `Live Assistant`. Doc map: `docs/README.md`. Read relevant `docs/adr/` decisions before changing behavior they govern; code shows current behavior, not permission to discard a deliberate decision.
 
@@ -6,7 +6,7 @@ Local-first Electron monorepo (pnpm + turbo) with two modules: `Job Finder` and 
 
 - Never commit, push, or create/update a PR unless the user explicitly asks. When the user asks for a commit, push it to the remote in the same step: a commit that stays local is not done. If the current branch was already merged, put the work on a new branch off `origin/main` and push that.
 - Do not run `pnpm verify`, `pnpm test:evidence`, fingerprints, seals, custody, persona waves, or any release-acceptance chain unless the user explicitly declares a release candidate (ADR 0014). Run the smallest check that proves the change; the picker is in `docs/TESTING.md`.
-- Never kill a process you did not start. No `pkill -f electron`, `pkill -f Nordri`, or `killall Electron`; those match the user's own `pnpm desktop:dev` instance. Stop only the instance you launched, through its own handle or PID tree, and report survivors instead of sweeping.
+- Never kill a process you did not start. No `pkill -f electron`, `pkill -f Nestor`, or `killall Electron`; those match the user's own `pnpm desktop:dev` instance. Stop only the instance you launched, through its own handle or PID tree, and report survivors instead of sweeping.
 - Final submission, account creation, credentials, CAPTCHA and MFA stay the person's unless they authorize the step, including through Send for me; the agent never asks for a password but may use one the person supplies for an authorized task (ADR 0012, ADR 0024). The agent may tick routine application declarations the person agrees to, including background-check consent; these are on by default and the person can turn any off (ADR 0027). Test runs may send only to the local replica job sites (`docs/TESTING.md`); against any other site they stay `prepare_only` with `submitAuthorized: false`. Warnings and callouts are dismissible.
 - Keep durable knowledge in `docs/` and `docs/adr/`. Do not add status logs, handoff notes, evidence logs, or plan files to the repo; git history and the scratchpad cover that. Write an ADR when a decision would surprise a future reader.
 - Do not edit docs unless the user asks or a doc contradicts the change you just made.
@@ -26,9 +26,9 @@ Local-first Electron monorepo (pnpm + turbo) with two modules: `Job Finder` and 
 
 ## Testing the app
 
-The user usually has `pnpm desktop:dev` running. For "use it like a user" checks: build with `pnpm --filter @nordri/desktop build`, launch an isolated instance with a temporary user-data directory and synthetic profile data, drive it, keep screenshots, and batch the fixes. Rebuild when needed and verify that the inspected app contains the final changes. Details and safety rules: `docs/TESTING.md`.
+The user usually has `pnpm desktop:dev` running. For "use it like a user" checks: build with `pnpm --filter @nestor/desktop build`, launch an isolated instance with a temporary user-data directory and synthetic profile data, drive it, keep screenshots, and batch the fixes. Rebuild when needed and verify that the inspected app contains the final changes. Details and safety rules: `docs/TESTING.md`.
 
 ## Website and marketing
 
-- `apps/website/` is the public landing page (https://nordri.netlify.app): static HTML, CSS and JS outside the pnpm workspace. Netlify deploys it from GitHub whenever a merge to `main` changes that folder; never deploy it from local files. Its `README.md` covers the forms and assets.
-- Product videos, the other landing-page designs and the app captures behind them live in the private repo `ebrardushullovcii/nordri-marketing`, normally checked out next to this one at `../nordri-marketing`: `motion/` renders the videos with Remotion, `landing/` holds the designs and finished videos. Its `AGENTS.md` explains how they are made. Edit the live site here, not there.
+- `apps/website/` is the public landing page (https://trynestor.netlify.app): static HTML, CSS and JS outside the pnpm workspace. Netlify deploys it from GitHub whenever a merge to `main` changes that folder; never deploy it from local files. Its `README.md` covers the forms and assets.
+- Product videos, the other landing-page designs and the app captures behind them live in the private repo `ebrardushullovcii/nestor-marketing`, normally checked out next to this one at `../nestor-marketing`: `motion/` renders the videos with Remotion, `landing/` holds the designs and finished videos. Its `AGENTS.md` explains how they are made. Edit the live site here, not there.

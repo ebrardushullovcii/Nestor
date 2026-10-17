@@ -12,7 +12,7 @@ import {
   type GroupedManualAnswerDecision,
   type UserActionEvent,
   type UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import type {
   CommitGroupedManualAnswerInput,

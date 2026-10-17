@@ -6,7 +6,7 @@ import {
   type SourceDebugRunRecord,
   type SourceDebugWorkerAttempt,
   type SourceInstructionArtifact,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { warningSuggestsAuthRestriction } from "./source-instruction-evidence";
 import { buildDiscoveryStartingUrls } from "./workspace-source-intelligence";
 import { resolveActiveSourceInstructionArtifact } from "./workspace-helpers";

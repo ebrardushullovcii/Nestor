@@ -36,7 +36,7 @@ describe("configureDesktopUserDataDirectory", () => {
 
   test("creates and applies one absolute directory before Electron session startup", () => {
     const parentDirectory = mkdtempSync(
-      path.join(os.tmpdir(), "nordri-user-data-"),
+      path.join(os.tmpdir(), "nestor-user-data-"),
     );
     temporaryDirectories.push(parentDirectory);
     const requestedDirectory = path.join(parentDirectory, "isolated-session");
@@ -54,7 +54,7 @@ describe("configureDesktopUserDataDirectory", () => {
 
   test("normalizes padded relative overrides for every desktop consumer", () => {
     const parentDirectory = mkdtempSync(
-      path.join(os.tmpdir(), "nordri-user-data-relative-"),
+      path.join(os.tmpdir(), "nestor-user-data-relative-"),
     );
     temporaryDirectories.push(parentDirectory);
     const requestedDirectory = path.join(parentDirectory, "isolated-session");
@@ -78,7 +78,7 @@ describe("configureDesktopUserDataDirectory", () => {
   test("keeps Electron's default user-data path when no override is configured", () => {
     const defaultDirectory = path.join(
       os.tmpdir(),
-      "nordri-default-user-data",
+      "nestor-default-user-data",
     );
 
     expect(

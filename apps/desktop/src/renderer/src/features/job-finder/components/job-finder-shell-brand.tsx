@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
-import type { SuiteModule } from "@nordri/contracts";
+import type { SuiteModule } from "@nestor/contracts";
 
-import { NordriWordmark } from "@renderer/components/brand/nordri-wordmark";
+import { NestorWordmark } from "@renderer/components/brand/nestor-wordmark";
 import { ModuleSwitch } from "@renderer/components/module-switch";
 import { cn } from "@renderer/lib/cn";
 
@@ -42,7 +42,7 @@ export function JobFinderShellBrand(props: {
       style={props.style}
     >
       <span className="max-[639px]:hidden" data-desktop-brand-wordmark>
-        <NordriWordmark className="block h-[1.05rem] w-auto text-(--headline-primary) sm:h-[1.3rem]" />
+        <NestorWordmark className="block h-[1.05rem] w-auto text-(--headline-primary) sm:h-[1.3rem]" />
       </span>
       {/* The module name is the subtitle of the wordmark, and that subtitle is
           the module switcher: one line, always visible, in the one place a

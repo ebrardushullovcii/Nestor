@@ -3,7 +3,7 @@ import {
   type ApplicationAnswerRecord,
   type ApplicationQuestionRecord,
   type CandidateProfile,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createReusableAnswerForQuestion,
   eligibilityAnswerScope,

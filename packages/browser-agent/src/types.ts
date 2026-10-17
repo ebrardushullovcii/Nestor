@@ -15,7 +15,7 @@ import type {
   SourceDebugPhaseEvidence,
   Tool,
   ToolCall,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 // Re-export shared types from contracts
 export type { Tool, ToolCall };

@@ -1,7 +1,7 @@
 import type {
   AssistantChangeEntry,
   AssistantMessagePart,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * "Undo this change" for assistant edits (ADR 0037).

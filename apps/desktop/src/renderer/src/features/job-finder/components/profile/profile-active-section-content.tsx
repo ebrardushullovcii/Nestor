@@ -5,7 +5,7 @@ import type {
   SourceDebugRunDetails,
   SourceDebugRunRecord,
   SourceInstructionArtifact,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { ReactNode } from "react";
 import type { UseFieldArrayReturn, UseFormReturn } from "react-hook-form";
 import { ProfileBackgroundTab } from "./profile-background-tab";

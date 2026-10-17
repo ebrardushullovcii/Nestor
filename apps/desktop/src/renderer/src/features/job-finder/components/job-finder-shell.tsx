@@ -42,8 +42,8 @@ import type {
   JobFinderRendererWorkspaceSnapshot,
   ResumeImportProgressEvent,
   SuiteModule,
-} from "@nordri/contracts";
-import { collapsesSideMenuWithAssistant } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { collapsesSideMenuWithAssistant } from "@nestor/contracts";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@renderer/components/ui/button";
 import { Count } from "@renderer/components/ui/count";
@@ -221,7 +221,7 @@ const NO_ROUTE_SCROLL_EDGES: CompactRouteScrollEdges = {
 };
 
 export const SIDEBAR_COLLAPSED_STORAGE_KEY =
-  "nordri.job-finder.sidebar-collapsed.v1";
+  "nestor.job-finder.sidebar-collapsed.v1";
 
 /**
  * Inventory counts describe workspace volume and are the bare number: a plain
@@ -962,7 +962,7 @@ export function JobFinderShell({
     const hasDestinationAnchor = Boolean(location.hash);
     const usesNarrowShellReflow =
       window.matchMedia?.("(max-width: 639px)").matches ?? false;
-    document.title = `${activeScreenLabel} | Job Finder | Nordri`;
+    document.title = `${activeScreenLabel} | Job Finder | Nestor`;
     setRouteAnnouncement("");
     if (!hasDestinationAnchor) {
       main?.scrollTo({ top: 0 });
@@ -994,7 +994,7 @@ export function JobFinderShell({
   useEffect(() => {
     let cancelled = false;
 
-    const unsubscribe = window.nordri.window.onControlsStateChange(
+    const unsubscribe = window.nestor.window.onControlsStateChange(
       (controlsState) => {
         if (!cancelled) {
           setWindowControlsState(controlsState);
@@ -1002,7 +1002,7 @@ export function JobFinderShell({
       },
     );
 
-    void window.nordri.window
+    void window.nestor.window
       .getControlsState()
       .then((controlsState) => {
         if (!cancelled) {
@@ -1031,15 +1031,15 @@ export function JobFinderShell({
   }
 
   function minimizeWindow() {
-    void runWindowAction(() => window.nordri.window.minimize());
+    void runWindowAction(() => window.nestor.window.minimize());
   }
 
   function toggleWindowExpand() {
-    void runWindowAction(() => window.nordri.window.toggleMaximize());
+    void runWindowAction(() => window.nestor.window.toggleMaximize());
   }
 
   function closeWindow() {
-    void window.nordri.window.close();
+    void window.nestor.window.close();
   }
 
   function handleScreenChange(nextScreen: string) {

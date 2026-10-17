@@ -7,7 +7,7 @@ import {
   createProfileEditorValues,
   type ProfileEditorValues,
 } from "../../lib/profile-editor";
-import { CandidateProfileSchema } from "@nordri/contracts";
+import { CandidateProfileSchema } from "@nestor/contracts";
 import { ProfileExperienceTab } from "./profile-experience-tab";
 const profile = CandidateProfileSchema.parse({
   id: "candidate_experience_remove",

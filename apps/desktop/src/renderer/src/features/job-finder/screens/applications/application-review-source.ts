@@ -1,4 +1,4 @@
-import type { ApplicationReviewCard, ApplyRunDetails } from "@nordri/contracts";
+import type { ApplicationReviewCard, ApplyRunDetails } from "@nestor/contracts";
 
 function selectedOptions(value: string): string[] {
   try {

@@ -1,4 +1,4 @@
-import type { JobPosting, JobSearchPreferences } from "@nordri/contracts";
+import type { JobPosting, JobSearchPreferences } from "@nestor/contracts";
 import type { CatalogSessionAgentDiscoveryOptions } from "./session-agent";
 import {
   matchesAnyPhrase,

@@ -2,7 +2,7 @@ import {
   PerformanceBudgetEvaluationSchema,
   type DiscoveryRunRecord,
   type PerformanceBudgetEvaluation,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 type PerformanceBudgetUnit = PerformanceBudgetEvaluation["unit"];
 

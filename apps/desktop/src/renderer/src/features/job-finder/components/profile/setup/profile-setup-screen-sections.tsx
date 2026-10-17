@@ -11,7 +11,7 @@ import type {
   ProfileSetupStep,
   ResumeImportFieldCandidateSummary,
   ResumeImportProgressEvent,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import {

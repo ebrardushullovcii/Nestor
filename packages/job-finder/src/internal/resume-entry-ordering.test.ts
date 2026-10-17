@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import type {
   ResumeDraftEntry,
   ResumeDraftSection,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   buildResumeEntryDateQualityIssues,
   moveSectionEntry,

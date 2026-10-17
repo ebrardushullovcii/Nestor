@@ -12,7 +12,7 @@ import {
   type Tool,
   type ToolCall,
   type ModelContinuation,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { z } from "zod";
 
 import { AgentTaskResultStore } from "./result-store";

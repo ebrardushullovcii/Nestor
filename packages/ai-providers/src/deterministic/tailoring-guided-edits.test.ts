@@ -1,4 +1,4 @@
-import { ResumeDraftSchema } from "@nordri/contracts";
+import { ResumeDraftSchema } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 import { createDeterministicJobFinderAiClient } from "../index";
 import { createJobPosting } from "../test-fixtures";

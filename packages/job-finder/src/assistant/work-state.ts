@@ -2,7 +2,7 @@ import {
   isInterruptedResumeImportRun,
   isResumeImportRunInProgress,
   type JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { AssistantHostPorts } from "./ports";
 import { listBackgroundResumeBatches } from "./tools/resume-tools";
 

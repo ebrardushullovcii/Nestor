@@ -13,13 +13,13 @@ async function loadServiceModule(): Promise<{
 }
 
 const temporaryDirectories: string[] = [];
-const originalUserDataDirectory = process.env.NORDRI_USER_DATA_DIR;
+const originalUserDataDirectory = process.env.NESTOR_USER_DATA_DIR;
 
 afterEach(async () => {
   if (originalUserDataDirectory === undefined) {
-    delete process.env.NORDRI_USER_DATA_DIR;
+    delete process.env.NESTOR_USER_DATA_DIR;
   } else {
-    process.env.NORDRI_USER_DATA_DIR = originalUserDataDirectory;
+    process.env.NESTOR_USER_DATA_DIR = originalUserDataDirectory;
   }
 
   await Promise.all(
@@ -31,12 +31,12 @@ afterEach(async () => {
 
 async function createUserDataDirectory(): Promise<string> {
   const temporaryRoot = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-db-recovery-persisted-fact-"),
+    path.join(os.tmpdir(), "nestor-db-recovery-persisted-fact-"),
   );
   temporaryDirectories.push(temporaryRoot);
   const userDataDirectory = path.join(temporaryRoot, "user-data");
   await mkdir(userDataDirectory, { recursive: true });
-  process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
+  process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
   return userDataDirectory;
 }
 

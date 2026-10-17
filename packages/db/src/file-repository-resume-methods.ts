@@ -13,7 +13,7 @@ import {
   ResumeResearchArtifactSchema,
   ResumeValidationResultSchema,
   TailoredAssetSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { secureDatabaseFile } from "./internal/migrations";
 import { TAILORED_ASSET_JOB_ID_SQL } from "./internal/tailored-asset-storage";

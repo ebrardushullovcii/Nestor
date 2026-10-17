@@ -8,7 +8,7 @@ import {
   type BrowserVisualObservation,
   type BrowserVisualObservationSet,
   type BrowserVisualQuestionContext,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { z } from "zod";
 import {
   buildModelRequestBody,
@@ -737,9 +737,9 @@ export function createBrowserVisualAnalysisProviderFromEnvironment(
   env: StringMap = process.env,
 ): BrowserVisualAnalysisProvider {
   const apiKey =
-    env.NORDRI_BROWSER_VISION_API_KEY ??
-    env.NORDRI_AI_VISION_API_KEY ??
-    env.NORDRI_AI_API_KEY;
+    env.NESTOR_BROWSER_VISION_API_KEY ??
+    env.NESTOR_AI_VISION_API_KEY ??
+    env.NESTOR_AI_API_KEY;
 
   if (!apiKey) {
     return createDeterministicBrowserVisualAnalysisProvider();
@@ -748,33 +748,33 @@ export function createBrowserVisualAnalysisProviderFromEnvironment(
   return createOpenAiCompatibleBrowserVisualAnalysisProvider({
     apiKey,
     baseUrl:
-      env.NORDRI_BROWSER_VISION_BASE_URL ??
-      env.NORDRI_AI_VISION_BASE_URL ??
-      env.NORDRI_AI_BASE_URL ??
+      env.NESTOR_BROWSER_VISION_BASE_URL ??
+      env.NESTOR_AI_VISION_BASE_URL ??
+      env.NESTOR_AI_BASE_URL ??
       DEFAULT_BROWSER_VISUAL_BASE_URL,
     model:
-      env.NORDRI_BROWSER_VISION_MODEL ??
-      env.NORDRI_AI_VISION_MODEL ??
+      env.NESTOR_BROWSER_VISION_MODEL ??
+      env.NESTOR_AI_VISION_MODEL ??
       DEFAULT_BROWSER_VISUAL_MODEL,
     apiMode:
       parseModelApiMode(
-        env.NORDRI_BROWSER_VISION_API_MODE ??
-          env.NORDRI_AI_VISION_API_MODE,
+        env.NESTOR_BROWSER_VISION_API_MODE ??
+          env.NESTOR_AI_VISION_API_MODE,
       ) ?? DEFAULT_VISION_MODEL_API_MODE,
     reasoningEffort:
       parseModelReasoningEffort(
-        env.NORDRI_BROWSER_VISION_REASONING_EFFORT ??
-          env.NORDRI_AI_VISION_REASONING_EFFORT,
+        env.NESTOR_BROWSER_VISION_REASONING_EFFORT ??
+          env.NESTOR_AI_VISION_REASONING_EFFORT,
       ) ?? DEFAULT_VISION_MODEL_REASONING_EFFORT,
     label: "Browser visual analysis",
     requestTimeoutMs:
-      parseConfiguredNumber(env.NORDRI_BROWSER_VISION_TIMEOUT_MS) ??
+      parseConfiguredNumber(env.NESTOR_BROWSER_VISION_TIMEOUT_MS) ??
       DEFAULT_BROWSER_VISUAL_TIMEOUT_MS,
-    idleTimeoutMs: parseConfiguredNumber(env.NORDRI_AI_IDLE_TIMEOUT_MS),
-    maxAttempts: parseConfiguredPositiveInteger(env.NORDRI_AI_MAX_ATTEMPTS),
-    streaming: parseConfiguredBoolean(env.NORDRI_AI_STREAMING),
+    idleTimeoutMs: parseConfiguredNumber(env.NESTOR_AI_IDLE_TIMEOUT_MS),
+    maxAttempts: parseConfiguredPositiveInteger(env.NESTOR_AI_MAX_ATTEMPTS),
+    streaming: parseConfiguredBoolean(env.NESTOR_AI_STREAMING),
     retryBaseDelayMs: parseConfiguredPositiveInteger(
-      env.NORDRI_AI_RETRY_BASE_DELAY_MS,
+      env.NESTOR_AI_RETRY_BASE_DELAY_MS,
       0,
     ),
   });

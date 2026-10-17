@@ -1,11 +1,11 @@
-import type { ResumeProfileExtraction } from "@nordri/ai-providers";
-import type { JobFinderRepositorySeed } from "@nordri/db";
+import type { ResumeProfileExtraction } from "@nestor/ai-providers";
+import type { JobFinderRepositorySeed } from "@nestor/db";
 import type {
   SavedJob,
   SavedJobDiscoveryProvenance,
   SourceDebugPhase,
   SourceInstructionArtifact,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   FRESH_START_CANDIDATE_PROFILE_ID,
   JobFinderDiscoveryStateSchema,
@@ -13,7 +13,7 @@ import {
   SavedJobDiscoveryProvenanceSchema,
   SavedJobSchema,
   SourceInstructionArtifactSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export type SourceDebugPhaseMap<TValue> = Partial<
   Record<SourceDebugPhase, TValue>

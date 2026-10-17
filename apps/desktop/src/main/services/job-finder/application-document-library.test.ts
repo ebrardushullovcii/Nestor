@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   ApplicationQuestionRecordSchema,
   ApplicationRecordSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createResumeWorkspaceDemoState } from "../../adapters/job-finder-demo-state";
 import { CandidateAssetLibrary } from "./candidate-asset-library";
 import { ApplicationDocumentLibrary } from "./application-document-library";
@@ -16,7 +16,7 @@ describe("ApplicationDocumentLibrary", () => {
 
   beforeEach(async () => {
     temporaryDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-application-documents-"),
+      path.join(os.tmpdir(), "nestor-application-documents-"),
     );
     library = new ApplicationDocumentLibrary(
       path.join(temporaryDirectory, "documents"),

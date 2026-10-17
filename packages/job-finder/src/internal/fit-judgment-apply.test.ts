@@ -1,4 +1,4 @@
-import { FitJudgmentSchema, MatchAssessmentSchema } from "@nordri/contracts";
+import { FitJudgmentSchema, MatchAssessmentSchema } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import {

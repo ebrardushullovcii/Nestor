@@ -8,7 +8,7 @@ import {
   type ListingDetailFetchOutcome,
   type MatchAssessment,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   extractListingDetailFromHtml,
   listingPageLinks,
@@ -18,7 +18,7 @@ import {
   stripPictographGlyphs,
   type ExtractedListingDetail,
 } from "./listing-detail-extraction";
-import { getAiProviderAccessFailure } from "@nordri/ai-providers";
+import { getAiProviderAccessFailure } from "@nestor/ai-providers";
 import { collapseRepeatedLocationTokens } from "./listing-field-shapes";
 import { enrichDiscoveredPosting } from "./matching";
 import { listUnreadSightings } from "./listing-sightings";

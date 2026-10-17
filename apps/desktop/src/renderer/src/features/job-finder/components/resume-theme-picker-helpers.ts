@@ -1,8 +1,8 @@
 import type {
   ResumeTemplateDefinition,
   ResumeTemplateId,
-} from "@nordri/contracts";
-import { getResumeTemplateVariantLabel } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { getResumeTemplateVariantLabel } from "@nestor/contracts";
 
 export interface ResumeThemePickerRecommendationContext {
   jobTitle: string | null;

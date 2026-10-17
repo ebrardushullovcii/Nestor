@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { ReviewQueueItem } from "@nordri/contracts";
+import type { ReviewQueueItem } from "@nestor/contracts";
 
 // Owned by the page controller, which stays mounted while routes change.
 export function useResumeOperationStarts(

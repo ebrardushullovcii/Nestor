@@ -6,7 +6,7 @@ import {
   SubmissionObservationIdentitySchema,
   type SubmissionFinalControlIdentity,
   type SubmissionObservationIdentity,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { Page, Request } from "playwright";
 
 import {

@@ -2,7 +2,7 @@ import {
   ResumeImportFieldCandidateDraftSchema,
   type ResumeDocumentBundle,
   type ResumeImportFieldCandidateDraft,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import type { ExtractResumeImportStageTransportInput } from "../shared";
 import {

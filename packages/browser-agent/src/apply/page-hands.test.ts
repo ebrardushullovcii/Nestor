@@ -1,4 +1,4 @@
-import type { RawApplyPage } from "@nordri/contracts";
+import type { RawApplyPage } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import { buildApplyFormObservation } from "./page-hands";

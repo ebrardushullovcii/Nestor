@@ -9,12 +9,12 @@ import {
   SourceDebugRunRecordSchema,
   UserActionEventSchema,
   UserActionRequestSchema,
-} from "@nordri/contracts";
-import type { JobFinderRepositorySeed } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepositorySeed } from "@nestor/db";
 import type {
   BrowserSessionRuntime,
   ExecuteApplicationFlowInput,
-} from "@nordri/browser-runtime";
+} from "@nestor/browser-runtime";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -1098,7 +1098,7 @@ describe("apply run cancellation and application record concurrency", () => {
 
   test("a failed consent relaunch parks the run instead of leaving it falsely running", async () => {
     // Keep the second job queued to exercise the relaunch failure itself.
-    vi.stubEnv("NORDRI_APPLICATION_PREPARATION_CONCURRENCY", "1");
+    vi.stubEnv("NESTOR_APPLICATION_PREPARATION_CONCURRENCY", "1");
     const seed = createSeed();
     stageReadyTailoredJob(seed, "job_ready", "linkedin_signal_ready", {
       filePath: "/tmp/job-ready-resume.pdf",

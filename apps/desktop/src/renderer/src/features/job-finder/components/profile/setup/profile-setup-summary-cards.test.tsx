@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   ProfileSetupState,
   ResumeImportProgressEvent,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { ProfileSetupSummaryCards } from "./profile-setup-screen-sections";
 
 describe("ProfileSetupSummaryCards", () => {

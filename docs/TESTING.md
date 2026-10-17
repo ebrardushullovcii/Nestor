@@ -22,9 +22,9 @@ Other entry points: `pnpm test:correctness`, `pnpm test:performance` (serial, no
 
 ## Testing the built app
 
-- For exploratory agent testing, use `pnpm --filter @nordri/desktop qa`. It wraps the installed Playwright/Electron tools in an isolated session with a private build copy, local sites, diagnostics and restarts. See [Agent development QA](AGENT_QA.md) for interactive/scripted usage, fault injection and evidence limits. Existing focused harnesses remain available.
+- For exploratory agent testing, use `pnpm --filter @nestor/desktop qa`. It wraps the installed Playwright/Electron tools in an isolated session with a private build copy, local sites, diagnostics and restarts. See [Agent development QA](AGENT_QA.md) for interactive/scripted usage, fault injection and evidence limits. Existing focused harnesses remain available.
 
-- Build first: `pnpm --filter @nordri/desktop build`. Scripts that launch `out/main/index.cjs` run whatever was last built.
+- Build first: `pnpm --filter @nestor/desktop build`. Scripts that launch `out/main/index.cjs` run whatever was last built.
 - Use a temporary user-data directory and synthetic data (`apps/desktop/test-fixtures/job-finder/resume-import-sample.txt`, or the synthetic personas in `apps/desktop/test-fixtures/job-finder/resume-import-personas/` in PDF, DOCX, TXT and Markdown), never the user's real workspace or a real person's resume.
 - Serialize isolated Electron launches unless a coordinated parallel run explicitly uses the QA launcher's shared `--parallel-group` with distinct `--session-id` values (see [Agent development QA](AGENT_QA.md)). Build once before starting the group and audit only the processes you own.
 - Harness commands live in `apps/desktop/package.json` (`ui:*`, `test:job-finder-*`, `test:live-assistant-*`). `:built` variants use the existing build; the others rebuild.
@@ -44,16 +44,16 @@ Other entry points: `pnpm test:correctness`, `pnpm test:performance` (serial, no
 
 ## Benchmarks
 
-- Resume import: `pnpm --filter @nordri/desktop benchmark:resume-import`
-- Resume quality: `pnpm --filter @nordri/desktop benchmark:resume-quality` (`-- --canary-only` for the canary)
+- Resume import: `pnpm --filter @nestor/desktop benchmark:resume-import`
+- Resume quality: `pnpm --filter @nestor/desktop benchmark:resume-quality` (`-- --canary-only` for the canary)
 - AI capabilities: `pnpm ai:benchmark plan | full <lane> | canary luna_high | full-report`. Keep each lane serial. Deterministic fallbacks are reported separately and never credited to the model.
-- Live discovery audit: `pnpm --filter @nordri/desktop audit:job-finder-live` needs network access and must never execute application actions.
+- Live discovery audit: `pnpm --filter @nestor/desktop audit:job-finder-live` needs network access and must never execute application actions.
 
 ## Assistant
 
 - Unit and host tests: `pnpm validate:package job-finder` (session host, grants, change diff, action inventory) and `pnpm validate:package agent-runtime`.
-- Eval lane: `pnpm --filter @nordri/ai-evals assistant-lane` runs the scripted-model cases; add `-- --model live` for the configured assistant model (serial; `--case <id prefix>`, `--out <dir>`). Report actual passes and failures, not percentages.
-- Built app: after a desktop build, `pnpm --filter @nordri/desktop qa --script scripts/test-job-finder-assistant.mjs` drives the sidebar with the scripted model (set `NORDRI_TEST_ASSISTANT_DELAY_MS=600` to exercise Stop). With `--provider configured` it also sends one application, only to the qa launcher's replica site, and refuses any other target before sending. `scripts/test-job-finder-assistant-fixes.mjs` (configured provider; `NORDRI_QA_ONLY=M1,M4` runs chosen journeys) re-checks selection, truthful replies, exclusions, the studio refresh and an authorized send to the replica; `scripts/test-job-finder-assistant-browser.mjs` checks the browser side of the sidebar. A Playwright-launched window does not get OS focus, so that script reports the window as focused inside Electron; say so when you report its results.
+- Eval lane: `pnpm --filter @nestor/ai-evals assistant-lane` runs the scripted-model cases; add `-- --model live` for the configured assistant model (serial; `--case <id prefix>`, `--out <dir>`). Report actual passes and failures, not percentages.
+- Built app: after a desktop build, `pnpm --filter @nestor/desktop qa --script scripts/test-job-finder-assistant.mjs` drives the sidebar with the scripted model (set `NESTOR_TEST_ASSISTANT_DELAY_MS=600` to exercise Stop). With `--provider configured` it also sends one application, only to the qa launcher's replica site, and refuses any other target before sending. `scripts/test-job-finder-assistant-fixes.mjs` (configured provider; `NESTOR_QA_ONLY=M1,M4` runs chosen journeys) re-checks selection, truthful replies, exclusions, the studio refresh and an authorized send to the replica; `scripts/test-job-finder-assistant-browser.mjs` checks the browser side of the sidebar. A Playwright-launched window does not get OS focus, so that script reports the window as focused inside Electron; say so when you report its results.
 
 ## Local replica job sites
 

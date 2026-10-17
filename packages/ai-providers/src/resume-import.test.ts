@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { ResumeDocumentBundle } from "@nordri/contracts";
+import type { ResumeDocumentBundle } from "@nestor/contracts";
 import {
   sanitizeStageCandidates,
   selectBlocksForResumeImportStage,

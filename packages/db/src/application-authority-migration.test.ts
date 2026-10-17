@@ -34,7 +34,7 @@ function createEnvelopeValue(input: {
 describe("application authority migration integrity", () => {
   test("repairs an empty migration-15 authority table whose column shape drifted", async () => {
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-authority-migration-"),
+      path.join(os.tmpdir(), "nestor-authority-migration-"),
     );
     cleanupPaths.push(directory);
     const database = new DatabaseSync(path.join(directory, "workspace.sqlite"));
@@ -72,7 +72,7 @@ describe("application authority migration integrity", () => {
 
   test("repairs a drifted foreign-key parent without dropping healthy sibling tables", async () => {
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-authority-migration-parent-"),
+      path.join(os.tmpdir(), "nestor-authority-migration-parent-"),
     );
     cleanupPaths.push(directory);
     const database = new DatabaseSync(path.join(directory, "workspace.sqlite"));
@@ -111,7 +111,7 @@ describe("application authority migration integrity", () => {
 
   test("fails closed instead of discarding rows when a drifted authority table is not empty", async () => {
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-authority-migration-rows-"),
+      path.join(os.tmpdir(), "nestor-authority-migration-rows-"),
     );
     cleanupPaths.push(directory);
     const database = new DatabaseSync(path.join(directory, "workspace.sqlite"));
@@ -137,7 +137,7 @@ describe("application authority migration integrity", () => {
 
   test("backfills the one-active-envelope index by revoking superseded active envelopes", async () => {
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-authority-migration-duplicates-"),
+      path.join(os.tmpdir(), "nestor-authority-migration-duplicates-"),
     );
     cleanupPaths.push(directory);
     const database = new DatabaseSync(path.join(directory, "workspace.sqlite"));
@@ -211,7 +211,7 @@ describe("application authority migration integrity", () => {
 
   test("fails closed when a superseded active envelope cannot be read", async () => {
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-authority-migration-unreadable-"),
+      path.join(os.tmpdir(), "nestor-authority-migration-unreadable-"),
     );
     cleanupPaths.push(directory);
     const database = new DatabaseSync(path.join(directory, "workspace.sqlite"));

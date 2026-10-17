@@ -1,4 +1,4 @@
-import type { ApplicationRecord, ApplyJobResult } from "@nordri/contracts";
+import type { ApplicationRecord, ApplyJobResult } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
 import { getApplicationApplyPresentation } from "./applications-apply-state";

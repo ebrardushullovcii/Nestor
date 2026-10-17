@@ -1,6 +1,6 @@
 import type { UseFieldArrayReturn, UseFormReturn } from "react-hook-form";
 import { Controller } from "react-hook-form";
-import { workModeValues } from "@nordri/contracts";
+import { workModeValues } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { Checkbox } from "@renderer/components/ui/checkbox";
 import { Field, FieldLabel } from "@renderer/components/ui/field";

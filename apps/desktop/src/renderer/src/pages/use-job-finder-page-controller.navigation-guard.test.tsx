@@ -3,7 +3,7 @@
 import type {
   CandidateProfile,
   JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { StrictMode } from "react";
 import {
   act,
@@ -90,14 +90,14 @@ function createReadyWorkspace(): JobFinderRendererWorkspaceSnapshot {
   } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
-function configureWindowNordri(
+function configureWindowNestor(
   workspace: JobFinderRendererWorkspaceSnapshot,
   overrides?: {
     jobFinder?: Record<string, unknown>;
     setCloseGuardState?: ReturnType<typeof vi.fn>;
   },
 ) {
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       ping: vi.fn(() =>
@@ -110,7 +110,7 @@ function configureWindowNordri(
       window: {
         setCloseGuardState: overrides?.setCloseGuardState ?? vi.fn(),
       },
-    } as unknown as Window["nordri"],
+    } as unknown as Window["nestor"],
   });
 }
 
@@ -252,7 +252,7 @@ async function leaveWithoutSaving() {
 
 afterEach(() => {
   cleanup();
-  Reflect.deleteProperty(window, "nordri");
+  Reflect.deleteProperty(window, "nestor");
 });
 
 describe("composeLeaveConfirmation", () => {
@@ -317,7 +317,7 @@ describe("useJobFinderPageController failed-save acknowledgement", () => {
     // Cmd+Q for the rest of the session: nothing cleared `failed` except a
     // later successful save of that exact surface or wiping the workspace.
     const setCloseGuardState = vi.fn();
-    configureWindowNordri(createReadyWorkspace(), {
+    configureWindowNestor(createReadyWorkspace(), {
       jobFinder: {
         saveProfile: vi.fn(() =>
           Promise.reject(new Error("The workspace database is unavailable.")),
@@ -360,7 +360,7 @@ describe("useJobFinderPageController failed-save acknowledgement", () => {
   });
 
   it("keeps unsaved-draft protection after the failed save is dismissed", async () => {
-    configureWindowNordri(createReadyWorkspace(), {
+    configureWindowNestor(createReadyWorkspace(), {
       jobFinder: {
         saveProfile: vi.fn(() =>
           Promise.reject(new Error("The workspace database is unavailable.")),
@@ -394,7 +394,7 @@ describe("useJobFinderPageController failed-save acknowledgement", () => {
   });
 
   it("still blocks on a later, different save failure after one was dismissed", async () => {
-    configureWindowNordri(createReadyWorkspace(), {
+    configureWindowNestor(createReadyWorkspace(), {
       jobFinder: {
         saveProfile: vi.fn(() =>
           Promise.reject(new Error("The workspace database is unavailable.")),
@@ -429,7 +429,7 @@ describe("useJobFinderPageController failed-save acknowledgement", () => {
     // Settings sections stage their edits in local component state and feed no
     // flag into `composeLeaveConfirmation`, so this failure is the only thing
     // between those drafts and a navigation that discards them.
-    configureWindowNordri(createReadyWorkspace(), {
+    configureWindowNestor(createReadyWorkspace(), {
       jobFinder: {
         updateWorkspaceBehavior: vi.fn(() =>
           Promise.reject(new Error("The workspace database is unavailable.")),
@@ -462,7 +462,7 @@ describe("useJobFinderPageController failed-save acknowledgement", () => {
     // that named it, and the navigation it allows unmounts the staged drafts,
     // so nothing is left to protect and the failure must stop blocking.
     const setCloseGuardState = vi.fn();
-    configureWindowNordri(createReadyWorkspace(), {
+    configureWindowNestor(createReadyWorkspace(), {
       jobFinder: {
         updateWorkspaceBehavior: vi.fn(() =>
           Promise.reject(new Error("The workspace database is unavailable.")),
@@ -502,7 +502,7 @@ describe("useJobFinderPageController failed-save acknowledgement", () => {
 
 describe("useJobFinderPageController navigation guard", () => {
   it("lets clean navigations through without any dialog or native prompt", async () => {
-    configureWindowNordri(createReadyWorkspace());
+    configureWindowNestor(createReadyWorkspace());
     const confirmSpy = vi.spyOn(window, "confirm");
     const harness = mountGuardedController();
     await waitForReady(harness);
@@ -519,7 +519,7 @@ describe("useJobFinderPageController navigation guard", () => {
   });
 
   it("blocks a programmatic push with the branded dialog and Stay keeps the draft and its protection", async () => {
-    configureWindowNordri(createReadyWorkspace());
+    configureWindowNestor(createReadyWorkspace());
     const confirmSpy = vi.spyOn(window, "confirm");
     const harness = mountGuardedController();
     await waitForReady(harness);
@@ -551,7 +551,7 @@ describe("useJobFinderPageController navigation guard", () => {
   });
 
   it("reaches the requested route exactly once on Leave without saving and stops prompting once the draft is discarded", async () => {
-    configureWindowNordri(createReadyWorkspace());
+    configureWindowNestor(createReadyWorkspace());
     const confirmSpy = vi.spyOn(window, "confirm");
     const harness = mountGuardedController();
     await waitForReady(harness);
@@ -590,7 +590,7 @@ describe("useJobFinderPageController navigation guard", () => {
   });
 
   it("blocks a router-owned link click with the dialog instead of window.confirm", async () => {
-    configureWindowNordri(createReadyWorkspace());
+    configureWindowNestor(createReadyWorkspace());
     const confirmSpy = vi.spyOn(window, "confirm");
     const harness = mountGuardedController();
     await waitForReady(harness);
@@ -607,7 +607,7 @@ describe("useJobFinderPageController navigation guard", () => {
   });
 
   it("guards back-button history moves truthfully: Escape restores, Leave commits", async () => {
-    configureWindowNordri(createReadyWorkspace());
+    configureWindowNestor(createReadyWorkspace());
     const confirmSpy = vi.spyOn(window, "confirm");
     const harness = mountGuardedController({
       initialEntries: ["/other", "/guard"],
@@ -644,7 +644,7 @@ describe("useJobFinderPageController navigation guard", () => {
   });
 
   it("exempts hash-only fragment changes so in-page anchors never lose drafts", async () => {
-    configureWindowNordri(createReadyWorkspace());
+    configureWindowNestor(createReadyWorkspace());
     const confirmSpy = vi.spyOn(window, "confirm");
     const harness = mountGuardedController();
     await waitForReady(harness);
@@ -664,7 +664,7 @@ describe("useJobFinderPageController navigation guard", () => {
   });
 
   it("allows Profile tab and focus changes while preserving protection when leaving Profile", async () => {
-    configureWindowNordri(createReadyWorkspace());
+    configureWindowNestor(createReadyWorkspace());
     const harness = mountGuardedController({
       initialEntries: ["/job-finder/profile?section=basics"],
     });
@@ -704,7 +704,7 @@ describe("useJobFinderPageController navigation guard", () => {
     ],
     ["/guard?section=basics", "/guard?section=preferences"],
   ])("still guards other query changes from %s", async (from, to) => {
-    configureWindowNordri(createReadyWorkspace());
+    configureWindowNestor(createReadyWorkspace());
     const harness = mountGuardedController({ initialEntries: [from] });
     await waitForReady(harness);
     markDirty(harness);
@@ -722,7 +722,7 @@ describe("useJobFinderPageController navigation guard", () => {
   it("protects full Profile drafts when a query change would return to unstarted setup", async () => {
     const workspace = createReadyWorkspace();
     workspace.profileSetupState.status = "not_started";
-    configureWindowNordri(workspace);
+    configureWindowNestor(workspace);
     const harness = mountGuardedController({
       initialEntries: [
         {
@@ -753,7 +753,7 @@ describe("useJobFinderPageController navigation guard", () => {
 });
 
 it("protects search-plan drafts on route changes and clears protection after discard", async () => {
-  configureWindowNordri(createReadyWorkspace());
+  configureWindowNestor(createReadyWorkspace());
   const harness = mountGuardedController();
   await waitForReady(harness);
   act(() => harness.current?.context?.onSearchPlanSurfaceDirtyChange(true));
@@ -775,7 +775,7 @@ it("protects search-plan drafts on route changes and clears protection after dis
 });
 
 it("allows navigation after the search-plan editor reports a successful save", async () => {
-  configureWindowNordri(createReadyWorkspace());
+  configureWindowNestor(createReadyWorkspace());
   const harness = mountGuardedController();
   await waitForReady(harness);
   act(() => {

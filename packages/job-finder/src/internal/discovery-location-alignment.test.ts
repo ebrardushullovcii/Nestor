@@ -1,4 +1,4 @@
-import { JobSearchPreferencesSchema, SavedJobSchema } from "@nordri/contracts";
+import { JobSearchPreferencesSchema, SavedJobSchema } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
 import { describeRemoteOnlySourceMismatch } from "./discovery-location-alignment";

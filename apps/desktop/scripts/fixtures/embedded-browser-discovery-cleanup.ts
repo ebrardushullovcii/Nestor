@@ -9,7 +9,7 @@ import { getEmbeddedBrowser } from "../../src/main/services/browser/embedded-bro
 async function main() {
   const out = process.env.EMBEDDED_BROWSER_TEST_OUTPUT;
   if (!out) throw new Error("Missing isolated test output directory");
-  app.setPath("userData", await mkdtemp(join(tmpdir(), "nordri-cleanup-")));
+  app.setPath("userData", await mkdtemp(join(tmpdir(), "nestor-cleanup-")));
   await app.whenReady();
   const window = new BrowserWindow({
     show: false,

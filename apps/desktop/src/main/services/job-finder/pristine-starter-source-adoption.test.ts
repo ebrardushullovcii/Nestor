@@ -9,8 +9,8 @@ import {
   ProfileSetupStateSchema,
   type JobSearchPreferences,
   type ProfileSetupState,
-} from "@nordri/contracts";
-import { createFileJobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import { createFileJobFinderRepository } from "@nestor/db";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { createJobFinderWorkspaceServiceAsync } from "./create-workspace-service";
 import { getJobFinderWorkspaceFilePath } from "./paths";
@@ -248,9 +248,9 @@ describe("adoptPristineWorkspaceStarterSources executor", () => {
 describe("starter source adoption during service bootstrap", () => {
   const temporaryDirectories: string[] = [];
   const originalEnv: Record<string, string | undefined> = {
-    NORDRI_USER_DATA_DIR: process.env.NORDRI_USER_DATA_DIR,
-    NORDRI_ENABLE_TEST_API: process.env.NORDRI_ENABLE_TEST_API,
-    NORDRI_BROWSER_AGENT: process.env.NORDRI_BROWSER_AGENT,
+    NESTOR_USER_DATA_DIR: process.env.NESTOR_USER_DATA_DIR,
+    NESTOR_ENABLE_TEST_API: process.env.NESTOR_ENABLE_TEST_API,
+    NESTOR_BROWSER_AGENT: process.env.NESTOR_BROWSER_AGENT,
   };
 
   afterEach(async () => {
@@ -273,9 +273,9 @@ describe("starter source adoption during service bootstrap", () => {
       path.join(os.tmpdir(), "pristine-adoption-legacy-"),
     );
     temporaryDirectories.push(userDataDirectory);
-    process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
-    process.env.NORDRI_ENABLE_TEST_API = "1";
-    process.env.NORDRI_BROWSER_AGENT = "0";
+    process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
+    process.env.NESTOR_ENABLE_TEST_API = "1";
+    process.env.NESTOR_BROWSER_AGENT = "0";
 
     // Persist a pre-seeder legacy workspace: zero targets, setup not started.
     const legacySeed = createEmptyJobFinderRepositoryState();

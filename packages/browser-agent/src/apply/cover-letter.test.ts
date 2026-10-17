@@ -1,4 +1,4 @@
-import { CandidateProfileSchema } from "@nordri/contracts";
+import { CandidateProfileSchema } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import {

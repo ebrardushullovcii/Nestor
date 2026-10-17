@@ -146,7 +146,7 @@ function expectConformanceOutcome(outcome: {
 describe("apply job result lineage conformance", () => {
   test("keeps one row per lineage with the persisted identity in both repositories", async () => {
     const temp = await createTempRepository(
-      "nordri-apply-result-lineage-conformance-",
+      "nestor-apply-result-lineage-conformance-",
     );
     let fileRepository: Awaited<
       ReturnType<typeof temp.createRepository>
@@ -185,7 +185,7 @@ describe("apply job result lineage conformance", () => {
 
   test("rejects preparation-start clobbering in both repositories without leaving partial rows", async () => {
     const temp = await createTempRepository(
-      "nordri-apply-result-lineage-clobber-",
+      "nestor-apply-result-lineage-clobber-",
     );
     let fileRepository: Awaited<
       ReturnType<typeof temp.createRepository>

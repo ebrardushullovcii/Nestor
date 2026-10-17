@@ -4,7 +4,7 @@ import type {
   ResumeDraftOrigin,
   ResumeDraftPatch,
   ResumeDraftSection,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 let resumeDraftPatchCounter = 0;
 

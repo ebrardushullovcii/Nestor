@@ -1,4 +1,4 @@
-import { canRetrySavedResumeImport } from "@nordri/contracts";
+import { canRetrySavedResumeImport } from "@nestor/contracts";
 import { getRunningResumeImportProgress } from "@renderer/features/job-finder/lib/profile-resume-panel-utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -15,7 +15,7 @@ import {
   type ResumeImportRun,
   type ResumeImportProgressEvent,
   type SourceDebugRunRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { useToast } from "@renderer/components/ui/toast";
 import { LockedScreenLayout } from "../../locked-screen-layout";

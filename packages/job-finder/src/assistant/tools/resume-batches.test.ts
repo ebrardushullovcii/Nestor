@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type {
   AssistantRunRef,
   JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import {

@@ -27,7 +27,7 @@ and routed only aggressive resume tailoring to DeepSeek. OpenCode Go now offers
 
 ## Consequences
 
-- A packaged build with only `NORDRI_AI_API_KEY` set behaves like the
+- A packaged build with only `NESTOR_AI_API_KEY` set behaves like the
   owner's dogfood setup; no local env file is needed to reproduce it.
 - `.env.example`, `docs/AI_PROVIDER_SETUP.md`, and the routing sentences in
   `docs/ARCHITECTURE.md` and `docs/PRODUCT.md` describe this default.

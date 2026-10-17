@@ -1,5 +1,5 @@
 import { createApplyTiming } from "./apply-timing";
-import { resumeFormFileNames } from "@nordri/contracts";
+import { resumeFormFileNames } from "@nestor/contracts";
 import {
   parseToolArguments,
   runAgentLoop,
@@ -7,11 +7,11 @@ import {
   type AgentLoopModel,
   type AgentLoopTool,
   type AgentLoopToolOutcome,
-} from "@nordri/agent-runtime";
+} from "@nestor/agent-runtime";
 import {
   describeBrowserError,
   type ApplicationAttemptQuestion,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import type { LLMClient } from "../agent/contracts";
 import { createPageTools } from "../page-tools";

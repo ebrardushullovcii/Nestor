@@ -3,7 +3,7 @@ import type {
   UserActionEventOperation,
   UserActionRequest,
   UserActionRequestState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export type UserActionRequestQuery = {
   id?: string;

@@ -47,7 +47,7 @@ import type {
   SaveUserActionAnswerDraftInput,
   UserActionEvent,
   UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   CreateUserActionRequestResult,
   UserActionEventQuery,

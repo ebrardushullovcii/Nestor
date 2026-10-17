@@ -8,7 +8,7 @@ import prepareValues from "./test-job-finder-prepare-values.mjs";
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const workspace = (qa) =>
-  qa.page.evaluate(() => window.nordri.jobFinder.getWorkspace());
+  qa.page.evaluate(() => window.nestor.jobFinder.getWorkspace());
 
 function localUrl(qa, route) {
   const url = new URL(route, qa.sites.url);
@@ -55,11 +55,11 @@ async function prepare(qa, site, { takeover = false } = {}) {
   );
   await qa.page.waitForFunction(
     () =>
-      typeof window.nordri?.jobFinder?.test?.loadAgentOwnedBrowserDemo ===
+      typeof window.nestor?.jobFinder?.test?.loadAgentOwnedBrowserDemo ===
       "function",
   );
   await qa.page.evaluate(
-    (input) => window.nordri.jobFinder.test.loadAgentOwnedBrowserDemo(input),
+    (input) => window.nestor.jobFinder.test.loadAgentOwnedBrowserDemo(input),
     {
       sourceUrl: localUrl(qa, `/${site}/`),
       applicationUrl,
@@ -69,8 +69,8 @@ async function prepare(qa, site, { takeover = false } = {}) {
   );
   await qa.page.reload();
   await qa.page.evaluate(async () => {
-    const state = await window.nordri.jobFinder.getWorkspace();
-    await window.nordri.jobFinder.saveProfile({
+    const state = await window.nestor.jobFinder.getWorkspace();
+    await window.nestor.jobFinder.saveProfile({
       ...state.profile,
       firstName: "Alex",
       lastName: "Morgan",
@@ -182,7 +182,7 @@ async function prepare(qa, site, { takeover = false } = {}) {
       .match(/fixture_session=([^;]+)/u)[1];
     await qa.app.evaluate(
       async ({ session }, input) => {
-        await session.fromPartition("persist:nordri-browser").cookies.set({
+        await session.fromPartition("persist:nestor-browser").cookies.set({
           url: input.url,
           name: "fixture_session",
           value: input.cookie,
@@ -195,23 +195,23 @@ async function prepare(qa, site, { takeover = false } = {}) {
     );
   }
   await qa.page.evaluate(async () => {
-    await window.nordri.jobFinder.generateResume("job_ready");
-    const exported = await window.nordri.jobFinder.exportResumePdf(
+    await window.nestor.jobFinder.generateResume("job_ready");
+    const exported = await window.nestor.jobFinder.exportResumePdf(
       "job_ready",
       "approval",
     );
-    const state = await window.nordri.jobFinder.getWorkspace();
+    const state = await window.nestor.jobFinder.getWorkspace();
     const artifact =
       exported?.artifact ??
       state.resumeExportArtifacts.find((entry) => entry.jobId === "job_ready");
-    await window.nordri.jobFinder.approveResume("job_ready", artifact.id);
+    await window.nestor.jobFinder.approveResume("job_ready", artifact.id);
   });
   assert.equal(
     (await workspace(qa)).settings.applicationAutomationMode,
     "prepare_only",
   );
   await qa.page.evaluate(() => {
-    void window.nordri.jobFinder.startApplyCopilotRun({
+    void window.nestor.jobFinder.startApplyCopilotRun({
       jobId: "job_ready",
       visualCheckpointsEnabled: false,
     });
@@ -286,7 +286,7 @@ export async function replicaFlow(qa, site, { takeover = false } = {}) {
         (entry) => entry.jobId === "job_ready",
       );
       await qa.page.evaluate(
-        (input) => window.nordri.jobFinder.focusPreparedApplicationPage(input),
+        (input) => window.nestor.jobFinder.focusPreparedApplicationPage(input),
         {
           runId: result.runId,
           jobId: result.jobId,

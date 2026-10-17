@@ -6,7 +6,7 @@ import {
   type JobFinderAgentDiscoveryResult,
   type JobFinderRendererWorkspaceSnapshot,
   type ResumeAssistantMessage,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   ActionState,
   JobFinderShellActions,

@@ -7,7 +7,7 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { SavedJobSchema, type SavedJob } from "@nordri/contracts";
+import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

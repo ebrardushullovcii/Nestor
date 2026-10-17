@@ -2,7 +2,7 @@ import type {
   ResumeCoverageRoleComparison,
   ResumeDraft,
   WorkHistoryReviewSuggestion,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export function describeReviewRole(
   suggestion: WorkHistoryReviewSuggestion,

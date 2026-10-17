@@ -11,8 +11,8 @@ required. Existing `ui:*` scripts and focused tests remain available.
 Coordinate the desktop build and launch mode with other agents first, then run:
 
 ```sh
-pnpm --filter @nordri/desktop qa --doctor
-pnpm --filter @nordri/desktop qa
+pnpm --filter @nestor/desktop qa --doctor
+pnpm --filter @nestor/desktop qa
 ```
 
 The second command opens a Node REPL with top-level `await`. Allocate a terminal
@@ -28,7 +28,7 @@ prove the output includes unbuilt changes. Coordinate one desktop build before
 verifying changed app code, then start a new session. `qa.restart()` reuses the
 same private build and data. Previously saved Page/locator handles become stale.
 
-The launcher defaults `NORDRI_BROWSER_HOST` to `embedded` in both AI modes,
+The launcher defaults `NESTOR_BROWSER_HOST` to `embedded` in both AI modes,
 including when test hooks are enabled. Explicit environment or `env` overrides
 are preserved. Without this selection, the app's test hooks retain the legacy
 external Chrome host for compatibility (ADR 0017). `qa.browserHost`, startup output
@@ -45,7 +45,7 @@ applications may send only to the local replica job sites; everywhere else they 
 `prepare_only` with `submitAuthorized: false`, as in `TESTING.md`.
 Label which provider actually ran; deterministic results cannot prove model quality.
 
-To check production behavior without test hooks, set `NORDRI_ENABLE_TEST_API=0`
+To check production behavior without test hooks, set `NESTOR_ENABLE_TEST_API=0`
 before the command. Use `--provider configured` as well when testing real AI.
 The raw Playwright/Electron tools still work with test hooks disabled.
 
@@ -55,8 +55,8 @@ The raw Playwright/Electron tools still work with test hooks disabled.
 await qa.page.locator("body").ariaSnapshot();
 await qa.page.getByRole("button", { name: "Home", exact: true }).click();
 await qa.capture("home");
-await qa.page.evaluate(() => window.nordri.jobFinder.getWorkspace());
-await qa.page.evaluate(() => Object.keys(window.nordri.jobFinder.test));
+await qa.page.evaluate(() => window.nestor.jobFinder.getWorkspace());
+await qa.page.evaluate(() => Object.keys(window.nestor.jobFinder.test));
 qa.context.pages().map((p) => p.url());
 await qa.app.evaluate(({ app }) => app.getAppMetrics());
 await qa.app.evaluate(({ webContents }) =>
@@ -86,7 +86,7 @@ export default async function (qa) {
 ```
 
 ```sh
-pnpm --filter @nordri/desktop qa --script /tmp/check-home.mjs
+pnpm --filter @nestor/desktop qa --script /tmp/check-home.mjs
 ```
 
 Use this script mode from Claude Code's Bash tool when it cannot send input to an
@@ -113,7 +113,7 @@ or a local model-server stub. There is no custom scenario language or assertion 
   existing application and following the resulting next screen when testing Apply;
   a new seeded record alone does not cover that path.
 - **Failures:** use `qa.context.route(...)`, `setOffline(...)` and existing hooks
-  such as `window.nordri.jobFinder.test.failNextSave('profile')`. Chromium
+  such as `window.nestor.jobFinder.test.failNextSave('profile')`. Chromium
   network controls do not affect Node-side AI requests; use a local HTTP stub or
   service-level inspection for that layer. Verify recovery as well as the error.
 - **Local sites:** `qa.sites.url` is a private random-port fixture server;
@@ -142,7 +142,7 @@ that particular run unsuitable for proving native picker or keyboard-focus behav
 process output. Known credential values are redacted; arbitrary page content is
 not a secrets detector. Keep test data synthetic. `--trace` saves standard
 Playwright traces per app launch; view them with
-`pnpm --filter @nordri/desktop exec playwright show-trace <path>`. Traces can contain request data, so leave them off
+`pnpm --filter @nestor/desktop exec playwright show-trace <path>`. Traces can contain request data, so leave them off
 for authenticated live browsing. Scenario failures capture the current screen.
 
 The launcher defaults to an exclusive shared lease and detects older Playwright
@@ -164,7 +164,7 @@ Report UI outcomes and persisted/backend outcomes separately, with provider/buil
 context and gaps. A screenshot, seeded record or launch alone is not a passed flow.
 
 ```sh
-pnpm --filter @nordri/desktop qa:test
+pnpm --filter @nestor/desktop qa:test
 # Only with the shared Electron slot free; does not rebuild:
-pnpm --filter @nordri/desktop qa --script scripts/agent-qa/smoke.mjs --trace
+pnpm --filter @nestor/desktop qa --script scripts/agent-qa/smoke.mjs --trace
 ```

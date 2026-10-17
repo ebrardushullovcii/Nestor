@@ -8,7 +8,7 @@ import {
   jobFinderSaveChannels,
 } from "./test-save-failure";
 
-const enabledEnv = { NORDRI_ENABLE_TEST_API: "1" } as NodeJS.ProcessEnv;
+const enabledEnv = { NESTOR_ENABLE_TEST_API: "1" } as NodeJS.ProcessEnv;
 const disabledEnv = {} as NodeJS.ProcessEnv;
 
 afterEach(() => {

@@ -13,8 +13,8 @@ import {
   type SavedJob,
   type UserActionRequest,
   type UserActionRequestKind,
-} from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 
 import {
   isUserActionTerminal,

@@ -1,12 +1,12 @@
 import { releaseFinishedApplicationPages } from "./application-page-lifecycle";
 import { mergeApplyReviewCards } from "./agent-application-preparation";
 import { creditOwnApplicationAnswers } from "./review-card-own-answers";
-import type { ExecuteApplicationFlowInput } from "@nordri/browser-runtime";
+import type { ExecuteApplicationFlowInput } from "@nestor/browser-runtime";
 import {
   completeTaskLocalSignIn,
   createApplyPageHands,
-} from "@nordri/browser-agent";
-import type { ApplyPageSession } from "@nordri/contracts";
+} from "@nestor/browser-agent";
+import type { ApplyPageSession } from "@nestor/contracts";
 import {
   buildApplyLetterDependencies,
   createApplyFormPreparer,
@@ -35,7 +35,7 @@ import {
   type JobSource,
   type SavedJob,
   type UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   isUserActionTerminal,
   reduceUserActionCommand,

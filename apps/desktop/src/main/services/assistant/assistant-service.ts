@@ -1,20 +1,20 @@
-import type { AssistantMessage } from "@nordri/contracts";
+import type { AssistantMessage } from "@nestor/contracts";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { BrowserWindow } from "electron";
-import { resolveAssistantModelRouteFromEnvironment } from "@nordri/ai-providers";
-import type { AssistantEvent } from "@nordri/contracts";
+import { resolveAssistantModelRouteFromEnvironment } from "@nestor/ai-providers";
+import type { AssistantEvent } from "@nestor/contracts";
 import {
   createAssistantRepository,
   type AssistantRepository,
-} from "@nordri/db";
+} from "@nestor/db";
 import {
   AssistantSessionHost,
   createAssistantModelHandle,
   createScriptedAssistantModelHandle,
   type AssistantModelResolution,
-} from "@nordri/job-finder";
+} from "@nestor/job-finder";
 
 import { getJobFinderUserDataDirectory } from "../job-finder/paths";
 import { isDesktopTestApiEnabled } from "../job-finder/test-api";
@@ -44,10 +44,10 @@ export function resolveAssistantModel(
   // rule the rest of Job Finder follows (see create-workspace-service).
   if (
     isDesktopTestApiEnabled(env) &&
-    !isEnabled(env.NORDRI_TEST_API_USE_LIVE_AI)
+    !isEnabled(env.NESTOR_TEST_API_USE_LIVE_AI)
   ) {
     const delay = Number.parseInt(
-      env.NORDRI_TEST_ASSISTANT_DELAY_MS ?? "",
+      env.NESTOR_TEST_ASSISTANT_DELAY_MS ?? "",
       10,
     );
     return {
@@ -77,8 +77,8 @@ function publish(event: AssistantEvent): void {
 
 function browserHost(env: NodeJS.ProcessEnv): "embedded" | "external" {
   const testApi = isDesktopTestApiEnabled(env);
-  return env.NORDRI_BROWSER_HOST !== "external" &&
-    (!testApi || env.NORDRI_BROWSER_HOST === "embedded")
+  return env.NESTOR_BROWSER_HOST !== "external" &&
+    (!testApi || env.NESTOR_BROWSER_HOST === "embedded")
     ? "embedded"
     : "external";
 }

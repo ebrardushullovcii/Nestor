@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { SupportingFactsField } from "./supporting-facts-field";
-import { candidateAnswerKindValues } from "@nordri/contracts";
+import { candidateAnswerKindValues } from "@nestor/contracts";
 import type {
   Control,
   UseFieldArrayReturn,

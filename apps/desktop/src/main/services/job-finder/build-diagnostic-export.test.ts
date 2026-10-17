@@ -1,12 +1,12 @@
 import {
   ApplicationQuestionRecordSchema,
   ApplicationAnswerRecordSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type {
   JobFinderPerformanceSnapshot,
   JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   buildJobFinderDiagnosticExport,
   buildPersonalWorkspaceExport,
@@ -210,7 +210,7 @@ it("exports profile, saved jobs, drafts, history and original document bytes", a
   const { tmpdir } = await import("node:os");
   const path = await import("node:path");
   const directory = await mkdtemp(
-    path.join(tmpdir(), "nordri-personal-export-"),
+    path.join(tmpdir(), "nestor-personal-export-"),
   );
   try {
     await writeFile(
@@ -292,7 +292,7 @@ it("personal export filename uses the local calendar date", () => {
   const date = new Date(2026, 9, 5, 1, 6);
   vi.spyOn(date, "toISOString").mockReturnValue("2026-10-04T23:06:00.000Z");
   expect(personalWorkspaceExportFileName(date)).toBe(
-    "nordri-workspace-2026-10-05.json",
+    "nestor-workspace-2026-10-05.json",
   );
 });
 

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   DesktopBrowserState,
   UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { installAutomaticSourceAccessResume } from "./automatic-source-access-resume";
 
 const origin = "http://127.0.0.1:47950/";

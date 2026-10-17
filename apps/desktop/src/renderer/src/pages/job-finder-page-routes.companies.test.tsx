@@ -8,7 +8,7 @@ import {
   type CompanyEntity,
   type DiscoveryJobView,
   type JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 

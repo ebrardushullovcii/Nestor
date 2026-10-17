@@ -5,7 +5,7 @@ import {
   DiscoveryRunRecordSchema,
   SourceDebugRunRecordSchema,
   SourceDebugWorkerAttemptSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import {

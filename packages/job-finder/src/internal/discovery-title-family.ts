@@ -1,7 +1,7 @@
 import type {
   JobListMatchAssessment,
   TitleFamilyMatch,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * Whether the listing's role is the kind of work the person asked for, read

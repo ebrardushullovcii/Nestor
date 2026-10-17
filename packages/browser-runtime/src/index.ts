@@ -14,7 +14,7 @@ export type {
 export type {
   BrowserVisualSnapshotRef,
   BrowserVisualSnapshotRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export {
   createCatalogBrowserSessionRuntime,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import type { ApplicationEvent } from "@nordri/contracts";
+import type { ApplicationEvent } from "@nestor/contracts";
 
 import {
   MAX_APPLICATION_EVENT_HISTORY,

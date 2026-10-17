@@ -6,7 +6,7 @@ import type {
   ResumeImportFieldCandidateDraft,
   ResumeImportFieldSensitivity,
   ResumeImportResolutionRecommendation,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export function normalizeConfidence(value: number): number {
   if (!Number.isFinite(value)) {

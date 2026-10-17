@@ -16,7 +16,7 @@ import {
   type JobSearchPreferences,
   type SaveCampaignRuleInput,
   type SaveJobSearchCampaignInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { trackerTimeToIso } from "../applications/applications-tracker-time";
 import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";

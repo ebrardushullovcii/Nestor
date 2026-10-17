@@ -20,7 +20,7 @@ import {
   AssistantUndoChangeInputSchema,
   AssistantUndoChangeResultSchema,
   type DesktopAssistantBridge,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * The assistant's typed bridge. Every call is schema-checked on both sides;

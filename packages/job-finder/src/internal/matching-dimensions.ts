@@ -4,7 +4,7 @@ import {
   type JobSearchPreferences,
   type MatchDimensionEvidence,
   type MatchDimensionsAssessment,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import type { MatchAssessmentPostingInput } from "./match-assessment-posting-input";
 import type {

@@ -3,12 +3,12 @@
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { HashRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { InterviewWorkspaceSnapshot } from "@nordri/contracts";
+import type { InterviewWorkspaceSnapshot } from "@nestor/contracts";
 
 import { LiveAssistantPage } from "./live-assistant-page";
 
 const LAST_JOB_FINDER_ROUTE_STORAGE_KEY =
-  "nordri.live-assistant.last-job-finder-route";
+  "nestor.live-assistant.last-job-finder-route";
 
 vi.mock("./interview-media-stream-probes", () => ({
   InterviewMediaStreamProbes: () => <div data-testid="media-probes-stub" />,
@@ -65,7 +65,7 @@ function installDesktopApi(workspace: InterviewWorkspaceSnapshot) {
     getWorkspace: vi.fn().mockResolvedValue(workspace),
     onWorkspaceChange: vi.fn().mockReturnValue(() => undefined),
   };
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       liveAssistant,
@@ -135,7 +135,7 @@ describe("Live Assistant product-switcher return target", () => {
 
     expect(
       rendered
-        .getByRole("img", { name: "Nordri" })
+        .getByRole("img", { name: "Nestor" })
         .closest("a")
         ?.getAttribute("href"),
     ).toBe("#/job-finder");
@@ -156,7 +156,7 @@ describe("Live Assistant product-switcher return target", () => {
     const outboundVisit = renderInterviewShell();
 
     expect(
-      (await outboundVisit.findByRole("img", { name: "Nordri" }))
+      (await outboundVisit.findByRole("img", { name: "Nestor" }))
         .closest("a")
         ?.getAttribute("href"),
     ).toBe("#/job-finder/applications");

@@ -2,7 +2,7 @@ import {
   CandidateProfileSchema,
   ApplicationAnswerRecordSchema,
   ApplicationQuestionRecordSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { expect, test } from "vitest";
 import { createSeed } from "./test-fixtures";
 import { quarantineAgentAnswers } from "./agent-answer-migration";

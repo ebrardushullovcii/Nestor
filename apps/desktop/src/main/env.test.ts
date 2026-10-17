@@ -12,21 +12,21 @@ describe("desktop env loader", () => {
       parseDotEnvContent(
         [
           "# comment",
-          "NORDRI_AI_API_KEY=abc123",
-          'NORDRI_AI_MODEL="gpt-5.6-luna"',
-          "export NORDRI_AI_BASE_URL='https://api.openai.com/v1'",
+          "NESTOR_AI_API_KEY=abc123",
+          'NESTOR_AI_MODEL="gpt-5.6-luna"',
+          "export NESTOR_AI_BASE_URL='https://api.openai.com/v1'",
         ].join("\n"),
       ),
     ).toEqual({
-      NORDRI_AI_API_KEY: "abc123",
-      NORDRI_AI_MODEL: "gpt-5.6-luna",
-      NORDRI_AI_BASE_URL: "https://api.openai.com/v1",
+      NESTOR_AI_API_KEY: "abc123",
+      NESTOR_AI_MODEL: "gpt-5.6-luna",
+      NESTOR_AI_BASE_URL: "https://api.openai.com/v1",
     });
   });
 
   test("loads values without overriding existing environment", () => {
     const env: NodeJS.ProcessEnv = {
-      NORDRI_AI_MODEL: "existing-model",
+      NESTOR_AI_MODEL: "existing-model",
     };
 
     loadDesktopEnvironment(
@@ -36,7 +36,7 @@ describe("desktop env loader", () => {
       ),
     );
 
-    expect(env.NORDRI_AI_MODEL).toBe("existing-model");
+    expect(env.NESTOR_AI_MODEL).toBe("existing-model");
   });
 
   test("lists root and desktop env file locations", () => {
@@ -53,15 +53,15 @@ test("inline route comments are not passed to the model or API-mode parser", () 
   expect(
     parseDotEnvContent(
       [
-        "NORDRI_AI_AGGRESSIVE_MODEL=muse-spark-1.3-contributor # deepseek-v4.1-flash",
-        "NORDRI_AI_AGGRESSIVE_API_MODE=responses # chat_completions",
-        "NORDRI_AI_AGGRESSIVE_REASONING_EFFORT=xhigh # high",
+        "NESTOR_AI_AGGRESSIVE_MODEL=muse-spark-1.3-contributor # deepseek-v4.1-flash",
+        "NESTOR_AI_AGGRESSIVE_API_MODE=responses # chat_completions",
+        "NESTOR_AI_AGGRESSIVE_REASONING_EFFORT=xhigh # high",
       ].join("\n"),
     ),
   ).toEqual({
-    NORDRI_AI_AGGRESSIVE_MODEL: "muse-spark-1.3-contributor",
-    NORDRI_AI_AGGRESSIVE_API_MODE: "responses",
-    NORDRI_AI_AGGRESSIVE_REASONING_EFFORT: "xhigh",
+    NESTOR_AI_AGGRESSIVE_MODEL: "muse-spark-1.3-contributor",
+    NESTOR_AI_AGGRESSIVE_API_MODE: "responses",
+    NESTOR_AI_AGGRESSIVE_REASONING_EFFORT: "xhigh",
   });
 });
 

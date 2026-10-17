@@ -1,5 +1,5 @@
 {
-  "name": "@nordri/browser-agent",
+  "name": "@nestor/browser-agent",
   "version": "1.0.0",
   "description": "AI browser agent for autonomous job discovery",
   "type": "module",
@@ -18,8 +18,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@nordri/agent-runtime": "workspace:*",
-    "@nordri/contracts": "workspace:*",
+    "@nestor/agent-runtime": "workspace:*",
+    "@nestor/contracts": "workspace:*",
     "playwright": "^1.63.0",
     "zod": "^3.23.8"
   },

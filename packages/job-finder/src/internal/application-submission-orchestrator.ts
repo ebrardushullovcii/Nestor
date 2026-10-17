@@ -1,5 +1,5 @@
-import type { JobFinderRepository } from "@nordri/db";
-import { SubmissionExecutionGrantSchema } from "@nordri/contracts";
+import type { JobFinderRepository } from "@nestor/db";
+import { SubmissionExecutionGrantSchema } from "@nestor/contracts";
 import {
   SubmissionArmedMarkerSchema,
   SubmissionOutcomeRecordSchema,
@@ -14,7 +14,7 @@ import {
   type SubmissionOutcomeRecord,
   type SubmissionOutcomeRetryEligibility,
   type SubmissionPreflightRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   evaluateApplicationSubmissionPolicy,

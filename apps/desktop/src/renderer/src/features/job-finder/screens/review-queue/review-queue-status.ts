@@ -1,4 +1,4 @@
-import { RESUME_PIPELINE_CAPACITY } from "@nordri/contracts";
+import { RESUME_PIPELINE_CAPACITY } from "@nestor/contracts";
 import {
   type ApplicationAttemptState,
   type ApplicationStatus,
@@ -8,7 +8,7 @@ import {
   type TailoredAssetSummary,
   type TailoringMode,
   type ResumeBatchProviderBlock,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { BadgeTone } from "../../lib/job-finder-types";
 import {
   describeAiUnavailableResume,

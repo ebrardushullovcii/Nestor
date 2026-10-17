@@ -1,13 +1,13 @@
 import { hasVerifiedApplicationSubmission } from "./workspace-apply-run-support";
 import { reduceUserActionCommand } from "../user-action-domain";
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   ApplicationAttemptSchema,
   ApplicationRecordSchema,
   type ApplyJobResult,
   type JobSource,
-} from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 
 // Page cleanup is best effort: a tab that will not close must never turn a
 // finished application, or the error that ended it, into a different result.

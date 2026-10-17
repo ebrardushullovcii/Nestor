@@ -3,8 +3,8 @@ import {
   hasProfileSetupPlaceholderValue,
   type CandidateProfile,
   type JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
-import type { JobFinderWorkspaceService } from "@nordri/job-finder";
+} from "@nestor/contracts";
+import type { JobFinderWorkspaceService } from "@nestor/job-finder";
 
 type ImportSnapshot = Pick<
   JobFinderWorkspaceSnapshot,

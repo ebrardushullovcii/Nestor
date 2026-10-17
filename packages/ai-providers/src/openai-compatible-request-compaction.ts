@@ -37,7 +37,7 @@ const REDUNDANT_EVIDENCE_ID_SUFFIXES = [":domainTags"];
 import {
   ResumeImportJsonValueSchema,
   type ResumeImportJsonValue,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export type OpenAiCompatibleJsonOperation =
   | "extractProfileFromResume"

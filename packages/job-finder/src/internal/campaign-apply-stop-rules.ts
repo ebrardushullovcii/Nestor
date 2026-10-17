@@ -1,7 +1,7 @@
 import type {
   ApplyBlockerReason,
   JobSearchCampaignStopRules,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export interface CampaignApplyStopCounts {
   blockedCount: number;

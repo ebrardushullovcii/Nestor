@@ -4,7 +4,7 @@ import {
   PROFILE_SETUP_PLACEHOLDER_SUMMARY,
   type JobSource,
   type SourceDebugPhase,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 // Profile placeholder strings - canonical definitions live in contracts.
 // These aliases remain for legacy-workspace detection in import reconciliation.

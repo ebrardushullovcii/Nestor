@@ -4,7 +4,7 @@ import type {
   ApplicationAuthorityEnvelope,
   ApplicationAuthorityEnvelopeMutationResult,
   ApplicationAuthorityReadiness,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   cleanup,
   fireEvent,
@@ -83,7 +83,7 @@ function applied(
 }
 
 function installApi(
-  overrides: Partial<Window["nordri"]["jobFinder"]> = {},
+  overrides: Partial<Window["nestor"]["jobFinder"]> = {},
 ) {
   const api = {
     getApplicationAuthorityReadiness: vi.fn(() => Promise.resolve(readiness)),
@@ -112,9 +112,9 @@ function installApi(
       Promise.resolve(applied(envelope({ revision: 2 }))),
     ),
     ...overrides,
-  } as Window["nordri"]["jobFinder"];
+  } as Window["nestor"]["jobFinder"];
 
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: { jobFinder: api },
   });
@@ -124,7 +124,7 @@ function installApi(
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: undefined,
   });

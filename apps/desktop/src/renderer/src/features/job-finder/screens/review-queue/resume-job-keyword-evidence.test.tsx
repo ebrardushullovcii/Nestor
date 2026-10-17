@@ -11,7 +11,7 @@ import {
   type ResumeDraftEntry,
   type ResumeDraftSection,
   type ResumeDraftSourceRef,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildResumeJobKeywordEvidence,

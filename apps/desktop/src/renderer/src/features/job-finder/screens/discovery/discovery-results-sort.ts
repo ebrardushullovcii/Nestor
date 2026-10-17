@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import type { JobListRow } from "@nordri/contracts";
+import type { JobListRow } from "@nestor/contracts";
 import {
   compareDiscoveryFitTieBreaks,
   compareDiscoveryJobs,
   getClearMismatchPenalty,
   getDiscoveryListingRecencyKey,
   isProvisionalMatchAssessment,
-} from "@nordri/job-finder/discovery-ordering";
+} from "@nestor/job-finder/discovery-ordering";
 
 export type DiscoveryResultsSortField = "fit" | "recent" | "company";
 export type DiscoveryResultsSortDirection = "asc" | "desc";
@@ -21,7 +21,7 @@ export const DISCOVERY_RESULTS_DEFAULT_SORT: DiscoveryResultsSort = {
   field: "fit",
 };
 
-const SORT_STORAGE_KEY = "nordri.job-finder.discovery.results-sort.v1";
+const SORT_STORAGE_KEY = "nestor.job-finder.discovery.results-sort.v1";
 
 // Switching pivots lands on the least surprising direction per field:
 // alphabetical companies, strongest fits, newest listings.

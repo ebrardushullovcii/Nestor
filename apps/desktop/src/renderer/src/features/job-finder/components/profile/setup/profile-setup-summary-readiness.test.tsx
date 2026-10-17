@@ -7,7 +7,7 @@ import {
   createFreshStartCandidateProfile,
   evaluateProfileSetupReadiness,
   type JobSearchPreferences,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   buildProfileSetupReadinessPresentation,
   getProfileSetupReadinessBlockerLabel,

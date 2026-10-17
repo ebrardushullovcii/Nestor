@@ -1,4 +1,4 @@
-import type { ApplyJobResultListRow, ApplyRunSummary } from "@nordri/contracts";
+import type { ApplyJobResultListRow, ApplyRunSummary } from "@nestor/contracts";
 import {
   type ApplicationOutcome,
   type OutcomeAnalyticsBucket,
@@ -9,10 +9,10 @@ import {
   type OutcomeSuggestionKind,
   type OutcomeUncertaintyLevel,
   outcomeBucketDimensionValues,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { recordedJobSourceName } from "../../lib/job-source-display-name";
-import { UNKNOWN_JOB_SOURCE_BUCKET_KEY } from "@nordri/contracts";
+import { UNKNOWN_JOB_SOURCE_BUCKET_KEY } from "@nestor/contracts";
 
 /**
  * Pure presentation derivation for campaign-scoped outcome analytics.

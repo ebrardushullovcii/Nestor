@@ -4,7 +4,7 @@ import {
   type BrowserSourceAccessProbeInput,
   type BrowserSourceAccessProbeResult,
   type BrowserSourceAccessProbeSignal,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { Page } from "playwright";
 
 export type VisibleAccessSignals = {

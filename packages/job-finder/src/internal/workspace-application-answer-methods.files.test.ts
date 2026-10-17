@@ -1,4 +1,4 @@
-import type { ApplyRunDetails, UserActionRequest } from "@nordri/contracts";
+import type { ApplyRunDetails, UserActionRequest } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 
 import { createWorkspaceApplicationAnswerMethods } from "./workspace-application-answer-methods";

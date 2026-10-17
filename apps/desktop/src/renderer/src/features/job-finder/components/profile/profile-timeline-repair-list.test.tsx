@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ResumeTimelineRepairProposalSchema } from "@nordri/contracts";
+import { ResumeTimelineRepairProposalSchema } from "@nestor/contracts";
 import { ProfileTimelineRepairList } from "./profile-timeline-repair-list";
 
 const experience = {

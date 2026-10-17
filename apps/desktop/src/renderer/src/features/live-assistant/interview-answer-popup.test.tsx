@@ -8,7 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { InterviewWorkspaceSnapshot } from "@nordri/contracts";
+import type { InterviewWorkspaceSnapshot } from "@nestor/contracts";
 import { InterviewAnswerPopup } from "./interview-answer-popup";
 
 function createWorkspace(): InterviewWorkspaceSnapshot {
@@ -52,7 +52,7 @@ function installDesktopApi(workspace: InterviewWorkspaceSnapshot) {
     writeClipboardText: vi.fn().mockResolvedValue({ written: true }),
     moveOverlayWindow: vi.fn().mockResolvedValue({ moved: true }),
   };
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: { liveAssistant },
   });

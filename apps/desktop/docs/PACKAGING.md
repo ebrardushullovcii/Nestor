@@ -35,7 +35,7 @@ working tree is deliberately excluded from the packaged resources.
 
 ## Release boundaries
 
-The Windows package uses the tracked Nordri icon in `build/icon.ico`.
+The Windows package uses the tracked Nestor icon in `build/icon.ico`.
 The current repository has no license file, signing certificate, update
 provider, or publish configuration. Builds are therefore unsigned local
 artifacts; the pipeline makes no signing, auto-update, or publishing claim.
@@ -45,7 +45,7 @@ before distributing an installer.
 ## Current Windows validation
 
 On 2026-08-19, `electron-builder --dir` produced and inspected a Windows x64
-bundle containing `Nordri.exe`, `resources/app.asar`, the tracked icon, and
+bundle containing `Nestor.exe`, `resources/app.asar`, the tracked icon, and
 the complete resume-parser sidecar manifest and executable. The inspected
 unpacked directory was 585,084,836 bytes. It was not Authenticode-signed.
 Regenerate the bundle after the final CSP metadata cleanup and repeat the

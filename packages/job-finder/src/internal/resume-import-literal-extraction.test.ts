@@ -1,4 +1,4 @@
-import { ResumeDocumentBundleSchema } from "@nordri/contracts";
+import { ResumeDocumentBundleSchema } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import { extractLiteralCandidates } from "./resume-import-literal-extraction";

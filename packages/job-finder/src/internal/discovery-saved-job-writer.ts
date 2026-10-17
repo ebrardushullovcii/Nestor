@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
-import type { JobFinderDiscoveryState, SavedJob } from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+import type { JobFinderDiscoveryState, SavedJob } from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 
 type DiscoveryUpdate = (
   current: JobFinderDiscoveryState,

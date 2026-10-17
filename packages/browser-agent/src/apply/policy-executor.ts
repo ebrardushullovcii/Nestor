@@ -2,7 +2,7 @@ import { questionClassificationKey } from "./question-classification";
 import {
   resumeFormFileNames,
   type ApplicationAttemptQuestion,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   savedAnswerForQuestion,

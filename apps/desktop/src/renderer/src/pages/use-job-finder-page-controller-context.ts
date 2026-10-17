@@ -23,7 +23,7 @@ import type {
   SetJobFinderActivityControlInput,
   SetOutcomeSuggestionEnabledInput,
   SnoozeGroupedDecisionInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   ActionState,
   JobFinderShellActions,
@@ -561,7 +561,7 @@ export function buildJobFinderPageContext(
           // the parked tab for this request. Then show it, expanded.
           const snapshot = await actions.performUserAction(command);
           if (parkedTab) {
-            const browserState = await window.nordri.browser.getState();
+            const browserState = await window.nestor.browser.getState();
             const tab =
               browserState.tabs.find((candidate) =>
                 parkedTab.tabId !== null
@@ -576,11 +576,11 @@ export function buildJobFinderPageContext(
                 `Job Finder could not open that page in its browser. Open ${JOB_FINDER_BROWSER_NAME} from the top bar and go to the site to sign in; Job Finder notices when you're done.`,
               );
             }
-            await window.nordri.browser.command({
+            await window.nestor.browser.command({
               type: "select_tab",
               tabId: tab.id,
             });
-            await window.nordri.browser.command({
+            await window.nestor.browser.command({
               type: "expand",
               expanded: true,
             });
@@ -609,7 +609,7 @@ export function buildJobFinderPageContext(
             }
             // The page is selected in the browser; show it, as a parked
             // search tab is shown, instead of leaving the browser minimized.
-            await window.nordri?.browser
+            await window.nestor?.browser
               ?.command({ type: "expand", expanded: true })
               .catch(() => undefined);
           }

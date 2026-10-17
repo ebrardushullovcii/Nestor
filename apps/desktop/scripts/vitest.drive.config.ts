@@ -7,16 +7,16 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 export default defineConfig({
   resolve: {
     alias: {
-      "@nordri/ai-providers": path.resolve(
+      "@nestor/ai-providers": path.resolve(
         repoRoot,
         "packages/ai-providers/src/index.ts",
       ),
       "@renderer": path.resolve(repoRoot, "apps/desktop/src/renderer/src"),
-      "@nordri/contracts": path.resolve(
+      "@nestor/contracts": path.resolve(
         repoRoot,
         "packages/contracts/src/index.ts",
       ),
-      "@nordri/job-finder": path.resolve(
+      "@nestor/job-finder": path.resolve(
         repoRoot,
         "packages/job-finder/src/index.ts",
       ),

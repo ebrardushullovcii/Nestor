@@ -17,5 +17,5 @@ Use this directory for profile-screen visual references only. The Job Finder pro
 - branch at capture time: `codex/profile-resume-polish`
 - artifact availability: no committed artifact folder is retained for this historical snapshot; use fresh harness output when you need a current comparison
 - viewport: `1440x920`
-- rerun command: `pnpm --filter @nordri/desktop ui:profile-baseline`
+- rerun command: `pnpm --filter @nestor/desktop ui:profile-baseline`
 - note: this entry is retained as historical metadata only; generated UI artifacts are disposable and should be recreated as needed rather than stored here long-term

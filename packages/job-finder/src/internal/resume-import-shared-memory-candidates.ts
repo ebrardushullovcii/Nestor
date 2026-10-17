@@ -1,8 +1,8 @@
-import { buildValuePreview } from "@nordri/ai-providers";
+import { buildValuePreview } from "@nestor/ai-providers";
 import {
   ResumeImportFieldCandidateSchema,
   type ResumeImportFieldCandidate,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { isObject, toStringArray } from "./resume-import-common";
 import { normalizeText } from "./shared";

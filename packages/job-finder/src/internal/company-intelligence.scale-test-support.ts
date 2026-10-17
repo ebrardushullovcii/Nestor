@@ -2,7 +2,7 @@ import {
   ApplicationRecordSchema,
   SavedJobSchema,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export const companyScaleNow = "2026-10-13T10:00:00.000Z";
 

@@ -1,11 +1,11 @@
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import type {
   DesktopBrowserState,
   UserActionCommandInput,
   UserActionRequest,
-} from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
-import { inspectApplicationAccessPage } from "@nordri/job-finder";
+} from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
+import { inspectApplicationAccessPage } from "@nestor/job-finder";
 import type { EmbeddedBrowser } from "../browser/embedded-browser";
 
 type BrowserStateListener = Pick<EmbeddedBrowser, "onStateChanged">;

@@ -6,7 +6,7 @@ import {
   NonEmptyStringSchema,
   type AssistantTaskPlan,
   type JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { z } from "zod";
 
 import { AssistantToolError, argText, defineTool, json } from "../tool-kit";

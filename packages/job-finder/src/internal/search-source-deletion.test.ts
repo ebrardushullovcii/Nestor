@@ -1,4 +1,4 @@
-import { SavedJobDiscoveryProvenanceSchema } from "@nordri/contracts";
+import { SavedJobDiscoveryProvenanceSchema } from "@nestor/contracts";
 import { expect, it } from "vitest";
 import { createWorkspaceServiceHarness } from "../workspace-service.test-harness";
 it("keeps saved jobs and their original board name when their source is deleted", async () => {

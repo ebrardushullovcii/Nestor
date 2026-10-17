@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, cleanup, render, screen } from "@testing-library/react";
-import type { JobSearchPreferences, SavedJob } from "@nordri/contracts";
+import type { JobSearchPreferences, SavedJob } from "@nestor/contracts";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";

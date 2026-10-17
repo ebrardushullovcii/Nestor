@@ -869,7 +869,7 @@ async function withTimeout(promise, timeoutMs, label, onTimeout) {
 
 async function waitForJobFinderBridge(page) {
   await page.waitForFunction(
-    () => Boolean(window.nordri?.jobFinder),
+    () => Boolean(window.nestor?.jobFinder),
     undefined,
     { timeout: 20_000 },
   );
@@ -878,12 +878,12 @@ async function waitForJobFinderBridge(page) {
 // Provider/API secret variables must never reach the automated child runtime;
 // the smoke drives deterministic/test AI only.
 export const CHILD_ENV_SECRET_VARS = [
-  "NORDRI_AI_API_KEY",
-  "NORDRI_AI_VISION_API_KEY",
-  "NORDRI_BROWSER_VISION_API_KEY",
-  "NORDRI_INTERVIEW_AI_API_KEY",
-  "NORDRI_INTERVIEW_VISION_API_KEY",
-  "NORDRI_RESUME_VISION_API_KEY",
+  "NESTOR_AI_API_KEY",
+  "NESTOR_AI_VISION_API_KEY",
+  "NESTOR_BROWSER_VISION_API_KEY",
+  "NESTOR_INTERVIEW_AI_API_KEY",
+  "NESTOR_INTERVIEW_VISION_API_KEY",
+  "NESTOR_RESUME_VISION_API_KEY",
 ];
 
 // Pure child-environment construction used by every launch. Ambient pollution
@@ -901,34 +901,34 @@ export function buildChildLaunchEnv({
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_RENDERER_URL;
   // Wrapper-level intent must never reach the child; the only write-
-  // authorization carrier is NORDRI_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES.
+  // authorization carrier is NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES.
   delete env.JOB_FINDER_PREPARE_ONLY_AUTHORIZE_INTERMEDIATE_WRITES;
   for (const name of CHILD_ENV_SECRET_VARS) {
     delete env[name];
   }
   if (intermediateWritesAuthorized) {
-    env.NORDRI_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES = "1";
+    env.NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES = "1";
   } else {
-    delete env.NORDRI_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES;
+    delete env.NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES;
   }
   if (forceLiveAi) {
-    env.NORDRI_TEST_API_USE_LIVE_AI = "1";
+    env.NESTOR_TEST_API_USE_LIVE_AI = "1";
   } else {
-    delete env.NORDRI_TEST_API_USE_LIVE_AI;
+    delete env.NESTOR_TEST_API_USE_LIVE_AI;
   }
-  env.NORDRI_BROWSER_AGENT = "1";
-  env.NORDRI_BROWSER_HEADLESS = "1";
-  env.NORDRI_ENABLE_TEST_API = "1";
-  env.NORDRI_USER_DATA_DIR = userDataDirectory;
+  env.NESTOR_BROWSER_AGENT = "1";
+  env.NESTOR_BROWSER_HEADLESS = "1";
+  env.NESTOR_ENABLE_TEST_API = "1";
+  env.NESTOR_USER_DATA_DIR = userDataDirectory;
   if (
     !intermediateWritesAuthorized &&
-    env.NORDRI_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES !== undefined
+    env.NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES !== undefined
   ) {
     throw new Error(
       "Child env invariant violated: intermediate-write authorization survived sanitization.",
     );
   }
-  if (!forceLiveAi && env.NORDRI_TEST_API_USE_LIVE_AI !== undefined) {
+  if (!forceLiveAi && env.NESTOR_TEST_API_USE_LIVE_AI !== undefined) {
     throw new Error(
       "Child env invariant violated: live-AI override survived sanitization.",
     );
@@ -939,7 +939,7 @@ export function buildChildLaunchEnv({
 // Report authority is derived from the final child environment, never from a
 // parallel boolean.
 export function childEnvAuthorizesIntermediateWrites(childEnv) {
-  return childEnv.NORDRI_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES === "1";
+  return childEnv.NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES === "1";
 }
 
 async function launchApp(launchEnv, sealedLaunchPlan = null) {
@@ -966,7 +966,7 @@ async function launchApp(launchEnv, sealedLaunchPlan = null) {
 }
 
 async function getWorkspace(page) {
-  return page.evaluate(() => window.nordri.jobFinder.getWorkspace());
+  return page.evaluate(() => window.nestor.jobFinder.getWorkspace());
 }
 
 async function getWorkspaceSafely(page) {
@@ -1380,7 +1380,7 @@ async function runPrepareOnlySmoke() {
   await mkdir(outputDir, { recursive: true });
   const fixture = JSON.parse(await readFile(fixturePath, "utf8"));
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-job-finder-prepare-only-"),
+    path.join(os.tmpdir(), "nestor-job-finder-prepare-only-"),
   );
   // Child environments are built once through the pure sanitizer; report
   // authority is read back from the final child env, never from a parallel
@@ -1649,12 +1649,12 @@ async function runPrepareOnlySmoke() {
       () =>
         page.evaluate(
           async ({ profile, searchPreferences, settings }) => {
-            await window.nordri.jobFinder.saveWorkspaceInputs({
+            await window.nestor.jobFinder.saveWorkspaceInputs({
               profile,
               searchPreferences,
             });
-            await window.nordri.jobFinder.saveSettings(settings);
-            return window.nordri.jobFinder.getWorkspace();
+            await window.nestor.jobFinder.saveSettings(settings);
+            return window.nestor.jobFinder.getWorkspace();
           },
           {
             profile: fixture.profile,
@@ -1670,7 +1670,7 @@ async function runPrepareOnlySmoke() {
       latestWorkspace = await runPhase("import_synthetic_original_resume", () =>
         page.evaluate(
           (sourcePath) =>
-            window.nordri.jobFinder.test.importResumeFromPath({
+            window.nestor.jobFinder.test.importResumeFromPath({
               sourcePath,
               useVision: false,
             }),
@@ -1696,7 +1696,7 @@ async function runPrepareOnlySmoke() {
         () =>
           page.evaluate(
             (reviewItemId) =>
-              window.nordri.jobFinder.applyProfileSetupReviewAction(
+              window.nestor.jobFinder.applyProfileSetupReviewAction(
                 reviewItemId,
                 "confirm",
               ),
@@ -1719,7 +1719,7 @@ async function runPrepareOnlySmoke() {
           () =>
             page.evaluate(
               (reviewItemId) =>
-                window.nordri.jobFinder.applyProfileSetupReviewAction(
+                window.nestor.jobFinder.applyProfileSetupReviewAction(
                   reviewItemId,
                   "confirm",
                 ),
@@ -1757,12 +1757,12 @@ async function runPrepareOnlySmoke() {
         () =>
           page.evaluate(
             async ({ profile, searchPreferences, settings }) => {
-              await window.nordri.jobFinder.saveWorkspaceInputs({
+              await window.nestor.jobFinder.saveWorkspaceInputs({
                 profile,
                 searchPreferences,
               });
-              await window.nordri.jobFinder.saveSettings(settings);
-              return window.nordri.jobFinder.getWorkspace();
+              await window.nestor.jobFinder.saveSettings(settings);
+              return window.nestor.jobFinder.getWorkspace();
             },
             {
               profile: latestWorkspace.profile,
@@ -1794,7 +1794,7 @@ async function runPrepareOnlySmoke() {
         withTimeout(
           page.evaluate(
             (targetId) =>
-              window.nordri.jobFinder.runAgentDiscovery(
+              window.nestor.jobFinder.runAgentDiscovery(
                 undefined,
                 targetId,
               ),
@@ -1804,7 +1804,7 @@ async function runPrepareOnlySmoke() {
           `${target.label} fast discovery`,
           () =>
             page.evaluate(() =>
-              window.nordri.jobFinder.cancelAgentDiscovery(),
+              window.nestor.jobFinder.cancelAgentDiscovery(),
             ),
         ),
     );
@@ -1854,7 +1854,7 @@ async function runPrepareOnlySmoke() {
 
     latestWorkspace = await runPhase("queue_discovered_job", () =>
       page.evaluate(
-        (jobId) => window.nordri.jobFinder.queueJobForReview(jobId),
+        (jobId) => window.nestor.jobFinder.queueJobForReview(jobId),
         selectedJob.id,
       ),
     );
@@ -1884,19 +1884,19 @@ async function runPrepareOnlySmoke() {
     } else {
       latestWorkspace = await runPhase("generate_deterministic_resume", () =>
         page.evaluate(
-          (jobId) => window.nordri.jobFinder.generateResume(jobId),
+          (jobId) => window.nestor.jobFinder.generateResume(jobId),
           selectedJob.id,
         ),
       );
       latestWorkspace = await runPhase("export_resume_pdf", () =>
         page.evaluate(
-          (jobId) => window.nordri.jobFinder.exportResumePdf(jobId),
+          (jobId) => window.nestor.jobFinder.exportResumePdf(jobId),
           selectedJob.id,
         ),
       );
       let resumeWorkspace = await runPhase("read_exported_resume", () =>
         page.evaluate(
-          (jobId) => window.nordri.jobFinder.getResumeWorkspace(jobId),
+          (jobId) => window.nestor.jobFinder.getResumeWorkspace(jobId),
           selectedJob.id,
         ),
       );
@@ -1917,12 +1917,12 @@ async function runPrepareOnlySmoke() {
       latestWorkspace = await runPhase("approve_resume_pdf", () =>
         page.evaluate(
           ({ jobId, exportId }) =>
-            window.nordri.jobFinder.approveResume(jobId, exportId),
+            window.nestor.jobFinder.approveResume(jobId, exportId),
           { jobId: selectedJob.id, exportId: exportedResume.id },
         ),
       );
       resumeWorkspace = await page.evaluate(
-        (jobId) => window.nordri.jobFinder.getResumeWorkspace(jobId),
+        (jobId) => window.nestor.jobFinder.getResumeWorkspace(jobId),
         selectedJob.id,
       );
       report.resume = {
@@ -1951,7 +1951,7 @@ async function runPrepareOnlySmoke() {
       withTimeout(
         page.evaluate(
           (jobId) =>
-            window.nordri.jobFinder.startApplyCopilotRun({
+            window.nestor.jobFinder.startApplyCopilotRun({
               jobId,
               visualCheckpointsEnabled: false,
             }),

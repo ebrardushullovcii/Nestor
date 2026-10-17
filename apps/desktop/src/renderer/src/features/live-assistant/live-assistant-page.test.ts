@@ -24,10 +24,10 @@ describe("Live Assistant navigation labels", () => {
     expect(getInterviewModeLabel("assist", true)).toBe("Live session");
     expect(getInterviewModeLabel("review", true)).toBe("Live session · Review");
     expect(getInterviewDocumentTitle("review", false)).toBe(
-      "Review mode | Live Assistant | Nordri",
+      "Review mode | Live Assistant | Nestor",
     );
     expect(getInterviewDocumentTitle("settings", true)).toBe(
-      "Live session · Settings | Live Assistant | Nordri",
+      "Live session · Settings | Live Assistant | Nestor",
     );
   });
 
@@ -130,7 +130,7 @@ describe("Job Finder return-route resolution", () => {
 
   it("falls back to the Job Finder root for stored non-Job-Finder routes", () => {
     const storage = createMemoryStorage({
-      "nordri.live-assistant.last-job-finder-route":
+      "nestor.live-assistant.last-job-finder-route":
         "/live-assistant/overlay/answer",
     });
 
@@ -197,7 +197,7 @@ describe("Job Finder route recorder installation", () => {
     );
     expect(
       secondStorage.getItem(
-        "nordri.live-assistant.last-job-finder-route",
+        "nestor.live-assistant.last-job-finder-route",
       ),
     ).toBeNull();
     expect(forwardedUrls).toEqual(["#/job-finder/companies/acme"]);

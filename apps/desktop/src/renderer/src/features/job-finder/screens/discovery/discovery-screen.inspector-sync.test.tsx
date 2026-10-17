@@ -13,7 +13,7 @@ import {
   type BrowserSessionState,
   type JobSearchPreferences,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { ToastProvider } from "@renderer/components/ui/toast";

@@ -2,7 +2,7 @@ import { round3SearchRun } from "../../lib/discovery-round3.test-fixture";
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { SavedJobSchema, type SavedJob } from "@nordri/contracts";
+import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -20,7 +20,7 @@ const browserSession = {
 };
 
 const COLLECTION_VIEW_STORAGE_KEY =
-  "nordri.job-finder.collection.discovery-results.v1";
+  "nestor.job-finder.collection.discovery-results.v1";
 
 function createJob(id: string, title: string): SavedJob {
   return SavedJobSchema.parse({

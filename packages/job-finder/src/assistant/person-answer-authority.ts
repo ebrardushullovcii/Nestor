@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AssistantMessage } from "@nordri/contracts";
+import type { AssistantMessage } from "@nestor/contracts";
 import { AssistantToolError, type AssistantTurnSession } from "./tool-kit";
 
 export interface PersonAnswerAuthorityInput {

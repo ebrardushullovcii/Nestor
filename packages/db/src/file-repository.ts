@@ -37,7 +37,7 @@ import {
   type CandidateProfile,
   type JobFinderDiscoveryState,
   type JobFinderRepositoryState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";

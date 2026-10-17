@@ -1,4 +1,4 @@
-import type { ApplyAgentTiming } from "@nordri/contracts";
+import type { ApplyAgentTiming } from "@nestor/contracts";
 import type {
   ApplicationAttemptQuestion,
   ApplyBlockedAttempt,
@@ -16,7 +16,7 @@ import type {
   CandidateAssetKind,
   CandidateReusableAnswer,
   JobSearchPreferences,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * Shapes for the agent that fills in an employer's application form.

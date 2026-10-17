@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
-import type { SourceDebugRunRecord } from "@nordri/contracts";
+import type { SourceDebugRunRecord } from "@nestor/contracts";
 
 /**
  * "Check these N sources" runs one source check after another. The queue

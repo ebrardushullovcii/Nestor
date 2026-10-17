@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import {
   act,
   cleanup,
@@ -106,7 +106,7 @@ describe("side menu while the assistant is open", () => {
       unobserve() {}
     }
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         window: {

@@ -29,10 +29,10 @@ async function seedProductQualityAudit() {
     cwd: desktopDir,
     env: {
       ...process.env,
-      NORDRI_BROWSER_AGENT: '0',
-      NORDRI_ENABLE_TEST_API: '1',
-      NORDRI_TEST_SYSTEM_THEME: 'dark',
-      NORDRI_USER_DATA_DIR: userDataDirectory,
+      NESTOR_BROWSER_AGENT: '0',
+      NESTOR_ENABLE_TEST_API: '1',
+      NESTOR_TEST_SYSTEM_THEME: 'dark',
+      NESTOR_USER_DATA_DIR: userDataDirectory,
     },
   })
 
@@ -40,14 +40,14 @@ async function seedProductQualityAudit() {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
     await window.waitForFunction(
-      () => Boolean(window.nordri?.jobFinder?.test?.importResumeFromPath),
+      () => Boolean(window.nestor?.jobFinder?.test?.importResumeFromPath),
       undefined,
       { timeout: 20_000 },
     )
 
     const snapshot = await window.evaluate(
       async (sourcePath) =>
-        window.nordri.jobFinder.test.importResumeFromPath({
+        window.nestor.jobFinder.test.importResumeFromPath({
           sourcePath,
           useVision: false,
         }),

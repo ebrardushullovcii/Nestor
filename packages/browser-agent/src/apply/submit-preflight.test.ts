@@ -4,7 +4,7 @@ import {
   unresolvedRequiredControls,
 } from "./submit-preflight";
 import { buildApplyFormObservation } from "./page-hands";
-import type { RawApplyControl, RawApplyPage } from "@nordri/contracts";
+import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
 
 const control: RawApplyControl = {
   index: 0,

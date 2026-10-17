@@ -1,6 +1,6 @@
-import { JobFinderStartupResetRecoveryFactSchema } from "@nordri/contracts";
-import type { JobFinderStartupResetRecoveryFact } from "@nordri/contracts";
-import type { JobFinderStartupResetRecoveryDegradedReason } from "@nordri/contracts";
+import { JobFinderStartupResetRecoveryFactSchema } from "@nestor/contracts";
+import type { JobFinderStartupResetRecoveryFact } from "@nestor/contracts";
+import type { JobFinderStartupResetRecoveryDegradedReason } from "@nestor/contracts";
 
 export type {
   JobFinderStartupResetRecoveryCompletedFact,
@@ -8,7 +8,7 @@ export type {
   JobFinderStartupResetRecoveryDegradedReason,
   JobFinderStartupResetRecoveryFact,
   JobFinderStartupResetRecoveryIdleFact,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export const JOB_FINDER_STARTUP_RESET_RECOVERY_COMPLETED_MESSAGE =
   "An interrupted workspace reset was completed during startup.";

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { CandidateProfile } from "@nordri/contracts";
+import type { CandidateProfile } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -232,7 +232,7 @@ describe("singleton profile revisions", () => {
 
   test("file repository applies, increments, and rejects stale writes", async () => {
     const tempDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-db-singleton-revision-"),
+      path.join(os.tmpdir(), "nestor-db-singleton-revision-"),
     );
     try {
       await expectSingletonRevisionParity(() =>
@@ -317,7 +317,7 @@ describe("singleton profile revisions", () => {
     await expectCopilotCasParity(() => createInMemoryJobFinderRepository(seed));
 
     const tempDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-db-copilot-cas-"),
+      path.join(os.tmpdir(), "nestor-db-copilot-cas-"),
     );
     try {
       await expectCopilotCasParity(() =>
@@ -337,7 +337,7 @@ describe("singleton profile revisions", () => {
     );
 
     const tempDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-db-reset-epoch-"),
+      path.join(os.tmpdir(), "nestor-db-reset-epoch-"),
     );
     try {
       await expectResetEpochParity(() =>
@@ -357,7 +357,7 @@ describe("singleton profile revisions", () => {
     );
 
     const tempDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-db-reset-stale-token-"),
+      path.join(os.tmpdir(), "nestor-db-reset-stale-token-"),
     );
     try {
       await expectPreResetTokenRejected(() =>
@@ -412,7 +412,7 @@ describe("singleton_state revision migration", () => {
 
   test("legacy database gains revision 1 without changing values, idempotently", async () => {
     const tempDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-db-revision-migration-"),
+      path.join(os.tmpdir(), "nestor-db-revision-migration-"),
     );
     const filePath = path.join(tempDirectory, "job-finder-state.sqlite");
     try {
@@ -470,7 +470,7 @@ describe("singleton_state revision migration", () => {
 
   test("fresh bootstrap initializes revision 1 deterministically", async () => {
     const tempDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-db-revision-bootstrap-"),
+      path.join(os.tmpdir(), "nestor-db-revision-bootstrap-"),
     );
     try {
       const repository = await createFileJobFinderRepository({
@@ -492,7 +492,7 @@ describe("singleton_state revision migration", () => {
 
 test("a workspace that fails to open leaves its file unlocked", async () => {
   const tempDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-db-failed-open-"),
+    path.join(os.tmpdir(), "nestor-db-failed-open-"),
   );
   const filePath = path.join(tempDirectory, "job-finder-state.sqlite");
   // Claims every migration up to 10 but has none of their tables, so opening

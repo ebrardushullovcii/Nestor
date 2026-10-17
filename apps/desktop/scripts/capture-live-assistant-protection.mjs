@@ -102,7 +102,7 @@ async function waitForWorkspaceState(
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const workspace = await window.evaluate(() =>
-      window.nordri.liveAssistant.getWorkspace(),
+      window.nestor.liveAssistant.getWorkspace(),
     );
     if (predicate(workspace)) {
       return workspace;
@@ -295,17 +295,17 @@ async function captureScreenAndAnalyze(app, overlays) {
 async function runCaptureProtection() {
   await mkdir(outputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-interview-protection-"),
+    path.join(os.tmpdir(), "nestor-interview-protection-"),
   );
   const app = await electron.launch({
     args: ["."],
     cwd: desktopDir,
     env: {
       ...process.env,
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_TEST_SYSTEM_THEME:
-        process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark",
-      NORDRI_USER_DATA_DIR: userDataDirectory,
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_TEST_SYSTEM_THEME:
+        process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
     },
   });
 
@@ -319,7 +319,7 @@ async function runCaptureProtection() {
     await window.setViewportSize({ width: 1440, height: 920 });
     await acceptAndStartSession(window);
     const activeWorkspace = await window.evaluate(() =>
-      window.nordri.liveAssistant.getWorkspace(),
+      window.nestor.liveAssistant.getWorkspace(),
     );
     const mainWindowTextDuringLive = await window.evaluate(
       () => document.body.innerText,
@@ -352,12 +352,12 @@ async function runCaptureProtection() {
     }
     await window.evaluate(() =>
       Promise.all([
-        window.nordri.liveAssistant.moveOverlayWindow({
+        window.nestor.liveAssistant.moveOverlayWindow({
           surfaceKind: "live_answer_overlay",
           deltaX: 0,
           deltaY: 0,
         }),
-        window.nordri.liveAssistant.moveOverlayWindow({
+        window.nestor.liveAssistant.moveOverlayWindow({
           surfaceKind: "live_transcript_overlay",
           deltaX: 0,
           deltaY: 0,
@@ -470,7 +470,7 @@ async function runCaptureProtection() {
         (surface) => surface.protectionState !== "requested_unverified",
       ) ?? false;
     const resetWorkspace = await window.evaluate(() =>
-      window.nordri.liveAssistant.resetOverlayPreferences(),
+      window.nestor.liveAssistant.resetOverlayPreferences(),
     );
     const resetOverlayLayoutOk = resetWorkspace.overlayPreferences.every(
       (preference) =>

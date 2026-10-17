@@ -12,7 +12,7 @@ import {
   type JobSource,
   type SourceDebugWorkerAttempt,
   type SourceInstructionArtifact,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { matchesExcludedLocation } from "./matching";
 import { isExplicitSearchProbeDisproof } from "./source-instruction-evidence";
 import { normalizeText, uniqueStrings } from "./shared";

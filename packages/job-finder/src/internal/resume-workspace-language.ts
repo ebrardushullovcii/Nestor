@@ -1,14 +1,14 @@
 import {
   ResumeProposalValidationError,
   type JobFinderAiClient,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import {
   ResumeLanguageTranslationSchema,
   type ResumeDraft,
   type ResumeDraftSourceRef,
   type SavedJob,
   type AgentTaskValidationIssue,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /** One model call translates every displayed field together, preserving structure. */
 export async function writeResumeLanguage(input: {

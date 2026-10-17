@@ -164,8 +164,8 @@ describe("configured resume strategy request boundary", () => {
 
     try {
       const client = createJobFinderAiClientFromEnvironment({
-        NORDRI_AI_API_KEY: "test-key",
-        NORDRI_AI_MODEL: "ordinary-model",
+        NESTOR_AI_API_KEY: "test-key",
+        NESTOR_AI_MODEL: "ordinary-model",
       });
 
       await client.createResumeDraft({

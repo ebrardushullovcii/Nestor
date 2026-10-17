@@ -1,4 +1,4 @@
-import type { ApplyAgentTiming } from "@nordri/contracts";
+import type { ApplyAgentTiming } from "@nestor/contracts";
 import type { LLMClient } from "../agent/contracts";
 import type { ApplyPageHands } from "./types";
 

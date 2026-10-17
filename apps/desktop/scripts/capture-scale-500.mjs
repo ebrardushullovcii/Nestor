@@ -995,7 +995,7 @@ async function waitForHeading(
 async function waitForWorkspaceHydrationComplete(page, timeout = 30_000) {
   await page.waitForFunction(
     async () => {
-      const workspace = await window.nordri?.jobFinder?.getWorkspace?.();
+      const workspace = await window.nestor?.jobFinder?.getWorkspace?.();
       return workspace?.hydration?.phase === "complete";
     },
     undefined,
@@ -3356,7 +3356,7 @@ async function run() {
   await verifyAcceptanceArtifacts(acceptance);
   await mkdir(screenshotDir, { recursive: true });
   const userDataDirectory = await makeIsolatedUserDataDirectory(
-    "nordri-scale-500-",
+    "nestor-scale-500-",
   );
   report.safety.isolatedUserDataDir = userDataDirectory;
   report.safety.syntheticTestDataDigest = digestSeed({
@@ -3376,7 +3376,7 @@ async function run() {
       args: ["."],
       cwd: desktopDir,
       env: acceptanceEnvironment({
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       }),
     });
     processOutputState = attachProcessOutput(app, report);
@@ -3412,13 +3412,13 @@ async function run() {
     log("launching bootstrap app");
     const bootstrapPage = await launch();
     await bootstrapPage.waitForFunction(
-      () => Boolean(window.nordri?.jobFinder?.test),
+      () => Boolean(window.nestor?.jobFinder?.test),
       undefined,
       { timeout: 15_000 },
     );
     const beforeFiles = new Set();
     const baseSnapshot = await bootstrapPage.evaluate(() =>
-      window.nordri.jobFinder.test.loadApplyQueueDemo(),
+      window.nestor.jobFinder.test.loadApplyQueueDemo(),
     );
     for (const filePath of [
       baseSnapshot.profile.baseResume.storagePath,
@@ -3437,7 +3437,7 @@ async function run() {
       `persisting synthetic scale state ${counts.jobs} jobs / ${counts.shortlisted} shortlisted / ${counts.applications} apps / ${counts.sources} sources`,
     );
     await bootstrapPage.evaluate(
-      (state) => window.nordri.jobFinder.test.resetWorkspaceState(state),
+      (state) => window.nestor.jobFinder.test.resetWorkspaceState(state),
       scaleState,
     );
     for (const filePath of [
@@ -3454,7 +3454,7 @@ async function run() {
     });
     await waitForWorkspaceHydrationComplete(bootstrapPage);
     const bootstrappedWorkspace = await bootstrapPage.evaluate(() =>
-      window.nordri.jobFinder.getWorkspace(),
+      window.nestor.jobFinder.getWorkspace(),
     );
     assert(
       bootstrappedWorkspace.hydration?.phase === "complete",
@@ -3579,7 +3579,7 @@ async function run() {
         }
         await launch();
         await page.waitForFunction(
-          () => Boolean(window.nordri?.jobFinder?.getWorkspace),
+          () => Boolean(window.nestor?.jobFinder?.getWorkspace),
           undefined,
           { timeout: 15_000 },
         );
@@ -3638,7 +3638,7 @@ async function run() {
     // through IPC before any rendering assertion runs. This is the hydrated
     // contract: 5,000 discovery jobs plus every prior-cap boundary collection.
     const hydratedWorkspace = await page.evaluate(() =>
-      window.nordri.jobFinder.getWorkspace(),
+      window.nestor.jobFinder.getWorkspace(),
     );
     assert(
       hydratedWorkspace.hydration?.phase === "complete",
@@ -4044,7 +4044,7 @@ async function run() {
       `Runtime errors detected: ${JSON.stringify(report.runtimeErrors)}`,
     );
     const finalWorkspace = await page.evaluate(() =>
-      window.nordri.jobFinder.getWorkspace(),
+      window.nestor.jobFinder.getWorkspace(),
     );
     report.safetyEvents = observedSafetyEvents;
     report.safety.authoritativePersistedFacts = assertPrepareOnly(

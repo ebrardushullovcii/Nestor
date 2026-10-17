@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import type { ResumeDraft } from "@nordri/contracts";
-import { ResumeDraftSchema } from "@nordri/contracts";
+import type { ResumeDraft } from "@nestor/contracts";
+import { ResumeDraftSchema } from "@nestor/contracts";
 import {
   buildResumeDraftStateHash,
   sanitizeResumeDraft,

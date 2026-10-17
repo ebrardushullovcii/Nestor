@@ -5,7 +5,7 @@ import {
   UserActionRequestSchema,
   type UserActionEvent,
   type UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { SQLInputValue } from "node:sqlite";
 
 import { secureDatabaseFile } from "./internal/migrations";

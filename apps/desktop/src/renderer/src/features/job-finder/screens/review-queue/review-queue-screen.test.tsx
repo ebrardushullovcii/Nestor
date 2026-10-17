@@ -8,7 +8,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import { ApplicationRecordSchema } from "@nordri/contracts";
+import { ApplicationRecordSchema } from "@nestor/contracts";
 import type {
   ApplicationAutomationMode,
   ApplicationRecord,
@@ -18,7 +18,7 @@ import type {
   ReviewQueueItem,
   SavedJob,
   TailoredAsset,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import type { JobFinderAutoApplyQueueStartOutcome } from "@renderer/features/job-finder/lib/job-finder-types";
@@ -131,12 +131,12 @@ function renderScreen(props: {
   selectedJob?: SavedJob | null;
   selectedAsset?: TailoredAsset | null;
 }) {
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
-      ...window.nordri,
+      ...window.nestor,
       jobFinder: {
-        ...window.nordri?.jobFinder,
+        ...window.nestor?.jobFinder,
         getJobDetail: vi.fn((_jobId: string, planId: string | null) =>
           Promise.resolve({
             job: props.selectedJob,
@@ -1115,9 +1115,9 @@ it("offers the saved batch when its jobs are outside the current campaign", () =
 });
 
 it("shows an assistant-owned batch in the usual control with progress, time left and Stop", async () => {
-  const previous = window.nordri;
+  const previous = window.nestor;
   const stopResumeBatch = vi.fn().mockResolvedValue(undefined);
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: { assistant: { stopResumeBatch } },
   });
@@ -1146,7 +1146,7 @@ it("shows an assistant-owned batch in the usual control with progress, time left
     fireEvent.click(screen.getByRole("button", { name: "Stop new resumes" }));
     await vi.waitFor(() => expect(stopResumeBatch).toHaveBeenCalledOnce());
   } finally {
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: previous,
     });

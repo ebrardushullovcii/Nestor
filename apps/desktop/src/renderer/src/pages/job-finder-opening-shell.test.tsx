@@ -10,7 +10,7 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { JobFinderShell } from "@renderer/features/job-finder/components/job-finder-shell";
 import { JobFinderOpeningShell } from "./job-finder-page";
 
@@ -18,7 +18,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   window.localStorage.clear();
-  Reflect.deleteProperty(window, "nordri");
+  Reflect.deleteProperty(window, "nestor");
 });
 
 function renderOpeningShell(
@@ -40,7 +40,7 @@ function renderOpeningShell(
     onControlsStateChange: vi.fn(() => vi.fn()),
     toggleMaximize: vi.fn().mockResolvedValue(controlsState),
   };
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       ping: vi.fn().mockResolvedValue({ ok: true, platform }),
@@ -251,7 +251,7 @@ describe("JobFinderOpeningShell platform geometry", () => {
 
   it("preserves the persisted collapsed rail width while opening", () => {
     window.localStorage.setItem(
-      "nordri.job-finder.sidebar-collapsed.v1",
+      "nestor.job-finder.sidebar-collapsed.v1",
       "true",
     );
     renderOpeningShell("darwin");
@@ -287,7 +287,7 @@ describe("JobFinderOpeningShell platform geometry", () => {
  * identical rather than trusting either copy.
  */
 function renderLoadedShell(initialEntry = "/job-finder/home") {
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       ping: vi.fn().mockResolvedValue({ ok: true, platform: "darwin" }),
@@ -333,7 +333,7 @@ function renderLoadedShell(initialEntry = "/job-finder/home") {
 }
 
 function renderOpeningShellContainer(initialEntry = "/job-finder/home") {
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       ping: vi.fn().mockResolvedValue({ ok: true, platform: "darwin" }),
@@ -683,7 +683,7 @@ describe("JobFinderOpeningShell parity with the loaded shell", () => {
     "paints the same collapsed %s as the loaded rail",
     async (_name, selector) => {
       window.localStorage.setItem(
-        "nordri.job-finder.sidebar-collapsed.v1",
+        "nestor.job-finder.sidebar-collapsed.v1",
         "true",
       );
       const loaded = renderLoadedShell();

@@ -18,11 +18,11 @@ import {
   type SavedJob,
   type GroupedManualAnswerDecision,
   type UserActionRequest,
-} from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 import { parseSearchPreferencesOnce } from "./validated-search-preferences";
 import { projectPlanSafeguardPauses } from "../plan-safeguard-pauses";
-import type { SourceAccessPrompt } from "@nordri/contracts";
+import type { SourceAccessPrompt } from "@nestor/contracts";
 import {
   getApplicationCrmData,
   isApplicationAwaitingUserApproval,

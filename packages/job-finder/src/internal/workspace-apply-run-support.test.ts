@@ -5,7 +5,7 @@ import {
   ApplyRunSchema,
   ApplicationReviewCardSchema,
   ApplicationResumeArtifactSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import {

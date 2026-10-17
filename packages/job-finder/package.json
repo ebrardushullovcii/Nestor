@@ -1,5 +1,5 @@
 {
-  "name": "@nordri/job-finder",
+  "name": "@nestor/job-finder",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -23,14 +23,14 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@nordri/agent-runtime": "workspace:*",
-    "@nordri/ai-providers": "workspace:*",
-    "@nordri/browser-agent": "workspace:*",
-    "@nordri/browser-runtime": "workspace:*",
-    "@nordri/contracts": "workspace:*",
-    "@nordri/core": "workspace:*",
-    "@nordri/db": "workspace:*",
-    "@nordri/knowledge-base": "workspace:*",
+    "@nestor/agent-runtime": "workspace:*",
+    "@nestor/ai-providers": "workspace:*",
+    "@nestor/browser-agent": "workspace:*",
+    "@nestor/browser-runtime": "workspace:*",
+    "@nestor/contracts": "workspace:*",
+    "@nestor/core": "workspace:*",
+    "@nestor/db": "workspace:*",
+    "@nestor/knowledge-base": "workspace:*",
     "zod": "^3.24.2"
   }
 }

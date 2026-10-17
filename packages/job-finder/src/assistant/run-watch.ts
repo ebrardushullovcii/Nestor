@@ -1,9 +1,9 @@
 import type {
   AssistantRunRef,
   JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
-import { isApplicationTrackedAsSentByPerson } from "@nordri/contracts";
+import { isApplicationTrackedAsSentByPerson } from "@nestor/contracts";
 
 import { readBackgroundBatch } from "./tools";
 import { allJobs, compactJob } from "./tools/format";

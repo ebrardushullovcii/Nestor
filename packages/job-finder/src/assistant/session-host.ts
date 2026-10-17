@@ -1,4 +1,4 @@
-import { estimateResumeBatchMinutesLeft } from "@nordri/contracts";
+import { estimateResumeBatchMinutesLeft } from "@nestor/contracts";
 import { verifyPersonAnswerAuthority } from "./person-answer-authority";
 import { readAssistantWorkState } from "./work-state";
 import { buildChangePreview } from "./change-diff";
@@ -12,7 +12,7 @@ import {
   type ConversationModel,
   type ConversationTurnEvent,
   type TokenCalibrator,
-} from "@nordri/agent-runtime";
+} from "@nestor/agent-runtime";
 import {
   AssistantNavigationAcknowledgmentSchema,
   type AssistantNavigationAcknowledgment,
@@ -45,8 +45,8 @@ import {
   type JobFinderWorkspaceSnapshot,
   type ProfileCopilotPatchOperation,
   type ResumeDraftPatch,
-} from "@nordri/contracts";
-import type { AssistantRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { AssistantRepository } from "@nestor/db";
 
 import type { JobFinderWorkspaceService } from "../internal/workspace-service-contracts";
 import {
@@ -1664,9 +1664,9 @@ export class AssistantSessionHost {
             navigationRequestId,
           });
           const result = await displayed;
-          const expected = new URL(route, "https://nordri.local");
+          const expected = new URL(route, "https://nestor.local");
           const actual = result.displayedRoute
-            ? new URL(result.displayedRoute, "https://nordri.local")
+            ? new URL(result.displayedRoute, "https://nestor.local")
             : null;
           const matches =
             actual?.pathname === expected.pathname &&

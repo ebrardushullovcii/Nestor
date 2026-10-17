@@ -1,4 +1,4 @@
-import type { SavedJob, MatchAssessment } from "@nordri/contracts";
+import type { SavedJob, MatchAssessment } from "@nestor/contracts";
 const planViews = new WeakMap<
   SavedJob,
   {

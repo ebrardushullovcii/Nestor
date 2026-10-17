@@ -15,7 +15,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import type * as CryptoModule from "node:crypto";
-import { createInMemoryJobFinderRepository } from "@nordri/db";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import {
@@ -40,13 +40,13 @@ vi.mock("node:crypto", async (importOriginal) => {
 });
 
 const temporaryDirectories: string[] = [];
-const originalUserDataDirectory = process.env.NORDRI_USER_DATA_DIR;
+const originalUserDataDirectory = process.env.NESTOR_USER_DATA_DIR;
 
 afterEach(async () => {
   if (originalUserDataDirectory === undefined) {
-    delete process.env.NORDRI_USER_DATA_DIR;
+    delete process.env.NESTOR_USER_DATA_DIR;
   } else {
-    process.env.NORDRI_USER_DATA_DIR = originalUserDataDirectory;
+    process.env.NESTOR_USER_DATA_DIR = originalUserDataDirectory;
   }
 
   await Promise.all(
@@ -58,11 +58,11 @@ afterEach(async () => {
 
 async function createCrashWorkspace() {
   const temporaryRoot = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-reset-crash-"),
+    path.join(os.tmpdir(), "nestor-reset-crash-"),
   );
   temporaryDirectories.push(temporaryRoot);
   const userDataDirectory = path.join(temporaryRoot, "user-data");
-  process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
+  process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
 
   const documentsDirectory = path.join(
     userDataDirectory,

@@ -3,7 +3,7 @@ import type {
   ApplicationAttemptQuestion,
   UserActionCommandInput,
   UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   QuestionAnswerForm,
   type QuestionAnswerDraft,

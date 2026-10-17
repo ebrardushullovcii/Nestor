@@ -1,4 +1,4 @@
-import type { JobFinderIntelligenceState } from "@nordri/contracts";
+import type { JobFinderIntelligenceState } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -73,7 +73,7 @@ describe("commitCompanyIntelligenceUpdate", () => {
   });
 
   test("reads transaction-current intelligence after acquiring the SQLite write lock", async () => {
-    const temp = await createTempRepository("nordri-company-intelligence-");
+    const temp = await createTempRepository("nestor-company-intelligence-");
     let first: JobFinderRepository | null = null;
     let second: JobFinderRepository | null = null;
     try {

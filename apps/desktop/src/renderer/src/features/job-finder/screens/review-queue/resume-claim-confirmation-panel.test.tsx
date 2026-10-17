@@ -5,7 +5,7 @@ import {
   type JobFinderResumeWorkspace,
   type ResumeClaimAssessment,
   type ResumeClaimConfirmation,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import { createApplyQueueDemoState } from "../../../../../../main/adapters/job-finder-demo-state";
 import { buildResumeClaimConfirmationCommandInput } from "./resume-claim-confirmation-panel";

@@ -12,10 +12,10 @@ import type {
   InterviewTranscriptionEngine,
   InterviewTranscriptSegment,
   InterviewVisualObservation,
-} from "@nordri/contracts";
-import { InterviewCueCardSchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { InterviewCueCardSchema } from "@nestor/contracts";
 import { z } from "zod";
-import { classifyAgentTaskFailure } from "@nordri/agent-runtime";
+import { classifyAgentTaskFailure } from "@nestor/agent-runtime";
 import {
   buildAudioTranscriptionsUrl,
   buildModelRequestBody,
@@ -1030,7 +1030,7 @@ export function createLocalCommandInterviewTranscriptionProvider(
       validatedOptions.requestTimeoutMs ?? DEFAULT_INTERVIEW_MODEL_TIMEOUT_MS;
     const language = input.language ?? "en-US";
     const tempDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-interview-local-stt-"),
+      path.join(os.tmpdir(), "nestor-interview-local-stt-"),
     );
     const audioFilePath = path.join(
       tempDirectory,
@@ -1214,9 +1214,9 @@ export function createDeterministicInterviewCueCardProvider(
 // same literal, so keep the three copies in sync
 // (apps/desktop/scripts/capture-live-assistant.mjs and
 // apps/desktop/scripts/release-acceptance-harness.mjs).
-export const DESKTOP_TEST_API_ENV = "NORDRI_ENABLE_TEST_API";
+export const DESKTOP_TEST_API_ENV = "NESTOR_ENABLE_TEST_API";
 export const LIVE_ASSISTANT_TEST_LIVE_AI_OPT_IN_ENV =
-  "NORDRI_INTERVIEW_TEST_USE_LIVE_AI";
+  "NESTOR_INTERVIEW_TEST_USE_LIVE_AI";
 
 const TEST_API_FORCE_DETERMINISTIC_REASON =
   "Desktop test API forces deterministic Live Assistant AI providers so scripted UI flows stay stable even when interview or shared credentials exist.";
@@ -1239,39 +1239,39 @@ export function createLiveAssistantProvidersFromEnvironment(
     ? undefined
     : TEST_API_FORCE_DETERMINISTIC_REASON;
   const apiKey = liveAiAllowed
-    ? (env.NORDRI_INTERVIEW_AI_API_KEY ?? env.NORDRI_AI_API_KEY)
+    ? (env.NESTOR_INTERVIEW_AI_API_KEY ?? env.NESTOR_AI_API_KEY)
     : undefined;
   const visionApiKey = liveAiAllowed
-    ? (env.NORDRI_INTERVIEW_VISION_API_KEY ??
-      env.NORDRI_AI_VISION_API_KEY ??
+    ? (env.NESTOR_INTERVIEW_VISION_API_KEY ??
+      env.NESTOR_AI_VISION_API_KEY ??
       apiKey)
     : undefined;
   const requestTimeoutMs = parseConfiguredTimeoutMs(
-    env.NORDRI_INTERVIEW_AI_TIMEOUT_MS ?? env.NORDRI_AI_TIMEOUT_MS,
+    env.NESTOR_INTERVIEW_AI_TIMEOUT_MS ?? env.NESTOR_AI_TIMEOUT_MS,
   );
   const screenshotVisionProvider = visionApiKey
     ? createOpenAiCompatibleInterviewScreenshotVisionProvider({
         apiKey: visionApiKey,
         baseUrl:
-          env.NORDRI_INTERVIEW_VISION_BASE_URL ??
-          env.NORDRI_AI_VISION_BASE_URL ??
-          env.NORDRI_INTERVIEW_AI_BASE_URL ??
-          env.NORDRI_AI_BASE_URL ??
+          env.NESTOR_INTERVIEW_VISION_BASE_URL ??
+          env.NESTOR_AI_VISION_BASE_URL ??
+          env.NESTOR_INTERVIEW_AI_BASE_URL ??
+          env.NESTOR_AI_BASE_URL ??
           DEFAULT_INTERVIEW_BASE_URL,
         model:
-          env.NORDRI_INTERVIEW_VISION_MODEL ??
-          env.NORDRI_AI_VISION_MODEL ??
-          env.NORDRI_RESUME_VISION_MODEL ??
+          env.NESTOR_INTERVIEW_VISION_MODEL ??
+          env.NESTOR_AI_VISION_MODEL ??
+          env.NESTOR_RESUME_VISION_MODEL ??
           DEFAULT_VISION_MODEL,
         apiMode:
           parseModelApiMode(
-            env.NORDRI_INTERVIEW_VISION_API_MODE ??
-              env.NORDRI_AI_VISION_API_MODE,
+            env.NESTOR_INTERVIEW_VISION_API_MODE ??
+              env.NESTOR_AI_VISION_API_MODE,
           ) ?? DEFAULT_VISION_MODEL_API_MODE,
         reasoningEffort:
           parseModelReasoningEffort(
-            env.NORDRI_INTERVIEW_VISION_REASONING_EFFORT ??
-              env.NORDRI_AI_VISION_REASONING_EFFORT,
+            env.NESTOR_INTERVIEW_VISION_REASONING_EFFORT ??
+              env.NESTOR_AI_VISION_REASONING_EFFORT,
           ) ?? DEFAULT_VISION_MODEL_REASONING_EFFORT,
         label: "AI interview screenshot vision provider",
         requestTimeoutMs,
@@ -1280,20 +1280,20 @@ export function createLiveAssistantProvidersFromEnvironment(
   const deterministicTranscriptionProvider =
     createDeterministicInterviewTranscriptionProvider();
   const summaryProvider = createDeterministicInterviewSummaryProvider();
-  const localTranscriptionProvider = env.NORDRI_INTERVIEW_LOCAL_STT_COMMAND
+  const localTranscriptionProvider = env.NESTOR_INTERVIEW_LOCAL_STT_COMMAND
     ? createLocalCommandInterviewTranscriptionProvider({
-        command: env.NORDRI_INTERVIEW_LOCAL_STT_COMMAND,
-        label: env.NORDRI_INTERVIEW_LOCAL_STT_LABEL,
+        command: env.NESTOR_INTERVIEW_LOCAL_STT_COMMAND,
+        label: env.NESTOR_INTERVIEW_LOCAL_STT_LABEL,
         requestTimeoutMs: parseConfiguredTimeoutMs(
-          env.NORDRI_INTERVIEW_LOCAL_STT_TIMEOUT_MS,
+          env.NESTOR_INTERVIEW_LOCAL_STT_TIMEOUT_MS,
         ),
-        workingDirectory: env.NORDRI_INTERVIEW_LOCAL_STT_CWD,
+        workingDirectory: env.NESTOR_INTERVIEW_LOCAL_STT_CWD,
       })
     : null;
   const transcriptionModel =
-    env.NORDRI_INTERVIEW_TRANSCRIPTION_MODEL ??
-    env.NORDRI_INTERVIEW_STT_MODEL ??
-    env.NORDRI_INTERVIEW_AUDIO_MODEL;
+    env.NESTOR_INTERVIEW_TRANSCRIPTION_MODEL ??
+    env.NESTOR_INTERVIEW_STT_MODEL ??
+    env.NESTOR_INTERVIEW_AUDIO_MODEL;
 
   if (!apiKey) {
     return {
@@ -1309,21 +1309,21 @@ export function createLiveAssistantProvidersFromEnvironment(
   const providerOptions = {
     apiKey,
     baseUrl:
-      env.NORDRI_INTERVIEW_AI_BASE_URL ??
-      env.NORDRI_AI_BASE_URL ??
+      env.NESTOR_INTERVIEW_AI_BASE_URL ??
+      env.NESTOR_AI_BASE_URL ??
       DEFAULT_INTERVIEW_BASE_URL,
     model:
-      env.NORDRI_INTERVIEW_AI_MODEL ??
-      env.NORDRI_AI_MODEL ??
+      env.NESTOR_INTERVIEW_AI_MODEL ??
+      env.NESTOR_AI_MODEL ??
       DEFAULT_INTERVIEW_MODEL,
     apiMode:
       parseModelApiMode(
-        env.NORDRI_INTERVIEW_AI_API_MODE ?? env.NORDRI_AI_API_MODE,
+        env.NESTOR_INTERVIEW_AI_API_MODE ?? env.NESTOR_AI_API_MODE,
       ) ?? DEFAULT_TEXT_MODEL_API_MODE,
     reasoningEffort:
       parseModelReasoningEffort(
-        env.NORDRI_INTERVIEW_REASONING_EFFORT ??
-          env.NORDRI_AI_REASONING_EFFORT,
+        env.NESTOR_INTERVIEW_REASONING_EFFORT ??
+          env.NESTOR_AI_REASONING_EFFORT,
       ) ?? DEFAULT_TEXT_MODEL_REASONING_EFFORT,
     requestTimeoutMs,
   };

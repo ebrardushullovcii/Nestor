@@ -4,7 +4,7 @@ import {
   type JobPosting,
   type MatchAssessment,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createSavedJob } from "../workspace-service.test-fixtures";
 import {
   applyListingDetailToJob,

@@ -24,7 +24,7 @@ import type {
   ReviewQueueItem,
   JobListRow,
   TailoredAssetSummary,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   APPLICATION_PREPARATION_BATCH_LIMIT,
   collectInProgressApplicationJobIds,
@@ -398,7 +398,7 @@ export function ReviewQueueScreen(props: {
     setBatchStopError(null);
     onStopTailoredDraftPreparation();
     if (runningBatch)
-      void window.nordri.assistant
+      void window.nestor.assistant
         .stopResumeBatch()
         .catch(() =>
           setBatchStopError("Could not stop the resume batch. Try again."),

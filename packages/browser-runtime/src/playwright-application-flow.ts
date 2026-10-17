@@ -18,7 +18,7 @@ import {
   type ApplicationAttemptExternalWriteEvidence,
   type ApplicationAttemptQuestion,
   type ApplyBlockedAttempt,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   carriesPreparedValue,
   isPageOwnedReadRequest,
@@ -160,9 +160,9 @@ export async function openPrepareOnlyAuthorizedFormActionWindow(
           : form.method) || "GET"
       ).toUpperCase();
       if (method !== "POST") return null;
-      actionElement.dataset.nordriAuthorizedFormAction = input.token;
+      actionElement.dataset.nestorAuthorizedFormAction = input.token;
       const state = (window as unknown as Record<string, unknown>)[
-        "__nordriPrepareOnlyMutationGuardV1"
+        "__nestorPrepareOnlyMutationGuardV1"
       ] as
         | {
             authorizedFormActionWindow?: AuthorizedFormActionWindow | null;
@@ -220,7 +220,7 @@ export async function closePrepareOnlyAuthorizedFormActionWindow(
   await page
     .evaluate(() => {
       const state = (window as unknown as Record<string, unknown>)[
-        "__nordriPrepareOnlyMutationGuardV1"
+        "__nestorPrepareOnlyMutationGuardV1"
       ] as
         | { authorizedFormActionWindow?: AuthorizedFormActionWindow | null }
         | undefined;
@@ -250,7 +250,7 @@ export async function openPrepareOnlyFinalActionWindow(
   await page
     .evaluate(() => {
       const state = (window as unknown as Record<string, unknown>)[
-        "__nordriPrepareOnlyMutationGuardV1"
+        "__nestorPrepareOnlyMutationGuardV1"
       ] as { finalActionAllowed?: boolean } | undefined;
       if (state) state.finalActionAllowed = true;
     })
@@ -267,7 +267,7 @@ export async function closePrepareOnlyFinalActionWindow(
   await page
     .evaluate(() => {
       const state = (window as unknown as Record<string, unknown>)[
-        "__nordriPrepareOnlyMutationGuardV1"
+        "__nestorPrepareOnlyMutationGuardV1"
       ] as { finalActionAllowed?: boolean } | undefined;
       if (state) state.finalActionAllowed = false;
     })
@@ -308,7 +308,7 @@ export function installPrepareOnlyMutationGuardInPage(
   }
 
   const pageWindow = window as unknown as Record<string, unknown>;
-  const existingState = pageWindow["__nordriPrepareOnlyMutationGuardV1"] as
+  const existingState = pageWindow["__nestorPrepareOnlyMutationGuardV1"] as
     | InternalGuardState
     | undefined;
   const state: InternalGuardState = existingState ?? {
@@ -336,7 +336,7 @@ export function installPrepareOnlyMutationGuardInPage(
   state.preparedValues ??= [];
   state.finalActionAllowed ??= false;
   state.authorizedFormActionWindow ??= null;
-  pageWindow["__nordriPrepareOnlyMutationGuardV1"] = state;
+  pageWindow["__nestorPrepareOnlyMutationGuardV1"] = state;
 
   const normalizeMethod = (value: string | null | undefined): string =>
     (value || "GET").trim().toUpperCase() || "GET";
@@ -637,7 +637,7 @@ export function installPrepareOnlyMutationGuardInPage(
       authorized &&
       submitter &&
       (submitter as HTMLButtonElement | HTMLInputElement).form === form &&
-      submitter.dataset.nordriAuthorizedFormAction === authorized.token &&
+      submitter.dataset.nestorAuthorizedFormAction === authorized.token &&
       Date.now() <= authorized.expiresAtMs &&
       normalizeMethod(
         submitter.hasAttribute("formmethod")
@@ -728,7 +728,7 @@ export function installPrepareOnlyMutationGuardInPage(
         const selected =
           submitter ??
           this.querySelector<HTMLElement>(
-            "[data-nordri-authorized-form-action]",
+            "[data-nestor-authorized-form-action]",
           );
         if (authorizedSubmitter(this, selected)) {
           originalRequestSubmit.call(this, selected);
@@ -1054,7 +1054,7 @@ export function setPrepareOnlyIntermediateMutationWindowInPage(
   mutationWindow: IntermediateMutationWindowSnapshot | null,
 ): void {
   const pageWindow = window as unknown as Record<string, unknown>;
-  const state = pageWindow["__nordriPrepareOnlyMutationGuardV1"] as
+  const state = pageWindow["__nestorPrepareOnlyMutationGuardV1"] as
     | {
         intermediateMutationWindow: IntermediateMutationWindowSnapshot | null;
       }
@@ -1070,7 +1070,7 @@ export function setPrepareOnlyIntermediateMutationWindowInPage(
 /** Runs inside an application page before Job Finder fills one grounded value. */
 export function registerPrepareOnlyPreparedValueInPage(value: string): void {
   const pageWindow = window as unknown as Record<string, unknown>;
-  const state = pageWindow["__nordriPrepareOnlyMutationGuardV1"] as
+  const state = pageWindow["__nestorPrepareOnlyMutationGuardV1"] as
     | { preparedValues?: string[] }
     | undefined;
   const normalized = value.trim();
@@ -1085,7 +1085,7 @@ export function registerPrepareOnlyPreparedValueInPage(value: string): void {
 /** Runs inside the application page and returns only serializable guard data. */
 export function readPrepareOnlyMutationGuardInPage(): PrepareOnlyGuardSnapshot {
   const pageWindow = window as unknown as Record<string, unknown>;
-  const state = pageWindow["__nordriPrepareOnlyMutationGuardV1"] as
+  const state = pageWindow["__nestorPrepareOnlyMutationGuardV1"] as
     | PrepareOnlyGuardSnapshot
     | undefined;
 
@@ -1113,7 +1113,7 @@ export interface ServiceWorkerRegisterGuardStatus {
  */
 export function installServiceWorkerRegisterGuardInPage(): void {
   const pageWindow = window as unknown as Record<string, unknown>;
-  const stateKey = "__nordriServiceWorkerRegisterGuardV1";
+  const stateKey = "__nestorServiceWorkerRegisterGuardV1";
   type InstallState = ServiceWorkerRegisterGuardStatus;
 
   const existingState = pageWindow[stateKey] as InstallState | undefined;
@@ -1159,11 +1159,11 @@ export function installServiceWorkerRegisterGuardInPage(): void {
     const guard = function register(): Promise<never> {
       state.blockedRegistrationAttempts += 1;
       console.warn(
-        "Service Worker registration blocked by Nordri managed browser.",
+        "Service Worker registration blocked by Nestor managed browser.",
       );
       return Promise.reject(
         new DOMException(
-          "Service Worker registration is disabled in the Nordri managed browser.",
+          "Service Worker registration is disabled in the Nestor managed browser.",
           "NotAllowedError",
         ),
       );
@@ -1203,7 +1203,7 @@ export function installServiceWorkerRegisterGuardInPage(): void {
 /** Runs inside the application page and returns only serializable status. */
 export function readServiceWorkerRegisterGuardInPage(): ServiceWorkerRegisterGuardStatus {
   const pageWindow = window as unknown as Record<string, unknown>;
-  const state = pageWindow["__nordriServiceWorkerRegisterGuardV1"] as
+  const state = pageWindow["__nestorServiceWorkerRegisterGuardV1"] as
     | ServiceWorkerRegisterGuardStatus
     | undefined;
   const container =
@@ -1312,7 +1312,7 @@ async function ensureFramePrepareOnlyMutationGuard(
   // takes the page back shuts it again unless its own send window is open.
   await frame.evaluate((open) => {
     const state = (window as unknown as Record<string, unknown>)[
-      "__nordriPrepareOnlyMutationGuardV1"
+      "__nestorPrepareOnlyMutationGuardV1"
     ] as { finalActionAllowed?: boolean } | undefined;
     if (state) state.finalActionAllowed = open;
   }, finalActionWindowOpen);
@@ -1364,7 +1364,7 @@ export async function ensurePrepareOnlyMutationGuard(
       void page
         .evaluate(() => {
           const state = (window as unknown as Record<string, unknown>)[
-            "__nordriPrepareOnlyMutationGuardV1"
+            "__nestorPrepareOnlyMutationGuardV1"
           ] as { finalActionAllowed?: boolean } | undefined;
           if (state) state.finalActionAllowed = true;
         })

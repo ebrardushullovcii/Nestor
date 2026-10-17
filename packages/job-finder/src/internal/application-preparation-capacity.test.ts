@@ -2,7 +2,7 @@ import {
   ApplicationRecordSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { deriveGlobalDailyApplicationPreparationCapacity } from "./application-preparation-capacity";

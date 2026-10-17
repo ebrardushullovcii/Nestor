@@ -10,16 +10,16 @@ import {
   ApplicationAuthorityEnvelopeSchema,
   ApplicationRecordSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
-} from "@nordri/contracts";
-import { createFileJobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import { createFileJobFinderRepository } from "@nestor/db";
 import {
   executeExactlyOneFinalAction,
   observeApplicationForm,
-} from "@nordri/browser-runtime";
+} from "@nestor/browser-runtime";
 import {
   runApplicationSubmissionRuntime,
   type ApplicationSubmissionBrowserRuntime,
-} from "@nordri/job-finder/application-submission-runtime-main";
+} from "@nestor/job-finder/application-submission-runtime-main";
 import { chromium, type Browser, type BrowserContext } from "playwright";
 import { afterEach, describe, expect, test } from "vitest";
 
@@ -198,7 +198,7 @@ describe("desktop main application submission composition", () => {
 
   test("executes one local action, persists uncertainty, and blocks the same key", async () => {
     const temporaryDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-desktop-submission-"),
+      path.join(os.tmpdir(), "nestor-desktop-submission-"),
     );
     temporaryDirectories.push(temporaryDirectory);
     const fixture = await startSubmissionFixtureServer();

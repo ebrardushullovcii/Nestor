@@ -464,15 +464,15 @@ describe("Live Assistant AI providers", () => {
   test("routes cue text and screenshot vision through separate model endpoints", () => {
     const providers = createLiveAssistantProvidersFromEnvironment(
       createEnvironment({
-        NORDRI_AI_API_KEY: "go-test-key",
-        NORDRI_AI_BASE_URL: "https://opencode.example/go/v1",
-        NORDRI_AI_MODEL: "deepseek-v4-flash",
-        NORDRI_AI_API_MODE: "chat_completions",
-        NORDRI_AI_REASONING_EFFORT: "max",
-        NORDRI_AI_VISION_BASE_URL: "https://vision.example/v1",
-        NORDRI_AI_VISION_MODEL: "gpt-5.6-luna",
-        NORDRI_AI_VISION_API_MODE: "responses",
-        NORDRI_AI_VISION_REASONING_EFFORT: "high",
+        NESTOR_AI_API_KEY: "go-test-key",
+        NESTOR_AI_BASE_URL: "https://opencode.example/go/v1",
+        NESTOR_AI_MODEL: "deepseek-v4-flash",
+        NESTOR_AI_API_MODE: "chat_completions",
+        NESTOR_AI_REASONING_EFFORT: "max",
+        NESTOR_AI_VISION_BASE_URL: "https://vision.example/v1",
+        NESTOR_AI_VISION_MODEL: "gpt-5.6-luna",
+        NESTOR_AI_VISION_API_MODE: "responses",
+        NESTOR_AI_VISION_REASONING_EFFORT: "high",
       }),
     );
 
@@ -486,10 +486,10 @@ describe("Live Assistant AI providers", () => {
 
   test("does not inherit the text model for screenshot vision", () => {
     const providers = createLiveAssistantProvidersFromEnvironment({
-      NORDRI_AI_API_KEY: "go-test-key",
-      NORDRI_AI_MODEL: "deepseek-v4-flash",
-      NORDRI_AI_API_MODE: "chat_completions",
-      NORDRI_AI_REASONING_EFFORT: "max",
+      NESTOR_AI_API_KEY: "go-test-key",
+      NESTOR_AI_MODEL: "deepseek-v4-flash",
+      NESTOR_AI_API_MODE: "chat_completions",
+      NESTOR_AI_REASONING_EFFORT: "max",
     });
 
     expect(providers.cueCardProvider.getStatus().detail).toContain(
@@ -503,7 +503,7 @@ describe("Live Assistant AI providers", () => {
   test("uses an explicit Live Assistant STT model for audio transcription", () => {
     const providers = createLiveAssistantProvidersFromEnvironment(
       createEnvironment({
-        NORDRI_INTERVIEW_STT_MODEL: "whisper-test",
+        NESTOR_INTERVIEW_STT_MODEL: "whisper-test",
       }),
     );
 
@@ -518,7 +518,7 @@ describe("Live Assistant AI providers", () => {
 
   test("uses deterministic Live Assistant providers without an API key", () => {
     const providers = createLiveAssistantProvidersFromEnvironment(
-      createEnvironment({ NORDRI_AI_API_KEY: undefined }),
+      createEnvironment({ NESTOR_AI_API_KEY: undefined }),
     );
 
     expect(providers.cueCardProvider.getStatus()).toMatchObject({
@@ -535,8 +535,8 @@ describe("Live Assistant AI providers", () => {
     const providers = createLiveAssistantProvidersFromEnvironment(
       createEnvironment({
         [DESKTOP_TEST_API_ENV]: "1",
-        NORDRI_INTERVIEW_AI_API_KEY: "ambient-interview-key",
-        NORDRI_INTERVIEW_VISION_API_KEY: "ambient-interview-vision-key",
+        NESTOR_INTERVIEW_AI_API_KEY: "ambient-interview-key",
+        NESTOR_INTERVIEW_VISION_API_KEY: "ambient-interview-vision-key",
       }),
     );
 
@@ -580,7 +580,7 @@ describe("Live Assistant AI providers", () => {
       createEnvironment({
         [DESKTOP_TEST_API_ENV]: "1",
         [LIVE_ASSISTANT_TEST_LIVE_AI_OPT_IN_ENV]: "1",
-        NORDRI_INTERVIEW_AI_API_KEY: "opted-in-interview-key",
+        NESTOR_INTERVIEW_AI_API_KEY: "opted-in-interview-key",
       }),
     );
 
@@ -633,7 +633,7 @@ describe("Live Assistant AI providers", () => {
     const providers = createLiveAssistantProvidersFromEnvironment(
       createEnvironment({
         [DESKTOP_TEST_API_ENV]: "1",
-        NORDRI_INTERVIEW_LOCAL_STT_COMMAND: "whisper-local",
+        NESTOR_INTERVIEW_LOCAL_STT_COMMAND: "whisper-local",
       }),
     );
 
@@ -785,7 +785,7 @@ describe("Live Assistant AI providers", () => {
   test("prefers configured local transcription before cloud fallback", () => {
     const providers = createLiveAssistantProvidersFromEnvironment(
       createEnvironment({
-        NORDRI_INTERVIEW_LOCAL_STT_COMMAND: `${process.execPath} --version`,
+        NESTOR_INTERVIEW_LOCAL_STT_COMMAND: `${process.execPath} --version`,
       }),
     );
 

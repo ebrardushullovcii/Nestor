@@ -12,7 +12,7 @@ import {
   type SubmissionFinalControlIdentity,
   type SubmissionObservationIdentity,
   type SubmissionPreflightRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * ADR 0012 / ADR 0013 application submission policy gate.

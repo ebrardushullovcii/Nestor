@@ -1,5 +1,5 @@
 import { withJobFinderWorkspaceUpdates } from "../services/job-finder/workspace-updates";
-import { ApplicationLetterGroundingError } from "@nordri/job-finder";
+import { ApplicationLetterGroundingError } from "@nestor/job-finder";
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -19,7 +19,7 @@ import {
   type ApplicationQuestionRecord,
   type JobFinderWorkspaceSnapshot,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   ApplicationDocumentLibraryError,
   type ApplicationDocumentLibrary,

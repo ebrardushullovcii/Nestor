@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   ResumeImportFieldCandidateSchema,
   type ResumeImportFieldCandidate,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { createSeed } from "../workspace-service.test-fixtures";
 import { applyResolvedResumeImportCandidatesToWorkspace } from "./resume-import-apply";

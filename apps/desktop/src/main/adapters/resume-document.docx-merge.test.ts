@@ -2,7 +2,7 @@ import {
   ResumeParserWorkerResponseSchema,
   type ResumeDocumentParserKind,
   type ResumeParserWorkerResponse,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import {

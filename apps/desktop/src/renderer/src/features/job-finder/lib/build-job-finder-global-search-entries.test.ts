@@ -2,7 +2,7 @@ import {
   JobListRowSchema,
   ReviewQueueItemSchema,
   type JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import { buildJobFinderGlobalSearchEntries } from "./build-job-finder-global-search-entries";
 import { searchJobFinderEntries } from "./job-finder-global-search";

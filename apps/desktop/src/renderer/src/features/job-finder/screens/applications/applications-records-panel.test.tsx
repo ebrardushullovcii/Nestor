@@ -12,7 +12,7 @@ import {
   ApplyJobResultSchema,
   type ApplicationRecord,
   type ApplyJobResult,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApplicationsRecordsPanel } from "./applications-records-panel";

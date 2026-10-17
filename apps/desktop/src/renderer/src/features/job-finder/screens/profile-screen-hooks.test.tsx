@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
-import type { ResumeImportFieldCandidateSummary } from "@nordri/contracts";
+import type { ResumeImportFieldCandidateSummary } from "@nestor/contracts";
 import {
   CandidateEducationSchema,
   CandidateProfileSchema,
   JobSearchPreferencesSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {

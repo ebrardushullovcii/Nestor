@@ -3,7 +3,7 @@ import {
   AssistantResultSetSchema,
   JobPostingSchema,
   type AssistantResultSet,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   createWorkspaceServiceHarness,

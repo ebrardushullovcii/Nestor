@@ -1,8 +1,8 @@
-import type { JudgeJobFitsInput } from "@nordri/ai-providers";
+import type { JudgeJobFitsInput } from "@nestor/ai-providers";
 import {
   DiscoveryAgentMetadataSchema,
   type DiscoveryActivityEvent,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {

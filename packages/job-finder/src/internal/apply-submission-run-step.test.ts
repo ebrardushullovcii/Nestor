@@ -2,7 +2,7 @@ import {
   ApplyJobResultSchema,
   SavedJobSchema,
   JobFinderIntelligenceStateSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 
 import type * as HandoffModule from "./apply-submission-handoff";
@@ -19,7 +19,7 @@ vi.mock("./apply-submission-handoff", async (importOriginal) => ({
 const { sendPreparedApplicationIfAllowed } =
   await import("./apply-submission-run-step");
 const { createSeed } = await import("../workspace-service.test-support");
-const { createInMemoryJobFinderRepository } = await import("@nordri/db");
+const { createInMemoryJobFinderRepository } = await import("@nestor/db");
 
 function sendInput(
   releaseApplicationPageBinding: ReturnType<typeof vi.fn>,

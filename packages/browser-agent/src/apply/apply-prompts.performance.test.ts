@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { RawApplyPage } from "@nordri/contracts";
+import type { RawApplyPage } from "@nestor/contracts";
 import recordedPage from "./synthetic-page.snapshot.json";
 import { buildApplyFormObservation } from "./page-hands";
 import {

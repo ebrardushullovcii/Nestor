@@ -3,7 +3,7 @@ import {
   ApplicationRecordSchema,
   ResumeValidationResultSchema,
   resumeComparisonNeedsRefresh,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createSeed,
   createWorkspaceServiceHarness,

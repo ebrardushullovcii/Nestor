@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { DiscoveryRunRecord } from "@nordri/contracts";
+import type { DiscoveryRunRecord } from "@nestor/contracts";
 
 /**
  * How long a browser-backed command may keep its controls disabled.

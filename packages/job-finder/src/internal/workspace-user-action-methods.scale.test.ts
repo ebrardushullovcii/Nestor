@@ -3,11 +3,11 @@ import {
   ApplyJobResultSchema,
   SavedJobSchema,
   UserActionRequestSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createInMemoryJobFinderRepository,
   type JobFinderRepository,
-} from "@nordri/db";
+} from "@nestor/db";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createJobFinderWorkspaceService } from "../index";

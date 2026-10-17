@@ -8,7 +8,7 @@ import type {
   ResumeSourceDocument,
   ResumeDraftPatch,
   ResumeTemplateDefinition,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { ResumeWorkHistoryDecisionRequest } from "./resume-workspace-work-history-decisions";
 
 export interface ResumeWorkspaceScreenProps {

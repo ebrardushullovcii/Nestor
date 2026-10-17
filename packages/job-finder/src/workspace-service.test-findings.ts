@@ -1,4 +1,4 @@
-import type { AgentDebugFindings, SourceDebugPhase } from "@nordri/contracts";
+import type { AgentDebugFindings, SourceDebugPhase } from "@nestor/contracts";
 
 import type { AgentDebugFindingsInput } from "./workspace-service.test-runtimes";
 import type { SourceDebugPhaseMap } from "./workspace-service.test-fixtures";

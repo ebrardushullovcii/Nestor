@@ -8,20 +8,20 @@ import {
   InterviewWorkspaceSnapshotSchema,
   InterviewWorkspaceViewSchema,
   type InterviewWorkspaceSnapshot,
-} from "@nordri/contracts";
-import { createFileLiveAssistantRepository } from "@nordri/db";
-import { createLiveAssistantService } from "@nordri/live-assistant";
+} from "@nestor/contracts";
+import { createFileLiveAssistantRepository } from "@nestor/db";
+import { createLiveAssistantService } from "@nestor/live-assistant";
 import {
   createStaticDesktopAudioCaptureAdapter,
   createStaticDesktopScreenshotCaptureAdapter,
   createStaticProtectedOverlaySurfaceAdapter,
-} from "@nordri/os-integration";
+} from "@nestor/os-integration";
 import {
   createDeterministicInterviewCueCardProvider,
   createDeterministicInterviewScreenshotVisionProvider,
   createDeterministicInterviewSummaryProvider,
   createDeterministicInterviewTranscriptionProvider,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 
 const now = "2026-10-13T00:00:00.000Z";
 const createService = (
@@ -48,7 +48,7 @@ const createService = (
 // No Electron launch, live providers, or user-data access. This exercises the
 // service and real storage together with an archive larger than a normal day.
 test("100 capture updates touch only the active body with 3,000 retained sessions", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "nordri-live-scale-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "nestor-live-scale-"));
   const filePath = path.join(directory, "live-assistant-workspace.json");
   let repository = createFileLiveAssistantRepository({ filePath });
   let service = createService(repository);

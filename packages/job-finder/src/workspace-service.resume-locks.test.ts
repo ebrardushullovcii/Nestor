@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ResumeDraftPatchSchema } from "@nordri/contracts";
+import { ResumeDraftPatchSchema } from "@nestor/contracts";
 import { createWorkspaceServiceHarness } from "./workspace-service.test-support";
 
 describe("resume section locking", () => {

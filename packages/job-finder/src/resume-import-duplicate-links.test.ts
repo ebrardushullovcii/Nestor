@@ -4,7 +4,7 @@ import {
   ResumeImportFieldCandidateSchema,
   createFreshStartCandidateProfile,
   type ResumeImportFieldCandidate,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   DUPLICATE_LINK_REASON,
   reconcileCandidates,

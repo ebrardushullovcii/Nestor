@@ -3,7 +3,7 @@ import {
   type BrowserSessionState,
   type CompensationPreference,
   type JobSearchPreferences,
-} from '@nordri/contracts'
+} from '@nestor/contracts'
 
 export function cloneValue<TValue>(value: TValue): TValue {
   return structuredClone(value)

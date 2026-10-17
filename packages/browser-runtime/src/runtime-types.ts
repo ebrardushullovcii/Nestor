@@ -33,9 +33,9 @@ import type {
   BrowserAgentRunCheckpoint,
   SourceDebugPhase,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { Page } from "playwright";
-import type { JobFinderAiClient } from "@nordri/ai-providers";
+import type { JobFinderAiClient } from "@nestor/ai-providers";
 import type {
   ApplicationFinalActionResult,
   ApplicationFormObservation,

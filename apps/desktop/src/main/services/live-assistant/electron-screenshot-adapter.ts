@@ -1,7 +1,7 @@
 import { desktopCapturer, screen } from "electron";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { DesktopScreenshotCaptureAdapter } from "@nordri/os-integration";
+import type { DesktopScreenshotCaptureAdapter } from "@nestor/os-integration";
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

@@ -3,7 +3,7 @@ import { Mic, MicOff, Monitor, Radio } from "lucide-react";
 import type {
   InterviewTranscriptSource,
   InterviewWorkspaceView,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import {
   createInterviewAudioChunkQueue,
@@ -508,7 +508,7 @@ export function InterviewMediaStreamProbes(props: {
           continue;
         }
 
-        void window.nordri.liveAssistant
+        void window.nestor.liveAssistant
           .addTranscriptSegment({
             sessionId: sessionIdRef.current,
             transcriptSegmentId: `browser_speech_${sessionIdRef.current}_${recognitionRunIdRef.current}_${index}`,
@@ -767,7 +767,7 @@ export function InterviewMediaStreamProbes(props: {
           .enqueue(async () => {
             const buffer = await chunk.arrayBuffer();
             const workspace =
-              await window.nordri.liveAssistant.transcribeAudioChunk({
+              await window.nestor.liveAssistant.transcribeAudioChunk({
                 sessionId,
                 source,
                 mimeType: chunk.type || mimeType || "audio/webm",

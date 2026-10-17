@@ -143,7 +143,7 @@ describe("browser profile import", () => {
   });
 
   test("lists profiles from installed browsers without exposing paths", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "nordri-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "nestor-home-"));
     temporary.push(home);
     const chrome = path.join(home, "Library/Application Support/Google/Chrome");
     await mkdir(path.join(chrome, "Default/Network"), { recursive: true });
@@ -210,7 +210,7 @@ describe("browser profile import", () => {
   });
 
   test("reads and decrypts a Chromium cookie store end to end", async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), "nordri-chromium-"));
+    const dir = await mkdtemp(path.join(tmpdir(), "nestor-chromium-"));
     temporary.push(dir);
     const file = path.join(dir, "Cookies");
     const key = deriveChromiumKey("synthetic-password", 1003);
@@ -254,7 +254,7 @@ describe("browser profile import", () => {
   });
 
   test("reads a Firefox cookie store", async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), "nordri-firefox-"));
+    const dir = await mkdtemp(path.join(tmpdir(), "nestor-firefox-"));
     temporary.push(dir);
     const file = path.join(dir, "cookies.sqlite");
     const db = new DatabaseSync(file);
@@ -271,7 +271,7 @@ describe("browser profile import", () => {
   });
 
   test("reports an empty device honestly", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "nordri-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "nestor-home-"));
     temporary.push(home);
     const listed = await listBrowserImportSources({ platform: "darwin", home });
     expect(listed.sources).toEqual([]);

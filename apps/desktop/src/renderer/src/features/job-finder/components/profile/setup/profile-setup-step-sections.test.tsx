@@ -7,7 +7,7 @@ import {
   CandidateProfileSchema,
   ResumeImportFieldCandidateSummarySchema,
   ResumeImportRunSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { ProfileSetupReviewQueueCard } from "./profile-setup-screen-sections";
 import { ProfileSetupImportStep } from "./profile-setup-step-sections";
 

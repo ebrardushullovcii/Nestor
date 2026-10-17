@@ -3,7 +3,7 @@ import type {
   ProfileCopilotPatchOperation,
   ResumeDraft,
   ResumeDraftPatch,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { plainFieldName } from "./prompt";
 
 const hiddenFields = new Set([

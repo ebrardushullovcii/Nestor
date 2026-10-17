@@ -44,13 +44,13 @@ async function waitForShell(window) {
 }
 
 async function getWorkspace(window) {
-  return window.evaluate(() => window.nordri.jobFinder.getWorkspace())
+  return window.evaluate(() => window.nestor.jobFinder.getWorkspace())
 }
 
 async function getApplyRunDetails(window, runId, jobId) {
   return window.evaluate(
     ({ currentRunId, currentJobId }) =>
-      window.nordri.jobFinder.getApplyRunDetails(currentRunId, currentJobId),
+      window.nestor.jobFinder.getApplyRunDetails(currentRunId, currentJobId),
     { currentRunId: runId, currentJobId: jobId },
   )
 }
@@ -61,11 +61,11 @@ function getApplicationRecords(workspace) {
 
 async function loadApplyQueueDemo(window) {
   await window.evaluate(async () => {
-    if (!window.nordri.jobFinder.test) {
+    if (!window.nestor.jobFinder.test) {
       throw new Error('Desktop test API is unavailable in the renderer.')
     }
 
-    return window.nordri.jobFinder.test.loadApplyQueueDemo()
+    return window.nestor.jobFinder.test.loadApplyQueueDemo()
   })
   await window.reload()
   await window.waitForLoadState('domcontentloaded')
@@ -148,7 +148,7 @@ async function selectApplicationByJobId(window, jobId) {
 
 async function stageQueueConsentRun(window) {
   const stagedSnapshot = await window.evaluate(async () => {
-    const snapshot = await window.nordri.jobFinder.startAutoApplyQueueRun([
+    const snapshot = await window.nestor.jobFinder.startAutoApplyQueueRun([
       'job_consent_queue',
       'job_ready',
     ])
@@ -157,7 +157,7 @@ async function stageQueueConsentRun(window) {
       throw new Error('Missing queue run id after staging consent demo run.')
     }
 
-    return window.nordri.jobFinder.approveApplyRun(runId)
+    return window.nestor.jobFinder.approveApplyRun(runId)
   })
 
   const fullWorkspace = await getWorkspace(window)
@@ -185,14 +185,14 @@ async function stageQueueConsentRun(window) {
 async function resolveConsent(window, requestId, action) {
   return window.evaluate(
     async ({ currentRequestId, currentAction }) =>
-      window.nordri.jobFinder.resolveApplyConsentRequest(currentRequestId, currentAction),
+      window.nestor.jobFinder.resolveApplyConsentRequest(currentRequestId, currentAction),
     { currentRequestId: requestId, currentAction: action },
   )
 }
 
 async function captureApplicationsConsentStates() {
   await mkdir(outputDir, { recursive: true })
-  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nordri-applications-consent-'))
+  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nestor-applications-consent-'))
 
   let app
 
@@ -202,22 +202,22 @@ async function captureApplicationsConsentStates() {
       cwd: desktopDir,
       env: {
         ...process.env,
-        NORDRI_BROWSER_AGENT: '0',
-        NORDRI_ENABLE_TEST_API: '1',
-        NORDRI_TEST_SYSTEM_THEME: process.env.NORDRI_TEST_SYSTEM_THEME ?? 'dark',
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_BROWSER_AGENT: '0',
+        NESTOR_ENABLE_TEST_API: '1',
+        NESTOR_TEST_SYSTEM_THEME: process.env.NESTOR_TEST_SYSTEM_THEME ?? 'dark',
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       },
     })
 
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
     await window.evaluate(async (theme) => {
-      if (!window.nordri.jobFinder.test) {
+      if (!window.nestor.jobFinder.test) {
         throw new Error('Desktop test API is unavailable in the renderer.')
       }
 
-      await window.nordri.jobFinder.test.setSystemThemeOverride(theme)
-    }, process.env.NORDRI_TEST_SYSTEM_THEME ?? 'dark')
+      await window.nestor.jobFinder.test.setSystemThemeOverride(theme)
+    }, process.env.NESTOR_TEST_SYSTEM_THEME ?? 'dark')
     await waitForProfileOrSetupHeading(window)
     await window.setViewportSize({ width, height })
 

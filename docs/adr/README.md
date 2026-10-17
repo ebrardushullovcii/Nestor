@@ -46,7 +46,7 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0037](0037-one-assistant-in-a-side-chat.md) | accepted | One app-wide assistant in a side chat replaces the Profile and Resume chats |
 | [0038](0038-the-assistant-works-in-the-tab-you-lend-it.md) | accepted | The assistant works only in the browser tab lent to it; a click takes it back |
 | [0039](0039-written-instructions-authorize.md) | accepted | Written sidebar instructions authorize their steps, sending included, through recorded grants |
-| [0040](0040-nordri-rebrand.md) | accepted | UnEmployed becomes Nordri and Interview Helper becomes Live Assistant; existing data moves once |
+| [0040](0040-nordri-rebrand.md) | accepted; product name changed by 0052 | UnEmployed becomes Nordri and Interview Helper becomes Live Assistant; existing data moves once |
 | [0041](0041-the-model-reads-the-page.md) | accepted; unchecked lines no longer wait for the person (0051) | The model reads the page and returns job details; scripts keep safety and mechanics, not interpretation |
 | [0042](0042-toasts-for-news-boxes-for-action.md) | accepted; action toasts lengthened by 0043; amended by 0044 | Toasts for news; tinted boxes only when the person must act; status in the control that owns it |
 | [0043](0043-bulk-work-queues-the-whole-selection.md) | accepted | Bulk work queues the whole selection or says what remains; toasts with Undo stay about twenty seconds |
@@ -58,6 +58,7 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0049](0049-resume-writing-in-one-call.md) | accepted; amended by 0051 | A resume is written in one model call, checked, and repaired only when flagged; refused listing reads pause the batch |
 | [0050](0050-one-selection-model-for-job-lists.md) | accepted | Find jobs and Shortlisted share checkboxes, a page select-all, ranges and one action bar; list screens share one column split |
 | [0051](0051-the-app-fixes-what-it-can-and-does-not-ask.md) | accepted | The app fixes what it can and does not ask the person to manage its rules; the resume writer decides what each resume shows |
+| [0052](0052-nestor-rebrand.md) | accepted | Nordri becomes Nestor; the newest old workspace, browser sign-ins and preferences move once |
 
 ## Policy
 

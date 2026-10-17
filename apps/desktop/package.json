@@ -1,9 +1,9 @@
 {
-  "name": "@nordri/desktop",
+  "name": "@nestor/desktop",
   "private": true,
   "version": "0.1.0",
   "description": "Local-first Job Finder and Live Assistant desktop workspace.",
-  "author": "Nordri contributors",
+  "author": "Nestor contributors",
   "type": "module",
   "main": "out/main/index.cjs",
   "scripts": {
@@ -68,14 +68,14 @@
     "@radix-ui/react-checkbox": "^1.3.3",
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tabs": "^1.1.13",
-    "@nordri/ai-providers": "workspace:*",
-    "@nordri/browser-runtime": "workspace:*",
-    "@nordri/contracts": "workspace:*",
-    "@nordri/db": "workspace:*",
-    "@nordri/live-assistant": "workspace:*",
-    "@nordri/job-finder": "workspace:*",
-    "@nordri/knowledge-base": "workspace:*",
-    "@nordri/os-integration": "workspace:*",
+    "@nestor/ai-providers": "workspace:*",
+    "@nestor/browser-runtime": "workspace:*",
+    "@nestor/contracts": "workspace:*",
+    "@nestor/db": "workspace:*",
+    "@nestor/live-assistant": "workspace:*",
+    "@nestor/job-finder": "workspace:*",
+    "@nestor/knowledge-base": "workspace:*",
+    "@nestor/os-integration": "workspace:*",
     "chromium-bidi": "^15.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -92,7 +92,7 @@
     "react-router-dom": "^7.13.1",
     "tailwind-merge": "^3.5.0",
     "ws": "8",
-    "@nordri/core": "workspace:*"
+    "@nestor/core": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",

@@ -9,11 +9,11 @@ import type {
   UpdateAiBehaviorInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   ApplicationCrmSettingsSchema,
   JobFinderSettingsSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   cleanup,
   fireEvent,

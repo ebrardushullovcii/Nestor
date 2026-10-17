@@ -4,7 +4,7 @@ import type {
   JobFinderJobDetail,
   JobListRow,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /** A sentence this hook wrote for the person, shown as it is. */
 class DetailReadError extends Error {}
@@ -88,7 +88,7 @@ export function useJobDetail(row: JobListRow | null, planId: string | null) {
     setState({ key, detail: detailCache.peek(key), error: null });
     void detailCache
       .load(key, async () => {
-        const detail = await window.nordri.jobFinder.getJobDetail(
+        const detail = await window.nestor.jobFinder.getJobDetail(
           jobId,
           planId,
         );

@@ -1348,7 +1348,7 @@ try {
     JSON.stringify({
       lastValidatedTimestamp: 0,
       projects: {
-        [repositoryRoot]: { name: "nordri", version: "0.1.0" },
+        [repositoryRoot]: { name: "nestor", version: "0.1.0" },
         [snapshotFixtureRoot]: { name: "fixture", version: "1.0.0" },
       },
     }),
@@ -1358,7 +1358,7 @@ try {
     JSON.stringify({
       lastValidatedTimestamp: 0,
       projects: {
-        [repositoryRoot]: { name: "nordri", version: "0.1.0" },
+        [repositoryRoot]: { name: "nestor", version: "0.1.0" },
         [snapshotFixtureRoot]: { name: "fixture", version: "1.0.0" },
       },
     }),
@@ -4015,7 +4015,7 @@ const resolver = await readFile(
   "utf8",
 );
 assert(
-  /export const DESKTOP_BUILD_ARGS = Object\.freeze\(\[\s*"--filter",\s*"@nordri\/desktop",\s*"build",?\s*\]\)/.test(
+  /export const DESKTOP_BUILD_ARGS = Object\.freeze\(\[\s*"--filter",\s*"@nestor\/desktop",\s*"build",?\s*\]\)/.test(
     resolver,
   ),
   "Acceptance resolver does not have one explicit desktop build command.",
@@ -4039,7 +4039,7 @@ assert(
 );
 assert(
   stableJson(DESKTOP_BUILD_ARGS) ===
-    stableJson(["--filter", "@nordri/desktop", "build"]),
+    stableJson(["--filter", "@nestor/desktop", "build"]),
   "Acceptance resolver changed the desktop build arguments.",
 );
 const cachedResolverProbe = resolveBuildInvocation({
@@ -4115,9 +4115,9 @@ assert(
       LANG: "en_US.UTF-8",
       OPENAI_API_KEY: "secret-value",
       PATH: "/usr/bin:/bin",
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_STARTUP_ZOOM_FACTOR: "9",
-      NORDRI_TESTER_SESSION_GEOMETRY: "0",
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_STARTUP_ZOOM_FACTOR: "9",
+      NESTOR_TESTER_SESSION_GEOMETRY: "0",
     },
     "/isolated/production-tester-user-data",
   );
@@ -4137,7 +4137,7 @@ assert(
     "HOME",
     "HTTPS_PROXY",
     "OPENAI_API_KEY",
-    "NORDRI_ENABLE_TEST_API",
+    "NESTOR_ENABLE_TEST_API",
   ]) {
     assert(
       !(forbiddenName in testerHardening.env),
@@ -4149,8 +4149,8 @@ assert(
     );
   }
   for (const geometryName of [
-    "NORDRI_STARTUP_ZOOM_FACTOR",
-    "NORDRI_TESTER_SESSION_GEOMETRY",
+    "NESTOR_STARTUP_ZOOM_FACTOR",
+    "NESTOR_TESTER_SESSION_GEOMETRY",
   ]) {
     assert(
       testerHardening.strippedNames.includes(geometryName),
@@ -4158,31 +4158,31 @@ assert(
     );
   }
   assert(
-    testerHardening.env.NORDRI_USER_DATA_DIR ===
+    testerHardening.env.NESTOR_USER_DATA_DIR ===
       "/isolated/production-tester-user-data" &&
-      testerHardening.env.NORDRI_TEST_API_USE_LIVE_AI === "0" &&
-      testerHardening.env.NORDRI_BROWSER_AGENT === "0" &&
+      testerHardening.env.NESTOR_TEST_API_USE_LIVE_AI === "0" &&
+      testerHardening.env.NESTOR_BROWSER_AGENT === "0" &&
       testerHardening.env
         .JOB_FINDER_PREPARE_ONLY_AUTHORIZE_INTERMEDIATE_WRITES === "0" &&
       testerHardening.env
         .JOB_FINDER_COMPLETE_FLOW_AUTHORIZED_WRITE_DIAGNOSTIC === "0" &&
-      testerHardening.env.NORDRI_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES ===
+      testerHardening.env.NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES ===
         "0",
     "Production tester environment must isolate user data and force browser agent/live AI/intermediate writes/ATS writes/diagnostics off.",
   );
   assert(
     testerHardening.injectedNames.includes(
-      "NORDRI_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES",
+      "NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES",
     ),
     "The ATS intermediate-write authorization flag must be an explicitly injected authority fact.",
   );
   assert(
-    testerHardening.env.NORDRI_TESTER_SESSION_GEOMETRY === "1" &&
-      testerHardening.env.NORDRI_STARTUP_WINDOW_WIDTH ===
+    testerHardening.env.NESTOR_TESTER_SESSION_GEOMETRY === "1" &&
+      testerHardening.env.NESTOR_STARTUP_WINDOW_WIDTH ===
         String(PRODUCTION_TESTER_GEOMETRY_REQUEST.width) &&
-      testerHardening.env.NORDRI_STARTUP_WINDOW_HEIGHT ===
+      testerHardening.env.NESTOR_STARTUP_WINDOW_HEIGHT ===
         String(PRODUCTION_TESTER_GEOMETRY_REQUEST.height) &&
-      testerHardening.env.NORDRI_STARTUP_ZOOM_FACTOR ===
+      testerHardening.env.NESTOR_STARTUP_ZOOM_FACTOR ===
         String(PRODUCTION_TESTER_GEOMETRY_REQUEST.zoomFactor),
     "Production tester environment must inject the canonical geometry marker and values.",
   );
@@ -4614,10 +4614,10 @@ assert(
   "Production tester probe does not request a loopback ephemeral CDP endpoint.",
 );
 assert(
-  wrapper.includes("NORDRI_TESTER_SESSION_GEOMETRY") &&
-    wrapper.includes("NORDRI_STARTUP_WINDOW_WIDTH") &&
-    wrapper.includes("NORDRI_STARTUP_WINDOW_HEIGHT") &&
-    wrapper.includes("NORDRI_STARTUP_ZOOM_FACTOR"),
+  wrapper.includes("NESTOR_TESTER_SESSION_GEOMETRY") &&
+    wrapper.includes("NESTOR_STARTUP_WINDOW_WIDTH") &&
+    wrapper.includes("NESTOR_STARTUP_WINDOW_HEIGHT") &&
+    wrapper.includes("NESTOR_STARTUP_ZOOM_FACTOR"),
   "Production tester probe does not inject the explicit startup-geometry environment.",
 );
 {
@@ -4628,10 +4628,10 @@ assert(
   assert(
     testerEnvironmentSource.length > 0 &&
       testerEnvironmentSource.includes(
-        "delete env.NORDRI_ENABLE_TEST_API",
+        "delete env.NESTOR_ENABLE_TEST_API",
       ) &&
-      !testerEnvironmentSource.includes('NORDRI_ENABLE_TEST_API = "1"') &&
-      !testerEnvironmentSource.includes("NORDRI_AI_API_KEY"),
+      !testerEnvironmentSource.includes('NESTOR_ENABLE_TEST_API = "1"') &&
+      !testerEnvironmentSource.includes("NESTOR_AI_API_KEY"),
     "Production tester environment builder must prove test API and provider keys stay absent by construction.",
   );
 }
@@ -6462,12 +6462,12 @@ assert(
 assert(
   freshSource.includes("collectWordmarkEvidence") &&
     freshSource.includes('"[data-desktop-brand-wordmark]"') &&
-    freshSource.includes('text !== "NORDRI"') &&
+    freshSource.includes('text !== "NESTOR"') &&
     freshSource.includes("expectWordmark: true") &&
     freshSource.includes(
       "wordmarkEvidence: await collectWordmarkEvidence(page)",
     ),
-  "Fresh minimum-width acceptance must prove the actual NORDRI wordmark remains visible and contained when navigation collapses.",
+  "Fresh minimum-width acceptance must prove the actual NESTOR wordmark remains visible and contained when navigation collapses.",
 );
 assert(
   freshSource.includes("collectWorkspaceStateGeometry") &&
@@ -6476,7 +6476,7 @@ assert(
     freshSource.includes('"[data-workspace-state-message]"') &&
     freshSource.includes('scenarioId: "opening-workspace-desktop"') &&
     freshSource.includes("expectWorkspaceStateGeometry: true") &&
-    freshSource.includes('NORDRI_TEST_WORKSPACE_OPENING_HOLD_MS: "750"'),
+    freshSource.includes('NESTOR_TEST_WORKSPACE_OPENING_HOLD_MS: "750"'),
   "Fresh acceptance must capture and geometry-gate the centered opening workspace state.",
 );
 assert(
@@ -7357,7 +7357,7 @@ assert(
     "zoomFactor: vp.zoomFactor",
     "getZoomFactor()",
     "reloadZoomFactorExact",
-    'NORDRI_STARTUP_ZOOM_FACTOR = "9"',
+    'NESTOR_STARTUP_ZOOM_FACTOR = "9"',
   ]) {
     let fired = false;
     try {

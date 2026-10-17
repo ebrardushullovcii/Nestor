@@ -43,7 +43,7 @@ import {
   UserActionEventSchema,
   UserActionRequestSchema,
   type JobFinderRepositoryState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import {
   APPLICATION_ATTEMPT_INDEXED_COLLECTION_CONFIG,

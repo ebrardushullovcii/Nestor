@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { AgentTaskNonRetryableProviderError } from "@nordri/agent-runtime";
+import { AgentTaskNonRetryableProviderError } from "@nestor/agent-runtime";
 import {
   getAiProviderAccessFailure,
   isAiProviderRateLimited,

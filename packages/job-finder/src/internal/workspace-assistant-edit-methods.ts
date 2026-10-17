@@ -14,7 +14,7 @@ import {
   type ResumeApplicationMode,
   type ResumeDraft,
   type ResumeDraftPatch,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { diffValues, undoChangeEntries } from "../assistant/change-diff";
 import { commitProfileCopilotStateWithStaleRetry } from "./profile-commit-stale-conflict";

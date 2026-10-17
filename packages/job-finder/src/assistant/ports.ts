@@ -4,7 +4,7 @@ import type {
   CandidateAsset,
   AssistantResumeBatchState,
   JobFinderSearchRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * What the assistant needs from the host that is not a workspace-service

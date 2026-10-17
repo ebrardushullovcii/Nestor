@@ -2,7 +2,7 @@ import type {
   ApplyRunDetails,
   JobFinderApplyRunActionInput,
   JobFinderExactApplicationTarget,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui";
 
 /**

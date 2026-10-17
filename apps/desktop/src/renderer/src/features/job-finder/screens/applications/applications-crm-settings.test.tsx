@@ -8,7 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ApplicationCrmSettings } from "@nordri/contracts";
+import type { ApplicationCrmSettings } from "@nestor/contracts";
 
 import { ApplicationsCrmSettingsEditor } from "./applications-crm-settings";
 

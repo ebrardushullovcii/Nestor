@@ -1,4 +1,4 @@
-import type { ProfileSetupState } from "@nordri/contracts";
+import type { ProfileSetupState } from "@nestor/contracts";
 import type { ProfileSection } from "../../lib/profile-screen-progress";
 
 const reviewSeverityRank = {

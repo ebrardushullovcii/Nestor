@@ -2,13 +2,13 @@ import {
   createApplyPageHands,
   createPageTools,
   type PageTools,
-} from "@nordri/browser-agent";
+} from "@nestor/browser-agent";
 import {
   JobPostingSchema,
   NonEmptyStringSchema,
   type ApplyRawPageHands,
   type JobPosting,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { z } from "zod";
 
 import type { AssistantBrowserLease } from "../ports";

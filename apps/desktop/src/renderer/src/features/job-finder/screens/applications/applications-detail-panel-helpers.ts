@@ -4,7 +4,7 @@ import type {
   ApplyRunDetails,
   ApplySubmitApproval,
   JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   CONFIRM_STEP_DONE_ACTION,
   FINISH_IN_JOB_FINDER_BROWSER_INSTRUCTION,

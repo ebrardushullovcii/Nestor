@@ -10,7 +10,7 @@ import {
   type ResumeImportVisionArtifact,
   type ResumeParserWorkerRequest,
   type ResumeParserWorkerResponse,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 const DEFAULT_PARSER_TIMEOUT_MS = 45_000;
 const MAX_SIDECAR_OUTPUT_BYTES = 512_000;
@@ -141,7 +141,7 @@ export function _resetSidecarAvailabilityLogged(): void {
 
 function getBundledSidecarBinaryPath(): string | null {
   const override =
-    process.env.NORDRI_RESUME_PARSER_SIDECAR_BINARY_PATH?.trim();
+    process.env.NESTOR_RESUME_PARSER_SIDECAR_BINARY_PATH?.trim();
   const candidates = uniquePaths([
     override ?? "",
     ...getGeneratedSidecarRootCandidates().map((root) =>
@@ -159,7 +159,7 @@ function getBundledSidecarBinaryPath(): string | null {
 }
 
 function getPythonPathEntriesForScript(scriptPath: string): string[] {
-  const override = process.env.NORDRI_RESUME_PARSER_PYTHONPATH?.trim();
+  const override = process.env.NESTOR_RESUME_PARSER_PYTHONPATH?.trim();
   const scriptDir = path.dirname(scriptPath);
 
   return uniquePaths(
@@ -235,7 +235,7 @@ function getResumeParserSidecarScriptPath(): string {
     "../src/main/adapters/scripts/resume_parser_sidecar.py",
   );
   const overrideCandidate =
-    process.env.NORDRI_RESUME_PARSER_SIDECAR_PATH?.trim();
+    process.env.NESTOR_RESUME_PARSER_SIDECAR_PATH?.trim();
 
   const candidates = [
     overrideCandidate,
@@ -288,7 +288,7 @@ function resolveBundledScriptPathFromManifest(): string | null {
 function getSidecarCommandCandidates(
   scriptPath: string,
 ): SidecarCommandCandidate[] {
-  const override = process.env.NORDRI_RESUME_PARSER_PYTHON?.trim();
+  const override = process.env.NESTOR_RESUME_PARSER_PYTHON?.trim();
   const bundledBinaryPath = getBundledSidecarBinaryPath();
   const candidates: SidecarCommandCandidate[] = [];
 

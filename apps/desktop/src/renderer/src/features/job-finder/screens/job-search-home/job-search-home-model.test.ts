@@ -1,12 +1,12 @@
 import type {
   JobFinderRendererWorkspaceSnapshot,
   ReviewQueueItem,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   AbnormalFailurePauseSchema,
   ApplicationRecordSchema,
   createFreshStartCandidateProfile,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import { buildJobFinderTaskCenterModel } from "../../components/task-center/job-finder-task-center-model";
 import { countNeedsYou } from "../../lib/destination-counts";

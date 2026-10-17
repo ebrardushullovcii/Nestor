@@ -2,8 +2,8 @@ import {
   ResumeImportFieldCandidateSchema,
   type ResumeDocumentBundle,
   type ResumeImportFieldCandidate,
-} from "@nordri/contracts";
-import { buildValuePreview } from "@nordri/ai-providers";
+} from "@nestor/contracts";
+import { buildValuePreview } from "@nestor/ai-providers";
 
 import { isObject } from "./resume-import-common";
 import { uniqueStrings } from "./shared";

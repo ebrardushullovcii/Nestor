@@ -3,7 +3,7 @@ import {
   type CompensationPreference,
   type CompensationFitAssessment,
   type NormalizedCompensation,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 function readPeriodUnit(
   salaryText: string,

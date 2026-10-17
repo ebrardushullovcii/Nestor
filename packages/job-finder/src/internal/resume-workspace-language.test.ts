@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
-import type { JobFinderAiClient } from "@nordri/ai-providers";
-import { ResumeProposalValidationError } from "@nordri/ai-providers";
+import type { JobFinderAiClient } from "@nestor/ai-providers";
+import { ResumeProposalValidationError } from "@nestor/ai-providers";
 import {
   createSeed,
   createAiClient,

@@ -8,7 +8,7 @@ import {
   type JobFinderResumeWorkspace,
   type JobFinderWorkspaceSnapshot,
   type ResumeDraft,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { z } from "zod";
 
 import { AssistantEditConflictError } from "../../internal/workspace-assistant-edit-methods";

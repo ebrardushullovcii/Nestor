@@ -6,7 +6,7 @@ import {
   InterviewWorkspaceSnapshotSchema,
   type InterviewChatConversation,
   type InterviewWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { InterviewVisibleChat } from "./interview-visible-chat";
 

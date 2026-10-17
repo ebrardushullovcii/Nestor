@@ -1,4 +1,4 @@
-import { JobFinderWorkspaceSnapshotSchema } from "@nordri/contracts";
+import { JobFinderWorkspaceSnapshotSchema } from "@nestor/contracts";
 import type { IpcMain } from "electron";
 import {
   getDesktopTestDelayMs,
@@ -8,7 +8,7 @@ import {
 import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-workspace-view";
 
 export const TEST_WORKSPACE_OPENING_HOLD_ENV =
-  "NORDRI_TEST_WORKSPACE_OPENING_HOLD_MS";
+  "NESTOR_TEST_WORKSPACE_OPENING_HOLD_MS";
 const MAX_TEST_WORKSPACE_OPENING_HOLD_MS = 5_000;
 
 export function getTestWorkspaceOpeningHoldMs(
@@ -20,7 +20,7 @@ export function getTestWorkspaceOpeningHoldMs(
 
   return Math.min(
     getDesktopTestDelayMs(
-      env.NORDRI_TEST_WORKSPACE_OPENING_HOLD_MS,
+      env.NESTOR_TEST_WORKSPACE_OPENING_HOLD_MS,
       TEST_WORKSPACE_OPENING_HOLD_ENV,
     ),
     MAX_TEST_WORKSPACE_OPENING_HOLD_MS,

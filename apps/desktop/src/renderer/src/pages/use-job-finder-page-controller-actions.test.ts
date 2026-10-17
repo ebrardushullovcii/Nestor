@@ -9,7 +9,7 @@ import {
   type JobFinderRendererWorkspaceSnapshot,
   type ResumeExtractionStatus,
   type ResumeDraft,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   ActionState,
   JobFinderShellActions,

@@ -13,7 +13,7 @@ import type {
   RapidReviewDecisionKind,
   RapidReviewMutationInput,
   JobListRow,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { Link } from "react-router-dom";
 import {

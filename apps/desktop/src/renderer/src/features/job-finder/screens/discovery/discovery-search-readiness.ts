@@ -2,7 +2,7 @@ import {
   isRunnableJobDiscoveryTarget,
   type BrowserSessionState,
   type JobSearchPreferences,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * Copy shared by the route header and search controls when Job Finder cannot

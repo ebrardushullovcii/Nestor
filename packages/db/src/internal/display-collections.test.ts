@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import {
   ResumeValidationResultSchema,
   TailoredAssetSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createDisplayCollectionsReader } from "./display-collections";
 import { bootstrapState } from "./state";
 import { runMigrations } from "./migrations";
@@ -150,7 +150,7 @@ test("latest validations reuse only latest bodies and reveal older validation af
 });
 
 test("external connection commits invalidate display state; canonical reads/export/reset remain lossless and owned", async () => {
-  const temp = await createTempRepository("nordri-history-cache-external-");
+  const temp = await createTempRepository("nestor-history-cache-external-");
   const repo = await temp.createRepository();
   const external = new DatabaseSync(temp.filePath);
   try {

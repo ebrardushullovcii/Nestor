@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { normalizePublicLinkUrl } from "@nordri/contracts";
+import { normalizePublicLinkUrl } from "@nestor/contracts";
 import { Controller, type UseFormReturn } from "react-hook-form";
 import { Checkbox } from "@renderer/components/ui/checkbox";
 import type { ProfileEditorValues } from "../../lib/profile-editor";

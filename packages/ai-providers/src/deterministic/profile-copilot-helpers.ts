@@ -4,7 +4,7 @@ import {
   type ProfileCopilotContext,
   type ProfileCopilotPatchGroup,
   type ProfileCopilotRelevantReviewItem,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import type { ReviseCandidateProfileInput } from "../shared";
 

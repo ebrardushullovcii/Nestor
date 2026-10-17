@@ -20,7 +20,7 @@ import {
   it,
   vi,
 } from "vitest";
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import {
   JobFinderWindowCloseGuard,
   applyJobFinderWindowCloseGuard,
@@ -48,7 +48,7 @@ function installCloseBridgeMock(): CloseBridgeMock {
   const resolutions: CloseResolution[] = [];
   const guardStates: Array<{ blocked: boolean }> = [];
 
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       ping: vi.fn(() => Promise.reject(new Error("unused in these tests"))),
@@ -117,14 +117,14 @@ afterAll(() => {
 beforeEach(() => {
   // The module-level mirror persists across tests; drop it without a bridge
   // present so every test starts from an unprotected session.
-  Reflect.deleteProperty(window, "nordri");
+  Reflect.deleteProperty(window, "nestor");
   applyJobFinderWindowCloseGuard(null);
   resetJobFinderOverlaysForTests();
 });
 
 afterEach(() => {
   cleanup();
-  Reflect.deleteProperty(window, "nordri");
+  Reflect.deleteProperty(window, "nestor");
   resetJobFinderOverlaysForTests();
 });
 
@@ -192,7 +192,7 @@ describe("JobFinderWindowCloseGuard decisions", () => {
     });
 
     const dialog = await screen.findByRole("dialog", {
-      name: /close nordri\?/i,
+      name: /close nestor\?/i,
     });
     expect(dialog.getAttribute("aria-modal")).toBe("true");
     expect(screen.getByText("Unsaved resume edits").textContent).toBe(
@@ -227,7 +227,7 @@ describe("JobFinderWindowCloseGuard decisions", () => {
     act(() => {
       bridge.emitCloseRequest("req_leave");
     });
-    await screen.findByRole("dialog", { name: /close nordri\?/i });
+    await screen.findByRole("dialog", { name: /close nestor\?/i });
 
     const leaveButton = screen.getByRole("button", {
       name: "Leave without saving",
@@ -255,7 +255,7 @@ describe("JobFinderWindowCloseGuard decisions", () => {
     act(() => {
       bridge.emitCloseRequest("req_first");
     });
-    await screen.findByRole("dialog", { name: /close nordri\?/i });
+    await screen.findByRole("dialog", { name: /close nestor\?/i });
 
     act(() => {
       bridge.emitCloseRequest("req_second");
@@ -283,7 +283,7 @@ describe("JobFinderWindowCloseGuard decisions", () => {
     act(() => {
       bridge.emitCloseRequest("req_unmount");
     });
-    await screen.findByRole("dialog", { name: /close nordri\?/i });
+    await screen.findByRole("dialog", { name: /close nestor\?/i });
 
     view.unmount();
 
@@ -361,7 +361,7 @@ describe("JobFinderWindowCloseGuard under an active overlay", () => {
     // With the stack settled and the draft still unsaved, the held request
     // is promoted into the single visible dialog.
     const closeDialog = await screen.findByRole("dialog", {
-      name: /close nordri\?/i,
+      name: /close nestor\?/i,
     });
     expect(closeDialog.getAttribute("aria-modal")).toBe("true");
 
@@ -421,10 +421,10 @@ describe("JobFinderPage answers close requests in every render state", () => {
 
   it("answers close requests while the opening shell is still loading", async () => {
     const bridge = installCloseBridgeMock();
-    const nordri = window.nordri as unknown as {
+    const nestor = window.nestor as unknown as {
       ping: () => Promise<never>;
     };
-    nordri.ping = () => new Promise(() => undefined);
+    nestor.ping = () => new Promise(() => undefined);
 
     renderJobFinderPage();
 
@@ -442,10 +442,10 @@ describe("JobFinderPage answers close requests in every render state", () => {
 
   it("uses the production brand lockup and macOS-safe header geometry while opening", () => {
     installCloseBridgeMock();
-    const nordri = window.nordri as unknown as {
+    const nestor = window.nestor as unknown as {
       ping: () => Promise<never>;
     };
-    nordri.ping = () => new Promise(() => undefined);
+    nestor.ping = () => new Promise(() => undefined);
 
     renderJobFinderPage();
 
@@ -467,10 +467,10 @@ describe("JobFinderPage answers close requests in every render state", () => {
     expect(header?.className).toContain("h-14");
     expect(brand?.style.paddingInlineStart).toBe("");
     expect(
-      wordmark?.contains(screen.getByRole("img", { name: "Nordri" })),
+      wordmark?.contains(screen.getByRole("img", { name: "Nestor" })),
     ).toBe(true);
     expect(
-      screen.getByRole("img", { name: "Nordri" }).getAttribute("class"),
+      screen.getByRole("img", { name: "Nestor" }).getAttribute("class"),
     ).toContain("sm:h-[1.3rem]");
     // The opening skeleton mirrors the loaded shell header: the caption row
     // carries the brand lockup and the native window-control reserve, and the
@@ -493,7 +493,7 @@ describe("JobFinderPage answers close requests in every render state", () => {
       ),
     ).not.toBeNull();
     expect(
-      screen.getAllByRole("group", { name: "Nordri modules" }),
+      screen.getAllByRole("group", { name: "Nestor modules" }),
     ).toContain(moduleNavigation);
     expect(
       screen.getByRole("navigation", { name: "Job Finder sections" }),
@@ -502,13 +502,13 @@ describe("JobFinderPage answers close requests in every render state", () => {
 
   it("answers close requests on the post-ready generic error screen", async () => {
     const bridge = installCloseBridgeMock();
-    const nordri = window.nordri as unknown as {
+    const nestor = window.nestor as unknown as {
       jobFinder: Record<string, unknown>;
     };
-    nordri.jobFinder.getWorkspaceBootstrap = vi.fn(() =>
+    nestor.jobFinder.getWorkspaceBootstrap = vi.fn(() =>
       Promise.reject(new Error("workspace storage unavailable")),
     );
-    nordri.jobFinder.getStartupDatabaseRecovery = vi.fn(() =>
+    nestor.jobFinder.getStartupDatabaseRecovery = vi.fn(() =>
       Promise.reject(new Error("recovery facts unavailable")),
     );
 
@@ -531,11 +531,11 @@ describe("JobFinderPage answers close requests in every render state", () => {
 
 describe("controller-owned close-guard mirror lifetime", () => {
   function configureReadyBootstrap(): void {
-    const nordri = window.nordri as unknown as {
+    const nestor = window.nestor as unknown as {
       ping: () => Promise<{ ok: true; platform: "darwin" }>;
       jobFinder: Record<string, unknown>;
     };
-    nordri.ping = () =>
+    nestor.ping = () =>
       Promise.resolve({ ok: true as const, platform: "darwin" as const });
     const readyWorkspace = {
       hydration: { phase: "complete", deferredCollections: [] },
@@ -561,7 +561,7 @@ describe("controller-owned close-guard mirror lifetime", () => {
       profileSetupState: { status: "completed", reviewItems: [] },
       profileCopilotMessages: [],
     } as unknown as JobFinderRendererWorkspaceSnapshot;
-    nordri.jobFinder.getWorkspaceBootstrap = vi.fn(() =>
+    nestor.jobFinder.getWorkspaceBootstrap = vi.fn(() =>
       Promise.resolve(readyWorkspace),
     );
   }

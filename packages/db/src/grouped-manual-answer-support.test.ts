@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ApplicationAnswerRecordSchema } from "@nordri/contracts";
+import { ApplicationAnswerRecordSchema } from "@nestor/contracts";
 import { latestApplicationAnswerRecord } from "./grouped-manual-answer-support";
 
 test("the repository selects the same latest answer regardless of legacy tie insertion order", () => {

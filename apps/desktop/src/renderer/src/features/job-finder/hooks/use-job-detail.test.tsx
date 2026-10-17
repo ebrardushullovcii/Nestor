@@ -4,7 +4,7 @@ import {
   JobListRowSchema,
   SavedJobSchema,
   type JobFinderJobDetail,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearJobDetailCache,
@@ -55,7 +55,7 @@ const read =
 beforeEach(() => {
   clearJobDetailCache();
   read.mockReset();
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: { jobFinder: { getJobDetail: read } },
   });

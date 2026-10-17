@@ -1,6 +1,6 @@
-# Nordri
+# Nestor
 
-Nordri is an agent-first desktop product for job search, resume preparation, safe application assistance, and interview support. This file is a glossary only; product behavior lives in `docs/PRODUCT.md`, boundaries in `docs/ARCHITECTURE.md`, and decisions in `docs/adr/`.
+Nestor is an agent-first desktop product for job search, resume preparation, safe application assistance, and interview support. This file is a glossary only; product behavior lives in `docs/PRODUCT.md`, boundaries in `docs/ARCHITECTURE.md`, and decisions in `docs/adr/`.
 
 ## Job Finder Language
 

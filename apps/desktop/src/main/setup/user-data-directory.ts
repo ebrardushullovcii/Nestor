@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 export function getConfiguredDesktopUserDataDirectory(
-  configuredDirectory = process.env.NORDRI_USER_DATA_DIR,
+  configuredDirectory = process.env.NESTOR_USER_DATA_DIR,
 ): string | null {
   const requestedDirectory = configuredDirectory?.trim();
   return requestedDirectory ? path.resolve(requestedDirectory) : null;
@@ -11,7 +11,7 @@ export function getConfiguredDesktopUserDataDirectory(
 
 export function resolveDesktopUserDataDirectory(
   app: Pick<App, "getPath">,
-  configuredDirectory = process.env.NORDRI_USER_DATA_DIR,
+  configuredDirectory = process.env.NESTOR_USER_DATA_DIR,
 ): string {
   return (
     getConfiguredDesktopUserDataDirectory(configuredDirectory) ??
@@ -20,7 +20,7 @@ export function resolveDesktopUserDataDirectory(
 }
 
 export function getDesktopStartupDiagnosticsPath(
-  configuredDirectory = process.env.NORDRI_USER_DATA_DIR,
+  configuredDirectory = process.env.NESTOR_USER_DATA_DIR,
 ): string | null {
   const resolvedDirectory =
     getConfiguredDesktopUserDataDirectory(configuredDirectory);
@@ -32,7 +32,7 @@ export function getDesktopStartupDiagnosticsPath(
 
 export function configureDesktopUserDataDirectory(
   app: Pick<App, "setPath">,
-  configuredDirectory = process.env.NORDRI_USER_DATA_DIR,
+  configuredDirectory = process.env.NESTOR_USER_DATA_DIR,
 ): string | null {
   const resolvedDirectory =
     getConfiguredDesktopUserDataDirectory(configuredDirectory);

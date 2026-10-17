@@ -84,11 +84,11 @@ test("Aggressive Muse writing and claim checks use Responses at xhigh throughout
   try {
     const client = createJobFinderAiClientFromEnvironment(
       createEnvironment({
-        NORDRI_AI_MODEL: "separate-primary",
-        NORDRI_AI_API_MODE: "chat_completions",
-        NORDRI_AI_AGGRESSIVE_MODEL: "muse-spark-1.3-contributor",
-        NORDRI_AI_AGGRESSIVE_API_MODE: "responses",
-        NORDRI_AI_AGGRESSIVE_REASONING_EFFORT: "xhigh",
+        NESTOR_AI_MODEL: "separate-primary",
+        NESTOR_AI_API_MODE: "chat_completions",
+        NESTOR_AI_AGGRESSIVE_MODEL: "muse-spark-1.3-contributor",
+        NESTOR_AI_AGGRESSIVE_API_MODE: "responses",
+        NESTOR_AI_AGGRESSIVE_REASONING_EFFORT: "xhigh",
       }),
     );
     const profile = createProfile();

@@ -59,8 +59,8 @@ vi.mock("./assistant-browser-port", () => ({
 import {
   DiscoveryRunRecordSchema,
   ResumeExportArtifactSummarySchema,
-} from "@nordri/contracts";
-import type { JobFinderWorkspaceService } from "@nordri/job-finder";
+} from "@nestor/contracts";
+import type { JobFinderWorkspaceService } from "@nestor/job-finder";
 import { getJobFinderRepositoryForWorkspaceService } from "../job-finder/create-workspace-service";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";

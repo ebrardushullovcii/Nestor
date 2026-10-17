@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { SavedJobSchema, type SavedJob } from "@nordri/contracts";
+import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { listCollectionValues, listValuesInChunks } from "./state";
 
 /** Borrowed projection values cannot become an accidental repository write. */

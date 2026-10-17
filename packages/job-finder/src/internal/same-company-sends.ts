@@ -5,7 +5,7 @@ import {
   type SavedJob,
   type ApplicationRecord,
   type SimultaneousApplicationConflict,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 
 export function sendCompanyKey(name: string): string {

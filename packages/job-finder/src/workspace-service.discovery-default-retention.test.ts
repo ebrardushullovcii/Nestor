@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { JobDiscoveryTargetSchema } from "@nordri/contracts";
+import { JobDiscoveryTargetSchema } from "@nestor/contracts";
 import {
   createSeed,
   createWorkspaceServiceHarness,

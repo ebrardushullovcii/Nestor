@@ -19,7 +19,7 @@ import type {
   ApplicationRecord,
   BrowserVisualEvidenceSummary,
   JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   ApplyRunDetailsSchema,
   UserActionRequestSchema,
@@ -30,7 +30,7 @@ import {
   ApplicationCrmSettingsSchema,
   ApplicationRecordSchema,
   JobFinderIntelligenceSafeguardsSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { countActiveSafeguardBlockers } from "../../lib/safeguards-blocker-count";
 import { formatDailyPreparationCapacityReachedText } from "../../lib/job-finder-daily-capacity";
 import { ApplicationsScreen } from "./applications-screen";
@@ -88,7 +88,7 @@ describe("ApplicationsScreen", () => {
   }
 
   function stubCandidateAssetsBridge() {
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         jobFinder: {
@@ -278,8 +278,8 @@ describe("ApplicationsScreen", () => {
       </MemoryRouter>,
     );
     const command = vi.fn(() => Promise.resolve());
-    vi.stubGlobal("nordri", {
-      ...(window as unknown as { nordri?: object }).nordri,
+    vi.stubGlobal("nestor", {
+      ...(window as unknown as { nestor?: object }).nestor,
       browser: { command },
     });
     fireEvent.click(

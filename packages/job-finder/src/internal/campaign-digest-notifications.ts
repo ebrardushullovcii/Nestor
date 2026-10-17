@@ -10,7 +10,7 @@ import {
   type CampaignRunFacts,
   type DiscoveryRunRecord,
   type DiscoveryRunReport,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { isProvisionalMatchAssessment } from "../discovery-ordering";
 import { deriveDiscoverySourceOutcome } from "../source-health";
 

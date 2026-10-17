@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SetStateAction } from "react";
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import type {
   ActionState,
   JobFinderShellActions,

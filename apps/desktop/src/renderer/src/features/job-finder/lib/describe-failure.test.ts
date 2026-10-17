@@ -45,11 +45,11 @@ describe("paused background work", () => {
 it("workspace restore explains unknown versions and keeps unexpected raw errors behind details", () => {
   const unsupported = describeWorkspaceRestoreFailure(
     new Error(
-      "Error invoking remote method 'job-finder:preview-personal-workspace-restore': Error: This export uses a version Nordri cannot restore. Your workspace was kept.",
+      "Error invoking remote method 'job-finder:preview-personal-workspace-restore': Error: This export uses a version Nestor cannot restore. Your workspace was kept.",
     ),
   );
   expect(unsupported.userMessage).toBe(
-    "This export uses a version Nordri cannot restore. Your workspace was kept.",
+    "This export uses a version Nestor cannot restore. Your workspace was kept.",
   );
   const unknown = describeWorkspaceRestoreFailure(
     new Error("Unexpected storage failure at internal_record_123"),

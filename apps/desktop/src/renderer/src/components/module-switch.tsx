@@ -2,8 +2,8 @@ import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Briefcase, Check, ChevronDown, MessageSquareText } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { suiteModules } from "@nordri/contracts";
-import type { SuiteModule } from "@nordri/contracts";
+import { suiteModules } from "@nestor/contracts";
+import type { SuiteModule } from "@nestor/contracts";
 
 import { Popover } from "@renderer/components/ui/popover";
 import type { PopoverPlacement } from "@renderer/components/ui/popover";
@@ -234,7 +234,7 @@ export function ModuleSwitch({
 
   return (
     <div
-      aria-label="Nordri modules"
+      aria-label="Nestor modules"
       className={cn("min-w-0", className)}
       data-desktop-module-navigation
       data-module-switch-variant={isRail ? "rail" : "caption"}

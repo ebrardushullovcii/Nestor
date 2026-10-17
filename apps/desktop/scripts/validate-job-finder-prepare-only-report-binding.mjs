@@ -146,10 +146,10 @@ async function buildSyntheticAcceptedApp(runDir) {
   await mkdir(path.join(appRoot, "out", "preload"), { recursive: true });
   await mkdir(path.join(appRoot, "out", "renderer"), { recursive: true });
   const packageMetadata = {
-    name: "@nordri/desktop",
+    name: "@nestor/desktop",
     version: "0.1.0",
     description: "synthetic accepted-app fixture",
-    author: "Nordri contributors",
+    author: "Nestor contributors",
     private: true,
     main: "out/main/index.cjs",
   };
@@ -447,13 +447,13 @@ const pollutedEnv = {
   ELECTRON_RUN_AS_NODE: "1",
   ELECTRON_RENDERER_URL: "http://localhost:5173",
   JOB_FINDER_PREPARE_ONLY_AUTHORIZE_INTERMEDIATE_WRITES: "1",
-  NORDRI_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES: "1",
-  NORDRI_TEST_API_USE_LIVE_AI: "1",
+  NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES: "1",
+  NESTOR_TEST_API_USE_LIVE_AI: "1",
   ...Object.fromEntries(
     CHILD_ENV_SECRET_VARS.map((name, index) => [name, `secret-${index}`]),
   ),
-  NORDRI_BROWSER_AGENT: "0",
-  NORDRI_ENABLE_TEST_API: "0",
+  NESTOR_BROWSER_AGENT: "0",
+  NESTOR_ENABLE_TEST_API: "0",
   PATH: "/usr/bin:/bin",
 };
 
@@ -468,9 +468,9 @@ assert(
     sanitizedStrict.ELECTRON_RENDERER_URL === undefined &&
     sanitizedStrict.JOB_FINDER_PREPARE_ONLY_AUTHORIZE_INTERMEDIATE_WRITES ===
       undefined &&
-    sanitizedStrict.NORDRI_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES ===
+    sanitizedStrict.NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES ===
       undefined &&
-    sanitizedStrict.NORDRI_TEST_API_USE_LIVE_AI === undefined,
+    sanitizedStrict.NESTOR_TEST_API_USE_LIVE_AI === undefined,
   "Ambient write/live-AI/routing overrides must be deleted from the strict child env.",
 );
 assert(
@@ -478,10 +478,10 @@ assert(
   "Provider/API secret variables must never reach the child env.",
 );
 assert(
-  sanitizedStrict.NORDRI_BROWSER_AGENT === "1" &&
-    sanitizedStrict.NORDRI_BROWSER_HEADLESS === "1" &&
-    sanitizedStrict.NORDRI_ENABLE_TEST_API === "1" &&
-    sanitizedStrict.NORDRI_USER_DATA_DIR === "/tmp/user-data" &&
+  sanitizedStrict.NESTOR_BROWSER_AGENT === "1" &&
+    sanitizedStrict.NESTOR_BROWSER_HEADLESS === "1" &&
+    sanitizedStrict.NESTOR_ENABLE_TEST_API === "1" &&
+    sanitizedStrict.NESTOR_USER_DATA_DIR === "/tmp/user-data" &&
     sanitizedStrict.PATH === "/usr/bin:/bin",
   "Safe explicit browser/test/userData values must be set without nuking unrelated vars.",
 );
@@ -497,9 +497,9 @@ const authorizedDiagnostic = smokeModule.buildChildLaunchEnv({
   sourceEnv: pollutedEnv,
 });
 assert(
-  authorizedDiagnostic.NORDRI_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES ===
+  authorizedDiagnostic.NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES ===
     "1" &&
-    authorizedDiagnostic.NORDRI_TEST_API_USE_LIVE_AI === "1" &&
+    authorizedDiagnostic.NESTOR_TEST_API_USE_LIVE_AI === "1" &&
     smokeModule.childEnvAuthorizesIntermediateWrites(authorizedDiagnostic) ===
       true,
   "Explicit diagnostic authorization must be reflected in the final child env.",
@@ -676,7 +676,7 @@ assert(
 );
 
 const outsideDir = await mkdtemp(
-  path.join(os.tmpdir(), "nordri-prepare-only-binding-escaped-"),
+  path.join(os.tmpdir(), "nestor-prepare-only-binding-escaped-"),
 );
 temporaryDirectoriesPush(outsideDir);
 await assertThrows(
@@ -841,11 +841,11 @@ await assertThrows(
 // ---- Real parity fixtures over a real fixture tree (not digest stubs).
 
 const parityFixtureRoot = await mkdtemp(
-  path.join(os.tmpdir(), "nordri-prepare-only-parity-source-"),
+  path.join(os.tmpdir(), "nestor-prepare-only-parity-source-"),
 );
 temporaryDirectoriesPush(parityFixtureRoot);
 const paritySnapshotRoot = await mkdtemp(
-  path.join(os.tmpdir(), "nordri-prepare-only-parity-snapshot-"),
+  path.join(os.tmpdir(), "nestor-prepare-only-parity-snapshot-"),
 );
 temporaryDirectoriesPush(paritySnapshotRoot);
 await runGit(["init", "-q"], parityFixtureRoot);
@@ -1352,7 +1352,7 @@ const resumeSummary = smokeModule.summarizeOriginalResumeEvidence({
   id: "resume-doc-1",
   fileName: "jamie-rivers-cv.txt",
   storagePath:
-    "/Users/someone/Library/Application Support/nordri/resumes/internal.pdf",
+    "/Users/someone/Library/Application Support/nestor/resumes/internal.pdf",
   sha256: "e".repeat(64),
   extractionStatus: "completed",
 });
@@ -1368,7 +1368,7 @@ assert(
 const serializedPortable = JSON.stringify([
   resumeSummary,
   {
-    retainedPath: path.basename("/var/folders/xx/T/nordri-job-finder-abc"),
+    retainedPath: path.basename("/var/folders/xx/T/nestor-job-finder-abc"),
   },
 ]);
 assert(

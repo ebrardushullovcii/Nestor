@@ -5,8 +5,8 @@ import {
   ApplyRunSchema,
   ApplySubmitApprovalSchema,
   UserActionRequestSchema,
-} from "@nordri/contracts";
-import { createInMemoryJobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createJobFinderWorkspaceService } from "./index";
@@ -38,7 +38,7 @@ function createService(
 describe("apply restart recovery", () => {
   test("shutdown preserves a live Home queue after its first result commits while paused", async () => {
     // Exercise a deliberately parked queue with one unfinished job.
-    vi.stubEnv("NORDRI_APPLICATION_PREPARATION_CONCURRENCY", "1");
+    vi.stubEnv("NESTOR_APPLICATION_PREPARATION_CONCURRENCY", "1");
     const seed = createSeed();
     const now = "2026-03-20T10:05:00.000Z";
     seed.settings.resumeApplicationMode = "original_resume";

@@ -108,7 +108,7 @@ export function usePersistedCollectionView(
   name: string,
   defaultDensity: CollectionDensity = "comfortable",
 ) {
-  const storageKey = `nordri.job-finder.collection.${name}.v1`;
+  const storageKey = `nestor.job-finder.collection.${name}.v1`;
   const [view, setView] = useState<PersistedCollectionView>(() =>
     readCollectionView(storageKey, defaultDensity),
   );

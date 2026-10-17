@@ -5,7 +5,7 @@ import {
   ApplyJobResultSchema,
   ApplyRunDetailsSchema,
   ApplyRunSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, expect, test, vi } from "vitest";
 import { ApplicationsDetailPanelActivitySections } from "./applications-detail-panel-activity-sections";
 afterEach(cleanup);

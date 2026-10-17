@@ -4,8 +4,8 @@ import {
   JobFinderDiscoveryStateSchema,
   JobFinderIntelligenceStateSchema,
   ListingSignalRecordSchema,
-} from "@nordri/contracts";
-import { createInMemoryJobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { describe, expect, test } from "vitest";
 
 import { createJobFinderWorkspaceService } from "./index";

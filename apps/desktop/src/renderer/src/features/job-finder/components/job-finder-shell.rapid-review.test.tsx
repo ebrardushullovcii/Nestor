@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,7 +31,7 @@ function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
 
 describe("JobFinderShell rapid review route", () => {
   beforeEach(() => {
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         window: {
@@ -80,7 +80,7 @@ describe("JobFinderShell rapid review route", () => {
       </MemoryRouter>,
     );
 
-    expect(document.title).toBe("Quick review | Job Finder | Nordri");
+    expect(document.title).toBe("Quick review | Job Finder | Nestor");
     expect(screen.getByRole("main", { name: "Quick review" })).toBeTruthy();
 
     const navigation = screen.getByRole("navigation", {

@@ -6,13 +6,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createLocalResumeExportFileVerifier } from "./job-finder-export-file-verifier";
 
 const directories: string[] = [];
-const originalUserDataDirectory = process.env.NORDRI_USER_DATA_DIR;
+const originalUserDataDirectory = process.env.NESTOR_USER_DATA_DIR;
 
 afterEach(async () => {
   if (originalUserDataDirectory === undefined) {
-    delete process.env.NORDRI_USER_DATA_DIR;
+    delete process.env.NESTOR_USER_DATA_DIR;
   } else {
-    process.env.NORDRI_USER_DATA_DIR = originalUserDataDirectory;
+    process.env.NESTOR_USER_DATA_DIR = originalUserDataDirectory;
   }
 
   await Promise.all(
@@ -49,7 +49,7 @@ describe("createLocalResumeExportFileVerifier", () => {
       path.join(os.tmpdir(), "resume-user-data-"),
     );
     directories.push(userDataDirectory);
-    process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
+    process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
 
     const generatedDirectory = path.join(
       userDataDirectory,
@@ -81,7 +81,7 @@ describe("createLocalResumeExportFileVerifier", () => {
       path.join(os.tmpdir(), "resume-user-data-"),
     );
     directories.push(userDataDirectory);
-    process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
+    process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
 
     const verifier = createLocalResumeExportFileVerifier();
     const missingPath = path.join(

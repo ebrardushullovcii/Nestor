@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { type ResumeDocumentBundle } from '@nordri/contracts'
+import { type ResumeDocumentBundle } from '@nestor/contracts'
 import { extractPdfDocumentBundleWithMacOs } from '../resume-document-macos'
 import {
   buildBundleFromPages,
@@ -19,7 +19,7 @@ import type {
   PdfTextItem,
   PdfTextLineEntry,
 } from './types'
-import type { ResumeParserWorkerRequest } from '@nordri/contracts'
+import type { ResumeParserWorkerRequest } from '@nestor/contracts'
 
 function isPdfTextItem(item: unknown): item is PdfTextItem {
   return (

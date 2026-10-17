@@ -15,7 +15,7 @@ import { createHash, randomUUID } from "node:crypto";
  */
 
 export const JOB_FINDER_MODEL_CLIENT_USER_AGENT =
-  "Nordri-JobFinder/0.1 (desktop; https://github.com/ebrardushullovcii/Nordri)";
+  "Nestor-JobFinder/0.1 (desktop; https://github.com/ebrardushullovcii/Nestor)";
 
 const OPENCODE_SESSION_HEADER = "x-opencode-session";
 const SESSION_ID_PREFIX = "ses_";

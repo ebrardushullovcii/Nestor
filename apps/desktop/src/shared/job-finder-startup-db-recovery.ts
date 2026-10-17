@@ -1,8 +1,8 @@
-import { JobFinderStartupDatabaseRecoveryFactSchema } from "@nordri/contracts";
-import type { JobFinderStartupDatabaseRecoveryFact } from "@nordri/contracts";
+import { JobFinderStartupDatabaseRecoveryFactSchema } from "@nestor/contracts";
+import type { JobFinderStartupDatabaseRecoveryFact } from "@nestor/contracts";
 import type {
   JobFinderStartupDatabaseRecoveryOutcome,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export type {
   JobFinderStartupDatabaseRecoveryBlockedCandidate,
@@ -13,7 +13,7 @@ export type {
   JobFinderStartupDatabaseRecoveryOutcome,
   JobFinderStartupDatabaseRecoveryRestoredFact,
   JobFinderStartupDatabaseRecoverySnapshotKind,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export const JOB_FINDER_STARTUP_DATABASE_RECOVERY_RESTORED_MESSAGE =
   "Your workspace database was recovered from an automatic snapshot.";

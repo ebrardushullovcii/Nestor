@@ -24,7 +24,7 @@ import {
   type RawApplyPage,
   type DesktopBrowserViewport,
   type WaitingFormMemory,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import path from "node:path";
 import { routeMainWindowZoomShortcut } from "../../setup/window-zoom";
 import { createAgentInputLedger } from "./agent-input-ledger";
@@ -44,7 +44,7 @@ import {
   normalizeBrowserNavigation,
 } from "./browser-navigation";
 
-export const EMBEDDED_BROWSER_PARTITION = "persist:nordri-browser";
+export const EMBEDDED_BROWSER_PARTITION = "persist:nestor-browser";
 const MAX_TABS = 8;
 const MAX_TOTAL_TABS = 16;
 interface BrowserPage extends BrowserCdpPage {
@@ -91,7 +91,7 @@ export type ClaimedAutomationTabs = () => Promise<string[]>;
  * world; a page without the guard is untouched.
  */
 const OPEN_PREPARE_ONLY_GUARD_FOR_PERSON = `(() => {
-  const state = window.__nordriPrepareOnlyMutationGuardV1;
+  const state = window.__nestorPrepareOnlyMutationGuardV1;
   if (state) state.finalActionAllowed = true;
 })();`;
 
@@ -1049,16 +1049,16 @@ export class EmbeddedBrowser {
     // Observe the person's final control without cancelling it or granting
     // page scripts access to any app command. The native input ledger excludes
     // automation; this message can only create a dismissible recording hint.
-    const submitNoticeToken = `nordri-unbound-send-${randomUUID()}`;
+    const submitNoticeToken = `nestor-unbound-send-${randomUUID()}`;
     const installSubmitNotice = () => {
       if (page.contents.isDestroyed()) return;
       for (const frame of page.contents.mainFrame.framesInSubtree)
         void frame
           .executeJavaScript(
             `(() => {
-        if (window.__nordriUnboundSendObserver) return;
-        window.__nordriUnboundSendObserver = true;
-        const isBound = () => window.__nordriPreparedApplication || sessionStorage.getItem('__nordriPreparedApplication');
+        if (window.__nestorUnboundSendObserver) return;
+        window.__nestorUnboundSendObserver = true;
+        const isBound = () => window.__nestorPreparedApplication || sessionStorage.getItem('__nestorPreparedApplication');
         const finalControl = element => element && /(?:submit|send[-_\\s]*application|complete[-_\\s]*(?:the[-_\\s]*)?application|apply[-_\\s]*(?:now|job))/iu.test([element.textContent, element.getAttribute('aria-label'), element.value].filter(Boolean).join(' '));
         const note = element => { if (!isBound() && finalControl(element)) console.debug(${JSON.stringify(submitNoticeToken)}); };
         document.addEventListener('submit', event => { if (event.isTrusted) note(event.submitter); }, true);
@@ -1416,7 +1416,7 @@ export class EmbeddedBrowser {
         frame
           .executeJavaScript(
             `(() => {
-              const state = window.__nordriPrepareOnlyMutationGuardV1;
+              const state = window.__nestorPrepareOnlyMutationGuardV1;
               if (state) {
                 state.finalActionAllowed = false;
                 state.authorizedFormActionWindow = null;
@@ -1522,7 +1522,7 @@ export class EmbeddedBrowser {
   }): Promise<string | null> {
     const bridge = this.bridge;
     if (!bridge) return null;
-    const token = `nordri-identify-${randomUUID()}`;
+    const token = `nestor-identify-${randomUUID()}`;
     const landed = bridge.waitForToken(token, 3_000);
     void page.evaluate((value) => value, token).catch(() => undefined);
     return landed;
@@ -1644,7 +1644,7 @@ export class EmbeddedBrowser {
     const claimPage: ClaimAutomationPage = (page) => {
       const bridge = this.bridge;
       if (!bridge || !this.operations.has(controller)) return;
-      const token = `nordri-claim-${randomUUID()}`;
+      const token = `nestor-claim-${randomUUID()}`;
       const landed = bridge
         .waitForToken(token, 5_000)
         .then((tabId) => {

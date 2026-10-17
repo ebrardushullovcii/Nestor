@@ -3,8 +3,8 @@ import {
   JobFinderRepositoryStateSchema,
   type PersonalWorkspaceExport,
   type JobFinderRepositoryState,
-} from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -16,7 +16,7 @@ export function parsePersonalWorkspaceExport(
   try {
     raw = JSON.parse(content);
   } catch {
-    throw new Error("This file is not a Nordri workspace export.");
+    throw new Error("This file is not a Nestor workspace export.");
   }
   if (
     !raw ||
@@ -25,7 +25,7 @@ export function parsePersonalWorkspaceExport(
     raw.schemaVersion !== 1
   )
     throw new Error(
-      "This export uses a version Nordri cannot restore. Your workspace was kept.",
+      "This export uses a version Nestor cannot restore. Your workspace was kept.",
     );
   if (!("repositoryState" in raw))
     throw new Error(

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type {
   BrowserSessionState,
   JobFinderSettings,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   getApplySafeguardCopy,
   SettingsRuntimeSummary,

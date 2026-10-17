@@ -2,7 +2,7 @@ import { app } from 'electron'
 import path from 'node:path'
 
 function getUserDataDirectory() {
-  return process.env.NORDRI_USER_DATA_DIR ?? app.getPath('userData')
+  return process.env.NESTOR_USER_DATA_DIR ?? app.getPath('userData')
 }
 
 export function getLiveAssistantWorkspaceFilePath() {

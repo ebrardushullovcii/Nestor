@@ -6,8 +6,8 @@ import {
   DiscoveryLedgerEntrySchema,
   SavedJobSchema,
   type SavedJob,
-} from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 import type { AssistantTurnSession } from "./assistant/tool-kit";
 import type { AssistantHostPorts } from "./assistant/ports";
 import {

@@ -12,7 +12,7 @@ vi.mock("electron", () => ({ BrowserWindow: vi.fn() }));
 describe("application document DOCX rendering", () => {
   test("writes a valid Word package containing the generated text", async () => {
     const outputDirectory = await mkdtemp(
-      path.join(tmpdir(), "nordri-letter-docx-"),
+      path.join(tmpdir(), "nestor-letter-docx-"),
     );
     const manager = createLocalJobFinderDocumentManager({ outputDirectory });
     const result = await manager.renderLetterArtifact!({

@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import type {
   JobFinderSettings,
   UpdateWorkspaceBehaviorInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { ToggleField } from "../../components/toggle-field";
 import { useRegisterSettingsDirtySection } from "./settings-dirty-sections";
 import { SettingsSectionSaveControl } from "./settings-section-save-control";

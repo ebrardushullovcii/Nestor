@@ -5,7 +5,7 @@ import {
   DiscoveryActivityEventSchema,
   DiscoveryLedgerEntrySchema,
   DiscoveryRunRecordSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 import { cleanupTempDirectoryWithRetry, createSavedJob, createTempRepository } from "./file-repository.test-support";
 import { createDiscoveryStorage } from "./internal/discovery-storage";
@@ -62,7 +62,7 @@ function activity(runId: string, index: number) {
 
 describe("normalized discovery storage", () => {
   test("pairs saved job, ledger, counters and checkpoint writes and rolls all of them back on failure", async () => {
-    const temp = await createTempRepository("nordri-discovery-paired-rows-");
+    const temp = await createTempRepository("nestor-discovery-paired-rows-");
     try {
       const repo = await temp.createRepository();
       try {
@@ -101,7 +101,7 @@ describe("normalized discovery storage", () => {
   });
 
   test("migrates a complete legacy singleton once, retaining history, ledger, pending jobs and checkpoints", async () => {
-    const temp = await createTempRepository("nordri-discovery-migration-");
+    const temp = await createTempRepository("nestor-discovery-migration-");
     try {
       const initial = await temp.createRepository();
       await initial.close();
@@ -161,7 +161,7 @@ describe("normalized discovery storage", () => {
   });
 
   test("canonical cache observes local row edits but never retains rolled-back transaction reads", async () => {
-    const temp = await createTempRepository("nordri-discovery-cache-tx-");
+    const temp = await createTempRepository("nestor-discovery-cache-tx-");
     try {
       const repo = await temp.createRepository();
       await repo.commitDiscoveryStateUpdate((current) => ({ ...current, discoveryLedger: [ledger("cache_row")] }));
@@ -197,7 +197,7 @@ describe("normalized discovery storage", () => {
   });
 
   test.each([3000, 10000])("a checkpoint with %i ledger rows writes only changed records", async (size) => {
-    const temp = await createTempRepository(`nordri-discovery-scale-${size}-`);
+    const temp = await createTempRepository(`nestor-discovery-scale-${size}-`);
     try {
       const repo = await temp.createRepository();
       try {

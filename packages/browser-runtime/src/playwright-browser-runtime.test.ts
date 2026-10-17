@@ -12,15 +12,15 @@ import type * as childProcess from "node:child_process";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { JobFinderAiClient } from "@nordri/ai-providers";
-import type * as browserAgent from "@nordri/browser-agent";
+import type { JobFinderAiClient } from "@nestor/ai-providers";
+import type * as browserAgent from "@nestor/browser-agent";
 import {
   ApplyExecutionResultSchema,
   BrowserVisualObservationSetSchema,
   SavedJobSchema,
   type BrowserVisualAnalysisInput,
   type BrowserVisualObservationSet,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { BrowserContext, Page } from "playwright";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -642,14 +642,14 @@ describe("playwright browser runtime", () => {
 
   test("normalizes stale crash state and lets owned Chrome exit gracefully after browser disconnect reset", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-close-"),
+      join(tmpdir(), "nestor-browser-runtime-close-"),
     );
 
     try {
       const chromeExecutablePath = join(userDataDir, "chrome.exe");
       await writeFile(chromeExecutablePath, "", "utf8");
       await writeFile(
-        join(userDataDir, "nordri-browser-window-bounds.json"),
+        join(userDataDir, "nestor-browser-window-bounds.json"),
         JSON.stringify({
           width: 1180,
           height: 780,
@@ -825,7 +825,7 @@ describe("playwright browser runtime", () => {
       expect(
         JSON.parse(
           await readFile(
-            join(userDataDir, "nordri-browser-window-bounds.json"),
+            join(userDataDir, "nestor-browser-window-bounds.json"),
             "utf8",
           ),
         ),
@@ -837,7 +837,7 @@ describe("playwright browser runtime", () => {
 
   test("connects after the Windows Chrome launcher hands off to a continuing process", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-windows-handoff-"),
+      join(tmpdir(), "nestor-browser-runtime-windows-handoff-"),
     );
 
     try {
@@ -913,7 +913,7 @@ describe("playwright browser runtime", () => {
 
   test("captures an in-memory viewport visual snapshot through Playwright", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-visual-"),
+      join(tmpdir(), "nestor-browser-runtime-visual-"),
     );
 
     try {
@@ -1001,7 +1001,7 @@ describe("playwright browser runtime", () => {
 
   test("retains visual snapshots with metadata and cleans expired files", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-visual-retained-"),
+      join(tmpdir(), "nestor-browser-runtime-visual-retained-"),
     );
 
     try {
@@ -1091,7 +1091,7 @@ describe("playwright browser runtime", () => {
 
   test("does not capture apply-page screenshots unless caller explicitly opts in", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-apply-visual-opt-in-"),
+      join(tmpdir(), "nestor-browser-runtime-apply-visual-opt-in-"),
     );
 
     try {
@@ -1262,7 +1262,7 @@ describe("playwright browser runtime", () => {
   test("closeSession waits for an owned Windows Chrome graceful exit before forced cleanup", async () => {
     vi.useFakeTimers();
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-windows-exit-"),
+      join(tmpdir(), "nestor-browser-runtime-windows-exit-"),
     );
 
     try {
@@ -1364,7 +1364,7 @@ describe("playwright browser runtime", () => {
 
   test("resolveLivePage avoids focus churn when the session is already ready", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-resolve-live-page-"),
+      join(tmpdir(), "nestor-browser-runtime-resolve-live-page-"),
     );
 
     try {
@@ -1556,7 +1556,7 @@ describe("playwright browser runtime", () => {
 
   test("runAgentDiscovery without AI still navigates the visible blank tab so compact observation can run", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-agent-visible-blank-"),
+      join(tmpdir(), "nestor-browser-runtime-agent-visible-blank-"),
     );
 
     try {
@@ -1651,7 +1651,7 @@ describe("playwright browser runtime", () => {
 
   test("runAgentDiscovery stops at a missing starting page instead of wandering to another board route", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-agent-missing-start-"),
+      join(tmpdir(), "nestor-browser-runtime-agent-missing-start-"),
     );
 
     try {
@@ -1726,9 +1726,9 @@ describe("playwright browser runtime", () => {
 
   test("runAgentDiscovery keeps a dedicated page the agent parked for the person open", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-agent-parked-page-"),
+      join(tmpdir(), "nestor-browser-runtime-agent-parked-page-"),
     );
-    vi.doMock("@nordri/browser-agent", async (importOriginal) => ({
+    vi.doMock("@nestor/browser-agent", async (importOriginal) => ({
       ...(await importOriginal<typeof browserAgent>()),
       runJobSearchAgent: vi.fn().mockResolvedValue({
         jobs: [],
@@ -1814,7 +1814,7 @@ describe("playwright browser runtime", () => {
       expect(page.close).not.toHaveBeenCalled();
       expect(claimed).toEqual([page]);
     } finally {
-      vi.doUnmock("@nordri/browser-agent");
+      vi.doUnmock("@nestor/browser-agent");
       await rm(userDataDir, { recursive: true, force: true });
     }
   });
@@ -1825,10 +1825,10 @@ describe("playwright browser runtime", () => {
       const userDataDir = await mkdtemp(
         join(
           tmpdir(),
-          "nordri-browser-runtime-agent-catalog-missing-page-",
+          "nestor-browser-runtime-agent-catalog-missing-page-",
         ),
       );
-      vi.doMock("@nordri/browser-agent", async (importOriginal) => ({
+      vi.doMock("@nestor/browser-agent", async (importOriginal) => ({
         ...(await importOriginal<typeof browserAgent>()),
         runJobSearchAgent: vi.fn((input: browserAgent.JobSearchAgentInput) => {
           const result = {
@@ -1932,7 +1932,7 @@ describe("playwright browser runtime", () => {
         expect(page.evaluate.mock.calls.length).toBe(readCount);
         expect(claimed).toEqual([page]);
       } finally {
-        vi.doUnmock("@nordri/browser-agent");
+        vi.doUnmock("@nestor/browser-agent");
         await rm(userDataDir, { recursive: true, force: true });
       }
     },
@@ -1940,7 +1940,7 @@ describe("playwright browser runtime", () => {
 
   test("runAgentDiscovery reuses an already-open matching page instead of navigating a blank tab", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-agent-ready-blank-"),
+      join(tmpdir(), "nestor-browser-runtime-agent-ready-blank-"),
     );
 
     try {
@@ -2076,7 +2076,7 @@ describe("playwright browser runtime", () => {
 
   test("openSession reuses an existing blank startup tab instead of creating a third tab", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-blank-reuse-"),
+      join(tmpdir(), "nestor-browser-runtime-blank-reuse-"),
     );
 
     try {
@@ -2148,7 +2148,7 @@ describe("playwright browser runtime", () => {
 
   test("openSession can navigate the shared browser profile to a specific target url", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-target-open-"),
+      join(tmpdir(), "nestor-browser-runtime-target-open-"),
     );
 
     try {
@@ -2221,7 +2221,7 @@ describe("playwright browser runtime", () => {
 
   test("opens a fresh manual page without navigating or closing the guarded application page", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-target-open-"),
+      join(tmpdir(), "nestor-browser-runtime-target-open-"),
     );
 
     try {
@@ -2304,7 +2304,7 @@ describe("playwright browser runtime", () => {
 
   test("openSession navigates a visible blank startup tab even when another live page exists", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-target-visible-blank-"),
+      join(tmpdir(), "nestor-browser-runtime-target-visible-blank-"),
     );
 
     try {
@@ -2386,7 +2386,7 @@ describe("playwright browser runtime", () => {
 
   test("openSession skips navigation when the current and target urls are structurally equivalent", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-equivalent-target-open-"),
+      join(tmpdir(), "nestor-browser-runtime-equivalent-target-open-"),
     );
 
     try {
@@ -2457,7 +2457,7 @@ describe("playwright browser runtime", () => {
 
   test("openSession accepts a navigation timeout after the target origin is visibly loaded", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-target-timeout-loaded-"),
+      join(tmpdir(), "nestor-browser-runtime-target-timeout-loaded-"),
     );
 
     try {
@@ -2527,7 +2527,7 @@ describe("playwright browser runtime", () => {
   });
   test("openSession marks the session blocked when navigation fails", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-target-open-failure-"),
+      join(tmpdir(), "nestor-browser-runtime-target-open-failure-"),
     );
 
     try {
@@ -2636,7 +2636,7 @@ describe("managed context service worker blocking", () => {
 
   test("installs the service-worker block once on the persistent CDP context across managed flows", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-sw-block-persistent-"),
+      join(tmpdir(), "nestor-browser-runtime-sw-block-persistent-"),
     );
 
     try {
@@ -2693,7 +2693,7 @@ describe("managed context service worker blocking", () => {
 
   test("prepare-only application flow blocks service workers before navigating the managed page", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-sw-block-prepare-"),
+      join(tmpdir(), "nestor-browser-runtime-sw-block-prepare-"),
     );
 
     try {
@@ -2792,7 +2792,7 @@ describe("managed context service worker blocking", () => {
 
   test("a failed application navigation reports a failed technical result instead of a Needs-you pause", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-goto-unreachable-"),
+      join(tmpdir(), "nestor-browser-runtime-goto-unreachable-"),
     );
 
     try {
@@ -2884,7 +2884,7 @@ describe("managed context service worker blocking", () => {
 
   test("a browser that cannot open another tab reports a failed result with a plain sentence, not a Needs-you pause", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-tab-limit-"),
+      join(tmpdir(), "nestor-browser-runtime-tab-limit-"),
     );
 
     try {
@@ -2965,7 +2965,7 @@ describe("managed context service worker blocking", () => {
 
   test("warm reconnect to an already-running debugger endpoint blocks service workers without relaunching Chrome", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-sw-block-warm-attach-"),
+      join(tmpdir(), "nestor-browser-runtime-sw-block-warm-attach-"),
     );
 
     try {
@@ -3017,7 +3017,7 @@ describe("managed context service worker blocking", () => {
 
   test("agent discovery shares the same service-worker-blocked managed context", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-sw-block-discovery-"),
+      join(tmpdir(), "nestor-browser-runtime-sw-block-discovery-"),
     );
 
     try {
@@ -3098,7 +3098,7 @@ describe("managed context service worker blocking", () => {
 
   test("fails the managed flow loudly when the service-worker block cannot be installed", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-sw-block-failure-"),
+      join(tmpdir(), "nestor-browser-runtime-sw-block-failure-"),
     );
 
     try {
@@ -3301,7 +3301,7 @@ describe("managed context active service worker gate", () => {
     ["different sites", "https://beta.test/apply/second", true],
     ["the same site", "https://jobs.example.com/apply/second", false],
   ])("application preparation overlaps only for %s", async (_label, secondUrl, overlaps) => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nordri-runtime-apply-overlap-"));
+    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-apply-overlap-"));
     try {
       const debugPort = await reserveFreePort();
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
@@ -3356,7 +3356,7 @@ describe("managed context active service worker gate", () => {
   });
 
   test("cancelling a same-site waiter does not touch the active form", async () => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nordri-runtime-apply-abort-"));
+    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-apply-abort-"));
     try {
       const debugPort = await reserveFreePort();
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
@@ -3399,7 +3399,7 @@ describe("managed context active service worker gate", () => {
   });
 
   test("a redirect into another active application's site waits before form work", async () => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nordri-runtime-redirect-lock-"));
+    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-redirect-lock-"));
     try {
       const debugPort = await reserveFreePort();
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
@@ -3451,7 +3451,7 @@ describe("managed context active service worker gate", () => {
   });
 
   test("a final page operation waits for same-site preparation while another site proceeds", async () => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nordri-runtime-final-site-"));
+    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-final-site-"));
     try {
       const debugPort = await reserveFreePort();
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
@@ -3547,9 +3547,9 @@ describe("managed context active service worker gate", () => {
 
   test("discovery waits for capacity, resumes after cleanup, and preserves the occupied forms", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-discovery-capacity-"),
+      join(tmpdir(), "nestor-discovery-capacity-"),
     );
-    vi.doMock("@nordri/browser-agent", async (importOriginal) => ({
+    vi.doMock("@nestor/browser-agent", async (importOriginal) => ({
       ...(await importOriginal<typeof browserAgent>()),
       runJobSearchAgent: vi.fn().mockResolvedValue({
         jobs: [],
@@ -3608,13 +3608,13 @@ describe("managed context active service worker gate", () => {
         true,
       );
     } finally {
-      vi.doUnmock("@nordri/browser-agent");
+      vi.doUnmock("@nestor/browser-agent");
       await rm(userDataDir, { recursive: true, force: true });
     }
   }, 15000);
 
   test("embedded tab headroom waits abortably without closing existing tabs", async () => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nordri-runtime-tab-headroom-"));
+    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-tab-headroom-"));
     try {
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
       // A form page, not the idle startup tab (that one may be closed for room).
@@ -3655,7 +3655,7 @@ describe("managed context active service worker gate", () => {
   });
 
   test("concurrent embedded tab openings reserve popup headroom atomically", async () => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nordri-runtime-tab-reservation-"));
+    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-tab-reservation-"));
     try {
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
       // A form page, not the idle startup tab (that one may be closed for room).
@@ -3713,7 +3713,7 @@ describe("managed context active service worker gate", () => {
 
   test("prepare-only flow fails closed without navigating when an application-origin service worker is active", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-sw-gate-controlling-"),
+      join(tmpdir(), "nestor-browser-runtime-sw-gate-controlling-"),
     );
 
     try {
@@ -3752,7 +3752,7 @@ describe("managed context active service worker gate", () => {
 
   test("prepare-only flow continues when active workers cannot control the application origin", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-sw-gate-cross-origin-"),
+      join(tmpdir(), "nestor-browser-runtime-sw-gate-cross-origin-"),
     );
 
     try {
@@ -3792,7 +3792,7 @@ describe("managed context active service worker gate", () => {
 
   test("prepare-only flow fails closed when a worker origin cannot be safely determined", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-sw-gate-unresolved-"),
+      join(tmpdir(), "nestor-browser-runtime-sw-gate-unresolved-"),
     );
 
     try {
@@ -3828,7 +3828,7 @@ describe("managed context active service worker gate", () => {
 
   test("warm reconnect with a pre-existing application-origin service worker fails closed without relaunching or navigating", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-sw-gate-warm-active-"),
+      join(tmpdir(), "nestor-browser-runtime-sw-gate-warm-active-"),
     );
 
     try {
@@ -3871,7 +3871,7 @@ describe("managed context active service worker gate", () => {
 
   test("warm reconnect with zero active service workers continues preparation", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-sw-gate-warm-clear-"),
+      join(tmpdir(), "nestor-browser-runtime-sw-gate-warm-clear-"),
     );
 
     try {
@@ -3907,7 +3907,7 @@ describe("managed context active service worker gate", () => {
     "closes a %s application's bound page immediately",
     async (state) => {
       const userDataDir = await mkdtemp(
-        join(tmpdir(), "nordri-terminal-page-"),
+        join(tmpdir(), "nestor-terminal-page-"),
       );
       try {
         const harness = createGateHarness({ activeServiceWorkers: () => [] });
@@ -3941,7 +3941,7 @@ describe("managed context active service worker gate", () => {
   );
 
   test("a retry transfers and reuses its filled wizard page without another navigation", async () => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nordri-retry-page-"));
+    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-retry-page-"));
     try {
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
       Object.assign(harness.fakePage, {
@@ -3996,7 +3996,7 @@ describe("managed context active service worker gate", () => {
   });
 
   test("a form the person opened to finish stays open when its application ends", async () => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nordri-handed-page-"));
+    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-handed-page-"));
     try {
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
       Object.assign(harness.fakePage, {
@@ -4034,9 +4034,9 @@ describe("managed context active service worker gate", () => {
   test.each(["finished", "failed", "aborted", "parked"] as const)(
     "releases a shared search page when %s, except a person handoff",
     async (ending) => {
-      const userDataDir = await mkdtemp(join(tmpdir(), "nordri-search-page-"));
+      const userDataDir = await mkdtemp(join(tmpdir(), "nestor-search-page-"));
       const controller = new AbortController();
-      vi.doMock("@nordri/browser-agent", async (importOriginal) => ({
+      vi.doMock("@nestor/browser-agent", async (importOriginal) => ({
         ...(await importOriginal<typeof browserAgent>()),
         runJobSearchAgent: vi.fn(() => {
           if (ending === "failed") throw new Error("synthetic search failure");
@@ -4090,7 +4090,7 @@ describe("managed context active service worker gate", () => {
         else expect(harness.fakePage.close).toHaveBeenCalled();
         expect(harness.secondaryPage.close).not.toHaveBeenCalled();
       } finally {
-        vi.doUnmock("@nordri/browser-agent");
+        vi.doUnmock("@nestor/browser-agent");
         await rm(userDataDir, { recursive: true, force: true });
       }
     },
@@ -4098,7 +4098,7 @@ describe("managed context active service worker gate", () => {
 
   test("continuation keeps the exact bound wizard page instead of a stale listing checkpoint", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-bound-continuation-"),
+      join(tmpdir(), "nestor-browser-runtime-bound-continuation-"),
     );
 
     try {
@@ -4154,7 +4154,7 @@ describe("managed context active service worker gate", () => {
 
   test("opening another target preserves an older result-bound application page", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-bound-open-session-"),
+      join(tmpdir(), "nestor-browser-runtime-bound-open-session-"),
     );
 
     try {
@@ -4202,7 +4202,7 @@ describe("managed context active service worker gate", () => {
 
   test("continuation fails closed when its exact bound wizard page was closed", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-closed-continuation-"),
+      join(tmpdir(), "nestor-browser-runtime-closed-continuation-"),
     );
 
     try {
@@ -4242,7 +4242,7 @@ describe("managed context active service worker gate", () => {
 
   test("fails closed when service worker inspection is unavailable instead of assuming no workers", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-sw-gate-unavailable-"),
+      join(tmpdir(), "nestor-browser-runtime-sw-gate-unavailable-"),
     );
 
     try {
@@ -4273,7 +4273,7 @@ describe("managed context active service worker gate", () => {
 
   test("fails closed when service worker inspection throws instead of assuming no workers", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-sw-gate-inspect-throws-"),
+      join(tmpdir(), "nestor-browser-runtime-sw-gate-inspect-throws-"),
     );
 
     try {
@@ -4308,7 +4308,7 @@ describe("managed context active service worker gate", () => {
 
   test("agent discovery is not gated by active service workers on the shared context", async () => {
     const userDataDir = await mkdtemp(
-      join(tmpdir(), "nordri-browser-runtime-sw-gate-discovery-"),
+      join(tmpdir(), "nestor-browser-runtime-sw-gate-discovery-"),
     );
 
     try {

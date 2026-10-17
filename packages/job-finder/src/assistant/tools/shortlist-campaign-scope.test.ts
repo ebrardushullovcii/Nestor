@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getDefaultCampaignConfiguration,
   JobSearchCampaignSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   createSeed,

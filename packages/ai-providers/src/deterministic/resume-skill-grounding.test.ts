@@ -6,7 +6,7 @@ import {
   looksLikeSpokenLanguageSkillEntry,
   skillsAreEquivalent,
 } from "./resume-skill-grounding";
-import { createFreshStartCandidateProfile } from "@nordri/contracts";
+import { createFreshStartCandidateProfile } from "@nestor/contracts";
 
 describe("filterCandidateFacingResumeKeywords", () => {
   test("drops schema enums and employment-type tokens that no resume should echo", () => {

@@ -1,4 +1,4 @@
-import type { ApplyJobResultListRow, ApplyRunSummary } from "@nordri/contracts";
+import type { ApplyJobResultListRow, ApplyRunSummary } from "@nestor/contracts";
 import { useEffect, useMemo, useState } from "react";
 import type {
   JobDiscoveryTarget,
@@ -9,7 +9,7 @@ import type {
   OutcomeEvent,
   ResumeStrategy,
   SetOutcomeSuggestionEnabledInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { jobSourceLabel } from "../../lib/job-source-display-name";
 import { Input } from "@renderer/components/ui/input";

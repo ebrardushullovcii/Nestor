@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import {
   getApplicationRecordIndex,
   getDiscoverySelectionIndex,
@@ -33,7 +33,7 @@ const NO_VALID_IDS: ReadonlySet<string> = new Set();
  * dropped instead of breaking selection.
  */
 const INSPECTED_SELECTION_STORAGE_KEY =
-  "nordri.job-finder.inspected-job-selections";
+  "nestor.job-finder.inspected-job-selections";
 const INSPECTED_SELECTION_SCHEMA_VERSION = 1;
 const INSPECTED_SELECTION_MAX_ENTRIES = 32;
 const INSPECTED_SELECTION_MAX_ID_LENGTH = 200;

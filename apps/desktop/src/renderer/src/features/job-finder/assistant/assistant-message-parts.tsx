@@ -8,7 +8,7 @@ import {
   RotateCcw,
   X,
 } from "lucide-react";
-import type { AssistantMessage, AssistantMessagePart } from "@nordri/contracts";
+import type { AssistantMessage, AssistantMessagePart } from "@nestor/contracts";
 
 import { cn } from "@renderer/lib/cn";
 import { AssistantMarkdown } from "./assistant-markdown";

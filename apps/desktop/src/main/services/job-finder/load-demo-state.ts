@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { JobFinderWorkspaceSnapshotSchema } from "@nordri/contracts";
+import { JobFinderWorkspaceSnapshotSchema } from "@nestor/contracts";
 import {
   createApplyQueueDemoState,
   createAgentOwnedBrowserDriveState,

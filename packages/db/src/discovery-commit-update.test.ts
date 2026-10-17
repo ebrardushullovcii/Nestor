@@ -3,8 +3,8 @@ import {
   DiscoveryLedgerEntrySchema,
   DiscoveryRunRecordSchema,
   SavedJobSchema,
-} from "@nordri/contracts";
-import type { JobFinderDiscoveryState } from "@nordri/contracts";
+} from "@nestor/contracts";
+import type { JobFinderDiscoveryState } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -211,7 +211,7 @@ describe("commitDiscoveryStateUpdate", () => {
   });
 
   test("file repository applies updater output atomically", async () => {
-    const temp = await createTempRepository("nordri-db-discovery-update-");
+    const temp = await createTempRepository("nestor-db-discovery-update-");
     try {
       await expectCommitDiscoveryStateUpdateParity(() =>
         temp.createRepository(),
@@ -294,7 +294,7 @@ describe("commitDiscoveryFeedbackUpdate", () => {
   });
 
   test("file repository commits feedback atomically and survives restart", async () => {
-    const temp = await createTempRepository("nordri-db-feedback-atomic-");
+    const temp = await createTempRepository("nestor-db-feedback-atomic-");
     try {
       const first = await temp.createRepository();
       await expectDiscoveryFeedbackAtomicity(first);
@@ -326,7 +326,7 @@ describe("commitSavedJobDelta paired discovery updates", () => {
   });
 
   test("file repository pairs saved-job and discovery mutations atomically", async () => {
-    const temp = await createTempRepository("nordri-db-discovery-paired-");
+    const temp = await createTempRepository("nestor-db-discovery-paired-");
     try {
       await expectPairedSavedJobDiscoveryDeltaParity(() =>
         temp.createRepository(),
@@ -389,7 +389,7 @@ describe("commitSavedJobDelta scoped updates", () => {
   });
 
   test("file repository updates only the named rows", async () => {
-    const temp = await createTempRepository("nordri-db-scoped-delta-");
+    const temp = await createTempRepository("nestor-db-scoped-delta-");
     try {
       await expectScopedSavedJobDeltaParity(() => temp.createRepository());
     } finally {
@@ -400,7 +400,7 @@ describe("commitSavedJobDelta scoped updates", () => {
 
 describe("file repository whole saved-job reads", () => {
   test("return every job in id order across parse chunks", async () => {
-    const temp = await createTempRepository("nordri-db-chunked-read-");
+    const temp = await createTempRepository("nestor-db-chunked-read-");
     try {
       const repository = await temp.createRepository();
       try {
@@ -433,7 +433,7 @@ describe("file repository whole saved-job reads", () => {
 
 describe("file repository cross-handle discovery concurrency", () => {
   test("two file handles preserve paired discovery and saved-job writes", async () => {
-    const temp = await createTempRepository("nordri-db-discovery-handles-");
+    const temp = await createTempRepository("nestor-db-discovery-handles-");
     try {
       const first = await temp.createRepository();
       const second = await temp.createRepository();
@@ -522,7 +522,7 @@ describe("file repository cross-handle discovery concurrency", () => {
 
   test("singleton revision increments only for applied discovery commits", async () => {
     const temp = await createTempRepository(
-      "nordri-db-discovery-revision-",
+      "nestor-db-discovery-revision-",
     );
     try {
       const repository = await temp.createRepository();

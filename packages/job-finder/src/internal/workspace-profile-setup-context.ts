@@ -5,7 +5,7 @@ import {
   type CandidateProfile,
   type ProfileSetupState,
   type ResumeDocumentBundle,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   deriveAndPersistProfileSetupState,

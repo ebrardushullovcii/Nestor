@@ -104,11 +104,11 @@ async function loadDemoDataForScreen(window, screen) {
     screen.fileName === "review-queue.png"
   ) {
     await window.evaluate(async () => {
-      if (!window.nordri?.jobFinder?.test) {
+      if (!window.nestor?.jobFinder?.test) {
         throw new Error("Desktop test API is unavailable in the renderer.");
       }
 
-      await window.nordri.jobFinder.test.loadResumeWorkspaceDemo();
+      await window.nestor.jobFinder.test.loadResumeWorkspaceDemo();
     });
     await window.reload();
     await window.waitForLoadState("domcontentloaded");
@@ -120,7 +120,7 @@ async function loadDemoDataForScreen(window, screen) {
 async function captureScreens() {
   await mkdir(outputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-ui-capture-"),
+    path.join(os.tmpdir(), "nestor-ui-capture-"),
   );
 
   const app = await electron.launch({
@@ -128,10 +128,10 @@ async function captureScreens() {
     cwd: desktopDir,
     env: {
       ...process.env,
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_TEST_SYSTEM_THEME:
-        process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark",
-      NORDRI_USER_DATA_DIR: userDataDirectory,
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_TEST_SYSTEM_THEME:
+        process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
     },
   });
 
@@ -148,8 +148,8 @@ async function captureScreens() {
 
     await window.waitForLoadState("domcontentloaded");
     await window.evaluate(async (theme) => {
-      await window.nordri.jobFinder.test?.setSystemThemeOverride(theme);
-    }, process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark");
+      await window.nestor.jobFinder.test?.setSystemThemeOverride(theme);
+    }, process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark");
     try {
       await waitForProfileOrSetupHeading(window);
     } catch (error) {

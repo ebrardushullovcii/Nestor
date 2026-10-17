@@ -13,7 +13,7 @@ import {
   type GroupedManualAnswerDecision,
   type UserActionEvent,
   type UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   createInMemoryJobFinderRepository,
@@ -478,7 +478,7 @@ async function runOnBoth(
   await run(inMemory);
   await inMemory.close();
 
-  const fixture = await createTempRepository("nordri-grouped-manual-answer-");
+  const fixture = await createTempRepository("nestor-grouped-manual-answer-");
   temporaryDirectories.push(fixture.tempDirectory);
   const fileRepository = await fixture.createRepository();
   await run(fileRepository);
@@ -690,7 +690,7 @@ describe("commitGroupedManualAnswer", () => {
 
   test("survives SQLite restart with the exact approved state", async () => {
     const temp = await createTempRepository(
-      "nordri-grouped-manual-answer-restart-",
+      "nestor-grouped-manual-answer-restart-",
     );
     temporaryDirectories.push(temp.tempDirectory);
 

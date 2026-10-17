@@ -1,4 +1,4 @@
-import { SaveJobSearchCampaignInputSchema } from "@nordri/contracts";
+import { SaveJobSearchCampaignInputSchema } from "@nestor/contracts";
 import { expect, it, vi } from "vitest";
 import { createWorkspaceServiceHarness } from "../workspace-service.test-harness";
 import { createAiClient } from "../workspace-service.test-runtimes";

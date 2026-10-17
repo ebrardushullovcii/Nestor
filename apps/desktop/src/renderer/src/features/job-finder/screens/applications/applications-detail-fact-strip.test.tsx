@@ -12,7 +12,7 @@ import type {
   ApplicationRecord,
   ApplyJobResultSummary,
   ApplyRunSummary,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

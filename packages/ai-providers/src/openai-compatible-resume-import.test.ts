@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import type {
   AgentProviderStatus,
   ResumeDocumentBundle,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createPreferences, createProfile } from "./test-fixtures";
 import { extractOpenAiCompatibleResumeImportStage } from "./openai-compatible-resume-import";
 

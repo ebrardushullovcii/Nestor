@@ -5,7 +5,7 @@ import type {
   ReviewQueueItem,
   JobListRow,
   TailoredAssetSummary,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { JOB_FINDER_BROWSER_NAME } from "../../lib/job-finder-browser-handoff-copy";
 import {
   AI_UNAVAILABLE_RESUME_RESULT_MESSAGE,

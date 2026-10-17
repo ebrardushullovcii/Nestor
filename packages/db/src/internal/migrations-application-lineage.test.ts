@@ -316,7 +316,7 @@ describe("exact application-record lineage migration", () => {
 
   test("keeps conflicting receipt lineage unassigned after reopen and rerun", async () => {
     const tempDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-lineage-migration-"),
+      path.join(os.tmpdir(), "nestor-lineage-migration-"),
     );
     const databasePath = path.join(tempDirectory, "lineage.sqlite");
     let database = new DatabaseSync(databasePath);

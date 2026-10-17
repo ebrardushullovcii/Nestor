@@ -1,5 +1,5 @@
 {
-  "name": "@nordri/browser-runtime",
+  "name": "@nestor/browser-runtime",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -13,9 +13,9 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@nordri/ai-providers": "workspace:*",
-    "@nordri/browser-agent": "workspace:*",
-    "@nordri/contracts": "workspace:*",
+    "@nestor/ai-providers": "workspace:*",
+    "@nestor/browser-agent": "workspace:*",
+    "@nestor/contracts": "workspace:*",
     "playwright": "^1.63.0"
   }
 }

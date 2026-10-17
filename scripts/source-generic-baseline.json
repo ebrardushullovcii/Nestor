@@ -11,8 +11,8 @@
     {
       "rule": "import-direction:runtime-to-agent-import",
       "file": "packages/browser-runtime/src/playwright-browser-runtime.ts",
-      "context": "@nordri/browser-agent",
-      "hash": "b526f18e38d3b5bcd689f55fd1b7b841f7d96b175544fb05012a38f22af1e956",
+      "context": "@nestor/browser-agent",
+      "hash": "8b10284483d2810e7af9dc7d4bca047c3c3000734792733c329d229bb2447c0f",
       "count": 1
     },
     {

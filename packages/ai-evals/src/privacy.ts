@@ -3,9 +3,11 @@ import type { EvalCase } from "./contracts";
 const forbiddenPersonalMarkers = [
   "ebrar",
   "resume-tests",
+  "appdata\\roaming\\@nestor",
+  "appdata/roaming/@nestor",
+  // Pre-rename data folders (ADR 0040, ADR 0052) can still appear in older captures.
   "appdata\\roaming\\@nordri",
   "appdata/roaming/@nordri",
-  // The pre-rename data folder (ADR 0040) can still appear in older captures.
   "appdata\\roaming\\@unemployed",
   "appdata/roaming/@unemployed",
   "documents\\jobsources",

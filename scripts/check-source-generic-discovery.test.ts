@@ -570,17 +570,17 @@ describe("package export subpath matching", () => {
 describe("import edge scanning and boundaries", () => {
   test("collects static imports, re-exports, and dynamic imports", () => {
     const content = [
-      'import { state } from "@nordri/db";',
+      'import { state } from "@nestor/db";',
       'export { helper } from "./helper";',
-      'await import("@nordri/contracts");',
+      'await import("@nestor/contracts");',
       'const legacy = require("./legacy");',
     ].join("\n");
 
     const edges = scanImportEdges(content);
     expect(edges.map((edge) => edge.specifier)).toEqual([
-      "@nordri/db",
+      "@nestor/db",
       "./helper",
-      "@nordri/contracts",
+      "@nestor/contracts",
       "./legacy",
     ]);
   });
@@ -588,8 +588,8 @@ describe("import edge scanning and boundaries", () => {
   test("allows bare workspace package and exported subpath imports", () => {
     const edges = scanImportEdges(
       [
-        'import { x } from "@nordri/db";',
-        'import { identity } from "@nordri/job-finder/source-health";',
+        'import { x } from "@nestor/db";',
+        'import { identity } from "@nestor/job-finder/source-health";',
       ].join("\n"),
     );
     const index = new Map([
@@ -604,7 +604,7 @@ describe("import edge scanning and boundaries", () => {
 
   test("hard-fails deep imports into non-exported package internals", () => {
     const edges = scanImportEdges(
-      'import { state } from "@nordri/db/src/internal/state";',
+      'import { state } from "@nestor/db/src/internal/state";',
     );
     const result = evaluateImportEdges(edges, "browser-agent", new Map());
     expect(result.deepImportViolations).toHaveLength(1);
@@ -614,7 +614,7 @@ describe("import edge scanning and boundaries", () => {
 
   test("ignores self-package imports", () => {
     const edges = scanImportEdges(
-      'import { state } from "@nordri/job-finder/source-health";',
+      'import { state } from "@nestor/job-finder/source-health";',
     );
     const result = evaluateImportEdges(edges, "job-finder", new Map());
     expect(result.deepImportViolations).toEqual([]);
@@ -623,7 +623,7 @@ describe("import edge scanning and boundaries", () => {
 
   test("ratchets forbidden runtime->agent direction and allows orchestrator->agent", () => {
     const runtimeEdges = scanImportEdges(
-      'import { runAgentDiscovery } from "@nordri/browser-agent";',
+      'import { runAgentDiscovery } from "@nestor/browser-agent";',
     );
     const runtimeResult = evaluateImportEdges(
       runtimeEdges,
@@ -636,7 +636,7 @@ describe("import edge scanning and boundaries", () => {
     );
 
     const orchestratorEdges = scanImportEdges(
-      'import { runAgentDiscovery } from "@nordri/browser-agent";',
+      'import { runAgentDiscovery } from "@nestor/browser-agent";',
     );
     const orchestratorResult = evaluateImportEdges(
       orchestratorEdges,
@@ -648,7 +648,7 @@ describe("import edge scanning and boundaries", () => {
 
   test("ratchets agent->orchestrator direction", () => {
     const edges = scanImportEdges(
-      'import type { JobFinderService } from "@nordri/job-finder";',
+      'import type { JobFinderService } from "@nestor/job-finder";',
     );
     const result = evaluateImportEdges(edges, "browser-agent", new Map());
     expect(result.directionFindings).toHaveLength(1);
@@ -659,7 +659,7 @@ describe("import edge scanning and boundaries", () => {
 
   test("returns no findings for files outside scanned packages", () => {
     const edges = scanImportEdges(
-      'import { state } from "@nordri/db/src/internal/state";',
+      'import { state } from "@nestor/db/src/internal/state";',
     );
     const result = evaluateImportEdges(edges, null, new Map());
     expect(result.deepImportViolations).toEqual([]);

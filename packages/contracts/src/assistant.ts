@@ -1150,7 +1150,7 @@ export type AssistantResumeBatchState = z.infer<
   typeof AssistantResumeBatchStateSchema
 >;
 
-/** The typed preload bridge the sidebar uses (`window.nordri.assistant`). */
+/** The typed preload bridge the sidebar uses (`window.nestor.assistant`). */
 export interface DesktopAssistantBridge {
   acknowledgeNavigation(
     input: AssistantNavigationAcknowledgment,

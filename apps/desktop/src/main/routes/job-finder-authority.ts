@@ -15,7 +15,7 @@ import {
   ResolveSubmissionOutcomeInputSchema,
   ResolveSubmissionOutcomeResultSchema,
   UpdateApplicationAuthorityEnvelopeInputSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   getJobFinderApplicationAuthorityService,

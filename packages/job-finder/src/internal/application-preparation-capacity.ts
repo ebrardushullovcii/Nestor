@@ -3,7 +3,7 @@ import type {
   ApplyJobResult,
   ApplyRun,
   JobFinderDashboardSummary,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export const MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN = 10;
 export const MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY = 20;

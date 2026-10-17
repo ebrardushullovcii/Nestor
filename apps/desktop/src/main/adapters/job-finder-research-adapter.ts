@@ -1,12 +1,12 @@
-import { ResumeResearchArtifactSchema, type ResumeResearchArtifact, type SavedJob } from "@nordri/contracts";
+import { ResumeResearchArtifactSchema, type ResumeResearchArtifact, type SavedJob } from "@nestor/contracts";
 import {
   extractReadablePage,
   extractResearchSignals,
-} from "@nordri/knowledge-base";
+} from "@nestor/knowledge-base";
 import type {
   ResumeResearchAdapter,
   ResumeResearchAdapterInput,
-} from "@nordri/job-finder";
+} from "@nestor/job-finder";
 
 interface CreateDesktopResumeResearchAdapterOptions {
   fetchImpl?: typeof fetch;
@@ -118,7 +118,7 @@ async function fetchPage(
       method: "GET",
       signal: controller.signal,
       headers: {
-        "User-Agent": "Nordri Resume Workspace Research/1.0",
+        "User-Agent": "Nestor Resume Workspace Research/1.0",
       },
     });
 

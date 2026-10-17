@@ -6,7 +6,7 @@ import {
   type ResumeDocumentParserKind,
   type ResumeDocumentQualitySignal,
   type ResumeDocumentRouteDecision,
-} from '@nordri/contracts'
+} from '@nestor/contracts'
 
 type BuildBundleFromPagesInput = {
   bundleId: string

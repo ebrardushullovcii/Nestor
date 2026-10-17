@@ -1,4 +1,4 @@
-import { type AddBrowserJobResult } from "@nordri/contracts";
+import { type AddBrowserJobResult } from "@nestor/contracts";
 import { withPlanAssessment } from "./plan-assessment";
 import { createMatchAssessmentAsync } from "./matching";
 import { listingPageText, listingPageLinks } from "./listing-detail-extraction";

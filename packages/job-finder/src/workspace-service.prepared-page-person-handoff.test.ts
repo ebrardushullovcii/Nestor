@@ -4,7 +4,7 @@ import {
   ApplyJobResultSchema,
   ApplyRunSchema,
   UserActionRequestSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 
 import { persistApplicationUserAction } from "./internal/workspace-application-user-action";

@@ -1,6 +1,6 @@
 import type {
   SourceDebugWorkerAttempt,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { normalizeText, uniqueStrings } from "./shared";
 import {
   lineMentionsAnyKeyword,

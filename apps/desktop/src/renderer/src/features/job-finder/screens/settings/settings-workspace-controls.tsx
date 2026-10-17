@@ -1,4 +1,4 @@
-import type { PersonalWorkspaceRestorePreview } from "@nordri/contracts";
+import type { PersonalWorkspaceRestorePreview } from "@nestor/contracts";
 import { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useToast } from "@renderer/components/ui/toast";
@@ -39,7 +39,7 @@ export function SettingsWorkspaceControls({
     setRestoreError(null);
     try {
       setRestorePreview(
-        await window.nordri.jobFinder.previewPersonalWorkspaceRestore(),
+        await window.nestor.jobFinder.previewPersonalWorkspaceRestore(),
       );
     } catch (error) {
       setRestoreError(describeWorkspaceRestoreFailure(error));
@@ -54,7 +54,7 @@ export function SettingsWorkspaceControls({
     clearTailoredAssetDetailCache();
     try {
       const result =
-        await window.nordri.jobFinder.confirmPersonalWorkspaceRestore({
+        await window.nestor.jobFinder.confirmPersonalWorkspaceRestore({
           token: restorePreview.token,
         });
       setRestorePreview(null);
@@ -76,7 +76,7 @@ export function SettingsWorkspaceControls({
     setExportPending(true);
     setExportError(null);
     try {
-      const result = await window.nordri.jobFinder.exportPersonalWorkspace();
+      const result = await window.nestor.jobFinder.exportPersonalWorkspace();
       if (result.status === "saved")
         showToast({
           title: "Workspace exported",
@@ -113,7 +113,7 @@ export function SettingsWorkspaceControls({
         describeFailure(error, {
           action: "reset your workspace",
           unknownSentence:
-            "Reset did not finish. Your workspace may still contain data. Restart Nordri and try again.",
+            "Reset did not finish. Your workspace may still contain data. Restart Nestor and try again.",
         }),
       );
     } finally {
@@ -220,7 +220,7 @@ export function SettingsWorkspaceControls({
                   {restorePreview.chats === 1 ? "chat" : "chats"}.
                 </p>
                 <p className="text-sm">
-                  This replaces your current workspace. Nordri first saves a
+                  This replaces your current workspace. Nestor first saves a
                   safety export of it in Documents. Activity stays paused after
                   restore. Browser sign-ins and AI credentials are not restored.
                 </p>
@@ -303,7 +303,7 @@ export function SettingsWorkspaceControls({
                 </div>
                 {pending ? (
                   <p role="status">
-                    Resetting workspace… Keep Nordri open until this finishes.
+                    Resetting workspace… Keep Nestor open until this finishes.
                   </p>
                 ) : null}
                 {resetError ? (

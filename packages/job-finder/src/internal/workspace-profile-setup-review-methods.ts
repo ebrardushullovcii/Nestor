@@ -12,7 +12,7 @@ import {
   type ProfileSetupReviewActionOptions,
   type ProfileSetupState,
   type ResumeImportFieldCandidate,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   isSearchLocationCandidateTarget,

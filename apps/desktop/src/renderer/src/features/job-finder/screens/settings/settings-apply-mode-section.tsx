@@ -10,7 +10,7 @@ import { Switch } from "@renderer/components/ui/switch";
 import type {
   ApplicationSalaryDisclosureRule,
   ApplicationAutomationMode,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { useRegisterSettingsDirtySection } from "./settings-dirty-sections";
 import {
   hasOutstandingSectionChanges,

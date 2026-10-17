@@ -12,7 +12,7 @@ import {
   JobFinderRendererWorkspaceSnapshotSchema,
   JobSearchCampaignSchema,
   JobSearchPreferencesSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   CandidateProfile,
   JobFinderSetResumeClaimConfirmationInput,
@@ -21,7 +21,7 @@ import type {
   JobFinderRendererWorkspaceSnapshot,
   JobFinderWorkspaceSyncResult,
   ResumeImportProgressEvent,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -304,7 +304,7 @@ describe("useJobFinderWorkspace revision window", () => {
     mutateWorkspaceEntities.mockReset();
     getWorkspace.mockReset();
     bareSnapshotAction.mockReset();
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         ping: vi.fn(() => Promise.resolve({ platform: "win32" as const })),
@@ -319,12 +319,12 @@ describe("useJobFinderWorkspace revision window", () => {
             return () => undefined;
           },
         },
-      } as unknown as Window["nordri"],
+      } as unknown as Window["nestor"],
     });
   });
 
   afterEach(() => {
-    Reflect.deleteProperty(window, "nordri");
+    Reflect.deleteProperty(window, "nestor");
   });
 
   function snapshotResult(
@@ -566,7 +566,7 @@ describe("useJobFinderWorkspace revision window", () => {
         .mockResolvedValueOnce(snapshotResult(initial, 1))
         .mockResolvedValueOnce(snapshotResult(recovered, 4));
       bareSnapshotAction.mockResolvedValueOnce(bare);
-      Object.assign(window.nordri.jobFinder as object, {
+      Object.assign(window.nestor.jobFinder as object, {
         runAgentDiscovery: () => Promise.resolve({ snapshot: bare }),
       });
       mutateWorkspaceEntities.mockResolvedValueOnce({
@@ -602,7 +602,7 @@ describe("useJobFinderWorkspace revision window", () => {
   it("starts an unrevisioned bootstrap with no claimed baseline", async () => {
     const bootstrap = createWorkspace("bootstrap-job");
     const recovered = createWorkspace("recovered-job");
-    Object.assign(window.nordri.jobFinder as object, {
+    Object.assign(window.nestor.jobFinder as object, {
       getWorkspaceBootstrap: () => Promise.resolve(bootstrap),
     });
     syncWorkspace.mockResolvedValueOnce(snapshotResult(recovered, 4));
@@ -706,7 +706,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         ping: vi.fn(() => Promise.resolve({ platform: "win32" as const })),
@@ -717,19 +717,19 @@ describe("useJobFinderWorkspace entity mutations", () => {
           checkBrowserSession,
           queueJobForReview: legacyQueueJobForReview,
         },
-      } as unknown as Window["nordri"],
+      } as unknown as Window["nestor"],
     });
   });
 
   function enableBootstrapApi() {
-    Object.assign(window.nordri.jobFinder as object, {
+    Object.assign(window.nestor.jobFinder as object, {
       getWorkspaceBootstrap,
     });
   }
 
   afterEach(() => {
     vi.useRealTimers();
-    Reflect.deleteProperty(window, "nordri");
+    Reflect.deleteProperty(window, "nestor");
   });
 
   it("applies returned pause and browser-reset snapshots without polling", async () => {
@@ -754,7 +754,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
       reason: "initial",
       snapshot: initial,
     });
-    Object.assign(window.nordri.jobFinder, {
+    Object.assign(window.nestor.jobFinder, {
       setActivityControl: vi.fn().mockResolvedValue(resumed),
       resetBrowser: vi.fn().mockResolvedValue(reset),
     });
@@ -1001,7 +1001,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
       reason: "initial",
       snapshot: initialWorkspace,
     });
-    Object.assign(window.nordri.jobFinder as object, { importResume });
+    Object.assign(window.nestor.jobFinder as object, { importResume });
 
     const { result } = renderHook(() => useJobFinderWorkspace());
     await waitFor(() => expect(result.current.status).toBe("ready"));
@@ -1186,7 +1186,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
         snapshot: beforeCancellation,
       })
       .mockReturnValueOnce(updateSync.promise);
-    Object.assign(window.nordri.jobFinder as object, {
+    Object.assign(window.nestor.jobFinder as object, {
       cancelAgentDiscovery,
       onWorkspaceUpdate,
     });
@@ -1240,7 +1240,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
     });
     const slowSync = deferred<JobFinderWorkspaceSyncResult>();
     const updateListeners: Array<() => void> = [];
-    Object.assign(window.nordri.jobFinder as object, {
+    Object.assign(window.nestor.jobFinder as object, {
       onWorkspaceUpdate: vi.fn((listener: () => void) => {
         updateListeners.push(listener);
         return () => undefined;
@@ -1561,7 +1561,7 @@ describe("useJobFinderWorkspace concurrency convergence", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         ping: vi.fn(() => Promise.resolve({ platform: "win32" as const })),
@@ -1572,17 +1572,17 @@ describe("useJobFinderWorkspace concurrency convergence", () => {
           checkBrowserSession,
           saveProfile,
         },
-      } as unknown as Window["nordri"],
+      } as unknown as Window["nestor"],
     });
   });
 
   afterEach(() => {
-    Reflect.deleteProperty(window, "nordri");
+    Reflect.deleteProperty(window, "nestor");
   });
 
   // Bootstrap-aware initial load; legacy-path tests never install this.
   function enableBootstrapApi() {
-    Object.assign(window.nordri.jobFinder as object, {
+    Object.assign(window.nestor.jobFinder as object, {
       getWorkspaceBootstrap,
     });
   }
@@ -1980,7 +1980,7 @@ describe("useJobFinderWorkspace resume claim confirmation action", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         ping: vi.fn(() => Promise.resolve({ platform: "win32" as const })),
@@ -1989,12 +1989,12 @@ describe("useJobFinderWorkspace resume claim confirmation action", () => {
           getWorkspace,
           setResumeClaimConfirmation,
         },
-      } as unknown as Window["nordri"],
+      } as unknown as Window["nestor"],
     });
   });
 
   afterEach(() => {
-    Reflect.deleteProperty(window, "nordri");
+    Reflect.deleteProperty(window, "nestor");
   });
 
   function snapshotSyncResult(

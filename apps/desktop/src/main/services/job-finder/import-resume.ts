@@ -7,7 +7,7 @@ import {
   type ResumeImportProgressEvent,
   type ResumeImportRun,
   type ResumeSourceDocument,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   detectResumeDocumentFileKind,
   extractResumeDocument,

@@ -1,6 +1,6 @@
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderWorkspaceSnapshot } from "@nestor/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { ApplyJobResultSchema, type ApplyRun } from "@nordri/contracts";
+import { ApplyJobResultSchema, type ApplyRun } from "@nestor/contracts";
 
 import { listJobsNotInProgress, startApplyBatch } from "./start-apply-batch";
 

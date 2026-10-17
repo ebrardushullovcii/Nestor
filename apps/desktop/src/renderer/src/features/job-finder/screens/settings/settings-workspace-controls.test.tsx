@@ -155,7 +155,7 @@ test("offers a workspace export before deletion and retains data if export fails
   const exportPersonalWorkspace = vi
     .fn()
     .mockRejectedValue(new Error("disk full"));
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: { jobFinder: { exportPersonalWorkspace } },
   });
@@ -190,7 +190,7 @@ test("offers a workspace export before deletion and retains data if export fails
 });
 
 test("personal export toast names the saved path and explains included chats", async () => {
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       jobFinder: {
@@ -246,7 +246,7 @@ test("restore previews all workspace contents and requires confirmation", async 
   const confirmPersonalWorkspaceRestore = vi
     .fn()
     .mockResolvedValue({ safetyExportPath: "/synthetic/safety.json" });
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       jobFinder: {

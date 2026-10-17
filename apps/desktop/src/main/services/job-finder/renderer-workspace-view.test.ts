@@ -5,7 +5,7 @@ import {
   ApplicationAttemptSchema,
   JobListRowSchema,
   type JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import { performance } from "node:perf_hooks";
 import {

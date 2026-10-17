@@ -11,7 +11,7 @@ import {
 import type {
   DesktopBrowserBridge,
   DesktopBrowserState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BrowserPeek } from "./browser-peek";
@@ -38,7 +38,7 @@ afterEach(() => {
 
 describe("BrowserPeek handoff attention", () => {
   it("clears the derived browser chip when the workspace has no unresolved handoff", async () => {
-    const previousBridge = window.nordri;
+    const previousBridge = window.nestor;
     const browser: DesktopBrowserBridge = {
       addCurrentJob: vi.fn(),
       getState: vi.fn().mockResolvedValue(staleAttentionState),
@@ -55,7 +55,7 @@ describe("BrowserPeek handoff attention", () => {
       onStateChanged: vi.fn().mockReturnValue(() => undefined),
       onFocusAddress: vi.fn().mockReturnValue(() => undefined),
     };
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: { browser },
     });
@@ -75,7 +75,7 @@ describe("BrowserPeek handoff attention", () => {
     );
     expect(screen.queryByLabelText(/This page needs a human/)).toBeNull();
 
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: previousBridge,
     });
@@ -90,7 +90,7 @@ it("saves the exact current tab from the visible Add this job action", async () 
       disconnect() {}
     },
   );
-  const previous = window.nordri;
+  const previous = window.nestor;
   let finishAdd!: (value: {
     jobId: string;
     title: string;
@@ -127,7 +127,7 @@ it("saves the exact current tab from the visible Add this job action", async () 
       },
     ],
   };
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       jobFinder: { queueJobForReview },
@@ -182,7 +182,7 @@ it("saves the exact current tab from the visible Add this job action", async () 
     );
   } finally {
     cleanup();
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: previous,
     });
@@ -191,10 +191,10 @@ it("saves the exact current tab from the visible Add this job action", async () 
 });
 
 it("shows a dismissible recording prompt for an unbound send without blocking browser input", async () => {
-  const previous = window.nordri;
+  const previous = window.nestor;
   const onRecordSend = vi.fn();
   const command = vi.fn().mockResolvedValue(staleAttentionState);
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       browser: {
@@ -228,7 +228,7 @@ it("shows a dismissible recording prompt for an unbound send without blocking br
       expect.objectContaining({ type: "stop" }),
     );
   } finally {
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: previous,
     });

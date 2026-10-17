@@ -10,7 +10,7 @@ const outputDir = path.join(desktopDir, 'test-artifacts', 'ui', 'original-cv-flo
 
 async function captureOriginalCvFlow() {
   await mkdir(outputDir, { recursive: true })
-  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nordri-original-cv-flow-'))
+  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nestor-original-cv-flow-'))
   let app
 
   try {
@@ -19,10 +19,10 @@ async function captureOriginalCvFlow() {
       cwd: desktopDir,
       env: {
         ...process.env,
-        NORDRI_BROWSER_AGENT: '0',
-        NORDRI_ENABLE_TEST_API: '1',
-        NORDRI_TEST_SYSTEM_THEME: 'dark',
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_BROWSER_AGENT: '0',
+        NESTOR_ENABLE_TEST_API: '1',
+        NESTOR_TEST_SYSTEM_THEME: 'dark',
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       },
     })
     const window = await app.firstWindow()
@@ -30,11 +30,11 @@ async function captureOriginalCvFlow() {
     await window.setViewportSize({ width: 1440, height: 920 })
 
     await window.evaluate(async () => {
-      if (!window.nordri.jobFinder.test) {
+      if (!window.nestor.jobFinder.test) {
         throw new Error('Desktop test API is unavailable in the renderer.')
       }
-      await window.nordri.jobFinder.test.setSystemThemeOverride('dark')
-      await window.nordri.jobFinder.test.loadApplyQueueDemo()
+      await window.nestor.jobFinder.test.setSystemThemeOverride('dark')
+      await window.nestor.jobFinder.test.loadApplyQueueDemo()
     })
     await window.reload()
     await window.waitForLoadState('domcontentloaded')
@@ -47,11 +47,11 @@ async function captureOriginalCvFlow() {
     await window.screenshot({ animations: 'disabled', path: path.join(outputDir, '01-original-cv-setting.png') })
     await window.getByRole('button', { name: 'Save settings' }).click()
     await window.waitForFunction(async () => {
-      const workspace = await window.nordri.jobFinder.getWorkspace()
+      const workspace = await window.nestor.jobFinder.getWorkspace()
       return workspace.settings.resumeApplicationMode === 'original_resume'
     }, undefined, { timeout: 10000 })
 
-    const savedWorkspace = await window.evaluate(() => window.nordri.jobFinder.getWorkspace())
+    const savedWorkspace = await window.evaluate(() => window.nestor.jobFinder.getWorkspace())
     if (savedWorkspace.settings.resumeApplicationMode !== 'original_resume') {
       throw new Error('Original-CV mode did not persist.')
     }
@@ -62,7 +62,7 @@ async function captureOriginalCvFlow() {
     await originalCvForJob.focus()
     await originalCvForJob.press('Space')
     await window.waitForFunction(async () => {
-      const workspace = await window.nordri.jobFinder.getWorkspace()
+      const workspace = await window.nestor.jobFinder.getWorkspace()
       return workspace.reviewQueue[0]?.resumeApplicationMode === 'original_resume'
     }, undefined, { timeout: 10000 })
     await window.getByText('Original CV · unchanged').waitFor({ timeout: 10000 })

@@ -1,4 +1,4 @@
-import type { CandidateProfile } from "@nordri/contracts";
+import type { CandidateProfile } from "@nestor/contracts";
 import { uniqueStrings } from "./utils";
 
 const QUANTIFIED_REQUIREMENT_PATTERN =

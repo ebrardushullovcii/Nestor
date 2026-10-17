@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createInMemoryJobFinderRepository } from "@nordri/db";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { afterEach, describe, expect, test } from "vitest";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import {
@@ -14,7 +14,7 @@ const temporaryDirectories: string[] = [];
 
 async function createTestDirectory() {
   const directory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-resume-source-migration-"),
+    path.join(os.tmpdir(), "nestor-resume-source-migration-"),
   );
   temporaryDirectories.push(directory);
   return directory;

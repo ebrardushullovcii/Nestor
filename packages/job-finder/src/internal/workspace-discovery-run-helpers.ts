@@ -9,7 +9,7 @@ import {
   type DiscoveryRunRecord,
   type DiscoveryRunReport,
   type DiscoveryTargetExecution,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   appendDiscoveryEvent,
