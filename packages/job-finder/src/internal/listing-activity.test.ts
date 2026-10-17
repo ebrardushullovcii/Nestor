@@ -17,6 +17,34 @@ import {
 const hour = (value: number) =>
   `2026-08-23T${String(value).padStart(2, "0")}:00:00.000Z`;
 
+test("unchanged immutable rows retain their activity view while changed evidence replaces it", () => {
+  const saved = Object.freeze(job());
+  const input = { jobs: [saved], discoveryLedger: [], listingSignals: [] };
+  const first = projectDiscoveryJobViews(input)[0]!;
+  expect(projectDiscoveryJobViews(input)[0]).toBe(first);
+  const changed = projectDiscoveryJobViews({
+    ...input,
+    listingSignals: [
+      ListingSignalRecordSchema.parse({
+        id: "closed_signal",
+        jobId: saved.id,
+        signal: "closed",
+        detectedAt: hour(11),
+        provenance: "system",
+        confidence: 1,
+        explanation: "Closed",
+        detail: null,
+        recoveryGuidance: "Choose another listing.",
+      }),
+    ],
+  })[0]!;
+  expect(changed).not.toBe(first);
+  expect(changed.listingActivity.status).toBe("closed");
+  expect(projectDiscoveryJobViews(input)[0]?.listingActivity.status).toBe(
+    first.listingActivity.status,
+  );
+});
+
 function job(overrides: Partial<SavedJob> = {}): SavedJob {
   return {
     ...createSeed().savedJobs[0]!,

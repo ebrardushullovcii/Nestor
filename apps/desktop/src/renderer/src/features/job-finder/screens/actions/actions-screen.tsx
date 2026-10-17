@@ -13,7 +13,7 @@ import type {
   CandidateProfile,
   PlanSafeguardPause,
   GroupedManualAnswerDecision,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ProjectGroupedManualAnswerCommand,
   SnoozeGroupedDecisionInput,
   UserActionCommandInput,
@@ -26,9 +26,9 @@ import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
 import { Textarea } from "@renderer/components/ui/textarea";
 import {
-  CollectionPagination,
-  COLLECTION_PAGE_SIZE,
-} from "../../components/collection-pagination";
+  BoundedCollectionPagination,
+  useBoundedCollection,
+} from "./bounded-collection";
 import { formatDateOnly } from "../../lib/job-finder-utils";
 import { stripScrapedGlyphs } from "../../lib/scraped-glyphs";
 import {
@@ -71,11 +71,11 @@ const terminalStates = new Set<UserActionRequest["state"]>([
   "superseded",
 ]);
 
-type DiscoveryJob = JobFinderWorkspaceSnapshot["discoveryJobs"][number];
+type DiscoveryJob = JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number];
 
 export function getUserActionContextRoute(
   request: Pick<UserActionRequest, "scope">,
-  applicationRecords?: readonly JobFinderWorkspaceSnapshot["applicationRecords"][number][],
+  applicationRecords?: readonly JobFinderRendererWorkspaceSnapshot["applicationRecords"][number][],
 ): string {
   if (request.scope.type === "discovery_source") {
     return buildJobFinderContextRoute("/job-finder/discovery", {
@@ -907,6 +907,9 @@ function GroupedDecisionCard(props: {
       : `Application for job ${jobId}`;
   };
   const jobNoun = uniqueJobCount === 1 ? "job" : "jobs";
+  const lineagePage = useBoundedCollection(decision.lineage, decision.id);
+  const [showLineage, setShowLineage] = useState(false);
+  const lineageIsLarge = decision.lineage.length > lineagePage.pageSize;
 
   return (
     <article
@@ -954,22 +957,45 @@ function GroupedDecisionCard(props: {
         </div>
       </dl>
 
-      <ul className="grid gap-1 text-sm leading-6 text-foreground-soft">
-        {decision.lineage.map((entry) => (
-          <li
-            className="flex flex-wrap items-baseline gap-x-2 gap-y-0"
-            key={entry.requestId}
+      {lineageIsLarge ? (
+        <Button
+          aria-expanded={showLineage}
+          onClick={() => setShowLineage((shown) => !shown)}
+          size="compact"
+          type="button"
+          variant="ghost"
+        >
+          {showLineage ? "Hide" : "Show"} application questions (
+          {decision.lineage.length})
+        </Button>
+      ) : null}
+      {!lineageIsLarge || showLineage ? (
+        <>
+          <ul
+            aria-label="Application questions"
+            className="grid gap-1 text-sm leading-6 text-foreground-soft"
           >
-            <span className="font-medium text-foreground">
-              {jobLabel(entry.jobId)}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              request {entry.requestId} · revision{" "}
-              {entry.expectedRequestRevision}
-            </span>
-          </li>
-        ))}
-      </ul>
+            {lineagePage.items.map((entry) => (
+              <li
+                className="flex flex-wrap items-baseline gap-x-2 gap-y-0"
+                key={entry.requestId}
+              >
+                <span className="font-medium text-foreground">
+                  {jobLabel(entry.jobId)}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  request {entry.requestId} · revision{" "}
+                  {entry.expectedRequestRevision}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <BoundedCollectionPagination
+            {...lineagePage}
+            itemLabel={`application questions for ${decision.id}`}
+          />
+        </>
+      ) : null}
 
       {hasConflict ? (
         <p
@@ -1067,7 +1093,7 @@ function GroupedDecisionCard(props: {
  */
 function AwaitingApplicationCard(props: {
   onNavigate: (path: string) => void;
-  record: JobFinderWorkspaceSnapshot["applicationRecords"][number];
+  record: JobFinderRendererWorkspaceSnapshot["applicationRecords"][number];
 }) {
   const { record } = props;
   const opensResumeStudio = getApplicationNextStepLabel(record)
@@ -1113,10 +1139,10 @@ function AwaitingApplicationCard(props: {
 
 export function ActionsScreen(props: {
   safeguardPauses?: readonly PlanSafeguardPause[];
-  applicationAttempts?: JobFinderWorkspaceSnapshot["applicationAttempts"];
-  applicationRecords?: JobFinderWorkspaceSnapshot["applicationRecords"];
-  applyJobResults?: JobFinderWorkspaceSnapshot["applyJobResults"];
-  discoveryJobs: JobFinderWorkspaceSnapshot["discoveryJobs"];
+  applicationAttempts?: JobFinderRendererWorkspaceSnapshot["applicationAttempts"];
+  applicationRecords?: JobFinderRendererWorkspaceSnapshot["applicationRecords"];
+  applyJobResults?: JobFinderRendererWorkspaceSnapshot["applyJobResults"];
+  discoveryJobs: JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
   groupedDecisions?: readonly GroupedManualAnswerDecision[];
   isGroupedApplyPending?: (decisionId: string) => boolean;
   isGroupedProjectPending?: (groupKey: string) => boolean;
@@ -1143,6 +1169,9 @@ export function ActionsScreen(props: {
   ) => void | Promise<void>;
   profile?: CandidateProfile;
   requests: readonly UserActionRequest[];
+  selectedRequestId?: string | null;
+  selectedDecisionId?: string | null;
+  selectedApplicationRecordId?: string | null;
 }) {
   const { answerDrafts, restoredApplications, updateAnswerDraft } =
     useQuestionAnswerDrafts(props);
@@ -1160,12 +1189,6 @@ export function ActionsScreen(props: {
   const unresolved = listUnresolvedUserActions(props.requests).filter(
     (request) => !representedRequestIds.has(request.id),
   );
-  const activeDecisions = pendingDecisions.filter(
-    (decision) => decision.snooze === null,
-  );
-  const snoozedDecisions = pendingDecisions.filter(
-    (decision) => decision.snooze !== null,
-  );
   // An application the Applications screen badges "Needs you" with no live
   // browser-step request behind it used to be invisible here, so this page
   // said "Nothing needs you right now" about work the other screen was
@@ -1180,10 +1203,66 @@ export function ActionsScreen(props: {
     [props.applicationRecords, props.applyJobResults, props.requests],
   );
   const view = usePersistedCollectionView("needs-you", "comfortable");
+  const selectionKey =
+    props.selectedRequestId ||
+    props.selectedApplicationRecordId ||
+    props.selectedDecisionId
+      ? `${props.selectedRequestId ?? ""}:${props.selectedApplicationRecordId ?? ""}:${props.selectedDecisionId ?? ""}`
+      : null;
+  const lastSelection = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectionKey && lastSelection.current !== selectionKey) {
+      view.setQuery("");
+    }
+    lastSelection.current = selectionKey;
+  }, [selectionKey, view.setQuery]);
   const deferredQuery = useDeferredValue(view.query);
   const jobsById = useMemo(
     () => buildJobIndexById(props.discoveryJobs),
     [props.discoveryJobs],
+  );
+  const visibleDecisions = pendingDecisions.filter(
+    (decision) =>
+      !deferredQuery.trim() ||
+      matchesCollectionSearch(deferredQuery, [
+        "manual answer",
+        "reusable answer",
+        decision.snooze ? "snoozed" : null,
+        decision.id,
+        decision.answer.value,
+        ...decision.lineage.flatMap((entry) => {
+          const job = jobsById.get(entry.jobId);
+          return [
+            entry.requestId,
+            entry.applicationRecordId,
+            entry.jobId,
+            job?.title,
+            job?.company,
+          ];
+        }),
+      ]),
+  );
+  const activeDecisions = visibleDecisions.filter(
+    (decision) => decision.snooze === null,
+  );
+  const snoozedDecisions = visibleDecisions.filter(
+    (decision) => decision.snooze !== null,
+  );
+  const activePage = useBoundedCollection(
+    activeDecisions,
+    deferredQuery,
+    activeDecisions.findIndex(
+      (decision) => decision.id === props.selectedDecisionId,
+    ),
+    props.selectedDecisionId,
+  );
+  const snoozedPage = useBoundedCollection(
+    snoozedDecisions,
+    deferredQuery,
+    snoozedDecisions.findIndex(
+      (decision) => decision.id === props.selectedDecisionId,
+    ),
+    props.selectedDecisionId,
   );
   const visibleRequests = useMemo(
     () =>
@@ -1195,6 +1274,7 @@ export function ActionsScreen(props: {
           : null;
         return matchesCollectionSearch(deferredQuery, [
           request.title,
+          request.id,
           userActionKindPresentations[request.kind].label,
           request.scope.type,
           job?.title,
@@ -1209,6 +1289,7 @@ export function ActionsScreen(props: {
       applicationsAwaitingUser.filter((record) =>
         matchesCollectionSearch(deferredQuery, [
           record.title,
+          record.id,
           record.company,
           "application",
           getApplicationNextStepLabel(record),
@@ -1216,46 +1297,60 @@ export function ActionsScreen(props: {
       ),
     [applicationsAwaitingUser, deferredQuery],
   );
-  const [page, setPage] = useState(1);
-  const pageCount = Math.max(
-    1,
-    Math.ceil(visibleRequests.length / COLLECTION_PAGE_SIZE),
+  const applicationItems = [
+    ...visibleAwaitingRecords.map((record) => ({
+      type: "record" as const,
+      record,
+    })),
+    ...visibleRequests
+      .filter((request) => request.scope.type === "application")
+      .map((request) => ({ type: "request" as const, request })),
+  ];
+  const applicationPage = useBoundedCollection(
+    applicationItems,
+    deferredQuery,
+    applicationItems.findIndex((item) =>
+      item.type === "record"
+        ? item.record.id === props.selectedApplicationRecordId
+        : item.request.id === props.selectedRequestId,
+    ),
+    props.selectedRequestId ?? props.selectedApplicationRecordId,
   );
-  const currentPage = Math.min(page, pageCount);
-  const pagedRequests = useMemo(
-    () =>
-      visibleRequests.slice(
-        (currentPage - 1) * COLLECTION_PAGE_SIZE,
-        currentPage * COLLECTION_PAGE_SIZE,
-      ),
-    [currentPage, visibleRequests],
+  const sourceRequests = visibleRequests.filter(
+    (request) => request.scope.type === "discovery_source",
   );
-
-  useEffect(() => {
-    setPage(1);
-  }, [view.query]);
-  useEffect(() => {
-    setPage((current) => Math.min(current, pageCount));
-  }, [pageCount]);
+  const sourcePage = useBoundedCollection(
+    sourceRequests,
+    deferredQuery,
+    sourceRequests.findIndex(
+      (request) => request.id === props.selectedRequestId,
+    ),
+    props.selectedRequestId,
+  );
   const groups = [
     {
       id: "application" as const,
       title: "Applications",
-      totalCount:
-        visibleRequests.filter(
-          (request) => request.scope.type === "application",
-        ).length + visibleAwaitingRecords.length,
+      totalCount: applicationItems.length,
+      page: applicationPage,
     },
     {
       id: "discovery_source" as const,
       title: "Job sources",
-      totalCount: visibleRequests.filter(
-        (request) => request.scope.type === "discovery_source",
-      ).length,
+      totalCount: sourceRequests.length,
+      page: sourcePage,
     },
   ];
 
   const hasPendingDecisionCards = pendingDecisions.length > 0;
+  const totalCount =
+    unresolved.length +
+    applicationsAwaitingUser.length +
+    pendingDecisions.length;
+  const visibleCount =
+    visibleRequests.length +
+    visibleAwaitingRecords.length +
+    visibleDecisions.length;
 
   return (
     <section className="grid gap-5 pb-8">
@@ -1271,15 +1366,15 @@ export function ActionsScreen(props: {
       {/* A search field plus a "1 result" counter above a single card is
           dead chrome in the first viewport. Search appears once the list is
           long enough to need it, or while a query is already narrowing it. */}
-      {unresolved.length >= ACTION_SEARCH_MIN_ITEMS || view.query.length > 0 ? (
+      {totalCount >= ACTION_SEARCH_MIN_ITEMS || view.query.length > 0 ? (
         <CollectionSearchToolbar
           label="Find an action"
           onQueryChange={view.setQuery}
           placeholder="Search jobs, companies, sources, or action type"
           placement="page"
           query={view.query}
-          totalCount={unresolved.length}
-          visibleCount={visibleRequests.length}
+          totalCount={totalCount}
+          visibleCount={visibleCount}
         />
       ) : null}
 
@@ -1302,7 +1397,7 @@ export function ActionsScreen(props: {
             <Badge variant="section">{activeDecisions.length}</Badge>
           </div>
           <div className="grid gap-3">
-            {activeDecisions.map((decision) => (
+            {activePage.items.map((decision) => (
               <GroupedDecisionCard
                 decision={decision}
                 isApplyPending={
@@ -1318,6 +1413,10 @@ export function ActionsScreen(props: {
               />
             ))}
           </div>
+          <BoundedCollectionPagination
+            {...activePage}
+            itemLabel="reusable answers"
+          />
         </section>
       ) : null}
 
@@ -1333,7 +1432,7 @@ export function ActionsScreen(props: {
             <Badge variant="section">{snoozedDecisions.length}</Badge>
           </div>
           <div className="grid gap-3">
-            {snoozedDecisions.map((decision) => (
+            {snoozedPage.items.map((decision) => (
               <GroupedDecisionCard
                 compact
                 decision={decision}
@@ -1350,6 +1449,10 @@ export function ActionsScreen(props: {
               />
             ))}
           </div>
+          <BoundedCollectionPagination
+            {...snoozedPage}
+            itemLabel="snoozed reusable answers"
+          />
         </section>
       ) : null}
 
@@ -1377,9 +1480,7 @@ export function ActionsScreen(props: {
             </Button>
           </div>
         </div>
-      ) : (unresolved.length > 0 || applicationsAwaitingUser.length > 0) &&
-        visibleRequests.length === 0 &&
-        visibleAwaitingRecords.length === 0 ? (
+      ) : totalCount > 0 && visibleCount === 0 ? (
         <CollectionNoMatches
           noun="actions"
           onClear={() => view.setQuery("")}
@@ -1392,14 +1493,17 @@ export function ActionsScreen(props: {
             if (totalCount === 0) {
               return null;
             }
-            const pageRequests = pagedRequests.filter(
-              (request) => request.scope.type === group.id,
-            );
-            // Paused applications are not paged with the requests; they lead
-            // the group on its first page so the person sees them at once.
+            const pageRequests =
+              group.id === "application"
+                ? applicationPage.items.flatMap((item) =>
+                    item.type === "request" ? [item.request] : [],
+                  )
+                : sourcePage.items;
             const pageRecords =
-              group.id === "application" && currentPage === 1
-                ? visibleAwaitingRecords
+              group.id === "application"
+                ? applicationPage.items.flatMap((item) =>
+                    item.type === "record" ? [item.record] : [],
+                  )
                 : [];
             const shownCount = pageRequests.length + pageRecords.length;
             return (
@@ -1528,16 +1632,17 @@ export function ActionsScreen(props: {
                     </div>
                   </>
                 )}
+                <BoundedCollectionPagination
+                  {...group.page}
+                  itemLabel={
+                    group.id === "application"
+                      ? "application actions"
+                      : "job source actions"
+                  }
+                />
               </section>
             );
           })}
-          <CollectionPagination
-            itemLabel="actions"
-            onPageChange={setPage}
-            page={currentPage}
-            pageSize={COLLECTION_PAGE_SIZE}
-            totalCount={visibleRequests.length}
-          />
         </>
       )}
     </section>

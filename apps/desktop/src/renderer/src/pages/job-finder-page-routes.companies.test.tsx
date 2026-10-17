@@ -7,7 +7,7 @@ import {
   SavedJobSchema,
   type CompanyEntity,
   type DiscoveryJobView,
-  type JobFinderWorkspaceSnapshot,
+  type JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
@@ -119,7 +119,7 @@ function createContext(
       discoveryJobs: [],
       dismissedDiscoveryJobs: [],
       companyJobs,
-    } as unknown as JobFinderWorkspaceSnapshot,
+    } as unknown as JobFinderRendererWorkspaceSnapshot,
   } as unknown as JobFinderPageContext;
 }
 

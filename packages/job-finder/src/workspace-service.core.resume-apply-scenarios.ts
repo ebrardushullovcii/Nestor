@@ -1467,7 +1467,7 @@ describe("createJobFinderWorkspaceService", () => {
     });
   });
 
-  test("rejects resume approval when exported validation still has blocking errors", async () => {
+  test("approves a resume that runs over its page target", async () => {
     const { workspaceService } = createWorkspaceServiceHarness({
       documentManager: {
         ...createDocumentManager(),
@@ -1502,9 +1502,14 @@ describe("createJobFinderWorkspaceService", () => {
       (artifact) => artifact.jobId === "job_ready",
     );
 
-    await expect(
-      workspaceService.approveResume("job_ready", exportedArtifact!.id),
-    ).rejects.toThrow(/blocking validation errors/i);
+    // Length is advice for the writer, never a reason to hold the person back.
+    const approved = await workspaceService.approveResume(
+      "job_ready",
+      exportedArtifact!.id,
+    );
+    expect(
+      approved.resumeDrafts.find((draft) => draft.jobId === "job_ready"),
+    ).toMatchObject({ status: "approved" });
   });
 
   test("rejects resume approval when the export is older than the current draft state", async () => {
@@ -4184,7 +4189,7 @@ describe("createJobFinderWorkspaceService", () => {
     ).toBe(false);
   });
 
-  test("persists generated claim blockers and refuses export before rendering", async () => {
+  test("a generated line the AI has not checked yet does not hold back export", async () => {
     const documentManager = createDocumentManager();
     const renderResumeArtifact = vi.fn(
       (
@@ -4235,27 +4240,19 @@ describe("createJobFinderWorkspaceService", () => {
       jobId: "job_ready",
     });
     renderResumeArtifact.mockClear();
-    await expect(workspaceService.exportResumePdf("job_ready")).rejects.toThrow(
-      /still need your decision/i,
-    );
-    expect(renderResumeArtifact).not.toHaveBeenCalled();
+    await workspaceService.exportResumePdf("job_ready");
+    expect(renderResumeArtifact).toHaveBeenCalled();
     expect(
-      await repository.listResumeExportArtifacts({ jobId: "job_ready" }),
-    ).toEqual(exportsBefore);
+      (await repository.listResumeExportArtifacts({ jobId: "job_ready" }))
+        .length,
+    ).toBeGreaterThan(exportsBefore.length);
 
     const validation = (
       await repository.listResumeValidationResults(workspace.draft.id)
     )[0];
-    expect(validation?.issues).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: "error",
-          category: "unsupported_claim",
-          sectionId: "section_experience",
-          bulletId: "unsupported_generated_claim",
-        }),
-      ]),
-    );
+    expect(
+      validation?.issues.some((issue) => issue.severity === "error"),
+    ).toBe(false);
   });
 
   test("rejects approval when the persisted claim assessment hash is stale", async () => {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import {
   act,
   cleanup,
@@ -26,7 +26,7 @@ const windowControlsState = {
   isMinimizable: true,
 } as const;
 
-function createWorkspace(): JobFinderWorkspaceSnapshot {
+function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
   return {
     activeCampaignId: "campaign-active",
     applicationRecords: [],
@@ -41,8 +41,18 @@ function createWorkspace(): JobFinderWorkspaceSnapshot {
       },
     ],
     discoveryJobs: [
-      { id: "job_1", company: "Acme", title: "Platform Engineer" },
-      { id: "job_2", company: "Globex", title: "Field Engineer" },
+      {
+        id: "job_1",
+        company: "Acme",
+        title: "Platform Engineer",
+        matchAssessment: { score: 70, reasons: [], gaps: [] },
+      },
+      {
+        id: "job_2",
+        company: "Globex",
+        title: "Field Engineer",
+        matchAssessment: { score: 60, reasons: [], gaps: [] },
+      },
     ],
     profileSetupState: {
       completedAt: null,
@@ -53,14 +63,15 @@ function createWorkspace(): JobFinderWorkspaceSnapshot {
     },
     reviewQueue: [],
     userActionRequests: [],
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function taskCenterSummary(): HTMLElement {
   const summary = document.querySelector<HTMLElement>(
     "summary[aria-label^='Activity']",
   );
-  if (!summary) throw new Error("Expected the Activity trigger to be rendered.");
+  if (!summary)
+    throw new Error("Expected the Activity trigger to be rendered.");
   return summary;
 }
 

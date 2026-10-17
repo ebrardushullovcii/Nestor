@@ -115,7 +115,7 @@ export function createWorkspaceIntelligenceMethods(input: {
     await input.ctx.withIntelligenceTransition(async () => {
       const [state, savedJobs, applicationRecords] = await Promise.all([
         input.ctx.repository.getIntelligenceState(),
-        input.ctx.repository.listSavedJobs(),
+        input.ctx.repository.readSavedJobsProjection(),
         input.ctx.repository.listApplicationRecords(),
       ]);
       const now = new Date().toISOString();
@@ -646,10 +646,10 @@ export function createWorkspaceIntelligenceMethods(input: {
     ): Promise<JobFinderWorkspaceSnapshot> {
       const mutation = RapidReviewMutationInputSchema.parse(rawInput);
       await input.ctx.withIntelligenceTransition(async () => {
-        const [campaignState, currentState, savedJobs] = await Promise.all([
+        const [campaignState, currentState, savedJobIds] = await Promise.all([
           input.ctx.repository.getCampaignState(),
           input.ctx.repository.getIntelligenceState(),
-          input.ctx.repository.listSavedJobs(),
+          input.ctx.repository.listSavedJobIds(),
         ]);
         const campaign = campaignState?.campaigns.find(
           (candidate) => candidate.id === mutation.campaignId,
@@ -666,7 +666,7 @@ export function createWorkspaceIntelligenceMethods(input: {
 
         if (mutation.type === "decide") {
           const uniqueJobIds = [...new Set(mutation.jobIds)];
-          const knownJobIds = new Set(savedJobs.map((job) => job.id));
+          const knownJobIds = new Set(savedJobIds);
           for (const jobId of uniqueJobIds) {
             if (!campaign.jobIds.includes(jobId) || !knownJobIds.has(jobId)) {
               throw new Error(

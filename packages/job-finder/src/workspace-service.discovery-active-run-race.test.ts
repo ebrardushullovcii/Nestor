@@ -28,6 +28,7 @@ import {
   createSavedJob,
   createSeed,
 } from "./workspace-service.test-support";
+import * as discoverySavedJobWriter from "./internal/discovery-saved-job-writer";
 
 interface Deferred<TValue> {
   promise: Promise<TValue>;
@@ -445,6 +446,116 @@ describe("active-run concurrent user decisions", () => {
 });
 
 describe("paired completion commits", () => {
+  test.each([false, true])(
+    "delayed source writes keep counters paired with durable jobs (cancel: %s)",
+    async (cancel) => {
+      const seed = createRaceSeed();
+      seed.settings.discoveryOnly = false;
+      seed.savedJobs = [];
+      seed.discovery.pendingDiscoveryJobs = [];
+      seed.discovery.discoveryLedger = [];
+      const baseRepository = createInMemoryJobFinderRepository(seed);
+      const firstStarted = createDeferred<void>();
+      const secondQueued = createDeferred<void>();
+      const secondStarted = createDeferred<void>();
+      const releaseFirst = createDeferred<void>();
+      const releaseSecond = createDeferred<void>();
+      const upsertIds: string[] = [];
+      let sourceWrites = 0;
+      const repository: RaceRepository = {
+        ...baseRepository,
+        async commitSavedJobDelta(input) {
+          if ((input.upserts?.length ?? 0) > 0) {
+            sourceWrites += 1;
+            if (sourceWrites === 1) {
+              firstStarted.resolve();
+              await releaseFirst.promise;
+            } else if (sourceWrites === 2) {
+              secondStarted.resolve();
+              await releaseSecond.promise;
+            }
+            upsertIds.push(...(input.upserts ?? []).map((job) => job.id));
+          }
+          return baseRepository.commitSavedJobDelta(input);
+        },
+      };
+      const createWriter =
+        discoverySavedJobWriter.createDiscoverySavedJobWriter;
+      const writerSpy = vi
+        .spyOn(discoverySavedJobWriter, "createDiscoverySavedJobWriter")
+        .mockImplementation((input) => {
+          const writer = createWriter(input);
+          return {
+            ...writer,
+            persist(update) {
+              const result = writer.persist(update);
+              // Synchronize with the second source's queued boundary, before
+              // either durable write is released. Assertions below read storage.
+              if (
+                update?.(seed.discovery).activeRun?.summary.jobsPersisted === 4
+              )
+                secondQueued.resolve();
+              return result;
+            },
+          };
+        });
+      const harness = createRaceHarness(repository);
+      const controller = new AbortController();
+      const runPromise = harness.workspaceService.runAgentDiscovery(
+        (event) => harness.events.push(event),
+        controller.signal,
+      );
+      try {
+        await firstStarted.promise;
+        harness.finishRun();
+        await secondQueued.promise;
+        expect(await baseRepository.listSavedJobIds()).toEqual([]);
+        expect(
+          (await baseRepository.getDiscoveryState()).activeRun?.summary
+            .jobsPersisted,
+        ).toBe(0);
+
+        releaseFirst.resolve();
+        await secondStarted.promise;
+        const firstState = await baseRepository.getDiscoveryState();
+        expect(await baseRepository.listSavedJobIds()).toHaveLength(1);
+        expect(firstState.activeRun?.summary.jobsPersisted).toBe(1);
+        expect(firstState.discoveryLedger).toHaveLength(1);
+        expect(
+          firstState.activeRun?.targetExecutions.find(
+            (target) => target.targetId === "target_fast_board",
+          ),
+        ).toMatchObject({ state: "completed", jobsPersisted: 1 });
+        expect(
+          firstState.activeRun?.targetExecutions.find(
+            (target) => target.targetId === "target_slow_board",
+          )?.jobsPersisted,
+        ).toBe(0);
+
+        if (cancel) controller.abort();
+        releaseSecond.resolve();
+        const snapshot = await runPromise;
+        const finalState = await baseRepository.getDiscoveryState();
+        expect(await baseRepository.listSavedJobIds()).toHaveLength(4);
+        expect(new Set(upsertIds).size).toBe(4);
+        expect(upsertIds).toHaveLength(4);
+        expect(finalState.discoveryLedger).toHaveLength(4);
+        expect(snapshot.recentDiscoveryRuns[0]).toMatchObject({
+          state: cancel ? "cancelled" : "completed",
+          summary: { jobsPersisted: 4, validJobsFound: 4 },
+        });
+      } finally {
+        releaseFirst.resolve();
+        releaseSecond.resolve();
+        harness.finishRun();
+        await runPromise.catch(() => {});
+        harness.cleanup();
+        writerSpy.mockRestore();
+      }
+    },
+    30_000,
+  );
+
   test("per-target and final completions pair saved-job deltas with discovery updates in one commit", async () => {
     const baseRepository = createInMemoryJobFinderRepository(createRaceSeed());
     let pairedDeltaCount = 0;
@@ -467,11 +578,9 @@ describe("paired completion commits", () => {
       expect(snapshot.recentDiscoveryRuns[0]?.summary.outcome).toBe(
         "completed",
       );
-      // The fourth paired commit records final per-plan membership together
-      // with the frozen retention counts. It is deliberately not a bare job
-      // write: readers must never see membership without the run report that
-      // explains it.
-      expect(pairedDeltaCount).toBe(4);
+      // Revalidated rows and final plan membership remain paired with run
+      // state. The two run-only completions do not issue empty row updates.
+      expect(pairedDeltaCount).toBe(2);
       expect(bareDeltaCount).toBe(0);
     } finally {
       harness.cleanup();

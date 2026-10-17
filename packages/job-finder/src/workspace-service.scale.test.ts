@@ -268,7 +268,10 @@ describe("workspace snapshot scale", () => {
     expect(settingsSnapshot.discoveryJobs).toHaveLength(SAVED_JOB_COUNT);
 
     const initialSerializeStartedAt = performance.now();
-    const initialSerialized = serializeStableSnapshot(settingsSnapshot);
+    // Both sides go through the same schema, so defaults and key order match.
+    const initialSerialized = serializeStableSnapshot(
+      JobFinderWorkspaceSnapshotSchema.parse(settingsSnapshot),
+    );
     const initialSerializeMs = performance.now() - initialSerializeStartedAt;
     const serializedBytes = Buffer.byteLength(initialSerialized, "utf8");
 

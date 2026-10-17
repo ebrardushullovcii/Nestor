@@ -847,7 +847,7 @@ ${ownSentence}`,
     );
   });
 
-  test("validateResumeDraft blocks preview-derived content without candidate traceability", () => {
+  test("validateResumeDraft notes preview-derived content without candidate traceability, without blocking", () => {
     const seed = createSeed();
     const profile = {
       ...seed.profile,
@@ -881,7 +881,7 @@ ${ownSentence}`,
     const factualReviewIssue = validation.issues.find(
       (issue) => issue.category === "low_confidence_fact",
     );
-    expect(factualReviewIssue?.severity).toBe("error");
+    expect(factualReviewIssue?.severity).toBe("info");
     expect(factualReviewIssue?.message).toMatch(
       /needs factual review before approval/i,
     );
@@ -940,7 +940,7 @@ ${ownSentence}`,
     ).toBe(true);
   });
 
-  test("blocks an untraceable generated summary when another section is grounded", () => {
+  test("notes an untraceable generated summary when another section is grounded", () => {
     const { profile, job } = getSeedContext();
     const candidateSourceRef = {
       id: "resume_source_profile_summary",
@@ -964,7 +964,7 @@ ${ownSentence}`,
       expect.arrayContaining([
         expect.objectContaining({
           category: "low_confidence_fact",
-          severity: "error",
+          severity: "info",
         }),
       ]),
     );
@@ -997,7 +997,7 @@ ${ownSentence}`,
     ).toBe(false);
   });
 
-  test("validateResumeDraft flags page overflow at three pages as an error", () => {
+  test("validateResumeDraft notes page overflow quietly, never as a blocker", () => {
     const { profile, job } = getSeedContext();
     const validation = validateResumeDraft({
       draft: createBaseDraft(),
@@ -1010,7 +1010,7 @@ ${ownSentence}`,
       expect.arrayContaining([
         expect.objectContaining({
           category: "page_overflow",
-          severity: "error",
+          severity: "info",
         }),
       ]),
     );
@@ -1032,8 +1032,9 @@ ${ownSentence}`,
       expect.arrayContaining([
         expect.objectContaining({
           category: "page_overflow",
-          severity: "warning",
-          message: "The exported resume exceeded the 1-page target.",
+          severity: "info",
+          message:
+            "The resume runs to 2 pages; the target is 1. Hide lines you do not need, or keep it as it is.",
         }),
       ]),
     );
@@ -1074,7 +1075,7 @@ ${ownSentence}`,
       expect.arrayContaining([
         expect.objectContaining({
           category: "page_overflow",
-          severity: "error",
+          severity: "info",
         }),
       ]),
     );
@@ -1102,7 +1103,7 @@ ${ownSentence}`,
     ]);
   });
 
-  test("validateResumeDraft catches unchecked absolutes and near repetition", () => {
+  test("validateResumeDraft leaves unchecked lines alone and catches near repetition", () => {
     const { profile, job } = getSeedContext();
     const draft = updateSection(
       createBaseDraft(),
@@ -1126,12 +1127,16 @@ ${ownSentence}`,
 
     const validation = validateResumeDraft({ draft, job, profile });
 
+    // A line the AI has not checked yet does not wait on the person.
+    expect(
+      validation.issues.some(
+        (issue) =>
+          issue.category === "unsupported_claim" &&
+          issue.bulletId === "claim_quality_tone_1",
+      ),
+    ).toBe(false);
     expect(validation.issues).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          category: "unsupported_claim",
-          bulletId: "claim_quality_tone_1",
-        }),
         expect.objectContaining({
           category: "duplicate_bullet",
           bulletId: "claim_quality_tone_5",
@@ -1474,11 +1479,8 @@ ${ownSentence}`,
     );
   });
 
-  test("maps the model's verdicts to statuses and gates confirmations by locator and hash", () => {
+  test("maps the model's verdicts to statuses; only an unbacked generated line blocks, bound to locator and hash", () => {
     const { profile, job } = getSeedContext();
-    // The model calls one line a stretch and the other supported; the
-    // summary repeats the person's own words. The stretch is the only
-    // confirmation-gated row.
     const groundedDraft = updateSection(
       createBaseDraft(),
       "section_summary",
@@ -1497,6 +1499,7 @@ ${ownSentence}`,
           bullets: createBullets("grounding_confirm", [
             "Championed resilient delivery improvements across organizations.",
             "Delivered the design system rollout across core product surfaces.",
+            "Ran the entire cloud migration single-handedly.",
           ]),
         })),
       }),
@@ -1507,47 +1510,56 @@ ${ownSentence}`,
         "stretch",
       "Delivered the design system rollout across core product surfaces.":
         "supported",
+      "Ran the entire cloud migration single-handedly.": "unsupported",
     });
     const validation = validateResumeDraft({
       draft: checkedDraft,
       job,
       profile,
     });
-    const weakClaim = validation.claimAssessments.find(
+    const stretchClaim = validation.claimAssessments.find(
       (assessment) => assessment.bulletId === "grounding_confirm_1",
     );
     const paraphraseClaim = validation.claimAssessments.find(
       (assessment) => assessment.bulletId === "grounding_confirm_2",
     );
+    const unbackedClaim = validation.claimAssessments.find(
+      (assessment) => assessment.bulletId === "grounding_confirm_3",
+    );
 
-    expect(weakClaim).toMatchObject({
+    // A stretch was accepted by choosing Aggressive: no chore, no block.
+    expect(stretchClaim).toMatchObject({
       claimOrigin: "ai_generated",
       status: "confirm_needed",
       verifier: "model_fact_check_v1",
     });
     expect(
       validation.issues.some(
-        (issue) =>
-          issue.category === "claim_confirmation_needed" &&
-          issue.severity === "warning" &&
-          issue.bulletId === "grounding_confirm_1",
+        (issue) => issue.category === "claim_confirmation_needed",
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(paraphraseClaim).toMatchObject({
       claimOrigin: "ai_generated",
       status: "paraphrase",
     });
+    expect(unbackedClaim).toMatchObject({ status: "unsupported" });
+    expect(
+      hasBlockingResumeClaimAssessment({
+        validation: { claimAssessments: [stretchClaim!, paraphraseClaim!] },
+        draft,
+      }),
+    ).toBe(false);
     expect(hasBlockingResumeClaimAssessment({ validation, draft })).toBe(true);
 
     const confirmation = ResumeClaimConfirmationSchema.parse({
-      id: "claim_confirmation_grounding_1",
+      id: "claim_confirmation_grounding_3",
       draftId: draft.id,
-      field: weakClaim?.field ?? "section_bullet",
-      sectionId: weakClaim?.sectionId ?? "",
-      entryId: weakClaim?.entryId ?? null,
-      bulletId: weakClaim?.bulletId ?? null,
+      field: unbackedClaim?.field ?? "section_bullet",
+      sectionId: unbackedClaim?.sectionId ?? "",
+      entryId: unbackedClaim?.entryId ?? null,
+      bulletId: unbackedClaim?.bulletId ?? null,
       confirmedClaimContentHash: fnv1a32(
-        normalizeText(weakClaim?.claimText ?? ""),
+        normalizeText(unbackedClaim?.claimText ?? ""),
       ),
       ownershipStatement: resumeClaimOwnershipStatement,
       confirmedAt: "2026-08-26T10:00:00.000Z",
@@ -1558,124 +1570,92 @@ ${ownSentence}`,
     ).toBe(false);
 
     // A cross-draft confirmation never satisfies the gate.
-    const foreignConfirmation = {
-      ...confirmation,
-      id: "claim_confirmation_foreign_draft",
-      draftId: "resume_draft_elsewhere",
-    };
     expect(
       hasBlockingResumeClaimAssessment({
         validation,
-        draft: { ...draft, claimConfirmations: [foreignConfirmation] },
+        draft: {
+          ...draft,
+          claimConfirmations: [
+            {
+              ...confirmation,
+              id: "claim_confirmation_foreign_draft",
+              draftId: "resume_draft_elsewhere",
+            },
+          ],
+        },
       }),
     ).toBe(true);
 
-    // A content-hash change re-blocks even with a stored confirmation:
-    // origin flips or wording edits alone cannot clear the gate.
-    const rewordedValidation = {
-      ...validation,
-      claimAssessments: validation.claimAssessments.map((assessment) =>
-        assessment.id === weakClaim?.id
-          ? { ...assessment, contentHash: fnv1a32("reworded claim") }
-          : assessment,
-      ),
-    };
+    // A reworded line needs its own approval.
     expect(
       hasBlockingResumeClaimAssessment({
-        validation: rewordedValidation,
+        validation: {
+          ...validation,
+          claimAssessments: validation.claimAssessments.map((assessment) =>
+            assessment.id === unbackedClaim?.id
+              ? { ...assessment, contentHash: fnv1a32("reworded claim") }
+              : assessment,
+          ),
+        },
         draft: confirmedDraft,
       }),
     ).toBe(true);
 
-    const originFlippedRow = {
-      ...(weakClaim as NonNullable<typeof weakClaim>),
-      claimOrigin: "user_edited" as const,
-    };
+    // The person's own line is theirs, whatever the checker says.
     expect(
       hasBlockingResumeClaimAssessment({
-        validation: { claimAssessments: [originFlippedRow] },
+        validation: {
+          claimAssessments: [
+            { ...unbackedClaim!, claimOrigin: "user_edited" as const },
+          ],
+        },
         draft,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  test("fails closed on stale verifier currency while keeping user prose informational", () => {
+  test("older verifiers follow the same rule: only an unbacked generated line blocks", () => {
     const { profile, job } = getSeedContext();
     const baseDraft = createBaseDraft();
     const validation = validateResumeDraft({ draft: baseDraft, job, profile });
-    const generatedRow =
-      validation.claimAssessments.find(
-        (assessment) =>
-          assessment.claimOrigin === "ai_generated" &&
-          assessment.status !== "unsupported",
-      ) ?? validation.claimAssessments[0];
-
-    if (!generatedRow) {
+    const row = validation.claimAssessments[0];
+    if (!row) {
       throw new Error("Expected at least one claim assessment.");
     }
-
-    // v1 rows predate the converged verifier: generated claims stay blocked
-    // pending revalidation regardless of their recorded status.
-    const staleGeneratedRow = {
-      ...generatedRow,
-      verifier: "deterministic_candidate_evidence_v1" as const,
-    };
-    expect(
+    const blocks = (overrides: Partial<typeof row>) =>
       hasBlockingResumeClaimAssessment({
-        validation: { claimAssessments: [staleGeneratedRow] },
+        validation: { claimAssessments: [{ ...row, ...overrides }] },
         draft: baseDraft,
-      }),
-    ).toBe(true);
+      });
 
-    // User-authored v1 rows keep legacy semantics: only hard unsupported
-    // verdicts blocked before v2 existed.
-    const staleUserExactRow = {
-      ...generatedRow,
-      claimOrigin: "user_edited" as const,
-      status: "exact" as const,
-      verifier: "deterministic_candidate_evidence_v1" as const,
-    };
-    const staleUserUnsupportedRow = {
-      ...staleUserExactRow,
-      status: "unsupported" as const,
-    };
     expect(
-      hasBlockingResumeClaimAssessment({
-        validation: { claimAssessments: [staleUserExactRow] },
-        draft: baseDraft,
+      blocks({
+        claimOrigin: "ai_generated",
+        status: "review",
+        verifier: "deterministic_candidate_evidence_v1",
       }),
     ).toBe(false);
     expect(
-      hasBlockingResumeClaimAssessment({
-        validation: { claimAssessments: [staleUserUnsupportedRow] },
-        draft: baseDraft,
+      blocks({
+        claimOrigin: "ai_generated",
+        status: "unsupported",
+        verifier: "deterministic_candidate_evidence_v1",
       }),
     ).toBe(true);
-
-    // Under v2, hard unsupported gaps block regardless of origin, while
-    // review-status user prose stays informational.
-    const v2UserReviewRow = {
-      ...generatedRow,
-      claimOrigin: "user_edited" as const,
-      status: "review" as const,
-      verifier: "deterministic_candidate_evidence_v2" as const,
-    };
-    const v2UserUnsupportedRow = {
-      ...v2UserReviewRow,
-      status: "unsupported" as const,
-    };
     expect(
-      hasBlockingResumeClaimAssessment({
-        validation: { claimAssessments: [v2UserReviewRow] },
-        draft: baseDraft,
+      blocks({
+        claimOrigin: "user_edited",
+        status: "unsupported",
+        verifier: "deterministic_candidate_evidence_v2",
       }),
     ).toBe(false);
     expect(
-      hasBlockingResumeClaimAssessment({
-        validation: { claimAssessments: [v2UserUnsupportedRow] },
-        draft: baseDraft,
+      blocks({
+        claimOrigin: "user_edited",
+        status: "review",
+        verifier: "deterministic_candidate_evidence_v2",
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 

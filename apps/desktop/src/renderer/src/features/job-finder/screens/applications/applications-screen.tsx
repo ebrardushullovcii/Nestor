@@ -1,3 +1,4 @@
+import { LIST_DETAIL_COLUMNS_CLASS } from "../../components/list-detail-columns";
 import { projectApplicationRecordsActivity } from "@nordri/contracts";
 import type { ReactNode } from "react";
 import { useQuestionAnswerDrafts } from "../actions/use-question-answer-drafts";
@@ -9,14 +10,14 @@ import type {
   ApplicationCrmExportFormat,
   ApplicationCrmMutationInput,
   ApplicationCrmSettings,
-  ApplicationAttempt,
+  ApplicationAttemptListRow,
   ApplicationAutomationMode,
   ApplicationRecord,
   ApplyRunDetails,
   ClearApplicationAnswerCommandInput,
   CompanyEntity,
   GlobalDailyApplicationPreparationCapacity,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   RecordOutcomeInput,
   SaveApplicationAnswerCommandInput,
   JobFinderApplyConsentActionInput,
@@ -91,20 +92,22 @@ export function ApplicationsScreen(props: {
   actionMessage?: string | null;
   searchPlanName?: string | undefined;
   hasOtherPlanApplications?: boolean;
-  applicationAttempts: readonly ApplicationAttempt[];
+  applicationAttempts: readonly ApplicationAttemptListRow[];
   applicationRecords: readonly ApplicationRecord[];
-  applyRuns: JobFinderWorkspaceSnapshot["applyRuns"];
-  applyJobResults: JobFinderWorkspaceSnapshot["applyJobResults"];
+  applyRuns: JobFinderRendererWorkspaceSnapshot["applyRuns"];
+  applyJobResults: JobFinderRendererWorkspaceSnapshot["applyJobResults"];
   /** The person's pause, so a job held by it reads Paused, not Filling in. */
-  activityControl?: JobFinderWorkspaceSnapshot["activityControl"] | null;
+  activityControl?:
+    | JobFinderRendererWorkspaceSnapshot["activityControl"]
+    | null;
   /**
    * Live user-action requests, so the finished-run summary counts this run's
    * share of the same Needs you population the header badge totals.
    */
-  userActionRequests?: JobFinderWorkspaceSnapshot["userActionRequests"];
+  userActionRequests?: JobFinderRendererWorkspaceSnapshot["userActionRequests"];
   companies?: readonly CompanyEntity[];
   dailyPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
-  discoveryJobs: JobFinderWorkspaceSnapshot["discoveryJobs"];
+  discoveryJobs: JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
   isApplyPending: boolean;
   isApplyRequestPending: (requestId: string) => boolean;
   isApplyRunPending: (runId: string) => boolean;
@@ -151,7 +154,7 @@ export function ApplicationsScreen(props: {
    */
   selectedApplyRunId: string | null;
   onSelectRecord: (recordId: string) => void;
-  selectedAttempt: ApplicationAttempt | null;
+  selectedAttempt: ApplicationAttemptListRow | null;
   selectedRecord: ApplicationRecord | null;
   crmSettings?: ApplicationCrmSettings;
   onMutateApplicationCrm?: (
@@ -361,7 +364,7 @@ export function ApplicationsScreen(props: {
   const latestApplyResultByRecordId = useMemo(() => {
     const latest = new Map<
       string,
-      JobFinderWorkspaceSnapshot["applyJobResults"][number]
+      JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
     >();
     const runsById = new Map(applyRuns.map((run) => [run.id, run]));
     for (const result of applyJobResults) {
@@ -1049,7 +1052,7 @@ export function ApplicationsScreen(props: {
         className={
           workspaceView === "crm"
             ? "grid min-w-0 items-stretch gap-4"
-            : "grid min-w-0 items-stretch gap-4 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(22rem,0.95fr)_minmax(30rem,1.45fr)] assistant-docked:xl:grid-cols-[minmax(16rem,0.95fr)_minmax(0,1.45fr)] xl:items-start xl:overflow-hidden"
+            : `grid min-w-0 items-stretch gap-4 xl:h-full xl:min-h-0 ${LIST_DETAIL_COLUMNS_CLASS} xl:items-start xl:overflow-hidden`
         }
         id="applications-workspace-content"
       >

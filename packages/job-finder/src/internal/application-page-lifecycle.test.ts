@@ -550,16 +550,16 @@ test("skipping a waiting job preserves its filling sibling and the sibling can f
 
 test("Prepare again opens a fresh form when the earlier page cannot accept the approved letter", async () => {
   const seed = seedPages();
-  seed.applyJobResults![0] = ApplyJobResultSchema.parse({
-    ...seed.applyJobResults![0],
+  seed.applyJobResults[0] = ApplyJobResultSchema.parse({
+    ...seed.applyJobResults[0],
     reviewCard: {
       siteLabel: "Synthetic careers",
       preparedAt: now,
       letter: { text: "Earlier letter", needsRefresh: true },
     },
   });
-  const transferApplicationPageBinding = vi.fn(async () => true);
-  const releaseApplicationPageBinding = vi.fn(async () => true);
+  const transferApplicationPageBinding = vi.fn(() => Promise.resolve(true));
+  const releaseApplicationPageBinding = vi.fn(() => Promise.resolve(true));
   const harness = createWorkspaceServiceHarness({
     seed,
     browserRuntime: {

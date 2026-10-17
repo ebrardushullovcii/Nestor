@@ -6,9 +6,10 @@
  * evidence only. Ambiguous or near matches never merge silently; they surface
  * as explicit `pending` merge-review candidates that require a user decision.
  *
- * Every mutating operation returns freshly schema-parsed values and never
- * mutates its inputs. Ids for newly created companies and all timestamps are
- * supplied by the caller; the operations never mint ids or times themselves.
+ * Mutating operations validate their inputs and return private values without
+ * mutating the inputs. Reconciliation validates new fields as they are added
+ * instead of reparsing the entire growing company graph. Ids and timestamps
+ * are supplied by the caller; the operations never mint them themselves.
  */
 
 import {
@@ -146,7 +147,9 @@ function addToIndex(
   if (!key) return;
   const existing = index.get(key);
   if (existing) {
-    if (!existing.includes(id)) existing.push(id);
+    // Each company is indexed in one pass. A duplicate key for that company
+    // can only be adjacent; scanning a popular shared domain is quadratic.
+    if (existing[existing.length - 1] !== id) existing.push(id);
   } else {
     index.set(key, [id]);
   }
@@ -211,15 +214,170 @@ export type ReconcileCompaniesResult =
     }
   | { ok: false; failure: ReconcileCompaniesFailure };
 
+type CompanyJobEvidence = Pick<
+  SavedJob,
+  | "id"
+  | "company"
+  | "employerDomain"
+  | "source"
+  | "firstSeenAt"
+  | "lastSeenAt"
+  | "lastVerifiedActiveAt"
+  | "discoveredAt"
+> & { listingHosts?: readonly string[] };
+type CompanyApplicationEvidence = Pick<
+  ApplicationRecord,
+  "id" | "jobId" | "company" | "lastUpdatedAt"
+>;
 type Evidence =
-  | { kind: "job"; job: SavedJob }
-  | { kind: "application"; record: ApplicationRecord };
+  | { kind: "job"; job: CompanyJobEvidence }
+  | { kind: "application"; record: CompanyApplicationEvidence };
+
+// Cache only immutable inputs, and only the facts reconciliation uses. Keeping
+// parsed SavedJobs here would retain every listing and provenance collection.
+const immutableJobEvidence = new WeakMap<SavedJob, CompanyJobEvidence>();
+const immutableApplicationEvidence = new WeakMap<
+  ApplicationRecord,
+  CompanyApplicationEvidence
+>();
+
+function listingHost(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    return normalizeEmployerDomain(new URL(url).hostname);
+  } catch {
+    return null;
+  }
+}
+
+function deeplyFrozen(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return true;
+  return Object.isFrozen(value) && Object.values(value).every(deeplyFrozen);
+}
+
+function readCompanyJobEvidence(
+  job: SavedJob,
+):
+  | { ok: true; evidence: CompanyJobEvidence }
+  | { ok: false; error: ZodErrorLike } {
+  const cached = immutableJobEvidence.get(job);
+  if (cached) return { ok: true, evidence: cached };
+  const parsed = SavedJobSchema.safeParse(job);
+  if (!parsed.success) return { ok: false, error: parsed.error };
+  const value = parsed.data;
+  const hosts = new Set<string>();
+  const addHost = (url: string | null | undefined): void => {
+    const host = listingHost(url);
+    if (host) hosts.add(host);
+  };
+  addHost(value.canonicalUrl);
+  addHost(value.applicationUrl);
+  for (const sighting of value.provenance) {
+    addHost(sighting.startingUrl);
+    addHost(sighting.listingUrl);
+    addHost(sighting.applicationUrl);
+    addHost(sighting.pageApplyUrl);
+  }
+  const evidence: CompanyJobEvidence = {
+    id: value.id,
+    company: value.company,
+    employerDomain: value.employerDomain,
+    source: value.source,
+    firstSeenAt: value.firstSeenAt,
+    lastSeenAt: value.lastSeenAt,
+    lastVerifiedActiveAt: value.lastVerifiedActiveAt,
+    discoveredAt: value.discoveredAt,
+    listingHosts: [...hosts],
+  };
+  if (deeplyFrozen(job)) immutableJobEvidence.set(job, evidence);
+  return { ok: true, evidence };
+}
+
+function readCompanyApplicationEvidence(
+  record: ApplicationRecord,
+):
+  | { ok: true; evidence: CompanyApplicationEvidence }
+  | { ok: false; error: ZodErrorLike } {
+  const cached = immutableApplicationEvidence.get(record);
+  if (cached) return { ok: true, evidence: cached };
+  const parsed = ApplicationRecordSchema.safeParse(record);
+  if (!parsed.success) return { ok: false, error: parsed.error };
+  const value = parsed.data;
+  const evidence: CompanyApplicationEvidence = {
+    id: value.id,
+    jobId: value.jobId,
+    company: value.company,
+    lastUpdatedAt: value.lastUpdatedAt,
+  };
+  if (deeplyFrozen(record)) immutableApplicationEvidence.set(record, evidence);
+  return { ok: true, evidence };
+}
+
+type CompanyMembership = {
+  jobIds: Set<string>;
+  applicationRecordIds: Set<string>;
+  domains: Set<string>;
+  aliases: Set<string>;
+  sourceHistory: Map<string, CompanySourceHistoryRef>;
+  sourceApplications: Map<string, Set<string>>;
+};
+
+function companyMembership(company: CompanyEntity): CompanyMembership {
+  const sourceHistory = new Map<string, CompanySourceHistoryRef>();
+  const sourceApplications = new Map<string, Set<string>>();
+  for (const ref of company.sourceHistory) {
+    if (sourceHistory.has(ref.sourceId)) continue;
+    sourceHistory.set(ref.sourceId, ref);
+    sourceApplications.set(ref.sourceId, new Set(ref.applicationRecordIds));
+  }
+  return {
+    jobIds: new Set(company.jobIds),
+    applicationRecordIds: new Set(company.applicationRecordIds),
+    domains: new Set(
+      company.domains.map((domain) => normalizeEmployerDomain(domain.domain)),
+    ),
+    aliases: new Set([
+      normalizeCompanyName(company.canonicalName),
+      ...company.aliases.map((alias) => alias.normalized),
+    ]),
+    sourceHistory,
+    sourceApplications,
+  };
+}
 
 type CompanyIndexes = {
   byId: Map<string, number>;
   domainIndex: Map<string, string[]>;
   nameIndex: Map<string, string[]>;
+  /** Company pairs with a merge-review candidate either way round. */
+  recordedPairs: Map<string, Set<string>>;
+  /** Ambiguous groups already flagged in this pass. */
+  flaggedGroups: WeakMap<readonly string[], number>;
+  memberships: Map<string, CompanyMembership>;
+  sharedListingHosts: Set<string>;
 };
+
+function hasCompanyPair(
+  indexes: CompanyIndexes,
+  firstId: string,
+  secondId: string,
+): boolean {
+  const [primary, secondary] =
+    firstId < secondId ? [firstId, secondId] : [secondId, firstId];
+  return indexes.recordedPairs.get(primary)?.has(secondary) ?? false;
+}
+
+function recordCompanyPair(
+  indexes: CompanyIndexes,
+  firstId: string,
+  secondId: string,
+): void {
+  const [primary, secondary] =
+    firstId < secondId ? [firstId, secondId] : [secondId, firstId];
+  const pairs = indexes.recordedPairs.get(primary);
+  if (pairs) pairs.add(secondary);
+  else indexes.recordedPairs.set(primary, new Set([secondary]));
+}
 
 type Resolution =
   | { status: "matched"; companyId: string }
@@ -230,10 +388,23 @@ function buildIndexes(companies: readonly CompanyEntity[]): CompanyIndexes {
   const byId = new Map<string, number>();
   const domainIndex = new Map<string, string[]>();
   const nameIndex = new Map<string, string[]>();
+  const indexes: CompanyIndexes = {
+    byId,
+    domainIndex,
+    nameIndex,
+    recordedPairs: new Map(),
+    flaggedGroups: new WeakMap(),
+    memberships: new Map(),
+    sharedListingHosts: new Set(),
+  };
 
   for (let index = 0; index < companies.length; index += 1) {
     const company = companies[index]!;
     byId.set(company.id, index);
+    indexes.memberships.set(company.id, companyMembership(company));
+    for (const candidate of company.mergeReviewCandidates) {
+      recordCompanyPair(indexes, company.id, candidate.candidateCompanyId);
+    }
     for (const domain of company.domains) {
       addToIndex(
         domainIndex,
@@ -253,7 +424,7 @@ function buildIndexes(companies: readonly CompanyEntity[]): CompanyIndexes {
     }
   }
 
-  return { byId, domainIndex, nameIndex };
+  return indexes;
 }
 
 function resolveEvidence(
@@ -280,7 +451,7 @@ function resolveEvidence(
   if (nameMatches.length > 1) {
     return {
       status: "ambiguous",
-      companyIds: [...nameMatches],
+      companyIds: nameMatches,
       reason: `Multiple companies claim the company name "${normalizedName}".`,
     };
   }
@@ -288,7 +459,9 @@ function resolveEvidence(
   if (
     nameMatches.length === 1 &&
     domainMatches.length === 1 &&
-    nameMatches[0] !== domainMatches[0]
+    nameMatches[0] !== domainMatches[0] &&
+    (normalizedDomain === null ||
+      !indexes.sharedListingHosts.has(normalizedDomain))
   ) {
     return {
       status: "ambiguous",
@@ -314,87 +487,6 @@ function resolveCurrentJobOwner(
   return resolution.status === "matched" ? resolution.companyId : null;
 }
 
-function mergeSourceHistory(
-  current: readonly CompanySourceHistoryRef[],
-  evidence: Evidence,
-  now: string,
-  jobSourceById: ReadonlyMap<string, string>,
-): { refs: readonly CompanySourceHistoryRef[]; changed: boolean } {
-  let sourceId: string;
-  let firstSeenAt: string;
-  let lastSeenAt: string;
-  let applicationRecordId: string | null;
-
-  if (evidence.kind === "job") {
-    const job = evidence.job;
-    sourceId = job.source;
-    firstSeenAt = job.firstSeenAt ?? job.discoveredAt ?? now;
-    lastSeenAt =
-      job.lastSeenAt ?? job.lastVerifiedActiveAt ?? job.discoveredAt ?? now;
-    applicationRecordId = null;
-  } else {
-    sourceId = jobSourceById.get(evidence.record.jobId) ?? "application_record";
-    firstSeenAt = evidence.record.lastUpdatedAt;
-    lastSeenAt = evidence.record.lastUpdatedAt;
-    applicationRecordId = evidence.record.id;
-  }
-
-  const existingIndex = current.findIndex((ref) => ref.sourceId === sourceId);
-
-  if (existingIndex < 0) {
-    return {
-      refs: [
-        ...current,
-        CompanySourceHistoryRefSchema.parse({
-          id: sourceId,
-          sourceId,
-          firstSeenAt,
-          lastSeenAt,
-          applicationRecordIds:
-            applicationRecordId === null ? [] : [applicationRecordId],
-        }),
-      ],
-      changed: true,
-    };
-  }
-
-  const existing = current[existingIndex]!;
-  const nextFirstSeenAt =
-    Date.parse(existing.firstSeenAt) <= Date.parse(firstSeenAt)
-      ? existing.firstSeenAt
-      : firstSeenAt;
-  const nextLastSeenAt =
-    Date.parse(existing.lastSeenAt) >= Date.parse(lastSeenAt)
-      ? existing.lastSeenAt
-      : lastSeenAt;
-  const appIds = new Set(existing.applicationRecordIds);
-  if (applicationRecordId !== null) appIds.add(applicationRecordId);
-  const nextAppIds = [...appIds];
-  const changed =
-    nextFirstSeenAt !== existing.firstSeenAt ||
-    nextLastSeenAt !== existing.lastSeenAt ||
-    nextAppIds.length !== existing.applicationRecordIds.length ||
-    nextAppIds.some(
-      (id, appIndex) => id !== existing.applicationRecordIds[appIndex],
-    );
-
-  if (!changed) return { refs: current, changed: false };
-
-  return {
-    refs: current.map((ref, refIndex) =>
-      refIndex === existingIndex
-        ? CompanySourceHistoryRefSchema.parse({
-            ...ref,
-            firstSeenAt: nextFirstSeenAt,
-            lastSeenAt: nextLastSeenAt,
-            applicationRecordIds: nextAppIds,
-          })
-        : ref,
-    ),
-    changed: true,
-  };
-}
-
 function attachEvidence(input: {
   working: CompanyEntity[];
   indexes: CompanyIndexes;
@@ -408,82 +500,70 @@ function attachEvidence(input: {
     input;
   const index = indexes.byId.get(companyId);
   if (index === undefined) return;
+  // working is schema-parsed and privately owned by this reconciliation.
+  // Append to its arrays once instead of cloning the growing company per job.
   const company = working[index]!;
-
-  const jobIds = new Set(company.jobIds);
-  const applicationRecordIds = new Set(company.applicationRecordIds);
-  const domains = company.domains.map((domain) => ({ ...domain }));
-  const aliases = company.aliases.map((alias) => ({ ...alias }));
+  const membership = indexes.memberships.get(companyId)!;
   let changed = false;
 
   if (evidence.kind === "job") {
-    if (!jobIds.has(evidence.job.id)) {
-      jobIds.add(evidence.job.id);
+    if (!membership.jobIds.has(evidence.job.id)) {
+      membership.jobIds.add(evidence.job.id);
+      company.jobIds.push(evidence.job.id);
       changed = true;
     }
-
     const rawDomain = evidence.job.employerDomain;
     if (rawDomain !== null && rawDomain.trim() !== "") {
       const normalizedDomain = normalizeEmployerDomain(rawDomain);
-      if (
-        !domains.some(
-          (domain) =>
-            normalizeEmployerDomain(domain.domain) === normalizedDomain,
-        )
-      ) {
+      if (!membership.domains.has(normalizedDomain)) {
         const parsedDomain = CompanyDomainSchema.safeParse({
           domain: normalizedDomain,
-          primary: domains.length === 0,
+          primary: company.domains.length === 0,
           verifiedAt: null,
         });
         if (parsedDomain.success) {
-          domains.push(parsedDomain.data);
+          company.domains.push(parsedDomain.data);
+          membership.domains.add(normalizedDomain);
           addToIndex(indexes.domainIndex, normalizedDomain, companyId);
           changed = true;
-
-          const domainMatches = indexes.domainIndex.get(normalizedDomain) ?? [];
-          if (domainMatches.length > 1) {
-            flagAmbiguousPair(
+          for (const otherId of indexes.sharedListingHosts.has(normalizedDomain)
+            ? []
+            : (indexes.domainIndex.get(normalizedDomain) ?? [])) {
+            if (otherId === companyId) continue;
+            const candidate = ensureMergeCandidates(
               working,
               indexes,
-              domainMatches,
+              companyId,
+              otherId,
               `Multiple companies share the employer domain "${normalizedDomain}".`,
               now,
-              created,
             );
+            if (candidate) created.push(candidate);
           }
         }
       }
     }
-  } else {
-    if (!applicationRecordIds.has(evidence.record.id)) {
-      applicationRecordIds.add(evidence.record.id);
-      changed = true;
-    }
+  } else if (!membership.applicationRecordIds.has(evidence.record.id)) {
+    membership.applicationRecordIds.add(evidence.record.id);
+    company.applicationRecordIds.push(evidence.record.id);
+    changed = true;
   }
 
   const rawName =
     evidence.kind === "job" ? evidence.job.company : evidence.record.company;
   const normalizedName = normalizeCompanyName(rawName);
-  const canonicalNormalized = normalizeCompanyName(company.canonicalName);
-  const aliasExists =
-    normalizedName !== "" &&
-    (normalizedName === canonicalNormalized ||
-      aliases.some((alias) => alias.normalized === normalizedName));
-  if (!aliasExists && normalizedName !== "") {
-    aliases.push({
+  if (normalizedName !== "" && !membership.aliases.has(normalizedName)) {
+    company.aliases.push({
       alias: rawName,
       normalized: normalizedName,
       confidence: 1,
       identityAuthority: "unknown",
     });
+    membership.aliases.add(normalizedName);
     changed = true;
-
-    const authoritativeNameMatches =
-      indexes.nameIndex.get(normalizedName) ?? [];
-    const conflictingNameMatches = authoritativeNameMatches.filter(
-      (id) => id !== companyId,
-    );
+    const conflictingNameMatches = (
+      indexes.nameIndex.get(normalizedName) ?? []
+    ).filter((id) => id !== companyId);
     if (conflictingNameMatches.length > 0) {
       flagAmbiguousPair(
         working,
@@ -496,27 +576,66 @@ function attachEvidence(input: {
     }
   }
 
-  const sourceHistoryResult = mergeSourceHistory(
-    company.sourceHistory,
-    evidence,
-    now,
-    jobSourceById,
-  );
-  if (sourceHistoryResult.changed) changed = true;
+  const sourceId =
+    evidence.kind === "job"
+      ? evidence.job.source
+      : (jobSourceById.get(evidence.record.jobId) ?? "application_record");
+  const firstSeenAt =
+    evidence.kind === "job"
+      ? (evidence.job.firstSeenAt ?? evidence.job.discoveredAt ?? now)
+      : evidence.record.lastUpdatedAt;
+  const lastSeenAt =
+    evidence.kind === "job"
+      ? (evidence.job.lastSeenAt ??
+        evidence.job.lastVerifiedActiveAt ??
+        evidence.job.discoveredAt ??
+        now)
+      : evidence.record.lastUpdatedAt;
+  const applicationRecordId =
+    evidence.kind === "job" ? null : evidence.record.id;
+  const existing = membership.sourceHistory.get(sourceId);
+  if (!existing) {
+    const ref = CompanySourceHistoryRefSchema.parse({
+      id: sourceId,
+      sourceId,
+      firstSeenAt,
+      lastSeenAt,
+      applicationRecordIds:
+        applicationRecordId === null ? [] : [applicationRecordId],
+    });
+    company.sourceHistory.push(ref);
+    membership.sourceHistory.set(sourceId, ref);
+    membership.sourceApplications.set(
+      sourceId,
+      new Set(ref.applicationRecordIds),
+    );
+    changed = true;
+  } else {
+    if (Date.parse(firstSeenAt) < Date.parse(existing.firstSeenAt)) {
+      existing.firstSeenAt = firstSeenAt;
+      changed = true;
+    }
+    if (Date.parse(lastSeenAt) > Date.parse(existing.lastSeenAt)) {
+      existing.lastSeenAt = lastSeenAt;
+      changed = true;
+    }
+    const applicationIds = membership.sourceApplications.get(sourceId)!;
+    if (
+      applicationRecordId !== null &&
+      !applicationIds.has(applicationRecordId)
+    ) {
+      applicationIds.add(applicationRecordId);
+      existing.applicationRecordIds.push(applicationRecordId);
+      changed = true;
+    }
+  }
 
-  if (!changed) return;
-
-  const updatedAt = nextCompanyIntelligenceUpdatedAt(now, company.updatedAt);
-
-  working[index] = CompanyEntitySchema.parse({
-    ...company,
-    jobIds: [...jobIds],
-    applicationRecordIds: [...applicationRecordIds],
-    domains,
-    aliases,
-    sourceHistory: [...sourceHistoryResult.refs],
-    updatedAt,
-  });
+  if (changed) {
+    company.updatedAt = nextCompanyIntelligenceUpdatedAt(
+      now,
+      company.updatedAt,
+    );
+  }
 }
 
 function createCompanyEntity(input: {
@@ -618,16 +737,8 @@ function ensureMergeCandidates(
     (firstCreatedAt === secondCreatedAt && first.id < second.id);
   const primary = firstIsPrimary ? first : second;
   const secondary = firstIsPrimary ? second : first;
-  const primaryIndex = firstIsPrimary ? firstIndex : secondIndex;
-
-  const alreadyRecorded =
-    primary.mergeReviewCandidates.some(
-      (candidate) => candidate.candidateCompanyId === secondary.id,
-    ) ||
-    secondary.mergeReviewCandidates.some(
-      (candidate) => candidate.candidateCompanyId === primary.id,
-    );
-  if (alreadyRecorded) return null;
+  if (hasCompanyPair(indexes, primary.id, secondary.id)) return null;
+  recordCompanyPair(indexes, primary.id, secondary.id);
 
   const updatedAt = nextCompanyIntelligenceUpdatedAt(now, primary.updatedAt);
 
@@ -639,11 +750,10 @@ function ensureMergeCandidates(
     requiresUserDecision: true,
   });
 
-  working[primaryIndex] = CompanyEntitySchema.parse({
-    ...primary,
-    mergeReviewCandidates: [...primary.mergeReviewCandidates, candidate],
-    updatedAt,
-  });
+  // The company and the candidate are both parsed already; parsing the whole
+  // company again for each new pair made a crowded domain cubic.
+  primary.mergeReviewCandidates.push(candidate);
+  primary.updatedAt = updatedAt;
 
   return { companyId: primary.id, candidateCompanyId: secondary.id, reason };
 }
@@ -656,6 +766,10 @@ function flagAmbiguousPair(
   now: string,
   created: CreatedMergeCandidateSummary[],
 ): void {
+  // Every job of a shared domain resolves to the same group; its pairs
+  // need flagging once a pass, not once per job.
+  if (indexes.flaggedGroups.get(ids) === ids.length) return;
+  indexes.flaggedGroups.set(ids, ids.length);
   for (let firstIndex = 0; firstIndex < ids.length; firstIndex += 1) {
     for (
       let secondIndex = firstIndex + 1;
@@ -675,161 +789,317 @@ function flagAmbiguousPair(
   }
 }
 
-function namesAreNear(first: CompanyEntity, second: CompanyEntity): boolean {
-  const firstTokens = tokenSet(normalizeCompanyName(first.canonicalName));
-  const secondTokens = tokenSet(normalizeCompanyName(second.canonicalName));
-  if (firstTokens.length === 0 || secondTokens.length === 0) return false;
-  if (firstTokens.join(" ") === secondTokens.join(" ")) return false;
+// Business/legal suffixes describe a kind of company, not an employer identity.
+// These affect advisory similarity only; exact ownership still uses all tokens.
+const COMMON_COMPANY_TOKENS = new Set([
+  "inc",
+  "incorporated",
+  "corp",
+  "corporation",
+  "co",
+  "company",
+  "companies",
+  "ltd",
+  "limited",
+  "llc",
+  "llp",
+  "plc",
+  "gmbh",
+  "ag",
+  "sa",
+  "sas",
+  "bv",
+  "nv",
+  "group",
+  "holding",
+  "holdings",
+  "international",
+  "global",
+  "solutions",
+  "service",
+  "services",
+  "system",
+  "systems",
+  "technology",
+  "technologies",
+  "tech",
+  "software",
+  "lab",
+  "labs",
+  "laboratories",
+  "consulting",
+  "partners",
+  "ventures",
+  "enterprise",
+  "enterprises",
+  "business",
+  "businesses",
+]);
+const COMMON_LISTING_LABELS = new Set([
+  "jobs",
+  "job",
+  "careers",
+  "career",
+  "apply",
+]);
 
-  const firstSet = new Set(firstTokens);
-  const shared = secondTokens.filter((token) => firstSet.has(token)).length;
+type CompanySimilarity = {
+  normalizedName: string;
+  tokens: Set<string>;
+  numericKey: string;
+  exactNames: Set<string>;
+  domains: string[];
+};
+
+function companySimilarity(
+  company: CompanyEntity,
+  indexes: CompanyIndexes,
+): CompanySimilarity {
+  const normalizedName = normalizeCompanyName(company.canonicalName);
+  const tokens = tokenSet(normalizedName);
+  return {
+    normalizedName,
+    tokens: new Set(
+      tokens.filter(
+        (token) => !COMMON_COMPANY_TOKENS.has(token) && !/^\d+$/u.test(token),
+      ),
+    ),
+    numericKey: [...new Set(tokens.filter((token) => /^\d+$/u.test(token)))]
+      .sort()
+      .join(" "),
+    exactNames: new Set([
+      normalizedName,
+      ...company.aliases.map((alias) => alias.normalized),
+    ]),
+    domains: company.domains
+      .map((domain) => normalizeEmployerDomain(domain.domain))
+      .filter((domain) => !indexes.sharedListingHosts.has(domain)),
+  };
+}
+
+function namesAreNear(
+  first: CompanySimilarity,
+  second: CompanySimilarity,
+): boolean {
+  if (first.normalizedName === second.normalizedName) return false;
+  if (
+    first.numericKey &&
+    second.numericKey &&
+    first.numericKey !== second.numericKey
+  )
+    return false;
+  if (first.tokens.size === 0 || second.tokens.size === 0) return false;
+  let shared = 0;
+  for (const token of first.tokens) if (second.tokens.has(token)) shared += 1;
   if (shared === 0) return false;
-
-  const shorterLength = Math.min(firstTokens.length, secondTokens.length);
+  const shorterLength = Math.min(first.tokens.size, second.tokens.size);
   if (shared === shorterLength) return true;
-
-  const unionLength = firstTokens.length + secondTokens.length - shared;
-  return shared / unionLength >= 0.5;
+  return shared / (first.tokens.size + second.tokens.size - shared) >= 0.5;
 }
 
 function domainLabel(domain: string): string | null {
-  const normalized = normalizeEmployerDomain(domain);
-  if (!normalized) return null;
-  const label = normalized.split(".")[0];
-  return label || null;
-}
-
-function companiesShareExactDomain(
-  first: CompanyEntity,
-  second: CompanyEntity,
-): boolean {
-  const secondDomains = new Set(
-    second.domains.map((domain) => normalizeEmployerDomain(domain.domain)),
-  );
-  return first.domains.some((domain) =>
-    secondDomains.has(normalizeEmployerDomain(domain.domain)),
-  );
+  const label = domain.split(".")[0];
+  return label &&
+    !COMMON_LISTING_LABELS.has(label) &&
+    !COMMON_COMPANY_TOKENS.has(label)
+    ? label
+    : null;
 }
 
 function companiesShareExactName(
-  first: CompanyEntity,
-  second: CompanyEntity,
+  first: CompanySimilarity,
+  second: CompanySimilarity,
 ): boolean {
-  const firstKeys = new Set([
-    normalizeCompanyName(first.canonicalName),
-    ...first.aliases.map((alias) => alias.normalized),
-  ]);
-  const secondKeys = new Set([
-    normalizeCompanyName(second.canonicalName),
-    ...second.aliases.map((alias) => alias.normalized),
-  ]);
-  for (const key of firstKeys) {
-    if (key && secondKeys.has(key)) return true;
+  for (const name of first.exactNames) {
+    if (name && second.exactNames.has(name)) return true;
   }
   return false;
 }
 
 function domainsAreNear(
-  first: CompanyEntity,
-  second: CompanyEntity,
+  first: CompanySimilarity,
+  second: CompanySimilarity,
 ): { near: boolean; firstDomain: string | null; secondDomain: string | null } {
   for (const firstDomain of first.domains) {
     for (const secondDomain of second.domains) {
-      const firstNormalized = normalizeEmployerDomain(firstDomain.domain);
-      const secondNormalized = normalizeEmployerDomain(secondDomain.domain);
-      if (firstNormalized === secondNormalized) continue;
-      const firstLabel = domainLabel(firstNormalized);
-      const secondLabel = domainLabel(secondNormalized);
-      if (firstLabel !== null && firstLabel === secondLabel) {
-        return {
-          near: true,
-          firstDomain: firstNormalized,
-          secondDomain: secondNormalized,
-        };
+      if (firstDomain === secondDomain) continue;
+      const label = domainLabel(firstDomain);
+      if (label !== null && label === domainLabel(secondDomain)) {
+        return { near: true, firstDomain, secondDomain };
       }
     }
   }
   return { near: false, firstDomain: null, secondDomain: null };
 }
 
-/**
- * Flags near-name and near-domain conflicts between company pairs as explicit
- * `pending` merge-review candidates. Pairs that already share an exact domain
- * or exact name are skipped: those conflicts are already surfaced by the
- * ambiguity handling during evidence attachment.
- */
+function identifySharedListingHosts(
+  indexes: CompanyIndexes,
+  jobs: readonly CompanyJobEvidence[],
+): void {
+  const ownerByHost = new Map<string, string>();
+  const employerDomains = new Set(indexes.domainIndex.keys());
+  for (const job of jobs) {
+    if (job.employerDomain)
+      employerDomains.add(normalizeEmployerDomain(job.employerDomain));
+  }
+  const observe = (host: string, owner: string): void => {
+    const previous = ownerByHost.get(host);
+    if (previous !== undefined && previous !== owner)
+      indexes.sharedListingHosts.add(host);
+    else ownerByHost.set(host, owner);
+  };
+  for (const job of jobs) {
+    if (!isSpecificCompanyName(job.company)) continue;
+    const name = normalizeCompanyName(job.company);
+    const owners = indexes.nameIndex.get(name);
+    const owner =
+      owners?.length === 1 ? `company:${owners[0]!}` : `name:${name}`;
+    for (const host of job.listingHosts ?? []) {
+      observe(host, owner);
+      // A supplied employer domain may be the parent of the listing host.
+      // Inspect DNS label boundaries, without guessing a provider or suffix.
+      let suffix = host;
+      while (suffix.includes(".")) {
+        if (employerDomains.has(suffix)) observe(suffix, owner);
+        suffix = suffix.slice(suffix.indexOf(".") + 1);
+      }
+    }
+  }
+}
+
+function removeUnsupportedDerivedCandidates(
+  working: CompanyEntity[],
+  indexes: CompanyIndexes,
+  now: string,
+): void {
+  const features = working.map((company) =>
+    companySimilarity(company, indexes),
+  );
+  for (let index = 0; index < working.length; index += 1) {
+    const company = working[index]!;
+    const feature = features[index]!;
+    const retained = company.mergeReviewCandidates.filter((candidate) => {
+      // A person's decisions and other kinds of identity conflict stand.
+      if (
+        candidate.decision !== "pending" ||
+        !/^(Similar company name|Similar employer domain|Multiple companies share the employer domain) /u.test(
+          candidate.reason,
+        )
+      )
+        return true;
+      const otherIndex = indexes.byId.get(candidate.candidateCompanyId);
+      if (otherIndex === undefined) return true;
+      const other = features[otherIndex]!;
+      return (
+        namesAreNear(feature, other) ||
+        feature.domains.some((domain) => other.domains.includes(domain)) ||
+        domainsAreNear(feature, other).near
+      );
+    });
+    if (retained.length === company.mergeReviewCandidates.length) continue;
+    company.mergeReviewCandidates = retained;
+    company.updatedAt = nextCompanyIntelligenceUpdatedAt(
+      now,
+      company.updatedAt,
+    );
+  }
+  // A removed suggestion cannot keep its pair reserved: new evidence later in
+  // this reconciliation may supply a valid reason to suggest that same pair.
+  indexes.recordedPairs.clear();
+  for (const company of working) {
+    for (const candidate of company.mergeReviewCandidates) {
+      recordCompanyPair(indexes, company.id, candidate.candidateCompanyId);
+    }
+  }
+}
+
+/** Only informative name tokens or employer domains produce new suggestions. */
 function applyNearConflictCandidates(
   working: CompanyEntity[],
   indexes: CompanyIndexes,
   now: string,
   created: CreatedMergeCandidateSummary[],
 ): void {
-  const tokenIndex = new Map<string, string[]>();
-  for (const company of working) {
-    for (const token of tokenSet(normalizeCompanyName(company.canonicalName))) {
-      addToIndex(tokenIndex, token, company.id);
+  const features = working.map((company) =>
+    companySimilarity(company, indexes),
+  );
+  // Numeric identities get separate buckets: "Employer 1" and "Employer 2"
+  // must neither generate a suggestion nor require scanning every employer.
+  const tokenIndex = new Map<string, Map<string, number[]>>();
+  const domainIndex = new Map<string, number[]>();
+  for (let index = 0; index < working.length; index += 1) {
+    const feature = features[index]!;
+    for (const token of feature.tokens) {
+      let buckets = tokenIndex.get(token);
+      if (!buckets) {
+        buckets = new Map();
+        tokenIndex.set(token, buckets);
+      }
+      const bucket = buckets.get(feature.numericKey);
+      if (bucket) bucket.push(index);
+      else buckets.set(feature.numericKey, [index]);
+    }
+    for (const label of new Set(feature.domains.map(domainLabel))) {
+      if (!label) continue;
+      const bucket = domainIndex.get(label);
+      if (bucket) bucket.push(index);
+      else domainIndex.set(label, [index]);
     }
   }
 
-  const visited = new Set<string>();
-  for (const ids of tokenIndex.values()) {
-    for (let firstIndex = 0; firstIndex < ids.length; firstIndex += 1) {
-      for (
-        let secondIndex = firstIndex + 1;
-        secondIndex < ids.length;
-        secondIndex += 1
-      ) {
-        const firstId = ids[firstIndex]!;
-        const secondId = ids[secondIndex]!;
-        const pairKey =
-          firstId < secondId
-            ? `${firstId}|${secondId}`
-            : `${secondId}|${firstId}`;
-        if (visited.has(pairKey)) continue;
-        visited.add(pairKey);
-
-        const firstIndexInWorking = indexes.byId.get(firstId);
-        const secondIndexInWorking = indexes.byId.get(secondId);
-        if (
-          firstIndexInWorking === undefined ||
-          secondIndexInWorking === undefined
-        ) {
-          continue;
-        }
-        const first = working[firstIndexInWorking]!;
-        const second = working[secondIndexInWorking]!;
-
-        if (
-          companiesShareExactDomain(first, second) ||
-          companiesShareExactName(first, second)
-        ) {
-          continue;
-        }
-
-        const reasons: string[] = [];
-        if (namesAreNear(first, second)) {
-          reasons.push(
-            `Similar company name "${first.canonicalName}" vs "${second.canonicalName}".`,
-          );
-        }
-        const domainNear = domainsAreNear(first, second);
-        if (domainNear.near) {
-          reasons.push(
-            `Similar employer domain "${domainNear.firstDomain}" vs "${domainNear.secondDomain}".`,
-          );
-        }
-        if (reasons.length === 0) continue;
-
-        const candidate = ensureMergeCandidates(
-          working,
-          indexes,
-          firstId,
-          secondId,
-          reasons.join(" "),
-          now,
-        );
-        if (candidate !== null) created.push(candidate);
+  for (let firstIndex = 0; firstIndex < working.length; firstIndex += 1) {
+    const first = working[firstIndex]!;
+    const firstFeature = features[firstIndex]!;
+    const possible = new Set<number>();
+    const add = (ids: readonly number[]): void => {
+      for (const id of ids) if (id > firstIndex) possible.add(id);
+    };
+    for (const token of firstFeature.tokens) {
+      const buckets = tokenIndex.get(token)!;
+      if (firstFeature.numericKey) {
+        add(buckets.get(firstFeature.numericKey) ?? []);
+        add(buckets.get("") ?? []);
+      } else {
+        for (const bucket of buckets.values()) add(bucket);
       }
+    }
+    for (const label of new Set(firstFeature.domains.map(domainLabel))) {
+      if (label) add(domainIndex.get(label) ?? []);
+    }
+    for (const secondIndex of possible) {
+      const second = working[secondIndex]!;
+      if (hasCompanyPair(indexes, first.id, second.id)) continue;
+      const secondFeature = features[secondIndex]!;
+      if (companiesShareExactName(firstFeature, secondFeature)) continue;
+      // Exact employer-domain conflicts were already recorded on attachment.
+      if (
+        firstFeature.domains.some((domain) =>
+          secondFeature.domains.includes(domain),
+        )
+      )
+        continue;
+      const reasons: string[] = [];
+      if (namesAreNear(firstFeature, secondFeature)) {
+        reasons.push(
+          `Similar company name "${first.canonicalName}" vs "${second.canonicalName}".`,
+        );
+      }
+      const domainNear = domainsAreNear(firstFeature, secondFeature);
+      if (domainNear.near) {
+        reasons.push(
+          `Similar employer domain "${domainNear.firstDomain}" vs "${domainNear.secondDomain}".`,
+        );
+      }
+      if (reasons.length === 0) continue;
+      const candidate = ensureMergeCandidates(
+        working,
+        indexes,
+        first.id,
+        second.id,
+        reasons.join(" "),
+        now,
+      );
+      if (candidate) created.push(candidate);
     }
   }
 }
@@ -880,27 +1150,31 @@ export function reconcileCompanies(input: {
       },
     };
   }
-  const jobsResult = SavedJobSchema.array().safeParse(input.jobs);
-  if (!jobsResult.success) {
-    return {
-      ok: false,
-      failure: {
-        code: "invalid_input",
-        message: firstIssueMessage(jobsResult.error),
-      },
-    };
+  const jobs: CompanyJobEvidence[] = [];
+  for (const job of input.jobs) {
+    const result = readCompanyJobEvidence(job);
+    if (!result.ok)
+      return {
+        ok: false,
+        failure: {
+          code: "invalid_input",
+          message: firstIssueMessage(result.error),
+        },
+      };
+    jobs.push(result.evidence);
   }
-  const recordsResult = ApplicationRecordSchema.array().safeParse(
-    input.applicationRecords,
-  );
-  if (!recordsResult.success) {
-    return {
-      ok: false,
-      failure: {
-        code: "invalid_input",
-        message: firstIssueMessage(recordsResult.error),
-      },
-    };
+  const records: CompanyApplicationEvidence[] = [];
+  for (const record of input.applicationRecords) {
+    const result = readCompanyApplicationEvidence(record);
+    if (!result.ok)
+      return {
+        ok: false,
+        failure: {
+          code: "invalid_input",
+          message: firstIssueMessage(result.error),
+        },
+      };
+    records.push(result.evidence);
   }
 
   const working: CompanyEntity[] = companiesResult.data;
@@ -920,9 +1194,11 @@ export function reconcileCompanies(input: {
   }
 
   const indexes = buildIndexes(working);
+  identifySharedListingHosts(indexes, jobs);
+  removeUnsupportedDerivedCandidates(working, indexes, now);
 
   const jobSourceById = new Map<string, string>();
-  for (const job of jobsResult.data) {
+  for (const job of jobs) {
     if (!jobSourceById.has(job.id)) jobSourceById.set(job.id, job.source);
   }
 
@@ -932,6 +1208,12 @@ export function reconcileCompanies(input: {
     ambiguousEvidenceCount: 0,
     unresolvableEvidenceCount: 0,
     createdMergeCandidates: [],
+  };
+  const matchedCompanyIds = new Set<string>();
+  const recordMatch = (companyId: string): void => {
+    if (matchedCompanyIds.has(companyId)) return;
+    matchedCompanyIds.add(companyId);
+    summary.matchedCompanyIds.push(companyId);
   };
 
   const processEvidence = (
@@ -954,9 +1236,7 @@ export function reconcileCompanies(input: {
         jobSourceById,
         created: summary.createdMergeCandidates,
       });
-      if (!summary.matchedCompanyIds.includes(resolution.companyId)) {
-        summary.matchedCompanyIds.push(resolution.companyId);
-      }
+      recordMatch(resolution.companyId);
       return resolution.companyId;
     }
 
@@ -983,9 +1263,7 @@ export function reconcileCompanies(input: {
         jobSourceById,
         created: summary.createdMergeCandidates,
       });
-      if (!summary.matchedCompanyIds.includes(requiredCompanyId)) {
-        summary.matchedCompanyIds.push(requiredCompanyId);
-      }
+      recordMatch(requiredCompanyId);
       return requiredCompanyId;
     }
 
@@ -1028,6 +1306,7 @@ export function reconcileCompanies(input: {
     });
 
     indexes.byId.set(newId, working.length);
+    indexes.memberships.set(newId, companyMembership(company));
     working.push(company);
     for (const domain of company.domains) {
       const existingDomainMatches =
@@ -1037,11 +1316,17 @@ export function reconcileCompanies(input: {
         normalizeEmployerDomain(domain.domain),
         newId,
       );
-      if (existingDomainMatches.length > 0) {
+      // The companies already on this domain were paired as each joined;
+      // only the new company's pairs can be new.
+      for (const existingId of indexes.sharedListingHosts.has(
+        normalizeEmployerDomain(domain.domain),
+      )
+        ? []
+        : existingDomainMatches) {
         flagAmbiguousPair(
           working,
           indexes,
-          [...existingDomainMatches, newId],
+          [existingId, newId],
           `Multiple companies share the employer domain "${normalizeEmployerDomain(domain.domain)}".`,
           now,
           summary.createdMergeCandidates,
@@ -1059,11 +1344,11 @@ export function reconcileCompanies(input: {
 
   try {
     const currentJobOwnerById = new Map<string, string | null>();
-    for (const job of jobsResult.data) {
+    for (const job of jobs) {
       currentJobOwnerById.set(job.id, processEvidence({ kind: "job", job }));
     }
     const currentApplicationOwnerById = new Map<string, string | null>();
-    for (const record of recordsResult.data) {
+    for (const record of records) {
       const relatedJobOwner = currentJobOwnerById.get(record.jobId);
       if (relatedJobOwner === undefined) {
         summary.unresolvableEvidenceCount += 1;
@@ -1094,12 +1379,12 @@ export function reconcileCompanies(input: {
       ) {
         continue;
       }
-      working[index] = CompanyEntitySchema.parse({
-        ...company,
-        jobIds,
-        applicationRecordIds,
-        updatedAt: nextCompanyIntelligenceUpdatedAt(now, company.updatedAt),
-      });
+      company.jobIds = jobIds;
+      company.applicationRecordIds = applicationRecordIds;
+      company.updatedAt = nextCompanyIntelligenceUpdatedAt(
+        now,
+        company.updatedAt,
+      );
     }
   } catch (error) {
     return {
@@ -1112,12 +1397,14 @@ export function reconcileCompanies(input: {
   }
 
   const listableCompanies = purgeUnlistableCompanies(working, now);
-  working.length = 0;
-  working.push(...listableCompanies);
-  const listableIndexes = buildIndexes(working);
+  const listableIndexes =
+    listableCompanies.length === working.length
+      ? indexes
+      : buildIndexes(listableCompanies);
+  listableIndexes.sharedListingHosts = indexes.sharedListingHosts;
 
   applyNearConflictCandidates(
-    working,
+    listableCompanies,
     listableIndexes,
     now,
     summary.createdMergeCandidates,
@@ -1125,7 +1412,9 @@ export function reconcileCompanies(input: {
 
   return {
     ok: true,
-    companies: CompanyEntitySchema.array().parse(working),
+    // Inputs, newly attached fields and candidates were already parsed. These
+    // privately owned values need no second deep copy of the complete graph.
+    companies: listableCompanies,
     summary,
   };
 }
@@ -1620,9 +1909,10 @@ export function projectCompanyOpenings(input: {
   jobs: readonly SavedJob[];
 }): CompanyOpeningsProjection {
   const company = CompanyEntitySchema.parse(input.company);
-  const jobs = SavedJobSchema.array().parse(input.jobs);
-
-  const linked = jobs.filter((job) => company.jobIds.includes(job.id));
+  const jobIds = new Set(company.jobIds);
+  const linked = SavedJobSchema.array().parse(
+    input.jobs.filter((job) => jobIds.has(job.id)),
+  );
   const current: SavedJob[] = [];
   const previous: SavedJob[] = [];
   for (const job of linked) {
@@ -1676,14 +1966,11 @@ export function projectCompanyApplicationHistory(input: {
   applicationRecords: readonly ApplicationRecord[];
 }): CompanyApplicationHistoryProjection {
   const company = CompanyEntitySchema.parse(input.company);
+  const recordIds = new Set(company.applicationRecordIds);
   const records = ApplicationRecordSchema.array().parse(
-    input.applicationRecords,
+    input.applicationRecords.filter((record) => recordIds.has(record.id)),
   );
-
-  const linked = records.filter((record) =>
-    company.applicationRecordIds.includes(record.id),
-  );
-  const sorted = [...linked].sort((first, second) => {
+  const sorted = records.sort((first, second) => {
     const difference =
       Date.parse(second.lastUpdatedAt) - Date.parse(first.lastUpdatedAt);
     if (difference !== 0) return difference;
@@ -2043,99 +2330,62 @@ export function projectCompanyDuplicateJobs(input: {
   jobs: readonly SavedJob[];
 }): CompanyDuplicateJobGroup[] {
   const company = CompanyEntitySchema.parse(input.company);
-  const jobs = SavedJobSchema.array().parse(input.jobs);
-
-  const linked = jobs.filter((job) => company.jobIds.includes(job.id));
+  const jobIds = new Set(company.jobIds);
+  const linked = SavedJobSchema.array().parse(
+    input.jobs.filter((job) => jobIds.has(job.id)),
+  );
   if (linked.length < 2) return [];
 
-  const aliasByJobId = new Map<
-    string,
-    ReturnType<typeof buildJobIdentityAliases>
-  >();
-  for (const job of linked) {
-    aliasByJobId.set(job.id, buildJobIdentityAliases(toJobIdentityInput(job)));
-  }
-
-  const strongKeysByJobId = new Map<string, ReadonlySet<string>>();
-  const weakKeysByJobId = new Map<string, ReadonlySet<string>>();
-  for (const job of linked) {
-    const aliases = aliasByJobId.get(job.id)!;
-    strongKeysByJobId.set(
-      job.id,
-      new Set(
-        aliases
-          .filter((alias) => alias.confidence === "strong")
-          .map((alias) => alias.key),
-      ),
-    );
-    weakKeysByJobId.set(
-      job.id,
-      new Set(
-        aliases
-          .filter(
-            (alias) =>
-              alias.confidence === "corroborating" ||
-              alias.confidence === "possible",
-          )
-          .map((alias) => alias.key),
-      ),
-    );
+  const aliasesByJob = linked.map((job) =>
+    buildJobIdentityAliases(toJobIdentityInput(job)),
+  );
+  const strongIndex = new Map<string, number[]>();
+  const weakIndex = new Map<string, number[]>();
+  for (let index = 0; index < linked.length; index += 1) {
+    for (const alias of aliasesByJob[index]!) {
+      const target = alias.confidence === "strong" ? strongIndex : weakIndex;
+      const matches = target.get(alias.key);
+      if (matches) matches.push(index);
+      else target.set(alias.key, [index]);
+    }
   }
 
   const groups: CompanyDuplicateJobGroup[] = [];
-  const visited = new Set<string>();
-
+  // Only matching pairs are retained. Unrelated jobs no longer allocate an
+  // entry in a quadratic visited-pair set.
+  const recorded = new Map<string, Set<string>>();
   for (let firstIndex = 0; firstIndex < linked.length; firstIndex += 1) {
     const first = linked[firstIndex]!;
-    for (
-      let secondIndex = firstIndex + 1;
-      secondIndex < linked.length;
-      secondIndex += 1
-    ) {
+    const exact = new Set<number>();
+    const possible = new Set<number>();
+    for (const alias of aliasesByJob[firstIndex]!) {
+      const target = alias.confidence === "strong" ? strongIndex : weakIndex;
+      const matches = alias.confidence === "strong" ? exact : possible;
+      for (const index of target.get(alias.key) ?? []) {
+        if (index > firstIndex) matches.add(index);
+      }
+    }
+    for (const secondIndex of [...new Set([...exact, ...possible])].sort(
+      (a, b) => a - b,
+    )) {
       const second = linked[secondIndex]!;
-      const pairKey =
-        first.id < second.id
-          ? `${first.id}|${second.id}`
-          : `${second.id}|${first.id}`;
-      if (visited.has(pairKey)) continue;
-      visited.add(pairKey);
-
-      const firstStrong = strongKeysByJobId.get(first.id)!;
-      const secondStrong = strongKeysByJobId.get(second.id)!;
-      let sharedStrong = false;
-      for (const key of firstStrong) {
-        if (secondStrong.has(key)) {
-          sharedStrong = true;
-          break;
-        }
-      }
-      if (sharedStrong) {
-        groups.push({
-          id: `duplicate_${first.id}_${second.id}`,
-          kind: "exact",
-          reason: `"${first.title}" at ${first.company} matches an identical posting already saved here.`,
-          jobIds: [first.id, second.id].sort(),
-        });
-        continue;
-      }
-
-      const firstWeak = weakKeysByJobId.get(first.id)!;
-      const secondWeak = weakKeysByJobId.get(second.id)!;
-      let sharedWeak = false;
-      for (const key of firstWeak) {
-        if (secondWeak.has(key)) {
-          sharedWeak = true;
-          break;
-        }
-      }
-      if (sharedWeak) {
-        groups.push({
-          id: `duplicate_possible_${first.id}_${second.id}`,
-          kind: "possible",
-          reason: `"${first.title}" at ${first.company} may repeat "${second.title}" from ${second.location}. Review before treating them as the same role.`,
-          jobIds: [first.id, second.id].sort(),
-        });
-      }
+      const [primary, secondary] =
+        first.id < second.id ? [first.id, second.id] : [second.id, first.id];
+      const previous = recorded.get(primary);
+      if (previous?.has(secondary)) continue;
+      if (previous) previous.add(secondary);
+      else recorded.set(primary, new Set([secondary]));
+      const sharedStrong = exact.has(secondIndex);
+      groups.push({
+        id: sharedStrong
+          ? `duplicate_${first.id}_${second.id}`
+          : `duplicate_possible_${first.id}_${second.id}`,
+        kind: sharedStrong ? "exact" : "possible",
+        reason: sharedStrong
+          ? `"${first.title}" at ${first.company} matches an identical posting already saved here.`
+          : `"${first.title}" at ${first.company} may repeat "${second.title}" from ${second.location}. Review before treating them as the same role.`,
+        jobIds: [first.id, second.id].sort(),
+      });
     }
   }
 

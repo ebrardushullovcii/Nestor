@@ -8,11 +8,12 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   SafeguardMutationInput,
   SetJobFinderActivityControlInput,
 } from "@nordri/contracts";
@@ -20,6 +21,83 @@ import { JobFinderIntelligenceSafeguardsSchema } from "@nordri/contracts";
 import { SafeguardsScreen } from "./safeguards-screen";
 
 const now = "2026-08-15T10:00:00.000Z";
+
+it.each([3_000, 10_000])(
+  "keeps %i safeguard events searchable and reachable with at most 40 mounted cards",
+  async (count) => {
+    const safeguards = JobFinderIntelligenceSafeguardsSchema.parse({
+      listingSignals: Array.from({ length: count }, (_, index) => ({
+        id: `scale_signal_${index}`,
+        jobId: `scale_job_${index}`,
+        signal: "suspicious",
+        confidence: 1,
+        detectedAt: now,
+        provenance: "browser",
+        explanation: `Scale event ${index}`,
+        recoveryGuidance: "Inspect the listing before applying.",
+      })),
+    });
+    const mutation = vi
+      .fn<(input: SafeguardMutationInput) => Promise<boolean>>()
+      .mockResolvedValue(true);
+    const view = renderScreen({
+      workspace: workspaceWith(safeguards),
+      onMutateSafeguards: mutation,
+    });
+    const nav = screen.getByRole("navigation", {
+      name: "safeguards pagination",
+    });
+    const reached = new Set<string>();
+    const cards = () =>
+      view.container.querySelectorAll<HTMLElement>("[data-safeguard-kind]");
+    expect(screen.getByRole("button", { name: `All ${count}` })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: `Listing signals ${count}` }),
+    ).toBeTruthy();
+    for (let page = 1; page <= Math.ceil(count / 40); page++) {
+      expect(cards().length).toBeLessThanOrEqual(40);
+      for (const card of cards()) {
+        reached.add(card.textContent.match(/Scale event \d+/)![0]);
+        expect(
+          within(card)
+            .getByRole("link", { name: "Open Shortlisted" })
+            .getAttribute("href"),
+        ).toBe("/job-finder/review-queue");
+      }
+      if (page < Math.ceil(count / 40)) {
+        fireEvent.click(within(nav).getByRole("button", { name: "Next page" }));
+        await waitFor(() =>
+          expect(nav.getAttribute("aria-busy")).toBe("false"),
+        );
+      }
+    }
+    expect(reached.size).toBe(count);
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search safeguards" }),
+      { target: { value: `Scale event ${count - 1}` } },
+    );
+    expect(cards()).toHaveLength(1);
+    expect(cards()[0]!.textContent).toContain(`Scale event ${count - 1}`);
+    fireEvent.click(
+      within(cards()[0]!).getByRole("button", { name: "Dismiss signal" }),
+    );
+    await waitFor(() =>
+      expect(mutation).toHaveBeenCalledWith(
+        expect.objectContaining({ referenceId: `scale_signal_${count - 1}` }),
+      ),
+    );
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search safeguards" }),
+      { target: { value: "" } },
+    );
+    expect(cards()).toHaveLength(40);
+    expect(
+      screen.getByRole("navigation", { name: "safeguards pagination" })
+        .textContent,
+    ).toContain(`1–40 of ${count}`);
+  },
+  60_000,
+);
 afterEach(cleanup);
 
 function emptySafeguards() {
@@ -99,7 +177,7 @@ function contradictionSafeguards() {
 
 function workspaceWith(
   safeguards: ReturnType<typeof emptySafeguards> = emptySafeguards(),
-): JobFinderWorkspaceSnapshot {
+): JobFinderRendererWorkspaceSnapshot {
   return {
     module: "job-finder",
     generatedAt: now,
@@ -110,14 +188,14 @@ function workspaceWith(
         company: "Signal Systems",
         location: "Remote",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["discoveryJobs"],
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["discoveryJobs"],
     applicationRecords: [],
     campaigns: [],
     activeCampaignId: null,
     intelligence: {
       safeguards,
-    } as unknown as JobFinderWorkspaceSnapshot["intelligence"],
-  } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot["intelligence"],
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function renderScreen(props: {
@@ -126,7 +204,7 @@ function renderScreen(props: {
   onMutateSafeguards?: (input: SafeguardMutationInput) => Promise<boolean>;
   isPending?: (controlId: string) => boolean;
   actionMessage?: string | null;
-  workspace?: JobFinderWorkspaceSnapshot | null;
+  workspace?: JobFinderRendererWorkspaceSnapshot | null;
 }) {
   return render(
     <MemoryRouter>
@@ -646,11 +724,11 @@ it("uses workspace actions to refresh immediately after Resume and browser reset
     .fn<
       (
         command: SetJobFinderActivityControlInput,
-      ) => Promise<JobFinderWorkspaceSnapshot>
+      ) => Promise<JobFinderRendererWorkspaceSnapshot>
     >()
     .mockResolvedValue(next);
   const resetBrowser = vi
-    .fn<() => Promise<JobFinderWorkspaceSnapshot>>()
+    .fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>()
     .mockResolvedValue(initial);
   function Harness() {
     const [workspace, setWorkspace] = useState(initial);

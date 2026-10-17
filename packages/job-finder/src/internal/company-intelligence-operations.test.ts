@@ -64,6 +64,8 @@ function makeJob(input: {
   lastSeenAt?: string | null;
   sourceJobId?: string;
   canonicalUrl?: string;
+  applicationUrl?: string | null;
+  provenance?: SavedJob["provenance"];
   title?: string;
   location?: string | null;
 }): SavedJob {
@@ -73,7 +75,7 @@ function makeJob(input: {
     sourceJobId: input.sourceJobId ?? `source_${input.id}`,
     discoveryMethod: "catalog_seed",
     canonicalUrl: input.canonicalUrl ?? `https://jobs.example.com/${input.id}`,
-    applicationUrl: null,
+    applicationUrl: input.applicationUrl ?? null,
     title: input.title ?? "Engineer",
     company: input.company,
     location: input.location ?? "Remote",
@@ -103,7 +105,7 @@ function makeJob(input: {
     atsProvider: null,
     status: input.status ?? "ready_for_review",
     matchAssessment: { score: 80 },
-    provenance: [],
+    provenance: input.provenance ?? [],
   });
 }
 
@@ -232,6 +234,341 @@ describe("reconcileCompanies", () => {
       "share the employer domain",
     );
   });
+
+  test("a shared listing host alone does not suggest merging every employer", () => {
+    const count = 150;
+    const startedAt = performance.now();
+    const result = reconcileCompanies({
+      companies: [],
+      jobs: Array.from({ length: count * 2 }, (_, index) =>
+        makeJob({
+          id: `job_${index}`,
+          company: `Board Listed Employer ${index % count} ${String.fromCharCode(97 + ((index % count) % 26))}`,
+          employerDomain: "jobs-board.example",
+          canonicalUrl: `https://jobs-board.example/employer/${index % count}/job/${index}`,
+        }),
+      ),
+      applicationRecords: [],
+      now,
+      createCompanyId: defaultCreateCompanyId,
+    });
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const pairs = new Set(
+      result.companies.flatMap((company) =>
+        company.mergeReviewCandidates.map((candidate) =>
+          [company.id, candidate.candidateCompanyId].sort().join("|"),
+        ),
+      ),
+    );
+    expect(result.companies).toHaveLength(count);
+    expect(pairs.size).toBe(0);
+    expect(result.summary.createdMergeCandidates).toEqual([]);
+    // A provider's shared host is source evidence, not an employer identity.
+    expect(elapsedMs).toBeLessThan(4_000);
+  });
+
+  test("a shared listing domain does not create pairs among 3000 employers", () => {
+    const count = 3_000;
+    const result = reconcileCompanies({
+      companies: [],
+      jobs: Array.from({ length: count }, (_, index) =>
+        makeJob({
+          id: `job_${index}`,
+          company: `Synthetic employer ${index}`,
+          employerDomain: "hiring.shared.example",
+          canonicalUrl: `https://hiring.shared.example/listing/${index}`,
+        }),
+      ),
+      applicationRecords: [],
+      now,
+      createCompanyId: defaultCreateCompanyId,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.companies).toHaveLength(count);
+    expect(result.summary.createdMergeCandidates).toEqual([]);
+    expect(
+      result.companies.every(
+        (company) =>
+          company.domains[0]?.domain === "hiring.shared.example" &&
+          company.mergeReviewCandidates.length === 0,
+      ),
+    ).toBe(true);
+  }, 60_000);
+
+  test("keeps an exact domain suggestion for related employer names", () => {
+    const result = reconcileCompanies({
+      companies: [],
+      jobs: [
+        makeJob({
+          id: "job_acme",
+          company: "Acme Inc",
+          employerDomain: "acme.example",
+          canonicalUrl: "https://acme.example/jobs/one",
+        }),
+        makeJob({
+          id: "job_acme_group",
+          company: "Acme Group",
+          employerDomain: "acme.example",
+          canonicalUrl: "https://acme.example/jobs/two",
+        }),
+      ],
+      applicationRecords: [],
+      now,
+      createCompanyId: defaultCreateCompanyId,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.companies.map((company) => company.jobIds)).toEqual([
+      ["job_acme"],
+      ["job_acme_group"],
+    ]);
+    expect(result.summary.createdMergeCandidates).toHaveLength(1);
+    expect(result.summary.createdMergeCandidates[0]?.reason).toContain(
+      "Similar company name",
+    );
+  });
+
+  test.each([
+    "canonicalUrl",
+    "applicationUrl",
+    "startingUrl",
+    "listingUrl",
+    "provenanceApplicationUrl",
+    "pageApplyUrl",
+  ] as const)("recognizes a shared host from %s", (route) => {
+    const sharedHost = "https://hiring.shared.example";
+    const secondJob = makeJob({
+      id: "job_northwind",
+      company: "Northwind Labs",
+      employerDomain: "hiring.shared.example",
+      canonicalUrl:
+        route === "canonicalUrl"
+          ? `${sharedHost}/northwind/opening`
+          : "https://northwind.example/opening",
+      applicationUrl:
+        route === "applicationUrl" ? `${sharedHost}/apply/northwind` : null,
+      provenance: [
+        {
+          targetId: "source_northwind",
+          adapterKind: "auto",
+          resolvedAdapterKind: null,
+          startingUrl:
+            route === "startingUrl"
+              ? `${sharedHost}/northwind`
+              : "https://northwind.example/careers",
+          discoveredAt: now,
+          collectionMethod: "fallback_search",
+          providerKey: null,
+          providerBoardToken: null,
+          titleTriageOutcome: "pass",
+          listingUrl:
+            route === "listingUrl" ? `${sharedHost}/listing/northwind` : null,
+          applicationUrl:
+            route === "provenanceApplicationUrl"
+              ? `${sharedHost}/apply/northwind`
+              : null,
+          pageApplyUrl:
+            route === "pageApplyUrl"
+              ? `${sharedHost}/page/apply/northwind`
+              : null,
+        },
+      ],
+    });
+    const result = reconcileCompanies({
+      companies: [],
+      jobs: [
+        makeJob({
+          id: "job_acme",
+          company: "Acme Inc",
+          employerDomain: "hiring.shared.example",
+          canonicalUrl: `${sharedHost}/acme/opening`,
+        }),
+        secondJob,
+      ],
+      applicationRecords: [],
+      now,
+      createCompanyId: defaultCreateCompanyId,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.companies.map((company) => company.jobIds)).toEqual([
+      ["job_acme"],
+      ["job_northwind"],
+    ]);
+    expect(
+      result.companies.every(
+        (company) => company.domains[0]?.domain === "hiring.shared.example",
+      ),
+    ).toBe(true);
+    expect(result.summary.createdMergeCandidates).toEqual([]);
+  });
+
+  test("removes unsupported pending suggestions while retaining a person's decision", () => {
+    const sharedDomain = [
+      {
+        domain: "hiring.shared.example",
+        primary: true,
+        verifiedAt: null,
+      },
+    ];
+    const result = reconcileCompanies({
+      companies: [
+        makeCompany({
+          id: "acme",
+          canonicalName: "Acme Inc",
+          domains: sharedDomain,
+          mergeReviewCandidates: [
+            {
+              candidateCompanyId: "northwind",
+              reason:
+                'Multiple companies share the employer domain "hiring.shared.example".',
+              decision: "pending",
+              decidedAt: null,
+              requiresUserDecision: true,
+            },
+            {
+              candidateCompanyId: "meridian",
+              reason:
+                'Multiple companies share the employer domain "hiring.shared.example".',
+              decision: "rejected",
+              decidedAt: now,
+              requiresUserDecision: true,
+            },
+          ],
+        }),
+        makeCompany({
+          id: "northwind",
+          canonicalName: "Northwind Labs",
+          domains: sharedDomain,
+        }),
+        makeCompany({
+          id: "meridian",
+          canonicalName: "Meridian Group",
+          domains: sharedDomain,
+        }),
+      ],
+      jobs: [
+        makeJob({
+          id: "job_acme",
+          company: "Acme Inc",
+          employerDomain: "hiring.shared.example",
+          canonicalUrl: "https://hiring.shared.example/acme",
+        }),
+        makeJob({
+          id: "job_northwind",
+          company: "Northwind Labs",
+          employerDomain: "hiring.shared.example",
+          canonicalUrl: "https://hiring.shared.example/northwind",
+        }),
+        makeJob({
+          id: "job_meridian",
+          company: "Meridian Group",
+          employerDomain: "hiring.shared.example",
+          canonicalUrl: "https://hiring.shared.example/meridian",
+        }),
+      ],
+      applicationRecords: [],
+      now,
+      createCompanyId: defaultCreateCompanyId,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.companies[0]?.mergeReviewCandidates).toEqual([
+      expect.objectContaining({
+        candidateCompanyId: "meridian",
+        decision: "rejected",
+      }),
+    ]);
+    expect(result.summary.createdMergeCandidates).toEqual([]);
+  });
+
+  test.each([3_000, 10_000])(
+    "keeps %i numbered employers separate and serializable",
+    (count) => {
+      const jobs = Array.from({ length: count }, (_, index) =>
+        makeJob({ id: `job_${index}`, company: `Synthetic company ${index}` }),
+      );
+      const result = reconcileCompanies({
+        companies: [],
+        jobs,
+        applicationRecords: [],
+        now,
+        createCompanyId: defaultCreateCompanyId,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.companies).toHaveLength(count);
+      expect(result.summary.createdMergeCandidates).toEqual([]);
+      expect(
+        result.companies.every(
+          (company) =>
+            company.mergeReviewCandidates.length === 0 &&
+            company.jobIds.length === 1,
+        ),
+      ).toBe(true);
+      expect(JSON.stringify(result.companies).length).toBeGreaterThan(count);
+    },
+    60_000,
+  );
+
+  test("does not infer identity from shared business and legal words", () => {
+    const result = reconcileCompanies({
+      companies: [],
+      jobs: [
+        makeJob({ id: "job_alpha", company: "Alpha Software LLC" }),
+        makeJob({ id: "job_beta", company: "Beta Software LLC" }),
+        makeJob({ id: "job_gamma", company: "Gamma Global Solutions" }),
+        makeJob({ id: "job_delta", company: "Delta Global Solutions" }),
+      ],
+      applicationRecords: [],
+      now,
+      createCompanyId: defaultCreateCompanyId,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.companies).toHaveLength(4);
+    expect(result.summary.createdMergeCandidates).toEqual([]);
+  });
+
+  test("links thousands of jobs to one employer on cold and warm passes", () => {
+    const count = 5_000;
+    const jobs = Array.from({ length: count }, (_, index) =>
+      makeJob({ id: `job_${index}`, company: "Acme Inc" }),
+    );
+    const cold = reconcileCompanies({
+      companies: [],
+      jobs,
+      applicationRecords: [],
+      now,
+      createCompanyId: defaultCreateCompanyId,
+    });
+    expect(cold.ok).toBe(true);
+    if (!cold.ok) return;
+
+    const warm = reconcileCompanies({
+      companies: cold.companies,
+      jobs,
+      applicationRecords: [],
+      now,
+      createCompanyId: defaultCreateCompanyId,
+    });
+    expect(warm.ok).toBe(true);
+    if (!warm.ok) return;
+    expect(cold.companies).toHaveLength(1);
+    expect(cold.companies[0]?.jobIds).toHaveLength(count);
+    expect(warm.companies).toEqual(cold.companies);
+    expect(warm.summary.createdMergeCandidates).toEqual([]);
+  }, 60_000);
 
   test("matches by exact normalized name when no domain is present", () => {
     const result = reconcileCompanies({

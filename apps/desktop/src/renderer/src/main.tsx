@@ -1,3 +1,5 @@
+// First: it must run before React loads.
+import './lib/react-dev-timing-setup'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { App } from './app/app'

@@ -35,6 +35,7 @@ import {
   SubmissionPreflightRecordSchema,
   TailoredAssetSchema,
   type CandidateProfile,
+  type JobFinderDiscoveryState,
   type JobFinderRepositoryState,
 } from "@nordri/contracts";
 import { randomUUID } from "node:crypto";
@@ -85,7 +86,6 @@ import {
   type WorkspaceDatabaseRecoveryResult,
 } from "./file-repository-recovery";
 import {
-  normalizeLegacyDiscoveryState,
   normalizeLegacySourceDebugRunRecord,
   readLegacySeed,
 } from "./internal/legacy";
@@ -98,6 +98,7 @@ import {
   incrementSingletonRevision,
   listCollectionValues,
   listValues,
+  listValuesInChunks,
   readState,
   replaceCollection,
   saveSingletonValue,
@@ -116,6 +117,14 @@ import type {
   WorkspaceDatabaseRecoveryRequiredDetails,
   WorkspaceDatabaseRecoveryRequiredOutcome,
 } from "./repository-types";
+import { createSavedJobProjectionReader } from "./internal/saved-job-projection";
+import { createDiscoveryDisplayProjectionReader } from "./internal/discovery-display-projection";
+import {
+  createDiscoveryStorage,
+  replaceDiscoveryStorage,
+} from "./internal/discovery-storage";
+import { createIntelligenceProjectionReader } from "./internal/intelligence-projection";
+import { createDisplayCollectionsReader } from "./internal/display-collections";
 
 /**
  * Thrown by createFileJobFinderRepository when the workspace database could
@@ -325,44 +334,75 @@ export async function createFileJobFinderRepository(
 
   const database = await openWorkspaceDatabaseWithRecovery();
 
-  if (!hasPersistedState(database)) {
-    const legacySeed = await readLegacySeed(options.filePath, normalizedSeed);
-    const bootstrapSeed = legacySeed
-      ? JobFinderRepositoryStateSchema.parse({
-          ...legacySeed,
-          profile: {
-            ...legacySeed.profile,
-            experiences: legacySeed.profile.experiences.map((experience) => ({
-              ...experience,
-              achievements: repairLegacyCommaSplitAchievements(
-                experience.achievements,
-              ),
-            })),
-          },
-          profileRevisions: legacySeed.profileRevisions.map((revision) => ({
-            ...revision,
-            snapshotProfile: {
-              ...revision.snapshotProfile,
-              experiences: revision.snapshotProfile.experiences.map(
-                (experience) => ({
-                  ...experience,
-                  achievements: repairLegacyCommaSplitAchievements(
-                    experience.achievements,
-                  ),
-                }),
-              ),
+  // Everything below runs on the open connection. If any step fails, the
+  // connection is closed before the error leaves: an orphaned handle keeps the
+  // workspace file locked on Windows until the app exits.
+  let context: ReturnType<typeof createFileRepositoryContext>;
+  let discoveryStorage: ReturnType<typeof createDiscoveryStorage>;
+  let readSavedJobsProjection: ReturnType<
+    typeof createSavedJobProjectionReader
+  >;
+  let readIntelligenceProjection: ReturnType<
+    typeof createIntelligenceProjectionReader
+  >;
+  let readDisplayCollections: ReturnType<typeof createDisplayCollectionsReader>;
+  let readDiscoveryDisplayProjection: ReturnType<
+    typeof createDiscoveryDisplayProjectionReader
+  >;
+  try {
+    if (!hasPersistedState(database)) {
+      const legacySeed = await readLegacySeed(options.filePath, normalizedSeed);
+      const bootstrapSeed = legacySeed
+        ? JobFinderRepositoryStateSchema.parse({
+            ...legacySeed,
+            profile: {
+              ...legacySeed.profile,
+              experiences: legacySeed.profile.experiences.map((experience) => ({
+                ...experience,
+                achievements: repairLegacyCommaSplitAchievements(
+                  experience.achievements,
+                ),
+              })),
             },
-          })),
-        })
-      : normalizedSeed;
-    bootstrapState(database, bootstrapSeed);
-    await secureDatabaseFile(options.filePath);
-  }
+            profileRevisions: legacySeed.profileRevisions.map((revision) => ({
+              ...revision,
+              snapshotProfile: {
+                ...revision.snapshotProfile,
+                experiences: revision.snapshotProfile.experiences.map(
+                  (experience) => ({
+                    ...experience,
+                    achievements: repairLegacyCommaSplitAchievements(
+                      experience.achievements,
+                    ),
+                  }),
+                ),
+              },
+            })),
+          })
+        : normalizedSeed;
+      bootstrapState(database, bootstrapSeed);
+      await secureDatabaseFile(options.filePath);
+    }
 
-  const context = createFileRepositoryContext({
-    database,
-    filePath: options.filePath,
-  });
+    context = createFileRepositoryContext({
+      database,
+      filePath: options.filePath,
+    });
+    discoveryStorage = createDiscoveryStorage(
+      database,
+      normalizedSeed.discovery,
+    );
+    readSavedJobsProjection = createSavedJobProjectionReader(database);
+    readIntelligenceProjection = createIntelligenceProjectionReader(database);
+    readDisplayCollections = createDisplayCollectionsReader(database);
+    readDiscoveryDisplayProjection = createDiscoveryDisplayProjectionReader(
+      database,
+      normalizedSeed.discovery,
+    );
+  } catch (error) {
+    closeDatabaseQuietly(database);
+    throw error;
+  }
 
   function listApplyCollection<TValue>(input: {
     tableName:
@@ -512,6 +552,7 @@ export async function createFileJobFinderRepository(
   }
 
   return {
+    readDisplayCollections,
     ...createApplicationAnswerSnapshotRepositoryMethods({
       read: () => readApplicationAuthorityState(),
       mutate: (operation) =>
@@ -760,6 +801,38 @@ export async function createFileJobFinderRepository(
         }),
     }),
     ...createFileRepositoryResumeMethods(context),
+    // These reads need only authority envelopes, not the application/result
+    // bodies loaded by the transaction store for preflight/outcome mutations.
+    listApplicationAuthorityEnvelopes(filter) {
+      return Promise.resolve(
+        listValues(
+          database,
+          "application_authority_envelopes",
+          ApplicationAuthorityEnvelopeSchema,
+        )
+          .filter(
+            (value) =>
+              (filter?.id === undefined || value.id === filter.id) &&
+              (filter?.status === undefined || value.status === filter.status),
+          )
+          .sort((left, right) => left.id.localeCompare(right.id)),
+      );
+    },
+    getApplicationAuthorityEnvelope(id) {
+      return Promise.resolve(
+        listCollectionValues(
+          database,
+          "application_authority_envelopes",
+          ApplicationAuthorityEnvelopeSchema,
+          {
+            whereSql: "id = ?",
+            params: [id],
+            orderBySql: "id",
+            limit: 1,
+          },
+        )[0] ?? null,
+      );
+    },
     ...createFileRepositoryUserActionMethods(context),
     ...createFileRepositoryGroupedManualAnswerMethods(context),
     exportState: () =>
@@ -1091,23 +1164,68 @@ export async function createFileJobFinderRepository(
       }
     },
     listSavedJobs(options?: { limit?: number; offset?: number }) {
+      if (options?.limit === undefined && options?.offset === undefined) {
+        return listValuesInChunks(database, "saved_jobs", SavedJobSchema);
+      }
       return Promise.resolve(
-        cloneValue(listValues(database, "saved_jobs", SavedJobSchema, options)),
+        listValues(database, "saved_jobs", SavedJobSchema, options),
+      );
+    },
+    readSavedJobsProjection,
+    listSavedJobIds() {
+      return Promise.resolve(
+        database
+          .prepare(`SELECT id FROM ${stateTableNames.saved_jobs} ORDER BY id`)
+          .all()
+          .map((row) => String(row.id)),
+      );
+    },
+    listSavedJobsByIds(jobIds) {
+      if (jobIds.length === 0) return Promise.resolve([]);
+      return Promise.resolve(
+        listCollectionValues(database, "saved_jobs", SavedJobSchema, {
+          whereSql: "id IN (SELECT value FROM json_each(?))",
+          params: [JSON.stringify([...new Set(jobIds)])],
+          orderBySql: "id",
+        }),
       );
     },
     commitSavedJobDelta({
       upserts = [],
+      upsertsFromDiscovery,
+      upsertsFromBorrowedDiscovery,
       update,
+      updateJobIds,
       updateSettings,
       clearResumeApproval,
       updateDiscoveryState,
     }) {
       try {
-        const normalizedUpserts = SavedJobSchema.array().parse(
+        const suppliedUpserts = SavedJobSchema.array().parse(
           cloneValue([...upserts]),
         );
+        let committedDiscovery: JobFinderDiscoveryState | null = null;
 
         runImmediateTransaction(database, () => {
+          const currentDiscoveryState =
+            upsertsFromDiscovery ||
+            upsertsFromBorrowedDiscovery ||
+            updateDiscoveryState
+              ? discoveryStorage.read()
+              : null;
+          const normalizedUpserts = [
+            ...suppliedUpserts,
+            ...(upsertsFromDiscovery && currentDiscoveryState
+              ? SavedJobSchema.array().parse(
+                  upsertsFromDiscovery(cloneValue(currentDiscoveryState)),
+                )
+              : []),
+            ...(upsertsFromBorrowedDiscovery && currentDiscoveryState
+              ? SavedJobSchema.array().parse(
+                  upsertsFromBorrowedDiscovery(currentDiscoveryState),
+                )
+              : []),
+          ];
           if (updateSettings) {
             const currentSettings =
               getSingletonValue(
@@ -1130,11 +1248,23 @@ export async function createFileJobFinderRepository(
           > | null = null;
 
           if (update) {
-            const currentJobs = listValues(
-              database,
-              "saved_jobs",
-              SavedJobSchema,
-            );
+            const currentJobs = updateJobIds
+              ? listCollectionValues(database, "saved_jobs", SavedJobSchema, {
+                  whereSql: "id IN (SELECT value FROM json_each(?))",
+                  params: [
+                    JSON.stringify([
+                      ...new Set([
+                        ...updateJobIds,
+                        ...normalizedUpserts.map((job) => job.id),
+                        ...(clearResumeApproval
+                          ? [clearResumeApproval.jobId]
+                          : []),
+                      ]),
+                    ]),
+                  ],
+                  orderBySql: "id",
+                })
+              : listValues(database, "saved_jobs", SavedJobSchema);
             for (const currentJob of currentJobs) {
               existingJobIds.add(currentJob.id);
               const nextJob = SavedJobSchema.parse(
@@ -1229,19 +1359,14 @@ export async function createFileJobFinderRepository(
             }
           }
 
-          if (updateDiscoveryState) {
-            const currentDiscoveryState =
-              getSingletonValue(database, "discovery_state", {
-                parse: normalizeLegacyDiscoveryState,
-              }) ?? normalizedSeed.discovery;
-            const nextDiscoveryState = JobFinderDiscoveryStateSchema.parse(
-              cloneValue(
-                updateDiscoveryState(cloneValue(currentDiscoveryState)),
-              ),
+          if (updateDiscoveryState && currentDiscoveryState) {
+            committedDiscovery = discoveryStorage.update(
+              updateDiscoveryState(currentDiscoveryState),
+              currentDiscoveryState,
             );
-            saveSingletonValue(database, "discovery_state", nextDiscoveryState);
           }
         });
+        if (committedDiscovery) discoveryStorage.publish(committedDiscovery);
       } catch (error) {
         return Promise.reject(
           error instanceof Error ? error : new Error(String(error)),
@@ -1252,19 +1377,20 @@ export async function createFileJobFinderRepository(
     },
     commitDiscoveryFeedbackUpdate(jobId, update) {
       try {
+        let committedDiscovery: JobFinderDiscoveryState | null = null;
         const result = runImmediateTransaction(database, () => {
-          const discoveryState =
-            getSingletonValue(database, "discovery_state", {
-              parse: normalizeLegacyDiscoveryState,
-            }) ?? normalizedSeed.discovery;
+          const discoveryState = discoveryStorage.read();
           const pendingJob =
             discoveryState.pendingDiscoveryJobs.find(
               (job) => job.id === jobId,
             ) ?? null;
-          const savedJob =
-            listValues(database, "saved_jobs", SavedJobSchema).find(
-              (job) => job.id === jobId,
-            ) ?? null;
+          const savedJob = pendingJob
+            ? null
+            : (listCollectionValues(database, "saved_jobs", SavedJobSchema, {
+                whereSql: "id = ?",
+                params: [jobId],
+                orderBySql: "id",
+              })[0] ?? null);
           const searchPreferences =
             getSingletonValue(
               database,
@@ -1288,7 +1414,7 @@ export async function createFileJobFinderRepository(
             searchPreferences: cloneValue(searchPreferences),
             campaignState: cloneValue(campaignState),
             intelligenceState: cloneValue(intelligenceState),
-            discoveryState: cloneValue(discoveryState),
+            discoveryState,
           });
           const nextSearchPreferences = JobSearchPreferencesSchema.parse(
             cloneValue(next.searchPreferences),
@@ -1299,9 +1425,6 @@ export async function createFileJobFinderRepository(
               : JobSearchCampaignCollectionSchema.parse(
                   cloneValue(next.campaignState),
                 );
-          const nextDiscoveryState = JobFinderDiscoveryStateSchema.parse(
-            cloneValue(next.discoveryState),
-          );
           const nextSavedJob = next.savedJob
             ? SavedJobSchema.parse(cloneValue(next.savedJob))
             : null;
@@ -1328,9 +1451,13 @@ export async function createFileJobFinderRepository(
           if (nextCampaignState !== null) {
             saveSingletonValue(database, "campaign_state", nextCampaignState);
           }
-          saveSingletonValue(database, "discovery_state", nextDiscoveryState);
+          committedDiscovery = discoveryStorage.update(
+            next.discoveryState,
+            discoveryState,
+          );
           return next.result;
         });
+        if (committedDiscovery) discoveryStorage.publish(committedDiscovery);
         return secureDatabaseFile(options.filePath).then(() => result);
       } catch (error) {
         return Promise.reject(
@@ -1358,11 +1485,7 @@ export async function createFileJobFinderRepository(
 
       runImmediateTransaction(database, () => {
         replaceCollection(database, "saved_jobs", normalizedJobs);
-        saveSingletonValue(
-          database,
-          "discovery_state",
-          normalizedDiscoveryState,
-        );
+        replaceDiscoveryStorage(database, normalizedDiscoveryState);
       });
 
       return secureDatabaseFile(options.filePath);
@@ -2127,32 +2250,26 @@ export async function createFileJobFinderRepository(
         );
       }
     },
+    readDiscoveryDisplayProjection,
     getDiscoveryState() {
-      return Promise.resolve(
-        cloneValue(
-          getSingletonValue(database, "discovery_state", {
-            parse: normalizeLegacyDiscoveryState,
-          }) ?? normalizedSeed.discovery,
-        ),
-      );
+      return Promise.resolve(cloneValue(discoveryStorage.read()));
     },
     commitDiscoveryStateUpdate(update) {
       try {
         const nextDiscoveryState = runImmediateTransaction(database, () => {
-          const currentDiscoveryState =
-            getSingletonValue(database, "discovery_state", {
-              parse: normalizeLegacyDiscoveryState,
-            }) ?? normalizedSeed.discovery;
-          const nextState = JobFinderDiscoveryStateSchema.parse(
-            cloneValue(update(cloneValue(currentDiscoveryState))),
-          );
-          saveSingletonValue(database, "discovery_state", nextState);
-          return nextState;
+          const current = discoveryStorage.read();
+          return discoveryStorage.update(update(current), current);
         });
+        discoveryStorage.publish(nextDiscoveryState);
 
-        return secureDatabaseFile(options.filePath).then(() =>
-          cloneValue(nextDiscoveryState),
-        );
+        return secureDatabaseFile(options.filePath).then(() => ({
+          ...nextDiscoveryState,
+          sessions: [...nextDiscoveryState.sessions],
+          recentRuns: [...nextDiscoveryState.recentRuns],
+          recentSourceDebugRuns: [...nextDiscoveryState.recentSourceDebugRuns],
+          discoveryLedger: [...nextDiscoveryState.discoveryLedger],
+          pendingDiscoveryJobs: [...nextDiscoveryState.pendingDiscoveryJobs],
+        }));
       } catch (error) {
         return Promise.reject(
           error instanceof Error ? error : new Error(String(error)),
@@ -2248,6 +2365,7 @@ export async function createFileJobFinderRepository(
         );
       }
     },
+    readIntelligenceProjection,
     getIntelligenceState() {
       return Promise.resolve(
         cloneValue(

@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import {
+  getApplicationRecordIndex,
+  getDiscoverySelectionIndex,
+  getLatestApplicationAttemptIndex,
+  getReviewSelectionIndex,
+} from "./job-finder-page-selection";
 
 type SelectedState = string | null;
 
@@ -16,7 +22,7 @@ export function useApplicationSelection(initialValue: SelectedState) {
   return [value, setValue] as const;
 }
 
-const NO_VALID_IDS: readonly string[] = [];
+const NO_VALID_IDS: ReadonlySet<string> = new Set();
 
 /**
  * Bounded, versioned local UI preferences for the inspected Discovery and
@@ -237,6 +243,7 @@ type RetainedSelectionState = {
 function resolveRetainedSelection(
   input: Parameters<typeof useRetainedSelection>[0],
   retained: RetainedSelectionState,
+  validIdSet: ReadonlySet<string>,
 ): RetainedSelectionState {
   const { snapshotValue, validIds, activeCampaignId, persistedSelection } =
     input;
@@ -244,7 +251,7 @@ function resolveRetainedSelection(
     persistedSelection !== undefined &&
     persistedSelection.collectionReady &&
     validIds != null;
-  const isValidId = (id: string) => (validIds ?? NO_VALID_IDS).includes(id);
+  const isValidId = (id: string) => validIdSet.has(id);
 
   if (retained.campaignId === activeCampaignId) {
     // A healthy hold wins over every default, whatever produced it.
@@ -342,7 +349,7 @@ function resolveRetainedSelection(
  */
 export function useRetainedSelection(input: {
   snapshotValue: SelectedState;
-  validIds: readonly string[] | null | undefined;
+  validIds: readonly string[] | ReadonlySet<string> | null | undefined;
   activeCampaignId: string | null;
   persistedSelection?: {
     storage: InspectedSelectionStorage;
@@ -352,6 +359,18 @@ export function useRetainedSelection(input: {
 }): [SelectedState, Dispatch<SetStateAction<SelectedState>>] {
   // `snapshotValue` is consumed inside resolveRetainedSelection via `input`.
   const { validIds, activeCampaignId, persistedSelection } = input;
+  const validIdSet = useMemo(
+    () =>
+      validIds == null
+        ? NO_VALID_IDS
+        : "has" in validIds
+          ? validIds
+          : new Set(validIds),
+    [validIds],
+  );
+  const storage = persistedSelection?.storage;
+  const surface = persistedSelection?.surface;
+  const collectionReady = persistedSelection?.collectionReady;
   const [retained, setRetained] = useState<RetainedSelectionState>(() => ({
     campaignId: activeCampaignId,
     value: null,
@@ -363,7 +382,7 @@ export function useRetainedSelection(input: {
   // settle here instead of flashing an intermediate default first. The
   // resolver is deterministic for given inputs, so the adjustment converges
   // immediately without looping.
-  const resolved = resolveRetainedSelection(input, retained);
+  const resolved = resolveRetainedSelection(input, retained, validIdSet);
   if (
     resolved.campaignId !== retained.campaignId ||
     resolved.value !== retained.value ||
@@ -373,10 +392,10 @@ export function useRetainedSelection(input: {
   }
 
   useEffect(() => {
-    if (!persistedSelection || activeCampaignId === null) {
+    if (!storage || !surface || activeCampaignId === null) {
       return;
     }
-    if (!persistedSelection.collectionReady || validIds == null) {
+    if (!collectionReady || validIds == null) {
       return;
     }
     if (retained.campaignId !== activeCampaignId) {
@@ -384,8 +403,8 @@ export function useRetainedSelection(input: {
     }
 
     const stored = readInspectedSelectionId({
-      storage: persistedSelection.storage,
-      surface: persistedSelection.surface,
+      storage,
+      surface,
       campaignId: activeCampaignId,
     });
     let desiredEntry: string | null;
@@ -394,7 +413,7 @@ export function useRetainedSelection(input: {
     } else if (
       retained.value !== null &&
       stored === retained.value &&
-      (validIds ?? NO_VALID_IDS).includes(retained.value)
+      validIdSet.has(retained.value)
     ) {
       // A system-restored pick that is still live stays persisted.
       desiredEntry = stored;
@@ -404,12 +423,20 @@ export function useRetainedSelection(input: {
     }
 
     writeInspectedSelectionId({
-      storage: persistedSelection.storage,
-      surface: persistedSelection.surface,
+      storage,
+      surface,
       campaignId: activeCampaignId,
       jobId: desiredEntry,
     });
-  }, [activeCampaignId, persistedSelection, retained, validIds]);
+  }, [
+    activeCampaignId,
+    collectionReady,
+    retained,
+    storage,
+    surface,
+    validIds,
+    validIdSet,
+  ]);
 
   const select = useCallback<Dispatch<SetStateAction<SelectedState>>>(
     (next) => {
@@ -440,33 +467,27 @@ export function isProfileSetupPath(pathname: string): boolean {
 }
 
 export function getLatestApplicationAttempt(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: {
+    applicationRecords: Readonly<
+      JobFinderRendererWorkspaceSnapshot["applicationRecords"]
+    >;
+    applicationAttempts: Readonly<
+      JobFinderRendererWorkspaceSnapshot["applicationAttempts"]
+    >;
+  },
   selectedApplicationRecordId: string | null,
 ) {
   const selectedApplicationRecord = selectedApplicationRecordId
-    ? (workspace.applicationRecords.find(
-        (record) => record.id === selectedApplicationRecordId,
+    ? (getApplicationRecordIndex(workspace.applicationRecords).get(
+        selectedApplicationRecordId,
       ) ?? null)
     : (workspace.applicationRecords[0] ?? null);
 
-  let selectedApplicationAttempt = null;
-
-  if (selectedApplicationRecord) {
-    let latestUpdatedAt = Number.NEGATIVE_INFINITY;
-
-    for (const attempt of workspace.applicationAttempts) {
-      if (attempt.applicationRecordId !== selectedApplicationRecord.id) {
-        continue;
-      }
-
-      const updatedAt = new Date(attempt.updatedAt).getTime();
-
-      if (updatedAt > latestUpdatedAt) {
-        latestUpdatedAt = updatedAt;
-        selectedApplicationAttempt = attempt;
-      }
-    }
-  }
+  const selectedApplicationAttempt = selectedApplicationRecord
+    ? (getLatestApplicationAttemptIndex(workspace.applicationAttempts).get(
+        selectedApplicationRecord.id,
+      ) ?? null)
+    : null;
 
   return {
     selectedApplicationAttempt,
@@ -476,13 +497,13 @@ export function getLatestApplicationAttempt(
 
 export function getJobFinderWorkspaceSelection(
   workspace: {
-    discoveryJobs: readonly JobFinderWorkspaceSnapshot["discoveryJobs"][number][];
-    reviewQueue: readonly JobFinderWorkspaceSnapshot["reviewQueue"][number][];
+    discoveryJobs: readonly JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number][];
+    reviewQueue: readonly JobFinderRendererWorkspaceSnapshot["reviewQueue"][number][];
   },
   selectedDiscoveryJobId: string | null,
   selectedReviewJobId: string | null,
 ) {
-  const jobsById = new Map(workspace.discoveryJobs.map((job) => [job.id, job]));
+  const { jobsById } = getDiscoverySelectionIndex(workspace.discoveryJobs);
   const selectedDiscoveryJob =
     (selectedDiscoveryJobId
       ? (jobsById.get(selectedDiscoveryJobId) ?? null)
@@ -490,7 +511,11 @@ export function getJobFinderWorkspaceSelection(
     workspace.discoveryJobs[0] ??
     null;
   const selectedReviewItem =
-    workspace.reviewQueue.find((item) => item.jobId === selectedReviewJobId) ??
+    (selectedReviewJobId
+      ? getReviewSelectionIndex(workspace.reviewQueue).itemsByJobId.get(
+          selectedReviewJobId,
+        )
+      : null) ??
     workspace.reviewQueue[0] ??
     null;
   const selectedReviewJob =

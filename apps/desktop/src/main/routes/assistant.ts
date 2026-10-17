@@ -1,3 +1,4 @@
+import { publishJobFinderWorkspaceUpdate } from "../services/job-finder/workspace-updates";
 import { getJobFinderWorkspaceService } from "../services/job-finder/workspace-service";
 import { BrowserWindow, dialog } from "electron";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
@@ -28,6 +29,7 @@ import {
 
 import {
   clearUiResumeBatch,
+  isUiResumeBatchInvalidated,
   readUiResumeBatch,
   syncUiResumeBatch,
 } from "../services/assistant/ui-resume-batch";
@@ -75,6 +77,16 @@ export function registerAssistantRouteHandlers(ipcMain: IpcMain): void {
     "job-finder:assistant:sync-resume-batch",
     async (event, payload: unknown) => {
       assertAppWindow(event);
+      const input = AssistantResumeBatchStateSchema.parse(payload);
+      const invalidatedResponse = () =>
+        AssistantResumeBatchStateSchema.parse({
+          ...input,
+          activeJobIds: [],
+          stopRequested: true,
+          running: false,
+          done: false,
+        });
+      if (isUiResumeBatchInvalidated(input.id)) return invalidatedResponse();
       queueOwnerId = event.sender.id;
       if (!queueOwners.has(event.sender)) {
         queueOwners.add(event.sender);
@@ -106,11 +118,17 @@ export function registerAssistantRouteHandlers(ipcMain: IpcMain): void {
         event.sender.on("did-finish-load", clearOwnedQueue);
       }
       const batch = AssistantResumeBatchStateSchema.parse(
-        syncUiResumeBatch(AssistantResumeBatchStateSchema.parse(payload)),
+        syncUiResumeBatch(input),
       );
-      await (
-        await getJobFinderWorkspaceService()
-      ).saveResumeBatchCheckpoint(batch);
+      const service = await getJobFinderWorkspaceService();
+      if (isUiResumeBatchInvalidated(input.id)) return invalidatedResponse();
+      await service.saveResumeBatchCheckpoint(batch);
+      if (isUiResumeBatchInvalidated(input.id)) return invalidatedResponse();
+      // The last job publishes before the renderer's final checkpoint sync.
+      // Publish once more after the durable running=false receipt so screens
+      // cannot keep showing a stale running queue until navigation or restart.
+      if (batch.running === false)
+        publishJobFinderWorkspaceUpdate(event.sender);
       return batch;
     },
   );

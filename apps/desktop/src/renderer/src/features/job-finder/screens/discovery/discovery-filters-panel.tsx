@@ -55,11 +55,6 @@ interface DiscoveryFiltersPanelProps {
    */
   searchSelectivity?: JobSearchSelectivity | null;
   sourceAccessPrompts: readonly SourceAccessPrompt[];
-  /**
-   * A running or most-recently completed run proves the browser runtime
-   * works, so a stale blocked snapshot must not disable Search here.
-   */
-  trustRecentRun?: boolean;
 }
 
 const SEARCH_SELECTIVITY_LABELS: Record<JobSearchSelectivity, string> = {
@@ -223,7 +218,6 @@ export function DiscoveryFiltersPanel({
   searchPreferences,
   searchSelectivity = null,
   sourceAccessPrompts,
-  trustRecentRun = false,
 }: DiscoveryFiltersPanelProps) {
   const searchControlsHeadingId = useId();
   const sectionHeadingPrefix = useId();
@@ -410,7 +404,6 @@ export function DiscoveryFiltersPanel({
   const searchReadiness = getDiscoverySearchReadiness(
     searchPreferences,
     displaySessionSnapshot,
-    { trustRecentRun },
   );
   // A not-yet-opened browser carries only a generic runtime sentence; the
   // summary shows its own plain-language description for that state instead.
@@ -463,7 +456,6 @@ export function DiscoveryFiltersPanel({
           searchDisabledReason={
             searchDisabledOverrideReason ?? searchReadiness.reason
           }
-          searchBlocker={searchReadiness.blocker}
           searchSetupActionLabel={
             searchReadiness.blocker === "no_search_roles"
               ? "Add target roles"

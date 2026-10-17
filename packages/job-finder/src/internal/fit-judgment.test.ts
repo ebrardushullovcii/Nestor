@@ -2,7 +2,10 @@ import { describe, expect, test, vi } from "vitest";
 import type { JudgeJobFitsInput } from "@nordri/ai-providers";
 
 import { createSeed } from "../workspace-service.test-fixtures";
-import { judgeJobFitsInBatches } from "./fit-judgment";
+import {
+  compareFitJudgingPromise,
+  judgeJobFitsInBatches,
+} from "./fit-judgment";
 
 function jobs(count: number) {
   const base = createSeed().savedJobs[0]!;
@@ -122,4 +125,53 @@ test("reports settled fit checks while other batches still wait", async () => {
     },
   });
   expect(progress).toEqual([20, 40, 42]);
+});
+
+describe("which unjudged jobs are asked about first", () => {
+  test("likeliest fits first, never judged in the middle, skips and unrelated roles last", () => {
+    const base = jobs(1)[0]!;
+    const judgment = {
+      source: "batch" as const,
+      judgedAt: "2026-10-01T00:00:00.000Z",
+      contextFingerprint: "old",
+      postingFingerprint: "old",
+      score: 50,
+      recommendation: "review_before_applying" as const,
+      role: "unknown" as const,
+      roleExplanation: null,
+      preferences: "unknown" as const,
+      preferencesExplanation: null,
+      locationReach: "unknown" as const,
+      reasons: [],
+      gaps: [],
+      listingClosed: false,
+      listingClosedEvidence: null,
+    };
+    const job = (
+      id: string,
+      assessment: Partial<typeof base.matchAssessment>,
+      discoveredAt = "2026-10-01T00:00:00.000Z",
+    ) => ({
+      ...base,
+      id,
+      discoveredAt,
+      matchAssessment: { ...base.matchAssessment, ...assessment },
+    });
+    const ordered = [
+      job("skip", { recommendation: "skip", score: 90, judgment }),
+      job("unrelated", { titleFamilyMatch: "unrelated", score: 85, judgment }),
+      job("weak", { score: 20, judgment }),
+      job("never", { judgment: null }),
+      job("newer-never", { judgment: null }, "2026-10-10T00:00:00.000Z"),
+      job("strong", { score: 90, judgment }),
+    ].sort(compareFitJudgingPromise);
+    expect(ordered.map((entry) => entry.id)).toEqual([
+      "strong",
+      "newer-never",
+      "never",
+      "weak",
+      "skip",
+      "unrelated",
+    ]);
+  });
 });

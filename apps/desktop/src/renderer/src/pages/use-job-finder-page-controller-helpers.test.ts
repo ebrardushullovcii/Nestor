@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, renderHook } from "@testing-library/react";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -37,7 +37,7 @@ describe("getLatestApplicationAttempt", () => {
           updatedAt: "2026-08-23T10:00:00.000Z",
         },
       ],
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
 
     const result = getLatestApplicationAttempt(workspace, "application_a");
 
@@ -56,7 +56,7 @@ describe("getLatestApplicationAttempt", () => {
           updatedAt: "2026-08-23T11:00:00.000Z",
         },
       ],
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
 
     expect(
       getLatestApplicationAttempt(workspace, "application_missing"),

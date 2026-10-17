@@ -5,7 +5,10 @@ import {
   evaluateResumeProposalGrounding,
   validateResumeDraft,
 } from "./internal/resume-workspace-helpers";
-import { createAiClient } from "./workspace-service.test-runtimes";
+import {
+  createAiClient,
+  fakeResumeClaimCheck,
+} from "./workspace-service.test-runtimes";
 import { createWorkspaceServiceHarness } from "./workspace-service.test-support";
 
 /**
@@ -34,6 +37,11 @@ function createSummaryRewriteHarness(newText: string) {
   return createWorkspaceServiceHarness({
     aiClient: {
       ...baseAiClient,
+      // The fact check finds the invented summary unbacked; a line the AI has
+      // not checked would not hold anything back.
+      checkResumeClaims: fakeResumeClaimCheck({
+        [LIVE_UNGROUNDED_SUMMARY]: "unsupported",
+      }),
       reviseResumeDraft(input) {
         const section = findEditableTextSection(input.draft.sections);
         return Promise.resolve({
@@ -147,7 +155,7 @@ describe("guided edits proposals share the export grounding rule", () => {
     expect(proposal?.content).not.toMatch(/would block approval/i);
   });
 
-  test("the proposal gate and the export validator agree on the same text", async () => {
+  test("the proposal gate and the export validator agree on unchecked text", async () => {
     const { workspaceService } = createSummaryRewriteHarness("placeholder");
     await workspaceService.generateResume("job_ready");
     const workspace = await workspaceService.getResumeWorkspace("job_ready");
@@ -179,10 +187,10 @@ describe("guided edits proposals share the export grounding rule", () => {
       evaluatedAt,
     });
 
-    expect(gate.accepted).toBe(false);
-    expect(
-      gate.approvalBlockers.map((blocker) => blocker.flaggedText),
-    ).toContain(LIVE_UNGROUNDED_SUMMARY);
+    // Without a fact check both layers let the line through: a line the AI
+    // has not checked never holds the person back.
+    expect(gate.accepted).toBe(true);
+    expect(gate.approvalBlockers).toEqual([]);
 
     const rewrittenDraft = {
       ...workspace.draft,
@@ -205,8 +213,6 @@ describe("guided edits proposals share the export grounding rule", () => {
       }),
     });
 
-    expect(exportBlockers.map((blocker) => blocker.flaggedText)).toContain(
-      LIVE_UNGROUNDED_SUMMARY,
-    );
+    expect(exportBlockers).toEqual([]);
   });
 });

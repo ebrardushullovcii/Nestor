@@ -1061,6 +1061,34 @@ export type ApplyRunSummary = z.infer<typeof ApplyRunSummarySchema>;
 export const ApplyJobResultSummarySchema = ApplyJobResultSchema;
 export type ApplyJobResultSummary = z.infer<typeof ApplyJobResultSummarySchema>;
 
+/** Workspace IPC omits evidence bodies read through getApplyRunDetails. */
+export const ApplyJobResultListRowSchema = ApplyJobResultSchema.innerType()
+  .omit({
+    visualObservationSets: true,
+    visualCheckpoints: true,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const hasStartedAt = value.applicationPreparationStartedAt !== undefined;
+    const hasStartedLocalDate =
+      value.applicationPreparationStartedLocalDate !== undefined;
+    const bothNull =
+      value.applicationPreparationStartedAt === null &&
+      value.applicationPreparationStartedLocalDate === null;
+    const bothSet =
+      typeof value.applicationPreparationStartedAt === "string" &&
+      typeof value.applicationPreparationStartedLocalDate === "string";
+    if ((hasStartedAt || hasStartedLocalDate) && !bothNull && !bothSet) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Preparation start timestamp and local date must both be null or both be set.",
+        path: ["applicationPreparationStartedAt"],
+      });
+    }
+  });
+export type ApplyJobResultListRow = z.infer<typeof ApplyJobResultListRowSchema>;
+
 export const ApplyRunDetailsSchema = z.object({
   run: ApplyRunSchema,
   result: ApplyJobResultSchema.nullable().default(null),

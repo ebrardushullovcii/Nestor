@@ -44,20 +44,23 @@ async function waitForOverlayWindows(app) {
       .filter((candidate) =>
         candidate.url().includes("/live-assistant/overlay/"),
       );
-    const visibleOverlayCount = await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows().filter(
-        (candidate) =>
-          candidate.webContents
-            .getURL()
-            .includes("/live-assistant/overlay/") && candidate.isVisible(),
-      ).length,
+    const visibleOverlayCount = await app.evaluate(
+      ({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows().filter(
+          (candidate) =>
+            candidate.webContents
+              .getURL()
+              .includes("/live-assistant/overlay/") && candidate.isVisible(),
+        ).length,
     );
     if (windows.length === 2 && visibleOverlayCount === 2) {
       return windows;
     }
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
-  throw new Error("Timed out waiting for visible answer and transcript popups.");
+  throw new Error(
+    "Timed out waiting for visible answer and transcript popups.",
+  );
 }
 
 async function waitForMeetingTranscript(
@@ -101,7 +104,9 @@ function excerpt(text, maximumWords = 18) {
 
 async function run() {
   if (process.platform !== "win32") {
-    throw new Error("This live loopback acceptance currently requires Windows.");
+    throw new Error(
+      "This live loopback acceptance currently requires Windows.",
+    );
   }
 
   await mkdir(outputDir, { recursive: true });
@@ -202,9 +207,7 @@ async function run() {
     const popupVisibility = await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
         .filter((candidate) =>
-          candidate.webContents
-            .getURL()
-            .includes("/live-assistant/overlay/"),
+          candidate.webContents.getURL().includes("/live-assistant/overlay/"),
         )
         .map((candidate) => ({
           url: candidate.webContents.getURL(),
@@ -298,11 +301,10 @@ async function run() {
     await window.getByRole("button", { name: /^Send$/ }).click();
     await window.waitForFunction(
       async () => {
-        const workspace =
-          await window.nordri.liveAssistant.getWorkspace();
+        const workspace = await window.nordri.liveAssistant.getWorkspace();
         return (
-          workspace.activeSession?.chatConversation?.messages.length ?? 0
-        ) >= 2;
+          (workspace.activeSession?.chatConversation?.messages.length ?? 0) >= 2
+        );
       },
       null,
       { timeout: 90_000 },
@@ -325,19 +327,13 @@ async function run() {
       const workspace = await window.nordri.liveAssistant.getWorkspace();
       return workspace.activeSession?.listening === false;
     });
-    await window
-      .getByRole("button", { name: "Resume", exact: true })
-      .waitFor();
-    await window
-      .getByRole("button", { name: "Resume", exact: true })
-      .click();
+    await window.getByRole("button", { name: "Resume", exact: true }).waitFor();
+    await window.getByRole("button", { name: "Resume", exact: true }).click();
     await window.waitForFunction(async () => {
       const workspace = await window.nordri.liveAssistant.getWorkspace();
       return workspace.activeSession?.listening === true;
     });
-    await window
-      .getByRole("button", { name: "Pause", exact: true })
-      .waitFor();
+    await window.getByRole("button", { name: "Pause", exact: true }).waitFor();
 
     await window.screenshot({
       animations: "disabled",
@@ -352,12 +348,12 @@ async function run() {
       path: path.join(outputDir, "03-transcript-popup.png"),
     });
 
-    await window
-      .getByRole("button", { name: "End", exact: true })
-      .click();
+    await window.getByRole("button", { name: "End", exact: true }).click();
     await window.waitForFunction(async () => {
       const workspace = await window.nordri.liveAssistant.getWorkspace();
-      return workspace.activeSession === null && workspace.recentSessions.length > 0;
+      return (
+        workspace.activeSession === null && workspace.recentSessions.length > 0
+      );
     });
     await window.getByRole("button", { name: "Review" }).click();
     await window
@@ -372,7 +368,10 @@ async function run() {
     });
 
     const finalWorkspace = await getWorkspace(window);
-    const finalSession = finalWorkspace.recentSessions[0];
+    const finalSession = await window.evaluate(
+      (id) => window.nordri.liveAssistant.getSession(id),
+      finalWorkspace.recentSessions[0]?.id,
+    );
     const finalCue = finalSession?.cueCards.at(-1) ?? null;
     const finalChat = finalSession?.chatConversation;
     const finalMeetingSegments =
@@ -384,7 +383,8 @@ async function run() {
       sourceUrl,
       outcome: "passed_live_system_audio_session",
       systemAudioOnly: {
-        microphoneCaptureEnabled: finalWorkspace.setup.consent.microphoneCapture,
+        microphoneCaptureEnabled:
+          finalWorkspace.setup.consent.microphoneCapture,
         systemAudioCaptureEnabled:
           finalWorkspace.setup.consent.meetingAudioCapture,
         microphoneTranscriptCount: microphoneSegments.length,
@@ -431,16 +431,13 @@ async function run() {
       },
       lifecycleEvidence: {
         endedSessionRetained: finalSession?.status === "ended",
-        exportVisible:
-          (await window.getByText(/\.md$/u).count()) > 0,
+        exportVisible: (await window.getByText(/\.md$/u).count()) > 0,
       },
       retentionEvidence: {
-        rawAudioRetained: JSON.stringify(finalWorkspace).includes(
-          "audioBase64",
-        ),
-        rawImageBytesRetained: JSON.stringify(finalWorkspace).includes(
-          "dataBase64",
-        ),
+        rawAudioRetained:
+          JSON.stringify(finalWorkspace).includes("audioBase64"),
+        rawImageBytesRetained:
+          JSON.stringify(finalWorkspace).includes("dataBase64"),
       },
     };
 

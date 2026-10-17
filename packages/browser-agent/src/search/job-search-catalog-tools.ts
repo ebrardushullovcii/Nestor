@@ -206,7 +206,8 @@ export function createSearchCatalogTools(input: {
             : null;
           if (
             !parsed?.success ||
-            !String(row.reason ?? "").trim() ||
+            typeof row.reason !== "string" ||
+            !row.reason.trim() ||
             (Array.isArray(ids) && ids.includes(row.id))
           )
             return {

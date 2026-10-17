@@ -12,7 +12,7 @@ import {
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import type { ReactElement } from "react";
 import type {
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   UserActionCommandInput,
 } from "@nordri/contracts";
 import type { FinishInBrowserInput } from "@renderer/features/job-finder/screens/applications/applications-detail-panel-recovery-actions-section";
@@ -71,7 +71,7 @@ vi.mock(
   }),
 );
 
-function workspace(): JobFinderWorkspaceSnapshot {
+function workspace(): JobFinderRendererWorkspaceSnapshot {
   return {
     activeCampaignId: "campaign_1",
     campaigns: [
@@ -104,7 +104,7 @@ function workspace(): JobFinderWorkspaceSnapshot {
         },
       ],
     },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 describe("selectRapidReviewScope", () => {
@@ -149,14 +149,14 @@ describe("selectOutcomeAnalyticsScope", () => {
         jobId: "job_a",
         campaignId: "campaign_1",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["intelligence"]["outcomeEvents"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["intelligence"]["outcomeEvents"];
     current.intelligence.outcomeAnalytics = {
       generatedAt: "2026-08-15T10:00:00.000Z",
       buckets: [],
     };
     current.intelligence.resumeStrategies = [
       { id: "strategy_1", name: "SWE generalist" },
-    ] as unknown as JobFinderWorkspaceSnapshot["intelligence"]["resumeStrategies"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["intelligence"]["resumeStrategies"];
 
     const scope = selectOutcomeAnalyticsScope(current);
 
@@ -258,7 +258,7 @@ describe("selectCampaignApplicationsScope", () => {
         },
       ],
       selectedApplyRunId: "run_1",
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
   }
 
   // F57. Campaign membership is resolved through a per-campaign Set index
@@ -288,7 +288,7 @@ describe("selectCampaignApplicationsScope", () => {
         { id: "run_span", campaignId: null, jobIds: ["job_1", "job_3"] },
       ],
       campaigns: [base.campaigns[0], base.campaigns[1]],
-    } as unknown as JobFinderWorkspaceSnapshot);
+    } as unknown as JobFinderRendererWorkspaceSnapshot);
     expect(uniqueOwner.applyRuns.map((run) => run.id)).toEqual(["run_span"]);
 
     // campaign_1 and campaign_3 both contain every job, so ownership is
@@ -298,7 +298,7 @@ describe("selectCampaignApplicationsScope", () => {
       applyRuns: [
         { id: "run_span", campaignId: null, jobIds: ["job_1", "job_3"] },
       ],
-    } as unknown as JobFinderWorkspaceSnapshot);
+    } as unknown as JobFinderRendererWorkspaceSnapshot);
     expect(ambiguousOwner.applyRuns).toEqual([]);
 
     // A job outside every campaign resolves to no campaign at all.
@@ -307,7 +307,7 @@ describe("selectCampaignApplicationsScope", () => {
       applyRuns: [
         { id: "run_outside", campaignId: null, jobIds: ["job_unknown"] },
       ],
-    } as unknown as JobFinderWorkspaceSnapshot);
+    } as unknown as JobFinderRendererWorkspaceSnapshot);
     expect(unowned.applyRuns).toEqual([]);
   });
 
@@ -358,7 +358,7 @@ describe("runJobFinderApplicationBrowserHandoff", () => {
     destinationUrl: "https://jobs.example.com/apply/1",
   };
 
-  function pendingRequests(): JobFinderWorkspaceSnapshot["userActionRequests"] {
+  function pendingRequests(): JobFinderRendererWorkspaceSnapshot["userActionRequests"] {
     return [
       {
         id: "request_a",
@@ -366,7 +366,7 @@ describe("runJobFinderApplicationBrowserHandoff", () => {
         state: "pending",
         scope: { type: "application", runId: "run_a", jobId: "job_a" },
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"];
   }
 
   it("opens the exact paused application page and reports that, with no submit authority", async () => {
@@ -540,7 +540,7 @@ describe("runJobFinderApplicationBrowserHandoff", () => {
         state: "superseded",
         scope: { type: "application", runId: "run_a", jobId: "job_a" },
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"];
 
     const outcome = await runJobFinderApplicationBrowserHandoff({
       onOpenBrowserSession,
@@ -584,7 +584,7 @@ describe("Applications browser-step confirmation", () => {
   function selectedRecordWorkspace(
     userActionRequests: unknown[],
     options?: { secondRecord?: boolean },
-  ): JobFinderWorkspaceSnapshot {
+  ): JobFinderRendererWorkspaceSnapshot {
     // `record_a` stays first so it is the record Applications selects.
     const applicationRecords = options?.secondRecord
       ? [
@@ -647,7 +647,7 @@ describe("Applications browser-step confirmation", () => {
         },
       },
       userActionRequests,
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
   }
 
   function renderApplicationsRoute(input: {
@@ -660,7 +660,7 @@ describe("Applications browser-step confirmation", () => {
     onSelectCampaign?: ReturnType<typeof vi.fn>;
     onSubmitPreparedApplication?: (jobId: string) => Promise<void>;
     onStartApplyCopilot?: JobFinderPageContext["onStartApplyCopilot"];
-    workspace: JobFinderWorkspaceSnapshot;
+    workspace: JobFinderRendererWorkspaceSnapshot;
   }) {
     const handlerStubs = new Map<string | symbol, () => undefined>();
     const base = {
@@ -811,15 +811,15 @@ describe("Applications browser-step confirmation", () => {
       id: "campaign_2",
       name: "Campaign Two",
       jobIds: ["job_b"],
-    } as JobFinderWorkspaceSnapshot["campaigns"][number]);
+    } as JobFinderRendererWorkspaceSnapshot["campaigns"][number]);
     current.discoveryJobs.push({
       id: "job_b",
       title: "Job B",
-    } as JobFinderWorkspaceSnapshot["discoveryJobs"][number]);
+    } as JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number]);
     current.applicationRecords.push({
       id: "record_b",
       jobId: "job_b",
-    } as JobFinderWorkspaceSnapshot["applicationRecords"][number]);
+    } as JobFinderRendererWorkspaceSnapshot["applicationRecords"][number]);
     const onSelectCampaign = vi.fn(() => new Promise<boolean>(() => undefined));
 
     renderApplicationsRoute({
@@ -857,11 +857,11 @@ describe("Applications browser-step confirmation", () => {
       id: "campaign_2",
       name: "Campaign Two",
       jobIds: ["job_b"],
-    } as JobFinderWorkspaceSnapshot["campaigns"][number]);
+    } as JobFinderRendererWorkspaceSnapshot["campaigns"][number]);
     current.applicationRecords.push({
       id: "record_b",
       jobId: "job_b",
-    } as JobFinderWorkspaceSnapshot["applicationRecords"][number]);
+    } as JobFinderRendererWorkspaceSnapshot["applicationRecords"][number]);
     const onSelectCampaign = vi.fn(() => Promise.resolve(false));
     renderApplicationsRoute({
       expectUnavailable: true,

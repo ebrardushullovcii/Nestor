@@ -4,14 +4,15 @@ import {
   JobDiscoveryTargetSchema,
   NonEmptyStringSchema,
   discoveryFeedbackReasonValues,
+  normalizeCompanyName,
   type DiscoveryJobView,
+  type DiscoveryFeedbackBatchOutcome,
 } from "@nordri/contracts";
 import { z } from "zod";
 
 import { AssistantToolError, defineTool, json } from "../tool-kit";
 import {
   allJobs,
-  comparableName,
   compactJob,
   createJobCaveats,
   describeApplicationStanding,
@@ -22,6 +23,26 @@ import {
   pausedByPersonMessage,
   plural,
 } from "./format";
+
+import type { JobFinderWorkspaceService } from "../../internal/workspace-service-contracts";
+
+function readAssistantWorkspace(service: JobFinderWorkspaceService) {
+  return service.getWorkspaceProjection?.() ?? service.getWorkspaceSnapshot();
+}
+
+function feedbackOutcome(entry: DiscoveryFeedbackBatchOutcome) {
+  return {
+    jobId: entry.jobId,
+    outcome:
+      entry.status === "failed"
+        ? `failed: ${entry.message}`
+        : entry.status === "held"
+          ? `held back: ${entry.message}`
+          : entry.status === "stopped"
+            ? "not started: stopped"
+            : entry.status,
+  };
+}
 
 const Id = NonEmptyStringSchema.max(200);
 
@@ -128,7 +149,7 @@ export const queryJobsTool = defineTool({
   label: () => "Looking through your jobs",
   effect: "read",
   async execute(input, { service, session }) {
-    const snapshot = await service.getWorkspaceSnapshot();
+    const snapshot = await readAssistantWorkspace(service);
     const caveatsFor = createJobCaveats(snapshot);
     // Shortlisted is the active plan's curated list; company history also
     // contains jobs belonging only to other plans and jobs removed from it.
@@ -228,7 +249,7 @@ export const showJobsTool = defineTool({
   label: () => "Showing the jobs",
   effect: "read",
   async execute(input, { service, session }) {
-    const snapshot = await service.getWorkspaceSnapshot();
+    const snapshot = await readAssistantWorkspace(service);
     const jobs = [...new Set(input.jobIds)]
       .map((jobId) => findJob(snapshot, jobId))
       .filter((job): job is NonNullable<typeof job> => job !== null);
@@ -265,7 +286,7 @@ export const getJobTool = defineTool({
   label: () => "Reading the job",
   effect: "read",
   async execute(input, { service }) {
-    const snapshot = await service.getWorkspaceSnapshot();
+    const snapshot = await readAssistantWorkspace(service);
     const job = findJob(snapshot, input.jobId);
     if (!job)
       throw new AssistantToolError("not_found", "No saved job with that id.");
@@ -284,7 +305,7 @@ export const compareJobsTool = defineTool({
     `Comparing ${plural(Array.isArray(input.jobIds) ? input.jobIds.length : 2, "job")}`,
   effect: "read",
   async execute(input, { service }) {
-    const snapshot = await service.getWorkspaceSnapshot();
+    const snapshot = await readAssistantWorkspace(service);
     const jobs = input.jobIds.map((id) => findJob(snapshot, id));
     const missing = input.jobIds.filter((_id, index) => !jobs[index]);
     const found = jobs.filter((job): job is DiscoveryJobView => job !== null);
@@ -313,13 +334,15 @@ export const shortlistJobsTool = defineTool({
     `Shortlisting ${plural(Array.isArray(input.jobIds) ? input.jobIds.length : 1, "job")}`,
   effect: "local_write",
   async execute(input, { service, session, ports }) {
-    const snapshot = await service.getWorkspaceSnapshot();
+    const readSnapshot = () => readAssistantWorkspace(service);
+    const snapshot = await readSnapshot();
     const caveatsFor = createJobCaveats(snapshot);
     const uniqueIds = [...new Set(input.jobIds)];
     const outcomes = uniqueIds.map((jobId) => ({
       jobId,
       outcome: "not started: stopped",
     }));
+    const eligible: string[] = [];
     const select = async (
       jobId: string,
     ): Promise<{ jobId: string; outcome: string }> => {
@@ -354,6 +377,10 @@ export const shortlistJobsTool = defineTool({
         };
       }
       session.assertCurrent();
+      if (service.queueJobsForReview) {
+        eligible.push(jobId);
+        return { jobId, outcome: "ready" };
+      }
       try {
         await service.queueJobForReview(jobId);
         return { jobId, outcome: "shortlisted" };
@@ -384,14 +411,38 @@ export const shortlistJobsTool = defineTool({
             .catch(() => undefined);
       }
     };
-    await Promise.all(
-      Array.from({ length: Math.min(3, uniqueIds.length) }, () => worker()),
-    );
+    if (service.queueJobsForReview) {
+      for (let index = 0; index < uniqueIds.length; index++) {
+        if (session.signal?.aborted) break;
+        outcomes[index] = await select(uniqueIds[index]!);
+      }
+      if (eligible.length > 0 && !session.signal?.aborted) {
+        session.assertCurrent();
+        let outcome = "shortlisted";
+        try {
+          await service.queueJobsForReview(eligible);
+        } catch (error) {
+          outcome = `failed: ${error instanceof Error ? error.message.slice(0, 200) : "error"}`;
+        }
+        for (const entry of outcomes)
+          if (entry.outcome === "ready") entry.outcome = outcome;
+        await session
+          .reportProgress?.(`Processed ${eligible.length} jobs in one batch.`)
+          .catch(() => undefined);
+      } else {
+        for (const entry of outcomes)
+          if (entry.outcome === "ready") entry.outcome = "not started: stopped";
+      }
+    } else {
+      await Promise.all(
+        Array.from({ length: Math.min(3, uniqueIds.length) }, () => worker()),
+      );
+    }
     ports.publishWorkspaceUpdate();
     const done = outcomes.filter(
       (entry) => entry.outcome === "shortlisted",
     ).length;
-    const after = await service.getWorkspaceSnapshot();
+    const after = await readSnapshot();
     const shortlisted = outcomes
       .filter((entry) => entry.outcome === "shortlisted")
       .map((entry) => findJob(after, entry.jobId))
@@ -439,7 +490,7 @@ export const shortlistResultSetTool = defineTool({
         "invalid_input",
         "Use a saved jobs result set; save collected page jobs first.",
       );
-    const snapshot = await context.service.getWorkspaceSnapshot();
+    const snapshot = await readAssistantWorkspace(context.service);
     const caveatsFor = createJobCaveats(snapshot);
     const eligible: string[] = [];
     const heldBack: { jobId: string; reason: string }[] = [];
@@ -555,18 +606,29 @@ export const dismissJobsTool = defineTool({
     ["jobIds", "reasons"],
   ),
   input: z.object({
-    jobIds: z.array(Id).min(1).max(100),
+    jobIds: z.array(Id).min(1),
     reasons: z.array(DiscoveryFeedbackReasonSchema).min(1).max(9),
   }),
   label: () => "Hiding jobs",
   effect: "local_write",
   async execute(input, { service, session, ports }) {
     const outcomes: { jobId: string; outcome: string }[] = [];
-    const before = await service.getWorkspaceSnapshot();
+    const before = await readAssistantWorkspace(service);
     const shortlistedBefore = new Set(
       before.reviewQueue.map((item) => item.jobId),
     );
-    for (const jobId of input.jobIds) {
+    const jobIds = [...new Set(input.jobIds)];
+    const batch = service.dismissDiscoveryJobs
+      ? await service.dismissDiscoveryJobs(
+          jobIds.map((jobId) => ({ jobId, reasons: input.reasons })),
+          {
+            signal: session.signal,
+            assertCurrent: () => session.assertCurrent(),
+          },
+        )
+      : null;
+    if (batch) outcomes.push(...batch.outcomes.map(feedbackOutcome));
+    for (const jobId of batch ? [] : jobIds) {
       session.assertCurrent();
       try {
         await service.dismissDiscoveryJob({ jobId, reasons: input.reasons });
@@ -578,9 +640,14 @@ export const dismissJobsTool = defineTool({
         });
       }
     }
-    ports.publishWorkspaceUpdate();
+    if (!batch || batch.workspace) {
+      session.assertCurrent();
+      ports.publishWorkspaceUpdate();
+    }
     // Say what hiding did to the shortlist, from the records.
-    const after = await service.getWorkspaceSnapshot();
+    const after = batch
+      ? (batch.workspace ?? before)
+      : await readAssistantWorkspace(service);
     const shortlistedAfter = new Set(
       after.reviewQueue.map((item) => item.jobId),
     );
@@ -602,16 +669,38 @@ export const restoreJobsTool = defineTool({
   group: "jobs",
   description: "Brings hidden jobs back to the found list.",
   parameters: json.object({ jobIds: json.ids() }, ["jobIds"]),
-  input: JobIdsInput,
+  input: z.object({ jobIds: z.array(Id).min(1) }),
   label: () => "Restoring hidden jobs",
   effect: "local_write",
   async execute(input, { service, session, ports }) {
-    for (const jobId of input.jobIds) {
+    const jobIds = [...new Set(input.jobIds)];
+    const batch = service.restoreDismissedDiscoveryJobs
+      ? await service.restoreDismissedDiscoveryJobs(jobIds, {
+          signal: session.signal,
+          assertCurrent: () => session.assertCurrent(),
+        })
+      : null;
+    const outcomes = batch?.outcomes.map(feedbackOutcome) ?? [];
+    for (const jobId of batch ? [] : jobIds) {
       session.assertCurrent();
-      await service.restoreDismissedDiscoveryJob(jobId);
+      try {
+        await service.restoreDismissedDiscoveryJob(jobId);
+        outcomes.push({ jobId, outcome: "restored" });
+      } catch (error) {
+        outcomes.push({
+          jobId,
+          outcome: `failed: ${error instanceof Error ? error.message.slice(0, 200) : "error"}`,
+        });
+      }
     }
-    ports.publishWorkspaceUpdate();
-    return { summary: `Restored ${plural(input.jobIds.length, "job")}.` };
+    if (!batch || batch.workspace) {
+      session.assertCurrent();
+      ports.publishWorkspaceUpdate();
+    }
+    return {
+      summary: `Restored ${plural(outcomes.filter((entry) => entry.outcome === "restored").length, "job")}.`,
+      data: outcomes,
+    };
   },
 });
 
@@ -633,24 +722,50 @@ export const excludeEmployerTool = defineTool({
       );
     }
     session.assertCurrent();
-    const before = await service.getWorkspaceSnapshot();
-    const employer = comparableName(preview.displayCompanyName);
+    const before = await readAssistantWorkspace(service);
     const sameEmployer = (job: DiscoveryJobView) =>
-      comparableName(job.company) === employer;
-    await service.dismissDiscoveryJob({
-      jobId: input.jobId,
-      reasons: ["company"],
-      action: "hide_and_exclude_employer",
-      expectedNormalizedCompanyName: preview.normalizedCompanyName,
-    });
+      normalizeCompanyName(job.company) === preview.normalizedCompanyName;
     const others = allJobs(before).filter(
       (job) =>
         job.id !== input.jobId &&
         job.status === "discovered" &&
         sameEmployer(job),
     );
-    const failed: string[] = [];
-    for (const job of others) {
+    const batch = service.excludeEmployerDiscoveryJobs
+      ? await service.excludeEmployerDiscoveryJobs(
+          {
+            jobId: input.jobId,
+            jobIds: others.map((job) => job.id),
+            expectedNormalizedCompanyName: preview.normalizedCompanyName,
+          },
+          {
+            signal: session.signal,
+            assertCurrent: () => session.assertCurrent(),
+          },
+        )
+      : null;
+    const anchor = batch?.outcomes.find((entry) => entry.jobId === input.jobId);
+    if (anchor && anchor.status !== "hidden") {
+      throw new AssistantToolError(
+        "refused",
+        anchor.status === "stopped"
+          ? "The employer exclusion was stopped."
+          : `This employer cannot be excluded (${anchor.status === "held" || anchor.status === "failed" ? anchor.message : anchor.status}).`,
+      );
+    }
+    if (!batch) {
+      await service.dismissDiscoveryJob({
+        jobId: input.jobId,
+        reasons: ["company"],
+        action: "hide_and_exclude_employer",
+        expectedNormalizedCompanyName: preview.normalizedCompanyName,
+      });
+    }
+    const failed =
+      batch?.outcomes
+        .filter((entry) => entry.status !== "hidden")
+        .map((entry) => entry.jobId) ?? [];
+    for (const job of batch ? [] : others) {
       session.assertCurrent();
       try {
         await service.dismissDiscoveryJob({
@@ -662,9 +777,14 @@ export const excludeEmployerTool = defineTool({
         failed.push(job.id);
       }
     }
-    ports.publishWorkspaceUpdate();
+    if (!batch || batch.workspace) {
+      session.assertCurrent();
+      ports.publishWorkspaceUpdate();
+    }
     // Report what the workspace now shows, not what was intended.
-    const after = await service.getWorkspaceSnapshot();
+    const after = batch
+      ? (batch.workspace ?? before)
+      : await readAssistantWorkspace(service);
     const stillFound = after.discoveryJobs.filter(
       (job) => job.status === "discovered" && sameEmployer(job),
     );
@@ -696,6 +816,7 @@ export const excludeEmployerTool = defineTool({
           (id) => !failed.includes(id),
         ),
         stillListedJobIds: stillFound.map((job) => job.id),
+        ...(batch ? { outcomes: batch.outcomes.map(feedbackOutcome) } : {}),
       },
     };
   },
@@ -752,7 +873,7 @@ export const searchForJobsTool = defineTool({
   label: () => "Starting a job search",
   effect: "external",
   async execute(input, { ports, session, service }) {
-    const before = await service.getWorkspaceSnapshot();
+    const before = await readAssistantWorkspace(service);
     const paused = pausedByPersonMessage(before.activityControl, "a search");
     if (paused) throw new AssistantToolError("refused", paused);
     if (before.activeDiscoveryRun?.state === "running") {
@@ -790,7 +911,7 @@ export const searchForJobsTool = defineTool({
       summary: `The search started. Results go to ${before.campaigns.find((plan) => plan.id === before.activeCampaignId)?.name ?? "your current plan"} in Find jobs and Shortlisted. This conversation continues when it ends.`,
       data: {
         runId: started.runId,
-        running: runningSearchState(await service.getWorkspaceSnapshot()),
+        running: runningSearchState(await readAssistantWorkspace(service)),
         started: true,
       },
     };
@@ -821,7 +942,7 @@ export const listSourcesTool = defineTool({
   label: () => "Reading your job sources",
   effect: "read",
   async execute(_input, { service }) {
-    const snapshot = await service.getWorkspaceSnapshot();
+    const snapshot = await readAssistantWorkspace(service);
     const targets = snapshot.searchPreferences.discovery.targets;
     return {
       summary: `${plural(targets.length, "source")}, ${targets.filter((target) => target.enabled).length} on.`,
@@ -899,7 +1020,7 @@ export const updateSourcesTool = defineTool({
   label: () => "Updating your job sources",
   effect: "local_write",
   async execute(input, { service, session, ports }) {
-    const snapshot = await service.getWorkspaceSnapshot();
+    const snapshot = await readAssistantWorkspace(service);
     const preferences = snapshot.searchPreferences;
     const existing = new Set(
       preferences.discovery.targets.map((target) =>

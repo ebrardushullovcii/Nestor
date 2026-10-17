@@ -20,6 +20,17 @@ import { ToastProvider } from "@renderer/components/ui/toast";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// Job details load over IPC in the app; here the listed row is the detail.
+vi.mock("../../hooks/use-job-detail", () => ({
+  useJobDetail: (row: unknown) => ({
+    job: row,
+    error: null,
+    loading: false,
+    retry: () => undefined,
+  }),
+  clearJobDetailCache: () => undefined,
+}));
+
 const detailProbe = vi.hoisted(() => ({
   latest: null as { selectedJob: SavedJob | null } | null,
 }));

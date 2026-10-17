@@ -107,14 +107,27 @@ function generate(startDate = "2017") {
 }
 
 describe("Resume Studio source fact benchmark", () => {
-  test("keeps all achievements and software proficiency in rendered Light drafts", () => {
-    const { profile, rendered } = generate();
-    const text = JSON.stringify(rendered);
+  test("keeps every achievement and skill on the draft, showing the chosen ones", () => {
+    const { profile, draft, rendered } = generate();
+    // Nothing the person saved is lost: the lines the resume does not show
+    // stay on the draft, hidden, for the person to show again.
+    const draftLines = draft.sections.flatMap((section) => [
+      ...section.bullets.map((bullet) => bullet.text),
+      ...section.entries.flatMap((entry) =>
+        entry.bullets.map((bullet) => bullet.text),
+      ),
+    ]);
     for (const fact of [
       ...profile.experiences[0]!.achievements,
       ...profile.skills,
     ])
-      expect(text).toContain(fact);
+      expect(draftLines).toContain(fact);
+    // The resume itself shows a chosen subset, with proficiency kept whole.
+    const text = JSON.stringify(rendered);
+    expect(text).toContain("Workday (basic)");
+    expect(
+      profile.experiences[0]!.achievements.some((fact) => !text.includes(fact)),
+    ).toBe(true);
   });
   test("keeps every qualification with its original year and record identity", () => {
     const { generated, rendered } = generate();

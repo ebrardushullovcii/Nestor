@@ -54,7 +54,10 @@ import {
   AssistantContextOverflowError,
 } from "./context-assembly";
 import { createHandleStore } from "./handle-store";
-import { migrateLegacyChats } from "./legacy-migration";
+import {
+  createLegacyMigrationCheckpoint,
+  migrateLegacyChats,
+} from "./legacy-migration";
 import type { AssistantBrowserLease, AssistantHostPorts } from "./ports";
 import {
   ASSISTANT_SYSTEM_PROMPT,
@@ -255,6 +258,8 @@ export class AssistantSessionHost {
   private generationCounter = 0;
   private watchTimer: ReturnType<typeof setInterval> | null = null;
   private watchCheckPending = false;
+  /** Update-driven watch checks wait until then; see `checkWatches`. */
+  private watchCheckRestUntil = 0;
   /** Chat questions tied to a Needs you step, by conversation and question. */
   private readonly linkedQuestions = new Map<
     string,
@@ -272,6 +277,10 @@ export class AssistantSessionHost {
   /** Notes for the model's next turn about questions settled elsewhere. */
   private readonly answeredElsewhere = new Map<string, string[]>();
   private closed = false;
+  private legacyMigrationPromise: Promise<{
+    conversations: number;
+    messages: number;
+  }> | null = null;
   private readonly now: () => string;
   private readonly createId: (prefix: string) => string;
 
@@ -612,9 +621,16 @@ export class AssistantSessionHost {
   }
 
   /** Stop dispatching from either batch entry point; active drafts can finish. */
+  private readWorkspaceSnapshot(): Promise<JobFinderWorkspaceSnapshot> {
+    return (
+      this.service.getWorkspaceProjection?.() ??
+      this.service.getWorkspaceSnapshot()
+    );
+  }
+
   async stopResumeBatches(): Promise<void> {
     this.ports.stopResumeBatch?.();
-    const snapshot = await this.service.getWorkspaceSnapshot();
+    const snapshot = await this.readWorkspaceSnapshot();
     const checkpoints =
       snapshot.intelligence.resumeBatchCheckpoints ??
       (snapshot.intelligence.resumeBatchCheckpoint
@@ -740,7 +756,7 @@ export class AssistantSessionHost {
       })),
     );
     const calibrator = this.calibratorFor(conversationId);
-    const snapshot = await this.service.getWorkspaceSnapshot();
+    const snapshot = await this.readWorkspaceSnapshot();
     const systemPrompt = `${ASSISTANT_SYSTEM_PROMPT}\n\n${buildProfileDigest(snapshot)}`;
     let lastEstimate = 0;
 
@@ -765,7 +781,7 @@ export class AssistantSessionHost {
         },
         takeSteering: () => this.takeSteering(live),
         assembleMessages: async (turnMessages) => {
-          const current = await this.service.getWorkspaceSnapshot();
+          const current = await this.readWorkspaceSnapshot();
           const currentContext = buildContextBlock({
             context: live.sourceMessage?.context ?? null,
             resultSets: live.sourceMessage
@@ -921,7 +937,7 @@ export class AssistantSessionHost {
     hostNote?: string,
   ): Promise<AgentLoopMessage> {
     const conversationId = live.turn.conversationId;
-    const snapshot = await this.service.getWorkspaceSnapshot();
+    const snapshot = await this.readWorkspaceSnapshot();
     const resultSets = live.sourceMessage
       ? await this.resultSetsFor(live.sourceMessage)
       : [];
@@ -974,7 +990,7 @@ export class AssistantSessionHost {
         // The newest message the person typed is what authorizes from here on.
         live.sourceMessage = message;
         const resultSets = await this.resultSetsFor(message);
-        const snapshot = await this.service.getWorkspaceSnapshot();
+        const snapshot = await this.readWorkspaceSnapshot();
         const block = buildContextBlock({
           context: message.context,
           resultSets,
@@ -1730,7 +1746,7 @@ export class AssistantSessionHost {
           tabId,
           ...(applicationResultId ? { applicationResultId } : {}),
           onApplicationChange: async (recordId, field) => {
-            const snapshot = await this.service.getWorkspaceSnapshot();
+            const snapshot = await this.readWorkspaceSnapshot();
             const record = snapshot.applicationRecords.find(
               (record) => record.id === recordId,
             );
@@ -1991,15 +2007,18 @@ export class AssistantSessionHost {
     }
     if (this.watches.size === 0 || this.watchCheckPending) return;
     this.watchCheckPending = true;
-    setTimeout(() => {
-      this.watchCheckPending = false;
-      void this.checkWatches();
-    }, 750);
+    setTimeout(
+      () => {
+        this.watchCheckPending = false;
+        void this.checkWatches();
+      },
+      Math.max(750, this.watchCheckRestUntil - Date.now()),
+    );
   }
 
   /** A queue continued in Shortlisted closes the assistant's restart notice too. */
   async refreshFinishedResumeBatchNotices(): Promise<void> {
-    const snapshot = await this.service.getWorkspaceSnapshot();
+    const snapshot = await this.readWorkspaceSnapshot();
     const checkpoints =
       snapshot.intelligence.resumeBatchCheckpoints ??
       (snapshot.intelligence.resumeBatchCheckpoint
@@ -2069,7 +2088,7 @@ export class AssistantSessionHost {
     if (this.linkedQuestions.size === 0) return;
     let snapshot;
     try {
-      snapshot = await this.service.getWorkspaceSnapshot();
+      snapshot = await this.readWorkspaceSnapshot();
     } catch {
       return;
     }
@@ -2123,8 +2142,15 @@ export class AssistantSessionHost {
 
   checkWatches(): Promise<void> {
     if (this.watchCheckInFlight) return this.watchCheckInFlight;
+    const startedAt = Date.now();
     const check = this.checkWatchesOnce().finally(() => {
       this.watchCheckInFlight = null;
+      // A watched search sends updates several times a second and each check
+      // rebuilds the whole workspace; resting twice as long as the check
+      // took keeps the watch from rebuilding it nonstop.
+      const finishedAt = Date.now();
+      this.watchCheckRestUntil =
+        finishedAt + Math.min(8_000, 2 * (finishedAt - startedAt));
     });
     this.watchCheckInFlight = check;
     return check;
@@ -2138,7 +2164,7 @@ export class AssistantSessionHost {
     }
     let snapshot;
     try {
-      snapshot = await this.service.getWorkspaceSnapshot();
+      snapshot = await this.readWorkspaceSnapshot();
     } catch {
       return;
     }
@@ -2600,7 +2626,7 @@ export class AssistantSessionHost {
   // ---------------------------------------------------------------------------
 
   async searchMentions(query: string): Promise<AssistantMentionCandidate[]> {
-    const snapshot = await this.service.getWorkspaceSnapshot();
+    const snapshot = await this.readWorkspaceSnapshot();
     const words = query.toLowerCase().split(/\s+/u).filter(Boolean);
     const hit = (text: string) =>
       words.every((word) => text.toLowerCase().includes(word));
@@ -2774,8 +2800,7 @@ export class AssistantSessionHost {
           operation.run.kind === "apply_batch" ||
           operation.run.kind === "apply_run"
             ? readRunStatus(
-                (applicationSnapshot ??=
-                  await this.service.getWorkspaceSnapshot()),
+                (applicationSnapshot ??= await this.readWorkspaceSnapshot()),
                 run,
               )
             : null;
@@ -2815,31 +2840,53 @@ export class AssistantSessionHost {
     conversations: number;
     messages: number;
   }> {
-    const snapshot = await this.service.getWorkspaceSnapshot();
+    if (this.closed) return { conversations: 0, messages: 0 };
+    if (this.legacyMigrationPromise) return this.legacyMigrationPromise;
+    const migration = this.migrateLegacyHistoryWhileOpen();
+    this.legacyMigrationPromise = migration;
+    try {
+      return await migration;
+    } finally {
+      if (this.legacyMigrationPromise === migration)
+        this.legacyMigrationPromise = null;
+    }
+  }
+
+  private async migrateLegacyHistoryWhileOpen(): Promise<{
+    conversations: number;
+    messages: number;
+  }> {
+    const [snapshot, resumeMessages] = await Promise.all([
+      this.readWorkspaceSnapshot(),
+      this.service.getResumeAssistantHistory(),
+    ]);
+    if (this.closed) return { conversations: 0, messages: 0 };
+    const checkpoint = createLegacyMigrationCheckpoint(() => this.closed);
     const resumeMessagesByJob = new Map<
       string,
       {
         jobTitle: string;
         messages: Awaited<
-          ReturnType<JobFinderWorkspaceService["getResumeAssistantMessages"]>
-        >;
+          ReturnType<JobFinderWorkspaceService["getResumeAssistantHistory"]>
+        >[number][];
       }
     >();
-    for (const draft of snapshot.resumeDrafts) {
-      try {
-        const messages = await this.service.getResumeAssistantMessages(
-          draft.jobId,
-        );
-        if (messages.length === 0) continue;
-        const job = snapshot.reviewQueue.find(
-          (entry) => entry.jobId === draft.jobId,
-        );
-        resumeMessagesByJob.set(draft.jobId, {
-          jobTitle: job ? `${job.title} at ${job.company}` : draft.jobId,
-          messages,
+    const jobsById = new Map(
+      snapshot.reviewQueue.map((job) => [job.jobId, job]),
+    );
+    // The UI getter ensures a draft and loads its full assets. Migration is
+    // read-only: scan persisted messages once, preserving their stored order
+    // and keeping chat history even if its old draft is no longer present.
+    for (const message of resumeMessages) {
+      const entry = resumeMessagesByJob.get(message.jobId);
+      if (entry) {
+        entry.messages.push(message);
+      } else {
+        const job = jobsById.get(message.jobId);
+        resumeMessagesByJob.set(message.jobId, {
+          jobTitle: job ? `${job.title} at ${job.company}` : message.jobId,
+          messages: [message],
         });
-      } catch (error) {
-        this.log("Could not read an old resume chat for migration", error);
       }
     }
     const result = await migrateLegacyChats({
@@ -2847,12 +2894,14 @@ export class AssistantSessionHost {
       profileMessages: snapshot.profileCopilotMessages,
       resumeMessagesByJob,
       now: this.now(),
+      checkpoint,
     });
     // A sidebar that loaded its list before migration finished learns about
     // the archives now, without a reload.
-    if (result.conversations > 0) {
+    if (!this.closed && result.conversations > 0) {
       for (const conversation of await this.repository.listConversations()) {
         if (conversation.status !== "archived") continue;
+        if (!(await checkpoint())) break;
         await this.emit(conversation.id, null, {
           type: "conversation_updated",
           conversation,
@@ -2864,25 +2913,33 @@ export class AssistantSessionHost {
 
   async shutdown(): Promise<void> {
     this.closed = true;
-    for (const watch of this.watches.values()) {
-      if (watch.run.kind === "resume_generation")
-        cancelBackgroundBatch(watch.run.id);
-    }
-    if (this.watchTimer) clearInterval(this.watchTimer);
-    this.watchTimer = null;
-    for (const [conversationId, live] of this.live) {
-      live.controller.abort(
-        new DOMException("The app is closing.", "AbortError"),
-      );
-      this.stopStallWatch(live);
-      await this.releaseLease(live, "app closing");
-      await this.repository.upsertTurn({
-        ...live.turn,
-        status: "interrupted",
-        endedAt: this.now(),
-        error: "The app closed while this was running.",
+    try {
+      for (const watch of this.watches.values()) {
+        if (watch.run.kind === "resume_generation")
+          cancelBackgroundBatch(watch.run.id);
+      }
+      if (this.watchTimer) clearInterval(this.watchTimer);
+      this.watchTimer = null;
+      for (const [conversationId, live] of this.live) {
+        live.controller.abort(
+          new DOMException("The app is closing.", "AbortError"),
+        );
+        this.stopStallWatch(live);
+        await this.releaseLease(live, "app closing");
+        await this.repository.upsertTurn({
+          ...live.turn,
+          status: "interrupted",
+          endedAt: this.now(),
+          error: "The app closed while this was running.",
+        });
+        this.live.delete(conversationId);
+      }
+    } finally {
+      // Migration is stopped at a checkpoint and finishes any partial chat's
+      // counters before the desktop is allowed to close or reset its store.
+      await this.legacyMigrationPromise?.catch((error: unknown) => {
+        this.log("Legacy chat migration stopped with an error", error);
       });
-      this.live.delete(conversationId);
     }
   }
 
@@ -2951,7 +3008,7 @@ export class AssistantSessionHost {
     if (sets.length === 0) return null;
     let snapshot: JobFinderWorkspaceSnapshot | null = null;
     try {
-      snapshot = await this.service.getWorkspaceSnapshot();
+      snapshot = await this.readWorkspaceSnapshot();
     } catch {
       snapshot = null;
     }

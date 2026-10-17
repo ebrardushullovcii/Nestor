@@ -15,7 +15,6 @@ import {
   updateStableDiscoveryRunSnapshot,
 } from "./discovery-screen";
 import {
-  DISCOVERY_BROWSER_BLOCKED_REASON,
   DISCOVERY_OFFLINE_RUNTIME_LABEL,
   DISCOVERY_OFFLINE_SEARCH_REASON,
   getDiscoveryRuntimeProjection,
@@ -125,7 +124,9 @@ describe("active-run result stability", () => {
       runId: "run_1",
     });
 
-    expect(running.jobs.map((job) => [job.id, job.matchAssessment.score])).toEqual([
+    expect(
+      running.jobs.map((job) => [job.id, job.matchAssessment.score]),
+    ).toEqual([
       ["original", 80],
       ["appended", 90],
     ]);
@@ -137,6 +138,46 @@ describe("active-run result stability", () => {
     });
     expect(completed.jobs[0]?.matchAssessment.score).toBe(20);
     expect(completed.snapshot).toBeNull();
+  });
+
+  it("shows a row's first verdict as soon as it is judged, then holds it", () => {
+    const unjudged = createSavedJob("job", "review_before_applying", 0);
+    const started = updateStableDiscoveryRunSnapshot({
+      current: null,
+      jobs: [unjudged],
+      runId: "run_1",
+    });
+    const judged = {
+      ...unjudged,
+      matchAssessment: {
+        ...unjudged.matchAssessment,
+        score: 72,
+        judgment: { score: 72 },
+      },
+    } as unknown as SavedJob;
+    const firstVerdict = updateStableDiscoveryRunSnapshot({
+      current: started.snapshot,
+      jobs: [judged],
+      runId: "run_1",
+    });
+    expect(firstVerdict.jobs[0]?.matchAssessment.score).toBe(72);
+
+    // A rescore later in the same run (a listing read in full) waits for
+    // the run to end, so rows do not jump while the search goes on.
+    const rescored = {
+      ...judged,
+      matchAssessment: {
+        ...judged.matchAssessment,
+        score: 40,
+        judgment: { score: 40 },
+      },
+    } as unknown as SavedJob;
+    const held = updateStableDiscoveryRunSnapshot({
+      current: firstVerdict.snapshot,
+      jobs: [rescored],
+      runId: "run_1",
+    });
+    expect(held.jobs[0]?.matchAssessment.score).toBe(72);
   });
 });
 
@@ -352,7 +393,7 @@ describe("getDiscoverySearchReadiness", () => {
     }
   });
 
-  it("blocks only a blocked browser session, names that blocker, and trusts a recent run over a stale snapshot", () => {
+  it("a browser blocked on one site never disables Search", () => {
     const preferences = createSearchPreferences({
       targetRoles: ["Engineer"],
       discovery: {
@@ -365,22 +406,11 @@ describe("getDiscoverySearchReadiness", () => {
       status: "blocked",
     });
 
-    expect(blocked.setupReady).toBe(true);
-    expect(blocked.ready).toBe(false);
-    expect(blocked.blocker).toBe("browser_blocked");
-    expect(blocked.reason).toBe(DISCOVERY_BROWSER_BLOCKED_REASON);
-    expect(blocked.reason).not.toMatch(/enable sources/i);
+    expect(blocked.ready).toBe(true);
+    expect(blocked.blocker).toBeNull();
+    expect(blocked.reason).toBeNull();
 
-    const trusted = getDiscoverySearchReadiness(
-      preferences,
-      { driver: "chrome_profile_agent", status: "blocked" },
-      { trustRecentRun: true },
-    );
-    expect(trusted.ready).toBe(true);
-    expect(trusted.blocker).toBeNull();
-
-    // Setup blockers still win over the browser so the action never points
-    // at the browser while a source or role is actually missing.
+    // A missing source is still the one setup step Search needs.
     const noSources = getDiscoverySearchReadiness(
       createSearchPreferences({ targetRoles: ["Engineer"] }),
       { driver: "chrome_profile_agent", status: "blocked" },
@@ -765,7 +795,11 @@ describe("getDiscoveryResultVisibility", () => {
   });
 
   it("holds the visible order during reading and applies new scores after the stage ends", () => {
-    const previouslyFirst = createSavedJob("previously-first", "strong_fit", 70);
+    const previouslyFirst = createSavedJob(
+      "previously-first",
+      "strong_fit",
+      70,
+    );
     const newlyHigher = createSavedJob("newly-higher", "strong_fit", 95);
 
     const whileReading = getDiscoveryResultVisibility(
@@ -822,11 +856,24 @@ describe("getDiscoveryInspectedJob", () => {
   });
 });
 
-
 it("refreshes shortlist status and removes missing rows while assessments remain stable during a search", () => {
   const job = createSavedJob("selected", "strong_fit", 80);
-  const snapshot = updateStableDiscoveryRunSnapshot({ current: null, jobs: [job], runId: "running" }).snapshot;
-  const refreshed = updateStableDiscoveryRunSnapshot({ current: snapshot, jobs: [{ ...job, status: "shortlisted" }], runId: "running" });
+  const snapshot = updateStableDiscoveryRunSnapshot({
+    current: null,
+    jobs: [job],
+    runId: "running",
+  }).snapshot;
+  const refreshed = updateStableDiscoveryRunSnapshot({
+    current: snapshot,
+    jobs: [{ ...job, status: "shortlisted" }],
+    runId: "running",
+  });
   expect(refreshed.jobs[0]?.status).toBe("shortlisted");
-  expect(updateStableDiscoveryRunSnapshot({ current: refreshed.snapshot, jobs: [], runId: "running" }).jobs).toEqual([]);
+  expect(
+    updateStableDiscoveryRunSnapshot({
+      current: refreshed.snapshot,
+      jobs: [],
+      runId: "running",
+    }).jobs,
+  ).toEqual([]);
 });

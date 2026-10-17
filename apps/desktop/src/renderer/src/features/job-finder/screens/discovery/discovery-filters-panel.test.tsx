@@ -1,3 +1,4 @@
+import { SavedJobSchema } from "@nordri/contracts";
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, within } from "@testing-library/react";
@@ -652,9 +653,7 @@ describe("DiscoveryFiltersPanel", () => {
         "data-variant",
       ),
     ).toBe("secondary");
-    expect(
-      getByRole("button", { name: "Edit your places" }),
-    ).toBeTruthy();
+    expect(getByRole("button", { name: "Edit your places" })).toBeTruthy();
     expect(getByRole("button", { name: "Set work modes" })).toBeTruthy();
     expect(
       getAllByRole("button", { name: "Add sources" }).length,
@@ -1169,7 +1168,7 @@ describe("DiscoveryFiltersPanel", () => {
             lastCheckedAt: "2026-03-20T10:00:00.000Z",
           }}
           jobs={[
-            {
+            SavedJobSchema.parse({
               id: "job_1",
               source: "target_site",
               sourceJobId: "job_1",
@@ -1287,7 +1286,7 @@ describe("DiscoveryFiltersPanel", () => {
               resumeApplicationMode: null,
               latestMatchAssessmentAudit: null,
               listingDetailFetch: null,
-            },
+            }),
           ]}
           onRecoveryAction={onRecoveryAction}
           onSelectJob={vi.fn()}

@@ -1,6 +1,8 @@
 import {
   RESUME_CLAIM_CHECK_BATCH_SIZE,
+  getAiProviderAccessFailure,
   type JobFinderAiClient,
+  type ResumeClaimCheckInput,
 } from "@nordri/ai-providers";
 import type {
   CandidateProfile,
@@ -28,7 +30,7 @@ import {
  * Verdicts are kept on the draft by each line's content hash, and remembered
  * here for the session, so a line is checked once however many times the
  * draft is previewed, proposed, accepted or exported. A line the model could
- * not check stays unchecked and goes to the person; nothing guesses for it.
+ * not check stays unchecked; it does not hold the resume back.
  */
 
 const SESSION_CACHE_LIMIT = 4_000;
@@ -36,6 +38,84 @@ type ResumeLine = Parameters<
   ReturnType<typeof buildPersonsOwnResumeClaimMatcher>
 >[0];
 const sessionChecks = new Map<string, ResumeClaimCheck>();
+
+class ResumeClaimBudgetExceededError extends Error {
+  constructor() {
+    super(
+      "Resume claim checking timed out: exceeded the remaining writing budget.",
+    );
+    this.name = "TimeoutError";
+  }
+}
+
+type ClaimCheckTransaction = {
+  signal?: AbortSignal;
+  getRemainingBudgetMs?: () => number;
+};
+
+/** Each batch/retry consumes the same writer clock, including nested checks. */
+async function checkWithinWritingBudget(
+  transaction: ClaimCheckTransaction,
+  request: ResumeClaimCheckInput,
+  check: NonNullable<JobFinderAiClient["checkResumeClaims"]>,
+) {
+  transaction.signal?.throwIfAborted();
+  const remaining = transaction.getRemainingBudgetMs?.();
+  if (
+    remaining !== undefined &&
+    (!Number.isFinite(remaining) || remaining <= 0)
+  )
+    throw new ResumeClaimBudgetExceededError();
+  const timeoutMs =
+    remaining === undefined ? undefined : Math.max(1, Math.floor(remaining));
+  const deadline = timeoutMs === undefined ? undefined : new AbortController();
+  const signal = deadline
+    ? transaction.signal
+      ? AbortSignal.any([transaction.signal, deadline.signal])
+      : deadline.signal
+    : transaction.signal;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const aborted = signal
+    ? new Promise<never>((_resolve, reject) => {
+        onAbort = () => {
+          const reason: unknown = signal.reason;
+          reject(
+            reason instanceof Error
+              ? reason
+              : new DOMException(
+                  "Resume claim checking was cancelled.",
+                  "AbortError",
+                ),
+          );
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+      })
+    : undefined;
+  // A synchronous provider can abort and throw before the race is attached.
+  void aborted?.catch(() => {});
+  try {
+    signal?.throwIfAborted();
+    if (deadline && timeoutMs !== undefined)
+      timer = setTimeout(
+        () => deadline.abort(new ResumeClaimBudgetExceededError()),
+        timeoutMs,
+      );
+    const checking = check({
+      ...request,
+      ...(signal ? { signal } : {}),
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    });
+    const results = await (aborted
+      ? Promise.race([checking, aborted])
+      : checking);
+    signal?.throwIfAborted();
+    return results;
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+  }
+}
 
 function remember(key: string, check: ResumeClaimCheck): void {
   sessionChecks.delete(key);
@@ -54,7 +134,9 @@ export async function withResumeClaimChecks(input: {
   tailoringStrength?: string | null;
   now?: () => string;
   signal?: AbortSignal;
+  getRemainingBudgetMs?: () => number;
 }): Promise<ResumeDraft> {
+  input.signal?.throwIfAborted();
   const { draft, profile } = input;
   const isPersonsOwn = buildPersonsOwnResumeClaimMatcher({ draft, profile });
   const allLines = buildResumeClaimDescriptors(draft);
@@ -94,7 +176,17 @@ export async function withResumeClaimChecks(input: {
   // resume stretch. A change to either has the lines checked again.
   const evidenceKey = fnv1a32(
     JSON.stringify([
-      "resume-fact-check-2026-10-05-context-v2",
+      "resume-fact-check-2026-10-14-context-v3",
+      [
+        input.job.title,
+        input.job.company,
+        input.job.description,
+        [
+          ...input.job.responsibilities,
+          ...input.job.minimumQualifications,
+          ...input.job.preferredQualifications,
+        ],
+      ],
       resumeLines.map((line) => [
         line.section,
         resumeClaimContentHash(line.text),
@@ -136,8 +228,7 @@ export async function withResumeClaimChecks(input: {
       const hashById = new Map(
         batch.map(([contentHash], index) => [`line_${index + 1}`, contentHash]),
       );
-      const request = {
-        ...(input.signal ? { signal: input.signal } : {}),
+      const request: ResumeClaimCheckInput = {
         tailoringStrength,
         job: {
           title: input.job.title,
@@ -160,17 +251,22 @@ export async function withResumeClaimChecks(input: {
           text: claim.text,
         })),
       };
-      // A call that fails for a passing reason is asked once more.
-      const results = await checkResumeClaims(request).catch(
-        (error: unknown) => {
-          if (input.signal?.aborted) throw error;
-          return checkResumeClaims(request).catch((retryError: unknown) => {
-            if (input.signal?.aborted) throw retryError;
-            // These lines stay unchecked and go to the person.
-            return [];
-          });
-        },
-      );
+      // The provider transport already retries transient requests within its budget.
+      // Repeating that whole operation here doubles failed paid attempts without
+      // giving the model new feedback. Unchecked lines still go to the person.
+      const results = await checkWithinWritingBudget(
+        input,
+        request,
+        checkResumeClaims,
+      ).catch((error: unknown) => {
+        if (
+          input.signal?.aborted ||
+          error instanceof ResumeClaimBudgetExceededError ||
+          getAiProviderAccessFailure(error) !== null
+        )
+          throw error;
+        return [];
+      });
       const checkedAt = now();
       for (const result of results) {
         const contentHash = hashById.get(result.id);
@@ -195,18 +291,17 @@ export async function withResumeClaimChecks(input: {
 }
 
 /**
- * When a generated resume is kept, the lines its check did not pass, or noted
- * as unfinished writing, are fixed with the checker's own fix: rewritten to
- * what the evidence backs, or hidden when nothing in them can be kept (ADR
- * 0041). Stretches count only outside aggressive tailoring, where they are the
- * person's to confirm. The rewrites are checked once more; a line that still
- * does not pass stays for the person.
+ * Settles the failed generated lines of a draft from the verdicts already on
+ * it, without calling the model: a line with a fix takes it, a line without
+ * one goes back to the person's saved wording or is left off (ADR 0051).
+ * Stretches count only outside aggressive tailoring, where choosing the level
+ * accepted them. Returns null when nothing needed settling.
  */
-export async function withResumeClaimFixes(
-  input: Parameters<typeof withResumeClaimChecks>[0] & {
-    stretchesAreThePersons: boolean;
-  },
-): Promise<ResumeDraft> {
+export function settleResumeClaimLines(input: {
+  draft: ResumeDraft;
+  profile: CandidateProfile | undefined;
+  stretchesAreThePersons: boolean;
+}): ResumeDraft | null {
   const { draft } = input;
   const checks = new Map(
     (draft.claimChecks ?? []).map((check) => [check.contentHash, check]),
@@ -225,13 +320,37 @@ export async function withResumeClaimFixes(
         (resumeClaimContentHash(line) === resumeClaimContentHash(fix) ||
           areNearDuplicateResumeLines(line, fix)),
     );
-  const fixFor = (claim: ResumeLine): string | null => {
+  // An achievement's saved wording, by its "experience:<id>:achievement:<n>"
+  // evidence ID, for a failed line the checker offered no fix for.
+  const savedAchievement = (sourceId: string | null): string | null => {
+    const match = sourceId?.match(/^experience:(.+):achievement:(\d+)$/u);
+    if (!match) return null;
+    const experience = input.profile?.experiences.find(
+      (record) => record.id === match[1],
+    );
+    return experience?.achievements[Number(match[2])]?.trim() || null;
+  };
+  /**
+   * The text a line should become: null keeps it, "" leaves it off. A failed
+   * line with no fix is settled here rather than left for the person.
+   */
+  const fixFor = (
+    claim: ResumeLine,
+    savedWording: string | null = null,
+  ): string | null => {
     if (isPersonsOwn(claim)) return null;
     const check = checks.get(resumeClaimContentHash(claim.text));
-    if (!check || check.fix === null) return null;
+    if (!check) return null;
     const failed =
       check.verdict === "unsupported" ||
       (check.verdict === "stretch" && !input.stretchesAreThePersons);
+    if (check.fix === null) {
+      if (!failed) return null;
+      changed = true;
+      return savedWording && savedWording !== claim.text.trim()
+        ? savedWording
+        : "";
+    }
     // A line that is not finished resume writing gets the same fix.
     const unfinished = Boolean(check.style);
     if ((!failed && !unfinished) || check.fix === claim.text.trim()) {
@@ -241,7 +360,12 @@ export async function withResumeClaimFixes(
     return check.fix;
   };
   const fixBullets = <
-    T extends { text: string; origin: ResumeLine["origin"]; included: boolean },
+    T extends {
+      text: string;
+      origin: ResumeLine["origin"];
+      included: boolean;
+      sourceRefs?: readonly { sourceKind: string; sourceId: string | null }[];
+    },
   >(
     bullets: readonly T[],
     field: "section_bullet" | "entry_bullet",
@@ -249,12 +373,18 @@ export async function withResumeClaimFixes(
   ): T[] =>
     bullets.map((bullet) => {
       if (!bullet.included) return bullet;
-      const fix = fixFor({
-        text: bullet.text,
-        origin: bullet.origin,
-        field,
-        sectionId,
-      });
+      const fix = fixFor(
+        {
+          text: bullet.text,
+          origin: bullet.origin,
+          field,
+          sectionId,
+        },
+        savedAchievement(
+          bullet.sourceRefs?.find((ref) => ref.sourceKind === "profile")
+            ?.sourceId ?? null,
+        ),
+      );
       if (fix === null) return bullet;
       // A fix that repeats a line already on the resume hides this one instead.
       if (!fix || repeatsAShownLine(fix, bullet.text)) {
@@ -271,7 +401,12 @@ export async function withResumeClaimFixes(
     sectionId: string,
   ): string | null => {
     if (!text?.trim()) return text;
-    const fix = fixFor({ text, origin, field, sectionId });
+    const fix = fixFor(
+      { text, origin, field, sectionId },
+      field === "section_text"
+        ? (input.profile?.summary?.trim() ?? null)
+        : null,
+    );
     if (fix === null) return text;
     if (!fix || repeatsAShownLine(fix, text)) return null;
     shown.push(fix);
@@ -313,8 +448,22 @@ export async function withResumeClaimFixes(
           },
     ),
   };
-  if (!changed) return draft;
-  return withResumeClaimChecks({ ...input, draft: fixed });
+  return changed ? fixed : null;
+}
+
+/**
+ * Applies the checker's fixes to a freshly generated draft and checks the
+ * rewrites once more (ADR 0041, ADR 0051).
+ */
+export async function withResumeClaimFixes(
+  input: Parameters<typeof withResumeClaimChecks>[0] & {
+    stretchesAreThePersons: boolean;
+  },
+): Promise<ResumeDraft> {
+  input.signal?.throwIfAborted();
+  const settled = settleResumeClaimLines(input);
+  if (!settled) return input.draft;
+  return withResumeClaimChecks({ ...input, draft: settled });
 }
 
 /**

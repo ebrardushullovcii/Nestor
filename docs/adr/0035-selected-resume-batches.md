@@ -1,6 +1,6 @@
 # ADR 0035: Selected resume batches
 
-Status: accepted (2026-09-26). The sequential-applying bullet is superseded by [ADR 0036](0036-parallel-application-preparation.md).
+Status: accepted (2026-09-26). The sequential-applying bullet is superseded by [ADR 0036](0036-parallel-application-preparation.md). Shortlisted concurrency is superseded by [ADR 0048](0048-shortlisted-resume-pipeline.md).
 
 ## Context
 

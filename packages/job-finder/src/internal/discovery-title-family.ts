@@ -1,4 +1,7 @@
-import type { MatchAssessment, TitleFamilyMatch } from "@nordri/contracts";
+import type {
+  JobListMatchAssessment,
+  TitleFamilyMatch,
+} from "@nordri/contracts";
 
 /**
  * Whether the listing's role is the kind of work the person asked for, read
@@ -6,8 +9,8 @@ import type { MatchAssessment, TitleFamilyMatch } from "@nordri/contracts";
  * role dimension carries the same verdict. `null` means not judged.
  */
 export function resolveTitleFamilyMatch(
-  assessment: Pick<MatchAssessment, "titleFamilyMatch"> &
-    Partial<Pick<MatchAssessment, "dimensions">>,
+  assessment: Pick<JobListMatchAssessment, "titleFamilyMatch"> &
+    Partial<Pick<JobListMatchAssessment, "dimensions">>,
 ): TitleFamilyMatch | null {
   const recorded = assessment.titleFamilyMatch;
   if (recorded) {

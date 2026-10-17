@@ -11,6 +11,8 @@ import {
 } from "@nordri/contracts";
 
 import { quarantineAgentAnswers } from "../agent-answer-migration";
+import { migrateDiscoveryStorage } from "./discovery-storage";
+import { ensureTailoredAssetJobIndex } from "./tailored-asset-storage";
 
 /**
  * Exact column shape every application-authority table must have. The assert
@@ -998,7 +1000,9 @@ export function runMigrations(database: DatabaseSync): void {
         !intelligence ||
         typeof intelligence !== "object" ||
         Array.isArray(intelligence) ||
-        !Array.isArray((intelligence as { outcomeEvents?: unknown }).outcomeEvents)
+        !Array.isArray(
+          (intelligence as { outcomeEvents?: unknown }).outcomeEvents,
+        )
       ) {
         return;
       }
@@ -1827,8 +1831,7 @@ export function runMigrations(database: DatabaseSync): void {
     const needsApplicationAnswerSnapshotMigration = !appliedVersions.has(16);
     const needsLegacyAgentAnswerMigration = !appliedVersions.has(19);
     const needsOutcomeSourceLineageMigration = !appliedVersions.has(17);
-    const needsSavedJobCampaignMembershipMigration =
-      !appliedVersions.has(18);
+    const needsSavedJobCampaignMembershipMigration = !appliedVersions.has(18);
 
     if (
       resumeImportTablesMissing ||
@@ -2068,6 +2071,8 @@ export function runMigrations(database: DatabaseSync): void {
       assertApplicationAnswerSnapshotTableShape();
     }
 
+    migrateDiscoveryStorage(database);
+    ensureTailoredAssetJobIndex(database);
     return;
   }
 
@@ -2334,4 +2339,6 @@ export function runMigrations(database: DatabaseSync): void {
     database.exec("ROLLBACK");
     throw error;
   }
+  migrateDiscoveryStorage(database);
+  ensureTailoredAssetJobIndex(database);
 }

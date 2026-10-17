@@ -1,11 +1,13 @@
+import { RESUME_PIPELINE_CAPACITY } from "@nordri/contracts";
 import {
   type ApplicationAttemptState,
   type ApplicationStatus,
   type BrowserSessionState,
   type ResumeApplicationMode,
   type ReviewQueueItem,
-  type TailoredAsset,
+  type TailoredAssetSummary,
   type TailoringMode,
+  type ResumeBatchProviderBlock,
 } from "@nordri/contracts";
 import type { BadgeTone } from "../../lib/job-finder-types";
 import {
@@ -32,10 +34,15 @@ export interface TailoredDraftPreparationViewState {
   eligibleRemainingCount: number;
   failedCount: number;
   status: TailoredDraftPreparationStatus;
+  providerBlock?: ResumeBatchProviderBlock;
   /** Stop was pressed: nothing new starts; drafts already started finish. */
   stopRequested?: boolean;
   totalCount: number;
   durationsMs?: number[];
+  elapsedMs?: number;
+  writingCount?: number;
+  processingCount?: number;
+  waitingCount?: number;
 }
 
 export interface TailoredDraftPreparationProgress {
@@ -74,7 +81,7 @@ export type ApplySupportState = "incomplete" | "manual_follow_up" | "supported";
 
 export function getReviewQueueWorkflowStatus(
   item: ReviewQueueItem | null,
-  asset?: TailoredAsset | null,
+  asset?: TailoredAssetSummary | null,
   /**
    * The renderer's own in-flight flag. The persisted asset status never moves
    * to "generating" during a draft, so without this the row and header kept
@@ -93,13 +100,8 @@ export function getReviewQueueWorkflowStatus(
     };
   }
 
-  if (hasResumeGenerationFailure(item, asset)) {
-    return {
-      label: "Resume failed",
-      tone: "critical",
-    };
-  }
-
+  // A run in progress outranks the last one's failure: "Try again" used to
+  // leave the row saying "Resume failed" for the whole rewrite.
   if (isPending) {
     return {
       label:
@@ -107,6 +109,13 @@ export function getReviewQueueWorkflowStatus(
           ? "Reading the listing"
           : "Writing resume",
       tone: "active",
+    };
+  }
+
+  if (hasResumeGenerationFailure(item, asset)) {
+    return {
+      label: "Resume failed",
+      tone: "critical",
     };
   }
 
@@ -203,7 +212,7 @@ export function needsPersonResumeReview(
    * stretched, so there are no flagged lines to read, whatever the level.
    */
   asset?: Pick<
-    TailoredAsset,
+    TailoredAssetSummary,
     "id" | "generationMethod" | "generationReason"
   > | null,
 ): boolean {
@@ -279,7 +288,7 @@ export function needsResumeGeneration(item: ReviewQueueItem | null): boolean {
 
 export function hasResumeGenerationFailure(
   item: ReviewQueueItem | null,
-  asset?: TailoredAsset | null,
+  asset?: TailoredAssetSummary | null,
 ): boolean {
   if (asset?.failureMessage && asset.failedAt) return true;
   if (item?.assetStatus !== "failed") {
@@ -368,7 +377,7 @@ export function isQueueStageReady(
  */
 export function getReviewQueueResumePolicyCaption(
   item: ReviewQueueItem,
-  asset?: TailoredAsset | null,
+  asset?: TailoredAssetSummary | null,
 ): string {
   if (hasResumeGenerationFailure(item, asset)) {
     return asset?.status === "ready"
@@ -452,8 +461,12 @@ export function isTailoredDraftPreparationEligible(
     return false;
   }
 
+  if (item.resumeApplicationMode === "original_resume") return false;
+  // A resume that kept the person's wording because the listing was not read
+  // was never tailored; it counts as missing until it is approved.
+  if (item.resumeWrittenWithoutListing)
+    return item.resumeReview.status !== "approved";
   return (
-    item.resumeApplicationMode !== "original_resume" &&
     (item.assetStatus === "not_started" || item.assetStatus === "failed") &&
     item.resumeReview.status === "not_started"
   );
@@ -568,7 +581,13 @@ export async function prepareTailoredDraftBatch(
   onGenerateResume: (
     jobId: string,
   ) => Promise<
-    boolean | null | "written" | "fallback" | "original" | "cancelled"
+    | boolean
+    | null
+    | "written"
+    | "fallback"
+    | "original"
+    | "cancelled"
+    | "blocked"
   >,
   options: {
     onProgress?: (progress: TailoredDraftPreparationProgress) => void;
@@ -580,6 +599,7 @@ export async function prepareTailoredDraftBatch(
     ? [...queue]
     : getTailoredDraftPreparationCandidates(queue);
   let attemptedCount = 0;
+  let nextCandidateIndex = 0;
   let completedCount = 0;
   let fallbackCount = 0;
   let originalChoiceCount = 0;
@@ -599,13 +619,14 @@ export async function prepareTailoredDraftBatch(
     });
   };
   const worker = async () => {
-    while (attemptedCount < candidates.length) {
+    while (nextCandidateIndex < candidates.length && !stopped) {
       if (options.shouldStop?.()) {
         stopped = true;
         return;
       }
       // Claim synchronously before awaiting so each job has exactly one owner.
-      const item = candidates[attemptedCount++]!;
+      const item = candidates[nextCandidateIndex++]!;
+      attemptedCount += 1;
       reportProgress();
       let succeeded:
         | boolean
@@ -613,7 +634,8 @@ export async function prepareTailoredDraftBatch(
         | "written"
         | "fallback"
         | "original"
-        | "cancelled" = false;
+        | "cancelled"
+        | "blocked" = false;
       try {
         succeeded = await onGenerateResume(item.jobId);
       } catch {
@@ -621,6 +643,11 @@ export async function prepareTailoredDraftBatch(
       }
       if (succeeded === null) {
         attemptedCount -= 1;
+        stopped = true;
+        reportProgress();
+        return;
+      }
+      if (succeeded === "blocked") {
         stopped = true;
         reportProgress();
         return;
@@ -634,10 +661,13 @@ export async function prepareTailoredDraftBatch(
     }
   };
 
-  // Two requests keep providers and local PDF work bounded. Stop prevents new
-  // claims; already-started drafts finish and remain available.
+  // The main pipeline gates50 writers and2 local processors. Admission is
+  // bounded so finished drafts cannot accumulate for the whole selection.
   await Promise.all(
-    Array.from({ length: Math.min(2, candidates.length) }, worker),
+    Array.from(
+      { length: Math.min(RESUME_PIPELINE_CAPACITY, candidates.length) },
+      worker,
+    ),
   );
 
   return {
@@ -681,6 +711,11 @@ export function getTailoredDraftPreparationResultMessage(
     completedCount - fallbackCount - originalChoiceCount - cancelledCount,
   );
   const completedDrafts = `${writtenCount} resume${writtenCount === 1 ? "" : "s"}${fallbackCount ? ` · ${fallbackCount} kept your original wording` : ""}${originalChoiceCount ? ` · ${originalChoiceCount} Original by choice` : ""}${cancelledCount ? ` · ${cancelledCount} removed from the shortlist` : ""}`;
+
+  if (state.providerBlock) {
+    const unfinished = Math.max(0, state.totalCount - completedCount);
+    return `Batch paused. ${state.providerBlock.message} ${unfinished} unfinished resume${unfinished === 1 ? " remains" : "s remain"} in the batch. Finished resumes were kept.`;
+  }
 
   if (state.status === "completed") {
     return `Wrote ${completedDrafts}.`;
@@ -834,7 +869,10 @@ export const AI_UNAVAILABLE_RESUME_RESULT_MESSAGE =
  * resume that is ready.
  */
 export function describeResumeRunResult(
-  snapshot: { tailoredAssets?: readonly TailoredAsset[] } | null | undefined,
+  snapshot:
+    | { tailoredAssets?: readonly TailoredAssetSummary[] }
+    | null
+    | undefined,
   jobId: string,
   successMessage: string,
 ): string {
@@ -844,4 +882,76 @@ export function describeResumeRunResult(
   return describeAiUnavailableResume(asset)
     ? AI_UNAVAILABLE_RESUME_RESULT_MESSAGE
     : successMessage;
+}
+
+export type ShortlistStatusFilter =
+  | "all"
+  | "needs_resume"
+  | "writing"
+  | "to_review"
+  | "ready"
+  | "in_applications";
+
+export const SHORTLIST_STATUS_FILTER_LABELS: Record<
+  ShortlistStatusFilter,
+  string
+> = {
+  all: "All",
+  needs_resume: "Needs a resume",
+  writing: "Writing",
+  to_review: "To review",
+  ready: "Ready to apply",
+  in_applications: "In Applications",
+};
+
+/**
+ * Which status filter a shortlisted job falls under, from the same status the
+ * row shows. A job that can have a resume written (none yet, a failed one, or
+ * one written without the listing) counts as needing one.
+ */
+export function getShortlistStatusFilter(
+  workflowLabel: string,
+  canWriteResume: boolean,
+): Exclude<ShortlistStatusFilter, "all"> | null {
+  switch (workflowLabel) {
+    case "Writing resume":
+    case "Reading the listing":
+      return "writing";
+    case "Applying":
+    case "In Applications":
+      return "in_applications";
+  }
+  if (canWriteResume || workflowLabel === "Resume failed")
+    return "needs_resume";
+  if (workflowLabel === "Review resume") return "to_review";
+  if (workflowLabel === "Ready to apply") return "ready";
+  return null;
+}
+
+function duplicateKeyPart(value: string | null | undefined): string {
+  return (value ?? "")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+/** Shortlisted jobs that share title, employer and place with another one. */
+export function findPossibleDuplicateJobIds(
+  queue: readonly Pick<
+    ReviewQueueItem,
+    "jobId" | "title" | "company" | "location"
+  >[],
+): ReadonlySet<string> {
+  const jobIdsByKey = new Map<string, string[]>();
+  for (const item of queue) {
+    const key = [item.title, item.company, item.location]
+      .map(duplicateKeyPart)
+      .join("|");
+    const jobIds = jobIdsByKey.get(key);
+    if (jobIds) jobIds.push(item.jobId);
+    else jobIdsByKey.set(key, [item.jobId]);
+  }
+  return new Set(
+    [...jobIdsByKey.values()].filter((ids) => ids.length > 1).flat(),
+  );
 }

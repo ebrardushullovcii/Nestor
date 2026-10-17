@@ -1,5 +1,5 @@
 import type {
-  ApplicationAttempt,
+  ApplicationAttemptListRow,
   ApplicationEvent,
   ApplicationRecord,
   ApplicationStatus,
@@ -64,20 +64,76 @@ export function isPostedDateText(value: string): boolean {
   return POSTED_DATE_TEXT_PATTERN.test(value);
 }
 
+const DAY_MS = 86_400_000;
+
+/**
+ * One shape for every posting age: "today", "yesterday", "5 days ago",
+ * "3 weeks ago", then the date itself once it is about two months old.
+ */
+export function formatPostingAge(timestamp: string, now = Date.now()): string {
+  const at = new Date(timestamp).getTime();
+  if (!Number.isFinite(at)) return timestamp;
+  const days = Math.floor((now - at) / DAY_MS);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.round(days / 7)} weeks ago`;
+  return formatDateOnly(timestamp);
+}
+
+const RELATIVE_POSTED_TEXT_PATTERN =
+  /^(\d+)\s*\+?\s*(h|hrs?|hours?|d|days?|day\(s\)|w|wks?|weeks?|week\(s\)|mo|mos|months?)\s*ago$/iu;
+
+/**
+ * A site's own relative wording ("38 day(s) ago", "3wks ago", "5h ago") in
+ * the same shape as formatPostingAge, so cards from different boards read
+ * alike.
+ */
+function normalizeRelativePostedText(text: string, now: number): string {
+  const match = RELATIVE_POSTED_TEXT_PATTERN.exec(text.trim());
+  if (!match) {
+    // A written date with a year ("September 24, 2026") reads as an age too.
+    const parsed = /\b\d{4}\b/u.test(text) ? Date.parse(text) : Number.NaN;
+    return Number.isFinite(parsed)
+      ? formatPostingAge(new Date(parsed).toISOString(), now)
+      : text;
+  }
+  const count = Number(match[1]);
+  const unit = match[2]!.toLowerCase();
+  if (unit.startsWith("h")) return "today";
+  if (unit.startsWith("mo"))
+    return `${count} ${count === 1 ? "month" : "months"} ago`;
+  const days = unit.startsWith("w") ? count * 7 : count;
+  if (days === 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 14) return `${days} days ago`;
+  const weeks = Math.round(days / 7);
+  return `${weeks} ${weeks === 1 ? "week" : "weeks"} ago`;
+}
+
 /**
  * Truthful date labeling for job postings: a known posting date (or visible
  * posted label) is always "Posted", while a provider-only last-update time
  * (e.g. Greenhouse boards that never expose the original publish date) must be
  * labeled "Updated" rather than passed off as a posting date.
  *
+ * A stored posting date wins over the site's own words: "2 days ago" was true
+ * on the day the job was found and grows stale, while the date does not.
+ *
  * Returns `null` when the listing carries no date worth printing, so a caller
  * renders nothing instead of a bare "Updated — Unknown" or a stray token.
  */
-export function getPostedDateLabel(input: {
-  postedAt: string | null;
-  postedAtText: string | null;
-  providerUpdatedAt: string | null;
-}): { label: "Posted" | "Updated"; value: string } | null {
+export function getPostedDateLabel(
+  input: {
+    postedAt: string | null;
+    postedAtText: string | null;
+    providerUpdatedAt: string | null;
+  },
+  now = Date.now(),
+): { label: "Posted" | "Updated"; value: string } | null {
+  if (input.postedAt && Number.isFinite(new Date(input.postedAt).getTime())) {
+    return { label: "Posted", value: formatPostingAge(input.postedAt, now) };
+  }
   // A site's own text often already says "Posted 3 days ago"; printing the
   // label in front of it read "POSTED POSTED 3 DAYS AGO".
   const visibleText =
@@ -92,17 +148,21 @@ export function getPostedDateLabel(input: {
     datedVisibleText !== null &&
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/u.test(datedVisibleText);
   const postedValue =
-    (isMachineTimestamp && datedVisibleText
-      ? formatDateOnly(datedVisibleText)
-      : datedVisibleText) ??
-    (input.postedAt ? formatDateOnly(input.postedAt) : null);
+    isMachineTimestamp && datedVisibleText
+      ? formatPostingAge(datedVisibleText, now)
+      : datedVisibleText
+        ? normalizeRelativePostedText(datedVisibleText, now)
+        : null;
 
   if (postedValue) {
     return { label: "Posted", value: postedValue };
   }
 
   if (input.providerUpdatedAt) {
-    return { label: "Updated", value: formatDateOnly(input.providerUpdatedAt) };
+    return {
+      label: "Updated",
+      value: formatPostingAge(input.providerUpdatedAt, now),
+    };
   }
 
   return null;
@@ -192,7 +252,9 @@ export function formatRunStateLabel(
 }
 
 export function getAttemptLabel(
-  value: ApplicationAttempt["state"] | ApplicationRecord["lastAttemptState"],
+  value:
+    | ApplicationAttemptListRow["state"]
+    | ApplicationRecord["lastAttemptState"],
 ): string {
   if (!value) {
     return "No apply attempt";
@@ -222,7 +284,7 @@ export function getAttemptLabel(
 
 export function getAttemptTone(
   value:
-    | ApplicationAttempt["state"]
+    | ApplicationAttemptListRow["state"]
     | ApplicationRecord["lastAttemptState"]
     | null,
 ): BadgeTone {

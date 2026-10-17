@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import type { AgentProviderStatus, ResumeDocumentBundle } from "@nordri/contracts";
+import type {
+  AgentProviderStatus,
+  ResumeDocumentBundle,
+} from "@nordri/contracts";
 import { createPreferences, createProfile } from "./test-fixtures";
 import { extractOpenAiCompatibleResumeImportStage } from "./openai-compatible-resume-import";
 
@@ -124,8 +127,12 @@ describe("extractOpenAiCompatibleResumeImportStage", () => {
       ],
     });
 
-    expect(result.candidates[0]?.confidenceBreakdown?.overall).toBeGreaterThan(0.8);
-    expect(result.candidates[0]?.confidenceBreakdown?.recommendation).toBe("auto_apply");
+    expect(result.candidates[0]?.confidenceBreakdown?.overall).toBeGreaterThan(
+      0.8,
+    );
+    expect(result.candidates[0]?.confidenceBreakdown?.recommendation).toBe(
+      "auto_apply",
+    );
   });
 });
 
@@ -180,10 +187,10 @@ describe("round-three resume context and extraction instructions", () => {
         },
         status,
         timeoutMs: 1000,
-        fetchModelJson: async (_operation, systemPrompt, payload) => {
+        fetchModelJson: (_operation, systemPrompt, payload) => {
           sent = payload;
           prompt = systemPrompt;
-          return { candidates: [], notes: [] };
+          return Promise.resolve({ candidates: [], notes: [] });
         },
       });
       expect(sent).toMatchObject({

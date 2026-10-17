@@ -10,7 +10,7 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import { JobFinderShell } from "@renderer/features/job-finder/components/job-finder-shell";
 import { JobFinderOpeningShell } from "./job-finder-page";
 
@@ -322,7 +322,7 @@ function renderLoadedShell(initialEntry = "/job-finder/home") {
             },
             reviewQueue: [],
             userActionRequests: [],
-          } as unknown as JobFinderWorkspaceSnapshot
+          } as unknown as JobFinderRendererWorkspaceSnapshot
         }
       >
         <div />

@@ -71,7 +71,7 @@ it("validates UI resume queue state at the typed bridge", () => {
   ).toThrow();
 });
 
-it("keeps a 33-job resume queue while limiting active generation to two", () => {
+it("keeps a 33-job resume queue within bounded pipeline admission", () => {
   const state = {
     id: "batch",
     jobIds: Array.from({ length: 33 }, (_, i) => `job_${i}`),
@@ -86,5 +86,5 @@ it("keeps a 33-job resume queue while limiting active generation to two", () => 
       ...state,
       activeJobIds: ["job_0", "job_1", "job_2"],
     }).success,
-  ).toBe(false);
+  ).toBe(true);
 });

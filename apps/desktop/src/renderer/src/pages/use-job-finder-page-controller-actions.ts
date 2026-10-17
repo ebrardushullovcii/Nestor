@@ -1,3 +1,4 @@
+import type { ResumeBatchGenerationProgress } from "@nordri/contracts";
 import { FAILURE_SENTENCES } from "@renderer/features/job-finder/lib/describe-failure";
 import {
   JOB_FINDER_BROWSER_NAME,
@@ -28,7 +29,7 @@ import type {
   ReviewQueueItem,
   JobFinderOpenBrowserSessionInput,
   JobFinderPreparedApplicationPageInput,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ProfileCopilotMessage,
   JobSearchPreferences,
   ProfileCopilotContext,
@@ -215,8 +216,8 @@ type BaseActionArgs = {
     SetStateAction<DiscoveryRunFeedback | null>
   >;
   sourceDebugRunIdRef: MutableRefObject<number>;
-  latestWorkspaceRef: MutableRefObject<JobFinderWorkspaceSnapshot | null>;
-  workspace: JobFinderWorkspaceSnapshot;
+  latestWorkspaceRef: MutableRefObject<JobFinderRendererWorkspaceSnapshot | null>;
+  workspace: JobFinderRendererWorkspaceSnapshot;
   saveCoordinator: JobFinderSaveCoordinator;
 };
 
@@ -233,6 +234,9 @@ export const DISCOVERY_PROGRESS_REFRESH_INTERVAL_MS = 250;
  * renderer is single-threaded, and the flag survives every rebuild.
  */
 let isDiscoveryRunActive = false;
+
+// Context rebuilds must not turn one pending bulk click into several IPC writes.
+let isBulkShortlistActive = false;
 
 /**
  * Single-flight guard for the tailored-draft batch. Module scope for the same
@@ -336,7 +340,7 @@ export function consumeFirstSearchRequest(campaignId?: string | null): boolean {
  */
 export function shouldStartFirstSearchAfterSetup(
   workspace: Pick<
-    JobFinderWorkspaceSnapshot,
+    JobFinderRendererWorkspaceSnapshot,
     "activeDiscoveryRun" | "recentDiscoveryRuns" | "searchPreferences"
   >,
 ): boolean {
@@ -416,7 +420,16 @@ export type DiscoveryWorkspaceRefreshCoordinator = {
  */
 export function createDiscoveryWorkspaceRefreshCoordinator(
   refreshWorkspace: () => Promise<unknown>,
-  options: { intervalMs?: number } = {},
+  options: {
+    intervalMs?: number;
+    /**
+     * Progress refreshes go here when given: the workspace's paced
+     * background refresh, which also answers main's update notices, so the
+     * two never rebuild the workspace at the same time. The final flush
+     * still reads it directly.
+     */
+    requestProgressiveRefresh?: () => void;
+  } = {},
 ): DiscoveryWorkspaceRefreshCoordinator {
   const intervalMs =
     options.intervalMs ?? DISCOVERY_PROGRESS_REFRESH_INTERVAL_MS;
@@ -437,8 +450,13 @@ export function createDiscoveryWorkspaceRefreshCoordinator(
       }
 
       pending = false;
+      const requestProgressiveRefresh = options.requestProgressiveRefresh;
       inFlight = Promise.resolve()
-        .then(() => refreshWorkspace())
+        .then(() =>
+          requestProgressiveRefresh
+            ? requestProgressiveRefresh()
+            : refreshWorkspace(),
+        )
         .then(() => undefined)
         .catch(() => undefined)
         .finally(() => {
@@ -550,7 +568,7 @@ function decrementPendingScope(
 }
 
 function getActiveCampaignReviewQueue(
-  snapshot: JobFinderWorkspaceSnapshot | null,
+  snapshot: JobFinderRendererWorkspaceSnapshot | null,
   campaignId = snapshot?.activeCampaignId,
 ): ReviewQueueItem[] {
   if (!snapshot) {
@@ -573,8 +591,8 @@ function getActiveCampaignReviewQueue(
  */
 export function describeAutoApplyQueueStart(
   snapshot:
-    | (Pick<JobFinderWorkspaceSnapshot, "applyRuns" | "reviewQueue"> &
-        Partial<Pick<JobFinderWorkspaceSnapshot, "applyJobResults">>)
+    | (Pick<JobFinderRendererWorkspaceSnapshot, "applyRuns" | "reviewQueue"> &
+        Partial<Pick<JobFinderRendererWorkspaceSnapshot, "applyJobResults">>)
     | null
     | undefined,
   jobIds: readonly string[],
@@ -615,7 +633,7 @@ export function describeAutoApplyQueueStart(
 }
 
 export function describePreparedApplicationSubmitResult(
-  snapshot: JobFinderWorkspaceSnapshot,
+  snapshot: JobFinderRendererWorkspaceSnapshot,
   jobId: string,
 ): string {
   const result = [...snapshot.applyJobResults]
@@ -634,7 +652,7 @@ export function describePreparedApplicationSubmitResult(
 
 /** One line for a Send-all press: how many went out, and what did not. */
 export function describePreparedApplicationsSendResult(
-  snapshot: JobFinderWorkspaceSnapshot,
+  snapshot: JobFinderRendererWorkspaceSnapshot,
   jobIds: readonly string[],
 ): string {
   if (jobIds.length === 1) {
@@ -653,7 +671,7 @@ export function describePreparedApplicationsSendResult(
 }
 
 export function preparedApplicationsToastTone(
-  snapshot: JobFinderWorkspaceSnapshot,
+  snapshot: JobFinderRendererWorkspaceSnapshot,
   jobIds: readonly string[],
 ): "success" | "warning" {
   return jobIds.every((jobId) => {
@@ -1086,12 +1104,16 @@ export function createPrimaryPageActions(
     let agentDiscoveryResult: JobFinderAgentDiscoveryResult | null = null;
     // `runAction` only returns a boolean success flag, so keep the final
     // refreshed workspace here for truthful zero-new / duplicate feedback.
-    let refreshedDiscoverySnapshot: JobFinderWorkspaceSnapshot | null = null;
+    let refreshedDiscoverySnapshot: JobFinderRendererWorkspaceSnapshot | null =
+      null;
 
     void runAction(
       async () => {
         const refreshCoordinator = createDiscoveryWorkspaceRefreshCoordinator(
           actions.refreshWorkspace,
+          actions.requestWorkspaceRefresh
+            ? { requestProgressiveRefresh: actions.requestWorkspaceRefresh }
+            : {},
         );
 
         try {
@@ -1130,7 +1152,7 @@ export function createPrimaryPageActions(
             typeof finalSnapshot === "object" &&
             finalSnapshot !== null &&
             "recentDiscoveryRuns" in finalSnapshot
-              ? (finalSnapshot as JobFinderWorkspaceSnapshot)
+              ? (finalSnapshot as JobFinderRendererWorkspaceSnapshot)
               : null;
           return refreshedDiscoverySnapshot;
         } finally {
@@ -1382,10 +1404,34 @@ export function createPrimaryPageActions(
           }
         : {}),
     };
+    const batchStartedAt = Date.now();
+    const stages = new Map<string, ResumeBatchGenerationProgress["stage"]>();
+    const unsubscribeProgress = window.nordri.jobFinder.onResumeBatchProgress(
+      (progress) => {
+        if (
+          progress.batchId !== batch.id ||
+          tailoredDraftPreparationDisposedRef.current
+        )
+          return;
+        if (progress.stage === "finished") stages.delete(progress.jobId);
+        else stages.set(progress.jobId, progress.stage);
+        const counts = { writingCount: 0, processingCount: 0, waitingCount: 0 };
+        for (const stage of stages.values()) {
+          if (stage === "writing") counts.writingCount += 1;
+          else if (stage === "processing") counts.processingCount += 1;
+          else counts.waitingCount += 1;
+        }
+        setTailoredDraftPreparation((current) => ({ ...current, ...counts }));
+      },
+    );
     uiResumeBatch = batch;
     const syncBatch = async () => {
       const result = await window.nordri.assistant.syncResumeBatch(batch);
-      if (result.stopRequested) stopAssistantUiResumeBatch(batch.id);
+      if (result.providerBlock) batch.providerBlock = result.providerBlock;
+      if (result.stopRequested) {
+        batch.stopRequested = true;
+        stopAssistantUiResumeBatch(batch.id);
+      }
     };
     isTailoredDraftPreparationRunActive = true;
     tailoredDraftPreparationRunRef.current = true;
@@ -1422,17 +1468,6 @@ export function createPrimaryPageActions(
                 const request = batch.requests?.findLast(
                   (entry) => entry.jobId === jobId,
                 );
-                if (request?.level) {
-                  await actions.setJobResumeApplicationMode(
-                    jobId,
-                    "tailored_per_job",
-                    request.level === "light"
-                      ? "conservative"
-                      : request.level === "tailored"
-                        ? "balanced"
-                        : "aggressive",
-                  );
-                }
                 const current = latestWorkspaceRef.current ?? workspace;
                 if (
                   current.reviewQueue.find((item) => item.jobId === jobId)
@@ -1447,38 +1482,29 @@ export function createPrimaryPageActions(
                 const generated = await withPendingScope(
                   jobFinderPendingActions.resumeJob(jobId),
                   () =>
-                    continuing &&
-                    current.resumeDrafts.some((draft) => draft.jobId === jobId)
-                      ? actions.regenerateResumeDraft(jobId)
-                      : actions.generateResume(jobId),
+                    window.nordri.jobFinder.generateResumeForBatch({
+                      batchId: batch.id,
+                      jobId,
+                      regenerate:
+                        continuing &&
+                        current.resumeDrafts.some(
+                          (draft) => draft.jobId === jobId,
+                        ),
+                    }),
                 );
-                const failed = generated?.tailoredAssets?.find(
-                  (entry) => entry.jobId === jobId,
-                )?.failureMessage;
-                if (failed) return false;
+                if (generated.outcome === "not_started") return null;
+                if (generated.outcome === "failed") return false;
+                if (generated.outcome === "blocked") {
+                  if (generated.providerBlock)
+                    batch.providerBlock = generated.providerBlock;
+                  batch.stopRequested = true;
+                  stopAssistantUiResumeBatch(batch.id);
+                  return "blocked";
+                }
                 batch.durationsMs!.push(Math.max(0, Date.now() - startedAt));
                 completedJobIds.add(jobId);
                 batch.completedJobIds.push(jobId);
-                if (
-                  generated?.reviewQueue?.find((item) => item.jobId === jobId)
-                    ?.resumeApplicationMode === "original_resume"
-                ) {
-                  return "original";
-                }
-                if (
-                  generated?.reviewQueue &&
-                  !generated.reviewQueue.some((item) => item.jobId === jobId)
-                ) {
-                  return "cancelled";
-                }
-                // A finished generation counts as written unless its asset
-                // says the AI was unavailable and the saved wording was kept.
-                const asset = generated?.tailoredAssets?.find(
-                  (entry) => entry.jobId === jobId,
-                );
-                return asset?.generationMethod === "deterministic"
-                  ? "fallback"
-                  : "written";
+                return generated.outcome;
               } catch {
                 return false;
               } finally {
@@ -1503,8 +1529,12 @@ export function createPrimaryPageActions(
 
                 setTailoredDraftPreparation((current) => ({
                   ...current,
+                  ...(batch.providerBlock
+                    ? { providerBlock: batch.providerBlock }
+                    : {}),
                   attemptedCount: currentIndex,
                   durationsMs: [...(batch.durationsMs ?? [])],
+                  elapsedMs: Date.now() - batchStartedAt,
                   completedCount,
                   ...(fallbackCount ? { fallbackCount } : {}),
                   ...(originalChoiceCount ? { originalChoiceCount } : {}),
@@ -1547,6 +1577,9 @@ export function createPrimaryPageActions(
               (!selectedJobIds || selectedJobIds.has(item.jobId)),
           );
           const finalState: TailoredDraftPreparationViewState = {
+            ...(batch.providerBlock
+              ? { providerBlock: batch.providerBlock }
+              : {}),
             attemptedCount: result.attemptedCount,
             completedCount: result.completedCount,
             ...(result.fallbackCount
@@ -1580,7 +1613,10 @@ export function createPrimaryPageActions(
           setTailoredDraftPreparation(finalState);
           applyRouteScopedMessage(
             {
-              message: getTailoredDraftPreparationResultMessage(finalState),
+              // The durable dismissible batch notice owns provider-outage copy.
+              message: batch.providerBlock
+                ? null
+                : getTailoredDraftPreparationResultMessage(finalState),
             },
             ownerStartRoute,
           );
@@ -1593,11 +1629,13 @@ export function createPrimaryPageActions(
           }));
         })
         .finally(async () => {
+          unsubscribeProgress();
           batch.running = false;
           batch.done =
             !batch.stopRequested &&
             !tailoredDraftPreparationStopRequested &&
-            !tailoredDraftPreparationDisposedRef.current;
+            !tailoredDraftPreparationDisposedRef.current &&
+            batch.jobIds.every((jobId) => completedJobIds.has(jobId));
           batch.activeJobIds = [];
           await syncBatch().catch(() => undefined);
           isTailoredDraftPreparationRunActive = false;
@@ -1605,6 +1643,7 @@ export function createPrimaryPageActions(
           tailoredDraftPreparationRunRef.current = false;
         });
     } catch (error) {
+      unsubscribeProgress();
       isTailoredDraftPreparationRunActive = false;
       tailoredDraftPreparationStopRequested = false;
       tailoredDraftPreparationRunRef.current = false;
@@ -1972,6 +2011,27 @@ export function createPrimaryPageActions(
           ),
         { scope: jobFinderPendingActions.resumeJob(jobId) },
       ),
+    ...(actions.removeJobsFromReview
+      ? {
+          onRemoveReviewJobs: async (jobIds: readonly string[]) => {
+            const ids = [...new Set(jobIds)];
+            if (ids.length === 0) return;
+            const mayLeave = await confirmLeaveDirtyResumeWorkspace(
+              "remove these jobs from Shortlisted",
+            );
+            if (!mayLeave) return;
+            await runAction(
+              () => actions.removeJobsFromReview!(ids),
+              () => undefined,
+              `${ids.length} ${ids.length === 1 ? "job" : "jobs"} moved back to Find jobs.`,
+              {
+                rethrowError: true,
+                scope: jobFinderPendingActions.resumeJob("bulk-remove"),
+              },
+            );
+          },
+        }
+      : {}),
     onRemoveReviewJob: (jobId: string) => {
       void confirmLeaveDirtyResumeWorkspace(
         "remove this job from Shortlisted",
@@ -2259,11 +2319,90 @@ export function createPrimaryPageActions(
         },
       );
     },
+    ...(actions.judgeUnjudgedJobs
+      ? {
+          onJudgeUnjudgedJobs: async () => {
+            await actions.judgeUnjudgedJobs?.();
+          },
+        }
+      : {}),
     onAssessJobListing: async (jobId: string) => {
       await withPendingScope(jobFinderPendingActions.discoveryJob(jobId), () =>
         actions.assessJobListing(jobId),
       );
     },
+    ...(actions.dismissDiscoveryJobs
+      ? {
+          onDismissJobs: async (jobIds: readonly string[]) => {
+            const ids = [...new Set(jobIds)];
+            if (ids.length === 0) return;
+            await runAction(
+              () => actions.dismissDiscoveryJobs!(ids, []),
+              () => undefined,
+              `${ids.length} ${ids.length === 1 ? "job" : "jobs"} hidden. They stay in Not interested, where you can restore them.`,
+              {
+                rethrowError: true,
+                scope: jobFinderPendingActions.discoveryJob("bulk-dismiss"),
+              },
+            );
+          },
+        }
+      : {}),
+    ...(actions.queueJobsForReview
+      ? {
+          onQueueJobs: async (
+            jobIds: readonly string[],
+          ): Promise<JobFinderQueuedJobOutcome> => {
+            if (isBulkShortlistActive)
+              return {
+                status: "failure",
+                message: "Shortlisting is already in progress.",
+              };
+            const ids = [...new Set(jobIds)];
+            if (ids.length === 0)
+              return {
+                status: "failure",
+                message: "Select a job to shortlist.",
+              };
+            isBulkShortlistActive = true;
+            const ownerRoute = jobFinderStatusRoute;
+            applyRouteScopedMessage({ message: null }, ownerRoute);
+            try {
+              await withPendingScope(
+                jobFinderPendingActions.discoveryJob("bulk-shortlist"),
+                () => actions.queueJobsForReview!(ids),
+              );
+              setSelectedReviewJobId(ids[0]!);
+              const message = `${ids.length} ${ids.length === 1 ? "job added" : "jobs added"} to Shortlisted.`;
+              applyRouteScopedMessage(
+                {
+                  message,
+                  tone: "success",
+                  actionLink: {
+                    label: "Open Shortlisted",
+                    route: "/job-finder/review-queue",
+                  },
+                },
+                ownerRoute,
+              );
+              return { status: "success", message };
+            } catch (error) {
+              const message = getJobFinderErrorMessage(
+                error,
+                "The requested Job Finder action failed.",
+              );
+              if (!isHandledRefreshError(error))
+                applyRouteScopedMessage(
+                  { message, tone: "failure" },
+                  ownerRoute,
+                );
+              return { status: "failure", message };
+            } finally {
+              isBulkShortlistActive = false;
+            }
+          },
+        }
+      : {}),
     onQueueJob: async (jobId: string): Promise<JobFinderQueuedJobOutcome> => {
       // Request-local shortlist outcome: the awaited result belongs to this
       // exact click, so overlapping shortlists resolving out of order can

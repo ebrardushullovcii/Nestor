@@ -8,9 +8,8 @@ import { build } from "vite";
 
 const desktop = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(join(desktop, "package.json"));
-const output = await mkdtemp(
-  join(tmpdir(), "nordri-embedded-browser-test-"),
-);
+const output = await mkdtemp(join(tmpdir(), "nordri-embedded-browser-test-"));
+const discoveryCleanup = process.argv.includes("--discovery-cleanup");
 await build({
   configFile: false,
   root: desktop,
@@ -43,7 +42,12 @@ await build({
   },
   ssr: { noExternal: true },
   build: {
-    ssr: join(desktop, "scripts/fixtures/embedded-browser.ts"),
+    ssr: join(
+      desktop,
+      discoveryCleanup
+        ? "scripts/fixtures/embedded-browser-discovery-cleanup.ts"
+        : "scripts/fixtures/embedded-browser.ts",
+    ),
     outDir: output,
     emptyOutDir: false,
     rollupOptions: {

@@ -77,8 +77,6 @@ describe("ResumeStrategyContextPanel", () => {
     );
 
     expect(markup).toContain("Your default:");
-    expect(markup).toContain(
-      "Aggressive: may stretch, with your say-so",
-    );
+    expect(markup).toContain("Aggressive: may stretch, with your say-so");
   });
 });

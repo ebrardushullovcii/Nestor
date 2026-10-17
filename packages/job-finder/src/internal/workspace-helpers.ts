@@ -25,6 +25,7 @@ import {
 } from "./source-instructions";
 import { normalizeResumeDraftEntryOrdering } from "./resume-entry-ordering";
 import { uniqueStrings } from "./shared";
+import { markValidatedSearchPreferences } from "./validated-search-preferences";
 import {
   DEFAULT_MAX_TARGET_ROLES,
   GENERIC_DEFAULT_TARGET_LABEL,
@@ -112,10 +113,25 @@ export function normalizeDiscoveryTarget(
   });
 }
 
+// Every workspace read normalizes the same stored preferences, which hold
+// hundreds of sources; validating each of them twice per refresh cost more
+// than the rest of the preference work. The last result is reused while the
+// input is unchanged, and each caller still gets its own copy.
+let lastNormalizedSearchPreferences: {
+  key: string;
+  value: JobSearchPreferences;
+} | null = null;
+
 export function normalizeSearchPreferences(
   searchPreferences: JobSearchPreferences,
 ): JobSearchPreferences {
-  return JobSearchPreferencesSchema.parse({
+  const key = JSON.stringify(searchPreferences);
+  if (lastNormalizedSearchPreferences?.key === key) {
+    return markValidatedSearchPreferences(
+      structuredClone(lastNormalizedSearchPreferences.value),
+    );
+  }
+  const value = JobSearchPreferencesSchema.parse({
     ...searchPreferences,
     discovery: {
       ...searchPreferences.discovery,
@@ -124,6 +140,8 @@ export function normalizeSearchPreferences(
       ),
     },
   });
+  lastNormalizedSearchPreferences = { key, value: structuredClone(value) };
+  return markValidatedSearchPreferences(value);
 }
 
 export function invalidateChangedSourceGuidance(
@@ -250,10 +268,15 @@ export function getActiveDiscoveryTargets(
 export function getPreferredSessionAdapter(
   searchPreferences: JobSearchPreferences,
 ): JobSource {
-  const targets = getActiveDiscoveryTargets(searchPreferences);
-  const preferredTarget = targets[0];
+  // Normalizing does not change whether a source is enabled, so only the
+  // first enabled one is normalized, not every saved source on each read.
+  const preferredTarget = searchPreferences.discovery.targets.find(
+    (target) => target.enabled,
+  );
 
-  return preferredTarget ? resolveAdapterKind(preferredTarget) : "target_site";
+  return preferredTarget
+    ? resolveAdapterKind(normalizeDiscoveryTarget(preferredTarget))
+    : "target_site";
 }
 
 export function nextAssetVersion(

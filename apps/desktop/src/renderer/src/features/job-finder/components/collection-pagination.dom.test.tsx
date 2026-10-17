@@ -5,7 +5,13 @@ import { afterEach, describe, expect, test } from "vitest";
 import { useState } from "react";
 import { CollectionPagination } from "./collection-pagination";
 
-function StatefulPagination({ initialPage = 1 }: { initialPage?: number }) {
+function StatefulPagination({
+  initialPage = 1,
+  totalCount = 120,
+}: {
+  initialPage?: number;
+  totalCount?: number;
+}) {
   const [page, setPage] = useState(initialPage);
 
   return (
@@ -14,7 +20,7 @@ function StatefulPagination({ initialPage = 1 }: { initialPage?: number }) {
       onPageChange={setPage}
       page={page}
       pageSize={50}
-      totalCount={120}
+      totalCount={totalCount}
     />
   );
 }
@@ -96,9 +102,22 @@ describe("CollectionPagination layout", () => {
     expect(view.container.querySelector(".sr-only")?.textContent).toBe(" jobs");
     expect(
       screen.getByRole("button", { name: "Next page" }).className,
-    ).toContain("h-6");
+    ).toContain("h-8");
     expect(
       screen.getByRole("button", { name: "Previous page" }).className,
-    ).toContain("h-6");
+    ).toContain("h-8");
   });
+});
+
+test("jumps by numbered buttons and first/last shortcuts without a page input", () => {
+  render(<StatefulPagination initialPage={60} totalCount={10000} />);
+  expect(screen.getAllByRole("button", { name: /^Page \d+$/ })).toHaveLength(5);
+  fireEvent.click(screen.getByRole("button", { name: "Page 61" }));
+  expect(screen.getByText("3001–3050 of 10000")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Last page" }));
+  expect(screen.getByText("9951–10000 of 10000")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "First page" }));
+  expect(screen.getByText("1–50 of 10000")).toBeTruthy();
+  expect(screen.queryByRole("textbox", { name: "Go to page" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Go" })).toBeNull();
 });

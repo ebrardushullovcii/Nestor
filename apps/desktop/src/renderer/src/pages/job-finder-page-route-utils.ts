@@ -1,7 +1,7 @@
-import type { JobFinderWorkspaceSnapshot } from '@nordri/contracts'
+import type { JobFinderRendererWorkspaceSnapshot } from '@nordri/contracts'
 
 export function buildSourceDebugOutcomeMessage(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
   targetId: string,
 ): string {
   const target = workspace.searchPreferences.discovery.targets.find(

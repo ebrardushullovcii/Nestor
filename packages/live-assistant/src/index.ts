@@ -24,7 +24,9 @@ import type {
   InterviewTranscriptionEngine,
   InterviewTranscriptSegment,
   InterviewVisualObservation,
+  InterviewWorkspaceView,
   InterviewWorkspaceSnapshot,
+  InterviewSessionSummary,
   SaveInterviewSetupInput,
   SendInterviewChatMessageInput,
   UpdateInterviewOverlayPreferenceInput,
@@ -48,7 +50,7 @@ import {
   InterviewTranscriptAnnotationSchema,
   InterviewTranscriptSegmentInputSchema,
   InterviewTranscriptSegmentSchema,
-  InterviewWorkspaceSnapshotSchema,
+  summarizeInterviewSession,
   SendInterviewChatMessageInputSchema,
   interviewChatLimits,
 } from "@nordri/contracts";
@@ -81,6 +83,12 @@ export interface InterviewOverlayModel {
 export interface LiveAssistantRepository {
   load(): Promise<InterviewWorkspaceSnapshot | null>;
   save(snapshot: InterviewWorkspaceSnapshot): Promise<void>;
+  loadWorkspace(): Promise<InterviewWorkspaceView | null>;
+  loadSession(sessionId: string): Promise<InterviewLiveSession | null>;
+  saveWorkspace(
+    snapshot: InterviewWorkspaceView,
+    changedArchiveSessions?: readonly InterviewLiveSession[],
+  ): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -187,38 +195,37 @@ function containsUsableSpeech(text: string) {
 }
 
 export interface LiveAssistantService {
-  getWorkspace(): Promise<InterviewWorkspaceSnapshot>;
-  saveSetup(
-    input: SaveInterviewSetupInput,
-  ): Promise<InterviewWorkspaceSnapshot>;
+  getWorkspace(): Promise<InterviewWorkspaceView>;
+  getSession(sessionId: string): Promise<InterviewLiveSession | null>;
+  saveSetup(input: SaveInterviewSetupInput): Promise<InterviewWorkspaceView>;
   updateOverlayPreference(
     input: UpdateInterviewOverlayPreferenceInput,
-  ): Promise<InterviewWorkspaceSnapshot>;
-  resetOverlayPreferences(): Promise<InterviewWorkspaceSnapshot>;
-  runRehearsal(): Promise<InterviewWorkspaceSnapshot>;
-  startSession(): Promise<InterviewWorkspaceSnapshot>;
-  beginSessionReconfiguration(): Promise<InterviewWorkspaceSnapshot>;
-  finishSessionReconfiguration(): Promise<InterviewWorkspaceSnapshot>;
+  ): Promise<InterviewWorkspaceView>;
+  resetOverlayPreferences(): Promise<InterviewWorkspaceView>;
+  runRehearsal(): Promise<InterviewWorkspaceView>;
+  startSession(): Promise<InterviewWorkspaceView>;
+  beginSessionReconfiguration(): Promise<InterviewWorkspaceView>;
+  finishSessionReconfiguration(): Promise<InterviewWorkspaceView>;
   performAction(
     input: InterviewSessionActionInput,
-  ): Promise<InterviewWorkspaceSnapshot>;
-  deleteSession(sessionId: string): Promise<InterviewWorkspaceSnapshot>;
+  ): Promise<InterviewWorkspaceView>;
+  deleteSession(sessionId: string): Promise<InterviewWorkspaceView>;
   saveCueAsPrepArtifact(input: {
     sessionId: string;
     cueCardId: string;
-  }): Promise<InterviewWorkspaceSnapshot>;
+  }): Promise<InterviewWorkspaceView>;
   addTranscriptAnnotation(
     input: InterviewTranscriptAnnotationInput,
-  ): Promise<InterviewWorkspaceSnapshot>;
+  ): Promise<InterviewWorkspaceView>;
   addTranscriptSegment(
     input: InterviewTranscriptSegmentInput,
-  ): Promise<InterviewWorkspaceSnapshot>;
+  ): Promise<InterviewWorkspaceView>;
   sendChatMessage(
     input: SendInterviewChatMessageInput,
   ): Promise<InterviewChatTurn>;
   recordProtectedSurfaceVerification(
     input: InterviewProtectedSurfaceVerificationInput,
-  ): Promise<InterviewWorkspaceSnapshot>;
+  ): Promise<InterviewWorkspaceView>;
   recordDisplayChange(input: {
     reason:
       | "display_added"
@@ -226,10 +233,10 @@ export interface LiveAssistantService {
       | "display_metrics_changed"
       | "manual_revalidation";
     detail?: string | null;
-  }): Promise<InterviewWorkspaceSnapshot>;
+  }): Promise<InterviewWorkspaceView>;
   transcribeAudioChunk(
     input: InterviewAudioTranscriptionInput,
-  ): Promise<InterviewWorkspaceSnapshot>;
+  ): Promise<InterviewWorkspaceView>;
   exportSession(input: {
     sessionId: string;
     format: "markdown" | "json";
@@ -402,9 +409,9 @@ function createWorkspace(input: {
   now: string;
   setup?: Partial<InterviewSetupState>;
   activeSession?: InterviewLiveSession | null;
-  recentSessions?: readonly InterviewLiveSession[];
+  recentSessions?: InterviewSessionSummary[];
   overlayPreferences?: readonly InterviewOverlayPreference[];
-}): InterviewWorkspaceSnapshot {
+}): InterviewWorkspaceView {
   const setup = InterviewSetupStateSchema.parse({
     consent: defaultConsent,
     targetContext: createDefaultTargetContext(input.now),
@@ -422,7 +429,7 @@ function createWorkspace(input: {
   const fallbackProtectionState =
     setup.rehearsal?.protectedSurfaces[0]?.protectionState ?? "unknown";
 
-  return InterviewWorkspaceSnapshotSchema.parse({
+  return {
     module: "live-assistant",
     generatedAt: input.now,
     setup,
@@ -441,7 +448,7 @@ function createWorkspace(input: {
       session: activeSession,
       fallbackProtectionState,
     }),
-  });
+  };
 }
 
 function hasAcceptedSetupConsent(setup: InterviewSetupState): boolean {
@@ -701,11 +708,11 @@ function buildMarkdownExport(session: InterviewLiveSession): string {
 
 async function persist(
   repository: LiveAssistantRepository,
-  snapshot: InterviewWorkspaceSnapshot,
-): Promise<InterviewWorkspaceSnapshot> {
-  const normalizedSnapshot = InterviewWorkspaceSnapshotSchema.parse(snapshot);
-  await repository.save(normalizedSnapshot);
-  return normalizedSnapshot;
+  snapshot: InterviewWorkspaceView,
+  changedArchiveSessions: readonly InterviewLiveSession[] = [],
+): Promise<InterviewWorkspaceView> {
+  await repository.saveWorkspace(snapshot, changedArchiveSessions);
+  return snapshot;
 }
 
 export function toOverlayWindowState(
@@ -744,7 +751,7 @@ export function createLiveAssistantService(
 ): LiveAssistantService {
   const now = options.now ?? (() => new Date().toISOString());
   const advancedSurfacesEnabled = options.advancedSurfacesEnabled ?? false;
-  let snapshotPromise: Promise<InterviewWorkspaceSnapshot> | null = null;
+  let snapshotPromise: Promise<InterviewWorkspaceView> | null = null;
   let workspaceMutationTail: Promise<void> = Promise.resolve();
   let audioProviderTail: Promise<void> = Promise.resolve();
   let audioCaptureEpoch = 0;
@@ -771,9 +778,9 @@ export function createLiveAssistantService(
     audioCaptureEpoch += 1;
   }
 
-  async function loadSnapshot(): Promise<InterviewWorkspaceSnapshot> {
+  async function loadSnapshot(): Promise<InterviewWorkspaceView> {
     snapshotPromise ??= options.repository
-      .load()
+      .loadWorkspace()
       .then(async (persistedSnapshot) => {
         const currentNow = now();
         if (!persistedSnapshot) {
@@ -809,31 +816,49 @@ export function createLiveAssistantService(
             setup: persistedSnapshot.setup,
             activeSession: null,
             recentSessions: [
-              interruptedSession,
+              summarizeInterviewSession(interruptedSession),
               ...persistedSnapshot.recentSessions.filter(
                 (session) => session.id !== interruptedSession.id,
               ),
             ],
             overlayPreferences: persistedSnapshot.overlayPreferences,
           }),
+          [interruptedSession],
         );
       });
 
     return snapshotPromise;
   }
 
-  async function saveSnapshot(nextSnapshot: InterviewWorkspaceSnapshot) {
-    const savedSnapshot = await persist(options.repository, nextSnapshot);
+  async function saveSnapshot(
+    nextSnapshot: InterviewWorkspaceView,
+    changedArchiveSessions: readonly InterviewLiveSession[] = [],
+  ) {
+    const savedSnapshot = await persist(
+      options.repository,
+      nextSnapshot,
+      changedArchiveSessions,
+    );
     snapshotPromise = Promise.resolve(savedSnapshot);
     return savedSnapshot;
+  }
+
+  async function findSession(
+    sessionId: string,
+  ): Promise<InterviewLiveSession | null> {
+    const current = await loadSnapshot();
+    if (current.activeSession?.id === sessionId) return current.activeSession;
+    if (!current.recentSessions.some((session) => session.id === sessionId))
+      return null;
+    return options.repository.loadSession(sessionId);
   }
 
   async function rebuildWorkspace(input: {
     setup?: InterviewSetupState;
     activeSession?: InterviewLiveSession | null;
-    recentSessions?: readonly InterviewLiveSession[];
+    recentSessions?: InterviewSessionSummary[];
     overlayPreferences?: readonly InterviewOverlayPreference[];
-  }): Promise<InterviewWorkspaceSnapshot> {
+  }): Promise<InterviewWorkspaceView> {
     const current = await loadSnapshot();
     return createWorkspace({
       now: now(),
@@ -1006,7 +1031,7 @@ export function createLiveAssistantService(
 
   async function ingestTranscriptSegment(
     rawInput: InterviewTranscriptSegmentInput,
-  ): Promise<InterviewWorkspaceSnapshot> {
+  ): Promise<InterviewWorkspaceView> {
     const input = InterviewTranscriptSegmentInputSchema.parse(rawInput);
     const current = await loadSnapshot();
     const activeSession = current.activeSession;
@@ -1086,7 +1111,7 @@ export function createLiveAssistantService(
     audioInput: InterviewAudioTranscriptionInput;
     expectedAudioCaptureEpoch: number;
     outcome: InterviewAudioProviderOutcome;
-  }): Promise<InterviewWorkspaceSnapshot> {
+  }): Promise<InterviewWorkspaceView> {
     const current = await loadSnapshot();
     const activeSession = current.activeSession;
     const currentNow = now();
@@ -1366,6 +1391,9 @@ export function createLiveAssistantService(
   }
 
   return {
+    getSession(sessionId) {
+      return enqueueWorkspaceMutation(() => findSession(sessionId));
+    },
     async getWorkspace() {
       return loadSnapshot();
     },
@@ -1937,7 +1965,7 @@ export function createLiveAssistantService(
         const nextRecentSessions =
           nextSession.status === "ended"
             ? [
-                nextSession,
+                summarizeInterviewSession(nextSession),
                 ...current.recentSessions.filter(
                   (session) => session.id !== nextSession.id,
                 ),
@@ -1948,7 +1976,10 @@ export function createLiveAssistantService(
           recentSessions: nextRecentSessions,
           overlayPreferences: nextOverlayPreferences,
         });
-        return saveSnapshot(nextSnapshot);
+        return saveSnapshot(
+          nextSnapshot,
+          nextSession.status === "ended" ? [nextSession] : [],
+        );
       });
     },
     deleteSession(sessionId) {
@@ -1972,12 +2003,7 @@ export function createLiveAssistantService(
     saveCueAsPrepArtifact(input) {
       return enqueueWorkspaceMutation(async () => {
         const current = await loadSnapshot();
-        const session =
-          current.activeSession?.id === input.sessionId
-            ? current.activeSession
-            : current.recentSessions.find(
-                (entry) => entry.id === input.sessionId,
-              );
+        const session = await findSession(input.sessionId);
 
         if (!session) {
           return current;
@@ -2164,12 +2190,7 @@ export function createLiveAssistantService(
     addTranscriptAnnotation(input) {
       return enqueueWorkspaceMutation(async () => {
         const current = await loadSnapshot();
-        const session =
-          current.activeSession?.id === input.sessionId
-            ? current.activeSession
-            : current.recentSessions.find(
-                (entry) => entry.id === input.sessionId,
-              );
+        const session = await findSession(input.sessionId);
 
         if (!session) {
           return current;
@@ -2215,20 +2236,19 @@ export function createLiveAssistantService(
               ? nextSession
               : current.activeSession,
           recentSessions: current.recentSessions.map((entry) =>
-            entry.id === session.id ? nextSession : entry,
+            entry.id === session.id
+              ? summarizeInterviewSession(nextSession)
+              : entry,
           ),
         });
-        return saveSnapshot(nextSnapshot);
+        return saveSnapshot(
+          nextSnapshot,
+          current.activeSession?.id === session.id ? [] : [nextSession],
+        );
       });
     },
     async exportSession(input) {
-      const current = await loadSnapshot();
-      const session =
-        current.activeSession?.id === input.sessionId
-          ? current.activeSession
-          : current.recentSessions.find(
-              (entry) => entry.id === input.sessionId,
-            );
+      const session = await findSession(input.sessionId);
 
       if (!session) {
         throw new Error("Interview session was not found.");

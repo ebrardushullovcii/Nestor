@@ -106,32 +106,34 @@ test.each([true, false])(
     > = [];
     const dependencies = buildApplyLetterDependencies({
       aiClient: {
-        chatWithTools: async (...args) => {
+        chatWithTools: (...args) => {
           calls.push(args);
-          return args[1].length
-            ? {
-                toolCalls: [
-                  {
-                    id: "check",
-                    type: "function",
-                    function: {
-                      name: "report_answer_checks",
-                      arguments: JSON.stringify({
-                        checks: [
-                          {
-                            index: 0,
-                            supported,
-                            reason: supported
-                              ? "Uses saved contact and supported facts"
-                              : "The rejected email and claimed editorial results are unsupported",
-                          },
-                        ],
-                      }),
+          return Promise.resolve(
+            args[1].length
+              ? {
+                  toolCalls: [
+                    {
+                      id: "check",
+                      type: "function",
+                      function: {
+                        name: "report_answer_checks",
+                        arguments: JSON.stringify({
+                          checks: [
+                            {
+                              index: 0,
+                              supported,
+                              reason: supported
+                                ? "Uses saved contact and supported facts"
+                                : "The rejected email and claimed editorial results are unsupported",
+                            },
+                          ],
+                        }),
+                      },
                     },
-                  },
-                ],
-              }
-            : { content: "A proposed letter with personal claims." };
+                  ],
+                }
+              : { content: "A proposed letter with personal claims." },
+          );
         },
       },
       documentManager: {},
@@ -161,7 +163,13 @@ test.each([true, false])(
         "The rejected email and claimed editorial results are unsupported",
       );
     expect(calls).toHaveLength(2);
-    const checked = JSON.parse(String(calls[1]![0][1]!.content));
+    const checked = JSON.parse(String(calls[1]![0][1]!.content)) as {
+      applicant: {
+        email: string;
+        preferences: { employmentTypes: string[]; locations: string[] };
+        answers: Record<string, string>;
+      };
+    };
     expect(checked.applicant.email).toBe("accepted@example.test");
     expect(checked.applicant.preferences.employmentTypes).toEqual([
       "Part-time",
@@ -273,23 +281,25 @@ test.each([
   const seed = createSeed();
   const dependencies = buildApplyLetterDependencies({
     aiClient: {
-      chatWithTools: async (...args) =>
-        args[1].length
-          ? {
-              toolCalls: [
-                {
-                  id: "check",
-                  type: "function",
-                  function: {
-                    name: "report_answer_checks",
-                    arguments: JSON.stringify({
-                      checks: [{ index: 0, supported: false, reason }],
-                    }),
+      chatWithTools: (...args) =>
+        Promise.resolve(
+          args[1].length
+            ? {
+                toolCalls: [
+                  {
+                    id: "check",
+                    type: "function",
+                    function: {
+                      name: "report_answer_checks",
+                      arguments: JSON.stringify({
+                        checks: [{ index: 0, supported: false, reason }],
+                      }),
+                    },
                   },
-                },
-              ],
-            }
-          : { content: "A proposed letter." },
+                ],
+              }
+            : { content: "A proposed letter." },
+        ),
     },
     documentManager: {},
     job: seed.savedJobs[0]!,

@@ -6,7 +6,6 @@ import type {
   WorkHistoryReviewSuggestion,
 } from "@nordri/contracts";
 import { Button } from "@renderer/components/ui/button";
-import { StatusBadge } from "../../components/status-badge";
 
 import { describeReviewRole } from "./resume-review-context";
 
@@ -24,11 +23,6 @@ export type ResumeWorkHistoryDecisionRequest =
       intent: "remove";
       acknowledgmentId: string;
     };
-
-const omissionKindLabels = {
-  weak_fit: "Weak fit",
-  gap_coverage: "Gap coverage",
-} as const;
 
 export function isWorkHistoryOmissionDecisionSuggestion<
   T extends Pick<WorkHistoryReviewSuggestion, "kind" | "action">,
@@ -158,6 +152,11 @@ interface ResumeWorkHistoryDecisionsProps {
   onRemoveAcknowledgment: (acknowledgmentId: string) => void;
 }
 
+/**
+ * The roles the writer left off this resume, as a plain list with a way to
+ * add any of them back. Which roles show is the writer's call for the job;
+ * nothing here asks the person to decide or holds anything back.
+ */
 export function ResumeWorkHistoryDecisions(
   props: ResumeWorkHistoryDecisionsProps,
 ) {
@@ -165,123 +164,56 @@ export function ResumeWorkHistoryDecisions(
     isWorkHistoryOmissionDecisionSuggestion,
   );
 
-  if (decisions.length === 0) {
+  if (decisions.length === 0 || !props.onIncludeRole) {
     return null;
   }
-
-  const resolved = decisions.map((suggestion) => ({
-    suggestion,
-    context: describeReviewRole(
-      suggestion,
-      props.sections ?? [],
-      props.roles ?? [],
-    ),
-    acknowledgment: matchWorkHistoryOmissionDecisionAcknowledgment({
-      draftId: props.draftId,
-      suggestion,
-      acknowledgments: props.acknowledgments,
-    }),
-  }));
-  const unresolvedCount = resolved.filter(
-    (decision) => !decision.acknowledgment,
-  ).length;
 
   return (
     <section
       aria-labelledby="resume-work-history-decisions-heading"
-      // Amber only while a decision is still open; once every hidden role is
-      // decided it is a plain record (ADR 0042).
-      className={
-        unresolvedCount > 0
-          ? "grid min-w-0 grid-cols-1 gap-2 rounded-(--radius-field) border border-(--warning-border) bg-(--warning-surface) p-2.5 text-(length:--text-small) leading-5 text-(--warning-text)"
-          : "grid min-w-0 grid-cols-1 gap-2 rounded-(--radius-field) border border-(--surface-panel-border) p-2.5 text-(length:--text-small) leading-5 text-foreground"
-      }
+      className="grid min-w-0 grid-cols-1 gap-1.5 text-(length:--text-small) leading-5 text-foreground-soft"
       data-resume-work-history-decisions
       tabIndex={-1}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3
-          className="font-display text-(--text-headline)"
-          id="resume-work-history-decisions-heading"
-        >
-          Work-history decisions
-        </h3>
-        <StatusBadge tone={unresolvedCount > 0 ? "critical" : "positive"}>
-          {unresolvedCount > 0 ? `${unresolvedCount} hidden` : "All left off"}
-        </StatusBadge>
-      </div>
-      <p aria-live="polite" role="status">
-        {unresolvedCount > 0
-          ? `${unresolvedCount} of ${decisions.length} hidden roles ${unresolvedCount === 1 ? "is" : "are"} off this resume. Add any back if you want it included; nothing here blocks approval.`
-          : "You chose to leave every listed hidden role off this resume."}
-      </p>
-      <ul className="grid min-w-0 grid-cols-1 gap-2">
-        {resolved.map(({ suggestion, context, acknowledgment }) => (
-          <li
-            className="grid min-w-0 grid-cols-1 gap-1.5 rounded-(--radius-field) border border-(--surface-panel-border) bg-background/60 px-2.5 py-2"
-            key={suggestion.id}
-          >
-            <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1">
-              <div
-                className="min-w-0 flex-1 [overflow-wrap:anywhere]"
-                id={`review-role-${suggestion.id}`}
-              >
-                <p className="font-medium text-(--text-headline)">
-                  {context.title}
-                </p>
+      <h3
+        className="font-display text-(--text-headline)"
+        id="resume-work-history-decisions-heading"
+      >
+        Left off this resume
+      </h3>
+      <ul className="grid min-w-0 grid-cols-1 gap-1">
+        {decisions.map((suggestion) => {
+          const context = describeReviewRole(
+            suggestion,
+            props.sections ?? [],
+            props.roles ?? [],
+          );
+          return (
+            <li
+              className="flex min-w-0 flex-wrap items-center justify-between gap-2"
+              key={suggestion.id}
+            >
+              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                {context.title}
                 {context.detail ? (
-                  <p className="text-xs text-foreground-soft">
-                    {context.detail}
-                  </p>
+                  <span className="text-xs"> · {context.detail}</span>
                 ) : null}
-              </div>
-              <StatusBadge tone={acknowledgment ? "positive" : "neutral"}>
-                {acknowledgment ? "Left off" : "Hidden"}
-              </StatusBadge>
-            </div>
-            <p className="min-w-0 [overflow-wrap:anywhere]">
-              {suggestion.message}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {props.onIncludeRole ? (
-                <Button
-                  aria-label={`Add this role back · ${omissionKindLabels[suggestion.kind]}: ${suggestion.message}`}
-                  aria-describedby={`review-role-${suggestion.id}`}
-                  data-resume-work-history-include
-                  disabled={props.disabled}
-                  onClick={() => props.onIncludeRole?.(suggestion)}
-                  pending={props.disabled}
-                  size="compact"
-                  type="button"
-                  variant={acknowledgment ? "secondary" : "primary"}
-                >
-                  Add this role back
-                </Button>
-              ) : null}
+              </span>
               <Button
-                aria-label={`${acknowledgment ? "Undo leave-off" : "Leave this role off"} · ${omissionKindLabels[suggestion.kind]}: ${suggestion.message}`}
-                aria-describedby={`review-role-${suggestion.id}`}
-                aria-pressed={Boolean(acknowledgment)}
+                aria-label={`Add back: ${context.title}`}
+                data-resume-work-history-include
                 disabled={props.disabled}
-                onClick={() =>
-                  acknowledgment
-                    ? props.onRemoveAcknowledgment(acknowledgment.id)
-                    : props.onAcknowledge(suggestion)
-                }
+                onClick={() => props.onIncludeRole?.(suggestion)}
                 pending={props.disabled}
                 size="compact"
                 type="button"
-                variant={
-                  acknowledgment || props.onIncludeRole
-                    ? "secondary"
-                    : "primary"
-                }
+                variant="ghost"
               >
-                {acknowledgment ? "Undo leave-off" : "Leave this role off"}
+                Add back
               </Button>
-            </div>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

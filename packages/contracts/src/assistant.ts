@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RESUME_PIPELINE_CAPACITY } from "./resume-batch";
 import { ResumeBatchCheckpointSchema } from "./resume";
 
 import { IsoDateTimeSchema, NonEmptyStringSchema } from "./base";
@@ -1132,8 +1133,19 @@ export const AssistantResumeBatchStateSchema =
     id: IdSchema,
     jobIds: z.array(IdSchema),
     completedJobIds: z.array(IdSchema),
-    activeJobIds: z.array(IdSchema).max(2),
-  }).strict();
+    activeJobIds: z.array(IdSchema).max(RESUME_PIPELINE_CAPACITY),
+  })
+    .strict()
+    .refine(
+      (batch) => {
+        const queued = new Set(batch.jobIds);
+        return batch.activeJobIds.every((jobId) => queued.has(jobId));
+      },
+      {
+        message: "Active resumes must belong to the batch queue.",
+        path: ["activeJobIds"],
+      },
+    );
 export type AssistantResumeBatchState = z.infer<
   typeof AssistantResumeBatchStateSchema
 >;

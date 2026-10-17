@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { BrowserWindow } from "electron";
+import { createConcurrencyLimiter } from "@nordri/core";
 import type { JobFinderDocumentManager } from "@nordri/job-finder";
 import JSZip from "jszip";
 import { getApplicationDocumentLibrary } from "../services/job-finder/application-document-library-instance";
@@ -132,80 +133,92 @@ function throwIfPreviewAborted(signal?: AbortSignal): void {
   throw new DOMException("Resume preview was superseded.", "AbortError");
 }
 
+const pdfRendering = createConcurrencyLimiter(2);
+
 async function renderPdfFromHtml(
   html: string,
   htmlPath: string,
   targetPath: string,
   signal?: AbortSignal,
+  onQueueWait?: (milliseconds: number) => void,
 ): Promise<void> {
   throwIfPreviewAborted(signal);
-  const exportWindow = new BrowserWindow({
-    show: false,
-    webPreferences: {
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
+  const queuedAt = performance.now();
+  await pdfRendering.run(async () => {
+    onQueueWait?.(performance.now() - queuedAt);
+    throwIfPreviewAborted(signal);
+    await mkdir(path.dirname(htmlPath), { recursive: true });
+    throwIfPreviewAborted(signal);
+    const exportWindow = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
 
-  // A hidden print window that never finishes must fail loudly, not leave
-  // "Exporting PDF" on screen for good.
-  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_, reject) => {
-    deadlineTimer = setTimeout(
-      () =>
-        reject(
-          new Error(
-            "The PDF did not finish rendering within 2 minutes. Try approving again.",
+    // A hidden print window that never finishes must fail loudly, not leave
+    // "Exporting PDF" on screen for good.
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      deadlineTimer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              "The PDF did not finish rendering within 2 minutes. Try approving again.",
+            ),
           ),
+        120_000,
+      ).unref?.();
+    });
+    let onAbort: (() => void) | undefined;
+    const aborted = new Promise<never>((_, reject) => {
+      onAbort = () =>
+        reject(
+          new DOMException("Resume preview was superseded.", "AbortError"),
+        );
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    // Cancellation can arrive while the HTML file write is still pending.
+    void aborted.catch(() => {});
+    const waitFor = <T>(operation: Promise<T>) =>
+      Promise.race([operation, deadline, aborted]);
+    try {
+      await writeFile(htmlPath, html, "utf8");
+      throwIfPreviewAborted(signal);
+      await waitFor(exportWindow.loadFile(htmlPath));
+      await waitFor(
+        exportWindow.webContents.executeJavaScript(
+          "new Promise((resolve) => { if (document.fonts?.ready) { document.fonts.ready.finally(resolve); } else { resolve(); } })",
+          true,
         ),
-      120_000,
-    ).unref?.();
-  });
-  let onAbort: (() => void) | undefined;
-  const aborted = new Promise<never>((_, reject) => {
-    onAbort = () =>
-      reject(new DOMException("Resume preview was superseded.", "AbortError"));
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-  // Cancellation can arrive while the HTML file write is still pending.
-  void aborted.catch(() => {});
-  const waitFor = <T>(operation: Promise<T>) =>
-    Promise.race([operation, deadline, aborted]);
-  try {
-    await writeFile(htmlPath, html, "utf8");
-    throwIfPreviewAborted(signal);
-    await waitFor(exportWindow.loadFile(htmlPath));
-    await waitFor(
-      exportWindow.webContents.executeJavaScript(
-        "new Promise((resolve) => { if (document.fonts?.ready) { document.fonts.ready.finally(resolve); } else { resolve(); } })",
-        true,
-      ),
-    );
+      );
 
-    const pdfBuffer = await waitFor(
-      exportWindow.webContents.printToPDF({
-        margins: {
-          top: 0,
-          bottom: 0,
-          left: 0,
-          right: 0,
-        },
-        printBackground: true,
-        pageSize: "Letter",
-        preferCSSPageSize: true,
-      }),
-    );
+      const pdfBuffer = await waitFor(
+        exportWindow.webContents.printToPDF({
+          margins: {
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
+          },
+          printBackground: true,
+          pageSize: "Letter",
+          preferCSSPageSize: true,
+        }),
+      );
 
-    throwIfPreviewAborted(signal);
-    await writeFile(targetPath, pdfBuffer);
-  } finally {
-    clearTimeout(deadlineTimer);
-    if (onAbort) signal?.removeEventListener("abort", onAbort);
-    if (!exportWindow.isDestroyed()) {
-      exportWindow.destroy();
+      throwIfPreviewAborted(signal);
+      await writeFile(targetPath, pdfBuffer);
+    } finally {
+      clearTimeout(deadlineTimer);
+      if (onAbort) signal?.removeEventListener("abort", onAbort);
+      if (!exportWindow.isDestroyed()) {
+        exportWindow.destroy();
+      }
     }
-  }
+  });
 }
 
 /** Best-effort measurements never hold the live preview for a slow print. */
@@ -240,8 +253,9 @@ function createPreviewPageCounter() {
       // A preceding preview may have measured the same HTML while we waited.
       const queuedCount = counts.get(hash);
       if (queuedCount !== undefined) return queuedCount;
-      const directory = await mkdtemp(
-        path.join(tmpdir(), "nordri-preview-pages-"),
+      const directory = path.join(
+        tmpdir(),
+        `nordri-preview-pages-${randomUUID()}`,
       );
       try {
         throwIfPreviewAborted(controller.signal);
@@ -359,12 +373,12 @@ export function createLocalJobFinderDocumentManager(
         options.outputDirectory,
         `${Date.now()}_${randomUUID()}`,
       );
-      await mkdir(documentDirectory, { recursive: true });
       const baseName = employerFacingFileBaseName(
         input.profile.fullName,
         "cover-letter",
       );
       if (input.fileType === "txt") {
+        await mkdir(documentDirectory, { recursive: true });
         const txtPath = path.join(documentDirectory, `${baseName}.txt`);
         await writeFile(txtPath, `${input.text.trim()}\n`, "utf8");
         const sha256 = createHash("sha256")
@@ -379,6 +393,7 @@ export function createLocalJobFinderDocumentManager(
         };
       }
       if (input.fileType === "docx") {
+        await mkdir(documentDirectory, { recursive: true });
         const docxPath = path.join(documentDirectory, `${baseName}.docx`);
         await writeFile(docxPath, await renderLetterDocx(input.text));
         const sha256 = createHash("sha256")
@@ -421,7 +436,6 @@ export function createLocalJobFinderDocumentManager(
         options.outputDirectory,
         `${Date.now()}_${randomUUID()}`,
       );
-      await mkdir(artifactDirectory, { recursive: true });
       const artifactBaseName = employerFacingFileBaseName(
         input.profile.fullName,
         "resume",
@@ -434,6 +448,7 @@ export function createLocalJobFinderDocumentManager(
         input.settings.resumeFormat === "html" ? "html" : "pdf";
 
       if (requestedFormat === "html") {
+        await mkdir(artifactDirectory, { recursive: true });
         const targetPath = input.targetPath ?? htmlPath;
         const fileName = path.basename(targetPath);
         await writeFile(targetPath, html, "utf8");
@@ -457,7 +472,13 @@ export function createLocalJobFinderDocumentManager(
       const pdfPath =
         input.targetPath ?? path.join(artifactDirectory, pdfFileName);
       const outputFileName = path.basename(pdfPath);
-      await renderPdfFromHtml(html, htmlPath, pdfPath);
+      await renderPdfFromHtml(
+        html,
+        htmlPath,
+        pdfPath,
+        input.signal,
+        input.onQueueWait,
+      );
       const pageCount = await getPdfPageCount(pdfPath);
       const sha256 = createHash("sha256")
         .update(await readFile(pdfPath))

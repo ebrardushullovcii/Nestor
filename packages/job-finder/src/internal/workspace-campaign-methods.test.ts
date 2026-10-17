@@ -1,13 +1,20 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
   DISCOVERY_NO_JOB_SITES_MESSAGE,
   DiscoveryRunReportSchema,
   DiscoveryRunRecordSchema,
+  JobSearchCampaignCollectionSchema,
+  JobSearchCampaignScheduleSchema,
   type DiscoveryRunRecord,
 } from "@nordri/contracts";
 
-import { describeCampaignRunSummary } from "./workspace-campaign-methods";
+import {
+  createWorkspaceCampaignMethods,
+  describeCampaignRunSummary,
+} from "./workspace-campaign-methods";
+import type { WorkspaceServiceContext } from "./workspace-service-context";
+import { createWorkspaceServiceHarness } from "../workspace-service.test-harness";
 
 function createRun(overrides: Record<string, unknown>): DiscoveryRunRecord {
   return DiscoveryRunRecordSchema.parse({
@@ -95,5 +102,94 @@ describe("describeCampaignRunSummary", () => {
     expect(summary).toBe(
       "1 of 1 sources completed. Discovery completed: 12 found · 3 new · 5 kept.",
     );
+  });
+});
+
+describe("processDueScheduledCampaigns", () => {
+  async function createHarness() {
+    const harness = createWorkspaceServiceHarness();
+    const snapshot = await harness.workspaceService.getWorkspaceSnapshot();
+    const getWorkspaceSnapshot = vi.fn(() => Promise.resolve(snapshot));
+    const runCampaignDiscovery = vi.fn(() => Promise.resolve(snapshot));
+    const afterCampaignRun = vi.fn(() => Promise.resolve(snapshot));
+    const ctx = {
+      repository: harness.repository,
+      withCampaignTransition: <T>(operation: () => Promise<T>) => operation(),
+    } as unknown as WorkspaceServiceContext;
+    const methods = createWorkspaceCampaignMethods({
+      ctx,
+      getWorkspaceSnapshot,
+      runCampaignDiscovery,
+      afterCampaignRun,
+    });
+    return {
+      ...harness,
+      methods,
+      getWorkspaceSnapshot,
+      runCampaignDiscovery,
+      afterCampaignRun,
+    };
+  }
+
+  test("an idle manual campaign tick reads no workspace snapshot or jobs", async () => {
+    const { methods, repository, getWorkspaceSnapshot } = await createHarness();
+    const listSavedJobs = vi.spyOn(repository, "listSavedJobs");
+    const getDiscoveryState = vi.spyOn(repository, "getDiscoveryState");
+
+    expect(
+      await methods.processDueScheduledCampaigns("2026-10-13T12:00:00.000Z"),
+    ).toBe(false);
+    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(listSavedJobs).not.toHaveBeenCalled();
+    expect(getDiscoveryState).not.toHaveBeenCalled();
+  });
+
+  test("initializing a missing scheduled time reports a change without snapshot hydration", async () => {
+    const {
+      methods,
+      repository,
+      getWorkspaceSnapshot,
+      runCampaignDiscovery,
+      afterCampaignRun,
+    } = await createHarness();
+    const state = await repository.getCampaignState();
+    if (!state) throw new Error("Expected a campaign collection.");
+    const campaign = state.campaigns[0];
+    if (!campaign) throw new Error("Expected an active campaign.");
+    await repository.saveCampaignState(
+      JobSearchCampaignCollectionSchema.parse({
+        ...state,
+        campaigns: state.campaigns.map((candidate) =>
+          candidate.id === campaign.id
+            ? {
+                ...candidate,
+                schedule: JobSearchCampaignScheduleSchema.parse({
+                  mode: "daily",
+                  enabled: true,
+                  daysOfWeek: [],
+                  localStartTime: "09:00",
+                  timeZone: "UTC",
+                  pauseWindows: [],
+                  runFacts: { nextRunAt: null },
+                }),
+              }
+            : candidate,
+        ),
+      }),
+    );
+
+    expect(
+      await methods.processDueScheduledCampaigns("2026-10-13T12:00:00.000Z"),
+    ).toBe(true);
+    const initialized = (await repository.getCampaignState())?.campaigns.find(
+      (candidate) => candidate.id === campaign.id,
+    );
+    expect(initialized?.schedule.runFacts.nextRunAt).not.toBeNull();
+    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
+    expect(runCampaignDiscovery).not.toHaveBeenCalled();
+    expect(afterCampaignRun).not.toHaveBeenCalled();
+    expect(
+      await methods.processDueScheduledCampaigns("2026-10-13T12:00:00.000Z"),
+    ).toBe(false);
   });
 });

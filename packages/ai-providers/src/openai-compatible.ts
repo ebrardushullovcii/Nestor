@@ -94,6 +94,7 @@ import {
   runResumeGenerationAgentTask,
   runResumeImportStageAgentTask,
 } from "./agent-capabilities";
+import { getAiProviderAccessFailure } from "./ai-provider-access-failure";
 import {
   buildModelRequestHeaders,
   createInstanceConversationKey,
@@ -184,16 +185,16 @@ function buildResumeRewriteProposalPrompt(
       : "Use job-description wording only when the candidate evidence supports the same skill or work. Never stuff keywords, copy employer language without evidence, or add target-company claims.";
 
   return [
-    "You propose only evidence-linked prose improvements for a tailored resume; the application deterministically owns the complete resume, identity metadata, chronology, coverage, skills, and rendering.",
+    'You write the tailored resume for this exact job: evidence-linked prose, and the choice of what to show. The application owns identity metadata, chronology and rendering. You see every role, achievement, project and skill the candidate saved; decide which of them this job needs and how much room each gets. The resume should fit on targetPageCount pages: give the most relevant recent roles the most bullets (up to six), older or unrelated roles one or two or none, mark a role or project the job does not need with "hidden": true, and return the additionalSkills worth listing. Anything you leave off stays on the candidate\'s draft, hidden, for them to show again; it is never deleted.',
     returnGuidance,
     'When targetLanguage is supplied, write the resume in that language in this writing pass. When it is "the language the listing is written in", determine it from the actual listing, following the source resume only if the listing language cannot be determined. Include languagePresentation: {"language":"the language actually written","listingLanguage":"the language of the actual posting, or null if unknown","translations":[{"id":"exact languageFields id","text":"final text"}]}. Translations are sparse display edits for fields that need translation: headings, headline, roles, skills, dates, credentials, and retained source prose. Omit translations for unchanged fields and for prose already written in the target language by your summary, experienceEntries or projectEntries proposal. Keep proper names, every source fact and qualifier. When all displayed fields already use the target language, return an empty translations array; do not reword the resume to translate it into the same language. The preview supplies the assembled languageFields; use those exact IDs to finish any source fields still in another language.',
-    'Use this sparse shape: {"summary":{"text":"...","evidenceRefs":["..."]},"experienceEntries":[{"profileRecordId":"...","summary":{"text":"...","evidenceRefs":["..."]},"bullets":[{"text":"...","evidenceRefs":["..."],"inferred":true,"sourceAchievementIds":["experience:record:achievement:0"]}]}],"projectEntries":[{"profileRecordId":"...","summary":{"text":"...","evidenceRefs":["..."]},"outcome":{"text":"...","evidenceRefs":["..."]},"bullets":[{"text":"...","evidenceRefs":["..."]}]}]}. Omit every unchanged or unused field and entry.',
+    'Use this sparse shape: {"summary":{"text":"...","evidenceRefs":["..."]},"experienceEntries":[{"profileRecordId":"...","summary":{"text":"...","evidenceRefs":["..."]},"bullets":[{"text":"...","evidenceRefs":["..."],"inferred":true,"sourceAchievementIds":["experience:record:achievement:0"]}]},{"profileRecordId":"...","hidden":true}],"projectEntries":[{"profileRecordId":"...","summary":{"text":"...","evidenceRefs":["..."]},"outcome":{"text":"...","evidenceRefs":["..."]},"bullets":[{"text":"...","evidenceRefs":["..."]}]}],"additionalSkills":["..."]}. For a role you show, list exactly the bullets it should show. Omit every unchanged field.',
     "Every proposed text must cite exact IDs from groundingEvidence.items. Experience and project proposals may cite items with the same profileRecordId; in aggressive mode they may additionally cite profile-scope items (for example profile:skills, profile:skillGroup:coreSkills, profile:summary) to anchor stack- and domain-aware wording.",
     "Outside aggressive mode, use only claims, numbers, technologies, scope, and outcomes stated in the cited evidence. In every mode, never add dates, titles, employers, credentials, seniority, causality, or absolutes, and never add leadership the cited evidence does not support.",
     "Write for the exact target job. Make the candidate's supported match obvious in the opening lines, and prioritize the job's most important supported skills and accomplishments over generic career description.",
-    "Keep every distinct source fact, including qualifications and their years, skill proficiency and learning limits, seasonal or partial dates and quantified results. Never replace a source achievement with generic wording that loses its number or outcome. A missing employer does not erase a freelance role or internship; retain the available facts without guessing the missing ones.",
+    "When you restate a fact, keep it whole: qualifications and their years, skill proficiency and learning limits, seasonal or partial dates and quantified results. Never replace a source achievement with generic wording that loses its number or outcome. A missing employer does not erase a freelance role or internship; retain the available facts without guessing the missing ones.",
     "Light edits preserve the original summary when rewriting would repeat terms or blur the meaning. Keep every stated skill level and limit, including basic or still learning, seasonal or partial dates, credential years and renewal dates, and quantified results with their exact numbers.",
-    "For each experience bullet, return sourceAchievementIds with the exact experience:<profileRecordId>:achievement:<index> IDs of every source achievement it fully restates, including translations. Keep evidenceRefs separately for supporting evidence. sourceAchievementIds declare coverage of the whole source fact, not just inspiration: retain its numbers and qualifiers. Use broader summary or profile references for supporting context only. Restate each source achievement once, combining IDs when one bullet covers several. Any source achievement not listed in sourceAchievementIds is retained by the assembler and must be translated through its languageFields ID. Translate generic credential descriptions such as First aid; preserve official credential names. Keep every language name and proficiency. Each achievement and qualification appears once. Merge duplicate or translated duplicate statements while retaining every distinct fact. Do not repeat a degree heading in its description. Summaries lead with supported results and relevant experience in a short paragraph; omit generic filler.",
+    "For each experience bullet, return sourceAchievementIds with the exact experience:<profileRecordId>:achievement:<index> IDs of every source achievement it fully restates, including translations. Keep evidenceRefs separately for supporting evidence. sourceAchievementIds declare coverage of the whole source fact, not just inspiration: retain its numbers and qualifiers. Use broader summary or profile references for supporting context only. Restate each source achievement once, combining IDs when one bullet covers several. Any source achievement not listed in sourceAchievementIds stays on the candidate's draft, hidden. Translate generic credential descriptions such as First aid; preserve official credential names. Keep every language name and proficiency. Each achievement and qualification appears once. Merge duplicate or translated duplicate statements while retaining every distinct fact. Do not repeat a degree heading in its description. Summaries lead with supported results and relevant experience in a short paragraph; omit generic filler.",
     "Use concise accomplishment statements: action, specific work, and outcome. Keep distinctive evidence terms and exact metrics unchanged. Do not repeat the same claim or metric in multiple bullets.",
     jobWordingGuidance,
     modeGuidance,
@@ -652,7 +653,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
       );
     },
     async checkResumeClaims(input) {
-      const { signal, ...rest } = input;
+      const { signal, timeoutMs, ...rest } = input;
       if (rest.claims.length === 0) {
         return [];
       }
@@ -661,6 +662,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
         buildResumeClaimCheckPrompt(),
         buildResumeClaimCheckPayload(rest),
         {
+          ...(timeoutMs !== undefined ? { timeoutMs } : {}),
           ...(signal ? { signal } : {}),
           reasoningEffort: agentReasoningEffort,
         },
@@ -962,6 +964,8 @@ const RESUME_EDIT_PLACEHOLDER_CONTENT =
  * place (ADR 0041): the job keeps the resume it had and the person is told.
  */
 function resumeWritingFailed(error: unknown): Error {
+  const accessFailure = getAiProviderAccessFailure(error);
+  if (accessFailure) return new Error(accessFailure.message, { cause: error });
   const timedOut = /timed out/i.test(summarizeError(error));
   return new Error(
     timedOut
@@ -1109,8 +1113,7 @@ export function createJobFinderAiClientFromEnvironment(
     baseUrl: env.NORDRI_AI_BASE_URL ?? DEFAULT_OPENCODE_GO_BASE_URL,
     model: env.NORDRI_AI_MODEL ?? DEFAULT_TEXT_MODEL,
     apiMode:
-      parseModelApiMode(env.NORDRI_AI_API_MODE) ??
-      DEFAULT_TEXT_MODEL_API_MODE,
+      parseModelApiMode(env.NORDRI_AI_API_MODE) ?? DEFAULT_TEXT_MODEL_API_MODE,
     reasoningEffort:
       parseModelReasoningEffort(env.NORDRI_AI_REASONING_EFFORT) ??
       DEFAULT_TEXT_MODEL_REASONING_EFFORT,
@@ -1130,15 +1133,13 @@ export function createJobFinderAiClientFromEnvironment(
     apiKey,
     baseUrl: env.NORDRI_AI_BASE_URL ?? DEFAULT_OPENCODE_GO_BASE_URL,
     model:
-      env.NORDRI_AI_AGGRESSIVE_MODEL?.trim() ||
-      DEFAULT_AGGRESSIVE_RESUME_MODEL,
+      env.NORDRI_AI_AGGRESSIVE_MODEL?.trim() || DEFAULT_AGGRESSIVE_RESUME_MODEL,
     apiMode:
       parseModelApiMode(env.NORDRI_AI_AGGRESSIVE_API_MODE) ??
       DEFAULT_AGGRESSIVE_RESUME_MODEL_API_MODE,
     reasoningEffort:
-      parseModelReasoningEffort(
-        env.NORDRI_AI_AGGRESSIVE_REASONING_EFFORT,
-      ) ?? DEFAULT_AGGRESSIVE_RESUME_MODEL_REASONING_EFFORT,
+      parseModelReasoningEffort(env.NORDRI_AI_AGGRESSIVE_REASONING_EFFORT) ??
+      DEFAULT_AGGRESSIVE_RESUME_MODEL_REASONING_EFFORT,
     label: "Aggressive AI resume agent",
     requestTimeoutMs: parsedRequestTimeoutMs,
     resumeExtractionTimeoutMs: parsedResumeExtractionTimeoutMs,
@@ -1456,7 +1457,10 @@ export function createJobFinderAiClientFromEnvironment(
       try {
         return await primaryClient.assessJobFit(input);
       } catch (error) {
-        if (input.signal?.aborted || error instanceof FullFitEvidenceBudgetError) {
+        if (
+          input.signal?.aborted ||
+          error instanceof FullFitEvidenceBudgetError
+        ) {
           throw error;
         }
         // No verdict stands in: the job stays as it was and says so.
@@ -1467,8 +1471,12 @@ export function createJobFinderAiClientFromEnvironment(
     // A failed check leaves the lines unchecked for the person to look at;
     // no rule stands in for the model's verdict (ADR 0041).
     checkResumeClaims(input) {
-      return primaryClient.checkResumeClaims
-        ? primaryClient.checkResumeClaims(input)
+      const claimClient =
+        input.tailoringStrength === "aggressive"
+          ? aggressiveClient
+          : primaryClient;
+      return claimClient.checkResumeClaims
+        ? claimClient.checkResumeClaims(input)
         : Promise.resolve([]);
     },
     async judgeJobFits(input) {

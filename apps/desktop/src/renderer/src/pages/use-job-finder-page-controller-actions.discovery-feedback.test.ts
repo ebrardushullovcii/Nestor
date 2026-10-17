@@ -4,7 +4,7 @@ import {
   DiscoveryActivityEventSchema,
   type DiscoveryActivityEvent,
   type JobFinderAgentDiscoveryResult,
-  type JobFinderWorkspaceSnapshot,
+  type JobFinderRendererWorkspaceSnapshot,
   type ResumeAssistantMessage,
 } from "@nordri/contracts";
 import type {
@@ -32,7 +32,7 @@ const workspace = {
       ],
     },
   },
-} as unknown as JobFinderWorkspaceSnapshot;
+} as unknown as JobFinderRendererWorkspaceSnapshot;
 
 function createAgentDiscoveryResult(
   outcome: JobFinderAgentDiscoveryResult["outcome"],
@@ -40,7 +40,7 @@ function createAgentDiscoveryResult(
 ): JobFinderAgentDiscoveryResult {
   return {
     outcome,
-    snapshot: snapshot as JobFinderWorkspaceSnapshot,
+    snapshot: snapshot as JobFinderRendererWorkspaceSnapshot,
   };
 }
 
@@ -60,7 +60,7 @@ function cancelledRunSnapshot(validJobsFound: number | null) {
 
 function createDiscoveryFeedbackHarness(input: {
   runAgentDiscovery: JobFinderShellActions["runAgentDiscovery"];
-  workspace?: JobFinderWorkspaceSnapshot;
+  workspace?: JobFinderRendererWorkspaceSnapshot;
   runActionOverride?: PrimaryPageActionArgs["runAction"];
   actions?: Partial<JobFinderShellActions>;
 }) {
@@ -91,7 +91,7 @@ function createDiscoveryFeedbackHarness(input: {
     actions: {
       refreshWorkspace: vi
         .fn<JobFinderShellActions["refreshWorkspace"]>()
-        .mockResolvedValue({} as JobFinderWorkspaceSnapshot),
+        .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot),
       runAgentDiscovery: input.runAgentDiscovery,
       ...input.actions,
     } as unknown as JobFinderShellActions,
@@ -224,7 +224,7 @@ describe("shared discovery run feedback handler", () => {
             targets: [],
           },
         },
-      } as unknown as JobFinderWorkspaceSnapshot,
+      } as unknown as JobFinderRendererWorkspaceSnapshot,
     });
 
     harness.pageActions.onRunAgentDiscovery();
@@ -276,7 +276,7 @@ describe("shared discovery run feedback handler", () => {
             },
           },
         ],
-      } as unknown as JobFinderWorkspaceSnapshot);
+      } as unknown as JobFinderRendererWorkspaceSnapshot);
     const harness = createDiscoveryFeedbackHarness({
       runAgentDiscovery,
       actions: { refreshWorkspace },
@@ -574,7 +574,7 @@ describe("onQueueJob request-local shortlist outcome", () => {
   it("resolves an awaited typed success while keeping the shared route message", async () => {
     const queueJobForReview = vi
       .fn<JobFinderShellActions["queueJobForReview"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const harness = createShortlistHarness(queueJobForReview);
 
     await expect(harness.pageActions.onQueueJob("job_1")).resolves.toEqual({
@@ -639,7 +639,7 @@ describe("onRegenerateResumeSection proposal-only truth", () => {
   it("reports a pending proposal without claiming the section changed", async () => {
     const regenerateResumeSection = vi
       .fn<JobFinderShellActions["regenerateResumeSection"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const getResumeAssistantMessages = vi
       .fn<JobFinderShellActions["getResumeAssistantMessages"]>()
       .mockResolvedValue([
@@ -680,7 +680,7 @@ describe("onRegenerateResumeSection proposal-only truth", () => {
   it("reports when no changes were proposed instead of claiming a refresh", async () => {
     const regenerateResumeSection = vi
       .fn<JobFinderShellActions["regenerateResumeSection"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const getResumeAssistantMessages = vi
       .fn<JobFinderShellActions["getResumeAssistantMessages"]>()
       .mockResolvedValue([

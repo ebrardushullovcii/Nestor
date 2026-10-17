@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FileText, FileX2 } from "lucide-react";
-import type { InterviewWorkspaceSnapshot } from "@nordri/contracts";
+import type { InterviewWorkspaceView } from "@nordri/contracts";
 import { Button } from "@renderer/components/ui/button";
 
 function normalizeCaptionFileText(input: string) {
@@ -27,7 +27,7 @@ export function InterviewCaptionFileWatcher(props: {
   sessionId: string;
   language: string;
   listening: boolean;
-  onWorkspaceChange: (workspace: InterviewWorkspaceSnapshot) => void;
+  onWorkspaceChange: (workspace: InterviewWorkspaceView) => void;
 }) {
   const [enabled, setEnabled] = useState(false);
   const [filePath, setFilePath] = useState<string | null>(null);

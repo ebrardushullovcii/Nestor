@@ -1408,10 +1408,11 @@ export function validateResumeDraft(input: {
     hasVisibleGeneratedResumeContent,
   );
 
+  // Checks the person cannot act on are quiet notes, never blockers.
   if (hasUntraceableGeneratedResumeContent(input.draft)) {
     issues.push({
       id: `issue_traceability_${input.draft.id}`,
-      severity: "error",
+      severity: "info",
       category: "low_confidence_fact",
       sectionId: null,
       entryId: null,
@@ -1428,7 +1429,7 @@ export function validateResumeDraft(input: {
   ) {
     issues.push({
       id: `issue_thin_fallback_${input.draft.id}`,
-      severity: "error",
+      severity: "info",
       category: "low_confidence_fact",
       sectionId: null,
       entryId: null,
@@ -1438,18 +1439,17 @@ export function validateResumeDraft(input: {
     });
   }
 
+  // Length is advice, never a block: the person decides whether a longer
+  // resume is right for the job.
   if (input.pageCount && input.pageCount > input.draft.targetPageCount) {
     issues.push({
       id: `issue_page_overflow_${input.draft.id}`,
-      severity: input.pageCount >= 3 ? "error" : "warning",
+      severity: "info",
       category: "page_overflow",
       sectionId: null,
       entryId: null,
       bulletId: null,
-      message:
-        input.pageCount >= 3
-          ? "The exported resume reached 3 or more pages and needs manual review."
-          : `The exported resume exceeded the ${input.draft.targetPageCount}-page target.`,
+      message: `The resume runs to ${input.pageCount} pages; the target is ${input.draft.targetPageCount}. Hide lines you do not need, or keep it as it is.`,
     });
   }
 
@@ -1501,18 +1501,7 @@ export function validateResumeDraft(input: {
         message: styleNote,
       });
     }
-    if (assessment.status === "confirm_needed") {
-      issues.push({
-        id: `issue_claim_confirmation_${assessment.id}`,
-        severity: "warning",
-        category: "claim_confirmation_needed",
-        sectionId: assessment.sectionId,
-        entryId: assessment.entryId,
-        bulletId: assessment.bulletId,
-        message:
-          "This claim goes beyond the stored candidate evidence — the kind of small, deliberate stretch that clears screening for a first interview. Confirm it is accurate and the candidate's own before export; only confirm what the candidate can back in the interview.",
-      });
-    }
+    // A stretch was accepted by choosing Aggressive; it is not a chore.
     const blocksExport = isBlockingResumeClaimAssessment({
       assessment,
       draft: input.draft,
@@ -1538,9 +1527,11 @@ export function validateResumeDraft(input: {
         (assessment.status === "paraphrase" &&
           !boundary.allowParaphrasedClaims);
       if (boundaryViolation) {
+        // The writer repairs this while it writes (see the generation
+        // preview); it never holds the person back.
         issues.push({
           id: `issue_strategy_evidence_boundary_${assessment.id}`,
-          severity: "error",
+          severity: "warning",
           category: "unsupported_claim",
           sectionId: assessment.sectionId,
           entryId: assessment.entryId,

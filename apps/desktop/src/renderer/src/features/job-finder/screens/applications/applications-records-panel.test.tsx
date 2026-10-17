@@ -753,13 +753,13 @@ describe("ApplicationsRecordsPanel", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getAllByRole("listitem")).toHaveLength(40);
+    expect(screen.getAllByRole("listitem")).toHaveLength(50);
     expect(
       screen.getByRole("navigation", { name: "applications pagination" }),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-    expect(screen.getAllByRole("listitem")).toHaveLength(40);
-    expect(screen.getByText("Product Engineer 40")).toBeTruthy();
+    expect(screen.getAllByRole("listitem")).toHaveLength(50);
+    expect(screen.getByText("Product Engineer 50")).toBeTruthy();
   });
 
   it("marks the records list as the locked pane scroll region", () => {

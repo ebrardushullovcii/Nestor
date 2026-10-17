@@ -2,6 +2,9 @@ import { describe, expect, test, vi } from "vitest";
 import {
   ResumeDraftSchema,
   ResumeImportFieldCandidateDraftSchema,
+  CandidateExperienceSchema,
+  CandidateProofBankEntrySchema,
+  SourceIntelligenceArtifactSchema,
   type ResumeDraftPatch,
 } from "@nordri/contracts";
 
@@ -12,7 +15,16 @@ import {
   runResumeGenerationAgentTask,
   runResumeImportStageAgentTask,
 } from "./agent-capabilities";
-import type { AgentCapableJobFinderAiClient } from "./shared";
+import type {
+  AgentCapableJobFinderAiClient,
+  CreateResumeDraftInput,
+} from "./shared";
+import { ResumeProposalValidationError } from "./shared";
+import {
+  buildGroundedResumeRewriteModelPayload,
+  buildResumeGenerationEvidenceCatalog,
+} from "./resume-generation-grounding";
+import { compactOpenAiCompatibleUserPayload } from "./openai-compatible-request-compaction";
 import {
   createJobPosting,
   createPreferences,
@@ -42,14 +54,478 @@ function createToolClient(
 }
 
 describe("tool-using AI capabilities", () => {
+  const composeCall = (
+    id: string,
+    args: Record<string, unknown> = { proposal: {} },
+  ) => ({
+    id,
+    type: "function" as const,
+    function: {
+      name: "compose_resume_proposal",
+      arguments: JSON.stringify(args),
+    },
+  });
+  const cleanPreview = (templateId = "classic_ats") =>
+    Promise.resolve({
+      templateId,
+      pageCount: 1,
+      warnings: [],
+      fileName: `preview-${templateId}.pdf`,
+      requiredModelRepairs: [],
+    });
+  const flaggedSummaryRepair = {
+    id: "issue_claim_grounding_summary",
+    severity: "error" as const,
+    category: "unsupported_claim" as const,
+    sectionId: "summary",
+    entryId: null,
+    bulletId: null,
+    message: "Saved evidence does not back this wording.",
+    flaggedText: "Unsupported summary wording.",
+  };
+  const flaggedPreview = (personConfirmationCount = 0) =>
+    Promise.resolve({
+      templateId: "classic_ats",
+      pageCount: 1,
+      warnings: [],
+      fileName: "preview.pdf",
+      requiredModelRepairs: [flaggedSummaryRepair],
+      personConfirmationCount,
+    });
+  const baseRequest = () => ({
+    profile: createProfile(),
+    searchPreferences: createPreferences(),
+    settings: createSettings(),
+    job: createJobPosting(),
+    resumeText: "Saved base resume text",
+  });
+
+  test("a clean proposal is written, rendered and checked in one model call", async () => {
+    let calls = 0;
+    let offeredTools: string[] = [];
+    const renderPreview = vi.fn(() => cleanPreview());
+    const client: AgentCapableJobFinderAiClient = {
+      ...createDeterministicJobFinderAiClient(),
+      chatWithTools(_messages, tools) {
+        calls += 1;
+        offeredTools = tools.map((tool) => tool.function.name);
+        return Promise.resolve({
+          toolCalls: [
+            composeCall("compose", {
+              proposal: {
+                summary: {
+                  text: "Builds reliable automation.",
+                  evidenceRefs: ["profile:summary"],
+                },
+              },
+            }),
+          ],
+        });
+      },
+    };
+
+    const result = await runResumeGenerationAgentTask({
+      client,
+      substantivePrompt: "Balanced mode substantive resume instructions.",
+      request: { ...baseRequest(), renderPreview },
+    });
+
+    expect(calls).toBe(1);
+    expect(renderPreview).toHaveBeenCalledTimes(1);
+    expect(offeredTools).not.toContain("read_resume_generation_context");
+    expect(offeredTools).not.toContain("inspect_completed_resume");
+    expect(result.summary).toContain("Builds reliable automation");
+    expect(result.fullText).toContain("Builds reliable automation");
+  });
+
+  test("forwards same-route reasoning continuation through the resume model adapter", async () => {
+    const continuation = {
+      kind: "reasoning_content" as const,
+      route: "test-model",
+      text: "private synthetic reasoning",
+    };
+    let turns = 0;
+    let renders = 0;
+    const client: AgentCapableJobFinderAiClient = {
+      ...createDeterministicJobFinderAiClient(),
+      chatWithTools(messages) {
+        if (++turns === 2)
+          expect(
+            messages.find((message) => message.role === "assistant"),
+          ).toMatchObject({ continuation });
+        return Promise.resolve({
+          ...(turns === 1 ? { continuation } : {}),
+          toolCalls: [composeCall(`compose_${turns}`)],
+        });
+      },
+    };
+    await runResumeGenerationAgentTask({
+      client,
+      substantivePrompt: "Write a grounded resume.",
+      request: {
+        ...baseRequest(),
+        renderPreview: () =>
+          ++renders === 1 ? flaggedPreview() : cleanPreview(),
+      },
+    });
+    expect(turns).toBe(2);
+  });
+
+  test("invalid translation output returns current field IDs for repair", async () => {
+    const oldFields = [{ id: "old_summary", text: "Saved summary" }];
+    const freshFields = [
+      { id: "current_summary", text: "Current assembled summary" },
+    ];
+    const renderedTranslations: unknown[] = [];
+    let turn = 0;
+    let repairFeedbackSeen = false;
+    const client: AgentCapableJobFinderAiClient = {
+      ...createDeterministicJobFinderAiClient(),
+      chatWithTools(messages) {
+        turn += 1;
+        if (turn === 2) {
+          const payload = JSON.parse(
+            messages.find((message) => message.role === "user")!.content,
+          ) as {
+            languageFields: unknown;
+            lastCheck: {
+              renderedCleanly: boolean;
+              validationIssues: Array<{ code: string }>;
+            };
+          };
+          expect(payload.languageFields).toEqual(freshFields);
+          expect(payload.lastCheck.renderedCleanly).toBe(false);
+          expect(payload.lastCheck.validationIssues).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                code: "resume_translation_unknown_field",
+              }),
+            ]),
+          );
+          repairFeedbackSeen = true;
+        }
+        return Promise.resolve({
+          toolCalls: [
+            composeCall(`compose_${turn}`, {
+              proposal: {
+                languagePresentation: {
+                  language: "English",
+                  translations: [
+                    {
+                      id: turn === 1 ? "stale_field" : "current_summary",
+                      text: "Supported final summary",
+                    },
+                  ],
+                },
+              },
+            }),
+          ],
+        });
+      },
+    };
+    const result = await runResumeGenerationAgentTask({
+      client,
+      substantivePrompt: "Write a grounded resume in the requested language.",
+      request: {
+        ...baseRequest(),
+        resumeText: "Selected base resume",
+        language: "English",
+        languageFields: oldFields,
+        renderPreview({ draft }) {
+          const translations = draft.languagePresentation!.translations;
+          renderedTranslations.push(translations);
+          if (translations[0]?.id === "stale_field") {
+            throw new ResumeProposalValidationError(
+              "The resume writer returned an unknown or repeated field.",
+              [
+                {
+                  code: "resume_translation_unknown_field",
+                  message:
+                    "Unknown translation field 'stale_field'. Use current_summary once.",
+                  path: ["languagePresentation", "translations", 0, "id"],
+                },
+              ],
+              freshFields,
+            );
+          }
+          return Promise.resolve({
+            templateId: "classic_ats",
+            pageCount: 1,
+            warnings: [],
+            fileName: "synthetic.pdf",
+            requiredModelRepairs: [],
+            languageFields: freshFields,
+          });
+        },
+      },
+    });
+    expect(turn).toBe(2);
+    expect(repairFeedbackSeen).toBe(true);
+    expect(renderedTranslations).toHaveLength(2);
+    expect(result.languagePresentation?.translations).toEqual([
+      { id: "current_summary", text: "Supported final summary" },
+    ]);
+  });
+
+  test("missing language metadata is repaired with a precise proposal path", async () => {
+    let turn = 0;
+    let repairPath: unknown;
+    const client: AgentCapableJobFinderAiClient = {
+      ...createDeterministicJobFinderAiClient(),
+      chatWithTools(messages) {
+        turn += 1;
+        if (turn === 2) {
+          const payload = JSON.parse(
+            messages.find((message) => message.role === "user")!.content,
+          ) as { lastCheck: { validationIssues: Array<{ path: unknown }> } };
+          repairPath = payload.lastCheck.validationIssues[0]?.path;
+        }
+        return Promise.resolve({
+          toolCalls: [
+            composeCall(`compose_${turn}`, {
+              proposal:
+                turn === 1
+                  ? {}
+                  : {
+                      languagePresentation: {
+                        language: "English",
+                        translations: [],
+                      },
+                    },
+            }),
+          ],
+        });
+      },
+    };
+    const result = await runResumeGenerationAgentTask({
+      client,
+      substantivePrompt: "Write a grounded English resume.",
+      request: {
+        ...baseRequest(),
+        resumeText: "Selected base resume",
+        language: "English",
+      },
+    });
+    expect(turn).toBe(2);
+    expect(repairPath).toEqual(["proposal", "languagePresentation"]);
+    expect(result.languagePresentation).toEqual({
+      language: "English",
+      translations: [],
+    });
+  });
+
+  test("a local renderer failure remains terminal rather than being treated as repairable writing", async () => {
+    const client = createToolClient([{ content: "{}" }]);
+    await expect(
+      runResumeGenerationAgentTask({
+        client,
+        substantivePrompt: "Write a grounded resume.",
+        request: {
+          ...baseRequest(),
+          resumeText: "Selected base resume",
+          renderPreview() {
+            throw new Error("Local PDF renderer unavailable.");
+          },
+        },
+      }),
+    ).rejects.toThrow("permanent_failure");
+  });
+
+  test("resume context keeps all candidate facts and listing details without search diagnostics", async () => {
+    const profile = createProfile();
+    profile.experiences = Array.from({ length: 10 }, (_, index) =>
+      CandidateExperienceSchema.parse({
+        id: `experience_${index}`,
+        companyName: `Synthetic company ${index}`,
+        title: "Software engineer",
+        workMode: ["remote"],
+        summary: `Saved role summary ${index}`,
+        achievements: Array.from(
+          { length: 24 },
+          (_, bullet) => `Saved achievement ${index}:${bullet}`,
+        ),
+      }),
+    );
+    profile.proofBank = Array.from({ length: 12 }, (_, index) =>
+      CandidateProofBankEntrySchema.parse({
+        id: `proof_${index}`,
+        title: `Evidence ${index}`,
+        claim: `Candidate proof ${index}`,
+        heroMetric: `${index + 1} supported improvements`,
+      }),
+    );
+    const preferences = createPreferences();
+    const source = preferences.discovery.targets[0]!;
+    preferences.discovery.targets = Array.from({ length: 897 }, (_, index) => ({
+      ...source,
+      id: `source_${index}`,
+      customInstructions: `DISCOVERY_ONLY_${index}`.repeat(100),
+    }));
+    const request: CreateResumeDraftInput = {
+      profile,
+      searchPreferences: preferences,
+      settings: createSettings(),
+      resumeText: "Complete selected base resume",
+      language: "English",
+      languageFields: [{ id: "header", text: "Current language field" }],
+      researchContext: {
+        companyNotes: ["Company product context"],
+        domainVocabulary: ["Workflow automation"],
+        priorityThemes: ["Accessibility"],
+      },
+      job: {
+        ...createJobPosting(),
+        description:
+          "Full listing introduction.\n\n" +
+          "Build accessible product workflows. ".repeat(400) +
+          "\n\nMiddle requirement: Dutch C1.\n\n" +
+          "Operate TypeScript services. ".repeat(400),
+        minimumQualifications: Array.from(
+          { length: 25 },
+          (_, index) => `Full qualification ${index}`,
+        ),
+        benefits: ["Flexible work schedule"],
+        sourceIntelligence: SourceIntelligenceArtifactSchema.parse({
+          reliability: {
+            failureFingerprints: ["DISCOVERY_DIAGNOSTIC_ONLY".repeat(1_000)],
+          },
+        }),
+      },
+    };
+    const payloads: Record<string, unknown>[] = [];
+    const client: AgentCapableJobFinderAiClient = {
+      ...createDeterministicJobFinderAiClient(),
+      chatWithTools(messages) {
+        payloads.push(
+          JSON.parse(
+            messages.find((message) => message.role === "user")!.content,
+          ) as Record<string, unknown>,
+        );
+        return Promise.resolve({
+          toolCalls: [
+            composeCall("compose", {
+              proposal: {
+                languagePresentation: {
+                  language: "English",
+                  translations: request.languageFields,
+                },
+              },
+            }),
+          ],
+        });
+      },
+    };
+    await runResumeGenerationAgentTask({
+      client,
+      request,
+      substantivePrompt: "Write an evidence-grounded resume.",
+    });
+
+    expect(payloads).toHaveLength(1);
+    const payload = payloads[0]!;
+    expect(payload.candidateProfile).toEqual(profile);
+    expect(payload.targetJob).toMatchObject({
+      description: request.job.description,
+      minimumQualifications: request.job.minimumQualifications,
+      screeningHints: request.job.screeningHints,
+      benefits: request.job.benefits,
+    });
+    expect(payload.groundingEvidence).toEqual({
+      version: 1,
+      items: buildResumeGenerationEvidenceCatalog(request),
+    });
+    expect(payload.baseResumeEvidenceRef).toBe("baseResume:text");
+    expect(payload).not.toHaveProperty("baseResumeText");
+    expect(payload.targetLanguage).toBe("English");
+    expect(payload.languageFields).toEqual(request.languageFields);
+    expect(payload.researchContext).toEqual(request.researchContext);
+    expect(JSON.stringify(payload)).not.toMatch(
+      /DISCOVERY_ONLY|DISCOVERY_DIAGNOSTIC_ONLY/,
+    );
+    expect(payload).not.toHaveProperty("fullTargetJob");
+    expect(payload).not.toHaveProperty("selectedBaseResumeText");
+    expect(payload).not.toHaveProperty("workingProposal");
+    const grounded = buildGroundedResumeRewriteModelPayload(request);
+    const previousPayload = compactOpenAiCompatibleUserPayload({
+      operation: "createResumeDraft",
+      modelContextWindowTokens: 196_000,
+      systemPrompt: "Write an evidence-grounded resume.",
+      userPayload: {
+        ...grounded,
+        fullTargetJob: request.job,
+        candidateProfile: request.profile,
+        selectedBaseResumeText: request.resumeText,
+        searchPreferences: request.searchPreferences,
+        generationStrategy: request.strategy ?? null,
+        settings: request.settings,
+        workingProposal: {},
+      },
+    });
+    // The old loop sent this payload and then a context read carrying the
+    // whole request again; one call now carries it once.
+    const previousPayloadAndReadChars =
+      JSON.stringify(previousPayload).length +
+      JSON.stringify({ ...request, ...grounded }).length;
+    expect(JSON.stringify(payload).length).toBeLessThan(
+      previousPayloadAndReadChars / 10,
+    );
+  });
+
+  test.each([
+    { previewMs: 100_000, expectedCalls: 2 },
+    { previewMs: 500_000, expectedCalls: 1 },
+  ])(
+    "resume generation excludes PDF queue wait and still counts $previewMs ms of preview work",
+    async ({ previewMs, expectedCalls }) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      let excludedMs = 0;
+      let calls = 0;
+      let renders = 0;
+      try {
+        const client: AgentCapableJobFinderAiClient = {
+          ...createDeterministicJobFinderAiClient(),
+          chatWithTools() {
+            calls += 1;
+            vi.setSystemTime(Date.now() + 200_000);
+            return Promise.resolve({
+              toolCalls: [composeCall(`compose_${calls}`)],
+            });
+          },
+        };
+        const run = runResumeGenerationAgentTask({
+          client,
+          substantivePrompt: "Write an evidence-grounded resume.",
+          request: {
+            ...baseRequest(),
+            resumeText: "Selected base resume",
+            getExcludedElapsedMs: () => excludedMs,
+            renderPreview() {
+              vi.setSystemTime(Date.now() + 700_000);
+              excludedMs += 700_000;
+              vi.setSystemTime(Date.now() + previewMs);
+              // The first render is flagged, so a second call happens only
+              // while the counted time is inside the budget.
+              return ++renders === 1 ? flaggedPreview() : cleanPreview();
+            },
+          },
+        });
+        // Out of time after a flagged render, the flagged draft is kept
+        // rather than thrown away.
+        await expect(run).resolves.toBeTruthy();
+        expect(calls).toBe(expectedCalls);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   test("resume generation exposes exact grounding ids and listing-requested skills to the model", async () => {
     const deterministic = createDeterministicJobFinderAiClient();
     let visiblePayload: Record<string, unknown> | null = null;
-    let turn = 0;
     const client: AgentCapableJobFinderAiClient = {
       ...deterministic,
       chatWithTools(messages) {
-        turn += 1;
         const userMessage = messages.find((message) => message.role === "user");
         visiblePayload = JSON.parse(userMessage?.content ?? "{}") as Record<
           string,
@@ -62,45 +538,18 @@ describe("tool-using AI capabilities", () => {
           evidence.items.find((item) =>
             item.id.startsWith("profile:summary"),
           ) ?? evidence.items[0]!;
-        return Promise.resolve(
-          turn > 1
-            ? {
-                toolCalls: [
-                  {
-                    id: "finish",
-                    type: "function" as const,
-                    function: { name: "finish_task", arguments: "{}" },
-                  },
-                ],
-              }
-            : {
-                toolCalls: [
-                  {
-                    id: "compose",
-                    type: "function" as const,
-                    function: {
-                      name: "compose_resume_proposal",
-                      arguments: JSON.stringify({
-                        proposal: {
-                          summary: {
-                            text: summaryEvidence.text,
-                            evidenceRefs: [summaryEvidence.id],
-                          },
-                        },
-                      }),
-                    },
-                  },
-                  {
-                    id: "render",
-                    type: "function" as const,
-                    function: {
-                      name: "render_resume_preview",
-                      arguments: "{}",
-                    },
-                  },
-                ],
+        return Promise.resolve({
+          toolCalls: [
+            composeCall("compose", {
+              proposal: {
+                summary: {
+                  text: summaryEvidence.text,
+                  evidenceRefs: [summaryEvidence.id],
+                },
               },
-        );
+            }),
+          ],
+        });
       },
     };
     const job = {
@@ -111,14 +560,12 @@ describe("tool-using AI capabilities", () => {
       client,
       substantivePrompt: "Aggressive mode substantive resume instructions.",
       request: {
-        profile: createProfile(),
+        ...baseRequest(),
         searchPreferences: {
           ...createPreferences(),
           tailoringMode: "aggressive",
         },
-        settings: createSettings(),
         job,
-        resumeText: "Saved base resume text",
       },
     });
 
@@ -131,71 +578,6 @@ describe("tool-using AI capabilities", () => {
       "Kubernetes",
     );
     expect(result.summary).toContain("Builds reliable automation");
-  });
-
-  test("resume generation composes and inspects a usable full draft before finishing", async () => {
-    const client = createToolClient([
-      {
-        toolCalls: [
-          {
-            id: "read",
-            type: "function",
-            function: {
-              name: "read_resume_generation_context",
-              arguments: "{}",
-            },
-          },
-        ],
-      },
-      {
-        toolCalls: [
-          {
-            id: "compose",
-            type: "function",
-            function: {
-              name: "compose_resume_proposal",
-              arguments: JSON.stringify({
-                proposal: {
-                  summary: {
-                    text: "Builds reliable automation.",
-                    evidenceRefs: ["profile:summary"],
-                  },
-                },
-              }),
-            },
-          },
-          {
-            id: "inspect",
-            type: "function",
-            function: { name: "render_resume_preview", arguments: "{}" },
-          },
-        ],
-      },
-      {
-        toolCalls: [
-          {
-            id: "finish",
-            type: "function",
-            function: { name: "finish_task", arguments: "{}" },
-          },
-        ],
-      },
-    ]);
-
-    const result = await runResumeGenerationAgentTask({
-      client,
-      substantivePrompt: "Balanced mode substantive resume instructions.",
-      request: {
-        profile: createProfile(),
-        searchPreferences: createPreferences(),
-        settings: createSettings(),
-        job: createJobPosting(),
-        resumeText: "Saved base resume text",
-      },
-    });
-
-    expect(result.summary).toContain("Builds reliable automation");
-    expect(result.fullText).toContain("Builds reliable automation");
   });
 
   test("resume generation renders legacy JSON content before finishing", async () => {
@@ -213,13 +595,7 @@ describe("tool-using AI capabilities", () => {
     const result = await runResumeGenerationAgentTask({
       client,
       substantivePrompt: "Balanced mode substantive resume instructions.",
-      request: {
-        profile: createProfile(),
-        searchPreferences: createPreferences(),
-        settings: createSettings(),
-        job: createJobPosting(),
-        resumeText: "Saved base resume text",
-      },
+      request: baseRequest(),
     });
 
     expect(result.summary).toContain("Builds reliable automation");
@@ -232,13 +608,7 @@ describe("tool-using AI capabilities", () => {
     const result = await runResumeGenerationAgentTask({
       client,
       substantivePrompt: "Balanced mode substantive resume instructions.",
-      request: {
-        profile: createProfile(),
-        searchPreferences: createPreferences(),
-        settings: createSettings(),
-        job: createJobPosting(),
-        resumeText: "Saved base resume text",
-      },
+      request: baseRequest(),
     });
 
     expect(result.generationQuality).toEqual(
@@ -258,128 +628,82 @@ describe("tool-using AI capabilities", () => {
     );
   });
 
-  test("resume generation exposes the authoritative phase after inspection and recomposition", async () => {
+  test("resume generation repairs blocking preview validation without erasing person confirmations", async () => {
     const proposal = {
       summary: {
         text: "Builds reliable automation.",
         evidenceRefs: ["profile:summary"],
       },
     };
-    const phases: Array<{
-      proposalComposed: boolean;
-      previewRenderedForCurrentProposal: boolean;
-      previewInspectedForCurrentProposal: boolean;
-      readyToFinish: boolean;
-      validationIssues: Array<{ code: string }>;
-    }> = [];
-    const deterministic = createDeterministicJobFinderAiClient();
+    let renderCount = 0;
+    let repairSeen = false;
+    let personConfirmationCountSeen = false;
+    const renderPreview = vi.fn(() =>
+      ++renderCount === 1 ? flaggedPreview(2) : cleanPreview(),
+    );
     let turn = 0;
-    let repairGuidanceSeen = false;
     const client: AgentCapableJobFinderAiClient = {
-      ...deterministic,
+      ...createDeterministicJobFinderAiClient(),
       chatWithTools(messages) {
-        const currentContext = messages.find(
-          (message) => message.role === "user",
-        );
-        const payload = JSON.parse(currentContext?.content ?? "{}") as {
-          resumeGenerationPhase: (typeof phases)[number];
-        };
-        phases.push(payload.resumeGenerationPhase);
         turn += 1;
-        if (turn === 1) {
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: "compose-first",
-                type: "function" as const,
-                function: {
-                  name: "compose_resume_proposal",
-                  arguments: JSON.stringify({ proposal }),
-                },
-              },
-              {
-                id: "render-first",
-                type: "function" as const,
-                function: { name: "render_resume_preview", arguments: "{}" },
-              },
-              {
-                id: "inspect-first",
-                type: "function" as const,
-                function: {
-                  name: "inspect_completed_resume",
-                  arguments: "{}",
-                },
-              },
-            ],
-          });
-        }
         if (turn === 2) {
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: "compose-revision",
-                type: "function" as const,
-                function: {
-                  name: "compose_resume_proposal",
-                  arguments: JSON.stringify({ proposal }),
-                },
-              },
-            ],
-          });
-        }
-        if (turn === 3) {
-          repairGuidanceSeen = messages.some(
+          const payload = JSON.parse(
+            messages.find((message) => message.role === "user")!.content,
+          ) as {
+            workingProposal: unknown;
+            lastCheck: { requiredModelRepairs: Array<{ id: string }> };
+          };
+          repairSeen =
+            payload.lastCheck.requiredModelRepairs.some(
+              (issue) => issue.id === "issue_claim_grounding_summary",
+            ) && JSON.stringify(payload.workingProposal).includes("reliable");
+          personConfirmationCountSeen = messages.some(
             (message) =>
               message.role === "tool" &&
-              message.content.includes("call finish_task") &&
-              message.content.includes("reasonForRevision"),
+              message.content.includes('"personConfirmationCount":2'),
           );
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: "compose-reasoned-revision",
-                type: "function" as const,
-                function: {
-                  name: "compose_resume_proposal",
-                  arguments: JSON.stringify({
-                    proposal,
-                    reasonForRevision:
-                      "The inspected opening sentence was too vague.",
-                  }),
-                },
-              },
-            ],
-          });
-        }
-        if (turn === 4) {
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: "render-revision",
-                type: "function" as const,
-                function: {
-                  name: "render_resume_preview",
-                  arguments: "{}",
-                },
-              },
-              {
-                id: "inspect-revision",
-                type: "function" as const,
-                function: {
-                  name: "inspect_completed_resume",
-                  arguments: "{}",
-                },
-              },
-            ],
-          });
         }
         return Promise.resolve({
+          toolCalls: [composeCall(`compose_${turn}`, { proposal })],
+        });
+      },
+    };
+
+    await runResumeGenerationAgentTask({
+      client,
+      substantivePrompt: "Aggressive mode substantive resume instructions.",
+      request: { ...baseRequest(), renderPreview },
+    });
+
+    expect(turn).toBe(2);
+    expect(repairSeen).toBe(true);
+    expect(personConfirmationCountSeen).toBe(true);
+    expect(renderPreview).toHaveBeenCalledTimes(2);
+  });
+
+  test("a second flagged render tells the model to drop the flagged lines, and a third call is the last, kept for review", async () => {
+    let turn = 0;
+    const toolResults: string[] = [];
+    const client: AgentCapableJobFinderAiClient = {
+      ...createDeterministicJobFinderAiClient(),
+      chatWithTools(messages) {
+        turn += 1;
+        toolResults.push(
+          messages
+            .filter((message) => message.role === "tool")
+            .map((message) => message.content)
+            .join("\n"),
+        );
+        return Promise.resolve({
           toolCalls: [
-            {
-              id: "finish",
-              type: "function" as const,
-              function: { name: "finish_task", arguments: "{}" },
-            },
+            composeCall(`compose_${turn}`, {
+              proposal: {
+                summary: {
+                  text: `Builds reliable automation ${turn}.`,
+                  evidenceRefs: ["profile:summary"],
+                },
+              },
+            }),
           ],
         });
       },
@@ -387,304 +711,104 @@ describe("tool-using AI capabilities", () => {
 
     const result = await runResumeGenerationAgentTask({
       client,
-      substantivePrompt: "Aggressive mode substantive resume instructions.",
-      request: {
-        profile: createProfile(),
-        searchPreferences: createPreferences(),
-        settings: createSettings(),
-        job: createJobPosting(),
-        resumeText: "Saved base resume text",
-      },
+      substantivePrompt: "Balanced mode substantive resume instructions.",
+      request: { ...baseRequest(), renderPreview: () => flaggedPreview() },
     });
 
-    expect(result.summary).toContain("Builds reliable automation");
-    expect(repairGuidanceSeen).toBe(true);
-    expect(phases[0]?.validationIssues.map((issue) => issue.code)).toEqual(
-      expect.arrayContaining([
-        "resume_proposal_required",
-        "resume_preview_required",
-      ]),
-    );
-    expect(phases).toEqual([
-      expect.objectContaining({
-        proposalComposed: false,
-        previewRenderedForCurrentProposal: false,
-        previewInspectedForCurrentProposal: false,
-        readyToFinish: false,
-      }),
-      expect.objectContaining({
-        proposalComposed: true,
-        previewRenderedForCurrentProposal: true,
-        previewInspectedForCurrentProposal: true,
-        readyToFinish: true,
-        validationIssues: [],
-      }),
-      expect.objectContaining({
-        proposalComposed: true,
-        previewRenderedForCurrentProposal: true,
-        previewInspectedForCurrentProposal: true,
-        readyToFinish: true,
-        validationIssues: [],
-      }),
-      expect.objectContaining({
-        proposalComposed: true,
-        previewRenderedForCurrentProposal: false,
-        previewInspectedForCurrentProposal: false,
-        readyToFinish: false,
-        validationIssues: [
-          expect.objectContaining({ code: "resume_preview_required" }),
-        ],
-      }),
-      expect.objectContaining({
-        proposalComposed: true,
-        previewRenderedForCurrentProposal: true,
-        previewInspectedForCurrentProposal: true,
-        readyToFinish: true,
-        validationIssues: [],
-      }),
-    ]);
+    expect(turn).toBe(3);
+    expect(toolResults[1]).not.toContain("second flagged render");
+    expect(toolResults[2]).toContain("This is the second flagged render");
+    // Three calls of writing are not thrown away over a few lines: the last
+    // draft is kept, and its flagged lines are settled after the writer.
+    expect(result.summary).toContain("Builds reliable automation 3.");
+    expect(result.notes.join(" ")).not.toContain("review");
   });
 
-  test("resume generation keeps the last cleanly rendered AI draft when a run keeps revising until its budget ends", async () => {
+  test("a clean draft over the page target gets one call to leave things off, then stands", async () => {
     let turn = 0;
-    const deterministic = createDeterministicJobFinderAiClient();
+    const toolResults: string[] = [];
     const client: AgentCapableJobFinderAiClient = {
-      ...deterministic,
-      chatWithTools() {
+      ...createDeterministicJobFinderAiClient(),
+      chatWithTools(messages) {
         turn += 1;
+        toolResults.push(
+          messages
+            .filter((message) => message.role === "tool")
+            .map((message) => message.content)
+            .join("\n"),
+        );
         return Promise.resolve({
-          toolCalls: [
-            {
-              id: `compose_${turn}`,
-              type: "function" as const,
-              function: {
-                name: "compose_resume_proposal",
-                arguments: JSON.stringify({
-                  proposal: {
-                    summary: {
-                      text: "Builds reliable automation.",
-                      evidenceRefs: ["profile:summary"],
-                    },
-                    revision: turn,
-                  },
-                }),
-              },
-            },
-            {
-              id: `render_${turn}`,
-              type: "function" as const,
-              function: { name: "render_resume_preview", arguments: "{}" },
-            },
-          ],
+          toolCalls: [composeCall(`compose_${turn}`)],
         });
       },
     };
-
     const result = await runResumeGenerationAgentTask({
       client,
-      substantivePrompt: "Aggressive mode substantive resume instructions.",
-      request: {
-        profile: createProfile(),
-        searchPreferences: {
-          ...createPreferences(),
-          tailoringMode: "aggressive",
-        },
-        settings: createSettings(),
-        job: createJobPosting(),
-        resumeText: "Saved base resume text",
-      },
-    });
-
-    expect(result.summary).toContain("Builds reliable automation");
-    expect(result.notes.join(" ")).toContain(
-      "this is its last draft that rendered cleanly",
-    );
-  });
-
-  test("resume generation warns the model to drop flagged lines once it keeps rendering flagged drafts", async () => {
-    let turn = 0;
-    const toolResults: string[] = [];
-    const deterministic = createDeterministicJobFinderAiClient();
-    const client: AgentCapableJobFinderAiClient = {
-      ...deterministic,
-      chatWithTools(messages) {
-        turn += 1;
-        for (const message of messages) {
-          if (message.role === "tool") toolResults.push(message.content);
-        }
-        if (turn > 4) {
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: `finish_${turn}`,
-                type: "function" as const,
-                function: { name: "finish_task", arguments: "{}" },
-              },
-            ],
-          });
-        }
-        return Promise.resolve({
-          toolCalls: [
-            {
-              id: `compose_${turn}`,
-              type: "function" as const,
-              function: {
-                name: "compose_resume_proposal",
-                arguments: JSON.stringify({
-                  proposal: {
-                    summary: {
-                      text: `Builds reliable automation ${turn}.`,
-                      evidenceRefs: ["profile:summary"],
-                    },
-                  },
-                }),
-              },
-            },
-            {
-              id: `render_${turn}`,
-              type: "function" as const,
-              function: { name: "render_resume_preview", arguments: "{}" },
-            },
-          ],
-        });
-      },
-    };
-
-    await runResumeGenerationAgentTask({
-      client,
       substantivePrompt: "Balanced mode substantive resume instructions.",
       request: {
-        profile: createProfile(),
-        searchPreferences: createPreferences(),
-        settings: createSettings(),
-        job: createJobPosting(),
-        resumeText: "Saved base resume text",
+        ...baseRequest(),
         renderPreview: () =>
           Promise.resolve({
             templateId: "classic_ats",
-            pageCount: 1,
-            warnings: [],
-            fileName: "preview.pdf",
-            requiredModelRepairs: [
-              {
-                id: "issue_claim_grounding_summary",
-                severity: "error" as const,
-                category: "unsupported_claim" as const,
-                sectionId: "summary",
-                entryId: null,
-                bulletId: null,
-                message: "Saved evidence does not back this wording.",
-                flaggedText: "Unsupported summary wording.",
-              },
-            ],
-          }),
-      },
-    }).catch(() => null);
-
-    const warned = toolResults.filter((content) =>
-      content.includes(
-        "Stop rewording: remove each line named in requiredModelRepairs",
-      ),
-    );
-    expect(warned.length).toBeGreaterThan(0);
-    // Not on the first or second flagged render.
-    expect(
-      toolResults.some(
-        (content) =>
-          content.includes("flagged render 1 ") ||
-          content.includes("flagged render 2 "),
-      ),
-    ).toBe(false);
-  });
-
-  test("resume generation tells the model to finish once it keeps rewriting clean drafts", async () => {
-    let turn = 0;
-    const toolResults: string[] = [];
-    const deterministic = createDeterministicJobFinderAiClient();
-    const client: AgentCapableJobFinderAiClient = {
-      ...deterministic,
-      chatWithTools(messages) {
-        turn += 1;
-        for (const message of messages) {
-          if (message.role === "tool") toolResults.push(message.content);
-        }
-        if (turn > 4) {
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: `finish_${turn}`,
-                type: "function" as const,
-                function: { name: "finish_task", arguments: "{}" },
-              },
-            ],
-          });
-        }
-        return Promise.resolve({
-          toolCalls: [
-            {
-              id: `compose_${turn}`,
-              type: "function" as const,
-              function: {
-                name: "compose_resume_proposal",
-                arguments: JSON.stringify({
-                  proposal: {
-                    summary: {
-                      text: `Builds reliable automation ${turn}.`,
-                      evidenceRefs: ["profile:summary"],
-                    },
-                  },
-                }),
-              },
-            },
-            {
-              id: `render_${turn}`,
-              type: "function" as const,
-              function: { name: "render_resume_preview", arguments: "{}" },
-            },
-          ],
-        });
-      },
-    };
-
-    await runResumeGenerationAgentTask({
-      client,
-      substantivePrompt: "Balanced mode substantive resume instructions.",
-      request: {
-        profile: createProfile(),
-        searchPreferences: createPreferences(),
-        settings: createSettings(),
-        job: createJobPosting(),
-        resumeText: "Saved base resume text",
-        renderPreview: () =>
-          Promise.resolve({
-            templateId: "classic_ats",
-            pageCount: 1,
+            pageCount: 3,
+            targetPageCount: 2,
             warnings: [],
             fileName: "preview.pdf",
             requiredModelRepairs: [],
           }),
       },
-    }).catch(() => null);
+    });
+    expect(turn).toBe(2);
+    expect(toolResults[1]).toContain("renders at 3 pages and should fit on 2");
+    expect(toolResults[1]).toContain("leave it off");
+    expect(result.summary).toBeTruthy();
+  });
 
-    expect(
-      toolResults.some((content) =>
-        content.includes(
-          "This render is clean. Call inspect_completed_resume, then finish_task",
-        ),
-      ),
-    ).toBe(true);
-    expect(
-      toolResults.some((content) =>
-        content.includes("This is clean render 3 in this run."),
-      ),
-    ).toBe(true);
-    expect(
-      toolResults.some(
-        (content) =>
-          content.includes("clean render 1 ") ||
-          content.includes("clean render 2 "),
-      ),
-    ).toBe(false);
+  test("resume generation keeps the last cleanly rendered AI draft when the call budget ends mid-revision", async () => {
+    let renders = 0;
+    let turn = 0;
+    const client: AgentCapableJobFinderAiClient = {
+      ...createDeterministicJobFinderAiClient(),
+      chatWithTools() {
+        turn += 1;
+        const proposal = (revision: number) => ({
+          proposal: {
+            summary: {
+              text: "Builds reliable automation.",
+              evidenceRefs: ["profile:summary"],
+            },
+            revision,
+          },
+        });
+        // The model composes a clean draft and, in the same turn, a revision
+        // the check flags; it keeps revising until the budget ends.
+        return Promise.resolve({
+          toolCalls:
+            turn === 1
+              ? [
+                  composeCall("clean", proposal(1)),
+                  composeCall("revise", proposal(2)),
+                ]
+              : [composeCall(`revise_${turn}`, proposal(turn + 1))],
+        });
+      },
+    };
+
+    const result = await runResumeGenerationAgentTask({
+      client,
+      substantivePrompt: "Aggressive mode substantive resume instructions.",
+      request: {
+        ...baseRequest(),
+        searchPreferences: {
+          ...createPreferences(),
+          tailoringMode: "aggressive",
+        },
+        renderPreview: () =>
+          ++renders === 1 ? cleanPreview() : flaggedPreview(),
+      },
+    });
+
+    expect(result.summary).toContain("Builds reliable automation");
   });
 
   test("resume generation rejects an incomplete agent task instead of grading an empty draft", async () => {
@@ -696,180 +820,46 @@ describe("tool-using AI capabilities", () => {
       runResumeGenerationAgentTask({
         client,
         substantivePrompt: "Balanced mode substantive resume instructions.",
-        request: {
-          profile: createProfile(),
-          searchPreferences: createPreferences(),
-          settings: createSettings(),
-          job: createJobPosting(),
-          resumeText: "Saved base resume text",
-        },
+        request: baseRequest(),
       }),
     ).rejects.toThrow(
       "Resume generation agent stopped before completing (no_progress).",
     );
   });
 
-  test("resume generation repairs blocking preview validation without erasing person confirmations", async () => {
-    const proposal = {
-      summary: {
-        text: "Builds reliable automation.",
-        evidenceRefs: ["profile:summary"],
+  const templateRequest = (
+    renderPreview: (input: {
+      templateId: string;
+    }) => ReturnType<typeof cleanPreview>,
+    locked = false,
+  ) => ({
+    ...baseRequest(),
+    selectedTemplateId: "classic_ats",
+    templateSelectionLocked: locked,
+    availableTemplates: [
+      {
+        id: "classic_ats" as const,
+        label: "Chronology Classic",
+        description: "General apply-safe layout.",
+        bestFor: ["General applications"],
+        density: "balanced" as const,
+        applyEligible: true,
       },
-    };
-    let renderCount = 0;
-    let repairIssueSeen = false;
-    let personConfirmationCountSeen = false;
-    const renderPreview = vi.fn(() => {
-      renderCount += 1;
-      return Promise.resolve({
-        templateId: "classic_ats",
-        pageCount: 1,
-        warnings: [],
-        fileName: "preview.pdf",
-        requiredModelRepairs:
-          renderCount === 1
-            ? [
-                {
-                  id: "issue_claim_grounding_summary",
-                  severity: "error" as const,
-                  category: "unsupported_claim" as const,
-                  sectionId: "summary",
-                  entryId: null,
-                  bulletId: null,
-                  message: "Saved evidence does not back this wording.",
-                  flaggedText: "Unsupported summary wording.",
-                },
-              ]
-            : [],
-        personConfirmationCount: 2,
-      });
-    });
-    const deterministic = createDeterministicJobFinderAiClient();
-    let turn = 0;
-    const client: AgentCapableJobFinderAiClient = {
-      ...deterministic,
-      chatWithTools(messages) {
-        const currentContext = messages.find(
-          (message) => message.role === "user",
-        );
-        const payload = JSON.parse(currentContext?.content ?? "{}") as {
-          resumeGenerationPhase: {
-            formattedArtifact?: {
-              personConfirmationCount?: number;
-            } | null;
-            validationIssues: Array<{ code: string }>;
-          };
-        };
-        turn += 1;
-        if (turn === 1) {
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: "compose",
-                type: "function" as const,
-                function: {
-                  name: "compose_resume_proposal",
-                  arguments: JSON.stringify({ proposal }),
-                },
-              },
-              {
-                id: "render",
-                type: "function" as const,
-                function: { name: "render_resume_preview", arguments: "{}" },
-              },
-              {
-                id: "inspect",
-                type: "function" as const,
-                function: {
-                  name: "inspect_completed_resume",
-                  arguments: "{}",
-                },
-              },
-            ],
-          });
-        }
-        if (turn === 2) {
-          repairIssueSeen = payload.resumeGenerationPhase.validationIssues.some(
-            (issue) =>
-              issue.code === "resume_preview_issue_claim_grounding_summary",
-          );
-          personConfirmationCountSeen =
-            payload.resumeGenerationPhase.formattedArtifact
-              ?.personConfirmationCount === 2;
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: "repair",
-                type: "function" as const,
-                function: {
-                  name: "compose_resume_proposal",
-                  arguments: JSON.stringify({
-                    proposal,
-                    reasonForRevision:
-                      "The preview reported unsupported summary wording.",
-                  }),
-                },
-              },
-            ],
-          });
-        }
-        if (turn === 3) {
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: "render-repair",
-                type: "function" as const,
-                function: { name: "render_resume_preview", arguments: "{}" },
-              },
-              {
-                id: "inspect-repair",
-                type: "function" as const,
-                function: {
-                  name: "inspect_completed_resume",
-                  arguments: "{}",
-                },
-              },
-            ],
-          });
-        }
-        return Promise.resolve({
-          toolCalls: [
-            {
-              id: "finish",
-              type: "function" as const,
-              function: { name: "finish_task", arguments: "{}" },
-            },
-          ],
-        });
+      {
+        id: "compact_exec" as const,
+        label: "Senior Brief",
+        description: "Compact apply-safe layout.",
+        bestFor: ["Experienced candidates"],
+        density: "compact" as const,
+        applyEligible: true,
       },
-    };
-
-    await runResumeGenerationAgentTask({
-      client,
-      substantivePrompt: "Aggressive mode substantive resume instructions.",
-      request: {
-        profile: createProfile(),
-        searchPreferences: createPreferences(),
-        settings: createSettings(),
-        job: createJobPosting(),
-        resumeText: "Saved base resume text",
-        renderPreview,
-      },
-    });
-
-    expect(repairIssueSeen).toBe(true);
-    expect(personConfirmationCountSeen).toBe(true);
-    expect(renderPreview).toHaveBeenCalledTimes(2);
+    ],
+    renderPreview,
   });
 
-  test("resume generation can choose an unlocked template and inspects the real rendered artifact", async () => {
-    const renderPreview = vi.fn(() =>
-      Promise.resolve({
-        templateId: "compact_exec",
-        pageCount: 2,
-        warnings: [],
-        fileName: "preview-compact-exec.pdf",
-      }),
+  test("resume generation can choose an unlocked template and renders with it", async () => {
+    const renderPreview = vi.fn(({ templateId }: { templateId: string }) =>
+      cleanPreview(templateId),
     );
     const client = createToolClient([
       {
@@ -882,167 +872,81 @@ describe("tool-using AI capabilities", () => {
               arguments: JSON.stringify({ templateId: "compact_exec" }),
             },
           },
-          {
-            id: "compose",
-            type: "function",
-            function: {
-              name: "compose_resume_proposal",
-              arguments: JSON.stringify({ proposal: {} }),
-            },
-          },
-        ],
-      },
-      {
-        toolCalls: [
-          {
-            id: "render",
-            type: "function",
-            function: { name: "render_resume_preview", arguments: "{}" },
-          },
-        ],
-      },
-      {
-        toolCalls: [
-          {
-            id: "finish",
-            type: "function",
-            function: { name: "finish_task", arguments: "{}" },
-          },
+          composeCall("compose"),
         ],
       },
     ]);
-    const request = {
-      profile: createProfile(),
-      searchPreferences: createPreferences(),
-      settings: createSettings(),
-      job: createJobPosting(),
-      resumeText: "Saved base resume text",
-      selectedTemplateId: "classic_ats",
-      templateSelectionLocked: false,
-      availableTemplates: [
-        {
-          id: "classic_ats" as const,
-          label: "Chronology Classic",
-          description: "General apply-safe layout.",
-          bestFor: ["General applications"],
-          density: "balanced" as const,
-          applyEligible: true,
-        },
-        {
-          id: "compact_exec" as const,
-          label: "Senior Brief",
-          description: "Compact apply-safe layout.",
-          bestFor: ["Experienced candidates"],
-          density: "compact" as const,
-          applyEligible: true,
-        },
-      ],
-      renderPreview,
-    };
 
     const result = await runResumeGenerationAgentTask({
       client,
       substantivePrompt: "Balanced mode substantive resume instructions.",
-      request,
+      request: templateRequest(renderPreview),
     });
 
     expect(result.recommendedTemplateId).toBe("compact_exec");
+    expect(renderPreview).toHaveBeenCalledTimes(1);
     expect(renderPreview).toHaveBeenCalledWith(
       expect.objectContaining({ templateId: "compact_exec" }),
     );
   });
 
-  test("a changed template is reported immediately and must be rendered again", async () => {
-    const deterministic = createDeterministicJobFinderAiClient();
-    const renderPreview = vi.fn(({ templateId }: { templateId: string }) =>
-      Promise.resolve({
-        templateId,
-        pageCount: 1,
-        warnings: [],
-        fileName: `preview-${templateId}.pdf`,
-      }),
+  test("the proposal call can pick the template itself, unless the person locked one", async () => {
+    let offeredTemplates: unknown;
+    const unlockedRender = vi.fn(({ templateId }: { templateId: string }) =>
+      cleanPreview(templateId),
     );
-    let turn = 0;
-    let templateReadContent = "";
-    const client: AgentCapableJobFinderAiClient = {
-      ...deterministic,
-      chatWithTools(messages) {
-        turn += 1;
-        if (turn === 4) {
-          templateReadContent = messages.at(-1)?.content ?? "";
-        }
-        const calls =
-          [
-            [
-              {
-                id: "compose",
-                name: "compose_resume_proposal",
-                args: { proposal: {} },
-              },
-              { id: "render-a", name: "render_resume_preview", args: {} },
+    const unlocked = await runResumeGenerationAgentTask({
+      client: {
+        ...createDeterministicJobFinderAiClient(),
+        chatWithTools(messages) {
+          offeredTemplates = (
+            JSON.parse(
+              messages.find((message) => message.role === "user")!.content,
+            ) as { templateSelection: { availableTemplates: unknown } }
+          ).templateSelection.availableTemplates;
+          return Promise.resolve({
+            toolCalls: [
+              composeCall("compose", {
+                proposal: {},
+                templateId: "compact_exec",
+              }),
             ],
-            [
-              {
-                id: "select-b",
-                name: "select_resume_template",
-                args: { templateId: "compact_exec" },
-              },
-            ],
-            [{ id: "read-b", name: "read_resume_templates", args: {} }],
-            [{ id: "finish-too-soon", name: "finish_task", args: {} }],
-            [{ id: "render-b", name: "render_resume_preview", args: {} }],
-            [{ id: "finish", name: "finish_task", args: {} }],
-          ][turn - 1] ?? [];
-        return Promise.resolve({
-          toolCalls: calls.map((call) => ({
-            id: call.id,
-            type: "function" as const,
-            function: { name: call.name, arguments: JSON.stringify(call.args) },
-          })),
-        });
+          });
+        },
       },
-    };
-
-    const result = await runResumeGenerationAgentTask({
-      client,
       substantivePrompt: "Balanced mode substantive resume instructions.",
-      request: {
-        profile: createProfile(),
-        searchPreferences: createPreferences(),
-        settings: createSettings(),
-        job: createJobPosting(),
-        resumeText: "Saved base resume text",
-        selectedTemplateId: "classic_ats",
-        templateSelectionLocked: false,
-        availableTemplates: [
-          {
-            id: "classic_ats" as const,
-            label: "Chronology Classic",
-            description: "General apply-safe layout.",
-            bestFor: ["General applications"],
-            density: "balanced" as const,
-            applyEligible: true,
-          },
-          {
-            id: "compact_exec" as const,
-            label: "Senior Brief",
-            description: "Compact apply-safe layout.",
-            bestFor: ["Experienced candidates"],
-            density: "compact" as const,
-            applyEligible: true,
-          },
-        ],
-        renderPreview,
-      },
+      request: templateRequest(unlockedRender),
     });
-
-    expect(templateReadContent).toContain("compact_exec");
-    expect(renderPreview).toHaveBeenCalledTimes(2);
-    expect(renderPreview).toHaveBeenNthCalledWith(
-      2,
+    expect(offeredTemplates).toEqual([
+      { id: "classic_ats", label: "Chronology Classic" },
+      { id: "compact_exec", label: "Senior Brief" },
+    ]);
+    expect(unlocked.recommendedTemplateId).toBe("compact_exec");
+    expect(unlockedRender).toHaveBeenCalledWith(
       expect.objectContaining({ templateId: "compact_exec" }),
     );
-    expect(result.recommendedTemplateId).toBe("compact_exec");
+
+    const lockedRender = vi.fn(({ templateId }: { templateId: string }) =>
+      cleanPreview(templateId),
+    );
+    const locked = await runResumeGenerationAgentTask({
+      client: createToolClient([
+        {
+          toolCalls: [
+            composeCall("compose", {
+              proposal: {},
+              templateId: "compact_exec",
+            }),
+          ],
+        },
+      ]),
+      substantivePrompt: "Balanced mode substantive resume instructions.",
+      request: templateRequest(lockedRender, true),
+    });
+    expect(locked.recommendedTemplateId).toBe("classic_ats");
+    expect(lockedRender).toHaveBeenCalledWith(
+      expect.objectContaining({ templateId: "classic_ats" }),
+    );
   });
 
   test.each(["identity_summary", "experience", "background"] as const)(

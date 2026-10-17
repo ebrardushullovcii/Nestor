@@ -93,7 +93,7 @@ describe("form readiness", () => {
   test("a disabled send control cannot be ready even with zero required fields", () => {
     expect(
       checkFormReadiness(
-        observe({ actions: [{ ...page.actions[0]!, disabled: true }] }),
+        observe({ actions: [{ ...page.actions[0], disabled: true }] }),
       ).ok,
     ).toBe(false);
   });

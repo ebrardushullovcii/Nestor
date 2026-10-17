@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SetStateAction } from "react";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import type {
   ActionState,
   JobFinderShellActions,
@@ -22,7 +22,7 @@ const workspace = {
       resumeTailoringMode: null,
     },
   ],
-} as unknown as JobFinderWorkspaceSnapshot;
+} as unknown as JobFinderRendererWorkspaceSnapshot;
 
 function createHarness(outage = false) {
   let actionState: ActionState = { message: null };

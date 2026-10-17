@@ -10,6 +10,13 @@ import type {
 import { createJobIdentityIndex } from "./job-identity";
 
 type ActivityCandidate = Exclude<ListingActivity, { status: "unknown" }>;
+const projectedActivityJobs = new WeakMap<
+  SavedJob,
+  {
+    activityKey: string;
+    view: DiscoveryJobView;
+  }
+>();
 
 /**
  * The listing's own words saying it is over, as the model read them when it
@@ -105,7 +112,16 @@ export function projectDiscoveryJobViews(input: {
   listingSignals: readonly ListingSignalRecord[];
   applicationAttempts?: readonly ApplicationAttempt[];
 }): DiscoveryJobView[] {
-  const jobIdentityIndex = createJobIdentityIndex(input.jobs, (job) => job);
+  const inactiveEntries = input.discoveryLedger.filter(
+    (entry) => entry.latestStatus === "inactive" && entry.inactiveAt !== null,
+  );
+  // Active sightings are projected directly from their jobs. Normalizing every
+  // full listing for an identity index only helps when an inactive sighting
+  // actually needs resolving; doing it on every progress update was wasteful.
+  const jobIdentityIndex =
+    inactiveEntries.length > 0
+      ? createJobIdentityIndex(input.jobs, (job) => job)
+      : null;
   const candidateByJob = new Map<SavedJob, ActivityCandidate>();
   const uniqueJobById = new Map<string, SavedJob | null>();
 
@@ -125,10 +141,9 @@ export function projectDiscoveryJobViews(input: {
     uniqueJobById.set(job.id, uniqueJobById.has(job.id) ? null : job);
   }
 
-  for (const entry of input.discoveryLedger) {
-    if (entry.latestStatus !== "inactive" || entry.inactiveAt === null)
-      continue;
-    const resolution = jobIdentityIndex.resolve(entry);
+  for (const entry of inactiveEntries) {
+    if (entry.inactiveAt === null) continue;
+    const resolution = jobIdentityIndex!.resolve(entry);
     if (resolution.status !== "matched") continue;
 
     candidateByJob.set(
@@ -181,8 +196,20 @@ export function projectDiscoveryJobViews(input: {
     );
   }
 
-  return input.jobs.map((job) => ({
-    ...job,
-    listingActivity: candidateByJob.get(job) ?? { status: "unknown" },
-  }));
+  return input.jobs.map((job) => {
+    const listingActivity: ListingActivity = candidateByJob.get(job) ?? {
+      status: "unknown",
+    };
+    const activityKey = JSON.stringify(listingActivity);
+    const previous = projectedActivityJobs.get(job);
+    if (previous?.activityKey === activityKey) return previous.view;
+    const view = { ...job, listingActivity };
+    // Only immutable repository rows are safe to reuse across display reads.
+    if (Object.isFrozen(job)) {
+      Object.freeze(listingActivity);
+      Object.freeze(view);
+      projectedActivityJobs.set(job, { activityKey, view });
+    }
+    return view;
+  });
 }

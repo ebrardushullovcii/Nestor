@@ -1880,7 +1880,7 @@ describe("createJobFinderWorkspaceService", () => {
       },
     };
 
-    const { workspaceService } = createWorkspaceServiceHarness({
+    const { repository, workspaceService } = createWorkspaceServiceHarness({
       seed,
       browserRuntime,
       aiClient: createAgentAiClient(),
@@ -1899,8 +1899,11 @@ describe("createJobFinderWorkspaceService", () => {
     expect(snapshot.discoveryJobs[0]?.provenance[0]?.targetId).toBe(
       "target_two",
     );
+    // Stored for durability; the display snapshot leaves resume checkpoints
+    // out because only main resumes a search.
     expect(
-      snapshot.recentDiscoveryRuns[0]?.targetExecutions[0]?.agentCheckpoint,
+      (await repository.getDiscoveryState()).recentRuns[0]?.targetExecutions[0]
+        ?.agentCheckpoint,
     ).toMatchObject({ revision: 1, stepCount: 3 });
 
     await workspaceService.runDiscoveryForTarget(

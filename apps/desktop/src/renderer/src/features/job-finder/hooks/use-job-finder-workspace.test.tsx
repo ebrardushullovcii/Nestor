@@ -3,10 +3,13 @@
 import {
   createFreshStartCandidateProfile,
   DiscoveryJobViewSchema,
+  DiscoveryRunRecordSchema,
+  JobListRowSchema,
   getDefaultCampaignConfiguration,
   JobFinderSettingsSchema,
   JobFinderWorkspaceDeltaSchema,
-  JobFinderWorkspaceSnapshotSchema,
+  JobFinderWorkspaceSyncResultSchema,
+  JobFinderRendererWorkspaceSnapshotSchema,
   JobSearchCampaignSchema,
   JobSearchPreferencesSchema,
 } from "@nordri/contracts";
@@ -15,7 +18,7 @@ import type {
   JobFinderSetResumeClaimConfirmationInput,
   JobFinderWorkspaceDelta,
   JobFinderWorkspaceEntityMutationInput,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   JobFinderWorkspaceSyncResult,
   ResumeImportProgressEvent,
 } from "@nordri/contracts";
@@ -23,6 +26,8 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useJobFinderWorkspace } from "./use-job-finder-workspace";
+import { createJobFinderWorkspaceDeltaTracker } from "../../../../../main/services/job-finder/workspace-delta";
+import { applyJobFinderWorkspaceDelta } from "../../../pages/job-finder-workspace-delta";
 
 function requireReadyWorkspace(
   value: ReturnType<typeof useJobFinderWorkspace>,
@@ -33,7 +38,9 @@ function requireReadyWorkspace(
   return value;
 }
 
-function createBaseSnapshot(generatedAt: string): JobFinderWorkspaceSnapshot {
+function createBaseSnapshot(
+  generatedAt: string,
+): JobFinderRendererWorkspaceSnapshot {
   const profile = createFreshStartCandidateProfile();
   const searchPreferences = JobSearchPreferencesSchema.parse({
     targetRoles: [],
@@ -84,7 +91,7 @@ function createBaseSnapshot(generatedAt: string): JobFinderWorkspaceSnapshot {
     progress: { lastUpdatedAt: generatedAt },
     history: [],
   });
-  return JobFinderWorkspaceSnapshotSchema.parse({
+  return JobFinderRendererWorkspaceSnapshotSchema.parse({
     module: "job-finder",
     generatedAt,
     hydration: { phase: "complete", deferredCollections: [] },
@@ -210,7 +217,7 @@ function createDiscoveryJob(jobId: string, generatedAt: string) {
 function createWorkspace(
   jobId: string,
   generatedAt = "2026-08-09T10:00:00.000Z",
-): JobFinderWorkspaceSnapshot {
+): JobFinderRendererWorkspaceSnapshot {
   const base = createBaseSnapshot(generatedAt);
   return {
     ...base,
@@ -275,6 +282,408 @@ function deferred<T>(): {
   return { promise, resolve };
 }
 
+describe("useJobFinderWorkspace revision window", () => {
+  const syncWorkspace =
+    vi.fn<
+      (baseRevision: number | null) => Promise<JobFinderWorkspaceSyncResult>
+    >();
+  const mutateWorkspaceEntities =
+    vi.fn<
+      (
+        input: JobFinderWorkspaceEntityMutationInput,
+      ) => Promise<JobFinderWorkspaceSyncResult>
+    >();
+  const getWorkspace =
+    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
+  const bareSnapshotAction =
+    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
+  let notifyUpdate: () => void;
+
+  beforeEach(() => {
+    syncWorkspace.mockReset();
+    mutateWorkspaceEntities.mockReset();
+    getWorkspace.mockReset();
+    bareSnapshotAction.mockReset();
+    Object.defineProperty(window, "nordri", {
+      configurable: true,
+      value: {
+        ping: vi.fn(() => Promise.resolve({ platform: "win32" as const })),
+        jobFinder: {
+          syncWorkspace,
+          mutateWorkspaceEntities,
+          getWorkspace,
+          checkBrowserSession: bareSnapshotAction,
+          resetWorkspace: bareSnapshotAction,
+          onWorkspaceUpdate: (listener: () => void) => {
+            notifyUpdate = listener;
+            return () => undefined;
+          },
+        },
+      } as unknown as Window["nordri"],
+    });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, "nordri");
+  });
+
+  function snapshotResult(
+    snapshot: JobFinderRendererWorkspaceSnapshot,
+    currentRevision: number,
+  ): JobFinderWorkspaceSyncResult {
+    return { kind: "snapshot", currentRevision, reason: "initial", snapshot };
+  }
+
+  function parsedDelta(result: JobFinderWorkspaceSyncResult) {
+    const parsed = JobFinderWorkspaceSyncResultSchema.parse(result);
+    if (parsed.kind !== "delta") throw new Error("Expected a tracker delta");
+    return parsed;
+  }
+
+  async function publishUpdate(
+    result: ReturnType<
+      typeof renderHook<ReturnType<typeof useJobFinderWorkspace>, unknown>
+    >["result"],
+    expected: JobFinderRendererWorkspaceSnapshot,
+  ) {
+    act(() => notifyUpdate());
+    await waitFor(() =>
+      expect(requireReadyWorkspace(result.current).workspace.generatedAt).toBe(
+        expected.generatedAt,
+      ),
+    );
+  }
+
+  it.each(["delta", "snapshot"] as const)(
+    "parses tracker 1→3 from held 1 after a %s at 2 without a full fetch",
+    async (updateKind) => {
+      const initial = JobFinderRendererWorkspaceSnapshotSchema.parse(
+        createWorkspace("kept-job"),
+      );
+      initial.fitJudgmentProgress = null;
+      const run = (id: string, activityIds: string[]) =>
+        DiscoveryRunRecordSchema.parse({
+          id,
+          state: "running",
+          startedAt: initial.generatedAt,
+          activity: activityIds.map((eventId) => ({
+            id: eventId,
+            runId: id,
+            timestamp: initial.generatedAt,
+            kind: "info",
+            stage: "run",
+            message: eventId,
+          })),
+        });
+      initial.activeDiscoveryRun = run("held-run", ["held-prefix"]);
+      const intermediate: JobFinderRendererWorkspaceSnapshot = {
+        ...initial,
+        generatedAt: "2026-08-09T10:01:00.000Z",
+        profile:
+          updateKind === "snapshot"
+            ? { ...initial.profile, summary: "Intermediate summary" }
+            : initial.profile,
+        discoveryJobs: [
+          { ...initial.discoveryJobs[0]!, title: "Intermediate title" },
+          JobListRowSchema.parse(
+            createDiscoveryJob("temporary-job", initial.generatedAt),
+          ),
+        ],
+        activeDiscoveryRun: run("intermediate-run", ["wrong-prefix"]),
+      };
+      const final: JobFinderRendererWorkspaceSnapshot = {
+        ...initial,
+        generatedAt: "2026-08-09T10:02:00.000Z",
+        activeDiscoveryRun: run("held-run", ["held-prefix", "final-tail"]),
+      };
+      const tracker = createJobFinderWorkspaceDeltaTracker();
+      const first = JobFinderWorkspaceSyncResultSchema.parse(
+        tracker.synchronize(null, initial),
+      );
+      // A changed field now travels inside a delta; a full snapshot at 2 is
+      // what another receiver with an unknown revision gets.
+      const second = JobFinderWorkspaceSyncResultSchema.parse(
+        tracker.synchronize(updateKind === "snapshot" ? 99 : 1, intermediate),
+      );
+      expect(second.kind).toBe(updateKind);
+      const cumulative = parsedDelta(tracker.synchronize(1, final));
+      expect(cumulative.delta).toMatchObject({
+        baseRevision: 1,
+        currentRevision: 3,
+        discoveryJobs: { upserts: [], removedIds: [] },
+        activeDiscoveryRunActivityFrom: 1,
+      });
+      const direct = applyJobFinderWorkspaceDelta({
+        revision: 1,
+        workspace: initial,
+        delta: cumulative.delta,
+      });
+      expect(direct.status).toBe("applied");
+      if (direct.status === "applied") expect(direct.workspace).toEqual(final);
+      const mutation = deferred<JobFinderWorkspaceSyncResult>();
+      syncWorkspace.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+      mutateWorkspaceEntities.mockReturnValueOnce(mutation.promise);
+      const { result } = renderHook(() => useJobFinderWorkspace());
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+      const baseline = requireReadyWorkspace(result.current).workspace;
+      let pending!: Promise<unknown>;
+      act(() => {
+        pending = requireReadyWorkspace(
+          result.current,
+        ).actions.queueJobForReview("kept-job");
+      });
+      await publishUpdate(result, intermediate);
+      expect(
+        requireReadyWorkspace(result.current).workspace.discoveryJobs,
+      ).toEqual(intermediate.discoveryJobs);
+      await act(async () => {
+        mutation.resolve(cumulative);
+        await pending;
+      });
+      const actual = requireReadyWorkspace(result.current).workspace;
+      expect(actual).toEqual(final);
+      expect(actual.discoveryJobs).toBe(baseline.discoveryJobs);
+      expect(actual.discoveryJobs[0]).toBe(baseline.discoveryJobs[0]);
+      expect(actual.activeDiscoveryRun?.activity.map(({ id }) => id)).toEqual([
+        "held-prefix",
+        "final-tail",
+      ]);
+      expect(syncWorkspace.mock.calls).toEqual([[null], [1]]);
+      expect(getWorkspace).not.toHaveBeenCalled();
+    },
+  );
+
+  it("ignores an older mutation delta after a cumulative update already reached 3", async () => {
+    const initial = createWorkspace("initial-job");
+    const intermediate = {
+      ...initial,
+      generatedAt: "2026-08-09T10:01:00.000Z",
+    };
+    const final = { ...initial, generatedAt: "2026-08-09T10:02:00.000Z" };
+    const tracker = createJobFinderWorkspaceDeltaTracker();
+    syncWorkspace.mockResolvedValueOnce(tracker.synchronize(null, initial));
+    const older = parsedDelta(tracker.synchronize(1, intermediate));
+    const newer = parsedDelta(tracker.synchronize(1, final));
+    syncWorkspace.mockResolvedValueOnce(newer);
+    const mutation = deferred<JobFinderWorkspaceSyncResult>();
+    mutateWorkspaceEntities.mockReturnValueOnce(mutation.promise);
+    const { result } = renderHook(() => useJobFinderWorkspace());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    let pending!: Promise<unknown>;
+    act(() => {
+      pending = requireReadyWorkspace(result.current).actions.queueJobForReview(
+        "initial-job",
+      );
+    });
+    await publishUpdate(result, final);
+    const held = requireReadyWorkspace(result.current).workspace;
+    await act(async () => {
+      mutation.resolve(older);
+      await pending;
+    });
+    expect(requireReadyWorkspace(result.current).workspace).toBe(held);
+    expect(syncWorkspace).toHaveBeenCalledTimes(2);
+    expect(getWorkspace).not.toHaveBeenCalled();
+  });
+
+  it.each([4, 5])(
+    "keeps four baselines and recovers only after revision 1 expires at %i",
+    async (latestRevision) => {
+      const initial = createWorkspace("initial-job");
+      const tracker = createJobFinderWorkspaceDeltaTracker();
+      syncWorkspace.mockResolvedValueOnce(tracker.synchronize(null, initial));
+      const mutation = deferred<JobFinderWorkspaceSyncResult>();
+      mutateWorkspaceEntities.mockReturnValueOnce(mutation.promise);
+      const { result } = renderHook(() => useJobFinderWorkspace());
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+      let pending!: Promise<unknown>;
+      act(() => {
+        pending = requireReadyWorkspace(
+          result.current,
+        ).actions.queueJobForReview("initial-job");
+      });
+      for (let revision = 2; revision <= latestRevision; revision += 1) {
+        const current = {
+          ...initial,
+          generatedAt: `2026-08-09T10:0${revision}:00.000Z`,
+        };
+        syncWorkspace.mockResolvedValueOnce(
+          parsedDelta(tracker.synchronize(revision - 1, current)),
+        );
+        await publishUpdate(result, current);
+      }
+      const recovered = createWorkspace(
+        "recovered-job",
+        "2026-08-09T10:07:00.000Z",
+      );
+      if (latestRevision === 5) {
+        syncWorkspace.mockResolvedValueOnce(snapshotResult(recovered, 7));
+      }
+      await act(async () => {
+        mutation.resolve({
+          kind: "delta",
+          delta: createJobReplacementDelta({
+            baseRevision: 1,
+            currentRevision: 6,
+            previousJobId: "initial-job",
+            currentJobId: "stale-job",
+          }),
+        });
+        await pending;
+      });
+      if (latestRevision === 5) {
+        expect(requireReadyWorkspace(result.current).workspace).toBe(recovered);
+        expect(syncWorkspace.mock.calls).toEqual([
+          [null],
+          [1],
+          [2],
+          [3],
+          [4],
+          [null],
+        ]);
+      } else {
+        expect(
+          requireReadyWorkspace(result.current).workspace
+            .selectedDiscoveryJobId,
+        ).toBe("stale-job");
+        expect(syncWorkspace.mock.calls).toEqual([[null], [1], [2], [3]]);
+      }
+      expect(getWorkspace).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "checkBrowserSession",
+    "resetWorkspace",
+    "runAgentDiscovery",
+  ] as const)(
+    "invalidates all held baselines after %s returns a bare snapshot",
+    async (action) => {
+      const initial = createWorkspace("initial-job");
+      const bare = createWorkspace("bare-job");
+      const recovered = createWorkspace("recovered-job");
+      syncWorkspace
+        .mockResolvedValueOnce(snapshotResult(initial, 1))
+        .mockResolvedValueOnce(snapshotResult(recovered, 4));
+      bareSnapshotAction.mockResolvedValueOnce(bare);
+      Object.assign(window.nordri.jobFinder as object, {
+        runAgentDiscovery: () => Promise.resolve({ snapshot: bare }),
+      });
+      mutateWorkspaceEntities.mockResolvedValueOnce({
+        kind: "delta",
+        delta: createJobReplacementDelta({
+          baseRevision: 1,
+          currentRevision: 3,
+          previousJobId: "initial-job",
+          currentJobId: "stale-job",
+        }),
+      });
+      const { result } = renderHook(() => useJobFinderWorkspace());
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+      await act(async () => {
+        await requireReadyWorkspace(result.current).actions[action]();
+      });
+      expect(requireReadyWorkspace(result.current).workspace).toBe(bare);
+      await act(async () => {
+        await requireReadyWorkspace(result.current).actions.queueJobForReview(
+          "bare-job",
+        );
+      });
+      expect(mutateWorkspaceEntities).toHaveBeenCalledWith({
+        baseRevision: null,
+        mutation: { type: "queue_job_for_review", jobId: "bare-job" },
+      });
+      expect(requireReadyWorkspace(result.current).workspace).toBe(recovered);
+      expect(syncWorkspace.mock.calls).toEqual([[null], [null]]);
+      expect(getWorkspace).not.toHaveBeenCalled();
+    },
+  );
+
+  it("starts an unrevisioned bootstrap with no claimed baseline", async () => {
+    const bootstrap = createWorkspace("bootstrap-job");
+    const recovered = createWorkspace("recovered-job");
+    Object.assign(window.nordri.jobFinder as object, {
+      getWorkspaceBootstrap: () => Promise.resolve(bootstrap),
+    });
+    syncWorkspace.mockResolvedValueOnce(snapshotResult(recovered, 4));
+    mutateWorkspaceEntities.mockResolvedValueOnce({
+      kind: "delta",
+      delta: createJobReplacementDelta({
+        baseRevision: 1,
+        currentRevision: 3,
+        previousJobId: "bootstrap-job",
+        currentJobId: "unheld-job",
+      }),
+    });
+    const { result } = renderHook(() => useJobFinderWorkspace());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      await requireReadyWorkspace(result.current).actions.queueJobForReview(
+        "bootstrap-job",
+      );
+    });
+    expect(mutateWorkspaceEntities.mock.calls[0]?.[0].baseRevision).toBeNull();
+    expect(requireReadyWorkspace(result.current).workspace).toBe(recovered);
+    expect(syncWorkspace.mock.calls).toEqual([[null]]);
+    expect(getWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("clears old baselines on recovery and retains the new revisioned snapshot", async () => {
+    const initial = createWorkspace("initial-job");
+    const recovered = createWorkspace("recovered-job");
+    const final = createWorkspace("final-job");
+    syncWorkspace
+      .mockResolvedValueOnce(snapshotResult(initial, 1))
+      .mockResolvedValueOnce(snapshotResult(recovered, 4))
+      .mockResolvedValueOnce(snapshotResult(final, 6));
+    mutateWorkspaceEntities
+      .mockResolvedValueOnce({
+        kind: "delta",
+        delta: createJobReplacementDelta({
+          baseRevision: 2,
+          currentRevision: 3,
+          previousJobId: "initial-job",
+          currentJobId: "gap-job",
+        }),
+      })
+      .mockResolvedValueOnce({
+        kind: "delta",
+        delta: createJobReplacementDelta({
+          baseRevision: 1,
+          currentRevision: 5,
+          previousJobId: "initial-job",
+          currentJobId: "stale-job",
+        }),
+      })
+      .mockResolvedValueOnce({
+        kind: "delta",
+        delta: createJobReplacementDelta({
+          baseRevision: 6,
+          currentRevision: 8,
+          previousJobId: "final-job",
+          currentJobId: "last-job",
+        }),
+      });
+    const { result } = renderHook(() => useJobFinderWorkspace());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    for (const jobId of ["initial-job", "recovered-job", "final-job"]) {
+      await act(async () => {
+        await requireReadyWorkspace(result.current).actions.queueJobForReview(
+          jobId,
+        );
+      });
+    }
+    expect(
+      mutateWorkspaceEntities.mock.calls.map(([input]) => input.baseRevision),
+    ).toEqual([1, 4, 6]);
+    expect(
+      requireReadyWorkspace(result.current).workspace.selectedDiscoveryJobId,
+    ).toBe("last-job");
+    expect(syncWorkspace.mock.calls).toEqual([[null], [null], [null]]);
+    expect(getWorkspace).not.toHaveBeenCalled();
+  });
+});
+
 describe("useJobFinderWorkspace entity mutations", () => {
   const syncWorkspace =
     vi.fn<
@@ -286,13 +695,14 @@ describe("useJobFinderWorkspace entity mutations", () => {
         input: JobFinderWorkspaceEntityMutationInput,
       ) => Promise<JobFinderWorkspaceSyncResult>
     >();
-  const getWorkspace = vi.fn<() => Promise<JobFinderWorkspaceSnapshot>>();
+  const getWorkspace =
+    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const getWorkspaceBootstrap =
-    vi.fn<() => Promise<JobFinderWorkspaceSnapshot>>();
+    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const checkBrowserSession =
-    vi.fn<() => Promise<JobFinderWorkspaceSnapshot>>();
+    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const legacyQueueJobForReview =
-    vi.fn<(jobId: string) => Promise<JobFinderWorkspaceSnapshot>>();
+    vi.fn<(jobId: string) => Promise<JobFinderRendererWorkspaceSnapshot>>();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -404,6 +814,55 @@ describe("useJobFinderWorkspace entity mutations", () => {
       ).toEqual(["job-new"]);
       expect(result.current.workspace.selectedDiscoveryJobId).toBe("job-new");
     }
+  });
+
+  it("commits one bulk shortlist delta for every selected ID without a full workspace read", async () => {
+    const initial = createWorkspace("job-old");
+    syncWorkspace.mockResolvedValueOnce({
+      kind: "snapshot",
+      currentRevision: 1,
+      reason: "initial",
+      snapshot: initial,
+    });
+    const jobIds = Array.from({ length: 50 }, (_, index) => `job-${index}`);
+    const delta = createJobReplacementDelta({
+      baseRevision: 1,
+      currentRevision: 2,
+      previousJobId: "job-old",
+      currentJobId: "job-49",
+    });
+    mutateWorkspaceEntities.mockResolvedValueOnce({ kind: "delta", delta });
+    const { result } = renderHook(() => useJobFinderWorkspace());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      await requireReadyWorkspace(result.current).actions.queueJobsForReview!(
+        jobIds,
+      );
+    });
+    expect(mutateWorkspaceEntities).toHaveBeenCalledExactlyOnceWith({
+      baseRevision: 1,
+      mutation: { type: "queue_jobs_for_review", jobIds },
+    });
+    expect(legacyQueueJobForReview).not.toHaveBeenCalled();
+    expect(getWorkspace).not.toHaveBeenCalled();
+    expect(
+      requireReadyWorkspace(result.current).workspace.discoveryJobs.map(
+        ({ id }) => id,
+      ),
+    ).toEqual(["job-49"]);
+    mutateWorkspaceEntities.mockResolvedValueOnce({
+      kind: "delta",
+      delta: { ...delta, baseRevision: 2, currentRevision: 3 },
+    });
+    await act(async () => {
+      await requireReadyWorkspace(result.current).actions.queueJobsForReview!([
+        "job-49",
+      ]);
+    });
+    expect(mutateWorkspaceEntities).toHaveBeenLastCalledWith({
+      baseRevision: 2,
+      mutation: { type: "queue_jobs_for_review", jobIds: ["job-49"] },
+    });
   });
 
   // PERF-03 / F33 durability contract. A mutation that answers with the typed
@@ -522,7 +981,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
 
   it("clears cancelled import progress and ignores progress delivered after settlement", async () => {
     const initialWorkspace = createWorkspace("job-import");
-    const importResponse = deferred<JobFinderWorkspaceSnapshot>();
+    const importResponse = deferred<JobFinderRendererWorkspaceSnapshot>();
     const progressListeners: Array<
       ((event: ResumeImportProgressEvent) => void) | undefined
     > = [];
@@ -530,7 +989,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
       vi.fn<
         (
           onProgress?: (event: ResumeImportProgressEvent) => void,
-        ) => Promise<JobFinderWorkspaceSnapshot>
+        ) => Promise<JobFinderRendererWorkspaceSnapshot>
       >();
     importResume.mockImplementation((onProgress) => {
       progressListeners.push(onProgress);
@@ -547,7 +1006,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
     const { result } = renderHook(() => useJobFinderWorkspace());
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    let importPromise!: Promise<JobFinderWorkspaceSnapshot>;
+    let importPromise!: Promise<JobFinderRendererWorkspaceSnapshot>;
     act(() => {
       if (result.current.status !== "ready") {
         throw new Error("Expected a ready Job Finder workspace.");
@@ -613,7 +1072,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
       kind: "delta",
       delta: createJobReplacementDelta({
         baseRevision: 2,
-        currentRevision: 3,
+        currentRevision: 5,
         previousJobId: "job-old",
         currentJobId: "job-stale",
       }),
@@ -663,8 +1122,8 @@ describe("useJobFinderWorkspace entity mutations", () => {
         reason: "initial",
         snapshot: newerWorkspace,
       });
-    const older = deferred<JobFinderWorkspaceSnapshot>();
-    const newer = deferred<JobFinderWorkspaceSnapshot>();
+    const older = deferred<JobFinderRendererWorkspaceSnapshot>();
+    const newer = deferred<JobFinderRendererWorkspaceSnapshot>();
     checkBrowserSession
       .mockImplementationOnce(() => older.promise)
       .mockImplementationOnce(() => newer.promise);
@@ -672,8 +1131,8 @@ describe("useJobFinderWorkspace entity mutations", () => {
     const { result } = renderHook(() => useJobFinderWorkspace());
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    let olderAction!: Promise<JobFinderWorkspaceSnapshot>;
-    let newerAction!: Promise<JobFinderWorkspaceSnapshot>;
+    let olderAction!: Promise<JobFinderRendererWorkspaceSnapshot>;
+    let newerAction!: Promise<JobFinderRendererWorkspaceSnapshot>;
     act(() => {
       if (result.current.status !== "ready") {
         throw new Error("Expected a ready Job Finder workspace.");
@@ -710,7 +1169,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
       "job-cancelled",
       "2026-08-09T10:05:00.000Z",
     );
-    const cancellation = deferred<JobFinderWorkspaceSnapshot>();
+    const cancellation = deferred<JobFinderRendererWorkspaceSnapshot>();
     const updateSync = deferred<JobFinderWorkspaceSyncResult>();
     const updateListeners: Array<() => void> = [];
     const cancelAgentDiscovery = vi.fn(() => cancellation.promise);
@@ -735,7 +1194,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
     const { result } = renderHook(() => useJobFinderWorkspace());
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    let cancellationPromise!: Promise<JobFinderWorkspaceSnapshot>;
+    let cancellationPromise!: Promise<JobFinderRendererWorkspaceSnapshot>;
     act(() => {
       cancellationPromise = requireReadyWorkspace(
         result.current,
@@ -746,7 +1205,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
     act(() => updateListeners[0]?.());
     await waitFor(() => expect(syncWorkspace).toHaveBeenCalledTimes(2));
 
-    let cancellationResult: JobFinderWorkspaceSnapshot | undefined;
+    let cancellationResult: JobFinderRendererWorkspaceSnapshot | undefined;
     await act(async () => {
       cancellation.resolve(cancelled);
       cancellationResult = await cancellationPromise;
@@ -767,9 +1226,69 @@ describe("useJobFinderWorkspace entity mutations", () => {
     expect(requireReadyWorkspace(result.current).workspace).toBe(cancelled);
   });
 
+  it("rests between update-driven syncs for twice as long as the last one took", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-09T10:00:00.000Z"));
+    const workspace = createWorkspace("job-searching");
+    const snapshotResult = (
+      currentRevision: number,
+    ): JobFinderWorkspaceSyncResult => ({
+      kind: "snapshot",
+      currentRevision,
+      reason: currentRevision === 1 ? "initial" : "stale_base",
+      snapshot: workspace,
+    });
+    const slowSync = deferred<JobFinderWorkspaceSyncResult>();
+    const updateListeners: Array<() => void> = [];
+    Object.assign(window.nordri.jobFinder as object, {
+      onWorkspaceUpdate: vi.fn((listener: () => void) => {
+        updateListeners.push(listener);
+        return () => undefined;
+      }),
+    });
+    syncWorkspace
+      .mockResolvedValueOnce(snapshotResult(1))
+      .mockReturnValueOnce(slowSync.promise)
+      .mockResolvedValue(snapshotResult(3));
+
+    const { result } = renderHook(() => useJobFinderWorkspace());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.status).toBe("ready");
+    expect(syncWorkspace).toHaveBeenCalledTimes(1);
+
+    // An update syncs at once; main takes a second to answer.
+    act(() => updateListeners[0]?.());
+    expect(syncWorkspace).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+      slowSync.resolve(snapshotResult(2));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // Updates arriving now wait out twice that second, then share one sync.
+    act(() => {
+      updateListeners[0]?.();
+      updateListeners[0]?.();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_990);
+    });
+    expect(syncWorkspace).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+    expect(syncWorkspace).toHaveBeenCalledTimes(3);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(syncWorkspace).toHaveBeenCalledTimes(3);
+  });
+
   it("shows the bootstrap before deferred collections arrive and then hydrates them", async () => {
     enableBootstrapApi();
-    const bootstrap: JobFinderWorkspaceSnapshot = {
+    const bootstrap: JobFinderRendererWorkspaceSnapshot = {
       ...createWorkspace("job-bootstrap"),
       discoveryJobs: [],
       selectedDiscoveryJobId: null,
@@ -815,7 +1334,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
 
   it("does not let late hydration overwrite a newer user action", async () => {
     enableBootstrapApi();
-    const bootstrap: JobFinderWorkspaceSnapshot = {
+    const bootstrap: JobFinderRendererWorkspaceSnapshot = {
       ...createWorkspace("job-bootstrap"),
       discoveryJobs: [],
       selectedDiscoveryJobId: null,
@@ -881,7 +1400,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
         phase: "bootstrap" as const,
         deferredCollections: ["discovery_jobs"] as const,
       },
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     getWorkspaceBootstrap.mockResolvedValueOnce(bootstrap);
     syncWorkspace.mockRejectedValueOnce(
       new Error("hydration sync unavailable"),
@@ -943,7 +1462,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
           resetsAt: "2026-08-09T10:00:01.000Z",
         },
       },
-    } as JobFinderWorkspaceSnapshot;
+    } as JobFinderRendererWorkspaceSnapshot;
     const refreshedWorkspace = {
       ...initialWorkspace,
       dashboard: {
@@ -956,7 +1475,7 @@ describe("useJobFinderWorkspace entity mutations", () => {
           resetsAt: "2026-08-10T10:00:01.000Z",
         },
       },
-    } as JobFinderWorkspaceSnapshot;
+    } as JobFinderRendererWorkspaceSnapshot;
     syncWorkspace.mockResolvedValue({
       kind: "snapshot",
       currentRevision: 1,
@@ -1029,13 +1548,16 @@ describe("useJobFinderWorkspace concurrency convergence", () => {
         input: JobFinderWorkspaceEntityMutationInput,
       ) => Promise<JobFinderWorkspaceSyncResult>
     >();
-  const getWorkspace = vi.fn<() => Promise<JobFinderWorkspaceSnapshot>>();
+  const getWorkspace =
+    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const getWorkspaceBootstrap =
-    vi.fn<() => Promise<JobFinderWorkspaceSnapshot>>();
+    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const checkBrowserSession =
-    vi.fn<() => Promise<JobFinderWorkspaceSnapshot>>();
+    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const saveProfile =
-    vi.fn<(profile: CandidateProfile) => Promise<JobFinderWorkspaceSnapshot>>();
+    vi.fn<
+      (profile: CandidateProfile) => Promise<JobFinderRendererWorkspaceSnapshot>
+    >();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1067,7 +1589,7 @@ describe("useJobFinderWorkspace concurrency convergence", () => {
 
   function createBootstrapPhaseWorkspace(
     jobId: string,
-  ): JobFinderWorkspaceSnapshot {
+  ): JobFinderRendererWorkspaceSnapshot {
     const base = createWorkspace(jobId);
     return {
       ...base,
@@ -1091,7 +1613,7 @@ describe("useJobFinderWorkspace concurrency convergence", () => {
   }
 
   function snapshotResult(
-    snapshot: JobFinderWorkspaceSnapshot,
+    snapshot: JobFinderRendererWorkspaceSnapshot,
     currentRevision = 1,
   ): JobFinderWorkspaceSyncResult {
     return { kind: "snapshot", currentRevision, reason: "initial", snapshot };
@@ -1099,7 +1621,7 @@ describe("useJobFinderWorkspace concurrency convergence", () => {
 
   function renderReadyWith(
     firstSync: { promise: Promise<JobFinderWorkspaceSyncResult> },
-    snapshot: JobFinderWorkspaceSnapshot,
+    snapshot: JobFinderRendererWorkspaceSnapshot,
     ...restResponses: Array<{ promise: Promise<JobFinderWorkspaceSyncResult> }>
   ) {
     queueSyncResponses(firstSync, ...restResponses);
@@ -1195,7 +1717,7 @@ describe("useJobFinderWorkspace concurrency convergence", () => {
     const initialSync = deferral<JobFinderWorkspaceSyncResult>();
     const backgroundRefresh = deferral<JobFinderWorkspaceSyncResult>();
     const convergenceFetch = deferral<JobFinderWorkspaceSyncResult>();
-    const actionResponse = deferral<JobFinderWorkspaceSnapshot>();
+    const actionResponse = deferral<JobFinderRendererWorkspaceSnapshot>();
 
     saveProfile.mockReturnValue(actionResponse.promise);
     const { result } = renderReadyWith(
@@ -1261,10 +1783,10 @@ describe("useJobFinderWorkspace concurrency convergence", () => {
     const supersedingSnapshot = createBootstrapPhaseWorkspace("job-old");
     const hydratedSnapshot = createWorkspace("job-old");
 
-    const bootstrap = deferral<JobFinderWorkspaceSnapshot>();
+    const bootstrap = deferral<JobFinderRendererWorkspaceSnapshot>();
     const hydrationFetch = deferral<JobFinderWorkspaceSyncResult>();
     const resumeFetch = deferral<JobFinderWorkspaceSyncResult>();
-    const actionResponse = deferral<JobFinderWorkspaceSnapshot>();
+    const actionResponse = deferral<JobFinderRendererWorkspaceSnapshot>();
 
     enableBootstrapApi();
     getWorkspaceBootstrap.mockReturnValue(bootstrap.promise);
@@ -1329,10 +1851,10 @@ describe("useJobFinderWorkspace concurrency convergence", () => {
     const supersedingSnapshot = createBootstrapPhaseWorkspace("job-old");
     const hydratedSnapshot = createWorkspace("job-old");
 
-    const bootstrap = deferral<JobFinderWorkspaceSnapshot>();
+    const bootstrap = deferral<JobFinderRendererWorkspaceSnapshot>();
     const hydrationFetch = deferral<JobFinderWorkspaceSyncResult>();
     const resumeFetch = deferral<JobFinderWorkspaceSyncResult>();
-    const actionResponse = deferral<JobFinderWorkspaceSnapshot>();
+    const actionResponse = deferral<JobFinderRendererWorkspaceSnapshot>();
 
     enableBootstrapApi();
     getWorkspaceBootstrap.mockReturnValue(bootstrap.promise);
@@ -1383,10 +1905,10 @@ describe("useJobFinderWorkspace concurrency convergence", () => {
     const bootstrapSnapshot = createBootstrapPhaseWorkspace("job-old");
     const supersedingSnapshot = createBootstrapPhaseWorkspace("job-old");
 
-    const bootstrap = deferral<JobFinderWorkspaceSnapshot>();
+    const bootstrap = deferral<JobFinderRendererWorkspaceSnapshot>();
     const hydrationFetch = deferral<JobFinderWorkspaceSyncResult>();
     const resumeFetch = deferral<JobFinderWorkspaceSyncResult>();
-    const actionResponse = deferral<JobFinderWorkspaceSnapshot>();
+    const actionResponse = deferral<JobFinderRendererWorkspaceSnapshot>();
 
     enableBootstrapApi();
     getWorkspaceBootstrap.mockReturnValue(bootstrap.promise);
@@ -1447,12 +1969,13 @@ describe("useJobFinderWorkspace resume claim confirmation action", () => {
     vi.fn<
       (baseRevision: number | null) => Promise<JobFinderWorkspaceSyncResult>
     >();
-  const getWorkspace = vi.fn<() => Promise<JobFinderWorkspaceSnapshot>>();
+  const getWorkspace =
+    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const setResumeClaimConfirmation =
     vi.fn<
       (
         input: JobFinderSetResumeClaimConfirmationInput,
-      ) => Promise<JobFinderWorkspaceSnapshot>
+      ) => Promise<JobFinderRendererWorkspaceSnapshot>
     >();
 
   beforeEach(() => {
@@ -1475,7 +1998,7 @@ describe("useJobFinderWorkspace resume claim confirmation action", () => {
   });
 
   function snapshotSyncResult(
-    snapshot: JobFinderWorkspaceSnapshot,
+    snapshot: JobFinderRendererWorkspaceSnapshot,
     currentRevision = 1,
   ): JobFinderWorkspaceSyncResult {
     return { kind: "snapshot", currentRevision, reason: "initial", snapshot };
@@ -1508,7 +2031,7 @@ describe("useJobFinderWorkspace resume claim confirmation action", () => {
   it("never lets a stale claim-confirmation response overwrite a newer commit", async () => {
     const initial = createWorkspace("job_1");
     const newer = createWorkspace("job_1", "2026-08-09T10:06:00.000Z");
-    const staleResponse = deferred<JobFinderWorkspaceSnapshot>();
+    const staleResponse = deferred<JobFinderRendererWorkspaceSnapshot>();
     syncWorkspace
       .mockResolvedValueOnce(snapshotSyncResult(initial))
       .mockResolvedValueOnce(snapshotSyncResult(newer, 2));

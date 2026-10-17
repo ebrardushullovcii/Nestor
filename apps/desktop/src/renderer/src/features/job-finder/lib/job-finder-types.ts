@@ -52,7 +52,7 @@ import type {
   SetCompanyPreferenceInput,
   SetJobFinderActivityControlInput,
   SetOutcomeSuggestionEnabledInput,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   JobSourceAdapterKind,
   ProfileCopilotContext,
   ProfileSetupReviewAction,
@@ -116,17 +116,21 @@ export type JobFinderAutoApplyQueueStartOutcome =
   | { status: "unknown" };
 
 export interface JobFinderShellActions {
-  analyzeProfileFromResume: () => Promise<JobFinderWorkspaceSnapshot>;
+  analyzeProfileFromResume: () => Promise<JobFinderRendererWorkspaceSnapshot>;
   openBrowserSession: (
     input?: JobFinderOpenBrowserSessionInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
-  checkBrowserSession: () => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  checkBrowserSession: () => Promise<JobFinderRendererWorkspaceSnapshot>;
   performUserAction: (
     command: UserActionCommandInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
-  refreshWorkspace: () => Promise<JobFinderWorkspaceSnapshot>;
-  resetWorkspace: () => Promise<JobFinderWorkspaceSnapshot>;
-  resetBrowser: () => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  refreshWorkspace: () => Promise<JobFinderRendererWorkspaceSnapshot>;
+  /** Judges every job of the plan that has no fit verdict yet. */
+  judgeUnjudgedJobs?: () => Promise<JobFinderRendererWorkspaceSnapshot>;
+  /** A paced background refresh; never stacks on another one. */
+  requestWorkspaceRefresh?: () => void;
+  resetWorkspace: () => Promise<JobFinderRendererWorkspaceSnapshot>;
+  resetBrowser: () => Promise<JobFinderRendererWorkspaceSnapshot>;
   runAgentDiscovery: (
     onActivity?: (event: DiscoveryActivityEvent) => void,
     targetId?: string,
@@ -134,12 +138,12 @@ export interface JobFinderShellActions {
   ) => Promise<JobFinderAgentDiscoveryResult>;
   cancelAgentDiscovery: (
     input: JobFinderDiscoveryCancellationInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   runSourceDebug: (
     targetId: string,
     onProgress?: (event: SourceDebugProgressEvent) => void,
     options?: { readabilityTimeoutMs?: number },
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   getSourceDebugRunDetails: (runId: string) => Promise<SourceDebugRunDetails>;
   getApplyRunDetails: (
     input: JobFinderApplyRunDetailsQuery,
@@ -152,13 +156,13 @@ export interface JobFinderShellActions {
   ) => Promise<ApplyRunDetails>;
   projectGroupedManualAnswer: (
     command: ProjectGroupedManualAnswerCommand,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   applyGroupedManualAnswer: (
     input: ApplyGroupedManualAnswerInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   snoozeGroupedDecision: (
     input: SnoozeGroupedDecisionInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   exportApplicationPacket: (
     input: JobFinderApplyRunDetailsQuery,
   ) => Promise<JobFinderApplicationPacketExportResult>;
@@ -168,182 +172,204 @@ export interface JobFinderShellActions {
   saveSourceInstructionArtifact: (
     targetId: string,
     artifact: EditableSourceInstructionArtifact,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   acceptSourceInstructionDraft: (
     targetId: string,
     instructionId: string,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   verifySourceInstructions: (
     targetId: string,
     instructionId: string,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   importResume: (options?: {
     retryInterrupted?: boolean;
-  }) => Promise<JobFinderWorkspaceSnapshot>;
+  }) => Promise<JobFinderRendererWorkspaceSnapshot>;
   saveProfile: (
     profile: CandidateProfile,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   saveWorkspaceInputs: (
     profile: CandidateProfile,
     searchPreferences: JobSearchPreferences,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   saveSearchPreferences: (
     searchPreferences: JobSearchPreferences,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   saveCampaign: (
     campaign: SaveJobSearchCampaignInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
-  selectCampaign: (campaignId: string) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  selectCampaign: (
+    campaignId: string,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   runCampaignNow: (
     campaignId?: string | null,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   markCampaignNotificationRead: (
     notificationId: string,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
-  markAllCampaignNotificationsRead: () => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  markAllCampaignNotificationsRead: () => Promise<JobFinderRendererWorkspaceSnapshot>;
   saveCampaignRule: (
     campaignId: string,
     rule: SaveCampaignRuleInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   deleteCampaignRule: (
     campaignId: string,
     ruleId: string,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   deleteCampaign: (campaignId: string) => Promise<boolean>;
   toggleCampaignRule: (
     campaignId: string,
     ruleId: string,
     enabled: boolean,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   projectCampaignRuleFunnel: (
     campaignId: string,
   ) => Promise<CampaignRuleFunnelProjection>;
   setActivityControl: (
     input: SetJobFinderActivityControlInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   mutateRapidReview: (
     input: RapidReviewMutationInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   recordOutcome: (
     input: RecordOutcomeInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   saveResumeStrategy: (
     input: SaveResumeStrategyInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   disableResumeStrategy: (
     strategyId: string,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   selectResumeStrategy: (
     input: SelectResumeStrategyInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   recommendResumeStrategy: (
     input: RecommendResumeStrategyInput,
   ) => Promise<ResumeStrategyRecommendation>;
   setCampaignResumeStrategyDefault: (
     input: SetCampaignResumeStrategyDefaultInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
-  refreshCompanyIntelligence: () => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  refreshCompanyIntelligence: () => Promise<JobFinderRendererWorkspaceSnapshot>;
   setCompanyPreference: (
     input: SetCompanyPreferenceInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   reviewCompanyMerge: (
     input: ReviewCompanyMergeInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   mutateCompanyIntelligence: (
     input: CompanyIntelligenceMutationInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   setOutcomeSuggestionEnabled: (
     input: SetOutcomeSuggestionEnabledInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   mutateSafeguards: (
     input: SafeguardMutationInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   saveSettings: (
     settings: JobFinderSettings,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   updateApplicationDefaults: (
     input: UpdateApplicationDefaultsInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   updateWorkspaceBehavior: (
     input: UpdateWorkspaceBehaviorInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   updateAiBehavior: (
     input: UpdateAiBehaviorInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   updateAppearanceTheme: (
     appearanceTheme: AppearanceTheme,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   updateTrackerCrm: (
     applicationCrm: ApplicationCrmSettings,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   saveProfileSetupState: (
     profileSetupState: ProfileSetupState,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   applyProfileSetupReviewAction: (
     reviewItemId: string,
     action: ProfileSetupReviewAction,
     options?: ProfileSetupReviewActionOptions,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   applyResumeTimelineRepairAction: (
     runId: string,
     proposalId: string,
     action: ResumeTimelineRepairAction,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   sendProfileCopilotMessage: (
     content: string,
     context?: ProfileCopilotContext,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   applyProfileCopilotPatchGroup: (
     patchGroupId: string,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   rejectProfileCopilotPatchGroup: (
     patchGroupId: string,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   undoProfileRevision: (
     revisionId: string,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
-  assessJobListing: (jobId: string) => Promise<JobFinderWorkspaceSnapshot>;
-  queueJobForReview: (jobId: string) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  assessJobListing: (
+    jobId: string,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  queueJobForReview: (
+    jobId: string,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  queueJobsForReview?: (
+    jobIds: readonly string[],
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  removeJobsFromReview?: (
+    jobIds: readonly string[],
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  dismissDiscoveryJobs?: (
+    jobIds: readonly string[],
+    reasons: readonly DiscoveryFeedbackReason[],
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   setJobResumeApplicationMode: (
     jobId: string,
     resumeApplicationMode: ResumeApplicationMode,
     resumeTailoringMode?: TailoringMode | null,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
-  removeJobFromReview: (jobId: string) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  removeJobFromReview: (
+    jobId: string,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   dismissDiscoveryJob: (
     jobId: string,
     reasons: readonly DiscoveryFeedbackReason[],
     action?: "hide_job" | "hide_and_exclude_employer",
     expectedNormalizedCompanyName?: string | null,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   previewEmployerExclusion: (
     jobId: string,
   ) => Promise<EmployerExclusionPreview>;
   removeEmployerExclusion: (
     input: RemoveEmployerExclusionInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   restoreDismissedDiscoveryJob: (
     jobId: string,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   getResumeWorkspace: (jobId: string) => Promise<JobFinderResumeWorkspace>;
   previewResumeDraft: (
     draft: ResumeDraft,
     requestId?: string,
   ) => Promise<JobFinderResumePreview>;
-  saveResumeDraft: (draft: ResumeDraft) => Promise<JobFinderWorkspaceSnapshot>;
-  regenerateResumeDraft: (jobId: string) => Promise<JobFinderWorkspaceSnapshot>;
+  saveResumeDraft: (
+    draft: ResumeDraft,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  regenerateResumeDraft: (
+    jobId: string,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   regenerateResumeSection: (
     jobId: string,
     sectionId: string,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   restoreResumeDraftRevision: (
     jobId: string,
     revisionId: string,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   undoResumeAssistantEdit: (
     jobId: string,
     revisionId: string,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   exportResumePdf: (
     jobId: string,
     intent?: ResumePdfExportIntent,
@@ -357,18 +383,20 @@ export interface JobFinderShellActions {
   approveResume: (
     jobId: string,
     exportId: string,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
-  clearResumeApproval: (jobId: string) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  clearResumeApproval: (
+    jobId: string,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   setWorkHistoryReviewAcknowledgment: (
     input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   setResumeClaimConfirmation: (
     input: JobFinderSetResumeClaimConfirmationInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   applyResumePatch: (
     patch: ResumeDraftPatch,
     revisionReason?: string | null,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   getResumeAssistantMessages: (
     jobId: string,
   ) => Promise<readonly ResumeAssistantMessage[]>;
@@ -382,52 +410,54 @@ export interface JobFinderShellActions {
     action: "accept" | "reject",
     patchIds: readonly string[],
   ) => Promise<readonly ResumeAssistantMessage[]>;
-  generateResume: (jobId: string) => Promise<JobFinderWorkspaceSnapshot>;
+  generateResume: (
+    jobId: string,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   startApplyCopilotRun: (
     input: JobFinderApplyCopilotActionInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   startAutoApplyRun: (
     input: JobFinderApplicationStartTarget,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   startAutoApplyQueueRun: (
     jobIds: JobFinderApplyQueueActionInput["jobIds"],
     applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   approveApplyRun: (
     input: JobFinderApplyRunActionInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   cancelApplyRun: (
     input: JobFinderApplyRunActionInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   resolveApplyConsentRequest: (
     input: JobFinderApplyConsentActionInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   revokeApplyRunApproval: (
     input: JobFinderApplyRunActionInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   focusPreparedApplicationPage: (
     input: JobFinderPreparedApplicationPageInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   /** Sends one application the person has already looked over. */
   submitPreparedApplication: (input: {
     jobId: string;
-  }) => Promise<JobFinderWorkspaceSnapshot>;
+  }) => Promise<JobFinderRendererWorkspaceSnapshot>;
   /** Send for me: sends each filled-in form under one permission. */
   sendPreparedApplications: (input: {
     jobIds: string[];
-  }) => Promise<JobFinderWorkspaceSnapshot>;
+  }) => Promise<JobFinderRendererWorkspaceSnapshot>;
   approveApply: (
     input: JobFinderApplicationStartTarget,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   mutateApplicationCrm: (
     input: ApplicationCrmMutationInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   mutateApplicationCrmBulkStage: (
     input: ApplicationCrmBulkStageMutationInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   runApplicationNoResponseAutomation: (
     settings?: ApplicationCrmSettings,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   exportApplicationCrm: (
     input: ApplicationCrmExportInput,
   ) => Promise<ApplicationCrmFileExportResult>;

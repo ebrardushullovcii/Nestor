@@ -284,16 +284,23 @@ it("reads and judges supplied and selected jobs first within the per-search budg
   expect(reads.slice(0, 2)).toEqual(
     expect.arrayContaining([jobs[63]!.canonicalUrl, jobs[64]!.canonicalUrl]),
   );
-  // ADR 0041 budgets: at most 60 listing reads and 100 fit judgments per
-  // search; the rest are read and judged on the next search.
+  // ADR 0041 budgets: at most 60 listing reads per search, and at most 100
+  // fit judgments of older jobs the search did not find and the person did
+  // not pick; the rest are read and judged on the next search.
   expect(reads.length).toBeLessThanOrEqual(60);
   const judgedIds = world.judge.mock.calls.flatMap(([input]) =>
     input.jobs.map((job) => job.jobId),
   );
-  expect(judgedIds.length).toBeLessThanOrEqual(100);
+  const priorIds = new Set(jobs.map((job) => job.id));
+  const olderJudged = judgedIds.filter(
+    (jobId) =>
+      priorIds.has(jobId) && jobId !== jobs[63]!.id && jobId !== jobs[64]!.id,
+  );
+  expect(olderJudged.length).toBe(100);
   expect(judgedIds).toEqual(
     expect.arrayContaining([jobs[63]!.id, jobs[64]!.id]),
   );
+  expect(new Set(judgedIds).size).toBe(judgedIds.length);
 });
 
 it("uses the selected plan's roles when a person assesses a listing", async () => {

@@ -162,11 +162,10 @@ export function deriveSourceAccessPrompts(input: {
 
     const requiredDetail =
       hardLoginSignals.find(isHardLoginRequirement) ?? null;
-    const learnedStartingUrls = buildDiscoveryStartingUrls(
-      target,
-      activeInstruction,
-    );
-    const resolvedTargetUrl = learnedStartingUrls[0] ?? target.startingUrl;
+    // Resolving learned routes parses every URL a source has learned; most of
+    // hundreds of sources need no prompt, so it waits until one is due.
+    const learnedStartingUrls = () =>
+      buildDiscoveryStartingUrls(target, activeInstruction);
     const updatedAt =
       latestRun?.updatedAt ?? activeInstruction?.updatedAt ?? input.generatedAt;
 
@@ -180,7 +179,7 @@ export function deriveSourceAccessPrompts(input: {
         {
           targetId: target.id,
           targetLabel: target.label,
-          targetUrl: resolvedTargetUrl,
+          targetUrl: learnedStartingUrls()[0] ?? target.startingUrl,
           state: "prompt_login_required" as const,
           summary: promptCopy.summary,
           detail: requiredDetail,
@@ -199,7 +198,8 @@ export function deriveSourceAccessPrompts(input: {
       return [];
     }
 
-    if (learnedStartingUrls.length === 0) {
+    const startingUrls = learnedStartingUrls();
+    if (startingUrls.length === 0) {
       return [];
     }
 
@@ -212,7 +212,7 @@ export function deriveSourceAccessPrompts(input: {
       {
         targetId: target.id,
         targetLabel: target.label,
-        targetUrl: resolvedTargetUrl,
+        targetUrl: startingUrls[0] ?? target.startingUrl,
         state: "prompt_login_recommended" as const,
         summary: promptCopy.summary,
         detail: recommendationDetail,

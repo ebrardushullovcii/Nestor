@@ -453,6 +453,27 @@ function entryConflictsWithFallback(
   return false;
 }
 
+/**
+ * The writer decides how much of a role this job needs: the most relevant
+ * role can carry more than the built-in three, and the achievements it leaves
+ * out stay on the person's draft, hidden.
+ */
+const WRITER_MAX_BULLETS_PER_ROLE = 6;
+
+/** Record IDs of the roles or projects the writer left off for this job. */
+function collectWriterHiddenRecordIds(entries: unknown): Set<string> {
+  const hidden = new Set<string>();
+  if (!Array.isArray(entries)) return hidden;
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as { hidden?: unknown; profileRecordId?: unknown };
+    if (record.hidden === true && typeof record.profileRecordId === "string") {
+      hidden.add(record.profileRecordId.trim());
+    }
+  }
+  return hidden;
+}
+
 function normalizeExperienceEntries(
   entries: Array<{
     title?: string | null;
@@ -586,6 +607,7 @@ function normalizeExperienceEntries(
       canonicalEvidence?.bullets ?? [],
       rewriteContext,
       allowedScope,
+      WRITER_MAX_BULLETS_PER_ROLE,
     );
 
     return {
@@ -864,14 +886,40 @@ export function completeTailoredResumeDraft(
           rewriteContext,
         )
       : fallback.experienceEntries;
-  const projectEntries =
+  const hiddenProjectIds = collectWriterHiddenRecordIds(
+    normalizedPrimary.projectEntries,
+  );
+  const projectEntries = (
     sanitizedProjectEntries.length > 0
       ? normalizeProjectEntries(
           sanitizedProjectEntries,
           fallback.projectEntries,
           rewriteContext,
         )
-      : fallback.projectEntries;
+      : fallback.projectEntries
+  ).filter(
+    (entry) =>
+      !entry.profileRecordId || !hiddenProjectIds.has(entry.profileRecordId),
+  );
+  // A role the writer left off stays on the draft, hidden, for the person to
+  // show again; it is never removed from the record.
+  const hiddenRoleIds = collectWriterHiddenRecordIds(
+    normalizedPrimary.experienceEntries,
+  );
+  const coverageMetadata = fallback.coverageMetadata.map((decision) =>
+    hiddenRoleIds.has(decision.profileRecordId) &&
+    (decision.classification === "detailed" ||
+      decision.classification === "compact")
+      ? {
+          ...decision,
+          classification: "suggested_hidden" as const,
+          reasons: [
+            ...decision.reasons,
+            "The writer left this role off for this job.",
+          ],
+        }
+      : decision,
+  );
   const generationProvenance = describeModelDraftProvenance(quality, notes);
   const languages = fallback.languages;
   const fullText = composeDeterministicFullText({
@@ -902,7 +950,7 @@ export function completeTailoredResumeDraft(
     experienceHighlights,
     coreSkills: finalCoreSkills,
     targetedKeywords,
-    coverageMetadata: fallback.coverageMetadata,
+    coverageMetadata,
     experienceEntries,
     projectEntries,
     educationEntries: fallback.educationEntries,
@@ -937,7 +985,7 @@ function describeModelDraftProvenance(
     if (deterministicNoteIndex >= 0) {
       notes.splice(deterministicNoteIndex, 1);
     }
-    const detail = `Created with AI: ${accepted} ${accepted === 1 ? "line" : "lines"} in the model's own wording, each checked against your saved evidence; a line your evidence does not back is listed for you to fix or confirm.`;
+    const detail = `Created with AI: ${accepted} ${accepted === 1 ? "line" : "lines"} in the model's own wording, each checked against your saved evidence.`;
     notes.unshift(detail);
     return { method: "ai", reason: null, detail };
   }

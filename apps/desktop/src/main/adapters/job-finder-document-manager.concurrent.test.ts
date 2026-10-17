@@ -5,6 +5,8 @@ import { expect, test, vi } from "vitest";
 import { createLocalJobFinderDocumentManager } from "./job-finder-document-manager";
 import { createApplyQueueDemoState } from "./job-finder-demo-state";
 
+vi.mock("electron", () => ({ BrowserWindow: vi.fn() }));
+
 test("simultaneous resumes for one employer keep separate files and contents", async () => {
   const outputDirectory = await mkdtemp(
     path.join(tmpdir(), "resume-concurrent-"),

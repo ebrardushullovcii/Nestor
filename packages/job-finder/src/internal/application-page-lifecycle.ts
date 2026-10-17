@@ -80,15 +80,20 @@ async function releaseApplicationPages(input: {
       ? { applicationRecordId: input.applicationRecordId }
       : {}),
   });
+  if (results.length === 0) return;
   const [jobs, runs] = await Promise.all([
-    input.repository.listSavedJobs(),
+    input.repository.listSavedJobsByIds([
+      ...new Set(results.map((result) => result.jobId)),
+    ]),
     input.repository.listApplyRuns(
       input.runId ? { id: input.runId } : undefined,
     ),
   ]);
+  const jobsById = new Map(jobs.map((job) => [job.id, job]));
+  const runsById = new Map(runs.map((run) => [run.id, run]));
   for (const result of results) {
-    const job = jobs.find((entry) => entry.id === result.jobId);
-    const run = runs.find((entry) => entry.id === result.runId);
+    const job = jobsById.get(result.jobId);
+    const run = runsById.get(result.runId);
     const unfinishedInTerminalRun =
       (run?.state === "cancelled" || run?.state === "failed") &&
       ["planned", "question_capture", "filling", "submitting"].includes(

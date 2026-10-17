@@ -60,11 +60,20 @@ export function mergeResumeBatchCheckpoints(
       done: false,
       running: unfinished.some((batch) => batch.running),
       stopRequested: unfinished.every((batch) => batch.stopRequested),
+      ...(unfinished.find((batch) => batch.providerBlock)?.providerBlock
+        ? {
+            providerBlock: unfinished.find((batch) => batch.providerBlock)!
+              .providerBlock,
+          }
+        : {}),
     } satisfies ResumeBatchCheckpoint,
   };
 }
 
 const liveBatches = new WeakMap<object, Set<string>>();
+export function clearResumeBatchLiveness(repository: object): void {
+  liveBatches.delete(repository);
+}
 export function markResumeBatchRunning(
   repository: object,
   batch: ResumeBatchCheckpoint,

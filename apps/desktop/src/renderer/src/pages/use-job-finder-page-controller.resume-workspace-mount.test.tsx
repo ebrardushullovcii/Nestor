@@ -6,14 +6,14 @@ import {
   getDefaultCampaignConfiguration,
   JobFinderResumeWorkspaceSchema,
   JobFinderSettingsSchema,
-  JobFinderWorkspaceSnapshotSchema,
+  JobFinderRendererWorkspaceSnapshotSchema,
   JobSearchCampaignSchema,
   JobSearchPreferencesSchema,
   ResumeDraftSchema,
 } from "@nordri/contracts";
 import type {
   JobFinderResumeWorkspace,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ResumeAssistantMessage,
 } from "@nordri/contracts";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
@@ -59,7 +59,7 @@ function createReviewQueueItem(jobId: string) {
   };
 }
 
-function createBaseSnapshot(): JobFinderWorkspaceSnapshot {
+function createBaseSnapshot(): JobFinderRendererWorkspaceSnapshot {
   const generatedAt = "2026-08-20T00:00:00.000Z";
   const profile = createFreshStartCandidateProfile();
   const searchPreferences = JobSearchPreferencesSchema.parse({
@@ -108,7 +108,7 @@ function createBaseSnapshot(): JobFinderWorkspaceSnapshot {
     progress: { lastUpdatedAt: generatedAt },
     history: [],
   });
-  return JobFinderWorkspaceSnapshotSchema.parse({
+  return JobFinderRendererWorkspaceSnapshotSchema.parse({
     module: "job-finder",
     generatedAt,
     hydration: { phase: "complete", deferredCollections: [] },
@@ -208,7 +208,7 @@ function createBaseSnapshot(): JobFinderWorkspaceSnapshot {
   });
 }
 
-function createWorkspace(): JobFinderWorkspaceSnapshot {
+function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
   return createBaseSnapshot();
 }
 

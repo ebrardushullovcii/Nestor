@@ -753,6 +753,57 @@ export const MatchAssessmentSchema = z.object({
 });
 export type MatchAssessment = z.infer<typeof MatchAssessmentSchema>;
 
+/**
+ * The fit facts a job list shows: score, verdict, states and the short
+ * reasons. The written explanations and evidence stay in the job detail, so
+ * thousands of rows do not carry them across IPC.
+ */
+export const JobListMatchAssessmentSchema = MatchAssessmentSchema.extend({
+  compensationFit: CompensationFitAssessmentSchema.omit({
+    explanation: true,
+  }).default({}),
+  dimensions: z
+    .object({
+      roleSuitability: RoleSuitabilityAssessmentSchema.pick({
+        state: true,
+      }).default({}),
+      preferenceAlignment: PreferenceAlignmentAssessmentSchema.pick({
+        state: true,
+      }).default({}),
+      applicationEffort: ApplicationEffortAssessmentSchema.pick({
+        level: true,
+      }).default({}),
+      evidenceConfidence: EvidenceConfidenceAssessmentSchema.omit({
+        explanation: true,
+        evidence: true,
+      }).default({}),
+    })
+    .default({}),
+  requirements: z
+    .array(
+      JobRequirementAssessmentSchema.pick({
+        id: true,
+        category: true,
+        label: true,
+        importance: true,
+        status: true,
+      }),
+    )
+    .default([]),
+  judgment: FitJudgmentSchema.omit({
+    contextFingerprint: true,
+    postingFingerprint: true,
+    roleExplanation: true,
+    preferencesExplanation: true,
+    listingClosedEvidence: true,
+  })
+    .nullable()
+    .optional(),
+});
+export type JobListMatchAssessment = z.infer<
+  typeof JobListMatchAssessmentSchema
+>;
+
 export const matchAssessmentInputChangeCodeValues = [
   "scorer_version_changed",
   "candidate_context_changed",
@@ -1620,6 +1671,83 @@ export const DiscoveryJobViewSchema = SavedJobSchema.and(
 );
 export type DiscoveryJobView = z.infer<typeof DiscoveryJobViewSchema>;
 
+/** List identity and workflow facts. Full listing evidence is read on demand. */
+const JobListRowObjectSchema = JobPostingSchema.pick({
+  source: true,
+  sourceJobId: true,
+  discoveryMethod: true,
+  collectionMethod: true,
+  canonicalUrl: true,
+  applicationUrl: true,
+  title: true,
+  company: true,
+  location: true,
+  workMode: true,
+  applyPath: true,
+  easyApplyEligible: true,
+  postedAt: true,
+  postedAtText: true,
+  providerUpdatedAt: true,
+  discoveredAt: true,
+  firstSeenAt: true,
+  lastSeenAt: true,
+  lastVerifiedActiveAt: true,
+  salaryText: true,
+  normalizedCompensation: true,
+  detailQuality: true,
+  listingDetailCapture: true,
+  seniority: true,
+  employmentType: true,
+  employerDomain: true,
+}).extend({
+  id: NonEmptyStringSchema,
+  campaignIds: z.array(NonEmptyStringSchema).default([]),
+  personSupplied: z.boolean().optional(),
+  status: ApplicationStatusSchema,
+  matchAssessment: JobListMatchAssessmentSchema,
+  provenance: z
+    .array(SavedJobDiscoveryProvenanceSchema.omit({ listingFacts: true }))
+    .default([]),
+  discoveryFeedback: DiscoveryFeedbackSchema.nullable().default(null),
+  resumeApplicationMode: ResumeApplicationModeSchema.nullable().default(null),
+  resumeTailoringMode: TailoringModeSchema.nullable().default(null),
+  listingActivity: ListingActivitySchema.default({ status: "unknown" }),
+  /** Changes whenever omitted detail evidence changes; never contains that evidence. */
+  detailRevision: NonEmptyStringSchema.optional(),
+  rescoredAfterListingRead: z.boolean().optional(),
+});
+type JobListRowParsed = z.infer<typeof JobListRowObjectSchema>;
+export type JobListRow = Omit<
+  JobListRowParsed,
+  "campaignIds" | "resumeTailoringMode" | "listingActivity"
+> & {
+  campaignIds?: string[];
+  resumeTailoringMode?: JobListRowParsed["resumeTailoringMode"];
+  listingActivity?: ListingActivity;
+};
+export const JobListRowSchema: z.ZodType<
+  JobListRow,
+  z.ZodTypeDef,
+  z.input<typeof JobListRowObjectSchema>
+> = JobListRowObjectSchema;
+
+export const JobFinderJobDetailQuerySchema = z
+  .object({
+    jobId: NonEmptyStringSchema,
+    planId: NonEmptyStringSchema.nullable(),
+  })
+  .strict();
+export type JobFinderJobDetailQuery = z.infer<
+  typeof JobFinderJobDetailQuerySchema
+>;
+export const JobFinderJobDetailSchema = z
+  .object({
+    job: SavedJobSchema,
+    planId: NonEmptyStringSchema.nullable(),
+  })
+  .strict();
+export type JobFinderJobDetail = z.infer<typeof JobFinderJobDetailSchema>;
+
 export const TailoredAssetPreviewSectionSchema = z.object({
   heading: NonEmptyStringSchema,
   lines: z.array(NonEmptyStringSchema).default([]),
@@ -1652,6 +1780,21 @@ export const TailoredAssetSchema = z.object({
   failedAt: IsoDateTimeSchema.nullable().default(null),
 });
 export type TailoredAsset = z.infer<typeof TailoredAssetSchema>;
+
+/** List metadata; complete text and preview sections are loaded by asset id. */
+export const TailoredAssetSummarySchema = TailoredAssetSchema.omit({
+  contentText: true,
+  previewSections: true,
+}).strict();
+export type TailoredAssetSummary = z.infer<typeof TailoredAssetSummarySchema>;
+
+export const JobFinderTailoredAssetQuerySchema = z
+  .object({
+    assetId: NonEmptyStringSchema,
+  })
+  .strict();
+export const JobFinderTailoredAssetDetailSchema =
+  TailoredAssetSchema.nullable();
 
 export const ReviewQueueResumeReviewStateSchema = z.discriminatedUnion(
   "status",
@@ -1713,6 +1856,12 @@ export const ReviewQueueItemSchema = z.object({
    * when nothing is waiting.
    */
   resumeLinesToDecide: z.number().int().min(0).optional(),
+  /**
+   * The saved resume kept the person's wording because the listing text was
+   * missing or said nothing specific when it was written. Nothing was
+   * tailored, so a batch may write it again once the listing can be read.
+   */
+  resumeWrittenWithoutListing: z.boolean().optional(),
   updatedAt: IsoDateTimeSchema,
 });
 export type ReviewQueueItem = z.infer<typeof ReviewQueueItemSchema>;
@@ -2085,6 +2234,17 @@ export const ApplicationAttemptSchema = z.object({
 });
 export type ApplicationAttempt = z.infer<typeof ApplicationAttemptSchema>;
 export type ApplicationAttemptInput = z.input<typeof ApplicationAttemptSchema>;
+
+/** Current attempt facts; historical visual/checkpoint bodies stay in storage. */
+export const ApplicationAttemptListRowSchema = ApplicationAttemptSchema.omit({
+  checkpoints: true,
+  visualEvidence: true,
+  visualObservationSets: true,
+  visualCheckpoints: true,
+}).strict();
+export type ApplicationAttemptListRow = z.infer<
+  typeof ApplicationAttemptListRowSchema
+>;
 
 /**
  * One use of a model during application preparation, for the privacy

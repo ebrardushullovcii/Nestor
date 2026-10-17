@@ -2,8 +2,10 @@ import {
   type CSSProperties,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
+  useTransition,
 } from "react";
 import type {
   DesktopWindowControlsState,
@@ -13,7 +15,8 @@ import type {
   InterviewOverlaySnapshot,
   SaveInterviewSetupInput,
   InterviewTranscriptSource,
-  InterviewWorkspaceSnapshot,
+  InterviewWorkspaceView,
+  InterviewLiveSession,
 } from "@nordri/contracts";
 import {
   Archive,
@@ -22,6 +25,7 @@ import {
   Clock,
   FileDown,
   ListChecks,
+  LoaderCircle,
   Minus,
   PanelTop,
   Pause,
@@ -57,7 +61,7 @@ type LoadState =
   | { status: "loading" }
   | {
       status: "ready";
-      workspace: InterviewWorkspaceSnapshot;
+      workspace: InterviewWorkspaceView;
       exportResult: InterviewExportResult | null;
     }
   | { status: "error"; message: string };
@@ -111,11 +115,11 @@ function Panel(props: {
   );
 }
 
-function getTargetLabel(workspace: InterviewWorkspaceSnapshot) {
+function getTargetLabel(workspace: InterviewWorkspaceView) {
   return workspace.setup.targetContext?.label ?? "General interview";
 }
 
-function getInitialInterviewTab(workspace: InterviewWorkspaceSnapshot) {
+function getInitialInterviewTab(workspace: InterviewWorkspaceView) {
   if (workspace.activeSession && workspace.activeSession.status !== "ended") {
     return "assist";
   }
@@ -257,6 +261,15 @@ export function LiveAssistantPage() {
   const [deleteSessionError, setDeleteSessionError] = useState<string | null>(
     null,
   );
+  const [reviewedSession, setReviewedSession] =
+    useState<InterviewLiveSession | null>(null);
+  const [reviewLoadError, setReviewLoadError] = useState<string | null>(null);
+  const [reviewTranscriptPage, setReviewTranscriptPage] = useState(1);
+  const [isTranscriptPagePending, startTranscriptPageTransition] =
+    useTransition();
+  const transcriptPreviousRef = useRef<HTMLButtonElement>(null);
+  const transcriptNextRef = useRef<HTMLButtonElement>(null);
+  const transcriptPageFocusRef = useRef<"previous" | "next" | null>(null);
   const [followUpDraft, setFollowUpDraft] = useState("");
   const [jobFinderWriteBackStatus, setJobFinderWriteBackStatus] = useState<
     string | null
@@ -287,7 +300,7 @@ export function LiveAssistantPage() {
   }, []);
 
   function applyWorkspaceSnapshot(
-    workspace: InterviewWorkspaceSnapshot,
+    workspace: InterviewWorkspaceView,
     force = false,
   ) {
     setState((current) => {
@@ -395,7 +408,7 @@ export function LiveAssistantPage() {
 
   async function updateWorkspace(
     actionId: string,
-    action: () => Promise<InterviewWorkspaceSnapshot>,
+    action: () => Promise<InterviewWorkspaceView>,
   ) {
     setPendingAction(actionId);
     try {
@@ -545,6 +558,60 @@ export function LiveAssistantPage() {
     document.title = getInterviewDocumentTitle(activeTab, pageHasLiveSession);
   }, [activeTab, pageHasLiveSession]);
 
+  const latestArchive =
+    state.status === "ready" && !state.workspace.activeSession
+      ? state.workspace.recentSessions[0]
+      : null;
+  useEffect(() => {
+    setReviewTranscriptPage(1);
+  }, [latestArchive?.id]);
+  useLayoutEffect(() => {
+    if (isTranscriptPagePending) return;
+    const direction = transcriptPageFocusRef.current;
+    if (!direction) return;
+    transcriptPageFocusRef.current = null;
+    const preferred =
+      direction === "next"
+        ? transcriptNextRef.current
+        : transcriptPreviousRef.current;
+    const fallback =
+      direction === "next"
+        ? transcriptPreviousRef.current
+        : transcriptNextRef.current;
+    (preferred && !preferred.disabled
+      ? preferred
+      : fallback && !fallback.disabled
+        ? fallback
+        : null
+    )?.focus();
+  }, [reviewTranscriptPage, isTranscriptPagePending]);
+  useEffect(() => {
+    let cancelled = false;
+    setReviewedSession(null);
+    setReviewLoadError(null);
+    if (latestArchive && activeTab === "review") {
+      void window.nordri.liveAssistant.getSession(latestArchive.id).then(
+        (session) => {
+          if (!cancelled) {
+            setReviewedSession(session);
+            if (!session) setReviewLoadError("Retained session was not found.");
+          }
+        },
+        (error: unknown) => {
+          if (!cancelled)
+            setReviewLoadError(
+              error instanceof Error
+                ? error.message
+                : "Session review failed to load.",
+            );
+        },
+      );
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [latestArchive, activeTab]);
+
   if (state.status === "loading") {
     return (
       <main className="grid h-screen place-items-center bg-canvas">
@@ -569,10 +636,29 @@ export function LiveAssistantPage() {
   const advancedSurfaceUiEnabled =
     import.meta.env.VITE_NORDRI_INTERVIEW_ADVANCED_SURFACES === "1";
   const rehearsal = workspace.setup.rehearsal;
-  const reviewSession = activeSession
-    ? null
-    : (workspace.recentSessions[0] ?? null);
+  const reviewSession = activeSession ? null : reviewedSession;
   const transcriptSegments = reviewSession?.transcriptSegments ?? [];
+  const transcriptPageSize = 40;
+  const transcriptPageCount = Math.max(
+    1,
+    Math.ceil(transcriptSegments.length / transcriptPageSize),
+  );
+  const currentTranscriptPage = Math.min(
+    reviewTranscriptPage,
+    transcriptPageCount,
+  );
+  const transcriptStartIndex = (currentTranscriptPage - 1) * transcriptPageSize;
+  const pagedTranscriptSegments = transcriptSegments.slice(
+    transcriptStartIndex,
+    transcriptStartIndex + transcriptPageSize,
+  );
+  const changeTranscriptPage = (
+    page: number,
+    direction: "previous" | "next",
+  ) => {
+    transcriptPageFocusRef.current = direction;
+    startTranscriptPageTransition(() => setReviewTranscriptPage(page));
+  };
   const latestCue = reviewSession?.cueCards.at(-1) ?? null;
   const checks = rehearsal?.checks ?? [];
   const rehearsalReady =
@@ -686,11 +772,10 @@ export function LiveAssistantPage() {
 
     setPendingAction(`export_${format}`);
     try {
-      const exportResult =
-        await window.nordri.liveAssistant.exportSession(
-          reviewSession.id,
-          format,
-        );
+      const exportResult = await window.nordri.liveAssistant.exportSession(
+        reviewSession.id,
+        format,
+      );
       setState({ status: "ready", workspace, exportResult });
     } finally {
       setPendingAction(null);
@@ -1478,6 +1563,10 @@ export function LiveAssistantPage() {
                         out of this surface while capture is active.
                       </p>
                     </div>
+                  ) : reviewLoadError ? (
+                    <p role="alert">{reviewLoadError}</p>
+                  ) : latestArchive && !reviewSession ? (
+                    <p>Loading retained session...</p>
                   ) : !reviewSession ? (
                     <div className="grid min-h-[12rem] place-items-center rounded-(--radius-small) border border-border-subtle bg-(--surface-fill-subtle) p-5 text-center">
                       <div className="grid max-w-md gap-2.5">
@@ -1507,8 +1596,12 @@ export function LiveAssistantPage() {
                         <h3 className="text-[0.78rem] uppercase tracking-(--tracking-badge) text-muted-foreground">
                           Transcript
                         </h3>
-                        <div className="max-h-64 overflow-y-auto rounded-(--radius-small) border border-border-subtle bg-(--surface-fill-subtle) p-3">
-                          {transcriptSegments.map((segment) => (
+                        <div
+                          aria-label="Retained transcript"
+                          role="region"
+                          className="max-h-64 overflow-y-auto rounded-(--radius-small) border border-border-subtle bg-(--surface-fill-subtle) p-3"
+                        >
+                          {pagedTranscriptSegments.map((segment) => (
                             <p
                               className="mb-2 text-[0.82rem] leading-5 text-foreground-soft"
                               key={segment.id}
@@ -1522,6 +1615,71 @@ export function LiveAssistantPage() {
                             </p>
                           ))}
                         </div>
+                        {transcriptPageCount > 1 ? (
+                          <nav
+                            aria-label="Transcript pagination"
+                            aria-busy={isTranscriptPagePending}
+                            className="flex flex-wrap items-center justify-between gap-2 text-[0.76rem] text-muted-foreground"
+                          >
+                            <p aria-live="polite">
+                              {isTranscriptPagePending ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <LoaderCircle
+                                    aria-hidden="true"
+                                    className="size-3 motion-safe:animate-spin"
+                                  />
+                                  Loading transcript…
+                                </span>
+                              ) : (
+                                `${transcriptStartIndex + 1}–${Math.min(transcriptStartIndex + transcriptPageSize, transcriptSegments.length)} of ${transcriptSegments.length} transcript segments`
+                              )}
+                            </p>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                aria-label="Previous transcript page"
+                                disabled={
+                                  isTranscriptPagePending ||
+                                  currentTranscriptPage === 1
+                                }
+                                onClick={() =>
+                                  changeTranscriptPage(
+                                    currentTranscriptPage - 1,
+                                    "previous",
+                                  )
+                                }
+                                ref={transcriptPreviousRef}
+                                size="xs"
+                                type="button"
+                                variant="ghost"
+                              >
+                                Previous
+                              </Button>
+                              <span aria-current="page">
+                                Page {currentTranscriptPage} of{" "}
+                                {transcriptPageCount}
+                              </span>
+                              <Button
+                                aria-label="Next transcript page"
+                                disabled={
+                                  isTranscriptPagePending ||
+                                  currentTranscriptPage === transcriptPageCount
+                                }
+                                onClick={() =>
+                                  changeTranscriptPage(
+                                    currentTranscriptPage + 1,
+                                    "next",
+                                  )
+                                }
+                                ref={transcriptNextRef}
+                                size="xs"
+                                type="button"
+                                variant="ghost"
+                              >
+                                Next
+                              </Button>
+                            </div>
+                          </nav>
+                        ) : null}
                       </div>
                       <div className="grid gap-2">
                         <h3 className="text-[0.78rem] uppercase tracking-(--tracking-badge) text-muted-foreground">
@@ -1939,7 +2097,7 @@ export function LiveAssistantPage() {
 }
 
 function useInterviewPopupWorkspace() {
-  const [workspace, setWorkspace] = useState<InterviewWorkspaceSnapshot | null>(
+  const [workspace, setWorkspace] = useState<InterviewWorkspaceView | null>(
     null,
   );
 
@@ -1951,11 +2109,9 @@ function useInterviewPopupWorkspace() {
       },
     );
 
-    void window.nordri.liveAssistant
-      .getWorkspace()
-      .then((nextWorkspace) => {
-        if (mounted) setWorkspace(nextWorkspace);
-      });
+    void window.nordri.liveAssistant.getWorkspace().then((nextWorkspace) => {
+      if (mounted) setWorkspace(nextWorkspace);
+    });
 
     return () => {
       mounted = false;

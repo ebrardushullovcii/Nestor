@@ -18,6 +18,7 @@ import { round3SearchRun } from "../../lib/discovery-round3.test-fixture";
 import { resetJobFinderOverlaysForTests } from "../../lib/job-finder-overlay-ownership";
 import { deviceTimeZone } from "../../lib/job-finder-timestamp-format";
 import { describePlanRunFailure, CampaignsScreen } from "./campaigns-screen";
+import { resolveCampaignSourceTargetIds } from "@nordri/contracts";
 
 afterEach(() => {
   cleanup();
@@ -31,6 +32,149 @@ afterEach(() => {
 const confirmNeverSpy = vi
   .spyOn(window, "confirm")
   .mockImplementation(() => false);
+
+it.each([897, 3_000, 10_000])(
+  "keeps all %i sources reachable with a full dirty selection and bounded checkboxes",
+  async (count) => {
+    const existing = campaign("scale", "Large source plan", "precision");
+    const template = existing.searchPreferences.discovery.targets[0]!;
+    existing.searchPreferences.discovery.targets = Array.from(
+      { length: count },
+      (_, index) => ({
+        ...template,
+        id: `scale_source_${index}`,
+        label: `Scale source ${index}`,
+        startingUrl: `https://sources.example/${index}`,
+      }),
+    );
+    existing.sourceTargetIds = existing.searchPreferences.discovery.targets.map(
+      (target) => target.id,
+    );
+    existing.sourceSelectionMode = "selected";
+    const includes = vi.spyOn(existing.sourceTargetIds, "includes");
+    const onSaveCampaign = vi
+      .fn<(value: SaveJobSearchCampaignInput) => Promise<boolean>>()
+      .mockResolvedValue(true);
+    const view = render(
+      <CampaignsScreen
+        activeCampaignId="scale"
+        campaigns={[existing]}
+        onSaveCampaign={onSaveCampaign}
+        onSelectCampaign={vi.fn()}
+        pending={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Retained dirty name" },
+    });
+    const fieldset = screen.getByText("Included sources").closest("fieldset")!;
+    const nav = within(fieldset).getByRole("navigation", {
+      name: "sources pagination",
+    });
+    const reached = new Set<string>();
+    const collect = () => {
+      const inputs =
+        fieldset.querySelectorAll<HTMLInputElement>("input[aria-label]");
+      expect(inputs.length).toBeLessThanOrEqual(40);
+      for (const input of inputs)
+        reached.add(input.getAttribute("aria-label")!);
+    };
+    collect();
+    fireEvent.click(screen.getByLabelText("Scale source 0"));
+    const move = async (direction: "Next" | "Previous") => {
+      fireEvent.click(
+        within(nav).getByRole("button", { name: `${direction} page` }),
+      );
+      await waitFor(() => expect(nav.getAttribute("aria-busy")).toBe("false"));
+    };
+    await move("Next");
+    fireEvent.click(screen.getByLabelText("Scale source 40"));
+    await move("Previous");
+    expect(
+      screen.getByLabelText<HTMLInputElement>("Scale source 0").checked,
+    ).toBe(false);
+    for (let page = 1; page <= Math.ceil(count / 40); page++) {
+      collect();
+      expect(screen.getByLabelText<HTMLInputElement>("Name").value).toBe(
+        "Retained dirty name",
+      );
+      if (page < Math.ceil(count / 40)) await move("Next");
+    }
+    fireEvent.click(screen.getByLabelText(`Scale source ${count - 1}`));
+    expect(reached.size).toBe(count);
+    expect(includes).not.toHaveBeenCalled();
+    expect(nav.textContent).toContain(`of ${count}`);
+    fireEvent.click(screen.getByRole("button", { name: "Save search plan" }));
+    await waitFor(() => expect(onSaveCampaign).toHaveBeenCalledTimes(1));
+    const saved = onSaveCampaign.mock.calls[0]![0];
+    expect(saved.name).toBe("Retained dirty name");
+    expect(saved.sourceTargetIds).toEqual(
+      existing.sourceTargetIds.filter(
+        (id) =>
+          id !== "scale_source_0" &&
+          id !== "scale_source_40" &&
+          id !== `scale_source_${count - 1}`,
+      ),
+    );
+    expect(saved.searchPreferences.discovery.targets).toEqual(
+      existing.searchPreferences.discovery.targets,
+    );
+    expect(
+      view.container.querySelectorAll('input[aria-label^="Scale source"]'),
+    ).toHaveLength(0);
+  },
+  60_000,
+);
+
+it("uses every enabled Profile source across pages when selecting all 897 sources", async () => {
+  const existing = campaign(
+    "profile_scale",
+    "Profile source plan",
+    "precision",
+  );
+  const template = existing.searchPreferences.discovery.targets[0]!;
+  existing.searchPreferences.discovery.targets = Array.from(
+    { length: 897 },
+    (_, index) => ({
+      ...template,
+      id: `source_${index}`,
+      label: `Profile source ${index}`,
+    }),
+  );
+  existing.sourceTargetIds = ["source_0"];
+  existing.sourceSelectionMode = "selected";
+  const onSaveCampaign = vi
+    .fn<(value: SaveJobSearchCampaignInput) => Promise<boolean>>()
+    .mockResolvedValue(true);
+  render(
+    <CampaignsScreen
+      activeCampaignId={existing.id}
+      campaigns={[existing]}
+      onSaveCampaign={onSaveCampaign}
+      onSelectCampaign={vi.fn()}
+      pending={false}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.click(screen.getByLabelText("Use enabled sources from Profile"));
+  expect(
+    screen.getByLabelText<HTMLInputElement>("Profile source 39").checked,
+  ).toBe(true);
+  const nav = screen.getByRole("navigation", { name: "sources pagination" });
+  fireEvent.click(within(nav).getByRole("button", { name: "Next page" }));
+  await waitFor(() => expect(nav.getAttribute("aria-busy")).toBe("false"));
+  expect(
+    screen.getByLabelText<HTMLInputElement>("Profile source 79").checked,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Save search plan" }));
+  await waitFor(() => expect(onSaveCampaign).toHaveBeenCalledTimes(1));
+  const saved = onSaveCampaign.mock.calls[0]![0];
+  expect(saved.sourceSelectionMode).toBe("profile");
+  expect(resolveCampaignSourceTargetIds(saved)).toEqual(
+    existing.searchPreferences.discovery.targets.map((target) => target.id),
+  );
+});
 
 it("replaces only the safeguarded plan's next run and restores it on dismissal", () => {
   const props = {

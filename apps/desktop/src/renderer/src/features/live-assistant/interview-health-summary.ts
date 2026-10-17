@@ -1,6 +1,6 @@
 import {
   InterviewSessionHealthSchema,
-  type InterviewWorkspaceSnapshot,
+  type InterviewWorkspaceView,
 } from "@nordri/contracts";
 import type { InterviewAudioChunkQueueSnapshot } from "./interview-audio-chunk-queue";
 import type {
@@ -55,7 +55,7 @@ function signalFromAudio(
   return { signal: "not_checked" as const, peakLevel: null };
 }
 
-function latestRecoverableDiagnostic(workspace: InterviewWorkspaceSnapshot) {
+function latestRecoverableDiagnostic(workspace: InterviewWorkspaceView) {
   return (
     [...(workspace.activeSession?.diagnostics ?? [])]
       .reverse()
@@ -142,7 +142,7 @@ export function deriveInterviewHealthSummary(input: {
   systemRecorderDetail: string;
   systemRecorderStatus: CaptureStatus;
   systemStatus: ProbeStatus;
-  workspace: InterviewWorkspaceSnapshot;
+  workspace: InterviewWorkspaceView;
 }) {
   const session = input.workspace.activeSession;
   const microphoneEnabled = input.workspace.setup.consent.microphoneCapture;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import { describePreparedApplicationsSendResult } from "./use-job-finder-page-controller-actions";
 
 describe("describePreparedApplicationsSendResult", () => {
@@ -10,7 +10,7 @@ describe("describePreparedApplicationsSendResult", () => {
         { jobId: "b", state: "awaiting_review", updatedAt: "2026-09-25T01:00:00.000Z" },
         { jobId: "c", state: "submitted", updatedAt: "2026-09-25T01:00:00.000Z" },
       ],
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     expect(describePreparedApplicationsSendResult(snapshot, ["a", "c"])).toBe(
       "Sent all 2 applications.",
     );

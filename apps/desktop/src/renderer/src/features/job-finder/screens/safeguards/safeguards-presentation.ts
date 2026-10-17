@@ -1,10 +1,11 @@
 import type {
   JobFinderIntelligenceSafeguards,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ListingSignalRecord,
   SafeguardDismissal,
   SafeguardEntryKind,
   SafeguardMutationInput,
+  JobListRow,
 } from "@nordri/contracts";
 import type { BadgeTone } from "../../lib/job-finder-types";
 import { buildJobFinderContextRoute } from "../../lib/job-finder-context-navigation";
@@ -168,111 +169,229 @@ export interface SafeguardsPresentationModel {
 
 export interface BuildSafeguardsPresentationModelInput {
   safeguards: JobFinderIntelligenceSafeguards;
-  workspace: JobFinderWorkspaceSnapshot;
+  workspace: JobFinderRendererWorkspaceSnapshot;
 }
 
-function jobLabel(
-  workspace: JobFinderWorkspaceSnapshot,
-  jobId: string,
-): string {
-  const job = [
-    ...workspace.discoveryJobs,
-    ...(workspace.companyJobs ?? []),
-    ...(workspace.dismissedDiscoveryJobs ?? []),
-  ].find((entry) => entry.id === jobId);
-  if (job)
-    return [job.title, job.location, job.company].filter(Boolean).join(" · ");
-  const record = workspace.applicationRecords.find(
-    (entry) => entry.jobId === jobId,
-  );
-  if (record) return `${record.title} · ${record.company}`;
-  return jobId;
+// Live updates retain unchanged collections. Cache by those identities rather
+// than the enclosing snapshot so event-only changes do not rebuild job indexes.
+interface WorkspaceLookup {
+  discoveryJobs: JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
+  companyJobs: JobFinderRendererWorkspaceSnapshot["companyJobs"];
+  dismissedJobs: JobFinderRendererWorkspaceSnapshot["dismissedDiscoveryJobs"];
+  records: JobFinderRendererWorkspaceSnapshot["applicationRecords"];
+  companies: JobFinderRendererWorkspaceSnapshot["intelligence"]["companies"];
+  campaigns: JobFinderRendererWorkspaceSnapshot["campaigns"];
+  results: JobFinderRendererWorkspaceSnapshot["applyJobResults"];
+  jobById: ReadonlyMap<string, JobListRow>;
+  recordById: ReadonlyMap<
+    string,
+    JobFinderRendererWorkspaceSnapshot["applicationRecords"][number]
+  >;
+  recordByJobId: ReadonlyMap<
+    string,
+    JobFinderRendererWorkspaceSnapshot["applicationRecords"][number]
+  >;
+  submittedJobIds: ReadonlySet<string>;
+  companyById: ReadonlyMap<
+    string,
+    JobFinderRendererWorkspaceSnapshot["intelligence"]["companies"][number]
+  >;
+  campaignsByJobId: ReadonlyMap<string, ReadonlySet<number>>;
+  resultById: ReadonlyMap<
+    string,
+    JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
+  >;
+  jobLabels: Map<string, string>;
 }
 
-function companyLabel(
-  workspace: JobFinderWorkspaceSnapshot,
-  companyId: string,
-): string {
-  const company = workspace.intelligence.companies.find(
-    (entry) => entry.id === companyId,
-  );
+const workspaceLookupCache = new WeakMap<
+  readonly JobListRow[],
+  WorkspaceLookup
+>();
+const jobIndexCache = new WeakMap<
+  readonly JobListRow[],
+  Pick<WorkspaceLookup, "companyJobs" | "dismissedJobs" | "jobById">
+>();
+
+function getJobIndex(workspace: JobFinderRendererWorkspaceSnapshot) {
+  const cached = jobIndexCache.get(workspace.discoveryJobs);
+  if (
+    cached &&
+    cached.companyJobs === workspace.companyJobs &&
+    cached.dismissedJobs === workspace.dismissedDiscoveryJobs
+  )
+    return cached.jobById;
+  const jobById = new Map<string, JobListRow>();
+  for (const jobs of [
+    workspace.discoveryJobs,
+    workspace.companyJobs ?? [],
+    workspace.dismissedDiscoveryJobs ?? [],
+  ]) {
+    for (const job of jobs) {
+      const id = job.id;
+      if (!jobById.has(id)) jobById.set(id, job);
+    }
+  }
+  jobIndexCache.set(workspace.discoveryJobs, {
+    companyJobs: workspace.companyJobs,
+    dismissedJobs: workspace.dismissedDiscoveryJobs,
+    jobById,
+  });
+  return jobById;
+}
+
+function getWorkspaceLookup(
+  workspace: JobFinderRendererWorkspaceSnapshot,
+): WorkspaceLookup {
+  const cached = workspaceLookupCache.get(workspace.discoveryJobs);
+  if (
+    cached &&
+    cached.companyJobs === workspace.companyJobs &&
+    cached.dismissedJobs === workspace.dismissedDiscoveryJobs &&
+    cached.records === workspace.applicationRecords &&
+    cached.companies === workspace.intelligence.companies &&
+    cached.campaigns === workspace.campaigns &&
+    cached.results === workspace.applyJobResults
+  )
+    return cached;
+  const jobById = getJobIndex(workspace);
+  const recordById = new Map<
+    string,
+    JobFinderRendererWorkspaceSnapshot["applicationRecords"][number]
+  >();
+  const recordByJobId = new Map<
+    string,
+    JobFinderRendererWorkspaceSnapshot["applicationRecords"][number]
+  >();
+  const submittedJobIds = new Set<string>();
+  for (const record of workspace.applicationRecords) {
+    if (!recordById.has(record.id)) recordById.set(record.id, record);
+    if (!recordByJobId.has(record.jobId))
+      recordByJobId.set(record.jobId, record);
+    if (record.lastAttemptState === "submitted")
+      submittedJobIds.add(record.jobId);
+  }
+  const companyById = new Map<
+    string,
+    JobFinderRendererWorkspaceSnapshot["intelligence"]["companies"][number]
+  >();
+  for (const company of workspace.intelligence.companies ?? [])
+    if (!companyById.has(company.id)) companyById.set(company.id, company);
+  const campaignsByJobId = new Map<string, Set<number>>();
+  workspace.campaigns.forEach((campaign, index) => {
+    for (const jobId of campaign.jobIds) {
+      const indices = campaignsByJobId.get(jobId) ?? new Set<number>();
+      indices.add(index);
+      campaignsByJobId.set(jobId, indices);
+    }
+  });
+  const resultById = new Map<
+    string,
+    JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
+  >();
+  for (const result of workspace.applyJobResults ?? [])
+    if (!resultById.has(result.id)) resultById.set(result.id, result);
+  const lookup: WorkspaceLookup = {
+    discoveryJobs: workspace.discoveryJobs,
+    companyJobs: workspace.companyJobs,
+    dismissedJobs: workspace.dismissedDiscoveryJobs,
+    records: workspace.applicationRecords,
+    companies: workspace.intelligence.companies,
+    campaigns: workspace.campaigns,
+    results: workspace.applyJobResults,
+    jobById,
+    recordById,
+    recordByJobId,
+    submittedJobIds,
+    companyById,
+    campaignsByJobId,
+    resultById,
+    jobLabels: new Map(),
+  };
+  workspaceLookupCache.set(workspace.discoveryJobs, lookup);
+  return lookup;
+}
+
+function jobLabel(lookup: WorkspaceLookup, jobId: string): string {
+  const cached = lookup.jobLabels.get(jobId);
+  if (cached !== undefined) return cached;
+  const job = lookup.jobById.get(jobId);
+  const record = lookup.recordByJobId.get(jobId);
+  const label = job
+    ? [job.title, job.location, job.company].filter(Boolean).join(" · ")
+    : record
+      ? `${record.title} · ${record.company}`
+      : jobId;
+  lookup.jobLabels.set(jobId, label);
+  return label;
+}
+
+function companyLabel(lookup: WorkspaceLookup, companyId: string): string {
+  const company = lookup.companyById.get(companyId);
   return company?.canonicalName ?? companyId;
 }
 
 function applicationRecordLabel(
-  workspace: JobFinderWorkspaceSnapshot,
+  lookup: WorkspaceLookup,
   applicationRecordId: string,
 ): string {
-  const record = workspace.applicationRecords.find(
-    (entry) => entry.id === applicationRecordId,
-  );
+  const record = lookup.recordById.get(applicationRecordId);
   return record
-    ? jobLabel(workspace, record.jobId)
+    ? jobLabel(lookup, record.jobId)
     : "Application no longer saved";
 }
 
 function dismissalReferenceLabel(
-  workspace: JobFinderWorkspaceSnapshot,
-  safeguards: JobFinderIntelligenceSafeguards,
+  lookup: WorkspaceLookup,
+  safeguards: ReturnType<typeof indexSafeguards>,
   dismissal: SafeguardDismissal,
 ): string {
   switch (dismissal.kind) {
     case "company_cap_limit": {
-      const cap = safeguards.companyApplicationCaps.find(
-        (entry) => entry.id === dismissal.referenceId,
-      );
+      const cap = safeguards.caps.get(dismissal.referenceId);
       return cap
-        ? `Application limit · ${companyLabel(workspace, cap.companyId)}`
+        ? `Application limit · ${companyLabel(lookup, cap.companyId)}`
         : dismissal.referenceId;
     }
     case "simultaneous_application_conflict": {
-      const conflict = safeguards.simultaneousApplicationConflicts.find(
-        (entry) => entry.id === dismissal.referenceId,
-      );
+      const conflict = safeguards.conflicts.get(dismissal.referenceId);
       return conflict
-        ? `Conflict: ${applicationRecordLabel(workspace, conflict.applicationRecordId)} ↔ ${applicationRecordLabel(workspace, conflict.conflictingApplicationRecordId)}`
+        ? `Conflict: ${applicationRecordLabel(lookup, conflict.applicationRecordId)} ↔ ${applicationRecordLabel(lookup, conflict.conflictingApplicationRecordId)}`
         : dismissal.referenceId;
     }
     case "listing_signal": {
-      const signal = safeguards.listingSignals.find(
-        (entry) => entry.id === dismissal.referenceId,
-      );
+      const signal = safeguards.signals.get(dismissal.referenceId);
       return signal
-        ? `Listing ${signal.signal} · ${jobLabel(workspace, signal.jobId)}`
+        ? `Listing ${signal.signal} · ${jobLabel(lookup, signal.jobId)}`
         : dismissal.referenceId;
     }
     case "abnormal_failure_pause":
-      return safeguards.abnormalFailurePauses.some(
-        (entry) => entry.id === dismissal.referenceId,
-      )
+      return safeguards.pauses.has(dismissal.referenceId)
         ? "Paused after repeated failures"
         : dismissal.referenceId;
     case "batch_sample_review_pending":
-      return safeguards.preparedBatchSampleReviews.some(
-        (entry) => entry.id === dismissal.referenceId,
-      )
+      return safeguards.reviews.has(dismissal.referenceId)
         ? "Quality sample review"
         : dismissal.referenceId;
     case "contradictory_answer":
-      return safeguards.contradictoryAnswerDetections.some(
-        (entry) => entry.id === dismissal.referenceId,
-      )
+      return safeguards.contradictions.has(dismissal.referenceId)
         ? "Contradictory reused answers"
         : dismissal.referenceId;
   }
 }
 
 function campaignLabelsForJobs(
-  workspace: JobFinderWorkspaceSnapshot,
+  lookup: WorkspaceLookup,
   jobIds: readonly string[],
 ): readonly string[] {
-  const labels: string[] = [];
-  for (const campaign of workspace.campaigns) {
-    if (campaign.jobIds.some((jobId) => jobIds.includes(jobId))) {
-      labels.push(campaign.name);
-    }
+  const indices = new Set<number>();
+  for (const jobId of jobIds) {
+    for (const index of lookup.campaignsByJobId.get(jobId) ?? [])
+      indices.add(index);
   }
-  return labels;
+  return [...indices]
+    .sort((a, b) => a - b)
+    .map((index) => lookup.campaigns[index]!.name);
 }
 
 function dismissalPairKey(kind: string, referenceId: string): string {
@@ -280,17 +399,35 @@ function dismissalPairKey(kind: string, referenceId: string): string {
 }
 
 function findDismissal(
-  safeguards: JobFinderIntelligenceSafeguards,
+  safeguards: ReturnType<typeof indexSafeguards>,
   kind: SafeguardEntryKind,
   referenceId: string,
 ): SafeguardDismissal | null {
   const pair = dismissalPairKey(kind, referenceId);
-  return (
-    safeguards.safeguardDismissals.find(
-      (dismissal) =>
-        dismissalPairKey(dismissal.kind, dismissal.referenceId) === pair,
-    ) ?? null
-  );
+  return safeguards.dismissals.get(pair) ?? null;
+}
+
+function indexSafeguards(safeguards: JobFinderIntelligenceSafeguards) {
+  const byId = <T extends { id: string }>(entries: readonly T[]) => {
+    const index = new Map<string, T>();
+    for (const entry of entries)
+      if (!index.has(entry.id)) index.set(entry.id, entry);
+    return index;
+  };
+  const dismissals = new Map<string, SafeguardDismissal>();
+  for (const dismissal of safeguards.safeguardDismissals) {
+    const key = dismissalPairKey(dismissal.kind, dismissal.referenceId);
+    if (!dismissals.has(key)) dismissals.set(key, dismissal);
+  }
+  return {
+    caps: byId(safeguards.companyApplicationCaps),
+    conflicts: byId(safeguards.simultaneousApplicationConflicts),
+    signals: byId(safeguards.listingSignals),
+    pauses: byId(safeguards.abnormalFailurePauses),
+    reviews: byId(safeguards.preparedBatchSampleReviews),
+    contradictions: byId(safeguards.contradictoryAnswerDetections),
+    dismissals,
+  };
 }
 
 function latestSignalIdsByJob(
@@ -316,6 +453,8 @@ export function buildSafeguardsPresentationModel(
   input: BuildSafeguardsPresentationModelInput,
 ): SafeguardsPresentationModel {
   const { safeguards, workspace } = input;
+  const lookup = getWorkspaceLookup(workspace);
+  const safeguardIndex = indexSafeguards(safeguards);
   const latestByJob = latestSignalIdsByJob(safeguards);
   const rows: SafeguardRow[] = [];
 
@@ -327,25 +466,26 @@ export function buildSafeguardsPresentationModel(
     jobIds: readonly string[],
     companyIds: readonly string[],
   ) => ({
-    jobs: [...new Set(jobIds)].map((jobId) => jobLabel(workspace, jobId)),
+    jobs: [...new Set(jobIds)].map((jobId) => jobLabel(lookup, jobId)),
     companies: [...new Set(companyIds)].map((companyId) =>
-      companyLabel(workspace, companyId),
+      companyLabel(lookup, companyId),
     ),
-    campaigns: campaignLabelsForJobs(workspace, jobIds),
+    campaigns: campaignLabelsForJobs(lookup, jobIds),
   });
 
   for (const cap of safeguards.companyApplicationCaps) {
-    const dismissal = findDismissal(safeguards, "company_cap_limit", cap.id);
+    const dismissal = findDismissal(
+      safeguardIndex,
+      "company_cap_limit",
+      cap.id,
+    );
     const active = cap.limitReached;
     // A limit that has not been reached is a rule, not an event. Rendering a
     // card for it told the user something had happened when nothing had.
     if (!active && !dismissal) {
       continue;
     }
-    const companyJobs =
-      workspace.intelligence.companies.find(
-        (company) => company.id === cap.companyId,
-      )?.jobIds ?? [];
+    const companyJobs = lookup.companyById.get(cap.companyId)?.jobIds ?? [];
     const lineage = baseLineage(companyJobs, [cap.companyId]);
     const controls: SafeguardControl[] = [];
     if (active && !dismissal) {
@@ -386,13 +526,13 @@ export function buildSafeguardsPresentationModel(
       blocked: active && !dismissal,
       dismissed: Boolean(dismissal),
       lineage,
-      tags: [`company:${companyLabel(workspace, cap.companyId)}`],
+      tags: [`company:${companyLabel(lookup, cap.companyId)}`],
       controls,
       recoveryLink: RECOVERY_LINKS.caps,
       searchText: [
         cap.explanation,
         cap.recoveryGuidance,
-        companyLabel(workspace, cap.companyId),
+        companyLabel(lookup, cap.companyId),
         ...lineage.jobs,
         ...lineage.companies,
         ...lineage.campaigns,
@@ -406,33 +546,24 @@ export function buildSafeguardsPresentationModel(
     if (conflict.companyKey && conflict.jobIds) {
       const jobIds = conflict.jobIds;
       const label = (id: string) => {
-        const job = [
-          ...workspace.discoveryJobs,
-          ...workspace.companyJobs,
-          ...workspace.dismissedDiscoveryJobs,
-        ].find((job) => job.id === id);
-        const record = workspace.applicationRecords.find(
-          (record) => record.jobId === id,
-        );
+        const job = lookup.jobById.get(id);
+        const record = lookup.recordByJobId.get(id);
         return `${job?.title ?? record?.title ?? "Application"} (${job?.location || "place not listed"})`;
       };
       const controls: SafeguardControl[] = [];
+      const pairKey = (ids: readonly string[]) =>
+        JSON.stringify([...ids].sort());
+      const allowedPairKeys = new Set(
+        (conflict.allowedPairs ?? [])
+          .filter((decision) => decision.revokedAt === null)
+          .map((decision) => pairKey(decision.jobIds)),
+      );
       let blocked = false;
       for (let i = 0; i < jobIds.length; i++) {
         for (let j = i + 1; j < jobIds.length; j++) {
           const pair: [string, string] = [jobIds[i]!, jobIds[j]!];
-          const allowed =
-            conflict.allowedPairs?.some(
-              (decision) =>
-                decision.revokedAt === null &&
-                pair.every((id) => decision.jobIds.includes(id)),
-            ) ?? false;
-          const bothSent = pair.every((id) =>
-            workspace.applicationRecords.some(
-              (record) =>
-                record.jobId === id && record.lastAttemptState === "submitted",
-            ),
-          );
+          const allowed = allowedPairKeys.has(pairKey(pair));
+          const bothSent = pair.every((id) => lookup.submittedJobIds.has(id));
           if (!allowed && bothSent) continue;
           if (!allowed) blocked = true;
           controls.push({
@@ -484,7 +615,7 @@ export function buildSafeguardsPresentationModel(
       continue;
     }
     const dismissal = findDismissal(
-      safeguards,
+      safeguardIndex,
       "simultaneous_application_conflict",
       conflict.id,
     );
@@ -493,9 +624,7 @@ export function buildSafeguardsPresentationModel(
       conflict.applicationRecordId,
       conflict.conflictingApplicationRecordId,
     ].flatMap((id) => {
-      const record = workspace.applicationRecords.find(
-        (record) => record.id === id,
-      );
+      const record = lookup.recordById.get(id);
       return record ? [record.jobId] : [];
     });
     const controls: SafeguardControl[] = [];
@@ -536,7 +665,7 @@ export function buildSafeguardsPresentationModel(
     pushRow({
       key: `conflict-${conflict.id}`,
       kind: "conflicts",
-      title: `Conflict: ${applicationRecordLabel(workspace, conflict.applicationRecordId)} ↔ ${applicationRecordLabel(workspace, conflict.conflictingApplicationRecordId)}`,
+      title: `Conflict: ${applicationRecordLabel(lookup, conflict.applicationRecordId)} ↔ ${applicationRecordLabel(lookup, conflict.conflictingApplicationRecordId)}`,
       subtitle:
         conflict.status === "detected"
           ? "Two applications overlapped in time"
@@ -566,7 +695,11 @@ export function buildSafeguardsPresentationModel(
   }
 
   for (const signal of safeguards.listingSignals) {
-    const dismissal = findDismissal(safeguards, "listing_signal", signal.id);
+    const dismissal = findDismissal(
+      safeguardIndex,
+      "listing_signal",
+      signal.id,
+    );
     const isLatestForJob = latestByJob.get(signal.jobId) === signal.id;
     const active = isLatestForJob;
     const jobIds = [signal.jobId];
@@ -630,7 +763,7 @@ export function buildSafeguardsPresentationModel(
 
   for (const pause of safeguards.abnormalFailurePauses) {
     const dismissal = findDismissal(
-      safeguards,
+      safeguardIndex,
       "abnormal_failure_pause",
       pause.id,
     );
@@ -753,9 +886,7 @@ export function buildSafeguardsPresentationModel(
       Number(left.reviewCompleted) - Number(right.reviewCompleted),
   )) {
     const sampleLinks = review.sampledItemIds.flatMap((resultId) => {
-      const result = workspace.applyJobResults.find(
-        (candidate) => candidate.id === resultId,
-      );
+      const result = lookup.resultById.get(resultId);
       if (!result?.applicationRecordId) return [];
       return [
         {
@@ -763,12 +894,12 @@ export function buildSafeguardsPresentationModel(
             applicationRecordId: result.applicationRecordId,
             jobId: result.jobId,
           }),
-          label: jobLabel(workspace, result.jobId),
+          label: jobLabel(lookup, result.jobId),
         },
       ];
     });
     const dismissal = findDismissal(
-      safeguards,
+      safeguardIndex,
       "batch_sample_review_pending",
       review.id,
     );
@@ -844,7 +975,7 @@ export function buildSafeguardsPresentationModel(
 
   for (const detection of safeguards.contradictoryAnswerDetections) {
     const dismissal = findDismissal(
-      safeguards,
+      safeguardIndex,
       "contradictory_answer",
       detection.id,
     );
@@ -919,7 +1050,7 @@ export function buildSafeguardsPresentationModel(
       key: `dismissal-${dismissal.id}`,
       kind: "dismissals",
       title: `Dismissed ${dismissal.kind.replaceAll("_", " ")}`,
-      subtitle: `${dismissalReferenceLabel(workspace, safeguards, dismissal)} · ${dismissal.reason}`,
+      subtitle: `${dismissalReferenceLabel(lookup, safeguardIndex, dismissal)} · ${dismissal.reason}`,
       explanation: dismissal.note ?? "Dismissed by the user.",
       recoveryGuidance: "Restore to re-arm the safeguard before continuing.",
       statusLabel: "Dismissed",

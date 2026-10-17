@@ -830,19 +830,19 @@ async function persistInitializedNextRun(input: {
   ctx: WorkspaceServiceContext;
   campaignId: string;
   now: string;
-}): Promise<void> {
-  await input.ctx.withCampaignTransition(async () => {
+}): Promise<boolean> {
+  return input.ctx.withCampaignTransition(async () => {
     const state = await input.ctx.repository.getCampaignState();
-    if (!state) return;
+    if (!state) return false;
     const current = state.campaigns.find(
       (candidate) => candidate.id === input.campaignId,
     );
-    if (!current || current.status !== "active") return;
+    if (!current || current.status !== "active") return false;
     const initialized = initializeNextRunAt({
       campaign: current,
       now: input.now,
     });
-    if (!initialized) return;
+    if (!initialized) return false;
     await input.ctx.repository.saveCampaignState(
       JobSearchCampaignCollectionSchema.parse({
         ...state,
@@ -851,6 +851,7 @@ async function persistInitializedNextRun(input: {
         ),
       }),
     );
+    return true;
   });
 }
 
@@ -1069,6 +1070,112 @@ export function createWorkspaceCampaignMethods(input: {
       repository: input.ctx.repository,
       searchPreferences: await input.ctx.repository.getSearchPreferences(),
     });
+  }
+
+  async function processDueScheduledCampaigns(
+    rawNow?: string,
+    onActivity?: (event: DiscoveryActivityEvent) => void,
+  ): Promise<boolean> {
+    const candidateNow = rawNow ?? new Date().toISOString();
+    const now = Number.isFinite(Date.parse(candidateNow))
+      ? candidateNow
+      : new Date().toISOString();
+    if ((await input.ctx.repository.getActivityControl()).paused) {
+      return false;
+    }
+
+    const state = await input.ctx.repository.getCampaignState();
+    if (!state) return false;
+
+    let changed = false;
+    for (const campaign of state.campaigns) {
+      if (campaign.status !== "active") continue;
+      const schedule = campaign.schedule;
+      if (!schedule.enabled || schedule.mode === "manual") continue;
+
+      if (schedule.runFacts.nextRunAt === null) {
+        // Initialization reconciles against freshly read state inside the
+        // transition; the stale outer snapshot only nominates the id.
+        changed =
+          (await persistInitializedNextRun({
+            ctx: input.ctx,
+            campaignId: campaign.id,
+            now,
+          })) || changed;
+        continue;
+      }
+
+      const dueNextRunAt = schedule.runFacts.nextRunAt;
+      const nextRunAtMs = Date.parse(dueNextRunAt);
+      if (!Number.isFinite(nextRunAtMs) || nextRunAtMs > Date.parse(now)) {
+        continue;
+      }
+      if (
+        isCampaignPauseWindowActive({
+          windows: schedule.pauseWindows,
+          at: now,
+        })
+      ) {
+        // Leave the run due so it executes once when the window ends.
+        continue;
+      }
+
+      const claimed = await claimDueScheduledSlot({
+        ctx: input.ctx,
+        campaignId: campaign.id,
+        dueNextRunAt,
+        now,
+      });
+      if (!claimed) continue;
+      changed = true;
+
+      if ((await input.ctx.repository.getActivityControl()).paused) {
+        await restoreClaimedScheduledSlot({
+          ctx: input.ctx,
+          campaignId: claimed.id,
+          dueNextRunAt,
+        });
+        break;
+      }
+      let ranScheduledCampaign = false;
+      await executeCampaignRun({
+        ctx: input.ctx,
+        campaign: claimed,
+        runCampaignDiscovery: input.runCampaignDiscovery,
+        now,
+        ...(onActivity ? { onActivity } : {}),
+        trigger: "scheduled",
+      })
+        .then(() => {
+          ranScheduledCampaign = true;
+        })
+        .catch(async (error: unknown) => {
+          if (isDiscoveryInProgressError(error)) {
+            // A manual or scheduled discovery owns the pipeline; put the
+            // claimed slot back so the next tick retries it.
+            await restoreClaimedScheduledSlot({
+              ctx: input.ctx,
+              campaignId: claimed.id,
+              dueNextRunAt,
+            });
+            return;
+          }
+          // The failed terminal state was already committed by
+          // executeCampaignRun, so the schedule advances; swallow so one
+          // campaign never blocks the rest of the ticker.
+        });
+
+      // A scheduled run finishes the same way a manual one does, including
+      // the post-run refresh the manual path already ran. Without it the
+      // run's own findings reached the workspace while everything derived
+      // from them (company intelligence, and the snapshot the screens read)
+      // stayed on the previous search.
+      if (ranScheduledCampaign) {
+        await input.afterCampaignRun(claimed.id);
+      }
+    }
+
+    return changed;
   }
 
   return {
@@ -1432,104 +1539,11 @@ export function createWorkspaceCampaignMethods(input: {
       rawNow?: string,
       onActivity?: (event: DiscoveryActivityEvent) => void,
     ): Promise<JobFinderWorkspaceSnapshot> {
-      const candidateNow = rawNow ?? new Date().toISOString();
-      const now = Number.isFinite(Date.parse(candidateNow))
-        ? candidateNow
-        : new Date().toISOString();
-      if ((await input.ctx.repository.getActivityControl()).paused) {
-        return input.getWorkspaceSnapshot();
-      }
-
-      const state = await input.ctx.repository.getCampaignState();
-      if (!state) return input.getWorkspaceSnapshot();
-
-      for (const campaign of state.campaigns) {
-        if (campaign.status !== "active") continue;
-        const schedule = campaign.schedule;
-        if (!schedule.enabled || schedule.mode === "manual") continue;
-
-        if (schedule.runFacts.nextRunAt === null) {
-          // Initialization reconciles against freshly read state inside the
-          // transition; the stale outer snapshot only nominates the id.
-          await persistInitializedNextRun({
-            ctx: input.ctx,
-            campaignId: campaign.id,
-            now,
-          });
-          continue;
-        }
-
-        const dueNextRunAt = schedule.runFacts.nextRunAt;
-        const nextRunAtMs = Date.parse(dueNextRunAt);
-        if (!Number.isFinite(nextRunAtMs) || nextRunAtMs > Date.parse(now)) {
-          continue;
-        }
-        if (
-          isCampaignPauseWindowActive({
-            windows: schedule.pauseWindows,
-            at: now,
-          })
-        ) {
-          // Leave the run due so it executes once when the window ends.
-          continue;
-        }
-
-        const claimed = await claimDueScheduledSlot({
-          ctx: input.ctx,
-          campaignId: campaign.id,
-          dueNextRunAt,
-          now,
-        });
-        if (!claimed) continue;
-
-        if ((await input.ctx.repository.getActivityControl()).paused) {
-          await restoreClaimedScheduledSlot({
-            ctx: input.ctx,
-            campaignId: claimed.id,
-            dueNextRunAt,
-          });
-          break;
-        }
-        let ranScheduledCampaign = false;
-        await executeCampaignRun({
-          ctx: input.ctx,
-          campaign: claimed,
-          runCampaignDiscovery: input.runCampaignDiscovery,
-          now,
-          ...(onActivity ? { onActivity } : {}),
-          trigger: "scheduled",
-        })
-          .then(() => {
-            ranScheduledCampaign = true;
-          })
-          .catch(async (error: unknown) => {
-            if (isDiscoveryInProgressError(error)) {
-              // A manual or scheduled discovery owns the pipeline; put the
-              // claimed slot back so the next tick retries it.
-              await restoreClaimedScheduledSlot({
-                ctx: input.ctx,
-                campaignId: claimed.id,
-                dueNextRunAt,
-              });
-              return;
-            }
-            // The failed terminal state was already committed by
-            // executeCampaignRun, so the schedule advances; swallow so one
-            // campaign never blocks the rest of the ticker.
-          });
-
-        // A scheduled run finishes the same way a manual one does, including
-        // the post-run refresh the manual path already ran. Without it the
-        // run's own findings reached the workspace while everything derived
-        // from them (company intelligence, and the snapshot the screens read)
-        // stayed on the previous search.
-        if (ranScheduledCampaign) {
-          await input.afterCampaignRun(claimed.id);
-        }
-      }
-
+      await processDueScheduledCampaigns(rawNow, onActivity);
       return input.getWorkspaceSnapshot();
     },
+
+    processDueScheduledCampaigns,
 
     /**
      * Marks a single in-app campaign notification read. Unknown ids and

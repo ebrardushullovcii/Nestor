@@ -18,7 +18,14 @@ describe("resolveBrandIconPaths", () => {
   });
 
   it("finds the images when Electron starts on the bundled entry in out/main", () => {
-    const icon = "/project/apps/desktop/assets/brand/app-icon.png";
+    // Built like the resolver builds it, so the drive and separators match on
+    // every platform.
+    const icon = path.join(
+      path.resolve("/project/apps/desktop"),
+      "assets",
+      "brand",
+      "app-icon.png",
+    );
     expect(
       resolveBrandIconPaths(
         "/project/apps/desktop/out/main",

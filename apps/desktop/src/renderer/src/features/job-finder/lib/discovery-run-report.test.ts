@@ -1,7 +1,7 @@
 import { round3SearchRun } from "./discovery-round3.test-fixture";
 import type {
   DiscoveryRunRecord,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import { describe, expect, test } from "vitest";
 
@@ -44,7 +44,7 @@ function createFinishedRun(
   } as unknown as DiscoveryRunRecord;
 }
 
-function createWorkspace(run: DiscoveryRunRecord): JobFinderWorkspaceSnapshot {
+function createWorkspace(run: DiscoveryRunRecord): JobFinderRendererWorkspaceSnapshot {
   return {
     activeDiscoveryRun: null,
     applicationRecords: [],
@@ -55,7 +55,7 @@ function createWorkspace(run: DiscoveryRunRecord): JobFinderWorkspaceSnapshot {
     searchPreferences: {
       discovery: { targets: [{ id: "source_a", label: "Mercury careers" }] },
     },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 describe("frozen discovery run report", () => {

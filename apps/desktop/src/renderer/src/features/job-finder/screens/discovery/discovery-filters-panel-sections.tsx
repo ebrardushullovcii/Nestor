@@ -12,7 +12,6 @@ import {
   DISCOVERY_OFFLINE_SEARCH_REASON,
   DISCOVERY_OFFLINE_SETUP_NOTICE,
   DISCOVERY_PAUSED_SEARCH_REASON,
-  type DiscoverySearchBlocker,
 } from "./discovery-search-readiness";
 
 /**
@@ -464,7 +463,6 @@ export function DiscoveryFiltersFooter(props: {
   onRunAgentDiscovery: (() => void) | undefined;
   onViewProgress: () => void;
   primarySourceAccessPrompt: SourceAccessPrompt | null;
-  searchBlocker?: DiscoverySearchBlocker | null;
   searchDisabledReason: string | null;
   searchSetupActionLabel: string;
   searchSetupHref: string;
@@ -481,7 +479,6 @@ export function DiscoveryFiltersFooter(props: {
     onRunAgentDiscovery,
     onViewProgress,
     primarySourceAccessPrompt,
-    searchBlocker = null,
     searchDisabledReason,
     searchSetupActionLabel,
     searchSetupHref,
@@ -490,10 +487,6 @@ export function DiscoveryFiltersFooter(props: {
     Boolean(searchDisabledReason) &&
     searchDisabledReason !== DISCOVERY_PAUSED_SEARCH_REASON &&
     !isOfflineRuntime;
-  // A blocked browser is the one setup problem whose fix is a browser action,
-  // never a Profile link; the warning box owns that action so the label
-  // always matches the reason beside it.
-  const isBrowserBlocked = searchBlocker === "browser_blocked";
 
   // Both secondary controls share the primary's row so the setup strip stays
   // one line: the browser control (or the offline note that replaces it) and
@@ -507,7 +500,7 @@ export function DiscoveryFiltersFooter(props: {
         >
           {DISCOVERY_OFFLINE_SEARCH_REASON}
         </span>
-      ) : isBrowserBlocked && showSourcesSetupAction ? null : (
+      ) : (
         <Button
           className="h-9 w-auto min-w-0 justify-center whitespace-nowrap px-3 text-xs normal-case tracking-normal"
           pending={
@@ -567,27 +560,14 @@ export function DiscoveryFiltersFooter(props: {
               >
                 {searchDisabledReason}
               </p>
-              {isBrowserBlocked ? (
-                <Button
-                  className="h-9 w-fit whitespace-nowrap px-3 text-center text-xs normal-case tracking-normal"
-                  onClick={onOpenBrowserSession}
-                  pending={isBrowserSessionPending}
-                  size="sm"
-                  type="button"
-                  variant="primary"
-                >
-                  {OPEN_JOB_FINDER_BROWSER_ACTION}
-                </Button>
-              ) : (
-                <Button
-                  asChild
-                  className="h-9 w-fit whitespace-nowrap px-3 text-center text-xs normal-case tracking-normal"
-                  size="sm"
-                  variant="primary"
-                >
-                  <Link to={searchSetupHref}>{searchSetupActionLabel}</Link>
-                </Button>
-              )}
+              <Button
+                asChild
+                className="h-9 w-fit whitespace-nowrap px-3 text-center text-xs normal-case tracking-normal"
+                size="sm"
+                variant="primary"
+              >
+                <Link to={searchSetupHref}>{searchSetupActionLabel}</Link>
+              </Button>
             </div>
           ) : null}
           <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -602,7 +582,7 @@ export function DiscoveryFiltersFooter(props: {
               className="h-9 w-fit whitespace-nowrap px-3.5 text-center text-xs normal-case tracking-normal"
               disabled={!canRunDiscovery}
               pending={isDiscoveryAllPending}
-              onClick={onRunAgentDiscovery}
+              onClick={() => onRunAgentDiscovery()}
               size="sm"
               type="button"
               variant={canRunDiscovery ? "primary" : "secondary"}

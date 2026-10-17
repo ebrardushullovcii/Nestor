@@ -867,10 +867,11 @@ describe("workspace snapshot and settings campaign durability", () => {
       ],
     });
 
-    // Park the third campaign read of this snapshot: discovery recovery,
-    // then create/reconcile, then the locked progress-rewrite read.
+    // Park the second campaign read of this snapshot: create/reconcile, then
+    // the locked progress-rewrite read. Discovery recovery reads plan state
+    // only when a search was running, and none is here.
     const readsBefore = harness.campaignReadsStarted();
-    const rewriteReadIndex = readsBefore + 3;
+    const rewriteReadIndex = readsBefore + 2;
     harness.armBeforeReadGate(rewriteReadIndex);
     const snapshotPromise = service.getWorkspaceSnapshot();
     await vi.waitFor(() =>
@@ -950,8 +951,9 @@ describe("workspace snapshot and settings campaign durability", () => {
       ],
     });
 
+    // As above: create/reconcile, then the locked progress-rewrite read.
     const readsBefore = harness.campaignReadsStarted();
-    const rewriteReadIndex = readsBefore + 3;
+    const rewriteReadIndex = readsBefore + 2;
     harness.armBeforeReadGate(rewriteReadIndex);
     const snapshotPromise = service.getWorkspaceSnapshot();
     await vi.waitFor(() =>
@@ -1246,8 +1248,7 @@ describe("workspace source-target metadata mirror integrity", () => {
       (candidate) => candidate.id === stateAfterValidation.activeCampaignId,
     );
     expect(
-      targetIn(activeAfterValidation!.searchPreferences)
-        .validatedInstructionId,
+      targetIn(activeAfterValidation!.searchPreferences).validatedInstructionId,
     ).toBe(validatedTarget.validatedInstructionId);
 
     // The next campaign run executes against the campaign's stored
@@ -1262,8 +1263,7 @@ describe("workspace source-target metadata mirror integrity", () => {
     if (!validatedArtifact) throw new Error("Expected a validated artifact.");
     // Discovery projects the bound instruction into prefixed agent guidance
     // lines; the campaign run must carry them.
-    const expectedGuidanceLines =
-      buildInstructionGuidance(validatedArtifact);
+    const expectedGuidanceLines = buildInstructionGuidance(validatedArtifact);
     expect(expectedGuidanceLines.length).toBeGreaterThan(0);
     const callsBeforeRun = captured.length;
     await service.runCampaignNow();
@@ -1773,10 +1773,15 @@ describe("workspace source-target metadata mirror integrity", () => {
 
     const profileSourceBefore = (await repository.getSearchPreferences())
       .discovery.targets[0];
-    await service.saveCampaign(toCampaignInput(planA, { sourceTargetIds: [], sourceSelectionMode: "selected" }));
+    await service.saveCampaign(
+      toCampaignInput(planA, {
+        sourceTargetIds: [],
+        sourceSelectionMode: "selected",
+      }),
+    );
 
-    const profileSourceAfter =
-      (await repository.getSearchPreferences()).discovery.targets[0];
+    const profileSourceAfter = (await repository.getSearchPreferences())
+      .discovery.targets[0];
     const state = await repository.getCampaignState();
     expect(profileSourceAfter?.enabled).toBe(profileSourceBefore?.enabled);
     expect(
@@ -1817,7 +1822,8 @@ test("adding sources to a default plan preserves all Profile switches across pla
   });
   const snapshot = await service.getWorkspaceSnapshot();
   expect(
-    snapshot.campaigns.find((plan) => plan.id === defaultPlan.id)?.sourceTargetIds,
+    snapshot.campaigns.find((plan) => plan.id === defaultPlan.id)
+      ?.sourceTargetIds,
   ).toEqual([oldSource.id, ...added.map((source) => source.id)]);
   const second = await service.saveCampaign(
     toCampaignInput(
@@ -1848,23 +1854,30 @@ test("adding sources to a default plan preserves all Profile switches across pla
 test("removing a source retains its saved label and URL on existing jobs", async () => {
   const seed = createSeed();
   const source = seed.searchPreferences.discovery.targets[0]!;
-  const original = seed.savedJobs![0]!;
-  seed.savedJobs = [{
-    ...original,
-    provenance: [createSavedJobDiscoveryProvenance({
-      targetId: source.id,
-      startingUrl: source.startingUrl,
-      adapterKind: "auto",
-      discoveredAt: "2026-10-04T12:00:00.000Z",
-    })],
-  }];
+  const original = seed.savedJobs[0]!;
+  seed.savedJobs = [
+    {
+      ...original,
+      provenance: [
+        createSavedJobDiscoveryProvenance({
+          targetId: source.id,
+          startingUrl: source.startingUrl,
+          adapterKind: "auto",
+          discoveredAt: "2026-10-04T12:00:00.000Z",
+        }),
+      ],
+    },
+  ];
   const { repository, service } = createConcurrencyHarness({ seed });
-  await service.saveProfileAndSearchPreferences(seed.profile!, {
+  await service.saveProfileAndSearchPreferences(seed.profile, {
     ...seed.searchPreferences,
     discovery: { ...seed.searchPreferences.discovery, targets: [] },
   });
   expect(
     (await repository.listSavedJobs()).find((job) => job.id === original.id)
       ?.provenance[0],
-  ).toMatchObject({ sourceLabel: source.label, startingUrl: source.startingUrl });
+  ).toMatchObject({
+    sourceLabel: source.label,
+    startingUrl: source.startingUrl,
+  });
 });

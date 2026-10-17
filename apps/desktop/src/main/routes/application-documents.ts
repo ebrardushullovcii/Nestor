@@ -18,6 +18,7 @@ import {
   type ApplyRunDetails,
   type ApplicationQuestionRecord,
   type JobFinderWorkspaceSnapshot,
+  type SavedJob,
 } from "@nordri/contracts";
 import {
   ApplicationDocumentLibraryError,
@@ -28,7 +29,12 @@ import { getJobFinderWorkspaceService } from "../services/job-finder";
 
 interface ApplicationDocumentRouteDependencies {
   library: ApplicationDocumentLibrary;
-  getWorkspaceSnapshot: () => Promise<JobFinderWorkspaceSnapshot>;
+  getWorkspaceProjection: () => Promise<JobFinderWorkspaceSnapshot>;
+  /** The one job, record and result a listing needs; read by id. */
+  getApplicationDocumentContext?: (
+    jobId: string,
+    applicationRecordId: string,
+  ) => Promise<ApplicationDocumentContext | null>;
   getApplyRunDetails: (
     runId: string,
     jobId: string,
@@ -48,6 +54,15 @@ interface ApplicationDocumentRouteDependencies {
     questionPrompt: string | null;
     priorText: string | null;
   }) => Promise<string | null>;
+}
+
+interface ApplicationDocumentContext {
+  profile: JobFinderWorkspaceSnapshot["profile"];
+  job: SavedJob | null;
+  applicationRecord:
+    | JobFinderWorkspaceSnapshot["applicationRecords"][number]
+    | null;
+  latestResult: JobFinderWorkspaceSnapshot["applyJobResults"][number] | null;
 }
 
 async function selectExportPath(
@@ -77,9 +92,21 @@ export function registerApplicationDocumentRouteHandlers(
   ipcMain: IpcMain,
   dependencies: ApplicationDocumentRouteDependencies = {
     library: getApplicationDocumentLibrary(),
-    getWorkspaceSnapshot: async () => {
+    getWorkspaceProjection: async () => {
       const workspace = await getJobFinderWorkspaceService();
-      return workspace.getWorkspaceSnapshot();
+      if (!workspace.getWorkspaceProjection) {
+        throw new Error("Application document context is unavailable.");
+      }
+      return workspace.getWorkspaceProjection();
+    },
+    getApplicationDocumentContext: async (jobId, applicationRecordId) => {
+      const workspace = await getJobFinderWorkspaceService();
+      return (
+        (await workspace.getApplicationDocumentContext?.(
+          jobId,
+          applicationRecordId,
+        )) ?? null
+      );
     },
     getApplyRunDetails: async (runId, jobId, applicationRecordId) => {
       const workspace = await getJobFinderWorkspaceService();
@@ -96,34 +123,52 @@ export function registerApplicationDocumentRouteHandlers(
     },
   },
 ) {
+  // A listing needs one job, its record and its newest result. Reading them
+  // by id kept opening Applications from rebuilding all saved jobs.
+  const readApplicationDocumentContext = async (
+    jobId: string,
+    applicationRecordId: string,
+  ): Promise<ApplicationDocumentContext | null> => {
+    const direct = await dependencies.getApplicationDocumentContext?.(
+      jobId,
+      applicationRecordId,
+    );
+    if (direct) return direct;
+    const snapshot = await dependencies.getWorkspaceProjection();
+    return {
+      profile: snapshot.profile,
+      job: snapshot.discoveryJobs.find((entry) => entry.id === jobId) ?? null,
+      applicationRecord:
+        snapshot.applicationRecords.find(
+          (entry) => entry.id === applicationRecordId && entry.jobId === jobId,
+        ) ?? null,
+      latestResult:
+        [...snapshot.applyJobResults]
+          .filter(
+            (entry) =>
+              entry.jobId === jobId &&
+              entry.applicationRecordId === applicationRecordId,
+          )
+          .sort(
+            (left, right) =>
+              Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+          )[0] ?? null,
+    };
+  };
+
   ipcMain.handle(
     "job-finder:list-application-documents",
     async (_event, payload) => {
       try {
         const input = ListApplicationDocumentsInputSchema.parse(payload);
         const listed = await dependencies.library.list(input);
-        const snapshot = await dependencies
-          .getWorkspaceSnapshot()
-          .catch(() => null);
-        if (!snapshot) return ApplicationDocumentListResultSchema.parse(listed);
-        const job = snapshot.discoveryJobs.find(
-          (entry) => entry.id === input.jobId,
-        );
-        const applicationRecord = snapshot.applicationRecords.find(
-          (entry) =>
-            entry.id === input.applicationRecordId &&
-            entry.jobId === input.jobId,
-        );
-        const result = [...snapshot.applyJobResults]
-          .filter(
-            (entry) =>
-              entry.jobId === input.jobId &&
-              entry.applicationRecordId === input.applicationRecordId,
-          )
-          .sort(
-            (left, right) =>
-              Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
-          )[0];
+        const context = await readApplicationDocumentContext(
+          input.jobId,
+          input.applicationRecordId,
+        ).catch(() => null);
+        if (!context) return ApplicationDocumentListResultSchema.parse(listed);
+        const { job, applicationRecord } = context;
+        const result = context.latestResult;
         const letter = result?.reviewCard?.letter;
         const documentId =
           result && letter
@@ -149,7 +194,7 @@ export function registerApplicationDocumentRouteHandlers(
               kind: "cover_letter",
               writtenContent: letter.text,
               grounding: {
-                profile: snapshot.profile,
+                profile: context.profile,
                 job,
                 applicationRecord,
                 question: null,
@@ -175,7 +220,7 @@ export function registerApplicationDocumentRouteHandlers(
     async (_event, payload) => {
       try {
         const input = ProposeApplicationDocumentInputSchema.parse(payload);
-        const snapshot = await dependencies.getWorkspaceSnapshot();
+        const snapshot = await dependencies.getWorkspaceProjection();
         const job = snapshot.discoveryJobs.find(
           (entry) => entry.id === input.jobId,
         );

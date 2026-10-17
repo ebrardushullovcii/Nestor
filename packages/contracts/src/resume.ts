@@ -5,6 +5,7 @@ import {
   NonEmptyStringSchema,
   ResumeTemplateIdSchema,
 } from "./base";
+import { ResumeBatchProviderBlockSchema } from "./resume-batch";
 import { AgentTaskMessageAttributionSchema } from "./agent-task";
 
 const ProbabilitySchema = z.number().min(0).max(1);
@@ -715,6 +716,8 @@ export const ResumeClaimCheckSchema = z.object({
 export type ResumeClaimCheck = z.infer<typeof ResumeClaimCheckSchema>;
 
 export const ResumeBatchCheckpointSchema = z.object({
+  /** A provider access rejection pauses new work without completing the queue. */
+  providerBlock: ResumeBatchProviderBlockSchema.optional(),
   id: NonEmptyStringSchema,
   jobIds: z.array(NonEmptyStringSchema),
   activeJobIds: z.array(NonEmptyStringSchema),
@@ -934,14 +937,6 @@ export function isBlockingResumeClaimAssessment(input: {
   draft: Pick<ResumeDraft, "id" | "claimConfirmations">;
 }): boolean {
   const assessment = input.assessment;
-
-  if (!isCurrentResumeClaimVerifier(assessment.verifier)) {
-    return (
-      isGeneratedResumeClaimOrigin(assessment.claimOrigin) ||
-      assessment.status === "unsupported"
-    );
-  }
-
   const hasMatchingConfirmation = input.draft.claimConfirmations.some(
     (confirmation) =>
       confirmation.draftId === input.draft.id &&
@@ -952,18 +947,13 @@ export function isBlockingResumeClaimAssessment(input: {
       confirmation.confirmedClaimContentHash === assessment.contentHash,
   );
 
-  // Even a claim that contradicts the saved evidence is the person's call:
-  // the product names the conflict, and their approval, bound to this exact
-  // wording, ends the block. Editing the line removes the approval.
-  if (
-    assessment.status === "unsupported" ||
-    assessment.status === "confirm_needed"
-  ) {
-    return !hasMatchingConfirmation;
-  }
-
+  // Only a generated line the saved evidence contradicts can hold a resume
+  // back, and generation settles those itself (it puts back the person's
+  // wording or leaves the line off). The person's own lines are theirs, a
+  // stretch was accepted by choosing Aggressive (ADR 0018), and a line the
+  // AI could not check yet does not wait on the person.
   return (
-    assessment.status === "review" &&
+    assessment.status === "unsupported" &&
     isGeneratedResumeClaimOrigin(assessment.claimOrigin) &&
     !hasMatchingConfirmation
   );
@@ -1343,12 +1333,21 @@ export type ResumeResearchArtifactSummary = z.infer<
   typeof ResumeResearchArtifactSummarySchema
 >;
 
-/** Two completed resumes establish an observed average; two writers share the remainder. */
+/** Two completed resumes establish an observed average or measured queue throughput. */
 export function estimateResumeBatchMinutesLeft(
   durationsMs: readonly number[],
   remainingCount: number,
+  observed?: { elapsedMs: number; completedCount: number },
 ): number | null {
   if (durationsMs.length < 2 || remainingCount <= 0) return null;
+  if (observed && observed.completedCount >= 2 && observed.elapsedMs > 0)
+    return Math.max(
+      1,
+      Math.ceil(
+        ((observed.elapsedMs / observed.completedCount) * remainingCount) /
+          60_000,
+      ),
+    );
   const average =
     durationsMs.reduce((sum, duration) => sum + duration, 0) /
     durationsMs.length;

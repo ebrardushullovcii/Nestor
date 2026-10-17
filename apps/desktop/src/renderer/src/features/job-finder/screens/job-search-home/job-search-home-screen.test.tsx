@@ -2,7 +2,7 @@
 
 import type {
   CampaignNotification,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ReviewQueueItem,
 } from "@nordri/contracts";
 import {
@@ -20,7 +20,7 @@ import {
 
 afterEach(cleanup);
 
-function workspace(): JobFinderWorkspaceSnapshot {
+function workspace(): JobFinderRendererWorkspaceSnapshot {
   return {
     activeCampaignId: "campaign-1",
     activityControl: { paused: false, pausedAt: null, reason: null },
@@ -109,10 +109,10 @@ function workspace(): JobFinderWorkspaceSnapshot {
       rapidReviewLogs: [],
       outcomeAnalytics: null,
     },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
-function withReadyShortlist(ws: JobFinderWorkspaceSnapshot, ids: string[]) {
+function withReadyShortlist(ws: JobFinderRendererWorkspaceSnapshot, ids: string[]) {
   return {
     ...ws,
     campaigns: ws.campaigns.map((campaign) => ({ ...campaign, jobIds: ids })),
@@ -163,7 +163,7 @@ function withReadyShortlist(ws: JobFinderWorkspaceSnapshot, ids: string[]) {
           updatedAt: "2026-08-15T10:00:00.000Z",
         }) as unknown as ReviewQueueItem,
     ),
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function baseProps() {
@@ -225,7 +225,7 @@ describe("JobSearchHomeScreen", () => {
         ],
         summary: { targetsPlanned: 1, targetsCompleted: 0, validJobsFound: 0 },
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["recentDiscoveryRuns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["recentDiscoveryRuns"];
     render(
       <JobSearchHomeScreen
         {...baseProps()}
@@ -260,7 +260,7 @@ describe("JobSearchHomeScreen", () => {
         targetExecutions: [],
         summary: { targetsPlanned: 1, targetsCompleted: 0, validJobsFound: 0 },
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["recentDiscoveryRuns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["recentDiscoveryRuns"];
     render(
       <JobSearchHomeScreen
         {...baseProps()}
@@ -321,7 +321,7 @@ describe("JobSearchHomeScreen", () => {
           },
         },
       ],
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     rerender(
       <JobSearchHomeScreen
         {...baseProps()}
@@ -469,7 +469,7 @@ describe("JobSearchHomeScreen", () => {
       activity: [],
       targetExecutions: [],
       summary: { targetsPlanned: 1, targetsCompleted: 0 },
-    } as unknown as JobFinderWorkspaceSnapshot["activeDiscoveryRun"];
+    } as unknown as JobFinderRendererWorkspaceSnapshot["activeDiscoveryRun"];
     render(
       <JobSearchHomeScreen
         {...props}
@@ -519,7 +519,7 @@ describe("JobSearchHomeScreen", () => {
       questionSummary: { total: 0, answered: 0 },
       lastActionLabel: "Stopped",
       lastUpdatedAt: "2026-08-15T11:00:00.000Z",
-    })) as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = ["job_a", "job_b", "job_c"].map((jobId) => ({
       id: `result-${jobId}`,
       runId: "apply-1",
@@ -528,7 +528,7 @@ describe("JobSearchHomeScreen", () => {
       state: jobId === "job_a" ? "awaiting_review" : "failed",
       blockerReason: null,
       updatedAt: "2026-08-15T11:00:00.000Z",
-    })) as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
     render(
       <JobSearchHomeScreen
         {...props}
@@ -624,7 +624,7 @@ describe("listCurrentUnreadNotifications", () => {
             lastAttemptState: "failed",
           },
         ],
-      } as unknown as JobFinderWorkspaceSnapshot,
+      } as unknown as JobFinderRendererWorkspaceSnapshot,
     );
     expect(kept.map((entry) => entry.id)).toEqual(["n_open", "n_src"]);
   });
@@ -655,7 +655,7 @@ describe("listCurrentUnreadNotifications", () => {
           jobId: "job_willow",
           startedAt: at,
         })),
-      }) as unknown as JobFinderWorkspaceSnapshot;
+      }) as unknown as JobFinderRendererWorkspaceSnapshot;
 
     // Only the attempt the note is about: it stays.
     expect(
@@ -694,7 +694,7 @@ describe("listCurrentUnreadNotifications", () => {
           jobId,
           startedAt: at,
         })),
-      }) as unknown as JobFinderWorkspaceSnapshot;
+      }) as unknown as JobFinderRendererWorkspaceSnapshot;
 
     // Only one of the run's two jobs was tried again: the note stays.
     expect(
@@ -740,7 +740,7 @@ describe("listCurrentUnreadNotifications", () => {
       ({
         applicationRecords: [],
         userActionRequests: steps,
-      }) as unknown as JobFinderWorkspaceSnapshot;
+      }) as unknown as JobFinderRendererWorkspaceSnapshot;
 
     expect(
       listCurrentUnreadNotifications(

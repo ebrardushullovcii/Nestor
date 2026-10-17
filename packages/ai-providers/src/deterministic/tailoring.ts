@@ -1075,11 +1075,6 @@ export function buildDeterministicTailoredResume(
             `Strategy policies: ${input.strategy.headlinePolicy} headline, ${input.strategy.skillsPolicy} skills, ${input.strategy.coveragePolicy} coverage, ${input.strategy.tailoringStrength} tailoring.`,
           ]
         : []),
-      ...(effectiveSearchPreferences.tailoringMode === "aggressive"
-        ? [
-            "Aggressive tailoring may include small, deliberate stretches of saved evidence — meant to get you the first interview, and proven by you in it. Review and confirm every generated line before approval.",
-          ]
-        : []),
     ],
   });
 }

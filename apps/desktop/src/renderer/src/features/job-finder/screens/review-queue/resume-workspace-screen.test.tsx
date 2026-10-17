@@ -1429,10 +1429,7 @@ describe("ResumeWorkspaceScreen", () => {
     expect(currentRoleIndex).toBeLessThan(olderRoleIndex);
   });
 
-  const hiddenRoleMessage =
-    "Hidden by default for review: this role has a weaker career-family fit for the target job.";
-
-  it("lists omitted-entry decisions near the top of the structured editor with exact guidance", async () => {
+  it("lists the roles left off this resume near the top of the editor, quietly, each with Add back", async () => {
     renderScreen();
 
     await act(async () => {
@@ -1442,221 +1439,34 @@ describe("ResumeWorkspaceScreen", () => {
     const scrollRegion = document.querySelector(
       "[data-resume-editor-scroll-region]",
     );
-    expect(scrollRegion?.textContent).toContain("Work-history decisions");
-    expect(scrollRegion?.textContent).toContain(hiddenRoleMessage);
-    const decisionContext = document.querySelector(
+    const leftOff = document.querySelector(
       "[data-resume-work-history-decisions]",
     );
-    expect(decisionContext?.textContent).toContain(
-      "Sales Operations Associate",
-    );
-    expect(decisionContext?.textContent).toMatch(/Bright Market.*2019.*2020/);
-    expect(screen.getAllByText("Hidden").length).toBeGreaterThan(0);
+    expect(leftOff?.textContent).toContain("Left off this resume");
+    expect(leftOff?.textContent).toContain("Sales Operations Associate");
+    expect(leftOff?.className).not.toContain("warning");
 
-    const decisionsSection = document.querySelector(
-      "[data-resume-work-history-decisions]",
-    );
     const identityHeading = Array.from(
       scrollRegion?.querySelectorAll("h3") ?? [],
     ).find((heading) => heading.textContent === "Resume identity");
-
-    if (!decisionsSection || !identityHeading) {
+    if (!leftOff || !identityHeading) {
       throw new Error("Expected structured editor sections to render.");
     }
-
     expect(
-      decisionsSection.compareDocumentPosition(identityHeading) &
+      leftOff.compareDocumentPosition(identityHeading) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);
 
-    const keepButtons = screen.getAllByRole("button", {
-      name: `Leave this role off · Weak fit: ${hiddenRoleMessage}`,
-    });
-    expect(keepButtons.length).toBeGreaterThan(0);
-    for (const button of keepButtons) {
-      expect(button.getAttribute("aria-pressed")).toBe("false");
-      expect(button.hasAttribute("disabled")).toBe(false);
-    }
-  });
-
-  it("sends the exact typed acknowledgment command with server suggestion fields", async () => {
-    const onSetWorkHistoryReviewAcknowledgment = vi.fn();
-    renderScreen({ onSetWorkHistoryReviewAcknowledgment });
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
-    });
-
-    fireEvent.click(
-      screen.getAllByRole("button", {
-        name: `Leave this role off · Weak fit: ${hiddenRoleMessage}`,
-      })[0]!,
-    );
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(onSetWorkHistoryReviewAcknowledgment).toHaveBeenCalledOnce();
-    expect(onSetWorkHistoryReviewAcknowledgment).toHaveBeenCalledWith(
-      "job_ready",
-      {
-        intent: "acknowledge",
-        suggestion: {
-          id: "work_history_review_demo_hidden",
-          profileRecordId: "experience_demo_hidden",
-          kind: "weak_fit",
-          action: "consider_showing",
-          messageContentHash: "fnv1a32:465fc3f2",
-        },
-      },
-    );
-  });
-
-  it("shows acknowledged omissions as kept and sends the removal command by acknowledgment id", async () => {
-    const workspace = buildWorkspace();
-    const acknowledgedWorkspace = JobFinderResumeWorkspaceSchema.parse({
-      ...workspace,
-      draft: {
-        ...workspace.draft,
-        workHistoryReviewAcknowledgments: [
-          {
-            id: "work_history_ack_demo_hidden_1",
-            draftId: workspace.draft.id,
-            profileRecordId: "experience_demo_hidden",
-            kind: "weak_fit",
-            action: "consider_showing",
-            messageContentHash: "fnv1a32:465fc3f2",
-            reason: "intentional_omission",
-            acknowledgedAt: "2026-04-27T00:00:00.000Z",
-          } satisfies WorkHistoryReviewAcknowledgment,
-        ],
-      },
-    });
-    const onSetWorkHistoryReviewAcknowledgment = vi.fn();
-
-    renderScreen({
-      onSetWorkHistoryReviewAcknowledgment,
-      workspace: acknowledgedWorkspace,
-    });
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
-    });
-
-    expect(screen.getAllByText("Left off").length).toBeGreaterThan(0);
-
-    const undoButtons = screen.getAllByRole("button", {
-      name: `Undo leave-off · Weak fit: ${hiddenRoleMessage}`,
-    });
-    expect(undoButtons.length).toBeGreaterThan(0);
-    expect(undoButtons[0]!.getAttribute("aria-pressed")).toBe("true");
-
-    fireEvent.click(undoButtons[0]!);
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(onSetWorkHistoryReviewAcknowledgment).toHaveBeenCalledOnce();
-    expect(onSetWorkHistoryReviewAcknowledgment).toHaveBeenCalledWith(
-      "job_ready",
-      {
-        intent: "remove",
-        acknowledgmentId: "work_history_ack_demo_hidden_1",
-      },
-    );
-  });
-
-  it("keeps stale acknowledgments unresolved when the projected hash no longer matches", async () => {
-    const workspace = buildWorkspace();
-    const staleAckWorkspace = JobFinderResumeWorkspaceSchema.parse({
-      ...workspace,
-      draft: {
-        ...workspace.draft,
-        workHistoryReviewAcknowledgments: [
-          {
-            id: "work_history_ack_stale_hash",
-            draftId: workspace.draft.id,
-            profileRecordId: "experience_demo_hidden",
-            kind: "weak_fit",
-            action: "consider_showing",
-            messageContentHash: "fnv1a32:00000000",
-            reason: "intentional_omission",
-            acknowledgedAt: "2026-04-27T00:00:00.000Z",
-          } satisfies WorkHistoryReviewAcknowledgment,
-        ],
-      },
-    });
-
-    renderScreen({ workspace: staleAckWorkspace });
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
-    });
-
-    expect(screen.getAllByText("Hidden").length).toBeGreaterThan(0);
+    // Nothing to decide: no leave-off or undo choices.
     expect(
-      screen.getAllByText(/nothing here blocks approval/).length,
+      screen.queryAllByRole("button", { name: /Leave this role off/ }),
+    ).toHaveLength(0);
+    expect(
+      screen.getAllByRole("button", { name: /^Add back:/ }).length,
     ).toBeGreaterThan(0);
   });
 
-  it("disables decision buttons while workspace work is pending", async () => {
-    const workspace = buildWorkspace();
-    const onSetWorkHistoryReviewAcknowledgment = vi.fn();
-
-    render(
-      <ResumeWorkspaceScreen
-        actionMessage={null}
-        assistantMessages={[]}
-        assistantPending={false}
-        availableResumeTemplates={availableResumeTemplates}
-        isWorkspacePending
-        jobId="job_ready"
-        onApplyPatch={vi.fn()}
-        onApproveCurrentResume={vi.fn()}
-        onApproveResume={vi.fn()}
-        onBack={vi.fn()}
-        onClearResumeApproval={vi.fn()}
-        onDirtyChange={vi.fn()}
-        onExportPdf={vi.fn()}
-        onPreviewDraft={() =>
-          Promise.resolve(buildPreview("preview_ready", "ready-preview"))
-        }
-        onRefresh={vi.fn()}
-        onRegenerateDraft={vi.fn()}
-        onRestoreRevision={vi.fn()}
-        onUndoAiEdit={vi.fn()}
-        onSaveDraft={vi.fn()}
-        onSaveDraftAndThen={vi.fn()}
-        onSendAssistantMessage={vi.fn()}
-        onSetWorkHistoryReviewAcknowledgment={
-          onSetWorkHistoryReviewAcknowledgment
-        }
-        workspace={workspace}
-      />,
-    );
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
-    });
-
-    const keepButtons = screen.getAllByRole("button", {
-      name: `Leave this role off · Weak fit: ${hiddenRoleMessage}`,
-    });
-    expect(keepButtons.length).toBeGreaterThan(0);
-    for (const button of keepButtons) {
-      expect(button.getAttribute("aria-disabled")).toBe("true");
-      expect(button.hasAttribute("disabled")).toBe(false);
-      expect(button.hasAttribute("data-pending")).toBe(true);
-    }
-
-    fireEvent.click(keepButtons[0]!);
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(onSetWorkHistoryReviewAcknowledgment).not.toHaveBeenCalled();
-  });
-
-  it("never blocks approval on hidden roles and offers to add each back", async () => {
+  it("never blocks approval on hidden roles", async () => {
     const workspace = buildWorkspace();
     const unapprovedWorkspace = JobFinderResumeWorkspaceSchema.parse({
       ...workspace,
@@ -1673,17 +1483,13 @@ describe("ResumeWorkspaceScreen", () => {
       await vi.advanceTimersByTimeAsync(100);
     });
 
-    // A hidden role is the person's choice, not a blocker.
     expect(screen.queryByText(/before you can approve/)).toBeNull();
     expect(
       screen.queryByRole("button", { name: "Review hidden roles" }),
     ).toBeNull();
-    expect(
-      screen.getAllByRole("button", { name: /^Add this role back/ }).length,
-    ).toBeGreaterThan(0);
   });
 
-  it("does not block approval or show the decisions list for compact-only suggestions", async () => {
+  it("shows no left-off list for compact-only suggestions", async () => {
     const workspace = buildWorkspace();
     const compactOnlyWorkspace = JobFinderResumeWorkspaceSchema.parse({
       ...workspace,
@@ -1709,28 +1515,7 @@ describe("ResumeWorkspaceScreen", () => {
       await vi.advanceTimersByTimeAsync(100);
     });
 
-    expect(screen.queryByText("Work-history decisions")).toBeNull();
-    expect(screen.queryByText(/You can still export a PDF/)).toBeNull();
-  });
-
-  it("saves unsaved edits before recording a leave-off decision", () => {
-    const onSaveDraftAndThen = vi.fn();
-    renderScreen({ onSaveDraftAndThen });
-
-    fireEvent.change(screen.getAllByLabelText("Section text")[0]!, {
-      target: { value: "Dirty summary before a work-history decision." },
-    });
-
-    fireEvent.click(
-      screen.getAllByRole("button", {
-        name: `Leave this role off · Weak fit: ${hiddenRoleMessage}`,
-      })[0]!,
-    );
-
-    expect(onSaveDraftAndThen).toHaveBeenCalledTimes(1);
-    expect(onSaveDraftAndThen.mock.calls[0]?.[2]).toBe(
-      "Saved your draft before recording this decision.",
-    );
+    expect(screen.queryByText("Left off this resume")).toBeNull();
   });
 
   describe("draft-edit revision signals", () => {

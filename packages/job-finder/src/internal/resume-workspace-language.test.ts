@@ -1,5 +1,6 @@
 import { expect, test, vi } from "vitest";
 import type { JobFinderAiClient } from "@nordri/ai-providers";
+import { ResumeProposalValidationError } from "@nordri/ai-providers";
 import {
   createSeed,
   createAiClient,
@@ -13,7 +14,11 @@ import {
   buildResumeCoverageComparison,
   validateResumeDraft,
 } from "./resume-workspace-helpers";
-import { writeResumeLanguage } from "./resume-workspace-language";
+import {
+  applyResumeLanguage,
+  collectResumeLanguageFields,
+  writeResumeLanguage,
+} from "./resume-workspace-language";
 
 function context() {
   const seed = createSeed();
@@ -29,6 +34,53 @@ function context() {
   });
   return { ...seed, job, draft };
 }
+
+test("unknown and repeated writer fields return typed repair feedback without changing the source", () => {
+  const { draft } = context();
+  const original = structuredClone(draft);
+  const fields = collectResumeLanguageFields(draft);
+  const field = fields[0]!;
+  let failure: unknown;
+  try {
+    applyResumeLanguage(draft, {
+      language: "English",
+      translations: [
+        { id: field.id, text: "First translation" },
+        { id: field.id, text: "Conflicting repeated translation" },
+        { id: "unknown_model_field", text: "Unknown translation" },
+      ],
+    });
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(ResumeProposalValidationError);
+  if (!(failure instanceof ResumeProposalValidationError))
+    throw new Error("Expected typed repair feedback");
+  expect(failure.issues.map((issue) => issue.code)).toEqual([
+    "resume_translation_repeated_field",
+    "resume_translation_unknown_field",
+  ]);
+  expect(failure.issues.map((issue) => issue.path)).toEqual([
+    ["languagePresentation", "translations", 1, "id"],
+    ["languagePresentation", "translations", 2, "id"],
+  ]);
+  expect(failure.languageFields).toEqual(fields);
+  expect(draft).toEqual(original);
+  const corrected = applyResumeLanguage(draft, {
+    language: "English",
+    translations: [{ id: field.id, text: "Corrected translation" }],
+  });
+  expect(
+    collectResumeLanguageFields(corrected).find(
+      (candidate) => candidate.id === field.id,
+    )?.text,
+  ).toBe("Corrected translation");
+  expect(
+    collectResumeLanguageFields(corrected).filter(
+      (candidate) => candidate.id !== field.id,
+    ),
+  ).toEqual(fields.filter((candidate) => candidate.id !== field.id));
+});
 
 test("translates every field together in one model call and keeps source structure", async () => {
   const { draft, job, profile } = context();
@@ -282,11 +334,11 @@ test("translated imported lines and keywords keep their original field sources",
     draft,
     job,
     aiClient: {
-      chatWithTools: async (messages) => {
+      chatWithTools: (messages) => {
         const payload = JSON.parse(messages[1]!.content) as {
           fields: Array<{ id: string; text: string }>;
         };
-        return {
+        return Promise.resolve({
           content: JSON.stringify({
             language: "German",
             translations: payload.fields.map(({ id, text }) => ({
@@ -294,7 +346,7 @@ test("translated imported lines and keywords keep their original field sources",
               text: `Übersetzt: ${text}`,
             })),
           }),
-        };
+        });
       },
     },
   });
@@ -325,11 +377,11 @@ test("translated imported lines and keywords keep their original field sources",
     draft: result,
     job,
     aiClient: {
-      chatWithTools: async (messages) => {
+      chatWithTools: (messages) => {
         const payload = JSON.parse(messages[1]!.content) as {
           fields: Array<{ id: string; text: string }>;
         };
-        return {
+        return Promise.resolve({
           content: JSON.stringify({
             language: "French",
             translations: payload.fields.map(({ id, text }) => ({
@@ -337,7 +389,7 @@ test("translated imported lines and keywords keep their original field sources",
               text: `Traduit: ${text}`,
             })),
           }),
-        };
+        });
       },
     },
   });

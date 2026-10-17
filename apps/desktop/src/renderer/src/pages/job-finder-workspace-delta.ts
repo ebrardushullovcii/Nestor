@@ -1,6 +1,6 @@
 import type {
   JobFinderWorkspaceDelta,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   WorkspaceRevision,
 } from "@nordri/contracts";
 
@@ -8,7 +8,7 @@ export type WorkspaceDeltaApplyResult =
   | {
       status: "applied";
       revision: WorkspaceRevision;
-      workspace: JobFinderWorkspaceSnapshot;
+      workspace: JobFinderRendererWorkspaceSnapshot;
     }
   | { status: "stale" }
   | { status: "gap" };
@@ -128,18 +128,36 @@ function preserveValidSelection<T>(input: {
 
 export function applyJobFinderWorkspaceDelta(input: {
   revision: WorkspaceRevision;
-  workspace: JobFinderWorkspaceSnapshot;
+  workspace: JobFinderRendererWorkspaceSnapshot;
   delta: JobFinderWorkspaceDelta;
 }): WorkspaceDeltaApplyResult {
   if (input.delta.currentRevision <= input.revision) {
     return { status: "stale" };
   }
 
-  if (
-    input.delta.baseRevision !== input.revision ||
-    input.delta.currentRevision !== input.revision + 1
-  ) {
+  if (input.delta.baseRevision !== input.revision) {
     return { status: "gap" };
+  }
+
+  // A running search sends only the activity after what this window holds.
+  let activeDiscoveryRun = input.delta.activeDiscoveryRun;
+  const activityFrom = input.delta.activeDiscoveryRunActivityFrom ?? null;
+  if (activeDiscoveryRun && activityFrom !== null) {
+    const held = input.workspace.activeDiscoveryRun;
+    if (
+      !held ||
+      held.id !== activeDiscoveryRun.id ||
+      held.activity.length < activityFrom
+    ) {
+      return { status: "gap" };
+    }
+    activeDiscoveryRun = {
+      ...activeDiscoveryRun,
+      activity: [
+        ...held.activity.slice(0, activityFrom),
+        ...activeDiscoveryRun.activity,
+      ],
+    };
   }
 
   const discoveryJobs = applyEntitySlice(
@@ -172,18 +190,29 @@ export function applyJobFinderWorkspaceDelta(input: {
     revision: input.delta.currentRevision,
     workspace: {
       ...input.workspace,
+      ...input.delta.replaced,
       generatedAt: input.delta.generatedAt,
       discoveryRunState: input.delta.discoveryRunState,
-      activeDiscoveryRun: input.delta.activeDiscoveryRun,
-      discoverySessions: input.delta.discoverySessions,
-      sourceAccessPrompts: input.delta.sourceAccessPrompts,
-      latestResumeImportRun: input.delta.latestResumeImportRun,
-      campaigns: input.delta.campaigns,
+      fitJudgmentProgress: input.delta.fitJudgmentProgress ?? null,
+      activeDiscoveryRun,
+      // Absent means unchanged: the sender leaves out what did not change.
+      discoverySessions:
+        input.delta.discoverySessions ?? input.workspace.discoverySessions,
+      sourceAccessPrompts:
+        input.delta.sourceAccessPrompts ?? input.workspace.sourceAccessPrompts,
+      latestResumeImportRun:
+        input.delta.latestResumeImportRun === undefined
+          ? input.workspace.latestResumeImportRun
+          : input.delta.latestResumeImportRun,
+      campaigns: input.delta.campaigns ?? input.workspace.campaigns,
       activeCampaignId: input.delta.activeCampaignId,
-      campaignNotifications: input.delta.campaignNotifications,
-      dashboard: input.delta.dashboard,
-      activityControl: input.delta.activityControl,
-      intelligence: input.delta.intelligence,
+      campaignNotifications:
+        input.delta.campaignNotifications ??
+        input.workspace.campaignNotifications,
+      dashboard: input.delta.dashboard ?? input.workspace.dashboard,
+      activityControl:
+        input.delta.activityControl ?? input.workspace.activityControl,
+      intelligence: input.delta.intelligence ?? input.workspace.intelligence,
       discoveryJobs,
       dismissedDiscoveryJobs: applyEntitySlice(
         input.workspace.dismissedDiscoveryJobs,

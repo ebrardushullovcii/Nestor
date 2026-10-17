@@ -22,6 +22,16 @@ vi.mock("electron", () => ({
   dialog: { showSaveDialog: vi.fn() },
 }));
 
+vi.mock("../services/job-finder", () => ({
+  getJobFinderWorkspaceService: vi.fn(),
+}));
+vi.mock("../services/job-finder/application-document-library-instance", () => ({
+  getApplicationDocumentLibrary: vi.fn(),
+}));
+
+import { getJobFinderWorkspaceService } from "../services/job-finder";
+import { getApplicationDocumentLibrary } from "../services/job-finder/application-document-library-instance";
+
 import { registerApplicationDocumentRouteHandlers } from "./application-documents";
 
 type RouteHandler = (
@@ -148,26 +158,27 @@ function register(
     applicationRecords: [applicationA, applicationB],
   } as unknown as JobFinderWorkspaceSnapshot;
 
-  const getWorkspaceSnapshot = vi.fn(() => Promise.resolve(snapshot));
+  const getWorkspaceProjection = vi.fn(() => Promise.resolve(snapshot));
+  const library =
+    realLibrary ??
+    ({
+      propose,
+      approve: vi.fn(() =>
+        Promise.resolve(
+          ApplicationDocumentRevisionSchema.parse({
+            ...revision,
+            status: "approved",
+            approvedAt: now,
+          }),
+        ),
+      ),
+      list: vi.fn(() =>
+        Promise.resolve({ documents: [], approvedRevisions: [] }),
+      ),
+    } as unknown as ApplicationDocumentLibrary);
   registerApplicationDocumentRouteHandlers(ipcMain, {
-    library:
-      realLibrary ??
-      ({
-        propose,
-        approve: vi.fn(() =>
-          Promise.resolve(
-            ApplicationDocumentRevisionSchema.parse({
-              ...revision,
-              status: "approved",
-              approvedAt: now,
-            }),
-          ),
-        ),
-        list: vi.fn(() =>
-          Promise.resolve({ documents: [], approvedRevisions: [] }),
-        ),
-      } as unknown as ApplicationDocumentLibrary),
-    getWorkspaceSnapshot,
+    library,
+    getWorkspaceProjection,
     getApplyRunDetails,
     selectExportPath: () => Promise.resolve(null),
     ...(writeDocumentText ? { writeDocumentText } : {}),
@@ -180,7 +191,9 @@ function register(
     approveHandler: handlers.get("job-finder:approve-application-document")!,
     propose,
     getApplyRunDetails,
-    getWorkspaceSnapshot,
+    getWorkspaceProjection,
+    snapshot,
+    library,
   };
 }
 
@@ -190,6 +203,87 @@ const payload = {
   applicationRecordId: applicationB.id,
   question: { runId: run.id, questionId: questionB.id },
 };
+
+it("uses the main projection for selected document listing and proposal without a canonical read", async () => {
+  const details = createDetails();
+  details.result!.reviewCard = {
+    siteLabel: "Synthetic",
+    pageUrl: null,
+    preparedAt: now,
+    answers: [],
+    attachments: [],
+    letter: { text: "Selected application's letter.", groundedIn: ["profile"] },
+    waitingOnYou: [],
+  };
+  const fixture = register(details);
+  fixture.snapshot.applyJobResults.unshift({
+    ...details.result!,
+    id: "newer-sibling-result",
+    applicationRecordId: applicationA.id,
+    updatedAt: "2026-08-23T12:05:00.000Z",
+    reviewCard: {
+      ...details.result!.reviewCard,
+      letter: {
+        text: "Sibling application's letter.",
+        groundedIn: ["profile"],
+      },
+    },
+  });
+  const getWorkspaceSnapshot = vi.fn(() => {
+    throw new Error(
+      "Canonical read is forbidden in interactive document routes",
+    );
+  });
+  const writeApplicationDocumentText = vi
+    .fn()
+    .mockResolvedValue("Model draft.");
+  vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
+    getWorkspaceSnapshot,
+    getWorkspaceProjection: fixture.getWorkspaceProjection,
+    getApplyRunDetails: fixture.getApplyRunDetails,
+    writeApplicationDocumentText,
+  } as unknown as Awaited<ReturnType<typeof getJobFinderWorkspaceService>>);
+  vi.mocked(getApplicationDocumentLibrary).mockReturnValue(fixture.library);
+  const handlers = new Map<string, RouteHandler>();
+  registerApplicationDocumentRouteHandlers({
+    handle: (channel: string, handler: RouteHandler) =>
+      handlers.set(channel, handler),
+  } as unknown as IpcMain);
+  const event = { sender: {} } as IpcMainInvokeEvent;
+
+  await handlers.get("job-finder:list-application-documents")!(event, {
+    jobId: job.id,
+    applicationRecordId: applicationB.id,
+  });
+  expect(fixture.propose).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      writtenContent: "Selected application's letter.",
+      grounding: {
+        profile: fixture.snapshot.profile,
+        job: fixture.snapshot.discoveryJobs[0],
+        applicationRecord: applicationB,
+        question: null,
+      },
+    }),
+  );
+  await handlers.get("job-finder:propose-application-document")!(
+    event,
+    payload,
+  );
+  expect(fixture.propose).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      writtenContent: "Model draft.",
+      grounding: {
+        profile: fixture.snapshot.profile,
+        job: fixture.snapshot.discoveryJobs[0],
+        applicationRecord: applicationB,
+        question: questionB,
+      },
+    }),
+  );
+  expect(fixture.getWorkspaceProjection).toHaveBeenCalledTimes(2);
+  expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
+});
 
 describe("application document proposal lineage", () => {
   it("forwards and accepts the exact application B lineage", async () => {
@@ -333,7 +427,7 @@ it("lists attached letters through the real library and preserves edits on repea
       },
       waitingOnYou: ["Authorization"],
     };
-    const { listHandler, getWorkspaceSnapshot } = register(
+    const { listHandler, getWorkspaceProjection } = register(
       details,
       undefined,
       library,
@@ -350,7 +444,7 @@ it("lists attached letters through the real library and preserves edits on repea
     expect(second).toHaveLength(1);
     expect(second[0]!.content).toBe("Person's corrected letter.");
     expect(second[0]!.revision).toBe(2);
-    getWorkspaceSnapshot.mockRejectedValueOnce(
+    getWorkspaceProjection.mockRejectedValueOnce(
       new Error("Snapshot is unavailable"),
     );
     await expect(listHandler(event, input)).resolves.toMatchObject({

@@ -74,6 +74,9 @@ importers:
       '@nordri/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@nordri/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@nordri/db':
         specifier: workspace:*
         version: link:../../packages/db

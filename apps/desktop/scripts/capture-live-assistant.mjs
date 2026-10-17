@@ -24,8 +24,7 @@ const outputDir = path.join(desktopDir, "test-artifacts", "ui", runLabel);
 // always enabled here and otherwise forces deterministic providers (see
 // packages/ai-providers/src/live-assistant.ts).
 const PROVIDER_MODE_ENV = "UI_LIVE_ASSISTANT_PROVIDER_MODE";
-const INTERVIEW_TEST_LIVE_AI_OPT_IN_ENV =
-  "NORDRI_INTERVIEW_TEST_USE_LIVE_AI";
+const INTERVIEW_TEST_LIVE_AI_OPT_IN_ENV = "NORDRI_INTERVIEW_TEST_USE_LIVE_AI";
 const requestedProviderMode = process.env[PROVIDER_MODE_ENV] ?? "deterministic";
 if (
   requestedProviderMode !== "deterministic" &&
@@ -78,9 +77,7 @@ async function waitForInterviewWorkspace(window) {
 }
 
 async function getWorkspace(window) {
-  return window.evaluate(() =>
-    window.nordri.liveAssistant.getWorkspace(),
-  );
+  return window.evaluate(() => window.nordri.liveAssistant.getWorkspace());
 }
 
 async function performInterviewAction(window, action) {
@@ -107,7 +104,7 @@ async function waitForWorkspace(
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const workspace = await getWorkspace(window);
-    if (predicate(workspace)) {
+    if (await predicate(workspace)) {
       return workspace;
     }
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -155,9 +152,7 @@ async function createSpeechAudioChunk(input) {
 
 function assertReportInvariant(condition, description) {
   if (!condition) {
-    throw new Error(
-      `Live Assistant harness invariant failed: ${description}.`,
-    );
+    throw new Error(`Live Assistant harness invariant failed: ${description}.`);
   }
 }
 
@@ -307,9 +302,7 @@ async function waitForOverlayWindows(app) {
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
 
-  throw new Error(
-    "Timed out waiting for two Live Assistant overlay windows.",
-  );
+  throw new Error("Timed out waiting for two Live Assistant overlay windows.");
 }
 
 async function getOverlayWindowBounds(app, routePart) {
@@ -339,8 +332,7 @@ async function runCapture() {
       ...(providerMode === "deterministic" ? deterministicProviderEnv : {}),
       ...providerModeAppEnv,
       NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_TEST_SYSTEM_THEME:
-        process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark",
+      NORDRI_TEST_SYSTEM_THEME: process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark",
       NORDRI_USER_DATA_DIR: userDataDirectory,
     },
   });
@@ -885,11 +877,21 @@ async function runCapture() {
     await window.getByRole("button", { name: /Save annotation/i }).click();
     const annotatedWorkspace = await waitForWorkspace(
       window,
-      (workspace) =>
-        (workspace.recentSessions[0]?.transcriptAnnotations.length ?? 0) > 0,
+      async (workspace) => {
+        const sessionId = workspace.recentSessions[0]?.id;
+        if (!sessionId) return false;
+        const session = await window.evaluate(
+          (id) => window.nordri.liveAssistant.getSession(id),
+          sessionId,
+        );
+        return (session?.transcriptAnnotations.length ?? 0) > 0;
+      },
       "saved transcript annotation",
     );
-    const annotatedSession = annotatedWorkspace.recentSessions[0];
+    const annotatedSession = await window.evaluate(
+      (id) => window.nordri.liveAssistant.getSession(id),
+      annotatedWorkspace.recentSessions[0]?.id,
+    );
     if (!annotatedSession) {
       throw new Error(
         "Expected an annotated Live Assistant session in recentSessions.",

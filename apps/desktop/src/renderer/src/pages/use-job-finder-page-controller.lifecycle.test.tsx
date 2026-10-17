@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import { RESUME_PIPELINE_CAPACITY } from "@nordri/contracts";
+import type {
+  JobFinderRendererWorkspaceSnapshot,
+  ResumeBatchGenerationProgress,
+  ResumeBatchGenerationResult,
+} from "@nordri/contracts";
 import { StrictMode } from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ToastProvider } from "@renderer/components/ui/toast";
@@ -18,7 +23,7 @@ import {
 import type { JobFinderShellActions } from "@renderer/features/job-finder/lib/job-finder-types";
 import { useJobFinderPageController } from "./use-job-finder-page-controller";
 
-type GenerateResume = (jobId: string) => Promise<JobFinderWorkspaceSnapshot>;
+type BatchGenerate = Window["nordri"]["jobFinder"]["generateResumeForBatch"];
 
 function createReviewQueueItem(jobId: string) {
   return {
@@ -37,22 +42,25 @@ function createReviewQueueItem(jobId: string) {
   };
 }
 
-function createBatchWorkspace(): JobFinderWorkspaceSnapshot {
+function createBatchWorkspace(
+  jobCount = 3,
+): JobFinderRendererWorkspaceSnapshot {
+  const reviewQueue = Array.from({ length: jobCount }, (_, index) =>
+    createReviewQueueItem(`job_${index + 1}`),
+  );
   return {
     hydration: { phase: "complete", deferredCollections: [] },
     activeCampaignId: "campaign_1",
-    campaigns: [{ id: "campaign_1", jobIds: ["job_1", "job_2", "job_3"] }],
+    campaigns: [
+      { id: "campaign_1", jobIds: reviewQueue.map((item) => item.jobId) },
+    ],
     discoveryJobs: [],
     dismissedDiscoveryJobs: [],
     recentDiscoveryRuns: [],
     discoverySessions: [],
     sourceAccessPrompts: [],
     activeDiscoveryRun: null,
-    reviewQueue: [
-      createReviewQueueItem("job_1"),
-      createReviewQueueItem("job_2"),
-      createReviewQueueItem("job_3"),
-    ],
+    reviewQueue,
     tailoredAssets: [],
     applicationRecords: [],
     applicationAttempts: [],
@@ -65,27 +73,32 @@ function createBatchWorkspace(): JobFinderWorkspaceSnapshot {
     settings: { appearanceTheme: "system" },
     profileSetupState: { status: "completed", reviewItems: [] },
     profileCopilotMessages: [],
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function createBatchHarness(options: { parkFirstCall?: boolean } = {}) {
   const parkFirstCall = options.parkFirstCall ?? true;
-  const workspace = createBatchWorkspace();
+  const workspace = createBatchWorkspace(
+    parkFirstCall ? RESUME_PIPELINE_CAPACITY + 1 : 3,
+  );
   const activeResolvers: (() => void)[] = [];
   const parkedIds = new Set<string>();
-  const generateResume = vi.fn<GenerateResume>((jobId: string) => {
-    if (
-      ["job_1", "job_2"].includes(jobId) &&
-      !parkedIds.has(jobId) &&
-      parkFirstCall
-    ) {
+  let releasedFirstBatch = false;
+  const generateResumeForBatch = vi.fn<BatchGenerate>(({ jobId }) => {
+    if (!parkedIds.has(jobId) && !releasedFirstBatch && parkFirstCall) {
       parkedIds.add(jobId);
-      return new Promise<JobFinderWorkspaceSnapshot>((resolve) => {
-        activeResolvers.push(() => resolve(workspace));
+      return new Promise<ResumeBatchGenerationResult>((resolve) => {
+        activeResolvers.push(() => resolve({ jobId, outcome: "written" }));
       });
     }
-    return Promise.resolve(workspace);
+    return Promise.resolve({ jobId, outcome: "written" });
   });
+  const generateResume = vi.fn(() => Promise.resolve(workspace));
+  const progressListeners = new Set<
+    (progress: ResumeBatchGenerationProgress) => void
+  >();
+  const unsubscribeProgress = vi.fn();
+  const getWorkspaceBootstrap = vi.fn(() => Promise.resolve(workspace));
 
   Object.defineProperty(window, "nordri", {
     configurable: true,
@@ -96,15 +109,32 @@ function createBatchHarness(options: { parkFirstCall?: boolean } = {}) {
         onResumeBatchStop: () => () => undefined,
       },
       jobFinder: {
-        getWorkspaceBootstrap: vi.fn(() => Promise.resolve(workspace)),
+        getWorkspaceBootstrap,
         generateResume,
+        generateResumeForBatch,
+        onResumeBatchProgress: (
+          listener: (progress: ResumeBatchGenerationProgress) => void,
+        ) => {
+          progressListeners.add(listener);
+          return () => {
+            progressListeners.delete(listener);
+            unsubscribeProgress();
+          };
+        },
       },
     } as unknown as Window["nordri"],
   });
 
   return {
     generateResume,
-    resolveParked: () => activeResolvers.forEach((resolve) => resolve()),
+    generateResumeForBatch,
+    getWorkspaceBootstrap,
+    progressListeners,
+    unsubscribeProgress,
+    resolveParked: () => {
+      releasedFirstBatch = true;
+      activeResolvers.forEach((resolve) => resolve());
+    },
   };
 }
 
@@ -196,7 +226,7 @@ describe("useJobFinderPageController tailored-draft lifecycle", () => {
     Reflect.deleteProperty(window, "nordri");
   });
 
-  it("lets a truly unmounted controller stop the batch tail after both active items settle", async () => {
+  it("lets a truly unmounted controller stop the batch tail after admitted items settle", async () => {
     const harness = createBatchHarness();
     const first = mountController(false);
     await waitFor(() =>
@@ -209,19 +239,27 @@ describe("useJobFinderPageController tailored-draft lifecycle", () => {
       firstContext?.onPrepareTailoredDrafts();
     });
     await waitFor(() =>
-      expect(harness.generateResume).toHaveBeenCalledTimes(2),
+      expect(harness.generateResumeForBatch).toHaveBeenCalledTimes(
+        RESUME_PIPELINE_CAPACITY,
+      ),
     );
 
-    // True teardown finishes both active jobs without starting the third.
+    // True teardown settles admitted jobs without dispatching the next one.
     first.unmount();
 
     harness.resolveParked();
     await flushTurns();
 
-    expect(harness.generateResume.mock.calls.map(([jobId]) => jobId)).toEqual([
-      "job_1",
-      "job_2",
-    ]);
+    const admittedIds = Array.from(
+      { length: RESUME_PIPELINE_CAPACITY },
+      (_, index) => `job_${index + 1}`,
+    );
+    expect(
+      harness.generateResumeForBatch.mock.calls.map(([input]) => input.jobId),
+    ).toEqual(admittedIds);
+    expect(harness.unsubscribeProgress).toHaveBeenCalledOnce();
+    expect(harness.progressListeners.size).toBe(0);
+    expect(harness.generateResume).not.toHaveBeenCalled();
 
     // The released global guard lets a freshly mounted controller run again.
     const second = mountController(false);
@@ -239,13 +277,18 @@ describe("useJobFinderPageController tailored-draft lifecycle", () => {
         "completed",
       ),
     );
-    expect(harness.generateResume.mock.calls.map(([jobId]) => jobId)).toEqual([
-      "job_1",
-      "job_2",
-      "job_1",
-      "job_2",
-      "job_3",
+    await flushTurns();
+    expect(
+      harness.generateResumeForBatch.mock.calls.map(([input]) => input.jobId),
+    ).toEqual([
+      ...admittedIds,
+      ...admittedIds,
+      `job_${RESUME_PIPELINE_CAPACITY + 1}`,
     ]);
+    expect(harness.getWorkspaceBootstrap).toHaveBeenCalledTimes(2);
+    expect(harness.generateResume).not.toHaveBeenCalled();
+    expect(harness.unsubscribeProgress).toHaveBeenCalledTimes(2);
+    expect(harness.progressListeners.size).toBe(0);
   });
 
   it("keeps a mounted controller's batch runnable across StrictMode effect cycling", async () => {
@@ -268,11 +311,13 @@ describe("useJobFinderPageController tailored-draft lifecycle", () => {
 
     // StrictMode's simulated unmount/remount reset the disposal signal, so
     // every eligible job still ran under the same live controller.
-    expect(harness.generateResume.mock.calls.map(([jobId]) => jobId)).toEqual([
-      "job_1",
-      "job_2",
-      "job_3",
-    ]);
+    expect(
+      harness.generateResumeForBatch.mock.calls.map(([input]) => input.jobId),
+    ).toEqual(["job_1", "job_2", "job_3"]);
+    await flushTurns();
+    expect(harness.generateResume).not.toHaveBeenCalled();
+    expect(harness.unsubscribeProgress).toHaveBeenCalledOnce();
+    expect(harness.progressListeners.size).toBe(0);
   });
 });
 
@@ -294,7 +339,7 @@ describe("useJobFinderPageController cross-route status lifetime", () => {
     }) => Promise<{
       kind: "snapshot";
       currentRevision: number;
-      snapshot: JobFinderWorkspaceSnapshot;
+      snapshot: JobFinderRendererWorkspaceSnapshot;
     }>;
     startApplyCopilotRun?: JobFinderShellActions["startApplyCopilotRun"];
   }) {
@@ -397,7 +442,9 @@ describe("useJobFinderPageController cross-route status lifetime", () => {
     // ADR 0044: a success on Find jobs is news, so it is a toast with its
     // link, and nothing is left behind to replay on a later visit.
     expect(await screen.findByText("Job added to Shortlisted.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open Shortlisted" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Open Shortlisted" }),
+    ).toBeTruthy();
     expect(harness.current?.context?.actionState.message).toBeNull();
   });
 
@@ -471,9 +518,9 @@ describe("useJobFinderPageController cross-route status lifetime", () => {
         "Applications updated. Check the latest attempt and next step there.",
       ),
     ).toBeTruthy();
-    expect(
-      harness.current?.context?.actionState.message ?? "",
-    ).not.toContain("Applications updated");
+    expect(harness.current?.context?.actionState.message ?? "").not.toContain(
+      "Applications updated",
+    );
   });
 
   it("keeps a status written after a sibling navigation on the route that owns it", async () => {

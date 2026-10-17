@@ -9,7 +9,7 @@ import {
 
 afterEach(() => vi.restoreAllMocks());
 
-test("retention and final judging share 100 slots and keep capacity for selected jobs", async () => {
+test("a result limit judges every job found once and still judges the person's selected job", async () => {
   const seed = createSeed();
   const selected = seed.savedJobs[0]!;
   selected.personSupplied = true;
@@ -63,8 +63,10 @@ test("retention and final judging share 100 slots and keep capacity for selected
 
   await workspaceService.runAgentDiscovery();
 
+  // The limit chooses among all 105 on the model's verdicts, and the
+  // selected job is judged as well; nobody is asked about twice.
   const judged = judgeJobFits.mock.calls.flatMap(([input]) => input.jobs);
-  expect(judged).toHaveLength(100);
+  expect(judged).toHaveLength(106);
   expect(judged.filter((job) => job.jobId === selected.id)).toHaveLength(1);
-  expect(new Set(judged.map((job) => job.jobId)).size).toBe(100);
+  expect(new Set(judged.map((job) => job.jobId)).size).toBe(106);
 });

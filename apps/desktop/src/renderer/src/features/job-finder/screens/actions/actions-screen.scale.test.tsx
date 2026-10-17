@@ -11,27 +11,24 @@ import {
 import {
   SavedJobSchema,
   UserActionRequestSchema,
-  type JobFinderWorkspaceSnapshot,
+  type JobFinderRendererWorkspaceSnapshot,
   type UserActionCommandInput,
   type UserActionRequest,
 } from "@nordri/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { COLLECTION_PAGE_SIZE } from "../../components/collection-pagination";
+import { BOUNDED_COLLECTION_PAGE_SIZE as COLLECTION_PAGE_SIZE } from "./bounded-collection";
 import { ActionsScreen, buildJobIndexById } from "./actions-screen";
 
 const ACTION_COUNT = 210;
 const APPLICATION_ACTION_COUNT = 130;
 const JOB_COUNT = 1000;
 
-// The exhaustive six-page walk over the full 210-action inbox is the heaviest
-// jsdom render in this file and its wall time varies ~10x between fast laptops
-// and loaded serial CI runners (measured ~0.9 s locally vs ~9.8 s on a loaded
-// single-worker run before focusing queries). The per-test timeout only guards
-// against true hangs; PAGING_WALK_BOUND_MS is the pagination regression guard.
+// Walk both independent groups with queries scoped to their pagination controls.
+// Allow serial runners time to finish while guarding against unbounded row work.
 const PAGING_WALK_TIMEOUT_MS = 15_000;
 const PAGING_WALK_BOUND_MS = 10_000;
-type DiscoveryJob = JobFinderWorkspaceSnapshot["discoveryJobs"][number];
+type DiscoveryJob = JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number];
 
 function createJobs(): DiscoveryJob[] {
   return Array.from({ length: JOB_COUNT }, (_, index) => {
@@ -151,31 +148,25 @@ afterEach(() => {
 describe("ActionsScreen workspace scale", () => {
   it("indexes the job list by id in one pass", () => {
     const index = buildJobIndexById(SCALE_JOBS);
-
     expect(index.size).toBe(JOB_COUNT);
     expect(index.get("scale_job_0999")?.title).toBe("Scale Engineer 0999");
     expect(index.get("scale_job_missing")).toBeUndefined();
   });
 
-  it("mounts one bounded page for 210 actions over 1,000 jobs with truthful counts", () => {
-    // Spy on a shallow copy so the shared fixture cache stays pristine.
+  it("mounts independent bounded pages with full counts and indexed job lookups", () => {
     const jobs = [...SCALE_JOBS];
     const findSpy = vi.spyOn(jobs, "find");
     const { container } = renderScaleInbox(jobs);
-
     expect(container.querySelectorAll("article")).toHaveLength(
-      COLLECTION_PAGE_SIZE,
+      COLLECTION_PAGE_SIZE * 2,
     );
     expect(screen.getByText(`${ACTION_COUNT} results`)).toBeTruthy();
     expect(
-      screen.getByText(`1–${COLLECTION_PAGE_SIZE} of ${ACTION_COUNT}`),
-    ).toBeTruthy();
+      getGroupSection("Applications").querySelectorAll("article"),
+    ).toHaveLength(COLLECTION_PAGE_SIZE);
     expect(
-      screen.getByRole("navigation", { name: "actions pagination" }),
-    ).toBeTruthy();
-    // Group badges report totals across every matching action, not just the
-    // mounted page window; each group also states how many of those land on
-    // the mounted page, or that all of them sit on another page.
+      getGroupSection("Job sources").querySelectorAll("article"),
+    ).toHaveLength(COLLECTION_PAGE_SIZE);
     expect(screen.getByText(String(APPLICATION_ACTION_COUNT))).toBeTruthy();
     expect(
       screen.getByText(String(ACTION_COUNT - APPLICATION_ACTION_COUNT)),
@@ -183,148 +174,83 @@ describe("ActionsScreen workspace scale", () => {
     expect(findSpy).not.toHaveBeenCalled();
   });
 
-  it(
-    "labels off-page group members explicitly instead of leaving an empty section",
-    () => {
-      const { container } = renderScaleInbox();
-
-      // Page 1 mounts only the first 40 actions, and every one is an
-      // application action, so the job-sources group must say where its cards
-      // are instead of rendering a bare header above nothing.
-      const applications = getGroupSection("Applications");
-      const sources = getGroupSection("Job sources");
-      expect(applications.querySelectorAll("article")).toHaveLength(
-        COLLECTION_PAGE_SIZE,
-      );
-      expect(
-        within(applications).getByText(
-          `Showing ${COLLECTION_PAGE_SIZE} of ${APPLICATION_ACTION_COUNT} on this page.`,
-        ),
-      ).toBeTruthy();
-      expect(sources.querySelectorAll("article")).toHaveLength(0);
-      expect(
-        within(sources).getByText(
-          `All ${ACTION_COUNT - APPLICATION_ACTION_COUNT} on another page.`,
-        ),
-      ).toBeTruthy();
-
-      // Paging keeps the per-group accounting truthful in both directions.
-      for (let click = 0; click < 4; click += 1) {
-        fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-      }
-
-      expect(screen.getByText("161–200 of 210")).toBeTruthy();
-      expect(applications.querySelectorAll("article")).toHaveLength(0);
-      expect(
-        within(applications).getByText(
-          `All ${APPLICATION_ACTION_COUNT} on another page.`,
-        ),
-      ).toBeTruthy();
-      expect(sources.querySelectorAll("article")).toHaveLength(
-        COLLECTION_PAGE_SIZE,
-      );
-      expect(
-        within(sources).getByText(
-          `Showing ${COLLECTION_PAGE_SIZE} of ${
-            ACTION_COUNT - APPLICATION_ACTION_COUNT
-          } on this page.`,
-        ),
-      ).toBeTruthy();
-      expect(container.querySelectorAll("article")).toHaveLength(
-        COLLECTION_PAGE_SIZE,
-      );
-    },
-    PAGING_WALK_TIMEOUT_MS,
-  );
+  it("pages each group independently without hiding the other group's cards", () => {
+    renderScaleInbox();
+    const applications = getGroupSection("Applications");
+    const sources = getGroupSection("Job sources");
+    const next = within(applications).getByRole("button", {
+      name: "Next page",
+    });
+    fireEvent.click(next);
+    expect(within(applications).getByText("51–100 of 130")).toBeTruthy();
+    expect(within(sources).getByText("1–50 of 80")).toBeTruthy();
+    expect(sources.querySelectorAll("article")).toHaveLength(50);
+    fireEvent.click(next);
+    expect(within(applications).getByText("101–130 of 130")).toBeTruthy();
+    expect(applications.querySelectorAll("article")).toHaveLength(30);
+    expect(
+      within(applications).getByRole("button", { name: "Next page" }),
+    ).toHaveProperty("disabled", true);
+  });
 
   it("keeps search complete across the whole collection without a find loop", async () => {
     const jobs = [...SCALE_JOBS];
     const findSpy = vi.spyOn(jobs, "find");
     renderScaleInbox(jobs);
-
     const input = screen.getByLabelText("Find an action");
-
-    // A late discovery-source action beyond the first page stays reachable.
     fireEvent.change(input, { target: { value: "0195" } });
-    await waitFor(() => {
-      expect(screen.getAllByText("Scale action 0195")).toHaveLength(1);
-    });
+    await waitFor(() =>
+      expect(screen.getAllByText("Scale action 0195")).toHaveLength(1),
+    );
     expect(screen.getByText("1 of 210 results")).toBeTruthy();
-
-    // A late application action resolves its job through the id index too.
     fireEvent.change(input, { target: { value: "0128" } });
-    await waitFor(() => {
-      expect(screen.getAllByText("Scale action 0128")).toHaveLength(1);
-    });
+    await waitFor(() =>
+      expect(screen.getAllByText("Scale action 0128")).toHaveLength(1),
+    );
     expect(
       screen.getByText(/Scale Engineer 0128 at Scale Company/),
     ).toBeTruthy();
-
     fireEvent.change(input, { target: { value: "" } });
-    await waitFor(() => {
-      expect(
-        screen.getByText(`1–${COLLECTION_PAGE_SIZE} of ${ACTION_COUNT}`),
-      ).toBeTruthy();
-    });
+    await waitFor(() => expect(screen.getByText("1–50 of 130")).toBeTruthy());
     expect(findSpy).not.toHaveBeenCalled();
   });
 
   it(
-    "pages through every action without losing any and bounds each page",
+    "walks every action once with bounded pages and accessible end cues",
     () => {
-      const { container } = renderScaleInbox();
+      renderScaleInbox();
       const seenTitles = new Set<string>();
-      // Query the small pagination nav once; in-loop button reads stay scoped to
-      // it so the six-page walk measures pagination work, not RTL document scans.
-      const pagination = screen.getByRole("navigation", {
-        name: "actions pagination",
-      });
       const startedAt = performance.now();
-
-      for (;;) {
-        for (const heading of container.querySelectorAll("article h3")) {
-          seenTitles.add(heading.textContent ?? "");
+      for (const name of ["Applications", "Job sources"]) {
+        const section = getGroupSection(name);
+        const navigation = within(section).getByRole("navigation");
+        for (;;) {
+          const cards = section.querySelectorAll("article");
+          expect(cards.length).toBeLessThanOrEqual(COLLECTION_PAGE_SIZE);
+          for (const heading of section.querySelectorAll("article h3"))
+            seenTitles.add(heading.textContent ?? "");
+          const next = within(navigation).getByRole<HTMLButtonElement>(
+            "button",
+            { name: "Next page" },
+          );
+          if (next.disabled) break;
+          fireEvent.click(next);
         }
-        const nextButton = within(pagination).getByRole<HTMLButtonElement>(
-          "button",
-          { name: "Next page" },
-        );
-        if (nextButton.disabled) break;
-        fireEvent.click(nextButton);
+        expect(
+          within(navigation).getByRole("button", { name: "Previous page" }),
+        ).toHaveProperty("disabled", false);
       }
-      const elapsedMs = performance.now() - startedAt;
-
       expect(seenTitles.size).toBe(ACTION_COUNT);
       expect(seenTitles.has("Scale action 0000")).toBe(true);
-      expect(
-        seenTitles.has(
-          `Scale action ${(ACTION_COUNT - 1).toString().padStart(4, "0")}`,
-        ),
-      ).toBe(true);
-      expect(container.querySelectorAll("article").length).toBeLessThanOrEqual(
-        COLLECTION_PAGE_SIZE,
-      );
-      expect(
-        screen.getByText(`201–${ACTION_COUNT} of ${ACTION_COUNT}`),
-      ).toBeTruthy();
-      expect(
-        screen.getByRole("button", { name: "Previous page" }),
-      ).toHaveProperty("disabled", false);
-      expect(screen.getByRole("button", { name: "Next page" })).toHaveProperty(
-        "disabled",
-        true,
-      );
-      // Regression guard for pagination complexity: the walk must stay linear
-      // in mounted cards. The bound sits far above the observed serial-run
-      // range (~0.9–9.8 s across machines) but far below anything super-linear.
-      expect(elapsedMs).toBeLessThan(PAGING_WALK_BOUND_MS);
+      expect(seenTitles.has("Scale action 0209")).toBe(true);
+      expect(performance.now() - startedAt).toBeLessThan(PAGING_WALK_BOUND_MS);
     },
     PAGING_WALK_TIMEOUT_MS,
   );
 
-  it("moves between pages with truthful windows and keeps commands intact", () => {
+  it("keeps off-page commands intact", () => {
     const onCommand = vi.fn<(command: UserActionCommandInput) => void>();
-    const { container } = render(
+    render(
       <ActionsScreen
         discoveryJobs={SCALE_JOBS}
         isPending={() => false}
@@ -333,27 +259,19 @@ describe("ActionsScreen workspace scale", () => {
         requests={SCALE_REQUESTS}
       />,
     );
-
-    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-
-    expect(screen.getByText("41–80 of 210")).toBeTruthy();
-    expect(screen.queryByText("Scale action 0000")).toBeNull();
-    expect(container.querySelectorAll("article")).toHaveLength(
-      COLLECTION_PAGE_SIZE,
-    );
-
-    const card = screen.getByText("Scale action 0045").closest("article");
+    const section = getGroupSection("Applications");
+    fireEvent.click(within(section).getByRole("button", { name: "Next page" }));
+    const card = screen.getByText("Scale action 0055").closest("article");
     expect(card).toBeTruthy();
     fireEvent.click(
       within(card as HTMLElement).getByRole("button", {
         name: "Cancel this step",
       }),
     );
-
     expect(onCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "cancel",
-        requestId: "scale_action_0045",
+        requestId: "scale_action_0055",
       }),
     );
   });

@@ -1,3 +1,4 @@
+import { clearResumeBatchLiveness } from "./internal/resume-batch-checkpoint";
 import type {
   BrowserSessionRuntime,
   OpenBrowserSessionOptions,
@@ -5,7 +6,9 @@ import type {
 import { addJobFromBrowserPage } from "./internal/workspace-browser-job";
 import { writeApplicationDocumentText } from "./internal/application-document-writer";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { recordApplicationsSentByPerson } from "./internal/application-sent-by-person";
+import { judgeUnjudgedPlanJobs } from "./internal/backlog-fit-judgment";
 import { refreshAutomaticApplicationFailurePauses } from "./internal/automatic-safeguards";
 import {
   ApplicationRecordSchema,
@@ -20,6 +23,7 @@ import {
   type ApplicationAutomationMode,
   type JobFinderDiscoveryState,
   type JobFinderWorkspaceSnapshot,
+  type FitJudgmentProgress,
   type JobDiscoveryTarget,
   type JobSearchCampaign,
   type JobSearchPreferences,
@@ -74,6 +78,7 @@ import { createWorkspaceSafeguardMethods } from "./internal/workspace-safeguard-
 import { createWorkspaceUserActionMethods } from "./internal/workspace-user-action-methods";
 import { toDiscoverySessionState } from "./internal/discovery-state";
 import { uniqueStrings } from "./internal/shared";
+import { buildDiscoveryJobs } from "./internal/matching-review-queue";
 import { persistDiscoveryLoginUserAction } from "./internal/workspace-source-user-action";
 import {
   createWorkspaceCampaignMethods,
@@ -265,6 +270,10 @@ export function createJobFinderWorkspaceService(
     current: null as AbortController | null,
   };
   const activeDiscoveryRunIdRef = { current: null as string | null };
+  const fitJudgmentProgressRef = {
+    current: null as FitJudgmentProgress | null,
+  };
+  let fitJudgmentAbortController: AbortController | null = null;
   const activeDiscoveryPromiseRef = {
     current: null as Promise<unknown> | null,
   };
@@ -291,6 +300,17 @@ export function createJobFinderWorkspaceService(
 
   const WORKSPACE_RESET_IN_PROGRESS_MESSAGE =
     "Job Finder workspace reset is already in progress. Wait for it to finish before starting another operation.";
+
+  function invalidateListingReads(): void {
+    clearResumeBatchLiveness(context.repository);
+    if (context.listingAssessmentGenerationRef)
+      context.listingAssessmentGenerationRef.current += 1;
+    context.listingAssessmentJobIds?.clear();
+    context.listingAssessmentAbortControllerRef?.current.abort();
+    if (context.listingAssessmentAbortControllerRef)
+      context.listingAssessmentAbortControllerRef.current =
+        new AbortController();
+  }
 
   function activeWorkspaceOperationLabels(): string[] {
     const labels = new Set(activeWorkspaceOperations.keys());
@@ -329,6 +349,11 @@ export function createJobFinderWorkspaceService(
   ): Promise<T> {
     if (workspaceResetInProgress) {
       return Promise.reject(new Error(WORKSPACE_RESET_IN_PROGRESS_MESSAGE));
+    }
+    if (shutdownPromiseRef.current) {
+      return Promise.reject(
+        new Error("Job Finder is closing. This operation was not started."),
+      );
     }
 
     activeWorkspaceOperations.set(
@@ -377,6 +402,7 @@ export function createJobFinderWorkspaceService(
     }
 
     workspaceResetInProgress = true;
+    invalidateListingReads();
     try {
       await options?.beforeStateReset?.();
       return await snapshotProfileMethods.resetWorkspace(seed);
@@ -394,6 +420,11 @@ export function createJobFinderWorkspaceService(
     ...(exportFileVerifier ? { exportFileVerifier } : {}),
     repository,
     listingAssessmentJobIds: new Set<string>(),
+    listingAssessmentGenerationRef: { current: 0 },
+    listingAssessmentAbortControllerRef: { current: new AbortController() },
+    isWorkspaceClosing: () =>
+      workspaceResetInProgress || shutdownPromiseRef.current !== null,
+    fitJudgmentProgressRef,
     ...(onListingAssessmentFinished ? { onListingAssessmentFinished } : {}),
     activeDiscoveryAbortControllerRef,
     activeDiscoveryRunIdRef,
@@ -454,6 +485,7 @@ export function createJobFinderWorkspaceService(
       repository.commitDiscoveryStateUpdate(updater),
     async refreshDiscoverySessions(
       searchPreferences: JobSearchPreferences,
+      knownSessions?: JobFinderDiscoveryState["sessions"],
     ): Promise<JobFinderDiscoveryState["sessions"]> {
       const targets = getActiveDiscoveryTargets(searchPreferences);
       const adapterKinds = uniqueStrings(
@@ -477,8 +509,26 @@ export function createJobFinderWorkspaceService(
       }
 
       if (observedSessions.length === 0) {
+        if (knownSessions) return knownSessions;
         const unchanged = await repository.getDiscoveryState();
         return unchanged.sessions;
+      }
+
+      // Every workspace refresh lands here. Rewriting the whole discovery
+      // state when the browser reports what is already stored made each
+      // refresh during a search write megabytes for nothing.
+      if (
+        knownSessions &&
+        isDeepStrictEqual(
+          observedSessions.reduce(
+            (sessions, observation) =>
+              mergeSessionStates(sessions, observation),
+            knownSessions,
+          ),
+          knownSessions,
+        )
+      ) {
+        return knownSessions;
       }
 
       const next = await context.persistDiscoveryState((current) => ({
@@ -665,6 +715,7 @@ export function createJobFinderWorkspaceService(
       let found = false;
 
       await repository.commitSavedJobDelta({
+        updateJobIds: [jobId],
         update: (job) => {
           if (job.id !== jobId) {
             return job;
@@ -714,6 +765,7 @@ export function createJobFinderWorkspaceService(
     );
   const userActionMethods = createWorkspaceUserActionMethods(context);
   let userActionRecoveryPromise: Promise<void> | null = null;
+  let unjudgedJobsJudging: Promise<JobFinderWorkspaceSnapshot> | null = null;
 
   async function resumeVerifyingUserActions(): Promise<void> {
     if (!userActionRecoveryPromise) {
@@ -749,12 +801,13 @@ export function createJobFinderWorkspaceService(
     }
   }
 
-  async function getWorkspaceSnapshot() {
+  async function getWorkspaceSnapshot(borrowValidatedJobs = false) {
     // Recovery starts or joins the continuation of every verifying step, and
     // a continuation drives the browser for minutes. Quick verifications
     // still land in this snapshot; a long continuation carries on in the
     // background instead of holding every read (the app showed "Loading your
     // workspace" for as long as the agent worked).
+    const alreadyRecovering = userActionRecoveryPromise !== null;
     const recovery = workspaceResetInProgress
       ? Promise.resolve()
       : resumeVerifyingUserActions();
@@ -765,31 +818,36 @@ export function createJobFinderWorkspaceService(
       );
     });
     let timer: ReturnType<typeof setTimeout> | null = null;
-    await Promise.race([
-      recovery,
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, SNAPSHOT_RECOVERY_WAIT_MS);
-      }),
-    ]).finally(() => {
-      if (timer) clearTimeout(timer);
-    });
-    return snapshotProfileMethods.getWorkspaceSnapshot();
+    if (!alreadyRecovering)
+      await Promise.race([
+        recovery,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, SNAPSHOT_RECOVERY_WAIT_MS);
+        }),
+      ]).finally(() => {
+        if (timer) clearTimeout(timer);
+      });
+    return borrowValidatedJobs && snapshotProfileMethods.getWorkspaceProjection
+      ? snapshotProfileMethods.getWorkspaceProjection()
+      : snapshotProfileMethods.getWorkspaceSnapshot();
   }
 
   async function getWorkspaceBootstrap() {
     return snapshotProfileMethods.getWorkspaceBootstrap();
   }
 
-  context.getWorkspaceSnapshot = getWorkspaceSnapshot;
+  // Mutation results are display reads. Canonical snapshots stay available
+  // through the public reader and readWorkspaceSnapshot; they retain checkpoints.
+  context.getWorkspaceSnapshot = () => getWorkspaceSnapshot(true);
   context.readWorkspaceSnapshot = () =>
     snapshotProfileMethods.getWorkspaceSnapshot();
   const crmMethods = createWorkspaceCrmMethods({
     ctx: context,
-    getWorkspaceSnapshot,
+    getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
   });
   const intelligenceMethods = createWorkspaceIntelligenceMethods({
     ctx: context,
-    getWorkspaceSnapshot,
+    getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
     callbacks: {
       shortlist: applicationMethods.queueJobForReview,
       reject: (jobId) =>
@@ -812,7 +870,7 @@ export function createJobFinderWorkspaceService(
   });
   const safeguardMethods = createWorkspaceSafeguardMethods({
     ctx: context,
-    getWorkspaceSnapshot,
+    getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
   });
   context.requireApplicationSafeguardClearance = async (jobIds, savedJobs) => {
     await refreshAutomaticApplicationFailurePauses({
@@ -860,7 +918,7 @@ export function createJobFinderWorkspaceService(
   const discoveryMethods = createWorkspaceDiscoveryMethods(context);
   const campaignMethods = createWorkspaceCampaignMethods({
     ctx: context,
-    getWorkspaceSnapshot,
+    getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
     runCampaignDiscovery: async (campaignContext, onActivity) => {
       await requireDiscoverySafeguardClearance();
       return discoveryMethods.runCampaignDiscovery(campaignContext, onActivity);
@@ -1369,7 +1427,7 @@ export function createJobFinderWorkspaceService(
   );
   const groupedAnswerMethods = createWorkspaceGroupedAnswerMethods({
     ctx: context,
-    getWorkspaceSnapshot,
+    getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
     resumeVerifyingUserActions: resumeVerifyingUserActionsAfterCommit,
   });
 
@@ -1387,7 +1445,9 @@ export function createJobFinderWorkspaceService(
     }
 
     shutdownPromiseRef.current = (async () => {
+      invalidateListingReads();
       const activeApplyRunIds = [...activeApplyRunAbortControllers.keys()];
+      fitJudgmentAbortController?.abort();
       activeDiscoveryAbortControllerRef.current?.abort();
       activeSourceDebugAbortControllerRef.current?.abort();
       for (const controller of activeApplyRunAbortControllers.values()) {
@@ -1535,6 +1595,7 @@ export function createJobFinderWorkspaceService(
           "Wait for Job Finder's current work to finish or stop it before restoring. Your workspace was kept.",
         );
       workspaceResetInProgress = true;
+      invalidateListingReads();
       try {
         await operation();
       } finally {
@@ -1582,6 +1643,10 @@ export function createJobFinderWorkspaceService(
       trackWorkspaceOperation("discovery", () =>
         campaignMethods.runDueScheduledCampaigns(now, onActivity),
       ),
+    processDueScheduledCampaigns: (now, onActivity) =>
+      trackWorkspaceOperation("scheduled discovery", () =>
+        campaignMethods.processDueScheduledCampaigns(now, onActivity),
+      ),
     ...intelligenceMethods,
     setActivityControl,
     getWorkspaceSnapshot: () =>
@@ -1590,6 +1655,34 @@ export function createJobFinderWorkspaceService(
         : trackWorkspaceOperation("workspace read", () =>
             getWorkspaceSnapshot(),
           ),
+    getWorkspaceProjection: () =>
+      workspaceResetInProgress
+        ? getWorkspaceSnapshot(true)
+        : trackWorkspaceOperation("workspace projection", () =>
+            getWorkspaceSnapshot(true),
+          ),
+    getApplicationDocumentContext: async (jobId, applicationRecordId) => {
+      const [profile, jobs, records, results] = await Promise.all([
+        repository.getProfile(),
+        repository.listSavedJobsByIds([jobId]),
+        repository.listApplicationRecords(),
+        repository.listApplyJobResults({ jobId, applicationRecordId }),
+      ]);
+      return {
+        profile,
+        job: buildDiscoveryJobs(jobs)[0] ?? null,
+        applicationRecord:
+          records.find(
+            (entry) =>
+              entry.id === applicationRecordId && entry.jobId === jobId,
+          ) ?? null,
+        latestResult:
+          [...results].sort(
+            (left, right) =>
+              Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+          )[0] ?? null,
+      };
+    },
     getWorkspaceBootstrap,
     mutateSafeguards: safeguardMethods.mutateSafeguards,
     getSafeguardsOverview: safeguardMethods.getSafeguardsOverview,
@@ -1685,8 +1778,85 @@ export function createJobFinderWorkspaceService(
         userActionMethods.performUserAction(command),
       ),
     ...applicationMethods,
+    dismissDiscoveryJob: (input) =>
+      trackWorkspaceOperation("hiding jobs", () =>
+        applicationMethods.dismissDiscoveryJob(input),
+      ),
+    dismissDiscoveryJobs: (inputs, options) =>
+      trackWorkspaceOperation("hiding jobs", () =>
+        applicationMethods.dismissDiscoveryJobs!(inputs, options),
+      ),
+    excludeEmployerDiscoveryJobs: (input, options) =>
+      trackWorkspaceOperation("excluding an employer", () =>
+        applicationMethods.excludeEmployerDiscoveryJobs!(input, options),
+      ),
+    restoreDismissedDiscoveryJob: (jobId) =>
+      trackWorkspaceOperation("restoring hidden jobs", () =>
+        applicationMethods.restoreDismissedDiscoveryJob(jobId),
+      ),
+    restoreDismissedDiscoveryJobs: (jobIds, options) =>
+      trackWorkspaceOperation("restoring hidden jobs", () =>
+        applicationMethods.restoreDismissedDiscoveryJobs!(jobIds, options),
+      ),
+    getResumeWorkspace: (jobId) =>
+      trackWorkspaceOperation("resume workspace", () =>
+        applicationMethods.getResumeWorkspace(jobId),
+      ),
+    queueJobForReview: (jobId) =>
+      trackWorkspaceOperation("shortlisting jobs", () =>
+        applicationMethods.queueJobForReview(jobId),
+      ),
+    queueJobsForReview: (jobIds) =>
+      trackWorkspaceOperation("shortlisting jobs", () =>
+        applicationMethods.queueJobsForReview!(jobIds),
+      ),
     recordApplicationsSentByPerson: () =>
       recordApplicationsSentByPerson(context),
+    judgeUnjudgedJobs: () => {
+      // One pass at a time; a second press joins the one already running.
+      unjudgedJobsJudging ??= trackWorkspaceOperation(
+        "fit judging",
+        async () => {
+          fitJudgmentProgressRef.current = null;
+          options.onFitJudgmentProgress?.();
+          const controller = new AbortController();
+          fitJudgmentAbortController = controller;
+          const startedAt = new Date().toISOString();
+          try {
+            await judgeUnjudgedPlanJobs({
+              ctx: context,
+              signal: controller.signal,
+              onProgress: (progress) => {
+                fitJudgmentProgressRef.current = {
+                  ...progress,
+                  startedAt,
+                  updatedAt: new Date().toISOString(),
+                };
+                options.onFitJudgmentProgress?.();
+              },
+            });
+            return getWorkspaceSnapshot();
+          } catch (error) {
+            const currentProgress = context.fitJudgmentProgressRef?.current;
+            controller.abort();
+            if (currentProgress) {
+              fitJudgmentProgressRef.current = {
+                ...currentProgress,
+                phase: "failed",
+                updatedAt: new Date().toISOString(),
+              };
+              options.onFitJudgmentProgress?.();
+            }
+            throw error;
+          } finally {
+            fitJudgmentAbortController = null;
+          }
+        },
+      ).finally(() => {
+        unjudgedJobsJudging = null;
+      });
+      return unjudgedJobsJudging;
+    },
     generateResume: (jobId, options) =>
       trackWorkspaceOperation("resume generation", () =>
         applicationMethods.generateResume(jobId, options),

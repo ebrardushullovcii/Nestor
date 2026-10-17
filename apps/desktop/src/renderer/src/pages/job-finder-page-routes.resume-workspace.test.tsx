@@ -2,7 +2,7 @@
 
 import { Suspense } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import type { JobFinderPageContext } from "./job-finder-page-context";
@@ -36,13 +36,13 @@ const REVIEW_QUEUE_ITEM = {
     approvedFilePath: "/tmp/ready-resume.pdf",
   },
   updatedAt: "2026-03-20T10:04:00.000Z",
-} satisfies NonNullable<JobFinderWorkspaceSnapshot["reviewQueue"][number]>;
+} satisfies NonNullable<JobFinderRendererWorkspaceSnapshot["reviewQueue"][number]>;
 
 function createWorkspace(
   overrides: Partial<
-    Pick<JobFinderWorkspaceSnapshot, "hydration" | "reviewQueue">
+    Pick<JobFinderRendererWorkspaceSnapshot, "hydration" | "reviewQueue">
   > = {},
-): JobFinderWorkspaceSnapshot {
+): JobFinderRendererWorkspaceSnapshot {
   return {
     hydration: { phase: "complete", deferredCollections: [] },
     reviewQueue: [
@@ -56,7 +56,7 @@ function createWorkspace(
       },
     ],
     ...overrides,
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function createContext(

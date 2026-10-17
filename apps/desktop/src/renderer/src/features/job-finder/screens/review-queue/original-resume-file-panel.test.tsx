@@ -23,18 +23,16 @@ it.each(["pdf", "docx"])(
       uploadedAt: "2026-10-01T12:00:00.000Z",
     });
     const openCandidateAsset = vi.fn().mockResolvedValue({ outcome: "opened" });
-    const listCandidateAssets = vi
-      .fn()
-      .mockResolvedValue({
-        assets: [],
-        originalResumeFile: {
-          id: source.id,
-          fileName: source.fileName,
-          fileType: extension.toUpperCase(),
-          byteSize: 4096,
-          importedAt: source.uploadedAt,
-        },
-      });
+    const listCandidateAssets = vi.fn().mockResolvedValue({
+      assets: [],
+      originalResumeFile: {
+        id: source.id,
+        fileName: source.fileName,
+        fileType: extension.toUpperCase(),
+        byteSize: 4096,
+        importedAt: source.uploadedAt,
+      },
+    });
     vi.stubGlobal("nordri", {
       jobFinder: { openCandidateAsset, listCandidateAssets },
     });

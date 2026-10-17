@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SavedJobSchema, type SavedJob } from "@nordri/contracts";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   DiscoveryResultsPanel,
@@ -78,7 +78,14 @@ function sortByRecent() {
   });
 }
 
+// Ages are relative to today; a fixed day keeps these dates in one shape.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-12-01T12:00:00.000Z"));
+});
+
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   window.localStorage?.clear();
 });
@@ -174,8 +181,8 @@ describe("DiscoveryResultsPanel relative-label recency truth", () => {
     expect(screen.getByText("Posted 01 Jun 2026").textContent).toBe(
       "Posted 01 Jun 2026",
     );
-    expect(screen.getByText("Posted 2026-08-20").textContent).toBe(
-      "Posted 2026-08-20",
+    expect(screen.getByText("Posted 20 Aug 2026").textContent).toBe(
+      "Posted 20 Aug 2026",
     );
     expect(screen.getByText("Updated 05 Aug 2026").textContent).toBe(
       "Updated 05 Aug 2026",
@@ -208,7 +215,7 @@ describe("getDiscoveryListingDateBadge", () => {
         postedAtText: "2026-08-20",
         providerUpdatedAt: "2026-08-24T09:00:00.000Z",
       }),
-    ).toEqual({ rankable: true, shown: true, text: "Posted 2026-08-20" });
+    ).toEqual({ rankable: true, shown: true, text: "Posted 20 Aug 2026" });
     expect(
       getDiscoveryListingDateBadge({
         postedAt: "2026-07-01T10:00:00.000Z",

@@ -202,6 +202,12 @@ export class EmbeddedBrowser {
     height: 640,
   };
   private readonly operations = new Map<AbortController, string>();
+  private readonly automationCommands = new Map<string, number>();
+  private readonly automationIdleTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+  private readonly idleGarbageCollectionAt = new Map<string, number>();
   /** The agent's input, told apart from the person's by source. */
   private readonly agentPresses = createAgentInputLedger();
   private readonly operationClaims = new Map<
@@ -399,14 +405,22 @@ export class EmbeddedBrowser {
     }
   }
 
+  /**
+   * A finished search source's leftover tabs (a listing a site opened in a
+   * new tab, a popup) close now unless the person is looking at one. Left
+   * for the person to close, they piled up to the tab limit over a long
+   * search, a renderer process each, and the search then waited for a tab.
+   */
   markFinishedTabs(tabIds: readonly string[]): void {
     for (const id of tabIds) this.finishedTabs.add(id);
+    this.closeIdleFinishedTabs({ keepActive: true });
   }
 
-  private closeFinishedTabs(): void {
+  private closeIdleFinishedTabs(options: { keepActive: boolean }): number {
     let closed = 0;
     for (const id of this.finishedTabs) {
       if (
+        (options.keepActive && id === this.activeTabId) ||
         this.heldTabs.has(id) ||
         this.parkedTabs.has(id) ||
         this.personTabs.has(id) ||
@@ -418,6 +432,11 @@ export class EmbeddedBrowser {
       closed += 1;
       this.finishedTabs.delete(id);
     }
+    return closed;
+  }
+
+  private closeFinishedTabs(): void {
+    const closed = this.closeIdleFinishedTabs({ keepActive: false });
     if (closed === 0)
       this.requestAttention({
         kind: "error",
@@ -815,7 +834,55 @@ export class EmbeddedBrowser {
   }
 
   private shouldThrottleTab(id: string): boolean {
-    return this.operations.size === 0 || this.isWaitingTab(id);
+    return (
+      this.operations.size === 0 ||
+      this.isWaitingTab(id) ||
+      (!this.automationCommands.has(id) && !this.automationIdleTimers.has(id))
+    );
+  }
+
+  private noteAutomationCommand(id: string, active: boolean): void {
+    const page = this.pageMap.get(id);
+    if (!page || page.contents.isDestroyed()) return;
+    const previousTimer = this.automationIdleTimers.get(id);
+    if (previousTimer) clearTimeout(previousTimer);
+    this.automationIdleTimers.delete(id);
+    const count = Math.max(
+      0,
+      (this.automationCommands.get(id) ?? 0) + (active ? 1 : -1),
+    );
+    if (count > 0) {
+      this.automationCommands.set(id, count);
+      page.contents.setBackgroundThrottling(false);
+    } else {
+      this.automationCommands.delete(id);
+      // Model requests can take minutes. Ads and page timers do not need to
+      // run at foreground speed while no browser command is using this page.
+      const timer = setTimeout(() => {
+        this.automationIdleTimers.delete(id);
+        if (page.contents.isDestroyed()) return;
+        if (!page.contents.isDestroyed())
+          page.contents.setBackgroundThrottling(this.shouldThrottleTab(id));
+        const metrics = app
+          .getAppMetrics?.()
+          .find((process) => process.pid === page.contents.getOSProcessId());
+        if (
+          !page.contents.isDestroyed() &&
+          (metrics?.memory.workingSetSize ?? 0) > 256 * 1024 &&
+          Date.now() - (this.idleGarbageCollectionAt.get(id) ?? 0) > 10_000 &&
+          page.contents.debugger.isAttached()
+        ) {
+          this.idleGarbageCollectionAt.set(id, Date.now());
+          // Reclaim unreachable page-read/JavaScript allocations while the
+          // model thinks. Live DOM, answers and attachments remain intact.
+          void page.contents.debugger
+            .sendCommand("HeapProfiler.collectGarbage")
+            .catch(() => undefined);
+        }
+      }, 5_000);
+      timer.unref();
+      this.automationIdleTimers.set(id, timer);
+    }
   }
 
   private memoryCleanup: Promise<void> | null = null;
@@ -883,6 +950,10 @@ export class EmbeddedBrowser {
     const memory = this.getWaitingFormMemory();
     if (!waitingFormsHaveCapacity(memory))
       void this.reduceWaitingFormMemory().catch(() => undefined);
+    // Finished search tabs give way before a search waits for a free tab;
+    // they close asynchronously, so the room shows at the next check.
+    if (!this.hasTabCapacity())
+      this.closeIdleFinishedTabs({ keepActive: false });
     return this.hasTabCapacity();
   }
 
@@ -930,7 +1001,7 @@ export class EmbeddedBrowser {
         contextIsolation: true,
         nodeIntegration: false,
         webSecurity: true,
-        backgroundThrottling: this.operations.size === 0,
+        backgroundThrottling: true,
         spellcheck: true,
         safeDialogs: true,
         navigateOnDragDrop: false,
@@ -1096,6 +1167,8 @@ export class EmbeddedBrowser {
         action: "allow",
         createWindow: (options) => {
           const popup = this.createPage("about:blank", page.id, options);
+          for (const claim of this.operationClaims.values())
+            if (claim.tabs.has(page.id)) claim.tabs.add(popup.id);
           for (const tabs of this.ownedTabs.values())
             if (tabs.has(page.id)) tabs.add(popup.id);
           return popup.contents;
@@ -1103,6 +1176,11 @@ export class EmbeddedBrowser {
       };
     });
     page.contents.once("destroyed", () => {
+      const idleTimer = this.automationIdleTimers.get(page.id);
+      if (idleTimer) clearTimeout(idleTimer);
+      this.automationIdleTimers.delete(page.id);
+      this.automationCommands.delete(page.id);
+      this.idleGarbageCollectionAt.delete(page.id);
       this.pageMap.delete(page.id);
       this.finishedTabs.delete(page.id);
       this.releasedOwnedTabs.delete(page.id);
@@ -1503,6 +1581,8 @@ export class EmbeddedBrowser {
           if (input?.pointerDown) this.agentPresses.notePress(pageId);
           if (input?.keyDown) this.agentPresses.noteKey(pageId, input.keyDown);
         },
+        onAutomationCommand: (pageId, active) =>
+          this.noteAutomationCommand(pageId, active),
       });
       this.bridge = bridge;
       const transport = await bridge.start();
@@ -1616,6 +1696,9 @@ export class EmbeddedBrowser {
       if (options.cleanupOnFinish) this.markFinishedTabs(await claimedTabs());
       this.operations.delete(controller);
       this.operationClaims.delete(controller);
+      // Finished tabs can only close after this operation releases its claim.
+      // Also retry tabs marked finished by the work before it returned.
+      this.closeIdleFinishedTabs({ keepActive: true });
       this.closeReleasedOwnedTabs();
       for (const page of this.pageMap.values()) {
         if (!page.contents.isDestroyed())

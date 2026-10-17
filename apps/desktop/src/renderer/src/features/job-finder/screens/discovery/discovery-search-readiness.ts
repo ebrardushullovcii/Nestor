@@ -3,7 +3,6 @@ import {
   type BrowserSessionState,
   type JobSearchPreferences,
 } from "@nordri/contracts";
-import { JOB_FINDER_BROWSER_NAME_SENTENCE_START } from "../../lib/job-finder-browser-handoff-copy";
 
 /**
  * Copy shared by the route header and search controls when Job Finder cannot
@@ -27,14 +26,6 @@ export const DISCOVERY_OFFLINE_CATALOG_NOTICE =
 export const DISCOVERY_OFFLINE_SETUP_NOTICE = `${DISCOVERY_OFFLINE_SEARCH_REASON} ${DISCOVERY_OFFLINE_CATALOG_NOTICE}`;
 
 export const DISCOVERY_OFFLINE_RUNTIME_LABEL = "Search unavailable";
-
-/**
- * Only a genuinely errored browser session blocks a current-source search.
- * A browser that is simply not open yet (or still starting) never blocks:
- * the discovery run opens and attaches the browser itself, so the UI gate
- * must not be stricter than the runtime it fronts.
- */
-export const DISCOVERY_BROWSER_BLOCKED_REASON = `${JOB_FINDER_BROWSER_NAME_SENTENCE_START} needs attention before the next search.`;
 
 export type DiscoveryRuntimeCapability = "agent_backed" | "offline_catalog";
 
@@ -76,8 +67,7 @@ export function getDiscoveryRuntimeProjection(
 export type DiscoverySearchBlocker =
   | "no_enabled_sources"
   | "no_search_roles"
-  | "offline_runtime"
-  | "browser_blocked";
+  | "offline_runtime";
 
 export interface DiscoverySearchReadiness {
   enabledSourceCount: number;
@@ -100,15 +90,6 @@ export const DISCOVERY_PAUSED_SEARCH_REASON =
 export function getDiscoverySearchReadiness(
   searchPreferences: JobSearchPreferences,
   session?: Pick<BrowserSessionState, "driver" | "status">,
-  options?: {
-    /**
-     * A discovery run that is active right now, or whose newest attempt
-     * completed successfully, proves the runtime works; a stale blocked
-     * session snapshot must not gate the next search behind a warning that
-     * contradicts the results on screen.
-     */
-    trustRecentRun?: boolean;
-  },
 ): DiscoverySearchReadiness {
   const hasSearchRoles =
     searchPreferences.targetRoles.length > 0 ||
@@ -119,19 +100,16 @@ export function getDiscoverySearchReadiness(
   // Saved roles refine a search; the profile also guides a run without them.
   const setupReady = enabledSourceCount > 0;
   const runtime = session ? getDiscoveryRuntimeProjection(session) : null;
-  const sourceSearchAvailable = runtime
-    ? runtime.isOffline
-      ? false
-      : runtime.sourceSearchAvailable || options?.trustRecentRun === true
-    : true;
+  // A browser that is blocked on one site (a sign-in, a failed page) never
+  // holds back the whole search: the run reopens the browser and skips the
+  // sources it cannot reach. Only an offline build cannot search.
+  const sourceSearchAvailable = runtime ? !runtime.isOffline : true;
   const blocker: DiscoverySearchBlocker | null =
     enabledSourceCount === 0
       ? "no_enabled_sources"
       : runtime?.isOffline
         ? "offline_runtime"
-        : !sourceSearchAvailable
-          ? "browser_blocked"
-          : null;
+        : null;
 
   return {
     enabledSourceCount,
@@ -144,9 +122,7 @@ export function getDiscoverySearchReadiness(
         ? "Add or enable at least one valid public job-source URL before searching."
         : blocker === "offline_runtime"
           ? DISCOVERY_OFFLINE_SEARCH_REASON
-          : blocker === "browser_blocked"
-            ? DISCOVERY_BROWSER_BLOCKED_REASON
-            : null,
+          : null,
     blocker,
   };
 }

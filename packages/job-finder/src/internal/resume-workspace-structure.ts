@@ -832,6 +832,10 @@ function mergeExperienceBullets(input: {
     refs.forEach((source) => covered.add(source.id));
     return [{ text, refs }];
   });
+  // Every saved achievement stays on the draft. The ones the writer chose are
+  // shown; the rest are kept hidden for the person to show again, so a long
+  // history does not push every resume past its page target.
+  const shownCount = lines.length;
   lines.push(
     ...sources
       .filter((source) => !covered.has(source.id))
@@ -840,8 +844,8 @@ function mergeExperienceBullets(input: {
         refs: [source],
       })),
   );
-  return lines.map(({ text, refs }, index) =>
-    createBullet(
+  return lines.map(({ text, refs }, index) => {
+    const bullet = createBullet(
       refs[0]
         ? `${input.entryId}_achievement_${refs[0].index}`
         : `${input.entryId}_bullet_${index + 1}`,
@@ -854,8 +858,11 @@ function mergeExperienceBullets(input: {
           createSourceRef("profile", source.id, source.text),
         ),
       ],
-    ),
-  );
+    );
+    return shownCount > 0 && index >= shownCount
+      ? { ...bullet, included: false }
+      : bullet;
+  });
 }
 
 function resolveCoverageMetadataByRecordId(draft: TailoredResumeDraft) {
@@ -1238,17 +1245,32 @@ function buildDraftSectionsFromStructuredTailoredDraft(input: {
     ...draftSkills.additionalSkills,
   ]);
   if (additionalSkills.length > 0) {
+    // The chosen additional skills are shown; every other saved skill stays
+    // listed but hidden, for the person to show again.
+    const chosenSkills = new Set(
+      draft.additionalSkills.map((skill) => normalizeText(skill)),
+    );
+    const section = createSection({
+      id: "section_additional_skills",
+      kind: "skills",
+      label: "Additional Skills",
+      bullets: additionalSkills,
+      updatedAt: createdAt,
+      origin,
+      sortOrder: sections.length,
+      sourceRefs: skillSourceRefs,
+    });
     sections.push(
-      createSection({
-        id: "section_additional_skills",
-        kind: "skills",
-        label: "Additional Skills",
-        bullets: additionalSkills,
-        updatedAt: createdAt,
-        origin,
-        sortOrder: sections.length,
-        sourceRefs: skillSourceRefs,
-      }),
+      chosenSkills.size === 0
+        ? section
+        : {
+            ...section,
+            bullets: section.bullets.map((bullet) =>
+              chosenSkills.has(normalizeText(bullet.text))
+                ? bullet
+                : { ...bullet, included: false },
+            ),
+          },
     );
   }
 

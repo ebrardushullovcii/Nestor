@@ -4,7 +4,7 @@ import {
 } from "@nordri/contracts";
 import { useEffect, useRef, useState } from "react";
 import type {
-  ApplicationAttempt,
+  ApplicationAttemptListRow,
   ApplyRunDetails,
   JobFinderApplyRunDetailsQuery,
   UserActionRequest,
@@ -15,7 +15,7 @@ import type { QuestionAnswerDraft } from "./actions-screen";
 let lastEditTime = 0;
 
 export function useQuestionAnswerDrafts(props: {
-  applicationAttempts?: readonly ApplicationAttempt[];
+  applicationAttempts?: readonly ApplicationAttemptListRow[];
   requests: readonly UserActionRequest[];
   onGetApplyRunDetails?: (
     query: JobFinderApplyRunDetailsQuery,

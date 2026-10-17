@@ -1,4 +1,4 @@
-import type { ApplyJobResult } from "@nordri/contracts";
+import type { ApplyJobResultListRow } from "@nordri/contracts";
 import type { GlobalDailyApplicationPreparationCapacity } from "@nordri/contracts";
 
 /**
@@ -91,9 +91,9 @@ export function formatDailyPreparationCapacityReachedText(
 
 export function describeDailyPreparationUsage(input: {
   capacity: GlobalDailyApplicationPreparationCapacity;
-  results: readonly ApplyJobResult[];
+  results: readonly ApplyJobResultListRow[];
 }): string {
-  const attempts = new Map<string, ApplyJobResult>();
+  const attempts = new Map<string, ApplyJobResultListRow>();
   const sends = new Set<string>();
   for (const result of input.results) {
     if (

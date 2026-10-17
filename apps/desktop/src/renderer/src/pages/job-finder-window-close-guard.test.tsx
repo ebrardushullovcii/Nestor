@@ -20,7 +20,7 @@ import {
   it,
   vi,
 } from "vitest";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import {
   JobFinderWindowCloseGuard,
   applyJobFinderWindowCloseGuard,
@@ -560,7 +560,7 @@ describe("controller-owned close-guard mirror lifetime", () => {
       settings: { appearanceTheme: "system" },
       profileSetupState: { status: "completed", reviewItems: [] },
       profileCopilotMessages: [],
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     nordri.jobFinder.getWorkspaceBootstrap = vi.fn(() =>
       Promise.resolve(readyWorkspace),
     );

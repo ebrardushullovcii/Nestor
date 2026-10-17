@@ -3,7 +3,7 @@
 import type {
   ApplyRunSummary,
   DiscoveryRunRecord,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import {
   cleanup,
@@ -17,7 +17,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { JobFinderTaskCenter } from "./job-finder-task-center";
 import type { TailoredDraftPreparationViewState } from "../../screens/review-queue/review-queue-status";
 
-function createWorkspace(): JobFinderWorkspaceSnapshot {
+function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
   const discoveryRun = {
     id: "discovery_running",
     state: "running",
@@ -60,10 +60,10 @@ function createWorkspace(): JobFinderWorkspaceSnapshot {
     searchPreferences: {
       discovery: { targets: [{ id: "source_1", label: "Mercury careers" }] },
     },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
-function createQuietWorkspace(): JobFinderWorkspaceSnapshot {
+function createQuietWorkspace(): JobFinderRendererWorkspaceSnapshot {
   return {
     applicationRecords: [],
     applyRuns: [],
@@ -73,7 +73,7 @@ function createQuietWorkspace(): JobFinderWorkspaceSnapshot {
     searchPreferences: {
       discovery: { targets: [] },
     },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 describe("JobFinderTaskCenter", () => {
@@ -106,7 +106,7 @@ describe("JobFinderTaskCenter", () => {
       {
         id: "source_1",
         label: "Example jobs",
-      } as JobFinderWorkspaceSnapshot["searchPreferences"]["discovery"]["targets"][number],
+      } as JobFinderRendererWorkspaceSnapshot["searchPreferences"]["discovery"]["targets"][number],
     ];
     const first = render(
       <JobFinderTaskCenter
@@ -257,7 +257,7 @@ describe("JobFinderTaskCenter", () => {
       id: "job_2",
       company: "Venus",
       title: "Platform Engineer",
-    } as JobFinderWorkspaceSnapshot["discoveryJobs"][number]);
+    } as JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number]);
     // The safety limit here is a sample waiting to be reviewed.
     workspace.intelligence = {
       ...workspace.intelligence,
@@ -276,7 +276,7 @@ describe("JobFinderTaskCenter", () => {
           },
         ],
       },
-    } as unknown as JobFinderWorkspaceSnapshot["intelligence"];
+    } as unknown as JobFinderRendererWorkspaceSnapshot["intelligence"];
 
     render(
       <JobFinderTaskCenter
@@ -552,7 +552,7 @@ test("Activity shows an item cancelled by the person without a failure count", (
       summary: "Cancelled by you",
       updatedAt: "2026-10-01T10:00:00.000Z",
     },
-  ] as JobFinderWorkspaceSnapshot["applyJobResults"];
+  ] as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
   render(
     <JobFinderTaskCenter
       isDiscoveryPending={false}

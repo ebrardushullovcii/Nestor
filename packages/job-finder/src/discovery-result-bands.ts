@@ -1,21 +1,21 @@
 import type {
-  DiscoveryJobView,
-  MatchAssessment,
+  JobListMatchAssessment,
+  ListingActivity,
   SavedJob,
 } from "@nordri/contracts";
 
-import {
-  isProvisionalMatchAssessment,
-} from "./discovery-ordering";
+import { isProvisionalMatchAssessment } from "./discovery-ordering";
 import { isTargetTitleFamily } from "./internal/discovery-title-family";
-import { findClosedListingPhrase } from "./internal/listing-activity";
 
-type DiscoveryBandJob = SavedJob | DiscoveryJobView;
+type DiscoveryBandJob = Pick<SavedJob, "discoveryMethod"> & {
+  matchAssessment: JobListMatchAssessment;
+  listingActivity?: ListingActivity;
+};
 
 function isClosedDiscoveryJob(job: DiscoveryBandJob): boolean {
   return (
-    ("listingActivity" in job && job.listingActivity.status === "closed") ||
-    findClosedListingPhrase(job) !== null
+    job.listingActivity?.status === "closed" ||
+    job.matchAssessment.judgment?.listingClosed === true
   );
 }
 
@@ -71,7 +71,7 @@ export interface FitEvidenceDepth {
  * frozen counts cannot disagree.
  */
 export function getFitEvidenceDepth(
-  assessment: MatchAssessment,
+  assessment: JobListMatchAssessment,
 ): FitEvidenceDepth {
   // Every field is read defensively: this runs for every row on the screen,
   // including legacy and partial payloads that were cast past the schema
@@ -121,7 +121,9 @@ export function getFitEvidenceDepth(
  * be earned or lost because of one.
  */
 export function isMatchScoreWithheld(
-  job: Pick<SavedJob, "discoveryMethod" | "matchAssessment">,
+  job: Pick<SavedJob, "discoveryMethod"> & {
+    matchAssessment: JobListMatchAssessment;
+  },
 ): boolean {
   // Fails closed for legacy or malformed payloads that may have been cast
   // past the schema boundary: a score without both binding fingerprints is

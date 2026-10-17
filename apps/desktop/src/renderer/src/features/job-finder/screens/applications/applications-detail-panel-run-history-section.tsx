@@ -1,5 +1,5 @@
 import { ApplicationsDisclosureSummary } from "./applications-disclosure-summary";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import { cn } from "@renderer/lib/utils";
 import {
   formatTimestamp,
@@ -19,8 +19,8 @@ import { APPLICATION_DETAIL_FACT_LABEL_CLASS } from "./applications-detail-fact-
 function RunHistoryEntry(props: {
   isSelected: boolean;
   onSelect: () => void;
-  result: JobFinderWorkspaceSnapshot["applyJobResults"][number];
-  run: JobFinderWorkspaceSnapshot["applyRuns"][number] | null;
+  result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
+  run: JobFinderRendererWorkspaceSnapshot["applyRuns"][number] | null;
 }) {
   const { isSelected, onSelect, result, run } = props;
   const applicationState = resolveApplyStatePresentation({
@@ -100,8 +100,8 @@ function RunHistoryEntry(props: {
 
 export function ApplicationsDetailPanelRunHistorySection(props: {
   applyRunHistory: Array<{
-    result: JobFinderWorkspaceSnapshot["applyJobResults"][number];
-    run: JobFinderWorkspaceSnapshot["applyRuns"][number] | null;
+    result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
+    run: JobFinderRendererWorkspaceSnapshot["applyRuns"][number] | null;
   }>;
   onSelectApplyRun: (runId: string) => void;
   selectedApplyRunId: string | null;

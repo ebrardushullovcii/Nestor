@@ -5,6 +5,7 @@ import path from "node:path";
 import { app, BrowserWindow } from "electron";
 import {
   CandidateAssetSchema,
+  type CandidateProfile,
   type CandidateAsset,
   type ResumeExportArtifactSummary,
 } from "@nordri/contracts";
@@ -12,6 +13,7 @@ import {
   resolveApprovedResumeExportForApply,
   savedResumeDigestMatches,
   type AssistantHostPorts,
+  type JobFinderWorkspaceService,
 } from "@nordri/job-finder";
 
 import { readUiResumeBatch, stopUiResumeBatch } from "./ui-resume-batch";
@@ -50,6 +52,22 @@ import { writeExportFile } from "./tracker-export-file";
  */
 
 const SEARCH_START_TIMEOUT_MS = 20_000;
+
+async function readWorkspaceProjection(service: JobFinderWorkspaceService) {
+  if (!service.getWorkspaceProjection) {
+    throw new Error("The assistant workspace view is unavailable.");
+  }
+  return service.getWorkspaceProjection();
+}
+
+async function readProfile(
+  service: JobFinderWorkspaceService,
+): Promise<CandidateProfile> {
+  const repository = getJobFinderRepositoryForWorkspaceService(service);
+  return repository
+    ? repository.getProfile()
+    : (await readWorkspaceProjection(service)).profile;
+}
 
 async function waitFor<T>(
   read: () => Promise<T | null>,
@@ -116,9 +134,13 @@ async function listResumeDocuments(
   documentId?: string,
 ): Promise<ResumeDocument[]> {
   const service = await getJobFinderWorkspaceService();
-  const snapshot = await service.getWorkspaceSnapshot();
+  const snapshot =
+    documentId === ORIGINAL_RESUME_DOCUMENT_ID
+      ? null
+      : await readWorkspaceProjection(service);
   const documents: ResumeDocument[] = [];
-  const base = snapshot.profile.baseResume;
+  const base =
+    snapshot?.profile.baseResume ?? (await readProfile(service)).baseResume;
   if (
     (!documentId || documentId === ORIGINAL_RESUME_DOCUMENT_ID) &&
     base.storagePath &&
@@ -143,7 +165,7 @@ async function listResumeDocuments(
       });
     }
   }
-  if (documentId === ORIGINAL_RESUME_DOCUMENT_ID) return documents;
+  if (!snapshot) return documents;
   const draftsByJob = new Map(
     snapshot.resumeDrafts.map((draft) => [draft.jobId, draft]),
   );
@@ -238,7 +260,7 @@ export function createAssistantHostPorts(input: {
     },
     async startSearch({ searchRequest, targetId }) {
       const service = await getJobFinderWorkspaceService();
-      const before = await service.getWorkspaceSnapshot();
+      const before = await readWorkspaceProjection(service);
       if (before.activeDiscoveryRun?.state === "running") {
         return {
           runId: before.activeDiscoveryRun.id,
@@ -266,7 +288,7 @@ export function createAssistantHostPorts(input: {
         )
         .finally(() => publishJobFinderWorkspaceUpdate());
       const runId = await waitFor(async () => {
-        const snapshot = await service.getWorkspaceSnapshot();
+        const snapshot = await readWorkspaceProjection(service);
         const run =
           snapshot.activeDiscoveryRun ??
           snapshot.recentDiscoveryRuns.find(
@@ -405,8 +427,7 @@ export function createAssistantHostPorts(input: {
     async readDocumentText(documentId) {
       if (documentId === ORIGINAL_RESUME_DOCUMENT_ID) {
         const service = await getJobFinderWorkspaceService();
-        const snapshot = await service.getWorkspaceSnapshot();
-        return snapshot.profile.baseResume.textContent ?? null;
+        return (await readProfile(service)).baseResume.textContent ?? null;
       }
       const resumeDocument = await findResumeDocument(documentId);
       if (resumeDocument) {
@@ -497,7 +518,7 @@ export function createAssistantHostPorts(input: {
       getEmbeddedBrowser(),
       async () => {
         const service = await getJobFinderWorkspaceService();
-        return service.getWorkspaceSnapshot();
+        return readWorkspaceProjection(service);
       },
     );
   }

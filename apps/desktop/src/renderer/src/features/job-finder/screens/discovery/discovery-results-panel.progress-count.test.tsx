@@ -181,6 +181,9 @@ it("reads the same report for the live line and source summary regardless of dis
   expect(
     screen.getByTestId("discovery-results-status-line").textContent,
   ).toContain("25 new to you · 22 kept by this plan · 27 duplicates merged");
+  fireEvent.click(
+    screen.getByTestId("discovery-source-summaries").querySelector("summary")!,
+  );
   expect(
     screen.getByTestId("discovery-source-summaries").textContent,
   ).toContain(

@@ -74,34 +74,53 @@ describe("jobDescriptionToText", () => {
 
 describe("getPostedDateLabel", () => {
   const providerUpdatedAt = "2026-07-30T12:00:00.000Z";
+  const now = new Date("2026-10-15T12:00:00.000Z").getTime();
 
-  test("labels a known posting date as Posted", () => {
-    expect(
-      getPostedDateLabel({
-        postedAt: "2026-07-01T12:00:00.000Z",
-        postedAtText: null,
-        providerUpdatedAt,
-      }),
-    ).toEqual({ label: "Posted", value: "01 Jul 2026" });
+  test("labels a known posting date as Posted, in one age shape", () => {
+    const at = (iso: string) =>
+      getPostedDateLabel(
+        { postedAt: iso, postedAtText: null, providerUpdatedAt },
+        now,
+      )?.value;
+    expect(at("2026-10-15T08:00:00.000Z")).toBe("today");
+    expect(at("2026-10-14T08:00:00.000Z")).toBe("yesterday");
+    expect(at("2026-10-10T08:00:00.000Z")).toBe("5 days ago");
+    expect(at("2026-09-24T08:00:00.000Z")).toBe("3 weeks ago");
+    expect(at("2026-07-01T12:00:00.000Z")).toBe("01 Jul 2026");
   });
 
-  test("prefers the visible posted label over derived dates", () => {
+  test("prefers the stored posting date over the site's own aging words", () => {
     expect(
-      getPostedDateLabel({
-        postedAt: "2026-07-01T12:00:00.000Z",
-        postedAtText: "2 days ago",
-        providerUpdatedAt,
-      }),
-    ).toEqual({ label: "Posted", value: "2 days ago" });
+      getPostedDateLabel(
+        {
+          postedAt: "2026-10-10T12:00:00.000Z",
+          postedAtText: "2 days ago",
+          providerUpdatedAt,
+        },
+        now,
+      ),
+    ).toEqual({ label: "Posted", value: "5 days ago" });
+  });
+
+  test("writes a site's relative wording in the same shape", () => {
+    const text = (postedAtText: string) =>
+      getPostedDateLabel(
+        { postedAt: null, postedAtText, providerUpdatedAt: null },
+        now,
+      )?.value;
+    expect(text("38 day(s) ago")).toBe("5 weeks ago");
+    expect(text("3wks ago")).toBe("3 weeks ago");
+    expect(text("5h ago")).toBe("today");
+    expect(text("September 24, 2026")).toBe("3 weeks ago");
+    expect(text("Recently")).toBe("Recently");
   });
 
   test("labels a provider-only update time as Updated instead of claiming a posted date", () => {
     expect(
-      getPostedDateLabel({
-        postedAt: null,
-        postedAtText: null,
-        providerUpdatedAt,
-      }),
+      getPostedDateLabel(
+        { postedAt: null, postedAtText: null, providerUpdatedAt },
+        now,
+      ),
     ).toEqual({ label: "Updated", value: "30 Jul 2026" });
   });
 
@@ -127,22 +146,28 @@ describe("getPostedDateLabel", () => {
 
   test("ignores a non-date posted token in favour of a real posting date", () => {
     expect(
-      getPostedDateLabel({
-        postedAt: "2026-09-04T12:00:00.000Z",
-        postedAtText: "NOPE",
-        providerUpdatedAt,
-      }),
-    ).toEqual({ label: "Posted", value: "04 Sept 2026" });
+      getPostedDateLabel(
+        {
+          postedAt: "2026-09-04T12:00:00.000Z",
+          postedAtText: "NOPE",
+          providerUpdatedAt,
+        },
+        now,
+      ),
+    ).toEqual({ label: "Posted", value: "6 weeks ago" });
   });
 
   test("still renders a written-out posting date", () => {
     expect(
-      getPostedDateLabel({
-        postedAt: null,
-        postedAtText: "04 Sept 2026",
-        providerUpdatedAt: null,
-      }),
-    ).toEqual({ label: "Posted", value: "04 Sept 2026" });
+      getPostedDateLabel(
+        {
+          postedAt: null,
+          postedAtText: "04 Sept 2026",
+          providerUpdatedAt: null,
+        },
+        now,
+      ),
+    ).toEqual({ label: "Posted", value: "6 weeks ago" });
   });
 });
 

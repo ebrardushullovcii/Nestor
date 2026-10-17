@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SavedJobSchema,
   type JobPosting,
@@ -8,6 +8,7 @@ import {
 import { createSavedJob } from "../workspace-service.test-fixtures";
 import {
   applyListingDetailToJob,
+  createDefaultListingHtmlFetcher,
   describeListingDetailEnrichment,
   enrichSavedJobListingDetails,
   jobNeedsListingDetail,
@@ -18,6 +19,29 @@ import {
 } from "./listing-detail-enrichment";
 
 const NOW = "2026-09-05T10:00:00.000Z";
+afterEach(() => vi.unstubAllGlobals());
+
+it("stops consuming an oversized response rather than buffering its entire body", async () => {
+  let pulls = 0;
+  const cancel = vi.fn();
+  const bytes = new TextEncoder().encode("x".repeat(8192));
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls += 1;
+      controller.enqueue(bytes);
+      if (pulls === 1000) controller.close();
+    },
+    cancel,
+  });
+  vi.stubGlobal("fetch", () => Promise.resolve(new Response(body)));
+  const result = await createDefaultListingHtmlFetcher()(
+    "https://example.test/large",
+    { signal: new AbortController().signal },
+  );
+  expect(result.html).toHaveLength(1_500_000);
+  expect(pulls).toBeLessThan(200);
+  expect(cancel).toHaveBeenCalledOnce();
+});
 
 function cardOnlyJob(overrides: Partial<SavedJob> = {}): SavedJob {
   return createSavedJob({
