@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest";
 
-import type { ResumeDraft, ResumeDraftEntry } from "@nordri/contracts";
+import type { ResumeDraft, ResumeDraftEntry } from "@nestor/contracts";
 import {
   ResumeClaimConfirmationSchema,
   ResumeDraftSchema,
   resumeClaimOwnershipStatement,
-} from "@nordri/contracts";
-import { fnv1a32 } from "@nordri/core";
+} from "@nestor/contracts";
+import { fnv1a32 } from "@nestor/core";
 import {
   buildResumeCoverageComparison,
   buildResumeDraftContentHash,

@@ -4,7 +4,7 @@ import type {
   ResumeDraftSection,
   ResumeDraftSourceRef,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createUniqueId, normalizeText, uniqueStrings } from "./shared";
 
 export function createBullet(

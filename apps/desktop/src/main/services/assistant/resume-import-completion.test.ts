@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import {
   ResumeImportRunSchema,
   createFreshStartCandidateProfile,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { waitForAssistantResumeImport } from "./resume-import-completion";
 
 function harness(input: { active?: boolean; accepted?: number } = {}) {

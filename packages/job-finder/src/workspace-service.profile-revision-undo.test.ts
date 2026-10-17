@@ -1,10 +1,10 @@
-import type { JobFinderAiClient } from "@nordri/ai-providers";
+import type { JobFinderAiClient } from "@nestor/ai-providers";
 import type {
   ProfileCopilotContext,
   ProfileCopilotPatchGroup,
   ProfileCopilotPatchOperation,
-} from "@nordri/contracts";
-import { ProfileCopilotPatchGroupSchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { ProfileCopilotPatchGroupSchema } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import {

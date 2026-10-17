@@ -3,7 +3,7 @@ import {
   ApplicationAuthorityEnvelopeSchema,
   type CandidateProfile,
   type UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { onlySavedAnswersWereAdded } from "./workspace-application-methods";
 import { findManualAnswerStepsCoveredBy } from "./workspace-user-action-methods";
 

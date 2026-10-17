@@ -1,4 +1,4 @@
-import type { ResumeImportFieldCandidateSummary } from "@nordri/contracts";
+import type { ResumeImportFieldCandidateSummary } from "@nestor/contracts";
 import type { ProfileSection } from "../../lib/profile-screen-progress";
 import { getJobFinderScrollBehavior } from "../../lib/job-finder-scroll-behavior";
 

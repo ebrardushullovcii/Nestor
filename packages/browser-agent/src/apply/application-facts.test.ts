@@ -1,4 +1,4 @@
-import { CandidateProfileSchema } from "@nordri/contracts";
+import { CandidateProfileSchema } from "@nestor/contracts";
 import { expect, test } from "vitest";
 import { storedFactFor, storedFacts } from "./application-facts";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";

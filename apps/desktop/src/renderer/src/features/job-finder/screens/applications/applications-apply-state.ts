@@ -1,4 +1,4 @@
-import type { ApplicationRecord, ApplyJobResultListRow } from "@nordri/contracts";
+import type { ApplicationRecord, ApplyJobResultListRow } from "@nestor/contracts";
 
 import type { BadgeTone } from "../../lib/job-finder-types";
 

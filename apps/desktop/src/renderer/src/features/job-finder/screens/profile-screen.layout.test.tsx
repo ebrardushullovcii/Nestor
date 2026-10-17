@@ -6,13 +6,13 @@ import type {
   ProfileSetupState,
   ResumeImportFieldCandidateSummary,
   SourceDebugRunDetails,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   CandidateProfileSchema,
   JobSearchPreferencesSchema,
   ResumeImportFieldCandidateSummarySchema,
   ResumeImportRunSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { ToastProvider } from "@renderer/components/ui/toast";
@@ -160,7 +160,7 @@ describe("ProfileScreen ready-state density and save-bar footprint", () => {
     }
 
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
-    window.localStorage.removeItem("nordri.profile-ready-banner-dismissed-v1");
+    window.localStorage.removeItem("nestor.profile-ready-banner-dismissed-v1");
   });
 
   afterEach(() => {

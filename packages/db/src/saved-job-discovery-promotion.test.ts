@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { DiscoveryRunRecordSchema, SavedJobSchema } from "@nordri/contracts";
+import { DiscoveryRunRecordSchema, SavedJobSchema } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 import {
   createInMemoryJobFinderRepository,
@@ -14,7 +14,7 @@ import { createSeed } from "./test-fixtures";
 async function fixture(storage: "memory" | "file") {
   const temp =
     storage === "file"
-      ? await createTempRepository("nordri-current-promotion-")
+      ? await createTempRepository("nestor-current-promotion-")
       : null;
   const repo: JobFinderRepository = temp
     ? await temp.createRepository()

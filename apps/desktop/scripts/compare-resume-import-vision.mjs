@@ -320,11 +320,11 @@ function isRunReadyForScoring(run) {
 }
 
 async function getResumeImportState(window) {
-  return window.evaluate(() => window.nordri.jobFinder.test.getResumeImportState())
+  return window.evaluate(() => window.nestor.jobFinder.test.getResumeImportState())
 }
 
 async function getWorkspaceSnapshot(window) {
-  return window.evaluate(() => window.nordri.jobFinder.getWorkspace())
+  return window.evaluate(() => window.nestor.jobFinder.getWorkspace())
 }
 
 async function waitForResumeImportReadyForScoring(window, runId, timeoutMs) {
@@ -475,7 +475,7 @@ async function waitForAppReady(window) {
 }
 
 async function runImport(benchmarkCase, useVision, importTimeoutMs) {
-  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nordri-resume-vision-compare-'))
+  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nestor-resume-vision-compare-'))
   const mode = useVision ? 'omni' : 'normal'
   const sourcePath = path.join(repoRoot, benchmarkCase.resumePath)
   const app = await electron.launch({
@@ -483,9 +483,9 @@ async function runImport(benchmarkCase, useVision, importTimeoutMs) {
     cwd: desktopDir,
     env: {
       ...process.env,
-      NORDRI_ENABLE_TEST_API: '1',
-      NORDRI_TEST_API_USE_LIVE_AI: '1',
-      NORDRI_USER_DATA_DIR: userDataDirectory,
+      NESTOR_ENABLE_TEST_API: '1',
+      NESTOR_TEST_API_USE_LIVE_AI: '1',
+      NESTOR_USER_DATA_DIR: userDataDirectory,
     },
   })
 
@@ -494,21 +494,21 @@ async function runImport(benchmarkCase, useVision, importTimeoutMs) {
     await waitForAppReady(window)
     const initialSnapshot = await getWorkspaceSnapshot(window)
     await window.evaluate((state) => {
-      if (!window.nordri.jobFinder.test) {
+      if (!window.nestor.jobFinder.test) {
         throw new Error('Desktop test API is not available in the renderer context.')
       }
 
-      return window.nordri.jobFinder.test.resetWorkspaceState(state)
+      return window.nestor.jobFinder.test.resetWorkspaceState(state)
     }, replaceWorkspaceForFreshImport(initialSnapshot))
 
     const startedAt = new Date().toISOString()
     const snapshot = await withTimeout(
       window.evaluate((input) => {
-        if (!window.nordri.jobFinder.test) {
+        if (!window.nestor.jobFinder.test) {
           throw new Error('Desktop test API is not available in the renderer context.')
         }
 
-        return window.nordri.jobFinder.test.importResumeFromPath(input)
+        return window.nestor.jobFinder.test.importResumeFromPath(input)
       }, { sourcePath, useVision }),
       importTimeoutMs,
       `${benchmarkCase.id} ${mode} import`,

@@ -2,15 +2,15 @@ import type {
   JobFinderSettings,
   ResumePreviewIdentityField,
   ResumeTemplateId,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   getResumeEntryBulletTargetId,
   getResumeEntryFieldTargetId,
   getResumeIdentityTargetId,
   getResumeSectionBulletTargetId,
   getResumeSectionTextTargetId,
-} from "@nordri/contracts";
-import type { ResumeRenderDocument } from "@nordri/job-finder";
+} from "@nestor/contracts";
+import type { ResumeRenderDocument } from "@nestor/job-finder";
 
 import { getLocalResumeTemplateDefinition } from "./job-finder-resume-catalog";
 

@@ -1,4 +1,4 @@
-import type { ResumeImportFieldCandidateSummary } from "@nordri/contracts";
+import type { ResumeImportFieldCandidateSummary } from "@nestor/contracts";
 import { ChevronDown } from "lucide-react";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";

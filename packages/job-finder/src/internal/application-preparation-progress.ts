@@ -1,6 +1,6 @@
-import type { ApplicationPreparationProgress } from "@nordri/browser-runtime";
-import { ApplyJobResultSchema } from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+import type { ApplicationPreparationProgress } from "@nestor/browser-runtime";
+import { ApplyJobResultSchema } from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 
 /**
  * Turns an agent/tool note into a safe sentence for durable UI state.

@@ -14,7 +14,7 @@ const tempDirectories: string[] = [];
 
 async function createTempResumeFile(fileName: string, contents: string) {
   const tempDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-resume-parser-"),
+    path.join(os.tmpdir(), "nestor-resume-parser-"),
   );
   tempDirectories.push(tempDirectory);
   const filePath = path.join(tempDirectory, fileName);
@@ -50,9 +50,9 @@ async function mockEmbeddedPdfExtraction() {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  delete process.env.NORDRI_RESUME_PARSER_SIDECAR;
-  delete process.env.NORDRI_RESUME_PARSER_SIDECAR_BINARY_PATH;
-  delete process.env.NORDRI_RESUME_PARSER_SIDECAR_PATH;
+  delete process.env.NESTOR_RESUME_PARSER_SIDECAR;
+  delete process.env.NESTOR_RESUME_PARSER_SIDECAR_BINARY_PATH;
+  delete process.env.NESTOR_RESUME_PARSER_SIDECAR_PATH;
 
   await Promise.all(
     tempDirectories
@@ -71,7 +71,7 @@ describe("resume document parser worker orchestration", () => {
   });
 
   test("falls back to the embedded parser when the python sidecar is disabled", async () => {
-    process.env.NORDRI_RESUME_PARSER_SIDECAR = "0";
+    process.env.NESTOR_RESUME_PARSER_SIDECAR = "0";
     const resumePath = await createTempResumeFile(
       "resume.txt",
       ["Jamie Rivers", "Staff Frontend Engineer", "Berlin, Germany"].join("\n"),
@@ -373,16 +373,16 @@ describe("resume document parser worker orchestration", () => {
         errorMessage: null,
       });
 
-    process.env.NORDRI_RESUME_PARSER_SIDECAR_BINARY_PATH = path.join(
+    process.env.NESTOR_RESUME_PARSER_SIDECAR_BINARY_PATH = path.join(
       os.tmpdir(),
       "resume_parser_sidecar.exe",
     );
-    process.env.NORDRI_RESUME_PARSER_SIDECAR_PATH = path.join(
+    process.env.NESTOR_RESUME_PARSER_SIDECAR_PATH = path.join(
       os.tmpdir(),
       "missing_resume_parser_sidecar.py",
     );
     await writeFile(
-      process.env.NORDRI_RESUME_PARSER_SIDECAR_BINARY_PATH,
+      process.env.NESTOR_RESUME_PARSER_SIDECAR_BINARY_PATH,
       "binary",
       "utf8",
     );

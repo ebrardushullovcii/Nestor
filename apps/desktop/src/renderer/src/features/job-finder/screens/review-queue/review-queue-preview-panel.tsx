@@ -3,7 +3,7 @@ import type {
   ReviewQueueItem,
   JobListRow,
   TailoredAssetSummary,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { ProgressBar } from "@renderer/components/ui";
 import { EmptyState } from "../../components/empty-state";

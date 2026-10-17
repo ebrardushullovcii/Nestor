@@ -55,7 +55,7 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
   status, and lifecycle identity but never raw answer text or a caller-supplied
   digest. An approved snapshot does not grant, arm, or execute anything.
 - product actions: schema-validated local tools call a narrow injected subset of the `job-finder` workspace service. They never expose raw IPC, browser primitives, arbitrary navigation, or filesystem access; the retired Profile Copilot's proposal-only calls persist reviewable patch groups without applying them
-- assistant (ADR 0037-0039): renderer sidebar -> typed preload `assistant` bridge -> `job-finder:assistant:*` IPC -> the main-process session host in `packages/job-finder/src/assistant`. The host runs `runConversationTurn` from `packages/agent-runtime` (product-neutral: steering at tool boundaries, per-tool deadlines, generation fencing, streaming) with Job Finder tools that call the workspace service and desktop ports (searches, application runs, sends, files, the lent browser tab). Conversations, events, operations, change receipts, grants, plans, result sets and checkpoints persist in `assistant.sqlite` through `packages/db`'s assistant repository. Renderer screens publish context references (route, focus, list ids, editor snapshots) and never call tools. Model routes and streaming come from `packages/ai-providers` (`NORDRI_AI_ASSISTANT_*`).
+- assistant (ADR 0037-0039): renderer sidebar -> typed preload `assistant` bridge -> `job-finder:assistant:*` IPC -> the main-process session host in `packages/job-finder/src/assistant`. The host runs `runConversationTurn` from `packages/agent-runtime` (product-neutral: steering at tool boundaries, per-tool deadlines, generation fencing, streaming) with Job Finder tools that call the workspace service and desktop ports (searches, application runs, sends, files, the lent browser tab). Conversations, events, operations, change receipts, grants, plans, result sets and checkpoints persist in `assistant.sqlite` through `packages/db`'s assistant repository. Renderer screens publish context references (route, focus, list ids, editor snapshots) and never call tools. Model routes and streaming come from `packages/ai-providers` (`NESTOR_AI_ASSISTANT_*`).
 - source-debug: `job-finder` orchestrates phases and artifacts, `browser-agent` returns structured attempts, `db` persists runs and evidence
 - browser visual evidence: `browser-runtime` owns screenshot capture and cleanup; `browser-agent` owns generic trigger policy and interpretation; `job-finder` persists only schema-validated summaries
 - interview live session: visible chat/audio UI -> typed preload -> Electron main-hosted `live-assistant` service -> typed AI/audio/screenshot adapters -> visible responses, source-labeled transcript, and post-session review
@@ -123,7 +123,7 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
   application observation/exact-one-action hands only to main-process
   composition. Job Finder owns the authority/preflight/idempotency policy around
   those mechanics through the explicit
-  `@nordri/job-finder/application-submission-runtime-main` subpath. No
+  `@nestor/job-finder/application-submission-runtime-main` subpath. No
   renderer, preload, IPC, or legacy apply route calls that seam; browser-local
   action facts can record only `not_submitted` or `outcome_uncertain`, never
   prove `submitted`
@@ -143,7 +143,7 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
 
 ## Interview Capture Protection
 
-Live Assistant defaults to the ordinary visible main window. Advanced overlay windows and global/tray controls initialize only when `NORDRI_INTERVIEW_ADVANCED_SURFACES=1`. When enabled, overlay capture exclusion remains adapter-owned capability state: Electron `BrowserWindow.setContentProtection(true)` is a request, while real platform-specific verification and any future authorized stronger capture-exclusion path must stay behind `packages/os-integration`.
+Live Assistant defaults to the ordinary visible main window. Advanced overlay windows and global/tray controls initialize only when `NESTOR_INTERVIEW_ADVANCED_SURFACES=1`. When enabled, overlay capture exclusion remains adapter-owned capability state: Electron `BrowserWindow.setContentProtection(true)` is a request, while real platform-specific verification and any future authorized stronger capture-exclusion path must stay behind `packages/os-integration`.
 
 See [ADR 0003](adr/0003-live-assistant-live-session-architecture.md) and [ADR 0008](adr/0008-visible-first-live-assistant.md).
 

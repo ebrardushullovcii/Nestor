@@ -11,7 +11,7 @@ import type {
   ProfileCopilotMessage,
   ResumeAssistantMessage,
   ResumeImportProgressEvent,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { useJobFinderWorkspace } from "@renderer/features/job-finder/hooks/use-job-finder-workspace";
 import { resolveResumeWorkspaceRouteState } from "@renderer/features/job-finder/lib/resume-workspace-route-state";
 import { JOB_FINDER_ROUTE_PATHS } from "@renderer/features/job-finder/lib/job-finder-route-hrefs";
@@ -453,7 +453,7 @@ export function useJobFinderPageController() {
         return;
       }
 
-      window.nordri.jobFinder.cancelImportResume(includeProcessing);
+      window.nestor.jobFinder.cancelImportResume(includeProcessing);
       clearResumeLifecyclePending([scope]);
     },
     [clearResumeLifecyclePending],
@@ -488,7 +488,7 @@ export function useJobFinderPageController() {
     );
   useEffect(
     () =>
-      window.nordri.assistant?.onResumeBatchStop?.((batchId) => {
+      window.nestor.assistant?.onResumeBatchStop?.((batchId) => {
         if (!stopAssistantUiResumeBatch(batchId)) return;
         setTailoredDraftPreparation((current) =>
           current.status === "running"
@@ -1024,7 +1024,7 @@ export function useJobFinderPageController() {
   const refreshResumeWorkspaceRef = useRef(refreshResumeWorkspace);
   refreshResumeWorkspaceRef.current = refreshResumeWorkspace;
   useEffect(() => {
-    const subscribe = window.nordri?.jobFinder?.onWorkspaceUpdate;
+    const subscribe = window.nestor?.jobFinder?.onWorkspaceUpdate;
     if (typeof subscribe !== "function") return undefined;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const unsubscribe = subscribe(() => {

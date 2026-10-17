@@ -2,7 +2,7 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CandidateProfileSchema } from "@nordri/contracts";
+import { CandidateProfileSchema } from "@nestor/contracts";
 import { ResumeIdentityChoiceNotice } from "./resume-identity-choice-notice";
 
 function profileWith(email: string) {

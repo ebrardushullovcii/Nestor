@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { AssistantMessageSchema } from "@nordri/contracts";
+import { AssistantMessageSchema } from "@nestor/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AssistantMessageParts } from "./assistant-message-parts";

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import type { JobFinderAiClient } from "@nordri/ai-providers";
-import { createInMemoryJobFinderRepository } from "@nordri/db";
+import type { JobFinderAiClient } from "@nestor/ai-providers";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 
 import { createJobFinderWorkspaceService } from "./index";
 import { buildResumeRenderDocument } from "./internal/resume-workspace-structure";

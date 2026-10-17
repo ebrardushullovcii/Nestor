@@ -17,7 +17,7 @@ import type {
   ReviewQueueItem,
   JobListRow,
   TailoredAssetSummary,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button, ProgressBar } from "@renderer/components/ui";
 import { cn } from "@renderer/lib/cn";
 import { openUrlInJobFinderBrowser } from "../../components/open-outside-links";

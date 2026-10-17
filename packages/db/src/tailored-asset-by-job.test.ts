@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { TailoredAssetSchema } from "@nordri/contracts";
+import { TailoredAssetSchema } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 import { createInMemoryJobFinderRepository } from "./index";
 import type { JobFinderRepository } from "./index";
@@ -30,7 +30,7 @@ for (const storage of ["memory", "file"] as const) {
     test("matches the existing list's first row and returns caller-owned nested values", async () => {
       const temp =
         storage === "file"
-          ? await createTempRepository("nordri-selected-tailored-asset-")
+          ? await createTempRepository("nestor-selected-tailored-asset-")
           : null;
       const repo: JobFinderRepository = temp
         ? await temp.createRepository()
@@ -82,7 +82,7 @@ for (const storage of ["memory", "file"] as const) {
 }
 
 test("SQLite selected-job lookup uses the index and never parses unrelated or later matching bodies", async () => {
-  const temp = await createTempRepository("nordri-tailored-bounded-");
+  const temp = await createTempRepository("nestor-tailored-bounded-");
   const repo = await temp.createRepository();
   const db = new DatabaseSync(temp.filePath);
   try {

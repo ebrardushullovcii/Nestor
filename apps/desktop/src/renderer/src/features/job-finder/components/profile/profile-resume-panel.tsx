@@ -12,7 +12,7 @@ import {
   type ResumeImportProgressEvent,
   type ResumeImportRun,
   type ResumeTimelineRepairAction,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Sparkles, Upload } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
 import {

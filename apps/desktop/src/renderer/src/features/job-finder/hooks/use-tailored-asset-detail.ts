@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { describeFailure } from "../lib/describe-failure";
-import type { TailoredAsset, TailoredAssetSummary } from "@nordri/contracts";
+import type { TailoredAsset, TailoredAssetSummary } from "@nestor/contracts";
 
 /** A sentence this hook wrote for the person, shown as it is. */
 class DetailReadError extends Error {}
@@ -53,7 +53,7 @@ export function useTailoredAssetDetail(summary: TailoredAssetSummary | null) {
     let current = true;
     setState({ key, source: summary, asset: null, error: null, loaded: false });
     void Promise.resolve()
-      .then(() => window.nordri.jobFinder.getTailoredAsset(id))
+      .then(() => window.nestor.jobFinder.getTailoredAsset(id))
       .then((asset) => {
         if (asset && asset.id !== id)
           throw new DetailReadError("This preview belongs to another resume.");

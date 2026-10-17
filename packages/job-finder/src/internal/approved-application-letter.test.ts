@@ -7,15 +7,15 @@ import {
   JobFinderSettingsSchema,
   type ApplicationDocumentRevision,
   type ApplyPageSession,
-} from "@nordri/contracts";
-import type { ExecuteApplicationFlowInput } from "@nordri/browser-runtime";
-import type * as BrowserAgent from "@nordri/browser-agent";
+} from "@nestor/contracts";
+import type { ExecuteApplicationFlowInput } from "@nestor/browser-runtime";
+import type * as BrowserAgent from "@nestor/browser-agent";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
-vi.mock("@nordri/browser-agent", async (original) => ({
+vi.mock("@nestor/browser-agent", async (original) => ({
   ...(await original<typeof BrowserAgent>()),
   replaceApprovedApplicationLetter: vi.fn(),
 }));
-import { replaceApprovedApplicationLetter } from "@nordri/browser-agent";
+import { replaceApprovedApplicationLetter } from "@nestor/browser-agent";
 import { refreshApprovedApplicationLetter } from "./approved-application-letter";
 const at = "2026-10-06T10:00:00.000Z";
 

@@ -2,7 +2,7 @@ import type {
   BrowserSessionState,
   ReviewQueueItem,
   TailoredAsset,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   collectInProgressApplicationJobIds,

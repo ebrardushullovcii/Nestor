@@ -7,7 +7,7 @@
 import {
   formatEmployerLabelFromSlug,
   sanitizeEmployerLabel,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 const EMPLOYER_ABSENCE_LABEL_PATTERN = /^employer not stated$/i;
 const LOCATION_ABSENCE_LABEL_PATTERN = /^location not stated$/i;

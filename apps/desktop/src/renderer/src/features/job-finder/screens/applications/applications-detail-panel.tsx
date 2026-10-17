@@ -9,7 +9,7 @@ import { useMemo, useRef } from "react";
 import {
   isApplicationTrackedAsSentByPerson,
   type ApplicationCrmStageDefinition,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   ApplicationAttemptListRow,
   ApplicationRecord,
@@ -24,7 +24,7 @@ import type {
   JobFinderExactApplicationTarget,
   UserActionCommandInput,
   UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { ApplicationAnswerStep } from "./applications-answer-step";
 import { Mic } from "lucide-react";
 import { Button } from "@renderer/components/ui";
@@ -742,7 +742,7 @@ export function ApplicationsDetailPanel({
                         );
                       // The page is focused, but the browser may be minimized:
                       // show it, as Open the Job Finder browser does.
-                      void window.nordri?.browser?.command({ type: "open" });
+                      void window.nestor?.browser?.command({ type: "open" });
                     }
                   : undefined
               }

@@ -10,7 +10,7 @@ import {
   evaluateProfileSetupReadiness,
   JobSearchPreferencesSchema,
   type ResumeApplicationMode,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createProfileEditorValues,
   createSearchPreferencesEditorValues,

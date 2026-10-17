@@ -2,7 +2,7 @@ import {
   ApplicationAnswerRecordSchema,
   ApplicationQuestionRecordSchema,
   ApplicationReviewCardSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { expect, test } from "vitest";
 import { creditOwnApplicationAnswers } from "./review-card-own-answers";
 

@@ -2,7 +2,7 @@ import { round3SearchRun } from "./discovery-round3.test-fixture";
 import type {
   DiscoveryRunRecord,
   JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import { buildJobFinderTaskCenterModel } from "../components/task-center/job-finder-task-center-model";

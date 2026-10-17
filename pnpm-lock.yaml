@@ -65,31 +65,31 @@ importers:
       '@radix-ui/react-tabs':
         specifier: ^1.1.13
         version: 1.1.13(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      '@nordri/ai-providers':
+      '@nestor/ai-providers':
         specifier: workspace:*
         version: link:../../packages/ai-providers
-      '@nordri/browser-runtime':
+      '@nestor/browser-runtime':
         specifier: workspace:*
         version: link:../../packages/browser-runtime
-      '@nordri/contracts':
+      '@nestor/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@nordri/core':
+      '@nestor/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@nordri/db':
+      '@nestor/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@nordri/live-assistant':
+      '@nestor/live-assistant':
         specifier: workspace:*
         version: link:../../packages/live-assistant
-      '@nordri/job-finder':
+      '@nestor/job-finder':
         specifier: workspace:*
         version: link:../../packages/job-finder
-      '@nordri/knowledge-base':
+      '@nestor/knowledge-base':
         specifier: workspace:*
         version: link:../../packages/knowledge-base
-      '@nordri/os-integration':
+      '@nestor/os-integration':
         specifier: workspace:*
         version: link:../../packages/os-integration
       chromium-bidi:
@@ -177,7 +177,7 @@ importers:
 
   packages/agent-runtime:
     dependencies:
-      '@nordri/contracts':
+      '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
       zod:
@@ -186,22 +186,22 @@ importers:
 
   packages/ai-evals:
     dependencies:
-      '@nordri/ai-providers':
+      '@nestor/ai-providers':
         specifier: workspace:*
         version: link:../ai-providers
-      '@nordri/browser-agent':
+      '@nestor/browser-agent':
         specifier: workspace:*
         version: link:../browser-agent
-      '@nordri/browser-runtime':
+      '@nestor/browser-runtime':
         specifier: workspace:*
         version: link:../browser-runtime
-      '@nordri/contracts':
+      '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@nordri/db':
+      '@nestor/db':
         specifier: workspace:*
         version: link:../db
-      '@nordri/job-finder':
+      '@nestor/job-finder':
         specifier: workspace:*
         version: link:../job-finder
       playwright:
@@ -217,10 +217,10 @@ importers:
 
   packages/ai-providers:
     dependencies:
-      '@nordri/agent-runtime':
+      '@nestor/agent-runtime':
         specifier: workspace:*
         version: link:../agent-runtime
-      '@nordri/contracts':
+      '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
       zod:
@@ -229,10 +229,10 @@ importers:
 
   packages/browser-agent:
     dependencies:
-      '@nordri/agent-runtime':
+      '@nestor/agent-runtime':
         specifier: workspace:*
         version: link:../agent-runtime
-      '@nordri/contracts':
+      '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
       playwright:
@@ -248,13 +248,13 @@ importers:
 
   packages/browser-runtime:
     dependencies:
-      '@nordri/ai-providers':
+      '@nestor/ai-providers':
         specifier: workspace:*
         version: link:../ai-providers
-      '@nordri/browser-agent':
+      '@nestor/browser-agent':
         specifier: workspace:*
         version: link:../browser-agent
-      '@nordri/contracts':
+      '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
       playwright:
@@ -271,47 +271,47 @@ importers:
 
   packages/db:
     dependencies:
-      '@nordri/contracts':
+      '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
 
   packages/live-assistant:
     dependencies:
-      '@nordri/contracts':
+      '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@nordri/os-integration':
+      '@nestor/os-integration':
         specifier: workspace:*
         version: link:../os-integration
     devDependencies:
-      '@nordri/ai-providers':
+      '@nestor/ai-providers':
         specifier: workspace:*
         version: link:../ai-providers
 
   packages/job-finder:
     dependencies:
-      '@nordri/agent-runtime':
+      '@nestor/agent-runtime':
         specifier: workspace:*
         version: link:../agent-runtime
-      '@nordri/ai-providers':
+      '@nestor/ai-providers':
         specifier: workspace:*
         version: link:../ai-providers
-      '@nordri/browser-agent':
+      '@nestor/browser-agent':
         specifier: workspace:*
         version: link:../browser-agent
-      '@nordri/browser-runtime':
+      '@nestor/browser-runtime':
         specifier: workspace:*
         version: link:../browser-runtime
-      '@nordri/contracts':
+      '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@nordri/core':
+      '@nestor/core':
         specifier: workspace:*
         version: link:../core
-      '@nordri/db':
+      '@nestor/db':
         specifier: workspace:*
         version: link:../db
-      '@nordri/knowledge-base':
+      '@nestor/knowledge-base':
         specifier: workspace:*
         version: link:../knowledge-base
       zod:

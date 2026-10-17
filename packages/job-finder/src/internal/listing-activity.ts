@@ -5,7 +5,7 @@ import type {
   ListingActivity,
   ListingSignalRecord,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { createJobIdentityIndex } from "./job-identity";
 

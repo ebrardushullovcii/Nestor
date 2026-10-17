@@ -6,8 +6,8 @@ import type {
   ResumeStrategySelection,
   SelectResumeStrategyInput,
   SetCampaignResumeStrategyDefaultInput,
-} from "@nordri/contracts";
-import { ResumeStrategySchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { ResumeStrategySchema } from "@nestor/contracts";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import {

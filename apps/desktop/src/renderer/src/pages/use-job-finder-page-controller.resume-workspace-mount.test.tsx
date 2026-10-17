@@ -10,12 +10,12 @@ import {
   JobSearchCampaignSchema,
   JobSearchPreferencesSchema,
   ResumeDraftSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   JobFinderResumeWorkspace,
   JobFinderRendererWorkspaceSnapshot,
   ResumeAssistantMessage,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import {
@@ -346,7 +346,7 @@ describe("useJobFinderPageController resume-workspace mount loading", () => {
 
   afterEach(() => {
     cleanup();
-    Reflect.deleteProperty(window, "nordri");
+    Reflect.deleteProperty(window, "nestor");
   });
 
   function createMountHarness() {
@@ -367,7 +367,7 @@ describe("useJobFinderPageController resume-workspace mount loading", () => {
         }),
     );
 
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         ping: vi.fn(() => Promise.resolve({ platform: "darwin" as const })),
@@ -376,7 +376,7 @@ describe("useJobFinderPageController resume-workspace mount loading", () => {
           getResumeWorkspace,
           sendResumeAssistantMessage,
         },
-      } as unknown as Window["nordri"],
+      } as unknown as Window["nestor"],
     });
 
     type Controller = ReturnType<typeof useJobFinderPageController>;

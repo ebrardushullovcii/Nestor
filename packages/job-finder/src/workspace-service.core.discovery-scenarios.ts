@@ -1,10 +1,10 @@
-import type { JudgeJobFitsInput } from "@nordri/ai-providers";
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+import type { JudgeJobFitsInput } from "@nestor/ai-providers";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   JobPostingSchema,
   SavedJobSchema,
   type DiscoveryActivityEvent,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 import {
   createAgentAiClient,

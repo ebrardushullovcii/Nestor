@@ -9,7 +9,7 @@ import {
 } from "../../../../../shared/job-finder-startup-reset-recovery";
 
 const BANNER_DISMISSED_STORAGE_KEY_PREFIX =
-  "nordri.startup-reset-recovery-banner-dismissed-v1:";
+  "nestor.startup-reset-recovery-banner-dismissed-v1:";
 
 function readBannerDismissed(dismissalKey: string): boolean {
   try {
@@ -47,7 +47,7 @@ export function StartupResetRecoveryBanner() {
 
     try {
       const recoveryBridge =
-        window.nordri?.jobFinder?.getStartupResetRecovery;
+        window.nestor?.jobFinder?.getStartupResetRecovery;
       recoveryBridge?.()
         .then((recoveryFact) => {
           if (!cancelled && isJobFinderStartupResetRecoveryFact(recoveryFact)) {

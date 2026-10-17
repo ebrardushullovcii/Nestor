@@ -3,7 +3,7 @@ import { renderHook, act } from "@testing-library/react";
 import {
   type SaveUserActionAnswerDraftInput,
   UserActionRequestSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import { useQuestionAnswerDrafts } from "./use-question-answer-drafts";
 
@@ -11,7 +11,7 @@ test("restores a durable draft on either screen without treating it as submitted
   const saveUserActionAnswerDraft = vi
     .fn<(input: SaveUserActionAnswerDraftInput) => Promise<void>>()
     .mockResolvedValue(undefined);
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: { jobFinder: { saveUserActionAnswerDraft } },
   });
@@ -74,7 +74,7 @@ test("both mounted screens take newer workspace drafts while stale refreshes kee
   const saveUserActionAnswerDraft = vi
     .fn<(input: SaveUserActionAnswerDraftInput) => Promise<void>>()
     .mockResolvedValue(undefined);
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: { jobFinder: { saveUserActionAnswerDraft } },
   });

@@ -16,7 +16,7 @@ import {
   CandidateAssetRestoreResultSchema,
   type CandidateAsset,
   type ResumeSourceDocument,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { CandidateAssetLibraryError } from "../services/job-finder/candidate-asset-library";
 import type { CandidateAssetLibrary } from "../services/job-finder/candidate-asset-library";
 import { getCandidateAssetLibrary } from "../services/job-finder/candidate-asset-library-instance";
@@ -204,7 +204,7 @@ export function registerCandidateAssetRouteHandlers(
       try {
         viewingPath = await dependencies.library.writeViewingCopy(
           input.assetId,
-          path.join(os.tmpdir(), "nordri-file-views"),
+          path.join(os.tmpdir(), "nestor-file-views"),
         );
       } catch {
         const source = await dependencies.getResumeSource?.();
@@ -213,7 +213,7 @@ export function registerCandidateAssetRouteHandlers(
         }
         try {
           const directory = await mkdtemp(
-            path.join(os.tmpdir(), "nordri-resume-view-"),
+            path.join(os.tmpdir(), "nestor-resume-view-"),
           );
           viewingPath = path.join(directory, path.basename(source.fileName));
           await copyFile(source.storagePath, viewingPath);

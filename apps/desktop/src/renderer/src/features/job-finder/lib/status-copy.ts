@@ -12,7 +12,7 @@ import type {
   ResumeExtractionStatus,
   DiscoveryRunState,
   WorkMode,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /** Where a job search stands, without exposing the stored run-state names. */
 export const DISCOVERY_RUN_STATE_LABELS = {

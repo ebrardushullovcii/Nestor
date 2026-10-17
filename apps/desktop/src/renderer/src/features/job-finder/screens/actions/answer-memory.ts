@@ -1,7 +1,7 @@
 import type {
   CandidateProfile,
   CandidateReusableAnswer,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export type AnswerMemoryMatch = {
   candidate: CandidateReusableAnswer | null;

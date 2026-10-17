@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ResumeImportFieldCandidateSchema } from "@nordri/contracts";
+import { ResumeImportFieldCandidateSchema } from "@nestor/contracts";
 
 import {
   areEquivalentRecordCandidates,

@@ -4,7 +4,7 @@ import {
   ApplicationRecordSchema,
   ApplyJobResultSchema,
   type ApplicationRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   getApplicationLatestActivityLabel,
   listPendingApplicationQuestions,

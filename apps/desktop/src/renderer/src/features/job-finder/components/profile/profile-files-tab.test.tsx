@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { CandidateAsset } from "@nordri/contracts";
+import type { CandidateAsset } from "@nestor/contracts";
 import {
   act,
   cleanup,
@@ -53,7 +53,7 @@ async function flush() {
 
 describe("ProfileFilesTab", () => {
   it("hides a removed file once its seven-day window has passed", async () => {
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         jobFinder: {
@@ -89,7 +89,7 @@ describe("ProfileFilesTab", () => {
       .fn()
       .mockResolvedValue({ asset: removedAsset });
     const restoreCandidateAsset = vi.fn().mockResolvedValue({ asset });
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         jobFinder: {
@@ -149,7 +149,7 @@ describe("ProfileFilesTab", () => {
       .fn()
       .mockRejectedValueOnce(new Error("disk"))
       .mockResolvedValueOnce({ assets: [] });
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         jobFinder: {
@@ -177,7 +177,7 @@ describe("ProfileFilesTab", () => {
     const importCandidateAsset = vi
       .fn()
       .mockResolvedValue({ status: "cancelled" });
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         jobFinder: {
@@ -201,7 +201,7 @@ describe("ProfileFilesTab", () => {
     const importCandidateAsset = vi
       .fn()
       .mockResolvedValue({ status: "cancelled" });
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         jobFinder: {

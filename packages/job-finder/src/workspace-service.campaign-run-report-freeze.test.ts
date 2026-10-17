@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { createInMemoryJobFinderRepository } from "@nordri/db";
-import type { JobFinderRepository } from "@nordri/db";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
+import type { JobFinderRepository } from "@nestor/db";
 
 import { createJobFinderWorkspaceService } from "./index";
 import {

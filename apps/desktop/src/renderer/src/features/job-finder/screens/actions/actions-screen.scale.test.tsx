@@ -14,7 +14,7 @@ import {
   type JobFinderRendererWorkspaceSnapshot,
   type UserActionCommandInput,
   type UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BOUNDED_COLLECTION_PAGE_SIZE as COLLECTION_PAGE_SIZE } from "./bounded-collection";

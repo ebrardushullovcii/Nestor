@@ -4,9 +4,9 @@ import { Button } from "@renderer/components/ui/button";
 import type {
   ReviewQueueItem,
   ResumeBatchProviderBlock,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
-const dismissedKey = "nordri.resume-batch.dismissed-notices";
+const dismissedKey = "nestor.resume-batch.dismissed-notices";
 
 export function InterruptedResumeBatchNotice({
   noticeId,

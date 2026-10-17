@@ -79,7 +79,7 @@ const ELECTRON_APP_PACKAGE_FIELDS = [
 
 export const ACCEPTANCE_VERSION = 1;
 export const SYNTHETIC_SEED =
-  "nordri-job-finder-production-acceptance-2026-08-20-v1";
+  "nestor-job-finder-production-acceptance-2026-08-20-v1";
 export const SYNTHETIC_SEED_DIGEST = digestSeed(SYNTHETIC_SEED);
 // These are release-gate values, not values supplied by a capture report. A
 // report may include the values as evidence, but the wrapper must compare them
@@ -1881,19 +1881,19 @@ export async function ensureFreshOutputDir(outputDir) {
 
 // Acceptance runs must never reach live AI providers through ambient
 // developer-shell credentials. Every Live Assistant credential variable is
-// stripped by prefix/suffix so future `NORDRI_INTERVIEW_*_API_KEY`
+// stripped by prefix/suffix so future `NESTOR_INTERVIEW_*_API_KEY`
 // variants cannot leak, shared keys are stripped by exact name, and the narrow
 // test-mode live-AI opt-in is removed so the enabled desktop test API always
 // resolves deterministic Live Assistant providers. This literal must stay in
 // sync with packages/ai-providers/src/live-assistant.ts.
-const ACCEPTANCE_INTERVIEW_CREDENTIAL_PREFIX = "NORDRI_INTERVIEW_";
+const ACCEPTANCE_INTERVIEW_CREDENTIAL_PREFIX = "NESTOR_INTERVIEW_";
 const ACCEPTANCE_CREDENTIAL_SUFFIX = "_API_KEY";
 const LIVE_ASSISTANT_TEST_LIVE_AI_OPT_IN_ENV =
-  "NORDRI_INTERVIEW_TEST_USE_LIVE_AI";
+  "NESTOR_INTERVIEW_TEST_USE_LIVE_AI";
 const ACCEPTANCE_SHARED_CREDENTIAL_ENV_NAMES = Object.freeze([
-  "NORDRI_AI_API_KEY",
-  "NORDRI_AI_VISION_API_KEY",
-  "NORDRI_RESUME_VISION_API_KEY",
+  "NESTOR_AI_API_KEY",
+  "NESTOR_AI_VISION_API_KEY",
+  "NESTOR_RESUME_VISION_API_KEY",
 ]);
 
 export function acceptanceEnvironment(extra = {}) {
@@ -1912,9 +1912,9 @@ export function acceptanceEnvironment(extra = {}) {
     delete env[name];
   }
   delete env[LIVE_ASSISTANT_TEST_LIVE_AI_OPT_IN_ENV];
-  env.NORDRI_BROWSER_AGENT = "0";
-  env.NORDRI_ENABLE_TEST_API = "1";
-  env.NORDRI_TEST_SYSTEM_THEME = "dark";
+  env.NESTOR_BROWSER_AGENT = "0";
+  env.NESTOR_ENABLE_TEST_API = "1";
+  env.NESTOR_TEST_SYSTEM_THEME = "dark";
   return env;
 }
 
@@ -2579,7 +2579,7 @@ export async function writeJson(filePath, value) {
 }
 
 export async function makeIsolatedUserDataDirectory(
-  prefix = "nordri-job-finder-acceptance-",
+  prefix = "nestor-job-finder-acceptance-",
 ) {
   return import("node:fs/promises").then(({ mkdtemp }) =>
     mkdtemp(path.join(os.tmpdir(), prefix)),

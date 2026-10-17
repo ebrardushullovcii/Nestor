@@ -1,6 +1,6 @@
 import { describeListingReadFailure } from "../../lib/describe-failure";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { JobListRow, FitJudgmentProgress } from "@nordri/contracts";
+import type { JobListRow, FitJudgmentProgress } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { isDiscoveryUncheckedResult } from "./discovery-result-groups";
 

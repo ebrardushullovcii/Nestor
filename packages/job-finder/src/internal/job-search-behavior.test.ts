@@ -1,4 +1,4 @@
-import { AiBehaviorPreferenceSchema } from "@nordri/contracts";
+import { AiBehaviorPreferenceSchema } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import { withSavedJobSearchBehavior } from "./job-search-behavior";

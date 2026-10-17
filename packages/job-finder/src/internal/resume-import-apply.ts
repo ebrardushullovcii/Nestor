@@ -9,7 +9,7 @@ import {
   type ResumeImportRun,
   type WorkMode,
   workModeValues,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   mergeCertificationRecords,

@@ -36,7 +36,7 @@ async function waitForCondition(check, description, timeoutMs = 15000, intervalM
 }
 
 async function waitForProfileOrSetupHeading(window) {
-  await window.waitForFunction(() => Boolean(window.nordri?.jobFinder?.test), undefined, { timeout: 15000 })
+  await window.waitForFunction(() => Boolean(window.nestor?.jobFinder?.test), undefined, { timeout: 15000 })
   await window.evaluate(() => {
     window.location.hash = '#/job-finder/profile'
   })
@@ -55,7 +55,7 @@ async function waitForProfileOrSetupHeading(window) {
   } catch (error) {
     await window.reload()
     await window.waitForLoadState('domcontentloaded')
-    await window.waitForFunction(() => Boolean(window.nordri?.jobFinder?.test), undefined, { timeout: 15000 })
+    await window.waitForFunction(() => Boolean(window.nestor?.jobFinder?.test), undefined, { timeout: 15000 })
     await window.evaluate(() => {
       window.location.hash = '#/job-finder/profile'
     })
@@ -76,19 +76,19 @@ async function waitForProfileOrSetupHeading(window) {
 
 async function getResumeWorkspace(window, jobId) {
   return window.evaluate(
-    async (currentJobId) => window.nordri.jobFinder.getResumeWorkspace(currentJobId),
+    async (currentJobId) => window.nestor.jobFinder.getResumeWorkspace(currentJobId),
     jobId,
   )
 }
 
 async function getWorkspace(window) {
-  return window.evaluate(() => window.nordri.jobFinder.getWorkspace())
+  return window.evaluate(() => window.nestor.jobFinder.getWorkspace())
 }
 
 async function getApplicationDocuments(window, jobId, applicationRecordId) {
   return window.evaluate(
     async ({ currentJobId, currentApplicationRecordId }) =>
-      window.nordri.jobFinder.listApplicationDocuments({
+      window.nestor.jobFinder.listApplicationDocuments({
         jobId: currentJobId,
         applicationRecordId: currentApplicationRecordId,
       }),
@@ -98,7 +98,7 @@ async function getApplicationDocuments(window, jobId, applicationRecordId) {
 
 async function getSelectedApplyReviewData(window) {
   return window.evaluate(async () => {
-    const snapshot = await window.nordri.jobFinder.getWorkspace()
+    const snapshot = await window.nestor.jobFinder.getWorkspace()
     const selectedRecord =
       snapshot.applicationRecords.find((record) => record.id === snapshot.selectedApplicationRecordId) ??
       snapshot.applicationRecords[0] ??
@@ -123,7 +123,7 @@ async function getSelectedApplyReviewData(window) {
       return null
     }
 
-    const details = await window.nordri.jobFinder.getApplyRunDetails(
+    const details = await window.nestor.jobFinder.getApplyRunDetails(
       selectedApplyResult.runId,
       selectedRecord.jobId,
     )
@@ -144,7 +144,7 @@ async function getSelectedApplyReviewData(window) {
 
 async function captureApplicationsCopilotReview() {
   await mkdir(outputDir, { recursive: true })
-  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nordri-applications-copilot-review-'))
+  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nestor-applications-copilot-review-'))
 
   let app
 
@@ -154,31 +154,31 @@ async function captureApplicationsCopilotReview() {
       cwd: desktopDir,
       env: {
         ...process.env,
-        NORDRI_BROWSER_AGENT: '0',
-        NORDRI_ENABLE_TEST_API: '1',
-        NORDRI_TEST_SYSTEM_THEME: process.env.NORDRI_TEST_SYSTEM_THEME ?? 'dark',
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_BROWSER_AGENT: '0',
+        NESTOR_ENABLE_TEST_API: '1',
+        NESTOR_TEST_SYSTEM_THEME: process.env.NESTOR_TEST_SYSTEM_THEME ?? 'dark',
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       },
     })
 
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
     await window.evaluate(async (theme) => {
-      if (!window.nordri?.jobFinder?.test?.setSystemThemeOverride) {
+      if (!window.nestor?.jobFinder?.test?.setSystemThemeOverride) {
         throw new Error('Desktop test API theme override is unavailable in the renderer.')
       }
 
-      await window.nordri.jobFinder.test.setSystemThemeOverride(theme)
-    }, process.env.NORDRI_TEST_SYSTEM_THEME ?? 'dark')
+      await window.nestor.jobFinder.test.setSystemThemeOverride(theme)
+    }, process.env.NESTOR_TEST_SYSTEM_THEME ?? 'dark')
     await waitForProfileOrSetupHeading(window)
     await window.setViewportSize({ width, height })
 
     await window.evaluate(async () => {
-      if (!window.nordri.jobFinder.test) {
+      if (!window.nestor.jobFinder.test) {
         throw new Error('Desktop test API is unavailable in the renderer.')
       }
 
-      return window.nordri.jobFinder.test.loadResumeWorkspaceDemo()
+      return window.nestor.jobFinder.test.loadResumeWorkspaceDemo()
     })
     await window.reload()
     await window.waitForLoadState('domcontentloaded')

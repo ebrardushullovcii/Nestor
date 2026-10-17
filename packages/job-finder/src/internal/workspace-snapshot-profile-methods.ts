@@ -52,9 +52,9 @@ import {
   type UpdateApplicationDefaultsInput,
   type UpdateWorkspaceBehaviorInput,
   type UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { reassessSavedJobs } from "./saved-job-reassessment";
-import type { JobFinderRepositorySeed } from "@nordri/db";
+import type { JobFinderRepositorySeed } from "@nestor/db";
 
 import { runApplicationNoResponseAutomation } from "./application-crm";
 import {

@@ -36,8 +36,8 @@ import type {
   BrowserSessionState,
   ResumeSourceDocument,
   ReviewQueueItem,
-} from "@nordri/contracts";
-import { ApplicationRecordSchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { ApplicationRecordSchema } from "@nestor/contracts";
 import { ApplicationsScreen } from "./applications/applications-screen";
 import { ReviewQueueScreen } from "./review-queue/review-queue-screen";
 import {

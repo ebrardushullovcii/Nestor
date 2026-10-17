@@ -8,7 +8,7 @@ import {
   type RapidReviewDecisionLog,
   type RapidReviewMutationInput,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   act,
   cleanup,

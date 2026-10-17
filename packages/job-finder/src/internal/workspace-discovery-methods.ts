@@ -38,7 +38,7 @@ import {
   type SourceIntelligenceProviderKey,
   deriveListingDetailCapture,
   stripDiscoveryCardOnlyEvidenceWarning,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   getDiscoveryListingRecencyKey,
   toSortableListingTime,
@@ -126,7 +126,7 @@ import {
 import { createUniqueId, normalizeText, uniqueStrings } from "./shared";
 import { createJobIdentityIndex } from "./job-identity";
 import { assessJobPostingDetailQuality } from "./job-posting-detail-quality";
-import { JOB_FIT_JUDGING_BATCH_SIZE } from "@nordri/ai-providers";
+import { JOB_FIT_JUDGING_BATCH_SIZE } from "@nestor/ai-providers";
 import {
   fitPostingFingerprint,
   compareFitJudgingPromise,
@@ -242,11 +242,11 @@ const PUBLIC_API_PREFETCH_CONCURRENCY = 8;
 /**
  * How many sources one search works on at the same time. Each gets its own
  * browser tab; the number stays small so a laptop and a site's patience both
- * hold. Override with NORDRI_SEARCH_CONCURRENCY.
+ * hold. Override with NESTOR_SEARCH_CONCURRENCY.
  */
 const DISCOVERY_SOURCE_CONCURRENCY = (() => {
   const configured = Number.parseInt(
-    process.env.NORDRI_SEARCH_CONCURRENCY ?? "",
+    process.env.NESTOR_SEARCH_CONCURRENCY ?? "",
     10,
   );
   return Number.isFinite(configured) && configured > 0

@@ -1,4 +1,4 @@
-import type { CandidateProfile } from "@nordri/contracts";
+import type { CandidateProfile } from "@nestor/contracts";
 import type {
   ProfileEditorValues,
   SearchPreferencesEditorValues,

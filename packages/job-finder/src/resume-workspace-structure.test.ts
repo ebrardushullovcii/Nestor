@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
-import type { TailoredResumeDraft } from "@nordri/ai-providers";
+import type { TailoredResumeDraft } from "@nestor/ai-providers";
 import type {
   ResumeDraft,
   WorkHistoryReviewAcknowledgment,
-} from "@nordri/contracts";
-import { fnv1a32 } from "@nordri/core";
+} from "@nestor/contracts";
+import { fnv1a32 } from "@nestor/core";
 import {
   buildResumeRenderDocument,
   buildResumeDraftFromTailoredDraft,
@@ -1632,7 +1632,7 @@ test.each([false, true])(
   "German restatements cover each source once even with overlapping combined lines (%s)",
   async (overlap) => {
     const { completeTailoredResumeDraft } =
-      await import("@nordri/ai-providers");
+      await import("@nestor/ai-providers");
     const { applyResumeLanguage, collectResumeLanguageFields } =
       await import("./internal/resume-workspace-language");
     const seed = createSeed();

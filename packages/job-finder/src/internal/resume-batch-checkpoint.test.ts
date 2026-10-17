@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { JobFinderIntelligenceStateSchema } from "@nordri/contracts";
+import { JobFinderIntelligenceStateSchema } from "@nestor/contracts";
 import {
   mergeResumeBatchCheckpoints,
   markResumeBatchRunning,

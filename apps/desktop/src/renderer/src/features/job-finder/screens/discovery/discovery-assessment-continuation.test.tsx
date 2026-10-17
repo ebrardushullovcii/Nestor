@@ -6,7 +6,7 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import type { SavedJob } from "@nordri/contracts";
+import type { SavedJob } from "@nestor/contracts";
 import { afterEach, expect, it, vi } from "vitest";
 import { DiscoveryAssessmentContinuation } from "./discovery-assessment-continuation";
 

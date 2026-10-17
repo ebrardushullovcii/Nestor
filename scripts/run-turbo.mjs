@@ -69,7 +69,7 @@ if (launcher.kind === "corepack") {
 } else {
   let shimDir;
   try {
-    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "nordri-pnpm-shim-"));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "nestor-pnpm-shim-"));
   } catch (error) {
     fail(
       `Unable to create a private pnpm PATH shim directory: ${error instanceof Error ? error.message : String(error)}`,

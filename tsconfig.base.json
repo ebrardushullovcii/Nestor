@@ -19,40 +19,40 @@
     "sourceMap": true,
     "baseUrl": ".",
     "paths": {
-      "@nordri/agent-runtime": ["packages/agent-runtime/src/index.ts"],
-      "@nordri/ai-evals": ["packages/ai-evals/src/index.ts"],
-      "@nordri/ai-providers": ["packages/ai-providers/src/index.ts"],
-      "@nordri/browser-agent": ["packages/browser-agent/src/index.ts"],
-      "@nordri/browser-runtime": ["packages/browser-runtime/src/index.ts"],
-      "@nordri/contracts": ["packages/contracts/src/index.ts"],
-      "@nordri/core": ["packages/core/src/index.ts"],
-      "@nordri/db": ["packages/db/src/index.ts"],
-      "@nordri/knowledge-base": ["packages/knowledge-base/src/index.ts"],
-      "@nordri/job-finder/assistant-attention": [
+      "@nestor/agent-runtime": ["packages/agent-runtime/src/index.ts"],
+      "@nestor/ai-evals": ["packages/ai-evals/src/index.ts"],
+      "@nestor/ai-providers": ["packages/ai-providers/src/index.ts"],
+      "@nestor/browser-agent": ["packages/browser-agent/src/index.ts"],
+      "@nestor/browser-runtime": ["packages/browser-runtime/src/index.ts"],
+      "@nestor/contracts": ["packages/contracts/src/index.ts"],
+      "@nestor/core": ["packages/core/src/index.ts"],
+      "@nestor/db": ["packages/db/src/index.ts"],
+      "@nestor/knowledge-base": ["packages/knowledge-base/src/index.ts"],
+      "@nestor/job-finder/assistant-attention": [
         "packages/job-finder/src/assistant/attention.ts"
       ],
-      "@nordri/job-finder/discovery-ordering": [
+      "@nestor/job-finder/discovery-ordering": [
         "packages/job-finder/src/discovery-ordering.ts"
       ],
-      "@nordri/job-finder/discovery-result-bands": [
+      "@nestor/job-finder/discovery-result-bands": [
         "packages/job-finder/src/discovery-result-bands.ts"
       ],
-      "@nordri/job-finder/resume-record-identity": [
+      "@nestor/job-finder/resume-record-identity": [
         "packages/job-finder/src/resume-record-identity.ts"
       ],
-      "@nordri/job-finder/plan-safeguard-pauses": ["packages/job-finder/src/plan-safeguard-pauses.ts"],
-      "@nordri/job-finder/source-health": [
+      "@nestor/job-finder/plan-safeguard-pauses": ["packages/job-finder/src/plan-safeguard-pauses.ts"],
+      "@nestor/job-finder/source-health": [
         "packages/job-finder/src/source-health.ts"
       ],
-      "@nordri/job-finder/source-instruction-review": [
+      "@nestor/job-finder/source-instruction-review": [
         "packages/job-finder/src/source-instruction-review.ts"
       ],
-      "@nordri/job-finder": ["packages/job-finder/src/index.ts"],
-      "@nordri/live-assistant": [
+      "@nestor/job-finder": ["packages/job-finder/src/index.ts"],
+      "@nestor/live-assistant": [
         "packages/live-assistant/src/index.ts"
       ],
-      "@nordri/os-integration": ["packages/os-integration/src/index.ts"],
-      "@nordri/testing": ["packages/testing/src/index.ts"]
+      "@nestor/os-integration": ["packages/os-integration/src/index.ts"],
+      "@nestor/testing": ["packages/testing/src/index.ts"]
     }
   }
 }

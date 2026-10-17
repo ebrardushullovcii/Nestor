@@ -1,6 +1,6 @@
 {
-  "appId": "com.nordri.desktop",
-  "productName": "Nordri",
+  "appId": "com.nestor.desktop",
+  "productName": "Nestor",
   "artifactName": "${productName}-${version}-${arch}.${ext}",
   "publish": null,
   "directories": {
@@ -21,7 +21,7 @@
     }
   ],
   "win": {
-    "executableName": "Nordri",
+    "executableName": "Nestor",
     "icon": "build/icon.ico",
     "target": [
       {

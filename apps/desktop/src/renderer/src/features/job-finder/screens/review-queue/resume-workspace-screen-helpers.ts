@@ -3,7 +3,7 @@ import type {
   ResumeDraft,
   ResumeTemplateDeliveryLane,
   ResumeTemplateDefinition,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { getJobFinderErrorMessage } from "@renderer/features/job-finder/lib/job-finder-error-message";
 
 export function getNewestExport(

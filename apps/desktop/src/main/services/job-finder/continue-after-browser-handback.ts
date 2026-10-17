@@ -1,5 +1,5 @@
-import type { ApplyJobResult, ApplyRun } from "@nordri/contracts";
-import { PERSON_TOOK_OVER_SUMMARY } from "@nordri/job-finder";
+import type { ApplyJobResult, ApplyRun } from "@nestor/contracts";
+import { PERSON_TOOK_OVER_SUMMARY } from "@nestor/job-finder";
 
 export interface HandbackRepository {
   listApplyRuns(): Promise<readonly ApplyRun[]>;

@@ -14,14 +14,14 @@ import {
 
 import { bindMainWindowZoomShortcuts } from "./window-zoom";
 
-const originalUserDataDirectory = process.env.NORDRI_USER_DATA_DIR;
+const originalUserDataDirectory = process.env.NESTOR_USER_DATA_DIR;
 
 describe("main window state", () => {
   afterEach(() => {
     if (originalUserDataDirectory === undefined) {
-      delete process.env.NORDRI_USER_DATA_DIR;
+      delete process.env.NESTOR_USER_DATA_DIR;
     } else {
-      process.env.NORDRI_USER_DATA_DIR = originalUserDataDirectory;
+      process.env.NESTOR_USER_DATA_DIR = originalUserDataDirectory;
     }
 
     vi.restoreAllMocks();
@@ -154,9 +154,9 @@ describe("main window state", () => {
 
   test("round-trips the persisted state through the desktop user data directory", () => {
     const userDataDirectory = mkdtempSync(
-      path.join(tmpdir(), "nordri-window-state-"),
+      path.join(tmpdir(), "nestor-window-state-"),
     );
-    process.env.NORDRI_USER_DATA_DIR = `  ${path.relative(
+    process.env.NESTOR_USER_DATA_DIR = `  ${path.relative(
       process.cwd(),
       userDataDirectory,
     )}  `;
@@ -194,9 +194,9 @@ describe("main window state", () => {
 
   test("falls back cleanly when the saved state file is invalid JSON", () => {
     const userDataDirectory = mkdtempSync(
-      path.join(tmpdir(), "nordri-window-state-"),
+      path.join(tmpdir(), "nestor-window-state-"),
     );
-    process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
+    process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
     const warnSpy = vi
       .spyOn(console, "warn")
       .mockImplementation(() => undefined);
@@ -234,8 +234,8 @@ describe("main window state", () => {
 });
 
 test("saves 200% on close and reapplies it after the next window first loads", () => {
-  const directory = mkdtempSync(path.join(tmpdir(), "nordri-window-zoom-"));
-  process.env.NORDRI_USER_DATA_DIR = directory;
+  const directory = mkdtempSync(path.join(tmpdir(), "nestor-window-zoom-"));
+  process.env.NESTOR_USER_DATA_DIR = directory;
   const handlers = new Map<string, () => void>();
   try {
     bindMainWindowStatePersistence({
@@ -267,8 +267,8 @@ test("saves 200% on close and reapplies it after the next window first loads", (
     expect(zoomFactor).toBe(2);
   } finally {
     if (originalUserDataDirectory === undefined)
-      delete process.env.NORDRI_USER_DATA_DIR;
-    else process.env.NORDRI_USER_DATA_DIR = originalUserDataDirectory;
+      delete process.env.NESTOR_USER_DATA_DIR;
+    else process.env.NESTOR_USER_DATA_DIR = originalUserDataDirectory;
     rmSync(directory, { recursive: true, force: true });
   }
 });

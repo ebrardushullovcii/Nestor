@@ -24,7 +24,7 @@ import { shell } from "electron";
 import {
   ResumeSourceDocumentSchema,
   CandidateAssetListResultSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { CandidateAssetLibrary } from "../services/job-finder/candidate-asset-library";
 import { getCandidateAssetLibrary } from "../services/job-finder/candidate-asset-library-instance";
 import { getJobFinderRepositoryForWorkspaceService } from "../services/job-finder/create-workspace-service";

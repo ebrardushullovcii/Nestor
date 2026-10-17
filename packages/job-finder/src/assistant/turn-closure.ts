@@ -1,4 +1,4 @@
-import type { AgentLoopMessage } from "@nordri/agent-runtime";
+import type { AgentLoopMessage } from "@nestor/agent-runtime";
 
 /**
  * Closes a turn the person stopped, for the stored history the next turns

@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { readPlanAssessment, withPlanAssessment } from "./plan-assessment";
-import type { JobRequirementAssessment } from "@nordri/contracts";
+import type { JobRequirementAssessment } from "@nestor/contracts";
 import {
   createSeed,
   createAiClient,

@@ -79,7 +79,7 @@ import type {
   UpdateAiBehaviorInput,
   WorkMode,
   UserActionCommandInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export type JobFinderScreen =
   | "home"

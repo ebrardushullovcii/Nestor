@@ -1,4 +1,4 @@
-import { normalizePublicLinkUrl } from "@nordri/contracts";
+import { normalizePublicLinkUrl } from "@nestor/contracts";
 import {
   candidateAnswerKindValues,
   CandidateProfileSchema,
@@ -8,7 +8,7 @@ import {
   type CandidateProfile,
   type JobDiscoveryTarget,
   type JobSearchPreferences,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   DiscoveryTargetEditorValue,
   ProofBankEntryFormEntry,

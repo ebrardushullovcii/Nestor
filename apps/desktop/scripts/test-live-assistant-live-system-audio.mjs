@@ -33,7 +33,7 @@ function assertInvariant(condition, message) {
 }
 
 async function getWorkspace(window) {
-  return window.evaluate(() => window.nordri.liveAssistant.getWorkspace());
+  return window.evaluate(() => window.nestor.liveAssistant.getWorkspace());
 }
 
 async function waitForOverlayWindows(app) {
@@ -111,15 +111,15 @@ async function run() {
 
   await mkdir(outputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-interview-live-system-audio-"),
+    path.join(os.tmpdir(), "nestor-interview-live-system-audio-"),
   );
   const app = await electron.launch({
     args: ["--autoplay-policy=no-user-gesture-required", "."],
     cwd: desktopDir,
     env: {
       ...process.env,
-      NORDRI_INTERVIEW_ADVANCED_SURFACES: "1",
-      NORDRI_USER_DATA_DIR: userDataDirectory,
+      NESTOR_INTERVIEW_ADVANCED_SURFACES: "1",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
     },
   });
 
@@ -136,7 +136,7 @@ async function run() {
 
     const initialized = await window.evaluate(async (url) => {
       const acceptedAt = new Date().toISOString();
-      await window.nordri.liveAssistant.saveSetup({
+      await window.nestor.liveAssistant.saveSetup({
         consent: {
           microphoneCapture: false,
           meetingAudioCapture: true,
@@ -160,8 +160,8 @@ async function run() {
           confirmedAt: acceptedAt,
         },
       });
-      const rehearsed = await window.nordri.liveAssistant.runRehearsal();
-      const started = await window.nordri.liveAssistant.startSession();
+      const rehearsed = await window.nestor.liveAssistant.runRehearsal();
+      const started = await window.nestor.liveAssistant.startSession();
       return { rehearsed, started };
     }, sourceUrl);
 
@@ -279,7 +279,7 @@ async function run() {
 
     const cueCountBeforeForce = afterAudio.activeSession?.cueCards.length ?? 0;
     const afterForcedCue = await window.evaluate(() =>
-      window.nordri.liveAssistant.performAction("force_cue"),
+      window.nestor.liveAssistant.performAction("force_cue"),
     );
     assertInvariant(
       (afterForcedCue.activeSession?.cueCards.length ?? 0) >
@@ -301,7 +301,7 @@ async function run() {
     await window.getByRole("button", { name: /^Send$/ }).click();
     await window.waitForFunction(
       async () => {
-        const workspace = await window.nordri.liveAssistant.getWorkspace();
+        const workspace = await window.nestor.liveAssistant.getWorkspace();
         return (
           (workspace.activeSession?.chatConversation?.messages.length ?? 0) >= 2
         );
@@ -324,13 +324,13 @@ async function run() {
 
     await window.getByRole("button", { name: "Pause" }).click();
     await window.waitForFunction(async () => {
-      const workspace = await window.nordri.liveAssistant.getWorkspace();
+      const workspace = await window.nestor.liveAssistant.getWorkspace();
       return workspace.activeSession?.listening === false;
     });
     await window.getByRole("button", { name: "Resume", exact: true }).waitFor();
     await window.getByRole("button", { name: "Resume", exact: true }).click();
     await window.waitForFunction(async () => {
-      const workspace = await window.nordri.liveAssistant.getWorkspace();
+      const workspace = await window.nestor.liveAssistant.getWorkspace();
       return workspace.activeSession?.listening === true;
     });
     await window.getByRole("button", { name: "Pause", exact: true }).waitFor();
@@ -350,7 +350,7 @@ async function run() {
 
     await window.getByRole("button", { name: "End", exact: true }).click();
     await window.waitForFunction(async () => {
-      const workspace = await window.nordri.liveAssistant.getWorkspace();
+      const workspace = await window.nestor.liveAssistant.getWorkspace();
       return (
         workspace.activeSession === null && workspace.recentSessions.length > 0
       );
@@ -369,7 +369,7 @@ async function run() {
 
     const finalWorkspace = await getWorkspace(window);
     const finalSession = await window.evaluate(
-      (id) => window.nordri.liveAssistant.getSession(id),
+      (id) => window.nestor.liveAssistant.getSession(id),
       finalWorkspace.recentSessions[0]?.id,
     );
     const finalCue = finalSession?.cueCards.at(-1) ?? null;

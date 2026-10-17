@@ -5,7 +5,7 @@ import type {
   ApplicationDocumentRevision,
   ApplicationRecord,
   ApplyRunDetails,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { cn } from "@renderer/lib/cn";
 import { APPLICATION_DETAIL_FACT_LABEL_CLASS } from "./applications-detail-fact-strip";
 import { Button } from "@renderer/components/ui";
@@ -14,7 +14,7 @@ import { formatApplicationEmployerLine } from "../../lib/job-employer-location-d
 import { StatusBadge } from "../../components/status-badge";
 
 export const CANDIDATE_ASSETS_CHANGED_EVENT =
-  "nordri:candidate-assets-changed";
+  "nestor:candidate-assets-changed";
 
 export function ApplicationsApplicationDocuments(props: {
   applicationRecord: ApplicationRecord;
@@ -74,7 +74,7 @@ export function ApplicationsApplicationDocuments(props: {
   async function refresh() {
     setStatus("loading");
     try {
-      const result = await window.nordri.jobFinder.listApplicationDocuments(
+      const result = await window.nestor.jobFinder.listApplicationDocuments(
         {
           jobId: applicationRecord.jobId,
           applicationRecordId: applicationRecord.id,
@@ -146,7 +146,7 @@ export function ApplicationsApplicationDocuments(props: {
     );
     try {
       const document =
-        await window.nordri.jobFinder.proposeApplicationDocument({
+        await window.nestor.jobFinder.proposeApplicationDocument({
           kind,
           jobId: applicationRecord.jobId,
           applicationRecordId: applicationRecord.id,
@@ -193,14 +193,14 @@ export function ApplicationsApplicationDocuments(props: {
     setMessage(null);
     try {
       const revisionToApprove = hasUnsavedEdit
-        ? await window.nordri.jobFinder.editApplicationDocument({
+        ? await window.nestor.jobFinder.editApplicationDocument({
             documentId: selectedDocument.id,
             expectedRevision: selectedDocument.revision,
             content,
           })
         : selectedDocument;
       const approved =
-        await window.nordri.jobFinder.approveApplicationDocument({
+        await window.nestor.jobFinder.approveApplicationDocument({
           documentId: revisionToApprove.id,
           expectedRevision: revisionToApprove.revision,
         });
@@ -239,7 +239,7 @@ export function ApplicationsApplicationDocuments(props: {
     setStatus("working");
     setMessage(null);
     try {
-      const edited = await window.nordri.jobFinder.editApplicationDocument({
+      const edited = await window.nestor.jobFinder.editApplicationDocument({
         documentId: selectedDocument.id,
         expectedRevision: selectedDocument.revision,
         content,
@@ -266,7 +266,7 @@ export function ApplicationsApplicationDocuments(props: {
     setMessage(null);
     try {
       const result =
-        await window.nordri.jobFinder.exportApplicationDocument({
+        await window.nestor.jobFinder.exportApplicationDocument({
           documentId: selectedDocument.id,
           expectedRevision: selectedDocument.revision,
         });

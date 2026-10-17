@@ -45,7 +45,7 @@ async function waitForCondition(
 }
 
 async function getWorkspace(window) {
-  return window.evaluate(() => window.nordri.jobFinder.getWorkspace());
+  return window.evaluate(() => window.nestor.jobFinder.getWorkspace());
 }
 
 async function captureProfileCopilotReviewDiagnostics(window) {
@@ -419,13 +419,13 @@ async function captureMarkdownTranscriptPreview(window) {
   };
 
   await window.evaluate(async (workspaceState) => {
-    if (!window.nordri.jobFinder.test) {
+    if (!window.nestor.jobFinder.test) {
       throw new Error(
         "Desktop test API is not available in the renderer context.",
       );
     }
 
-    return window.nordri.jobFinder.test.resetWorkspaceState(workspaceState);
+    return window.nestor.jobFinder.test.resetWorkspaceState(workspaceState);
   }, markdownWorkspace);
 
   await window.reload();
@@ -446,7 +446,7 @@ async function captureMarkdownTranscriptPreview(window) {
 async function captureProfileCopilotPreferences() {
   await mkdir(outputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-profile-copilot-preferences-"),
+    path.join(os.tmpdir(), "nestor-profile-copilot-preferences-"),
   );
 
   let app;
@@ -457,31 +457,31 @@ async function captureProfileCopilotPreferences() {
       cwd: desktopDir,
       env: {
         ...process.env,
-        NORDRI_ENABLE_TEST_API: "1",
-        NORDRI_BROWSER_AGENT: "0",
-        NORDRI_TEST_SYSTEM_THEME:
-          process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark",
-        NORDRI_TEST_PROFILE_COPILOT_DELAY_MS: "1200",
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_ENABLE_TEST_API: "1",
+        NESTOR_BROWSER_AGENT: "0",
+        NESTOR_TEST_SYSTEM_THEME:
+          process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",
+        NESTOR_TEST_PROFILE_COPILOT_DELAY_MS: "1200",
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       },
     });
 
     const window = await app.firstWindow();
     await window.waitForLoadState("domcontentloaded");
     await window.evaluate(async (theme) => {
-      await window.nordri.jobFinder.test?.setSystemThemeOverride(theme);
-    }, process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark");
+      await window.nestor.jobFinder.test?.setSystemThemeOverride(theme);
+    }, process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark");
     await window.setViewportSize({ width, height });
 
     const state = JSON.parse(await readFile(snapshotPath, "utf8"));
     await window.evaluate(async (workspaceState) => {
-      if (!window.nordri.jobFinder.test) {
+      if (!window.nestor.jobFinder.test) {
         throw new Error(
           "Desktop test API is not available in the renderer context.",
         );
       }
 
-      return window.nordri.jobFinder.test.resetWorkspaceState(
+      return window.nestor.jobFinder.test.resetWorkspaceState(
         workspaceState,
       );
     }, state);

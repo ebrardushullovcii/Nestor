@@ -6,12 +6,12 @@ import type {
   ApplicationCrmSettings,
   ApplicationCrmStage,
   JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   APPLICATION_CRM_STAGES_AFTER_SENDING,
   ApplicationCrmBulkStageMutationInputSchema,
   ApplicationCrmSettingsSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   exportApplicationCrm,

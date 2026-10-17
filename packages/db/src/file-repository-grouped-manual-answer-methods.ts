@@ -9,7 +9,7 @@ import {
   type JobFinderIntelligenceState,
   type UserActionEvent,
   type UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { APPLY_INDEXED_COLLECTION_CONFIGS } from "./apply-collection-support";
 import {

@@ -6,8 +6,8 @@ import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import type {
   ApplicationCrmSettings,
   ApplicationCrmStageDefinition,
-} from "@nordri/contracts";
-import { ApplicationCrmSettingsSchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { ApplicationCrmSettingsSchema } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 
 import {

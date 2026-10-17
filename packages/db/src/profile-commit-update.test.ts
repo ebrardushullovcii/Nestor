@@ -1,4 +1,4 @@
-import type { CandidateProfile } from "@nordri/contracts";
+import type { CandidateProfile } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -64,7 +64,7 @@ describe("commitProfileUpdate", () => {
   });
 
   test("file repository applies updater output atomically", async () => {
-    const temp = await createTempRepository("nordri-db-profile-update-");
+    const temp = await createTempRepository("nestor-db-profile-update-");
     try {
       await expectCommitProfileUpdateParity(() => temp.createRepository());
     } finally {

@@ -6,7 +6,7 @@ import {
   createFreshStartCandidateProfile,
   createStarterJobDiscoveryTargets,
   type JobFinderRepositoryState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export function createEmptyJobFinderRepositoryState(): JobFinderRepositoryState {
   return {

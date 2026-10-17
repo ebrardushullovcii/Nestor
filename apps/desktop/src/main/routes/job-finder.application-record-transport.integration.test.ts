@@ -5,7 +5,7 @@ import {
   ApplyJobResultSchema,
   ApplyRunDetailsSchema,
   ApplyRunSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 type Handler = (
@@ -197,7 +197,7 @@ describe("typed preload/main exact application-record transport", () => {
       } as unknown as IpcMain,
       { includeBootstrapRoutes: false },
     );
-    const exposed = exposedValues.get("nordri") as
+    const exposed = exposedValues.get("nestor") as
       | { jobFinder?: JobFinderApi }
       | undefined;
     if (!exposed?.jobFinder) throw new Error("Preload API was not exposed.");

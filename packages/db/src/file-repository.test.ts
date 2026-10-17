@@ -20,7 +20,7 @@ import {
   ResumeValidationResultSchema,
   SourceInstructionArtifactSchema,
   TailoredAssetSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   createFileJobFinderRepository,
@@ -79,7 +79,7 @@ function createPersistedRetentionRevision(draftId: string, index: number) {
 }
 describe("createFileJobFinderRepository", () => {
   test("commits revision-guarded CRM batches atomically and survives reopen", async () => {
-    const temp = await createTempRepository("nordri-db-crm-batch-");
+    const temp = await createTempRepository("nestor-db-crm-batch-");
     const seed = createSeed();
     seed.applicationRecords = [
       ApplicationRecordSchema.parse({
@@ -189,7 +189,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("merges CRM onto current records and validates unchanged selected rows in file storage", async () => {
-    const temp = await createTempRepository("nordri-db-crm-merge-");
+    const temp = await createTempRepository("nestor-db-crm-merge-");
     const seed = createSeed();
     const first = ApplicationRecordSchema.parse({
       id: "application_1",
@@ -283,7 +283,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("deletes only source instruction artifacts for the requested target in file storage", async () => {
-    const temp = await createTempRepository("nordri-db-artifacts-");
+    const temp = await createTempRepository("nestor-db-artifacts-");
     let repository: FileRepository | null = null;
 
     try {
@@ -347,7 +347,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("claims one resumption owner and CAS-protects apply results across sqlite repositories", async () => {
-    const temp = await createTempRepository("nordri-db-resumption-cas-");
+    const temp = await createTempRepository("nestor-db-resumption-cas-");
     let firstRepository: FileRepository | null = null;
     let secondRepository: FileRepository | null = null;
 
@@ -441,7 +441,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("CAS-protects application answer revisions across sqlite repositories", async () => {
-    const temp = await createTempRepository("nordri-db-answer-cas-");
+    const temp = await createTempRepository("nestor-db-answer-cas-");
     let firstRepository: FileRepository | null = null;
     let secondRepository: FileRepository | null = null;
 
@@ -539,7 +539,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("persists repository state to a local sqlite file", async () => {
-    const temp = await createTempRepository("nordri-db-");
+    const temp = await createTempRepository("nestor-db-");
     let firstRepository: FileRepository | null = null;
     let secondRepository: FileRepository | null = null;
 
@@ -594,7 +594,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("persists apply foundation records across sqlite reloads", async () => {
-    const temp = await createTempRepository("nordri-db-apply-foundation-");
+    const temp = await createTempRepository("nestor-db-apply-foundation-");
     let firstRepository: FileRepository | null = null;
     let secondRepository: FileRepository | null = null;
 
@@ -820,7 +820,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("atomically marks application preparation once and retains it after restart", async () => {
-    const temp = await createTempRepository("nordri-db-preparation-start-");
+    const temp = await createTempRepository("nestor-db-preparation-start-");
     let firstRepository: FileRepository | null = null;
     let secondRepository: FileRepository | null = null;
 
@@ -937,7 +937,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("filters persisted results by exact application record lineage", async () => {
-    const temp = await createTempRepository("nordri-db-lineage-filter-");
+    const temp = await createTempRepository("nestor-db-lineage-filter-");
     let repository: FileRepository | null = null;
     try {
       repository = await temp.createRepository();
@@ -984,7 +984,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("persists profile setup state across sqlite reloads", async () => {
-    const temp = await createTempRepository("nordri-db-setup-");
+    const temp = await createTempRepository("nestor-db-setup-");
     let firstRepository: FileRepository | null = null;
     let secondRepository: FileRepository | null = null;
 
@@ -1023,7 +1023,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("persists profile copilot messages and revisions across sqlite reloads", async () => {
-    const temp = await createTempRepository("nordri-db-profile-copilot-");
+    const temp = await createTempRepository("nestor-db-profile-copilot-");
     let firstRepository: FileRepository | null = null;
     let secondRepository: FileRepository | null = null;
     const seed = createSeed();
@@ -1110,7 +1110,7 @@ describe("createFileJobFinderRepository", () => {
 
   test("atomically commits profile copilot state across sqlite reloads", async () => {
     const temp = await createTempRepository(
-      "nordri-db-profile-copilot-atomic-",
+      "nestor-db-profile-copilot-atomic-",
     );
     let firstRepository: FileRepository | null = null;
     let secondRepository: FileRepository | null = null;
@@ -1209,7 +1209,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("persists source-debug artifacts outside the singleton discovery state blob", async () => {
-    const temp = await createTempRepository("nordri-db-source-debug-");
+    const temp = await createTempRepository("nestor-db-source-debug-");
     let firstRepository: FileRepository | null = null;
     let secondRepository: FileRepository | null = null;
 
@@ -1371,7 +1371,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("atomically persists saved-job updates with resume approval invalidation", async () => {
-    const temp = await createTempRepository("nordri-db-resume-stale-");
+    const temp = await createTempRepository("nestor-db-resume-stale-");
     let repository: FileRepository | null = null;
     const seed = createSeed();
     seed.savedJobs = [
@@ -1498,7 +1498,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("persists resume import runs, bundles, and candidates together", async () => {
-    const temp = await createTempRepository("nordri-db-import-runs-");
+    const temp = await createTempRepository("nestor-db-import-runs-");
     let repository: FileRepository | null = null;
 
     try {
@@ -1572,7 +1572,7 @@ describe("createFileJobFinderRepository", () => {
   });
 
   test("atomically finalizes resume import state across sqlite reloads", async () => {
-    const temp = await createTempRepository("nordri-db-import-finalize-");
+    const temp = await createTempRepository("nestor-db-import-finalize-");
     let firstRepository: FileRepository | null = null;
     let secondRepository: FileRepository | null = null;
     const seed = createSeed();
@@ -1700,7 +1700,7 @@ describe("createFileJobFinderRepository", () => {
 
   test("repairs profile copilot tables for existing version-4 sqlite files", async () => {
     const temp = await createTempRepository(
-      "nordri-db-profile-copilot-migration-",
+      "nestor-db-profile-copilot-migration-",
     );
     let repository: FileRepository | null = null;
     let initialRepository: FileRepository | null = null;
@@ -1750,7 +1750,7 @@ describe("createFileJobFinderRepository", () => {
 
   test("dedupe migration rewrites result references without replacing unrelated JSON strings", async () => {
     const temp = await createTempRepository(
-      "nordri-db-apply-dedupe-migration-",
+      "nestor-db-apply-dedupe-migration-",
     );
     let repository: FileRepository | null = null;
     let initialRepository: FileRepository | null = null;
@@ -1908,7 +1908,7 @@ describe("createFileJobFinderRepository", () => {
 
   test("dedupe migration runs before rebuilding apply indexes for legacy sqlite files", async () => {
     const temp = await createTempRepository(
-      "nordri-db-apply-dedupe-legacy-migration-",
+      "nestor-db-apply-dedupe-legacy-migration-",
     );
     let repository: FileRepository | null = null;
     let initialRepository: FileRepository | null = null;
@@ -2036,7 +2036,7 @@ describe("createFileJobFinderRepository", () => {
   }, 15000);
   test("retains the newest 100 revisions per draft across direct and atomic writes after restart", async () => {
     const temp = await createTempRepository(
-      "nordri-db-revision-retention-",
+      "nestor-db-revision-retention-",
     );
     let repository: FileRepository | null = null;
 
@@ -2106,7 +2106,7 @@ describe("createFileJobFinderRepository", () => {
   }, 30000);
 
   test("persists an exact restored draft and cleared approval readiness after restart", async () => {
-    const temp = await createTempRepository("nordri-db-revision-restore-");
+    const temp = await createTempRepository("nestor-db-revision-restore-");
     let repository: FileRepository | null = null;
 
     try {
@@ -2208,7 +2208,7 @@ describe("createFileJobFinderRepository", () => {
     }
   }, 15000);
   test("persists resume revision chains across restart and rejects stale atomic commits", async () => {
-    const temp = await createTempRepository("nordri-db-resume-revisions-");
+    const temp = await createTempRepository("nestor-db-resume-revisions-");
     let repository: FileRepository | null = null;
 
     try {
@@ -2330,7 +2330,7 @@ describe("persisted row corruption handling", () => {
 
   test("fails loudly instead of silently dropping a corrupted saved job row", async () => {
     const sensitiveMarker = "CONFIDENTIAL-salary-band-9f31";
-    const temp = await createTempRepository("nordri-db-corrupt-job-row-");
+    const temp = await createTempRepository("nestor-db-corrupt-job-row-");
     let repository: FileRepository | null = null;
     try {
       repository = await temp.createRepository();
@@ -2383,7 +2383,7 @@ describe("persisted row corruption handling", () => {
 
   test("fails loudly instead of falling back to the seed when a settings singleton is corrupted", async () => {
     const sensitiveMarker = "SECRET-TOKEN-4c2e";
-    const temp = await createTempRepository("nordri-db-corrupt-settings-");
+    const temp = await createTempRepository("nestor-db-corrupt-settings-");
     let repository: FileRepository | null = null;
     try {
       repository = await temp.createRepository();
@@ -2455,7 +2455,7 @@ describe("repository backend parity", () => {
     {
       label: "in SQLite",
       create: async (): Promise<JobFinderRepository> => {
-        const temp = await createTempRepository("nordri-backend-parity-");
+        const temp = await createTempRepository("nestor-backend-parity-");
         cleanupDirectories.push(temp.tempDirectory);
         return temp.createRepository();
       },

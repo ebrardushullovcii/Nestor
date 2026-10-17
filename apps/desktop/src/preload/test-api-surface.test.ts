@@ -2,14 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 /**
  * The desktop test API is decided once, at preload module evaluation, from
- * NORDRI_ENABLE_TEST_API. This file therefore sets the flag before the
+ * NESTOR_ENABLE_TEST_API. This file therefore sets the flag before the
  * preload module is ever imported, so the enabled shape is observed in its own
  * module registry. `index.test.ts` covers the disabled shape the same way.
  */
 const { mockExposeInMainWorld, mockInvoke } = vi.hoisted(() => {
   // Hoisted so the flag is set before the preload module is evaluated; a
   // plain module-level assignment would run after the hoisted import below.
-  process.env.NORDRI_ENABLE_TEST_API = "1";
+  process.env.NESTOR_ENABLE_TEST_API = "1";
   return {
     mockExposeInMainWorld: vi.fn(),
     mockInvoke: vi.fn(),
@@ -41,7 +41,7 @@ const exposedTestApi = (() => {
     | { jobFinder: { test?: ExposedTestApi } }
     | undefined;
   if (!exposed) {
-    throw new Error("Preload did not expose the nordri API.");
+    throw new Error("Preload did not expose the nestor API.");
   }
   return exposed.jobFinder.test;
 })();

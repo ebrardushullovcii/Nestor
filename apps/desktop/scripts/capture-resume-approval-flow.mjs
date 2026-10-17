@@ -23,7 +23,7 @@ async function main() {
   await rm(outputDir, { force: true, recursive: true });
   await mkdir(outputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-resume-approval-"),
+    path.join(os.tmpdir(), "nestor-resume-approval-"),
   );
   let app;
 
@@ -33,23 +33,23 @@ async function main() {
       cwd: desktopDir,
       env: {
         ...process.env,
-        NORDRI_BROWSER_AGENT: "0",
-        NORDRI_ENABLE_TEST_API: "1",
-        NORDRI_TEST_SYSTEM_THEME: "dark",
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_BROWSER_AGENT: "0",
+        NESTOR_ENABLE_TEST_API: "1",
+        NESTOR_TEST_SYSTEM_THEME: "dark",
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       },
     });
 
     const window = await app.firstWindow();
     await window.setViewportSize({ width: 1440, height: 920 });
     await window.waitForFunction(
-      () => Boolean(window.nordri?.jobFinder?.test),
+      () => Boolean(window.nestor?.jobFinder?.test),
       undefined,
       { timeout: 15_000 },
     );
     await window.evaluate(async () => {
-      await window.nordri.jobFinder.test?.setSystemThemeOverride("dark");
-      await window.nordri.jobFinder.test?.loadResumeWorkspaceDemo();
+      await window.nestor.jobFinder.test?.setSystemThemeOverride("dark");
+      await window.nestor.jobFinder.test?.loadResumeWorkspaceDemo();
       window.location.hash = "#/job-finder/review-queue/job_ready/resume";
     });
     await window.reload();
@@ -173,7 +173,7 @@ async function main() {
     await waitForCondition(async () => {
       const workspace = await window.evaluate(
         async (currentJobId) =>
-          window.nordri.jobFinder.getResumeWorkspace(currentJobId),
+          window.nestor.jobFinder.getResumeWorkspace(currentJobId),
         jobId,
       );
       return (
@@ -192,7 +192,7 @@ async function main() {
 
     const finalWorkspace = await window.evaluate(
       async (currentJobId) =>
-        window.nordri.jobFinder.getResumeWorkspace(currentJobId),
+        window.nestor.jobFinder.getResumeWorkspace(currentJobId),
       jobId,
     );
     await writeFile(

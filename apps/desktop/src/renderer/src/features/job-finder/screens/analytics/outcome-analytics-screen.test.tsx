@@ -6,14 +6,14 @@ import {
   ApplyJobResultSchema,
   ApplyRunSchema,
   OutcomeEventSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   JobSearchCampaign,
   OutcomeAnalyticsOverview,
   OutcomeEvent,
   ResumeStrategy,
   SetOutcomeSuggestionEnabledInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { MemoryRouter } from "react-router-dom";
 import { OutcomeAnalyticsScreen } from "./outcome-analytics-screen";
 

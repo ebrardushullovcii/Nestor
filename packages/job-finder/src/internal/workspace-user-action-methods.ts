@@ -12,13 +12,13 @@ import {
   JobFinderActivityControlSchema,
   type ApplicationQuestionRecord,
   type ApplyJobResult,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   buildApplyFormObservation,
   inferAttestationKind,
   inferQuestionKind,
   selectObservedSignInAction,
-} from "@nordri/browser-agent";
+} from "@nestor/browser-agent";
 
 import {
   isUserActionTerminal,
@@ -35,7 +35,7 @@ import {
   releaseApplicationRecordAfterDismissedUserAction,
   retireCancelledApplicationUserActions,
 } from "./workspace-application-user-action";
-import type { JobFinderRepository } from "@nordri/db";
+import type { JobFinderRepository } from "@nestor/db";
 
 import type {
   TaskLocalApplicationCredentials,

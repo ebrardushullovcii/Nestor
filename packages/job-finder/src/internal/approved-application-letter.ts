@@ -1,17 +1,17 @@
 import {
   createApplyPageHands,
   replaceApprovedApplicationLetter,
-} from "@nordri/browser-agent";
+} from "@nestor/browser-agent";
 import {
   buildPreparationResult,
   type ExecuteApplicationFlowInput,
-} from "@nordri/browser-runtime";
+} from "@nestor/browser-runtime";
 import {
   ApplicationReviewCardSchema,
   ApplyJobResultSchema,
   type ApplicationDocumentRevision,
   type ApplicationReviewCard,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   buildApplyLetterDependencies,
   toApplyLlmClient,

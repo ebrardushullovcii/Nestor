@@ -1,4 +1,4 @@
-import type { DiscoveryLedgerEntry, SavedJob } from "@nordri/contracts";
+import type { DiscoveryLedgerEntry, SavedJob } from "@nestor/contracts";
 import { expect, test } from "vitest";
 
 import { createSeed } from "../workspace-service.test-support";

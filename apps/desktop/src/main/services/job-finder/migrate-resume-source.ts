@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { access, copyFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { JobFinderRepository } from "@nordri/db";
+import type { JobFinderRepository } from "@nestor/db";
 
 export const missingResumeSourceWarning =
   "The saved original CV file is unavailable. Re-import it before using the original CV for an application.";

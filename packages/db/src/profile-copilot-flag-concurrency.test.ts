@@ -188,7 +188,7 @@ describe("profile copilot shared epoch and patch-flag parity", () => {
 
   test("file repository advances the shared epoch and flips flags atomically", async () => {
     const tempDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-db-copilot-flag-parity-"),
+      path.join(os.tmpdir(), "nestor-db-copilot-flag-parity-"),
     );
     try {
       await expectSharedEpochAndFlagParity(() =>

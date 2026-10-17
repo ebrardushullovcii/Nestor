@@ -7,12 +7,12 @@ import type {
   ResumeBatchGenerationProgress,
   ResumeBatchProviderBlock,
   ResumeBatchCheckpoint,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   JobFinderAiClient,
   ResumeVisionProvider,
-} from "@nordri/ai-providers";
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+} from "@nestor/ai-providers";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import type {
   ApplicationCrmBulkStageMutationInput,
   ApplicationCrmExportInput,
@@ -110,8 +110,8 @@ import type {
   AssistantChangeEntry,
   JobPosting,
   ProfileCopilotPatchOperation,
-} from "@nordri/contracts";
-import type { JobFinderRepository, JobFinderRepositorySeed } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepository, JobFinderRepositorySeed } from "@nestor/db";
 import type {
   AssistantEditResult,
   AssistantProfileEditResult,

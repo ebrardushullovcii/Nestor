@@ -3,8 +3,8 @@
 import type {
   JobFinderSettings,
   UpdateApplicationDefaultsInput,
-} from "@nordri/contracts";
-import { JobFinderSettingsSchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { JobFinderSettingsSchema } from "@nestor/contracts";
 import {
   cleanup,
   fireEvent,

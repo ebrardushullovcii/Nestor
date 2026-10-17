@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import { DesktopPlatformPingSchema } from '@nordri/contracts'
+import { DesktopPlatformPingSchema } from '@nestor/contracts'
 
 export function registerSystemRouteHandlers(ipcMain: IpcMain) {
   ipcMain.handle('system:ping', () => {

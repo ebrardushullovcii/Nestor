@@ -19,7 +19,7 @@ import {
   type SavedJob,
   type SourceInstructionArtifact,
   type TailoredAsset,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   prefixedLines,
 } from "./source-instructions";

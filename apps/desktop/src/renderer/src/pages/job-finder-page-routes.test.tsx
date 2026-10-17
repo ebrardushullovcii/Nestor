@@ -14,7 +14,7 @@ import type { ReactElement } from "react";
 import type {
   JobFinderRendererWorkspaceSnapshot,
   UserActionCommandInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { FinishInBrowserInput } from "@renderer/features/job-finder/screens/applications/applications-detail-panel-recovery-actions-section";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import {

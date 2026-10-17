@@ -12,9 +12,9 @@ import type {
   AssistantResultSet,
   AssistantRunRef,
   AssistantTaskPlan,
-} from "@nordri/contracts";
-import type { ConversationTool } from "@nordri/agent-runtime";
-import { JobPostingSchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import type { ConversationTool } from "@nestor/agent-runtime";
+import { JobPostingSchema } from "@nestor/contracts";
 import type { z, ZodTypeAny } from "zod";
 
 import type { JobFinderWorkspaceService } from "../internal/workspace-service-contracts";

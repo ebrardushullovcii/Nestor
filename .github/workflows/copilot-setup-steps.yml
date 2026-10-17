@@ -41,4 +41,4 @@ jobs:
         shell: bash
         run: |
           CHROME_PATH="$(pnpm --dir apps/desktop exec node --input-type=module -e 'import { chromium } from "playwright"; process.stdout.write(chromium.executablePath())')"
-          echo "NORDRI_CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
+          echo "NESTOR_CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"

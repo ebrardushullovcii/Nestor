@@ -6,8 +6,8 @@ import {
   type DiscoveryTargetExecution,
   type JobDiscoveryTarget,
   type SourceDebugRunRecord,
-} from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 
 import {
   isUserActionTerminal,

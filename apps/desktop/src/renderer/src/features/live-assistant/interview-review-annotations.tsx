@@ -3,7 +3,7 @@ import type {
   InterviewLiveSession,
   InterviewTranscriptAnnotationInput,
   InterviewWorkspaceView,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { MessageSquarePlus } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
 import { formatInterviewTranscriptSource } from "./interview-transcript-source-label";
@@ -33,7 +33,7 @@ export function TranscriptAnnotationPanel(props: {
     setPending(true);
     try {
       const workspace =
-        await window.nordri.liveAssistant.addTranscriptAnnotation({
+        await window.nestor.liveAssistant.addTranscriptAnnotation({
           sessionId: props.session.id,
           transcriptSegmentId: segmentId,
           kind,

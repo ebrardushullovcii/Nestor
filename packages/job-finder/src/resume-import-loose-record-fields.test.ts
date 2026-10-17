@@ -5,7 +5,7 @@ import {
   ResumeImportFieldCandidateSchema,
   createFreshStartCandidateProfile,
   type ResumeImportFieldCandidate,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { applyResolvedResumeImportCandidatesToWorkspace } from "./internal/resume-import-apply";
 import {
   FOLDED_INTO_RECORD_REASON,

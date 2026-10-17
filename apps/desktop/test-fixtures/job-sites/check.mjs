@@ -12,7 +12,7 @@ const confirmation = "Thank you! Your application has been received.";
 const directory = new URL("./", import.meta.url);
 const submissionsLogPath = join(
   tmpdir(),
-  `nordri-job-sites-check-${process.pid}.log`,
+  `nestor-job-sites-check-${process.pid}.log`,
 );
 const server = spawn(
   process.execPath,
@@ -21,7 +21,7 @@ const server = spawn(
     env: {
       ...process.env,
       PORT: "0",
-      NORDRI_FIXTURE_SUBMISSIONS_LOG: submissionsLogPath,
+      NESTOR_FIXTURE_SUBMISSIONS_LOG: submissionsLogPath,
     },
     stdio: ["ignore", "pipe", "pipe"],
   },

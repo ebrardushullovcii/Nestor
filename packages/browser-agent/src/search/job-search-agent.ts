@@ -1,11 +1,11 @@
-import { ListingRejectionCategorySchema } from "@nordri/contracts";
+import { ListingRejectionCategorySchema } from "@nestor/contracts";
 import {
   parseToolArguments,
   runAgentLoop,
   type AgentLoopFinish,
   type AgentLoopMessage,
   type AgentLoopTool,
-} from "@nordri/agent-runtime";
+} from "@nestor/agent-runtime";
 import {
   AgentDebugFindingsSchema,
   JobPostingSchema,
@@ -15,7 +15,7 @@ import {
   type DiscoveryAccessBlockerReason,
   type JobPosting,
   type SourceDebugPhaseCompletionMode,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { APIResponse, Page } from "playwright";
 
 import { isAllowedUrl } from "../allowlist";

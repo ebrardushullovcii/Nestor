@@ -1,5 +1,5 @@
-import type { JobPosting } from '@nordri/contracts'
-import type { AgentLoopToolDefinition } from '@nordri/agent-runtime'
+import type { JobPosting } from '@nestor/contracts'
+import type { AgentLoopToolDefinition } from '@nestor/agent-runtime'
 import type { AgentMessage, ToolCall } from '../types'
 
 export type AgentExtractorPageType = 'search_results' | 'job_detail'

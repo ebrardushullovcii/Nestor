@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { ApplicationAttemptQuestionSchema } from "@nordri/contracts";
+import { ApplicationAttemptQuestionSchema } from "@nestor/contracts";
 import { afterEach, expect, test, vi } from "vitest";
 import { QuestionAnswerForm } from "./actions-screen";
 afterEach(cleanup);

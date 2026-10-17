@@ -1,7 +1,7 @@
 import {
   buildCoverLetterRequest,
   looksLikeUsableLetter,
-} from "@nordri/browser-agent";
+} from "@nestor/browser-agent";
 import { ApplicationLetterGroundingError } from "./application-letter-provider";
 import { buildApplyLetterDependencies } from "./agent-application-preparation";
 import type { WorkspaceServiceContext } from "./workspace-service-context";

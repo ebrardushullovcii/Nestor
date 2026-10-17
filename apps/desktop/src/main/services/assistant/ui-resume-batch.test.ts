@@ -1,4 +1,4 @@
-import type { AssistantResumeBatchState } from "@nordri/contracts";
+import type { AssistantResumeBatchState } from "@nestor/contracts";
 import { beforeEach, expect, it } from "vitest";
 import {
   clearUiResumeBatch,

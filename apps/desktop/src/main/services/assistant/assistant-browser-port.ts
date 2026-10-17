@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 
-import { createPlaywrightApplyPageMechanics } from "@nordri/browser-runtime";
+import { createPlaywrightApplyPageMechanics } from "@nestor/browser-runtime";
 import type {
   ApplyRawPageHands,
   JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   AssistantBrowserLease,
   AssistantBrowserPort,
-} from "@nordri/job-finder";
+} from "@nestor/job-finder";
 import type { Browser, Page } from "playwright";
 
 import type { EmbeddedBrowser } from "../browser/embedded-browser";
@@ -89,7 +89,7 @@ export function createAssistantBrowserPort(
         )) {
           const mark = await browser.readTab<string | null>(
             tabId,
-            `window.__nordriPreparedApplication || sessionStorage.getItem('__nordriPreparedApplication')`,
+            `window.__nestorPreparedApplication || sessionStorage.getItem('__nestorPreparedApplication')`,
           );
           if (mark?.value === input.applicationResultId) matches.push(tabId);
         }
@@ -168,7 +168,7 @@ export function createAssistantBrowserPort(
               // Never infer a successful binding from the visible tab or URL.
               const binding = await current
                 .evaluate(() => {
-                  const mark = "__nordriPreparedApplication";
+                  const mark = "__nestorPreparedApplication";
                   const value = (window as unknown as Record<string, unknown>)[
                     mark
                   ];
@@ -214,9 +214,9 @@ export function createAssistantBrowserPort(
                   .evaluate(
                     () =>
                       (window as unknown as Record<string, unknown>)
-                        .__nordriPreparedApplication ||
+                        .__nestorPreparedApplication ||
                       window.sessionStorage.getItem(
-                        "__nordriPreparedApplication",
+                        "__nestorPreparedApplication",
                       ),
                   )
                   .catch(() => null);

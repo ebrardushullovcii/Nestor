@@ -1,4 +1,4 @@
-import type { InterviewDiagnosticEvent } from "@nordri/contracts";
+import type { InterviewDiagnosticEvent } from "@nestor/contracts";
 import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
 
 function getIcon(event: InterviewDiagnosticEvent) {

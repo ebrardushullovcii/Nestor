@@ -1,10 +1,10 @@
 import { useState } from "react";
-import type { ProfileSetupState } from "@nordri/contracts";
+import type { ProfileSetupState } from "@nestor/contracts";
 
 import type { PageStatusItem } from "../page-status-line";
 
 const PROFILE_SETUP_REMINDER_DISMISSED_KEY =
-  "nordri.profile-setup-reminder-dismissed-v1";
+  "nestor.profile-setup-reminder-dismissed-v1";
 
 // Mirrors the friendly step language used on Home so the reminder never
 // exposes raw setup step identifiers.

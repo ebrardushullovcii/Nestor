@@ -3,7 +3,7 @@ import {
   FitJudgmentSchema,
   DiscoveryRunRecordSchema,
   type JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
 import type { AssistantHostPorts } from "../ports";

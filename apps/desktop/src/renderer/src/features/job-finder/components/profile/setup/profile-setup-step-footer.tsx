@@ -1,7 +1,7 @@
 import {
   normalizeProfileSetupStep,
   type ProfileSetupStep,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { PROFILE_SETUP_VALIDATION_ALERT_ID } from "./profile-setup-screen-helpers";
 import { getNextProfileSetupStep } from "./profile-setup-steps";

@@ -10,7 +10,7 @@ import {
   DesktopBrowserStateSchema,
   DesktopBrowserViewportSchema,
   type DesktopBrowserBridge,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export const browserBridge: DesktopBrowserBridge = {
   addCurrentJob: async (input) =>

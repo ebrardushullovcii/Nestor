@@ -28,7 +28,7 @@ import {
   type CandidateAssetRestoreInput,
   type CandidateAssetRestoreResult,
   type CandidateAssetRetention,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 const GLOBAL_MAX_BYTES = 25 * 1024 * 1024;
 const TEXT_MAX_BYTES = 5 * 1024 * 1024;

@@ -1,7 +1,7 @@
 import {
   InterviewSessionHealthSchema,
   type InterviewWorkspaceView,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { InterviewAudioChunkQueueSnapshot } from "./interview-audio-chunk-queue";
 import type {
   CaptureStatus,

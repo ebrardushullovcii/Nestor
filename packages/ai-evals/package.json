@@ -1,5 +1,5 @@
 {
-  "name": "@nordri/ai-evals",
+  "name": "@nestor/ai-evals",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -11,12 +11,12 @@
     "assistant-lane": "node scripts/run-assistant-lane.mjs"
   },
   "dependencies": {
-    "@nordri/ai-providers": "workspace:*",
-    "@nordri/browser-agent": "workspace:*",
-    "@nordri/browser-runtime": "workspace:*",
-    "@nordri/contracts": "workspace:*",
-    "@nordri/db": "workspace:*",
-    "@nordri/job-finder": "workspace:*",
+    "@nestor/ai-providers": "workspace:*",
+    "@nestor/browser-agent": "workspace:*",
+    "@nestor/browser-runtime": "workspace:*",
+    "@nestor/contracts": "workspace:*",
+    "@nestor/db": "workspace:*",
+    "@nestor/job-finder": "workspace:*",
     "playwright": "^1.63.0",
     "zod": "3.25.76"
   },

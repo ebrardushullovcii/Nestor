@@ -6,7 +6,7 @@ import {
   Lock,
   LockOpen,
 } from "lucide-react";
-import type { ResumeDraftSection } from "@nordri/contracts";
+import type { ResumeDraftSection } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
 import { StatusBadge } from "../../components/status-badge";

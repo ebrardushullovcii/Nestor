@@ -8,11 +8,11 @@ import {
   ResumeDraftSchema,
   SavedJobSchema,
   type ResumeAssistantMessage,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createAssistantRepository,
   createFileJobFinderRepository,
-} from "@nordri/db";
+} from "@nestor/db";
 import { expect, test, vi } from "vitest";
 import { createJobFinderWorkspaceService } from "../index";
 import {
@@ -181,7 +181,7 @@ test("shutdown at a migration yield safely closes the store and restart preserve
   const { repository: workspaceRepository, workspaceService } =
     createWorkspaceServiceHarness({ seed });
   const directory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-migration-stop-"),
+    path.join(os.tmpdir(), "nestor-migration-stop-"),
   );
   const filePath = path.join(directory, "assistant.sqlite");
   let assistantRepository = createAssistantRepository({ filePath });
@@ -396,7 +396,7 @@ for (const hasHistory of [false, true]) {
         ]
       : [];
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-legacy-scale-"),
+      path.join(os.tmpdir(), "nestor-legacy-scale-"),
     );
     const filePath = path.join(directory, "workspace.sqlite");
     const assistantPath = path.join(directory, "assistant.sqlite");

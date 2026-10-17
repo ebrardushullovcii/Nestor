@@ -11,7 +11,7 @@ import {
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Link, MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import {
   JobFinderApplicationsRoute,

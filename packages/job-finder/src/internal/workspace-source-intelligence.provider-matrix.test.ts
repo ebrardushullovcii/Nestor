@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { JobDiscoveryTarget, JobSource } from "@nordri/contracts";
+import type { JobDiscoveryTarget, JobSource } from "@nestor/contracts";
 
 import { runPublicProviderSourceCheck } from "./workspace-public-provider-source-check";
 import {

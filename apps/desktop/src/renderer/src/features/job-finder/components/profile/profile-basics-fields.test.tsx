@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useForm } from "react-hook-form";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CandidateProfileSchema } from "@nordri/contracts";
+import { CandidateProfileSchema } from "@nestor/contracts";
 import {
   createProfileEditorValues,
   type ProfileEditorValues,

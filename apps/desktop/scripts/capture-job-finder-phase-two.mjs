@@ -318,7 +318,7 @@ function workspaceDemoFilePaths(snapshot) {
 }
 
 function knownDemoFilePaths() {
-  const demoDirectory = path.join(os.tmpdir(), "nordri-demo-resume-files");
+  const demoDirectory = path.join(os.tmpdir(), "nestor-demo-resume-files");
   return [
     path.join(demoDirectory, "alex-vanguard.pdf"),
     path.join(demoDirectory, "job-ready-resume.pdf"),
@@ -394,7 +394,7 @@ async function waitForCondition(check, description, timeoutMs = 30_000) {
 }
 
 async function getWorkspace(page) {
-  return page.evaluate(() => window.nordri.jobFinder.getWorkspace());
+  return page.evaluate(() => window.nestor.jobFinder.getWorkspace());
 }
 
 async function navigate(page, route, expectedHeading) {
@@ -1279,7 +1279,7 @@ async function run() {
   await mkdir(outputDir, { recursive: true });
   await cleanCaptureArtifacts();
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-phase-two-"),
+    path.join(os.tmpdir(), "nestor-phase-two-"),
   );
   const demoFilesCreatedByHarness = new Set();
   const demoFilesExistedBeforeHarness = new Set();
@@ -1292,12 +1292,12 @@ async function run() {
       cwd: desktopDir,
       env: {
         ...process.env,
-        NORDRI_BROWSER_AGENT: "0",
-        NORDRI_ENABLE_TEST_API: "1",
-        NORDRI_TEST_SYSTEM_THEME: "dark",
-        NORDRI_AI_API_KEY: "",
-        NORDRI_AI_VISION_API_KEY: "",
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_BROWSER_AGENT: "0",
+        NESTOR_ENABLE_TEST_API: "1",
+        NESTOR_TEST_SYSTEM_THEME: "dark",
+        NESTOR_AI_API_KEY: "",
+        NESTOR_AI_VISION_API_KEY: "",
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       },
     });
     const page = await app.firstWindow();
@@ -1316,13 +1316,13 @@ async function run() {
     });
     await page.waitForLoadState("domcontentloaded");
     await page.waitForFunction(
-      () => Boolean(window.nordri?.jobFinder?.test),
+      () => Boolean(window.nestor?.jobFinder?.test),
       undefined,
       { timeout: 30_000 },
     );
     const browserWindow = await app.browserWindow(page);
     await page.evaluate(() =>
-      window.nordri.jobFinder.test.setSystemThemeOverride("dark"),
+      window.nestor.jobFinder.test.setSystemThemeOverride("dark"),
     );
     await setViewport(page, browserWindow, viewports[0]);
 
@@ -1334,7 +1334,7 @@ async function run() {
       demoFilesExistedBeforeHarness.add(filePath);
     }
     const baseSnapshot = await page.evaluate(() =>
-      window.nordri.jobFinder.test.loadApplyQueueDemo(),
+      window.nestor.jobFinder.test.loadApplyQueueDemo(),
     );
     for (const filePath of workspaceDemoFilePaths(baseSnapshot)) {
       if (!demoFilesExistedBeforeHarness.has(filePath)) {
@@ -1344,13 +1344,13 @@ async function run() {
     report.safety.demoFilesTracked = [...demoFilesCreatedByHarness];
     const seededState = createPhaseTwoState(baseSnapshot);
     await page.evaluate(
-      (state) => window.nordri.jobFinder.test.resetWorkspaceState(state),
+      (state) => window.nestor.jobFinder.test.resetWorkspaceState(state),
       seededState,
     );
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await page.waitForFunction(
-      () => Boolean(window.nordri?.jobFinder?.getWorkspace),
+      () => Boolean(window.nestor?.jobFinder?.getWorkspace),
       undefined,
       { timeout: 30_000 },
     );
@@ -1404,7 +1404,7 @@ async function run() {
       .waitFor();
     await page.getByText(/Latest digest/).waitFor();
     const funnel = await page.evaluate(
-      (id) => window.nordri.jobFinder.projectCampaignRuleFunnel(id),
+      (id) => window.nestor.jobFinder.projectCampaignRuleFunnel(id),
       campaignId,
     );
     assert(
@@ -1439,7 +1439,7 @@ async function run() {
       .getByRole("heading", { name: "Compare selected jobs" })
       .waitFor();
     await page.evaluate(
-      (input) => window.nordri.jobFinder.mutateRapidReview(input),
+      (input) => window.nestor.jobFinder.mutateRapidReview(input),
       {
         type: "decide",
         campaignId,
@@ -1484,7 +1484,7 @@ async function run() {
     };
 
     await page.evaluate(
-      (input) => window.nordri.jobFinder.mutateApplicationCrm(input),
+      (input) => window.nestor.jobFinder.mutateApplicationCrm(input),
       {
         applicationRecordId,
         expectedRevision: 0,
@@ -1497,7 +1497,7 @@ async function run() {
       },
     );
     await page.evaluate(
-      (input) => window.nordri.jobFinder.recordOutcome(input),
+      (input) => window.nestor.jobFinder.recordOutcome(input),
       {
         jobId: jobIds[0],
         campaignId,
@@ -1547,7 +1547,7 @@ async function run() {
 
     await page.evaluate(
       (input) =>
-        window.nordri.jobFinder.setCampaignResumeStrategyDefault(input),
+        window.nestor.jobFinder.setCampaignResumeStrategyDefault(input),
       { campaignId, strategyId: "phase_two_strategy" },
     );
     await page.reload();
@@ -1577,11 +1577,11 @@ async function run() {
     });
     await capture(page, "companies-merge-review", { surface: "companies" });
     await page.evaluate(
-      (input) => window.nordri.jobFinder.setCompanyPreference(input),
+      (input) => window.nestor.jobFinder.setCompanyPreference(input),
       { companyId, preference: "prefer" },
     );
     await page.evaluate(
-      (input) => window.nordri.jobFinder.reviewCompanyMerge(input),
+      (input) => window.nestor.jobFinder.reviewCompanyMerge(input),
       { companyId, candidateId: mergeCandidateId, decision: "rejected" },
     );
     await page.reload();

@@ -1,4 +1,4 @@
-import type { InterviewTranscriptSource } from "@nordri/contracts";
+import type { InterviewTranscriptSource } from "@nestor/contracts";
 
 export function formatInterviewTranscriptSource(
   source: InterviewTranscriptSource,

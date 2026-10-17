@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ApplicationPrivacyReceipt } from "@nordri/contracts";
+import type { ApplicationPrivacyReceipt } from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApplicationsDetailPanelPrivacyReceiptSection } from "./applications-detail-panel-privacy-receipt-section";
 

@@ -2,7 +2,7 @@ import type {
   ApplicationAttestationKind,
   ApplicationQuestionControlType,
   ApplicationQuestionKind,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import type {
   ApplyActionKind,

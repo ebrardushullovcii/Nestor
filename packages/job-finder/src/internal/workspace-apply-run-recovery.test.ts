@@ -4,7 +4,7 @@ import {
   ApplyJobResultSchema,
   JobFinderActivityControlSchema,
   type ApplySubmitApproval,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import {
   APPLY_BATCH_APPROVAL_REUSE_WINDOW_MS,

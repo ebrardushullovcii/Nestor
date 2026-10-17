@@ -9,7 +9,7 @@ import type {
   SubmissionOutcomeRecord,
   SubmissionOutcomeResolutionInput,
   SubmissionPreflightRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export type ApplicationAuthorityEnvelopeCommitResult =
   | {

@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import {
   ApplyRunDetailsSchema,
   ApplicationReviewCardSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { withPersonAnswerSources } from "./application-review-source";
 it("keeps a person's checkbox-group answer attributed to them when the form changes separators", () => {
   const at = "2026-10-05T10:00:00.000Z";

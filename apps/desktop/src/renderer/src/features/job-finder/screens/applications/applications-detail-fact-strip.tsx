@@ -3,12 +3,12 @@ import type {
   ApplicationAttemptListRow,
   ApplicationRecord,
   JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { ReactNode } from "react";
 import {
   isApplicationTrackedAsSentByPerson,
   isApplicationWithdrawnByPerson,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   formatStatusLabel,
   formatTimestamp,

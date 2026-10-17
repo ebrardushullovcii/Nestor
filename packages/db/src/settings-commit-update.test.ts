@@ -2,8 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import {
   ApplicationCrmSettingsSchema,
   JobFinderSettingsSchema,
-} from "@nordri/contracts";
-import type { JobFinderSettings } from "@nordri/contracts";
+} from "@nestor/contracts";
+import type { JobFinderSettings } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -191,7 +191,7 @@ describe("commitSettingsUpdate", () => {
   });
 
   test("file repository applies updater output atomically", async () => {
-    const temp = await createTempRepository("nordri-db-settings-update-");
+    const temp = await createTempRepository("nestor-db-settings-update-");
     try {
       await expectCommitSettingsUpdateParity(() => temp.createRepository());
     } finally {
@@ -208,7 +208,7 @@ describe("scoped settings merges against transaction-current state", () => {
   });
 
   test("file repository keeps concurrent scoped field owners", async () => {
-    const temp = await createTempRepository("nordri-db-settings-scoped-");
+    const temp = await createTempRepository("nestor-db-settings-scoped-");
     try {
       await expectScopedMergeParity(() => temp.createRepository());
     } finally {
@@ -225,7 +225,7 @@ describe("commitSavedJobDelta paired settings updates", () => {
   });
 
   test("file repository pairs settings and saved-job mutations atomically", async () => {
-    const temp = await createTempRepository("nordri-db-settings-paired-");
+    const temp = await createTempRepository("nestor-db-settings-paired-");
     try {
       await expectPairedSettingsJobDeltaAtomicityParity(() =>
         temp.createRepository(),
@@ -236,7 +236,7 @@ describe("commitSavedJobDelta paired settings updates", () => {
   });
 
   test("file repository increments the settings singleton revision only on applied commits", async () => {
-    const temp = await createTempRepository("nordri-db-settings-revision-");
+    const temp = await createTempRepository("nestor-db-settings-revision-");
     try {
       const repository = await temp.createRepository();
       try {
@@ -279,7 +279,7 @@ describe("commitSavedJobDelta paired settings updates", () => {
 
 describe("file repository cross-handle settings concurrency", () => {
   test("two handles preserve interleaved scoped settings and saved-job writes", async () => {
-    const temp = await createTempRepository("nordri-db-settings-handles-");
+    const temp = await createTempRepository("nestor-db-settings-handles-");
     try {
       const first = await temp.createRepository();
       const second = await temp.createRepository();

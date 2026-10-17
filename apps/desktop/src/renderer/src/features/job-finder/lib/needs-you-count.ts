@@ -1,11 +1,11 @@
 import type {
   GroupedManualAnswerDecision,
   JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   projectNeedsYou,
   projectWorkspaceAttention,
-} from "@nordri/job-finder/assistant-attention";
+} from "@nestor/job-finder/assistant-attention";
 
 /**
  * The one renderer-side owner of the "Needs you" population.

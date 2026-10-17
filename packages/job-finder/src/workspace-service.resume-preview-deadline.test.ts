@@ -1,4 +1,4 @@
-import type { ResumeClaimCheckInput } from "@nordri/ai-providers";
+import type { ResumeClaimCheckInput } from "@nestor/ai-providers";
 import { expect, test, vi } from "vitest";
 import {
   createAiClient,

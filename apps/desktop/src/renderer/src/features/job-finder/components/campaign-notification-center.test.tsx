@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { CampaignNotification } from "@nordri/contracts";
+import type { CampaignNotification } from "@nestor/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CampaignNotificationCenter } from "./campaign-notification-center";

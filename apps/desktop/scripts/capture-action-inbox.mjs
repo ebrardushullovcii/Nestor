@@ -166,7 +166,7 @@ async function captureGroup(page, capture, groupName, fileName) {
 async function runCapture() {
   await mkdir(outputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-action-inbox-"),
+    path.join(os.tmpdir(), "nestor-action-inbox-"),
   );
   let app;
 
@@ -176,11 +176,11 @@ async function runCapture() {
       cwd: desktopDir,
       env: {
         ...process.env,
-        NORDRI_BROWSER_AGENT: "0",
-        NORDRI_ENABLE_TEST_API: "1",
-        NORDRI_TEST_SYSTEM_THEME:
-          process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark",
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_BROWSER_AGENT: "0",
+        NESTOR_ENABLE_TEST_API: "1",
+        NESTOR_TEST_SYSTEM_THEME:
+          process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       },
     });
 
@@ -247,16 +247,16 @@ async function runCapture() {
 
     await page.evaluate(
       async ({ theme, workspaceState }) => {
-        if (!window.nordri.jobFinder.test) {
+        if (!window.nestor.jobFinder.test) {
           throw new Error("Desktop test API is unavailable in the renderer.");
         }
-        await window.nordri.jobFinder.test.setSystemThemeOverride(theme);
-        await window.nordri.jobFinder.test.resetWorkspaceState(
+        await window.nestor.jobFinder.test.setSystemThemeOverride(theme);
+        await window.nestor.jobFinder.test.resetWorkspaceState(
           workspaceState,
         );
       },
       {
-        theme: process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark",
+        theme: process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",
         workspaceState: state,
       },
     );

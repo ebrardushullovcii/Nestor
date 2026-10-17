@@ -6,7 +6,7 @@ import type {
   ResumeImportRun,
   ResumeResearchArtifact,
   ResumeValidationResult,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export function upsertById<TValue extends { id: string }>(
   current: readonly TValue[],

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   BrowserVisualObservationSetSchema,
   type BrowserVisualAnalysisInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createDeterministicBrowserVisualAnalysisProvider,
   createOpenAiCompatibleBrowserVisualAnalysisProvider,

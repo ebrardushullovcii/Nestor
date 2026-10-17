@@ -1,4 +1,4 @@
-import { SavedJobSchema } from "@nordri/contracts";
+import { SavedJobSchema } from "@nestor/contracts";
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, within } from "@testing-library/react";
@@ -8,7 +8,7 @@ import type {
   JobSearchPreferences,
   SavedJob,
   SourceAccessPrompt,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   DiscoveryFiltersPanel,
   getDiscoveryOtherActiveCriteria,

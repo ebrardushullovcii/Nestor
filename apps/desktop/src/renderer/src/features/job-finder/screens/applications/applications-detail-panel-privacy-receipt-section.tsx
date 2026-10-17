@@ -1,4 +1,4 @@
-import type { ApplicationPrivacyReceipt } from "@nordri/contracts";
+import type { ApplicationPrivacyReceipt } from "@nestor/contracts";
 import {
   AlertTriangle,
   CheckCircle2,

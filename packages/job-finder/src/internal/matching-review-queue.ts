@@ -12,7 +12,7 @@ import {
   type ReviewQueueItem,
   type SavedJob,
   type TailoredAsset,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { compareDiscoveryJobs } from "../discovery-ordering";
 import { resolveJobResumeApplicationMode } from "./job-resume-application-mode";

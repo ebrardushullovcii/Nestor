@@ -7,7 +7,7 @@ import {
   ResumeValidationResultSchema,
   resumeClaimOwnershipStatement,
   type ResumeClaimConfirmation,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { ResumeClaimTrustPanel } from "./resume-claim-trust-panel";
 
 const assessedAt = "2026-07-30T12:00:00.000Z";

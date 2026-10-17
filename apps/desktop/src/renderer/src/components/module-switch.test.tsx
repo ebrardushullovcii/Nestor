@@ -56,7 +56,7 @@ describe("ModuleSwitch", () => {
   it("states the active module and offers to switch it", () => {
     const { trigger } = renderSwitch();
 
-    const group = screen.getByRole("group", { name: "Nordri modules" });
+    const group = screen.getByRole("group", { name: "Nestor modules" });
     expect(group.dataset.moduleSwitchVariant).toBe("caption");
     expect(group.contains(trigger)).toBe(true);
 
@@ -204,7 +204,7 @@ describe("ModuleSwitch", () => {
     const { trigger } = renderSwitch({ variant: "rail" });
 
     expect(
-      screen.getByRole("group", { name: "Nordri modules" }).dataset
+      screen.getByRole("group", { name: "Nestor modules" }).dataset
         .moduleSwitchVariant,
     ).toBe("rail");
     expect(trigger.textContent).toBe("");
@@ -222,7 +222,7 @@ describe("ModuleSwitch", () => {
     for (const variant of ["row", "stacked"] as const) {
       renderSwitch({ variant });
       expect(
-        screen.getByRole("group", { name: "Nordri modules" }).dataset
+        screen.getByRole("group", { name: "Nestor modules" }).dataset
           .moduleSwitchVariant,
       ).toBe("caption");
       expect(getTrigger().textContent).toBe("Job Finder");

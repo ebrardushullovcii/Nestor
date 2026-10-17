@@ -68,16 +68,16 @@ async function waitForProfileOrSetupHeading(window) {
 
 async function captureResumeImport() {
   await mkdir(outputDir, { recursive: true })
-  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nordri-resume-import-'))
+  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nestor-resume-import-'))
 
   const app = await electron.launch({
     args: ['.'],
     cwd: desktopDir,
     env: {
       ...process.env,
-      NORDRI_ENABLE_TEST_API: '1',
-      NORDRI_TEST_SYSTEM_THEME: process.env.NORDRI_TEST_SYSTEM_THEME ?? 'dark',
-      NORDRI_USER_DATA_DIR: userDataDirectory
+      NESTOR_ENABLE_TEST_API: '1',
+      NESTOR_TEST_SYSTEM_THEME: process.env.NESTOR_TEST_SYSTEM_THEME ?? 'dark',
+      NESTOR_USER_DATA_DIR: userDataDirectory
     }
   })
 
@@ -85,14 +85,14 @@ async function captureResumeImport() {
     const window = await app.firstWindow()
 
     await window.evaluate(async (theme) => {
-      await window.nordri.jobFinder.test?.setSystemThemeOverride(theme)
-    }, process.env.NORDRI_TEST_SYSTEM_THEME ?? 'dark')
+      await window.nestor.jobFinder.test?.setSystemThemeOverride(theme)
+    }, process.env.NESTOR_TEST_SYSTEM_THEME ?? 'dark')
 
     await window.waitForLoadState('domcontentloaded')
     await waitForProfileOrSetupHeading(window)
     await window.setViewportSize({ width: 1440, height: 920 })
 
-    const beforeImport = await window.evaluate(() => window.nordri.jobFinder.getWorkspace())
+    const beforeImport = await window.evaluate(() => window.nestor.jobFinder.getWorkspace())
     await writeJson('workspace-before-import.json', beforeImport)
 
     await window.screenshot({
@@ -102,11 +102,11 @@ async function captureResumeImport() {
 
     const importedSnapshot = await window.evaluate(
       async (sourcePath) => {
-        if (!window.nordri.jobFinder.test) {
+        if (!window.nestor.jobFinder.test) {
           throw new Error('Desktop test API is not available in the renderer context.')
         }
 
-        return window.nordri.jobFinder.test.importResumeFromPath(sourcePath)
+        return window.nestor.jobFinder.test.importResumeFromPath(sourcePath)
       },
       resumePath
     )
@@ -124,7 +124,7 @@ async function captureResumeImport() {
       await window.getByRole('heading', { level: 1, name: 'Your profile' }).waitFor({ timeout: 15000 })
     }
 
-    const reloadedSnapshot = await window.evaluate(() => window.nordri.jobFinder.getWorkspace())
+    const reloadedSnapshot = await window.evaluate(() => window.nestor.jobFinder.getWorkspace())
     failIfExpectationMisses(reloadedSnapshot)
     await writeJson('workspace-after-reload.json', reloadedSnapshot)
 

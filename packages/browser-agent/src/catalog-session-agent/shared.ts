@@ -1,7 +1,7 @@
 import {
   annualizeCompensationAmount,
   type CompensationPreference,
-} from '@nordri/contracts'
+} from '@nestor/contracts'
 
 const knownCompensationPeriods = new Set([
   'yr',

@@ -48,7 +48,7 @@ function source(filename) {
   }, fileName: filename }).outputText;
   const module = new vm.SourceTextModule(output, {
     identifier: filename,
-    initializeImportMeta(meta) { meta.env = { VITE_NORDRI_REACT_PERFORMANCE_TRACKS: keepTracks ? '1' : undefined }; }
+    initializeImportMeta(meta) { meta.env = { VITE_NESTOR_REACT_PERFORMANCE_TRACKS: keepTracks ? '1' : undefined }; }
   });
   loaded.set(filename, module);
   return module;

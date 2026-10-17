@@ -1,14 +1,14 @@
 import {
   compareApplicationAnswerRecency,
   mergeUserActionAnswerDraft,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { useEffect, useRef, useState } from "react";
 import type {
   ApplicationAttemptListRow,
   ApplyRunDetails,
   JobFinderApplyRunDetailsQuery,
   UserActionRequest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { listPendingApplicationQuestions } from "../applications/applications-status";
 import type { QuestionAnswerDraft } from "./actions-screen";
 
@@ -100,7 +100,7 @@ export function useQuestionAnswerDrafts(props: {
     );
     answerDrafts.current.set(request.id, merged.answerDraft!);
     fieldTimes.current.set(request.id, merged.answerDraftFieldUpdatedAt!);
-    await window.nordri.jobFinder.saveUserActionAnswerDraft({
+    await window.nestor.jobFinder.saveUserActionAnswerDraft({
       requestId: request.id,
       expectedRevision: request.revision,
       draft: patch,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { DISCOVERY_NO_JOB_SITES_MESSAGE } from "@nordri/contracts";
+import { DISCOVERY_NO_JOB_SITES_MESSAGE } from "@nestor/contracts";
 
 import { createWorkspaceServiceHarness } from "./workspace-service.test-harness";
 

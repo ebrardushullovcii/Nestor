@@ -26,14 +26,14 @@ const mechanics = vi.hoisted(() => ({
   goBack: vi.fn(() => Promise.resolve({ ok: true })),
   fillText: vi.fn(() => Promise.resolve({ ok: true })),
 }));
-vi.mock("@nordri/browser-runtime", () => ({
+vi.mock("@nestor/browser-runtime", () => ({
   createPlaywrightApplyPageMechanics: () => mechanics,
 }));
 
 import {
   ApplicationRecordSchema,
   type JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import type { EmbeddedBrowser } from "../browser/embedded-browser";
 import { createAssistantBrowserPort } from "./assistant-browser-port";

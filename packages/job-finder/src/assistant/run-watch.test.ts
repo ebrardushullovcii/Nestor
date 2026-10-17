@@ -1,4 +1,4 @@
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderWorkspaceSnapshot } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
 import { readRunStatus } from "./run-watch";

@@ -72,7 +72,7 @@ it("returns a blocked route and dialog state when unsaved edits prevent navigati
 
 it("does not acknowledge a route covered by the embedded browser", async () => {
   document.body.innerHTML = "<main><h1>Tracker</h1></main>";
-  (window as unknown as { nordri: unknown }).nordri = {
+  (window as unknown as { nestor: unknown }).nestor = {
     browser: {
       getState: () =>
         Promise.resolve({ phase: "ready", presentation: "expanded" }),
@@ -87,7 +87,7 @@ it("does not acknowledge a route covered by the embedded browser", async () => {
       ),
     ).toMatchObject({ status: "blocked", overlay: "browser" });
   } finally {
-    delete (window as { nordri?: unknown }).nordri;
+    delete (window as { nestor?: unknown }).nestor;
   }
 });
 

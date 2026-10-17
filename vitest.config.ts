@@ -7,63 +7,63 @@ const currentDir = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   resolve: {
     alias: {
-      "@nordri/ai-providers": path.resolve(
+      "@nestor/ai-providers": path.resolve(
         currentDir,
         "packages/ai-providers/src/index.ts",
       ),
       "@renderer": path.resolve(currentDir, "apps/desktop/src/renderer/src"),
-      "@nordri/browser-agent": path.resolve(
+      "@nestor/browser-agent": path.resolve(
         currentDir,
         "packages/browser-agent/src/index.ts",
       ),
-      "@nordri/browser-runtime": path.resolve(
+      "@nestor/browser-runtime": path.resolve(
         currentDir,
         "packages/browser-runtime/src/index.ts",
       ),
-      "@nordri/contracts": path.resolve(
+      "@nestor/contracts": path.resolve(
         currentDir,
         "packages/contracts/src/index.ts",
       ),
-      "@nordri/db": path.resolve(currentDir, "packages/db/src/index.ts"),
-      "@nordri/job-finder/assistant-attention": path.resolve(
+      "@nestor/db": path.resolve(currentDir, "packages/db/src/index.ts"),
+      "@nestor/job-finder/assistant-attention": path.resolve(
         currentDir,
         "packages/job-finder/src/assistant/attention.ts",
       ),
-      "@nordri/job-finder/discovery-ordering": path.resolve(
+      "@nestor/job-finder/discovery-ordering": path.resolve(
         currentDir,
         "packages/job-finder/src/discovery-ordering.ts",
       ),
-      "@nordri/job-finder/discovery-result-bands": path.resolve(
+      "@nestor/job-finder/discovery-result-bands": path.resolve(
         currentDir,
         "packages/job-finder/src/discovery-result-bands.ts",
       ),
-      "@nordri/job-finder/resume-record-identity": path.resolve(
+      "@nestor/job-finder/resume-record-identity": path.resolve(
         currentDir,
         "packages/job-finder/src/resume-record-identity.ts",
       ),
-      "@nordri/job-finder/plan-safeguard-pauses": path.resolve(currentDir, "packages/job-finder/src/plan-safeguard-pauses.ts"),
-      "@nordri/job-finder/resume-identity": path.resolve(
+      "@nestor/job-finder/plan-safeguard-pauses": path.resolve(currentDir, "packages/job-finder/src/plan-safeguard-pauses.ts"),
+      "@nestor/job-finder/resume-identity": path.resolve(
         currentDir,
         "packages/job-finder/src/internal/resume-identity.ts",
       ),
-      "@nordri/job-finder/apply-run-recovery": path.resolve(
+      "@nestor/job-finder/apply-run-recovery": path.resolve(
         currentDir,
         "packages/job-finder/src/internal/workspace-apply-run-recovery.ts",
       ),
-      "@nordri/job-finder/source-health": path.resolve(
+      "@nestor/job-finder/source-health": path.resolve(
         currentDir,
         "packages/job-finder/src/source-health.ts",
       ),
-      "@nordri/job-finder/application-submission-runtime-main":
+      "@nestor/job-finder/application-submission-runtime-main":
         path.resolve(
           currentDir,
           "packages/job-finder/src/application-submission-runtime-main.ts",
         ),
-      "@nordri/job-finder": path.resolve(
+      "@nestor/job-finder": path.resolve(
         currentDir,
         "packages/job-finder/src/index.ts",
       ),
-      "@nordri/knowledge-base": path.resolve(
+      "@nestor/knowledge-base": path.resolve(
         currentDir,
         "packages/knowledge-base/src/index.ts",
       ),

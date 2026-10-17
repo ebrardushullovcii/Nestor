@@ -1,7 +1,7 @@
 import {
   filterCandidateFacingResumeKeywords,
   type TailoredResumeDraft,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import type {
   CandidateProfile,
   ResumeDraft,
@@ -17,9 +17,9 @@ import type {
   TailoredAsset,
   TailoredResumeCoverageMetadata,
   WorkHistoryReviewAcknowledgment,
-} from "@nordri/contracts";
-import { ResumeDraftSchema } from "@nordri/contracts";
-import { fnv1a32 } from "@nordri/core";
+} from "@nestor/contracts";
+import { ResumeDraftSchema } from "@nestor/contracts";
+import { fnv1a32 } from "@nestor/core";
 import {
   createBullet,
   createEntry,

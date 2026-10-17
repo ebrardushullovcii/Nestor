@@ -9,8 +9,8 @@ import type {
   ResumeImportFieldCandidate,
   ResumeImportRun,
   SavedJob,
-} from "@nordri/contracts";
-import { SavedJobSchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { SavedJobSchema } from "@nestor/contracts";
 
 export type FileRepository = Awaited<
   ReturnType<typeof createFileJobFinderRepository>

@@ -2,7 +2,7 @@ import { applicationFacts } from "./application-facts";
 import type {
   CandidateProfile,
   CoverLetterPreference,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { normalizeSignal } from "./control-classification";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";

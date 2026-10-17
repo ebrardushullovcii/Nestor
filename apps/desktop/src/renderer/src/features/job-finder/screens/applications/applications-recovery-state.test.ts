@@ -4,7 +4,7 @@ import {
   APPLICATION_SKIPPED_BY_PERSON_LABEL,
   PREPARED_PAGE_CLOSED_SUMMARY,
   type JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   applyResultStoppedStructurally,
   buildApplyRunContextReader,

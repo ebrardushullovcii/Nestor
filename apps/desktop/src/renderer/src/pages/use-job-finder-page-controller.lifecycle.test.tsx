@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
-import { RESUME_PIPELINE_CAPACITY } from "@nordri/contracts";
+import { RESUME_PIPELINE_CAPACITY } from "@nestor/contracts";
 import type {
   JobFinderRendererWorkspaceSnapshot,
   ResumeBatchGenerationProgress,
   ResumeBatchGenerationResult,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { StrictMode } from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ToastProvider } from "@renderer/components/ui/toast";
@@ -23,7 +23,7 @@ import {
 import type { JobFinderShellActions } from "@renderer/features/job-finder/lib/job-finder-types";
 import { useJobFinderPageController } from "./use-job-finder-page-controller";
 
-type BatchGenerate = Window["nordri"]["jobFinder"]["generateResumeForBatch"];
+type BatchGenerate = Window["nestor"]["jobFinder"]["generateResumeForBatch"];
 
 function createReviewQueueItem(jobId: string) {
   return {
@@ -100,7 +100,7 @@ function createBatchHarness(options: { parkFirstCall?: boolean } = {}) {
   const unsubscribeProgress = vi.fn();
   const getWorkspaceBootstrap = vi.fn(() => Promise.resolve(workspace));
 
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       ping: vi.fn(() => Promise.resolve({ platform: "darwin" as const })),
@@ -122,7 +122,7 @@ function createBatchHarness(options: { parkFirstCall?: boolean } = {}) {
           };
         },
       },
-    } as unknown as Window["nordri"],
+    } as unknown as Window["nestor"],
   });
 
   return {
@@ -223,7 +223,7 @@ describe("useJobFinderPageController tailored-draft lifecycle", () => {
 
   afterEach(() => {
     cleanup();
-    Reflect.deleteProperty(window, "nordri");
+    Reflect.deleteProperty(window, "nestor");
   });
 
   it("lets a truly unmounted controller stop the batch tail after admitted items settle", async () => {
@@ -328,7 +328,7 @@ describe("useJobFinderPageController cross-route status lifetime", () => {
 
   afterEach(() => {
     cleanup();
-    Reflect.deleteProperty(window, "nordri");
+    Reflect.deleteProperty(window, "nestor");
   });
 
   function mountStatusHarness(options: {
@@ -353,7 +353,7 @@ describe("useJobFinderPageController cross-route status lifetime", () => {
             snapshot: workspace,
           })),
     );
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         ping: vi.fn(() => Promise.resolve({ platform: "darwin" as const })),
@@ -368,7 +368,7 @@ describe("useJobFinderPageController cross-route status lifetime", () => {
             options.startApplyCopilotRun ?? (() => Promise.resolve(workspace)),
           setActivityControl: vi.fn(() => Promise.resolve(workspace)),
         },
-      } as unknown as Window["nordri"],
+      } as unknown as Window["nestor"],
     });
 
     const mounted: { current: JobFinderPageController | null } = {

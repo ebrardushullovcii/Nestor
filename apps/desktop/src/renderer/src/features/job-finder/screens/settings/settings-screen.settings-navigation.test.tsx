@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import type { BrowserSessionState, JobFinderSettings } from "@nordri/contracts";
-import { ApplicationCrmSettingsSchema } from "@nordri/contracts";
+import type { BrowserSessionState, JobFinderSettings } from "@nestor/contracts";
+import { ApplicationCrmSettingsSchema } from "@nestor/contracts";
 import {
   act,
   cleanup,

@@ -1,7 +1,7 @@
 import {
   ResumeDraftBulletSchema,
   ResumeDraftPatchSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
 import {

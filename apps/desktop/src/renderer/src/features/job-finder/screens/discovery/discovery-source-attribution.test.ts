@@ -1,7 +1,7 @@
 import type {
   JobDiscoveryTarget,
   SavedJobDiscoveryProvenance,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
 import { getDiscoverySourceLabels } from "./discovery-source-attribution";

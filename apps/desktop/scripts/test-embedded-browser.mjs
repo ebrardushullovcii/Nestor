@@ -8,7 +8,7 @@ import { build } from "vite";
 
 const desktop = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(join(desktop, "package.json"));
-const output = await mkdtemp(join(tmpdir(), "nordri-embedded-browser-test-"));
+const output = await mkdtemp(join(tmpdir(), "nestor-embedded-browser-test-"));
 const discoveryCleanup = process.argv.includes("--discovery-cleanup");
 await build({
   configFile: false,
@@ -27,7 +27,7 @@ await build({
           source.startsWith("/") ||
           source.startsWith("\0") ||
           /^[A-Za-z]:/.test(source) ||
-          source.startsWith("@nordri/")
+          source.startsWith("@nestor/")
         )
           return null;
         return { id: createRequire(importer).resolve(source), external: true };

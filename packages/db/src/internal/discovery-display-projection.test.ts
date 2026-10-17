@@ -3,7 +3,7 @@ import {
   DiscoveryLedgerEntrySchema,
   DiscoveryRunRecordSchema,
   JobFinderDiscoveryStateSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createInMemoryJobFinderRepository } from "../index";
 import type { JobFinderRepository } from "../index";
@@ -158,7 +158,7 @@ for (const storage of ["memory", "file"] as const) {
     async function repository(): Promise<JobFinderRepository> {
       if (storage === "memory")
         return createInMemoryJobFinderRepository(createSeed());
-      const temp = await createTempRepository("nordri-discovery-display-");
+      const temp = await createTempRepository("nestor-discovery-display-");
       cleanup.push(temp.cleanup);
       const repo = await temp.createRepository();
       cleanup.push(() => repo.close());
@@ -255,7 +255,7 @@ for (const storage of ["memory", "file"] as const) {
 }
 
 test("other connections invalidate discovery display state and reopening retains canonical checkpoints", async () => {
-  const temp = await createTempRepository("nordri-discovery-display-external-");
+  const temp = await createTempRepository("nestor-discovery-display-external-");
   cleanup.push(temp.cleanup);
   let repo = await temp.createRepository();
   cleanup.push(() => repo.close());

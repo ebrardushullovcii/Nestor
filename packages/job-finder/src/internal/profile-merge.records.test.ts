@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { CandidateEducationSchema } from "@nordri/contracts";
+import { CandidateEducationSchema } from "@nestor/contracts";
 
 import {
   mergeCertificationRecords,

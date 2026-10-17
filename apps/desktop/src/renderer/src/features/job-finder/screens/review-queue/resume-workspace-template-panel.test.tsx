@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ResumeTemplateDefinition } from "@nordri/contracts";
+import type { ResumeTemplateDefinition } from "@nestor/contracts";
 import { ResumeWorkspaceTemplatePanel } from "./resume-workspace-template-panel";
 
 const themes: readonly ResumeTemplateDefinition[] = [

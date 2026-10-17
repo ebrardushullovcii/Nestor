@@ -2,7 +2,7 @@
 
 import { cleanup, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import type { ReviewQueueItem } from "@nordri/contracts";
+import type { ReviewQueueItem } from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   ReviewQueueRowProps,

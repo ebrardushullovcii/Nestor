@@ -4,7 +4,7 @@ import type {
   ApplicationCrmStage,
   ApplicationCrmStageDefinition,
   ApplicationRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   APPLICATION_CRM_STAGE_NAMES,
   inferApplicationActivityStage,
@@ -12,7 +12,7 @@ import {
   isApplicationWithdrawnByPerson,
   resolveApplicationCrmStageSource,
   resolveApplicationCrmTrackedStage,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { formatApplicationEmployerLine } from "../../lib/job-employer-location-display";
 
 export const APPLICATION_CRM_STAGE_ORDER: readonly ApplicationCrmStage[] = [
@@ -39,7 +39,7 @@ export const APPLICATION_CRM_STAGE_ORDER: readonly ApplicationCrmStage[] = [
 export {
   APPLICATION_CRM_STAGE_NAMES,
   APPLICATION_CRM_MANUAL_STAGES,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 export const APPLICATION_CRM_STAGE_LABELS = {
   ...APPLICATION_CRM_STAGE_NAMES,
   preparing: "Preparing",

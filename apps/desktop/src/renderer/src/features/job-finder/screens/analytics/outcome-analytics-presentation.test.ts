@@ -1,4 +1,4 @@
-import { ApplyJobResultSchema } from "@nordri/contracts";
+import { ApplyJobResultSchema } from "@nestor/contracts";
 import { deriveVerifiedApplicationFunnel } from "./outcome-analytics-presentation";
 import { describe, expect, it } from "vitest";
 import {
@@ -6,7 +6,7 @@ import {
   type OutcomeBucketDimension,
   type OutcomeEvent,
   OutcomeEventSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { UNNAMED_JOB_SOURCE_NAME } from "../../lib/job-source-display-name";
 import {
   OUTCOME_VIEW_MINIMUM_SAMPLE_FOR_CONFIDENCE,

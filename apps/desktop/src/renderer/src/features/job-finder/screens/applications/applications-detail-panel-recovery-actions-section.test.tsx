@@ -7,7 +7,7 @@ import {
   PREPARED_PAGE_CLOSED_SUMMARY,
   ApplyRunSchema,
   type JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { ApplicationAnswerStepCard } from "./applications-answer-step";
 import {
   ApplicationsDetailPanelRecoveryActionsSection,
@@ -352,9 +352,9 @@ describe("ApplicationsDetailPanelRecoveryActionsSection", () => {
   });
 
   it("offers one cleanup action while capacity is full instead of claiming it is filling", () => {
-    const previous = window.nordri;
+    const previous = window.nestor;
     const command = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: { browser: { command } },
     });
@@ -377,7 +377,7 @@ describe("ApplicationsDetailPanelRecoveryActionsSection", () => {
         type: "close_finished_tabs",
       });
     } finally {
-      Object.defineProperty(window, "nordri", {
+      Object.defineProperty(window, "nestor", {
         configurable: true,
         value: previous,
       });

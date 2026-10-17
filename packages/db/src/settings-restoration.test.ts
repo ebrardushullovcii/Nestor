@@ -5,7 +5,7 @@ import { createTempRepository } from "./file-repository.test-support";
 import { createSeed } from "./test-fixtures";
 
 test("older settings gain new defaults without losing saved choices", async () => {
-  const temp = await createTempRepository("nordri-settings-legacy-");
+  const temp = await createTempRepository("nestor-settings-legacy-");
   const legacyPath = temp.filePath.replace(/\.sqlite$/, ".json");
   try {
     const seed = createSeed();
@@ -43,7 +43,7 @@ test("older settings gain new defaults without losing saved choices", async () =
 
 test("invalid legacy settings preserve valid preferences and the source JSON", async () => {
   const temp = await createTempRepository(
-    "nordri-settings-invalid-legacy-",
+    "nestor-settings-invalid-legacy-",
   );
   const legacyPath = temp.filePath.replace(/\.sqlite$/, ".json");
   try {
@@ -77,7 +77,7 @@ test.each([
 ])(
   "corrupt SQLite settings reject load and retain their original bytes (%s)",
   async (corrupt) => {
-    const temp = await createTempRepository("nordri-settings-corrupt-");
+    const temp = await createTempRepository("nestor-settings-corrupt-");
     try {
       const repository = await temp.createRepository();
       await repository.close();
@@ -103,7 +103,7 @@ test.each([
 );
 
 test("legacy repair keeps valid nested choices and disables corrupt permissions", async () => {
-  const temp = await createTempRepository("nordri-settings-repair-permissions-");
+  const temp = await createTempRepository("nestor-settings-repair-permissions-");
   try {
     const seed = createSeed();
     await writeFile(temp.filePath.replace(/\.sqlite$/, ".json"), JSON.stringify({ ...seed, settings: {
@@ -123,7 +123,7 @@ test("legacy repair keeps valid nested choices and disables corrupt permissions"
 });
 
 test("unrelated legacy repair preserves valid explicit authority and partial behavior defaults", async () => {
-  const temp = await createTempRepository("nordri-settings-repair-siblings-");
+  const temp = await createTempRepository("nestor-settings-repair-siblings-");
   try {
     const seed = createSeed();
     await writeFile(temp.filePath.replace(/\.sqlite$/, ".json"), JSON.stringify({ ...seed, settings: {
@@ -142,7 +142,7 @@ test("unrelated legacy repair preserves valid explicit authority and partial beh
 });
 
 test("legacy tracker repair keeps valid stages and a disabled follow-up rule", async () => {
-  const temp = await createTempRepository("nordri-settings-repair-tracker-");
+  const temp = await createTempRepository("nestor-settings-repair-tracker-");
   const stage = { id: "screen", label: "Screen", baseStage: "reviewing", color: "blue", position: 0, isTerminal: false };
   try {
     const seed = createSeed();

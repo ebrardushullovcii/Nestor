@@ -5,7 +5,7 @@ import {
   type ApplicationAuthorityEnvelopeInput,
   type SubmissionExecutionGrantInput,
   type SubmissionPreflightRecordInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import {

@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ResumeValidationIssue } from "@nordri/contracts";
+import type { ResumeValidationIssue } from "@nestor/contracts";
 import {
   buildResumeValidationAiPrompt,
   countBlockingResumeValidationIssues,

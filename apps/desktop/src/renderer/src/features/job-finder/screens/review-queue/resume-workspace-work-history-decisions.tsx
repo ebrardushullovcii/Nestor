@@ -4,7 +4,7 @@ import type {
   ResumeCoverageRoleComparison,
   WorkHistoryReviewAcknowledgment,
   WorkHistoryReviewSuggestion,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 
 import { describeReviewRole } from "./resume-review-context";

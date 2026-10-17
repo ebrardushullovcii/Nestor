@@ -7,7 +7,7 @@ import {
   type CandidateProfile,
   type JobPosting,
   type JobSearchPreferences,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import type { AssessJobFitInput, JobFitJudgmentResult } from "./shared";
 

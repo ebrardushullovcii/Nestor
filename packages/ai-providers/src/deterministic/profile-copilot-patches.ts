@@ -1,7 +1,7 @@
 import {
   type ProfileCopilotPatchGroup,
   type ProfileCopilotReply,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import type { ReviseCandidateProfileInput } from "../shared";
 import { buildGenericExplicitFieldPatchGroups } from "./profile-copilot-field-updates";

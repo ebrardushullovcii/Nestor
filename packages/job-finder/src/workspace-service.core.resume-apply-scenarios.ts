@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   ApplicationAuthorityDecisionPolicySchema,
   ApplicationAuthorityEnvelopeSchema,
@@ -14,8 +14,8 @@ import {
   SavedJobSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
   serializeApprovedApplicationAnswerSnapshotForDigest,
-} from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 import type { JobFinderDocumentManager } from "./internal/workspace-service-contracts";
 import { isApprovedTailoredResumeReadyForApply } from "./internal/matching-review-queue";
 import { describe, expect, test, vi } from "vitest";

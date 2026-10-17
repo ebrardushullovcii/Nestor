@@ -36,7 +36,7 @@
         form.reset();
         if (status)
           status.textContent =
-            "Thank you. We will email you when you can try Nordri.";
+            "Thank you. We will email you when you can try Nestor.";
       } catch {
         if (status)
           status.textContent =

@@ -1,7 +1,7 @@
 import {
   createAdaptiveConcurrencyLimiter,
   createConcurrencyLimiter,
-} from "@nordri/core";
+} from "@nestor/core";
 import {
   RESUME_AI_CONCURRENCY,
   RESUME_LOCAL_CONCURRENCY,
@@ -9,15 +9,15 @@ import {
   type ResumeBatchGenerationResult,
   type ResumeBatchGenerationProgress,
   type ResumeBatchProviderBlock,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { refreshApprovedApplicationLetter } from "./approved-application-letter";
 import type {
   DiscoveryFeedbackBatchOutcome,
   DiscoveryFeedbackBatchResult,
   JobFinderDiscoveryState,
   JobFinderDismissDiscoveryJobInput,
-} from "@nordri/contracts";
-import { normalizeCompanyName } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { normalizeCompanyName } from "@nestor/contracts";
 import type { DiscoveryFeedbackBatchOptions } from "./workspace-service-contracts";
 import {
   mergeResumeBatchCheckpoints,
@@ -31,7 +31,7 @@ import {
   getAiProviderAccessFailure,
   isAiProviderRateLimited,
   completeTailoredResumeDraft,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import {
   applyResumeLanguage,
   collectResumeLanguageFields,
@@ -54,7 +54,7 @@ import {
 import {
   applicationSiteKey,
   type ExecuteApplicationFlowInput,
-} from "@nordri/browser-runtime";
+} from "@nestor/browser-runtime";
 import { creditOwnApplicationAnswers } from "./review-card-own-answers";
 import {
   buildApplyLetterDependencies,
@@ -133,7 +133,7 @@ import {
   type JobFinderActivityControl,
   type ResumeClaimConfirmation,
   type WorkHistoryReviewAcknowledgment,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { isSafelyParkedApplyQueue } from "./workspace-apply-run-recovery";
 import { sanitizeTailoredAssetFailureMessage } from "./tailored-asset-failure";
 import { projectDiscoveryJobViews } from "./listing-activity";
@@ -258,7 +258,7 @@ import {
 import type {
   ApplicationAutomationMode,
   ApplicationReviewCard,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   ApplicationPreparationCapacityToken,
   TaskLocalApplicationCredentials,
@@ -3646,7 +3646,7 @@ export function createWorkspaceApplicationMethods(
       // Preparation can overlap; every result/run transition above is still
       // committed in order. Drain active workers before cleanup or failure.
       const requestedConcurrency = Number(
-        process.env.NORDRI_APPLICATION_PREPARATION_CONCURRENCY ?? 2,
+        process.env.NESTOR_APPLICATION_PREPARATION_CONCURRENCY ?? 2,
       );
       const concurrency =
         input.mode === "single_job_auto"

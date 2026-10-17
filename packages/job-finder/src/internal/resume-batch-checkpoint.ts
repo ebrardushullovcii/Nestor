@@ -1,5 +1,5 @@
-import type { JobFinderIntelligenceState } from "@nordri/contracts";
-import type { ResumeBatchCheckpoint } from "@nordri/contracts";
+import type { JobFinderIntelligenceState } from "@nestor/contracts";
+import type { ResumeBatchCheckpoint } from "@nestor/contracts";
 
 /** Keep independently running queues durable, and expose one recovery control. */
 export function mergeResumeBatchCheckpoints(

@@ -7,7 +7,7 @@
  * diffing the props cost CPU on every render. React records them only when
  * `console.timeStamp` exists, so the app removes it before React loads;
  * nothing else uses it, and production React records nothing either way.
- * Set VITE_NORDRI_REACT_PERFORMANCE_TRACKS=1 to keep React's tracks for a
+ * Set VITE_NESTOR_REACT_PERFORMANCE_TRACKS=1 to keep React's tracks for a
  * Performance-panel profile.
  */
 export function disableReactPerformanceTracks(

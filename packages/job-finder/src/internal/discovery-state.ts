@@ -1,4 +1,4 @@
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   DiscoveryActivityEventSchema,
   DiscoveryTargetExecutionSchema,
@@ -10,7 +10,7 @@ import {
   type DiscoveryTargetExecution,
   type JobFinderDiscoveryState,
   type JobSearchPreferences,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 const DEFAULT_DISCOVERY_HISTORY_LIMIT = 5;
 

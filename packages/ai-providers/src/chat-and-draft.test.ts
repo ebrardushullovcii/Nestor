@@ -4,7 +4,7 @@ import {
   createOpenAiCompatibleJobFinderAiClient,
   createJobFinderAiClientFromEnvironment,
 } from "./index";
-import type { ProfileCopilotRelevantReviewItem } from "@nordri/contracts";
+import type { ProfileCopilotRelevantReviewItem } from "@nestor/contracts";
 import { ProfileCopilotUnfinishedError } from "./openai-compatible";
 import { ResumeGenerationStrategyPolicySchema } from "./shared";
 import {

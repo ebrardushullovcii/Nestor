@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 function createAppData() {
-  const appData = mkdtempSync(path.join(os.tmpdir(), "nordri-app-data-"));
+  const appData = mkdtempSync(path.join(os.tmpdir(), "nestor-app-data-"));
   temporaryDirectories.push(appData);
   return appData;
 }
@@ -46,11 +46,11 @@ describe("migrateLegacyDesktopUserData", () => {
     const appData = createAppData();
     seedLegacyWorkspace(path.join(appData, "@unemployed", "desktop"));
 
-    const result = migrateLegacyDesktopUserData(fakeApp(appData, "@nordri/desktop"), {
+    const result = migrateLegacyDesktopUserData(fakeApp(appData, "@nestor/desktop"), {
       configuredDirectory: null,
     });
 
-    const target = path.join(appData, "@nordri", "desktop");
+    const target = path.join(appData, "@nestor", "desktop");
     expect(result.movedDirectory).toEqual({
       from: path.join(appData, "@unemployed", "desktop"),
       to: target,
@@ -67,14 +67,14 @@ describe("migrateLegacyDesktopUserData", () => {
   test("moves the packaged workspace into an empty directory Electron already made", () => {
     const appData = createAppData();
     seedLegacyWorkspace(path.join(appData, "UnEmployed"));
-    mkdirSync(path.join(appData, "Nordri"));
+    mkdirSync(path.join(appData, "Nestor"));
 
-    const result = migrateLegacyDesktopUserData(fakeApp(appData, "Nordri"), {
+    const result = migrateLegacyDesktopUserData(fakeApp(appData, "Nestor"), {
       configuredDirectory: null,
     });
 
-    expect(result.movedDirectory?.to).toBe(path.join(appData, "Nordri"));
-    expect(existsSync(path.join(appData, "Nordri", "job-finder-workspace.sqlite"))).toBe(
+    expect(result.movedDirectory?.to).toBe(path.join(appData, "Nestor"));
+    expect(existsSync(path.join(appData, "Nestor", "job-finder-workspace.sqlite"))).toBe(
       true,
     );
     expect(existsSync(path.join(appData, "UnEmployed"))).toBe(false);
@@ -83,15 +83,15 @@ describe("migrateLegacyDesktopUserData", () => {
   test("never merges into a directory that already holds data", () => {
     const appData = createAppData();
     seedLegacyWorkspace(path.join(appData, "UnEmployed"));
-    mkdirSync(path.join(appData, "Nordri"));
-    writeFileSync(path.join(appData, "Nordri", "job-finder-workspace.sqlite"), "new");
+    mkdirSync(path.join(appData, "Nestor"));
+    writeFileSync(path.join(appData, "Nestor", "job-finder-workspace.sqlite"), "new");
 
-    const result = migrateLegacyDesktopUserData(fakeApp(appData, "Nordri"), {
+    const result = migrateLegacyDesktopUserData(fakeApp(appData, "Nestor"), {
       configuredDirectory: null,
     });
 
     expect(result).toMatchObject({ movedDirectory: null, skippedReason: "target-has-data" });
-    expect(readFileSync(path.join(appData, "Nordri", "job-finder-workspace.sqlite"), "utf8")).toBe(
+    expect(readFileSync(path.join(appData, "Nestor", "job-finder-workspace.sqlite"), "utf8")).toBe(
       "new",
     );
     expect(existsSync(path.join(appData, "UnEmployed", "job-finder-workspace.sqlite"))).toBe(
@@ -106,7 +106,7 @@ describe("migrateLegacyDesktopUserData", () => {
     mkdirSync(isolated);
 
     const result = migrateLegacyDesktopUserData(
-      fakeApp(appData, "@nordri/desktop", isolated),
+      fakeApp(appData, "@nestor/desktop", isolated),
       { configuredDirectory: isolated },
     );
 
@@ -122,7 +122,7 @@ describe("migrateLegacyDesktopUserData", () => {
     mkdirSync(switched);
 
     const result = migrateLegacyDesktopUserData(
-      fakeApp(appData, "@nordri/desktop", switched),
+      fakeApp(appData, "@nestor/desktop", switched),
       { configuredDirectory: null },
     );
 
@@ -137,7 +137,7 @@ describe("migrateLegacyDesktopUserData", () => {
     seedLegacyWorkspace(isolated);
 
     const result = migrateLegacyDesktopUserData(
-      fakeApp(appData, "@nordri/desktop", isolated),
+      fakeApp(appData, "@nestor/desktop", isolated),
       { configuredDirectory: isolated },
     );
 
@@ -147,14 +147,49 @@ describe("migrateLegacyDesktopUserData", () => {
     ]);
   });
 
+  test("moves the Nordri workspace before an older UnEmployed one", () => {
+    const appData = createAppData();
+    const nordri = path.join(appData, "@nordri", "desktop");
+    mkdirSync(path.join(nordri, "Partitions", "unemployed-browser"), { recursive: true });
+    writeFileSync(path.join(nordri, "job-finder-workspace.sqlite"), "nordri");
+    seedLegacyWorkspace(path.join(appData, "@unemployed", "desktop"));
+
+    const result = migrateLegacyDesktopUserData(fakeApp(appData, "@nestor/desktop"), {
+      configuredDirectory: null,
+    });
+
+    const target = path.join(appData, "@nestor", "desktop");
+    expect(result.movedDirectory).toEqual({ from: nordri, to: target });
+    expect(readFileSync(path.join(target, "job-finder-workspace.sqlite"), "utf8")).toBe(
+      "nordri",
+    );
+    expect(result.renamedEntries).toEqual([path.join("Partitions", "nestor-browser")]);
+    expect(existsSync(path.join(target, "Partitions", "nestor-browser"))).toBe(true);
+    expect(existsSync(path.join(appData, "@nordri"))).toBe(false);
+    expect(existsSync(path.join(appData, "@unemployed", "desktop"))).toBe(true);
+  });
+
+  test("keeps the newer browser partition when both old ones exist", () => {
+    const appData = createAppData();
+    const target = path.join(appData, "Nestor");
+    mkdirSync(path.join(target, "Partitions", "nordri-browser"), { recursive: true });
+    mkdirSync(path.join(target, "Partitions", "unemployed-browser"));
+
+    migrateLegacyDesktopUserData(fakeApp(appData, "Nestor"), { configuredDirectory: null });
+
+    expect(existsSync(path.join(target, "Partitions", "nestor-browser"))).toBe(true);
+    expect(existsSync(path.join(target, "Partitions", "nordri-browser"))).toBe(false);
+    expect(existsSync(path.join(target, "Partitions", "unemployed-browser"))).toBe(true);
+  });
+
   test("does nothing on a fresh install", () => {
     const appData = createAppData();
 
     expect(
-      migrateLegacyDesktopUserData(fakeApp(appData, "Nordri"), {
+      migrateLegacyDesktopUserData(fakeApp(appData, "Nestor"), {
         configuredDirectory: null,
       }),
     ).toEqual({ movedDirectory: null, renamedEntries: [], skippedReason: null });
-    expect(existsSync(path.join(appData, "Nordri"))).toBe(false);
+    expect(existsSync(path.join(appData, "Nestor"))).toBe(false);
   });
 });

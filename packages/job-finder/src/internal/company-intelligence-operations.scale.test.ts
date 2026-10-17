@@ -5,7 +5,7 @@ import {
   CompanyEntitySchema,
   SavedJobSchema,
   type CompanyEntity,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createCompanyScaleFixture,
   companyScaleNow,

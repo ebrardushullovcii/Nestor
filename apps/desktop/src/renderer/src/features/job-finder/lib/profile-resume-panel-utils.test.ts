@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   ResumeImportFieldCandidateSummarySchema,
   ResumeImportRunSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   getVisibleYearsExperience,
   getRunningResumeImportProgress,

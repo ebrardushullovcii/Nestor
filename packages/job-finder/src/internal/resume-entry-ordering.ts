@@ -3,7 +3,7 @@ import type {
   ResumeDraftEntry,
   ResumeDraftSection,
   ResumeValidationIssue,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { normalizeText } from "./shared";
 
 const orderedSectionKinds = new Set<ResumeDraftSection["kind"]>([

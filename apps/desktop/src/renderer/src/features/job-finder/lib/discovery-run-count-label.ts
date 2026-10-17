@@ -1,12 +1,12 @@
 import {
   formatDiscoveryAccounting,
   formatDiscoverySourceAccounting,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   DiscoveryActivityEvent,
   DiscoveryRunRecord,
   DiscoveryRunReport,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * The counts a finished run froze about itself, read verbatim.

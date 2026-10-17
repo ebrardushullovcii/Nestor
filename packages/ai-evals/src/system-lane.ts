@@ -7,25 +7,25 @@ import {
   createOpenAiCompatibleResumeVisionProvider,
   runProfileCopilotAgentTask,
   runResumeEditAgentTask,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import {
   createApplyPageHands,
   runJobSearchAgent,
   type AgentConfig,
-} from "@nordri/browser-agent";
-import { createPlaywrightApplyPageMechanics } from "@nordri/browser-runtime";
+} from "@nestor/browser-agent";
+import { createPlaywrightApplyPageMechanics } from "@nestor/browser-runtime";
 import {
   BrowserVisualAnalysisInputSchema,
   JobDiscoveryTargetSchema,
   SourceDebugRunRecordSchema,
   SourceDebugWorkerAttemptSchema,
   SourceInstructionVerificationSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   reviewSourceInstructionArtifactWithAi,
   synthesizeSourceInstructionArtifact,
   type SourceInstructionFinalReviewPhaseContext,
-} from "@nordri/job-finder/source-instruction-review";
+} from "@nestor/job-finder/source-instruction-review";
 import { chromium } from "playwright";
 
 import {
@@ -347,11 +347,11 @@ async function finalizeSyntheticSourceInstruction(input: {
 export function readSystemLaneEnvironment(
   env: Record<string, string | undefined>,
 ): SystemLaneEnvironment {
-  const apiKey = env.NORDRI_AI_API_KEY?.trim();
-  const baseUrl = env.NORDRI_AI_BASE_URL?.trim();
+  const apiKey = env.NESTOR_AI_API_KEY?.trim();
+  const baseUrl = env.NESTOR_AI_BASE_URL?.trim();
   if (!apiKey || !baseUrl) {
     throw new Error(
-      "Configured benchmark requires NORDRI_AI_API_KEY and NORDRI_AI_BASE_URL.",
+      "Configured benchmark requires NESTOR_AI_API_KEY and NESTOR_AI_BASE_URL.",
     );
   }
   return {

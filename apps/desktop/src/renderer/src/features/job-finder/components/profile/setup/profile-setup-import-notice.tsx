@@ -8,13 +8,13 @@ import {
   type CandidateProfile,
   type ResumeImportRun,
   type ResumeImportProgressEvent,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { getResumeImportStageFallbackNotes } from "../profile-resume-panel";
 import { getResumeImportStageFallbackSummary } from "../resume-import-quality-note";
 
 const NOTICE_DISMISSED_STORAGE_KEY_PREFIX =
-  "nordri.profile-setup-import-notice-dismissed-v1:";
+  "nestor.profile-setup-import-notice-dismissed-v1:";
 
 function readNoticeDismissed(key: string): boolean {
   try {

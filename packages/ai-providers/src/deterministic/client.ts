@@ -1,4 +1,4 @@
-import { AgentProviderStatusSchema } from "@nordri/contracts";
+import { AgentProviderStatusSchema } from "@nestor/contracts";
 import type { JobFinderAiClient } from "../shared";
 import { createDeterministicBrowserVisualAnalysisProvider } from "../browser-visual-analysis";
 import { buildDeterministicProfileCopilotReply } from "./profile-copilot";
@@ -44,7 +44,7 @@ export function createDeterministicJobFinderAiClient(
 ): JobFinderAiClient {
   const status = buildDeterministicStatus(
     detail ??
-      "Deterministic fallback is active. Set NORDRI_AI_API_KEY to use the configured OpenAI-compatible provider for resume extraction and tailoring.",
+      "Deterministic fallback is active. Set NESTOR_AI_API_KEY to use the configured OpenAI-compatible provider for resume extraction and tailoring.",
   );
   const generationProvenance = {
     method: "deterministic" as const,

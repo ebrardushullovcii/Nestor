@@ -4,7 +4,7 @@ import {
   ASSISTANT_MESSAGE_MAX_CHARS,
   AssistantConversationSchema,
   type AssistantActivity,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   act,
   cleanup,
@@ -95,11 +95,11 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  delete (window as { nordri?: unknown }).nordri;
+  delete (window as { nestor?: unknown }).nestor;
 });
 
 async function renderSidebar(bridge: ReturnType<typeof fakeBridge>) {
-  (window as unknown as { nordri: unknown }).nordri = {
+  (window as unknown as { nestor: unknown }).nestor = {
     assistant: bridge,
   };
   render(

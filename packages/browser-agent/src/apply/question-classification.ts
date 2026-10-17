@@ -1,9 +1,9 @@
 import {
   ApplicationAttestationKindSchema,
   type ApplicationAttestationKind,
-} from "@nordri/contracts";
-import { parseToolArguments } from "@nordri/agent-runtime";
-import type { AgentLoopToolDefinition } from "@nordri/agent-runtime";
+} from "@nestor/contracts";
+import { parseToolArguments } from "@nestor/agent-runtime";
+import type { AgentLoopToolDefinition } from "@nestor/agent-runtime";
 
 import type { LLMClient } from "../agent/contracts";
 import { questionPrompt } from "./policy-executor";

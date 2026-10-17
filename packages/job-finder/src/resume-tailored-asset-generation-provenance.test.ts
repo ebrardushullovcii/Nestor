@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { TailoredAsset } from "@nordri/contracts";
+import type { TailoredAsset } from "@nestor/contracts";
 import { buildTailoredAssetBridge } from "./internal/resume-workspace-helpers";
 import { seedResumeDraft } from "./internal/resume-workspace-structure";
 import { createSeed } from "./workspace-service.test-support";

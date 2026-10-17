@@ -19,7 +19,7 @@ Job Finder had two chats: one beside the profile and one inside the Resume studi
 - **Work continues across background runs.** A search, resume batch or application run the assistant starts is watched; when it finishes the host continues the same turn's plan without a new message. Stop fences the turn, cancels its runs and releases its browser tab.
 - **Bounded context.** Old tool outputs become handles the model can reopen, and long threads compact into validated checkpoints that keep corrections, result order, pending questions, grants and outcomes.
 - **Old chats are archived, not dropped.** Profile Copilot and Resume assistant histories migrate once, in order, into read-only archive conversations. Their pending proposals stay actionable from the archive; nothing re-executes.
-- **AI is bundled.** The default route is `deepseek-v4.1-flash` over Chat Completions, with `muse-spark-1.3-contributor` over Responses as the alternative (`NORDRI_AI_ASSISTANT_*`). A missing or failing model reads as a temporary outage, never as a setup task.
+- **AI is bundled.** The default route is `deepseek-v4.1-flash` over Chat Completions, with `muse-spark-1.3-contributor` over Responses as the alternative (`NESTOR_AI_ASSISTANT_*`). A missing or failing model reads as a temporary outage, never as a setup task.
 
 ## Consequences
 

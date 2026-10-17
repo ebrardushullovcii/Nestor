@@ -9,8 +9,8 @@ import type {
   CompanySalaryOfferEvidence,
   ReviewCompanyMergeInput,
   JobListRow,
-} from "@nordri/contracts";
-import { isGenericCompanyName, normalizeCompanyName } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { isGenericCompanyName, normalizeCompanyName } from "@nestor/contracts";
 import {
   projectCompanyApplicationHistory,
   projectCompanyDuplicateJobs,

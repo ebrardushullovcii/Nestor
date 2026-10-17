@@ -7,8 +7,8 @@ import assert from "node:assert/strict";
  * straight from the page (before anyone touches it) and what the run record
  * says it answered, and compares both with the stored profile.
  *
- *   pnpm --filter @nordri/desktop build
- *   pnpm --filter @nordri/desktop qa --provider configured --script scripts/test-job-finder-prepare-values.mjs
+ *   pnpm --filter @nestor/desktop build
+ *   pnpm --filter @nestor/desktop qa --provider configured --script scripts/test-job-finder-prepare-values.mjs
  *
  * Nothing is sent: the apply mode is prepare_only and the script refuses to
  * start if it is not. Only the qa launcher's private replica sites are used.
@@ -24,15 +24,15 @@ export default async function prepareValues(qa) {
   assert.equal(new URL(qa.sites.url).hostname, "127.0.0.1");
   const site = (path) => new URL(path, qa.sites.url).href;
   const workspace = () =>
-    qa.page.evaluate(() => window.nordri.jobFinder.getWorkspace());
+    qa.page.evaluate(() => window.nestor.jobFinder.getWorkspace());
   await qa.page.waitForFunction(
     () =>
-      typeof window.nordri?.jobFinder?.test?.loadAgentOwnedBrowserDemo ===
+      typeof window.nestor?.jobFinder?.test?.loadAgentOwnedBrowserDemo ===
       "function",
   );
   const jobs = [2, 4, 6, 7, 9, 10];
   await qa.page.evaluate(
-    (input) => window.nordri.jobFinder.test.loadAgentOwnedBrowserDemo(input),
+    (input) => window.nestor.jobFinder.test.loadAgentOwnedBrowserDemo(input),
     {
       sourceUrl: site("/lever/"),
       applicationUrl: site("/lever/apply/3"),
@@ -53,9 +53,9 @@ export default async function prepareValues(qa) {
   // a shortened URL, the stored url is the full one.
   const stored = await qa.page.evaluate(
     async (links) => {
-      const state = await window.nordri.jobFinder.getWorkspace();
+      const state = await window.nestor.jobFinder.getWorkspace();
       const profile = state.profile;
-      await window.nordri.jobFinder.saveProfile({
+      await window.nestor.jobFinder.saveProfile({
         ...profile,
         linkedinUrl: links.linkedin,
         githubUrl: links.github,
@@ -84,7 +84,7 @@ export default async function prepareValues(qa) {
           },
         ],
       });
-      const saved = (await window.nordri.jobFinder.getWorkspace()).profile;
+      const saved = (await window.nestor.jobFinder.getWorkspace()).profile;
       return {
         email: saved.applicationIdentity?.preferredEmail ?? saved.email,
         phone: saved.applicationIdentity?.preferredPhone ?? saved.phone,
@@ -113,15 +113,15 @@ export default async function prepareValues(qa) {
     const note = [];
     try {
       await qa.page.evaluate(
-        (id) => window.nordri.jobFinder.queueJobForReview(id),
+        (id) => window.nestor.jobFinder.queueJobForReview(id),
         jobId,
       );
       await qa.page.evaluate(
-        (id) => window.nordri.jobFinder.generateResume(id),
+        (id) => window.nestor.jobFinder.generateResume(id),
         jobId,
       );
       const exported = await qa.page.evaluate(
-        (id) => window.nordri.jobFinder.exportResumePdf(id, "approval"),
+        (id) => window.nestor.jobFinder.exportResumePdf(id, "approval"),
         jobId,
       );
       const artifactId =
@@ -135,13 +135,13 @@ export default async function prepareValues(qa) {
         )?.id;
       await qa.page.evaluate(
         ({ id, exportId }) =>
-          window.nordri.jobFinder.approveResume(id, exportId),
+          window.nestor.jobFinder.approveResume(id, exportId),
         { id: jobId, exportId: artifactId },
       );
       // What the plain Apply button does with "Prepare for me" chosen. The
       // call returns when the run ends, so it is not awaited here.
       await qa.page.evaluate((id) => {
-        void window.nordri.jobFinder
+        void window.nestor.jobFinder
           .startApplyCopilotRun({ jobId: id, visualCheckpointsEnabled: false })
           .catch(() => undefined);
       }, jobId);
@@ -198,7 +198,7 @@ export default async function prepareValues(qa) {
       const details = record
         ? await qa.page
             .evaluate(
-              (input) => window.nordri.jobFinder.getApplyRunDetails(input),
+              (input) => window.nestor.jobFinder.getApplyRunDetails(input),
               {
                 runId: settled.result.runId,
                 jobId,

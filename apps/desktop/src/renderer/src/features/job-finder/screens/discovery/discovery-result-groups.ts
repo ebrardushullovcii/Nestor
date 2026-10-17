@@ -1,4 +1,4 @@
-import type { JobListRow } from "@nordri/contracts";
+import type { JobListRow } from "@nestor/contracts";
 import {
   DISCOVERY_CLEAR_MISMATCH_SCORE_FLOOR,
   DISCOVERY_WEAKER_MATCH_SCORE_FLOOR,
@@ -7,10 +7,10 @@ import {
   isDiscoveryClearMismatch,
   isDiscoveryWorthOpeningResult,
   type DiscoveryResultGroupId,
-} from "@nordri/job-finder/discovery-result-bands";
+} from "@nestor/job-finder/discovery-result-bands";
 
 /**
- * Banding rules moved to `@nordri/job-finder/discovery-result-bands` so a
+ * Banding rules moved to `@nestor/job-finder/discovery-result-bands` so a
  * finished run can freeze its own "worth opening" count with the same rule
  * this screen applies. Re-exported here because every Find jobs surface
  * already imports them from this module.

@@ -13,12 +13,12 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type {
   InterviewLiveSession,
   InterviewWorkspaceView,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   summarizeInterviewSession,
   InterviewTranscriptSegmentSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { LiveAssistantPage } from "./live-assistant-page";
 
@@ -114,7 +114,7 @@ function installDesktopApi(
   workspace: InterviewWorkspaceView,
   isFullScreen = false,
 ) {
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       liveAssistant: {
@@ -270,12 +270,12 @@ describe("Live Assistant section navigation", () => {
     const body = new Promise<InterviewLiveSession>((resolve) => {
       resolveBody = resolve;
     });
-    vi.mocked(window.nordri.liveAssistant.getSession).mockReturnValueOnce(body);
+    vi.mocked(window.nestor.liveAssistant.getSession).mockReturnValueOnce(body);
     const rendered = renderInterviewShell();
     expect(
       await rendered.findByText("Loading retained session..."),
     ).toBeTruthy();
-    expect(window.nordri.liveAssistant.getSession).toHaveBeenCalledWith(
+    expect(window.nestor.liveAssistant.getSession).toHaveBeenCalledWith(
       session.id,
     );
     expect(
@@ -312,7 +312,7 @@ describe("Live Assistant section navigation", () => {
       ...createWorkspace(),
       recentSessions: [summarizeInterviewSession(session)],
     });
-    vi.mocked(window.nordri.liveAssistant.getSession).mockResolvedValue(
+    vi.mocked(window.nestor.liveAssistant.getSession).mockResolvedValue(
       session,
     );
     const exported = {
@@ -323,7 +323,7 @@ describe("Live Assistant section navigation", () => {
         .join("\n"),
     };
     const exportSession = vi.fn().mockResolvedValue(exported);
-    Object.assign(window.nordri.liveAssistant, { exportSession });
+    Object.assign(window.nestor.liveAssistant, { exportSession });
     const rendered = renderInterviewShell();
     const transcript = await rendered.findByRole("region", {
       name: "Retained transcript",
@@ -417,7 +417,7 @@ describe("Live Assistant section navigation", () => {
       expect(
         rendered.queryByText(session.transcriptSegments[0]!.text),
       ).toBeNull();
-      expect(window.nordri.liveAssistant.getSession).not.toHaveBeenCalled();
+      expect(window.nestor.liveAssistant.getSession).not.toHaveBeenCalled();
     } finally {
       if (scrollToDescriptor)
         Object.defineProperty(

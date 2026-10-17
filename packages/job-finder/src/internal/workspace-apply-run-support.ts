@@ -1,5 +1,5 @@
-import { resumeFormFileNames } from "@nordri/contracts";
-import { inferQuestionKind } from "@nordri/browser-agent";
+import { resumeFormFileNames } from "@nestor/contracts";
+import { inferQuestionKind } from "@nestor/browser-agent";
 import {
   ApplicationAnswerRecordSchema,
   type ApplicationAnswerRecord,
@@ -23,7 +23,7 @@ import {
   type BrowserVisualEvidenceSummary,
   type JobFinderWorkspaceSnapshot,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { createUniqueId } from "./shared";
 

@@ -14,7 +14,7 @@ About ninety tinted boxes (amber, blue and green panels) sat across 42 renderer 
 - **Live status belongs to the control that owns it.** A running search shows one plain line under the Results header (source and progress), not a box; the agent's own notes stay in Activity.
 - **Explanations and optional hints are plain text**: no tint, no border. An "all clear" is a plain line or nothing.
 - **One problem gets one box.** A second box restating the same problem is removed.
-- **Bottom left, not a right corner.** Nordri's screens keep their main actions on the right: page actions and Search now at the top, the detail panels' action rows and the save footers at the bottom, and the Assistant docks there. The bottom left holds list rows and footer status text, so a toast there covers nothing the person is about to press.
+- **Bottom left, not a right corner.** Nestor's screens keep their main actions on the right: page actions and Search now at the top, the detail panels' action rows and the save footers at the bottom, and the Assistant docks there. The bottom left holds list rows and footer status text, so a toast there covers nothing the person is about to press.
 
 Native `<select>` dropdowns draw the same single chevron as the custom Select, inset from the edge, in the same change: one shared style instead of the platform arrow.
 

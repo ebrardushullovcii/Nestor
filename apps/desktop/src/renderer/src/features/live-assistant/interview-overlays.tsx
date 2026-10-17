@@ -1,7 +1,7 @@
 import type {
   InterviewOverlaySnapshot,
   InterviewTranscriptSegment,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { Check, Copy, Mic, Shield, Sparkles, X } from "lucide-react";
 import { cn } from "@renderer/lib/cn";
@@ -67,7 +67,7 @@ export function createInterviewPopupDragProps(enabled: boolean) {
         lastY = moveEvent.screenY;
 
         if (deltaX !== 0 || deltaY !== 0) {
-          void window.nordri.liveAssistant
+          void window.nestor.liveAssistant
             .moveOverlayWindow({
               surfaceKind,
               deltaX,

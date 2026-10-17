@@ -10,7 +10,7 @@ import {
   type PerformanceEvidenceBudgetStatus,
   type PerformanceEvidenceStageDuration,
   type SourceDebugRunDetails,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { buildDiscoveryPerformanceBudgetEvaluations } from "./performance-budget-evaluation";
 

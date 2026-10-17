@@ -13,7 +13,7 @@ import {
   type BrowserSessionState,
   type JobPosting,
   type JobSource,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   AgentDiscoveryOptions,
   BrowserSessionRuntime,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { isBlockingResumeClaimAssessment } from "@nordri/contracts";
+import { isBlockingResumeClaimAssessment } from "@nestor/contracts";
 import {
   collectResumeExportBlockers,
   evaluateResumeProposalGrounding,

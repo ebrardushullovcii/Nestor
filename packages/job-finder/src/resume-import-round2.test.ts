@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { type ResumeImportFieldCandidate } from "@nordri/contracts";
+import { type ResumeImportFieldCandidate } from "@nestor/contracts";
 import { extractLiteralCandidates } from "./internal/resume-import-literal-extraction";
 import { reconcileCandidates } from "./internal/resume-import-reconciliation";
 import { applyResolvedResumeImportCandidatesToWorkspace } from "./internal/resume-import-apply";

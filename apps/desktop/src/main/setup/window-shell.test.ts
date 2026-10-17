@@ -204,8 +204,8 @@ vi.mock("electron", () => ({
     return electronMock.createWindow(options);
   },
   app: {
-    getPath: () => "/fake-nordri-user-data",
-    getAppPath: () => "/fake-nordri-app",
+    getPath: () => "/fake-nestor-user-data",
+    getAppPath: () => "/fake-nestor-app",
     isPackaged: false,
   },
   dialog: {},
@@ -401,10 +401,10 @@ describe("main renderer security policy", () => {
 });
 
 describe("startup window geometry", () => {
-  const widthEnvName = "NORDRI_STARTUP_WINDOW_WIDTH";
-  const heightEnvName = "NORDRI_STARTUP_WINDOW_HEIGHT";
-  const zoomEnvName = "NORDRI_STARTUP_ZOOM_FACTOR";
-  const markerEnvName = "NORDRI_TESTER_SESSION_GEOMETRY";
+  const widthEnvName = "NESTOR_STARTUP_WINDOW_WIDTH";
+  const heightEnvName = "NESTOR_STARTUP_WINDOW_HEIGHT";
+  const zoomEnvName = "NESTOR_STARTUP_ZOOM_FACTOR";
+  const markerEnvName = "NESTOR_TESTER_SESSION_GEOMETRY";
 
   function createStartupZoomHarness() {
     const windowListeners = new Map<string, Array<() => void>>();
@@ -454,13 +454,13 @@ describe("startup window geometry", () => {
   test("requests nothing when the startup environment is absent", () => {
     expect(parseStartupWindowGeometryRequest({})).toBeNull();
     expect(
-      parseStartupWindowGeometryRequest({ NORDRI_USER_DATA_DIR: "/x" }),
+      parseStartupWindowGeometryRequest({ NESTOR_USER_DATA_DIR: "/x" }),
     ).toBeNull();
   });
 
   test("ignores stray ambient startup variables without the tester marker", () => {
     // Normal .env/default startup behavior must be unaffected by ambient
-    // NORDRI_STARTUP_* values that leak from a developer shell.
+    // NESTOR_STARTUP_* values that leak from a developer shell.
     expect(
       parseStartupWindowGeometryRequest({
         [heightEnvName]: "800",
@@ -692,11 +692,11 @@ describe("startup window geometry", () => {
 describe("createMainWindow zoom wiring order", () => {
   const geometryEnvironmentNames = [
     "ELECTRON_RENDERER_URL",
-    "NORDRI_STARTUP_WINDOW_HEIGHT",
-    "NORDRI_STARTUP_WINDOW_WIDTH",
-    "NORDRI_STARTUP_ZOOM_FACTOR",
-    "NORDRI_TESTER_SESSION_GEOMETRY",
-    "NORDRI_USER_DATA_DIR",
+    "NESTOR_STARTUP_WINDOW_HEIGHT",
+    "NESTOR_STARTUP_WINDOW_WIDTH",
+    "NESTOR_STARTUP_ZOOM_FACTOR",
+    "NESTOR_TESTER_SESSION_GEOMETRY",
+    "NESTOR_USER_DATA_DIR",
   ];
   let savedEnvironment: Array<[string, string | undefined]>;
 
@@ -768,8 +768,8 @@ describe("createMainWindow zoom wiring order", () => {
   }
 
   test("pins registration order: startup request writer first, owned-session writer last", () => {
-    process.env.NORDRI_TESTER_SESSION_GEOMETRY = "1";
-    process.env.NORDRI_STARTUP_ZOOM_FACTOR = "1.25";
+    process.env.NESTOR_TESTER_SESSION_GEOMETRY = "1";
+    process.env.NESTOR_STARTUP_ZOOM_FACTOR = "1.25";
     const instance = createWiredMainWindow();
 
     // Real wiring adopted the parsed request as the owned factor and wrote it

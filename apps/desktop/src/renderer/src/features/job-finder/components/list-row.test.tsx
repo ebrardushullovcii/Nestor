@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { SavedJobSchema, type SavedJob } from "@nordri/contracts";
-import type { ApplicationRecord, ReviewQueueItem } from "@nordri/contracts";
+import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
+import type { ApplicationRecord, ReviewQueueItem } from "@nestor/contracts";
 import { cleanup, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";

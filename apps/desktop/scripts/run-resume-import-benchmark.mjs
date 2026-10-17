@@ -46,16 +46,16 @@ const outputDir = path.join(desktopDir, 'test-artifacts', 'ui', runLabel)
 
 async function main() {
   await mkdir(outputDir, { recursive: true })
-  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nordri-resume-benchmark-'))
+  const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'nestor-resume-benchmark-'))
 
   const app = await electron.launch({
     args: ['.'],
     cwd: desktopDir,
     env: {
       ...process.env,
-      NORDRI_ENABLE_TEST_API: '1',
-      NORDRI_USER_DATA_DIR: userDataDirectory,
-      ...(useConfiguredAi ? {} : { NORDRI_AI_API_KEY: '' }),
+      NESTOR_ENABLE_TEST_API: '1',
+      NESTOR_USER_DATA_DIR: userDataDirectory,
+      ...(useConfiguredAi ? {} : { NESTOR_AI_API_KEY: '' }),
     },
   })
 
@@ -63,18 +63,18 @@ async function main() {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
     await window.waitForFunction(
-      () => Boolean(window.nordri?.jobFinder?.test?.runResumeImportBenchmark),
+      () => Boolean(window.nestor?.jobFinder?.test?.runResumeImportBenchmark),
       undefined,
       { timeout: 15000 },
     )
 
     const report = await window.evaluate(
       async ({ benchmarkVersion, canaryOnly, useConfiguredAi, useVision, caseIds }) => {
-        if (!window.nordri.jobFinder.test) {
+        if (!window.nestor.jobFinder.test) {
           throw new Error('Desktop test API is not available in the renderer context.')
         }
 
-        const defaultCases = await window.nordri.jobFinder.test.getResumeImportBenchmarkCases()
+        const defaultCases = await window.nestor.jobFinder.test.getResumeImportBenchmarkCases()
         const selectedCases = caseIds.length > 0
           ? defaultCases.filter((entry) => caseIds.includes(entry.id))
           : []
@@ -85,7 +85,7 @@ async function main() {
           throw new Error(`Unknown resume import benchmark case id(s): ${missingIds.join(', ')}`)
         }
 
-        return window.nordri.jobFinder.test.runResumeImportBenchmark({
+        return window.nestor.jobFinder.test.runResumeImportBenchmark({
           benchmarkVersion,
           canaryOnly,
           useConfiguredAi,

@@ -5,7 +5,7 @@ import {
   CandidateProfileSchema,
   type RawApplyControl,
   type RawApplyPage,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import type { LLMClient } from "../agent/contracts";
 import { runApplyAgent } from "./apply-agent";

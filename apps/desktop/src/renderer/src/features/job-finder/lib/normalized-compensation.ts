@@ -1,4 +1,4 @@
-import type { NormalizedCompensation, JobListRow } from "@nordri/contracts";
+import type { NormalizedCompensation, JobListRow } from "@nestor/contracts";
 
 export function formatNormalizedCompensation(
   compensation: NormalizedCompensation | null | undefined,

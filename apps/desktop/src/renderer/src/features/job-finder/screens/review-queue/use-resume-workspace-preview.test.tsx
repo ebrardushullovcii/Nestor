@@ -2,7 +2,7 @@
 
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { JobFinderResumePreview, ResumeDraft } from "@nordri/contracts";
+import type { JobFinderResumePreview, ResumeDraft } from "@nestor/contracts";
 import { useResumeWorkspacePreview } from "./use-resume-workspace-preview";
 
 async function actAndFlush(action: () => void): Promise<void> {

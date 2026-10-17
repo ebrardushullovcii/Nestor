@@ -7,7 +7,7 @@ import {
   JobSearchCampaignCollectionSchema,
   JobSearchCampaignScheduleSchema,
   type DiscoveryRunRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   createWorkspaceCampaignMethods,

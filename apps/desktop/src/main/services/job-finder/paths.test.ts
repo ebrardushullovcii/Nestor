@@ -18,23 +18,23 @@ import {
   resolveJobFinderWorkspaceRelativePath,
 } from "./paths";
 
-const originalUserDataDirectory = process.env.NORDRI_USER_DATA_DIR;
+const originalUserDataDirectory = process.env.NESTOR_USER_DATA_DIR;
 
 afterEach(() => {
   if (originalUserDataDirectory === undefined) {
-    delete process.env.NORDRI_USER_DATA_DIR;
+    delete process.env.NESTOR_USER_DATA_DIR;
   } else {
-    process.env.NORDRI_USER_DATA_DIR = originalUserDataDirectory;
+    process.env.NESTOR_USER_DATA_DIR = originalUserDataDirectory;
   }
 });
 
 describe("ensureJobFinderUserDataDirectory", () => {
   test("creates a brand-new nested user-data directory before SQLite opens", async () => {
     const temporaryRoot = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-fresh-user-"),
+      path.join(os.tmpdir(), "nestor-fresh-user-"),
     );
     const userDataDirectory = path.join(temporaryRoot, "new-profile", "data");
-    process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
+    process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
 
     try {
       await ensureJobFinderUserDataDirectory();
@@ -46,11 +46,11 @@ describe("ensureJobFinderUserDataDirectory", () => {
 
   test("uses one resolved root for every Job Finder persistence path", async () => {
     const temporaryRoot = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-canonical-user-"),
+      path.join(os.tmpdir(), "nestor-canonical-user-"),
     );
     const userDataDirectory = path.join(temporaryRoot, "new-profile", "data");
     const relativeOverride = path.relative(process.cwd(), userDataDirectory);
-    process.env.NORDRI_USER_DATA_DIR = `  ${relativeOverride}  `;
+    process.env.NESTOR_USER_DATA_DIR = `  ${relativeOverride}  `;
 
     try {
       const resolvedUserDataDirectory = path.resolve(userDataDirectory);
@@ -93,9 +93,9 @@ describe("ensureJobFinderUserDataDirectory", () => {
 
 describe("reset intent and trash paths", () => {
   test("keeps the reset marker and tokenized trash inside the user-data root", () => {
-    const temporaryRoot = path.join(os.tmpdir(), "nordri-reset-paths-");
+    const temporaryRoot = path.join(os.tmpdir(), "nestor-reset-paths-");
     const userDataDirectory = path.join(temporaryRoot, "profile", "data");
-    process.env.NORDRI_USER_DATA_DIR = userDataDirectory;
+    process.env.NESTOR_USER_DATA_DIR = userDataDirectory;
 
     const resolvedUserDataDirectory = path.resolve(userDataDirectory);
 

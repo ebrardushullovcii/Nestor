@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ResumeImportFieldCandidateSummarySchema } from "@nordri/contracts";
+import { ResumeImportFieldCandidateSummarySchema } from "@nestor/contracts";
 import {
   focusProfileImportSuggestion,
   getProfileImportSuggestionDestination,

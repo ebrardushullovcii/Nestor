@@ -2,14 +2,14 @@ import {
   JOB_FIT_JUDGING_BATCH_SIZE,
   type JobFinderAiClient,
   type JobFitJudgmentResult,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import type {
   CandidateProfile,
   FitJudgment,
   JobPosting,
   JobSearchPreferences,
   MatchAssessment,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { createMatchAssessmentPostingInput } from "./match-assessment-posting-input";
 import { createMatchAssessmentPostingFingerprint } from "./match-assessment-session";

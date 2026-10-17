@@ -5,12 +5,12 @@ import {
   ApplySubmitApprovalSchema,
   JobFinderIntelligenceStateSchema,
   type CompanyEntity,
-} from "@nordri/contracts";
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+} from "@nestor/contracts";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   createInMemoryJobFinderRepository,
   type JobFinderRepositorySeed,
-} from "@nordri/db";
+} from "@nestor/db";
 import { describe, expect, test } from "vitest";
 
 import { createJobFinderWorkspaceService } from "./index";

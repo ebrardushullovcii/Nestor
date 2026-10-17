@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   ResumeImportFieldCandidateSchema,
   type ResumeImportFieldCandidate,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { applyResolvedResumeImportCandidatesToWorkspace } from "./internal/resume-import-apply";
 import { reconcileCandidates } from "./internal/resume-import-reconciliation";
 import { extractLiteralCandidates } from "./internal/resume-import-literal-extraction";

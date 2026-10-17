@@ -2,7 +2,7 @@ import type {
   JobListMatchAssessment,
   ListingActivity,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * A candidate as the ordering sees it. `listingActivity` is a projection, so

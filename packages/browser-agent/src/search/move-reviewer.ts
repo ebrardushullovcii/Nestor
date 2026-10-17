@@ -1,4 +1,4 @@
-import { parseToolArguments } from "@nordri/agent-runtime";
+import { parseToolArguments } from "@nestor/agent-runtime";
 
 import type { LLMClient } from "../agent/contracts";
 import type { AgentConfig } from "../types";

@@ -4,12 +4,12 @@ import {
   estimateTokens,
   type AgentLoopMessage,
   type TokenCalibrator,
-} from "@nordri/agent-runtime";
+} from "@nestor/agent-runtime";
 import {
   AssistantCheckpointSchema,
   type AssistantCheckpoint,
-} from "@nordri/contracts";
-import type { AssistantRepository, AssistantTranscriptItem } from "@nordri/db";
+} from "@nestor/contracts";
+import type { AssistantRepository, AssistantTranscriptItem } from "@nestor/db";
 import { z } from "zod";
 
 /**

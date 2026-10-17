@@ -4,7 +4,7 @@ import {
   AssistantMessageSchema,
   AssistantResultSetSchema,
   type AssistantInstructionGrant,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { checkGrantTargets, decideUnderGrants, narrowGrant } from "./grants";
 

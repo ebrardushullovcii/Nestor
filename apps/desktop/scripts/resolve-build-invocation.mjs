@@ -3,7 +3,7 @@ import path from "node:path";
 
 export const DESKTOP_BUILD_ARGS = Object.freeze([
   "--filter",
-  "@nordri/desktop",
+  "@nestor/desktop",
   "build",
 ]);
 

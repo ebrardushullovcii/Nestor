@@ -9,7 +9,7 @@ import {
   type ProfileSetupState,
   type ResumeDocumentBundle,
   type ResumeImportFieldCandidate,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { buildExtractionId } from "./profile-merge";
 import {
   shouldIncludeCandidateInSetupReview,

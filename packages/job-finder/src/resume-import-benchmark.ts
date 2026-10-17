@@ -3,8 +3,8 @@ import {
   type ResumeVisionProvider,
   buildDeterministicResumeProfileExtraction,
   buildDeterministicResumeImportStageExtraction,
-} from "@nordri/ai-providers";
-import { createCatalogBrowserSessionRuntime } from "@nordri/browser-runtime";
+} from "@nestor/ai-providers";
+import { createCatalogBrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   JobFinderIntelligenceStateSchema,
   ResumeImportBenchmarkReportSchema,
@@ -21,8 +21,8 @@ import {
   type ResumeImportFieldCandidate,
   type ResumeImportVisionArtifact,
   type JobFinderRepositoryState,
-} from "@nordri/contracts";
-import { createInMemoryJobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 
 import { runResumeImportWorkflow } from "./internal/resume-import-workflow";
 import type { WorkspaceServiceContext } from "./internal/workspace-service-context";

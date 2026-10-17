@@ -13,7 +13,7 @@ import {
   type JobSource,
   type ApplicationResumeArtifact,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { buildApplyReplay, buildScreeningQuestions } from "./apply";
 import {
   buildDiscoveryQuerySummary,

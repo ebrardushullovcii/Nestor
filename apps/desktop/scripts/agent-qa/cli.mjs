@@ -22,15 +22,15 @@ const { values } = parseArgs({
 if (values.help) {
   console.log(`Development QA with the installed Playwright and Electron tools.
 
-  pnpm --filter @nordri/desktop qa
-  pnpm --filter @nordri/desktop qa --script /absolute/path/scenario.mjs
-  pnpm --filter @nordri/desktop qa --provider configured
-  pnpm --filter @nordri/desktop qa --doctor
-  pnpm --filter @nordri/desktop qa --parallel-group job-finder-check --session-id lane-01
+  pnpm --filter @nestor/desktop qa
+  pnpm --filter @nestor/desktop qa --script /absolute/path/scenario.mjs
+  pnpm --filter @nestor/desktop qa --provider configured
+  pnpm --filter @nestor/desktop qa --doctor
+  pnpm --filter @nestor/desktop qa --parallel-group job-finder-check --session-id lane-01
 
 Default: fresh synthetic workspace, deterministic AI, embedded browser, private
 copy of existing build, local fixture sites on a free port. No build or release
-checks are run. Explicit NORDRI_BROWSER_HOST overrides are preserved.
+checks are run. Explicit NESTOR_BROWSER_HOST overrides are preserved.
 --trace records Playwright traces (may include request data).
 --no-fixtures skips the local sites.
 --parallel-group explicitly permits isolated sessions in the same named group.

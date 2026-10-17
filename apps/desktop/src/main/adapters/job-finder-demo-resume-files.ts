@@ -13,7 +13,7 @@ function createMinimalPdf(title: string, body: string) {
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     `<< /Length ${Buffer.byteLength(stream, "ascii")} >>\nstream\n${stream}endstream`,
   ];
-  let pdf = "%PDF-1.4\n% Nordri deterministic demo PDF\n";
+  let pdf = "%PDF-1.4\n% Nestor deterministic demo PDF\n";
   const offsets = [0];
 
   for (const [index, object] of objects.entries()) {
@@ -42,7 +42,7 @@ export const JOB_FINDER_DEMO_EXPORT_RESUME_CONTENT = createMinimalPdf(
   "Alex Vanguard - Tailored resume",
 );
 
-const demoDirectory = path.join(os.tmpdir(), "nordri-demo-resume-files");
+const demoDirectory = path.join(os.tmpdir(), "nestor-demo-resume-files");
 
 export const JOB_FINDER_DEMO_SOURCE_RESUME_PATH = path.join(
   demoDirectory,

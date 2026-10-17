@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { ApplicationLetterGroundingError } from "@nordri/job-finder";
+import { ApplicationLetterGroundingError } from "@nestor/job-finder";
 import { createResumeWorkspaceDemoState } from "../adapters/job-finder-demo-state";
 import { CandidateAssetLibrary } from "../services/job-finder/candidate-asset-library";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
@@ -13,7 +13,7 @@ import {
   ApplyRunSchema,
   type ApplicationDocumentRevision,
   type JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { ApplicationDocumentLibrary } from "../services/job-finder/application-document-library";
 
@@ -407,7 +407,7 @@ it("does not keep an evidence fallback after checked document writing fails", as
 
 it("lists attached letters through the real library and preserves edits on repeated reads", async () => {
   const temporaryDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-letter-route-"),
+    path.join(os.tmpdir(), "nestor-letter-route-"),
   );
   try {
     const library = new ApplicationDocumentLibrary(
@@ -457,7 +457,7 @@ it("lists attached letters through the real library and preserves edits on repea
 
 it("does not keep another copy of a letter it already holds when a later run attaches it", async () => {
   const temporaryDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-letter-copies-"),
+    path.join(os.tmpdir(), "nestor-letter-copies-"),
   );
   try {
     const library = new ApplicationDocumentLibrary(
@@ -512,7 +512,7 @@ it("does not keep another copy of a letter it already holds when a later run att
 
 it("keeps an unchecked letter draft and its reason through the real library", async () => {
   const temporaryDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-unchecked-letter-"),
+    path.join(os.tmpdir(), "nestor-unchecked-letter-"),
   );
   try {
     const library = new ApplicationDocumentLibrary(

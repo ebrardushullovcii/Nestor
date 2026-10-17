@@ -1,4 +1,4 @@
-import type { MatchAssessment, SavedJob } from "@nordri/contracts";
+import type { MatchAssessment, SavedJob } from "@nestor/contracts";
 
 import { withSavedJobSearchBehavior } from "./job-search-behavior";
 import { createMatchAssessmentSession } from "./match-assessment-session";

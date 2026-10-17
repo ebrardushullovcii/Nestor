@@ -14,7 +14,7 @@ import type {
   ResumeDraftPatch,
   ResumeValidationIssue,
   WorkHistoryReviewSuggestion,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   getResumePreviewTargetContext,
   resumeComparisonNeedsRefresh,
@@ -22,11 +22,11 @@ import {
   isBlockingResumeClaimAssessment,
   isResumeClaimAssessmentApprovable,
   isBlockingResumeValidationIssue,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   getResumeTemplateDeliveryLane,
   isResumeTemplateApprovalEligible,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { EmptyState } from "../../components/empty-state";
 import { LockedScreenLayout } from "../../components/locked-screen-layout";

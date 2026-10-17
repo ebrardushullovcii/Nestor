@@ -1,11 +1,11 @@
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   ApplyJobResultSchema,
   ApplyRunSchema,
   type JobSearchCampaign,
   type SaveJobSearchCampaignInput,
-} from "@nordri/contracts";
-import { createInMemoryJobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createJobFinderWorkspaceService } from "./index";

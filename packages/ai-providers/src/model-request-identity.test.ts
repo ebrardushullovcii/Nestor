@@ -134,7 +134,7 @@ describe("OpenCode-compatible client requests", () => {
 
     const client = createJobFinderAiClientFromEnvironment(
       createEnvironment({
-        NORDRI_AI_BASE_URL: "https://opencode.ai/zen/go/v1",
+        NESTOR_AI_BASE_URL: "https://opencode.ai/zen/go/v1",
       }),
     );
     // Distinct content words, not one phrase repeated: the client refuses to

@@ -4,7 +4,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import {
   ProfileSetupStateSchema,
   ProfileReviewItemSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   ProfileSetupPathCard,
   ProfileSetupReviewQueueCard,

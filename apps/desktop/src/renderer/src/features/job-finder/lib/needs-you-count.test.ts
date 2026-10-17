@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 
 import {
   countWorkspaceNeedsYouItems,

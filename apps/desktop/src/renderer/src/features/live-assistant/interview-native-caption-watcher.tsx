@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Captions, CaptionsOff } from "lucide-react";
-import type { InterviewWorkspaceView } from "@nordri/contracts";
+import type { InterviewWorkspaceView } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 
 export function InterviewNativeCaptionWatcher(props: {
@@ -39,7 +39,7 @@ export function InterviewNativeCaptionWatcher(props: {
         return;
       }
 
-      void window.nordri.liveAssistant
+      void window.nestor.liveAssistant
         .readClipboardText()
         .then((result) => {
           const text = result.text.trim();
@@ -49,7 +49,7 @@ export function InterviewNativeCaptionWatcher(props: {
 
           lastTextRef.current = text;
           setStatusLabel("Native caption copied into transcript");
-          return window.nordri.liveAssistant
+          return window.nestor.liveAssistant
             .addTranscriptSegment({
               sessionId: sessionIdRef.current,
               source: "meeting_native_transcript",

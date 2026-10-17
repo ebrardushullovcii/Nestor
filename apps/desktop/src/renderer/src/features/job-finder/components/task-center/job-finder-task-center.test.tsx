@@ -4,7 +4,7 @@ import type {
   ApplyRunSummary,
   DiscoveryRunRecord,
   JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   cleanup,
   fireEvent,

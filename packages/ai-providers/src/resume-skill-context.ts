@@ -1,4 +1,4 @@
-import type { CandidateProfile, JobPosting } from "@nordri/contracts";
+import type { CandidateProfile, JobPosting } from "@nestor/contracts";
 import { buildCandidateSkillBank } from "./deterministic/resume-skill-grounding";
 
 export type ResumeSkillContextJob = {

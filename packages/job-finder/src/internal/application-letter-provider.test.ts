@@ -1,7 +1,7 @@
 import {
   CoverLetterPreferenceSchema,
   JobFinderSettingsSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 
 import {

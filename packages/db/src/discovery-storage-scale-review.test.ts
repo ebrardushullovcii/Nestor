@@ -4,7 +4,7 @@ import {
   DiscoveryLedgerEntrySchema,
   DiscoveryRunRecordSchema,
   type JobFinderDiscoveryState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   createSavedJob,
@@ -58,7 +58,7 @@ function run(id: string, targetId = "target") {
 }
 
 test("moving the first of 10k ledger rows to last and removing the first pending row writes two rows", async () => {
-  const temp = await createTempRepository("nordri-bounded-order-");
+  const temp = await createTempRepository("nestor-bounded-order-");
   let repo = await temp.createRepository();
   const raw = new DatabaseSync(temp.filePath);
   try {
@@ -192,7 +192,7 @@ test("moving the first of 10k ledger rows to last and removing the first pending
 }, 30000);
 
 test("mid-list insertion, duplicate-id collisions, arbitrary reorder and exhausted ranks preserve complete order on restart", async () => {
-  const temp = await createTempRepository("nordri-order-parity-");
+  const temp = await createTempRepository("nestor-order-parity-");
   let repo = await temp.createRepository();
   try {
     const entries = [
@@ -276,7 +276,7 @@ test("mid-list insertion, duplicate-id collisions, arbitrary reorder and exhaust
 });
 
 test("warm display refresh batches 500 changed bodies in one indexed query and reuses other rows", async () => {
-  const temp = await createTempRepository("nordri-batched-dirty-");
+  const temp = await createTempRepository("nestor-batched-dirty-");
   const repo = await temp.createRepository();
   try {
     await repo.commitDiscoveryStateUpdate((current) => ({
@@ -341,7 +341,7 @@ test("warm display refresh batches 500 changed bodies in one indexed query and r
 });
 
 test("run scopes are pruned across 48 histories with delimiters and duplicate IDs", async () => {
-  const temp = await createTempRepository("nordri-run-cache-pruning-");
+  const temp = await createTempRepository("nestor-run-cache-pruning-");
   const repo = await temp.createRepository();
   await repo.close();
   const raw = new DatabaseSync(temp.filePath);

@@ -1,12 +1,12 @@
-import type { DiscoveryActivityEvent } from "@nordri/contracts";
+import type { DiscoveryActivityEvent } from "@nestor/contracts";
 import {
   DiscoveryLedgerEntrySchema,
   type DiscoveryLedgerEntry,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createFileJobFinderRepository,
   createInMemoryJobFinderRepository,
-} from "@nordri/db";
+} from "@nestor/db";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -399,7 +399,7 @@ describe("active-run concurrent user decisions", () => {
     const temporaryDirectories = new Set<string>();
     try {
       const directory = await mkdtemp(
-        path.join(os.tmpdir(), "nordri-discovery-race-"),
+        path.join(os.tmpdir(), "nestor-discovery-race-"),
       );
       temporaryDirectories.add(directory);
       const filePath = path.join(directory, "job-finder-state.sqlite");

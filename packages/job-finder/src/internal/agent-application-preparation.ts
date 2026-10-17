@@ -8,12 +8,12 @@ import {
   type ApplyAuthority,
   type ApplyDocument,
   type LLMClient,
-} from "@nordri/browser-agent";
+} from "@nestor/browser-agent";
 import {
   buildPreparationResult,
   loadVerifiedResumeBytes,
   type ExecuteApplicationFlowInput,
-} from "@nordri/browser-runtime";
+} from "@nestor/browser-runtime";
 
 /** The application facts, without the callback that is about to use them. */
 export type ApplyPreparationInput = Omit<
@@ -41,7 +41,7 @@ import {
   AiBehaviorPreferenceSchema,
   ApplicationReviewCardSchema,
   CoverLetterPreferenceSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   ApplicationAuthorityEnvelope,
   ApplyPageSession,
@@ -56,7 +56,7 @@ import type {
   JobFinderSettings,
   JobSearchPreferences,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 /**
  * Runs one application through the agent loop and reports it the way the rest
  * of the product already expects.

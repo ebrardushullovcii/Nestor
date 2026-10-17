@@ -1,7 +1,7 @@
 import type {
   JobFinderIntelligenceSafeguards,
   ListingSignalRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * Client-side mirror of the deterministic safeguard gate used for badges and

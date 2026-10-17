@@ -17,13 +17,13 @@ import type {
   SourceDebugRunDetails,
   SourceDebugRunRecord,
   SourceInstructionArtifact,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { useToast } from "@renderer/components/ui/toast";
 import {
   describeResumeIdentityOwnershipChoice,
   useResumeSourceNameForProfile,
-} from "@nordri/job-finder/resume-identity";
+} from "@nestor/job-finder/resume-identity";
 import { buildComparableValueFingerprint } from "../lib/profile-editor-review-candidates";
 import { LockedScreenLayout } from "../components/locked-screen-layout";
 import { ProfileActiveSectionContent } from "../components/profile/profile-active-section-content";
@@ -48,7 +48,7 @@ import { formatProfileSetupReviewValue } from "../components/profile/setup/profi
 import {
   areEquivalentExperienceRecords,
   areEquivalentEducationRecords,
-} from "@nordri/job-finder/resume-record-identity";
+} from "@nestor/job-finder/resume-record-identity";
 import { getJobFinderScrollBehavior } from "../lib/job-finder-scroll-behavior";
 
 import { ResumeIdentityChoiceNotice } from "../components/profile/resume-identity-choice-notice";

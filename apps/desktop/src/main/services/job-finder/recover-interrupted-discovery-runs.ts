@@ -1,8 +1,8 @@
 import {
   recoverInterruptedDiscoveryRun,
   type JobFinderDiscoveryState,
-} from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 
 /**
  * Records, at startup, that a search which was still running when the app

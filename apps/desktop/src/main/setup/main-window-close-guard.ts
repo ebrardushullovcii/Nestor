@@ -1,7 +1,7 @@
 import type {
   DesktopWindowCloseRequest,
   DesktopWindowCloseResolution,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * How long a paused close waits for the renderer's dialog resolution before

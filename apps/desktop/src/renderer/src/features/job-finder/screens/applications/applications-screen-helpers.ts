@@ -2,7 +2,7 @@ import type {
   ApplicationAttemptListRow,
   ApplicationRecord,
   GlobalDailyApplicationPreparationCapacity,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { FAILURE_SENTENCES } from "../../lib/describe-failure";
 import {
   formatDailyPreparationCapacityReachedText,

@@ -44,7 +44,7 @@ describe("sidebar file attachment classification", () => {
 
   test("a scan named resume-scanned.png reaches the existing image library path", async () => {
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-attachment-"),
+      path.join(os.tmpdir(), "nestor-attachment-"),
     );
     try {
       const fileName = "resume-scanned.png";

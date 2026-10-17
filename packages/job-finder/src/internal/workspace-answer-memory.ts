@@ -2,7 +2,7 @@ import type {
   ApplicationQuestionKind,
   CandidateAnswerKind,
   CandidateReusableAnswer,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export function normalizeAnswerQuestion(value: string): string {
   return value

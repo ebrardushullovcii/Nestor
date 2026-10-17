@@ -29,13 +29,13 @@ import type {
   ListingActivity,
   JobListRow,
   WorkMode,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   describeInterruptedDiscoveryRun,
   fitRecommendationValues,
   getDiscoveryRunPhase,
   workModeValues,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { DiscoveryAssessmentContinuation } from "./discovery-assessment-continuation";
 import { jobSourceLabel } from "../../lib/job-source-display-name";
 import {
@@ -111,7 +111,7 @@ import {
   type DiscoveryResultsSortField,
   useDiscoveryResultsSort,
 } from "./discovery-results-sort";
-import { getDiscoveryListingRecencyKey } from "@nordri/job-finder/discovery-ordering";
+import { getDiscoveryListingRecencyKey } from "@nestor/job-finder/discovery-ordering";
 import type { DiscoveryLatestRunVerdict } from "./discovery-run-feedback";
 import { getDiscoverySourceLabels } from "./discovery-source-attribution";
 import { useAssistantContextSource } from "../../assistant/assistant-provider";
@@ -243,12 +243,12 @@ const WORK_MODE_UNSPECIFIED_FILTER = "Not specified";
 // storage can never grow with plan count and plans never see each other's
 // filters.
 const FACET_FILTERS_STORAGE_KEY =
-  "nordri.job-finder.discovery.result-filters.v2";
+  "nestor.job-finder.discovery.result-filters.v2";
 // Legacy unscoped snapshot from before plan scoping existed. Read once as
 // the migrating value for whichever plan is active, then removed after the
 // first successful scoped write.
 const LEGACY_FACET_FILTERS_STORAGE_KEY =
-  "nordri.job-finder.discovery.result-filters.v1";
+  "nestor.job-finder.discovery.result-filters.v1";
 const FACET_SCOPE_FALLBACK = "default";
 const MAX_FACET_SCOPES = 8;
 const MAX_PERSISTED_FACET_VALUES = 24;

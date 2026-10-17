@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   SourceDebugRunDetails,
   SourceDebugRunRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * `getRunDetails` is awaited and must return a Promise.

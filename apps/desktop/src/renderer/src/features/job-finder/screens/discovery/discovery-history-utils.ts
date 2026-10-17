@@ -1,10 +1,10 @@
-import { isFinishedDiscoveryTargetExecutionState } from "@nordri/contracts";
+import { isFinishedDiscoveryTargetExecutionState } from "@nestor/contracts";
 import type {
   DiscoveryActivityEvent,
   DiscoveryRunRecord,
   DiscoveryTargetExecution,
   JobSearchPreferences,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export type DiscoveryTargetConfig =
   JobSearchPreferences["discovery"]["targets"][number];

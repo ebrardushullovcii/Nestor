@@ -207,7 +207,7 @@ describe("normalized stream events", () => {
 describe("assistant route", () => {
   test("defaults to DeepSeek Flash on Chat Completions at low effort", () => {
     const resolution = resolveAssistantModelRouteFromEnvironment({
-      NORDRI_AI_API_KEY: "test-key",
+      NESTOR_AI_API_KEY: "test-key",
     });
     expect(resolution.available).toBe(true);
     if (!resolution.available) return;
@@ -222,8 +222,8 @@ describe("assistant route", () => {
 
   test("the alternative route uses Responses and has vision", () => {
     const resolution = resolveAssistantModelRouteFromEnvironment({
-      NORDRI_AI_API_KEY: "test-key",
-      NORDRI_AI_ASSISTANT_MODEL: ALTERNATIVE_ASSISTANT_MODEL,
+      NESTOR_AI_API_KEY: "test-key",
+      NESTOR_AI_ASSISTANT_MODEL: ALTERNATIVE_ASSISTANT_MODEL,
     });
     expect(resolution.available).toBe(true);
     if (!resolution.available) return;

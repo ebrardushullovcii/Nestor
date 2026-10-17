@@ -47,26 +47,26 @@ function Normalize-Language {
   return "auto"
 }
 
-$whisperCandidate = if ($env:NORDRI_INTERVIEW_WHISPER_CPP_EXE) {
-  $env:NORDRI_INTERVIEW_WHISPER_CPP_EXE
+$whisperCandidate = if ($env:NESTOR_INTERVIEW_WHISPER_CPP_EXE) {
+  $env:NESTOR_INTERVIEW_WHISPER_CPP_EXE
 } else {
   "whisper-cli"
 }
-$ffmpegCandidate = if ($env:NORDRI_FFMPEG_PATH) {
-  $env:NORDRI_FFMPEG_PATH
+$ffmpegCandidate = if ($env:NESTOR_FFMPEG_PATH) {
+  $env:NESTOR_FFMPEG_PATH
 } else {
   "ffmpeg"
 }
 
-if (-not $env:NORDRI_INTERVIEW_WHISPER_CPP_MODEL) {
-  throw "NORDRI_INTERVIEW_WHISPER_CPP_MODEL must point to a local Whisper.cpp ggml model."
+if (-not $env:NESTOR_INTERVIEW_WHISPER_CPP_MODEL) {
+  throw "NESTOR_INTERVIEW_WHISPER_CPP_MODEL must point to a local Whisper.cpp ggml model."
 }
 
 $whisper = Resolve-CommandPath -Candidate $whisperCandidate -Name "Whisper.cpp"
 $ffmpeg = Resolve-CommandPath -Candidate $ffmpegCandidate -Name "FFmpeg"
-$model = (Resolve-Path -LiteralPath $env:NORDRI_INTERVIEW_WHISPER_CPP_MODEL).Path
+$model = (Resolve-Path -LiteralPath $env:NESTOR_INTERVIEW_WHISPER_CPP_MODEL).Path
 $inputAudio = (Resolve-Path -LiteralPath $Audio).Path
-$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "nordri-interview-stt-$([System.Guid]::NewGuid().ToString('N'))"
+$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "nestor-interview-stt-$([System.Guid]::NewGuid().ToString('N'))"
 
 New-Item -ItemType Directory -Path $tempDir | Out-Null
 

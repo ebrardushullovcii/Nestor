@@ -1,4 +1,4 @@
-import type { ApprovedApplicationAnswerSnapshot } from "@nordri/contracts";
+import type { ApprovedApplicationAnswerSnapshot } from "@nestor/contracts";
 
 /**
  * Result of appending one approved answer snapshot revision.

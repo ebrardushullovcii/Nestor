@@ -37,8 +37,8 @@ import {
   type ResolveSubmissionOutcomeInput,
   type ResolveSubmissionOutcomeResult,
   type UpdateApplicationAuthorityEnvelopeInput,
-} from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { getJobFinderRepositoryForWorkspaceService } from "./create-workspace-service";

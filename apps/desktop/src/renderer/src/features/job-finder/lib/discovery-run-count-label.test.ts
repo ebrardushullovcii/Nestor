@@ -1,7 +1,7 @@
 import type {
   DiscoveryActivityEvent,
   DiscoveryRunRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import {
   formatDiscoveryResultBandLabel,

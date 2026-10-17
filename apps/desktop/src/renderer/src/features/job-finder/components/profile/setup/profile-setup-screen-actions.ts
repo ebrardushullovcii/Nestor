@@ -4,8 +4,8 @@ import type {
   JobSearchPreferences,
   ProfileSetupStep,
   ResumeApplicationMode,
-} from "@nordri/contracts";
-import { hasProfileSetupPlaceholderValue } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { hasProfileSetupPlaceholderValue } from "@nestor/contracts";
 import type {
   ProfileEditorValues,
   SearchPreferencesEditorValues,

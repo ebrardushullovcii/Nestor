@@ -3,7 +3,7 @@ import type {
   ProfileReviewTargetDomain,
   ResumeDocumentBundle,
   ResumeImportFieldCandidate,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   isSearchLocationCandidateTarget,
   sanitizeSearchLocationCandidateValue,

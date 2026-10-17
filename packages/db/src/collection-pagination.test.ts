@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   ApplicationRecordSchema,
   ProfileCopilotMessageSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { createFileJobFinderRepository } from "./file-repository";
 import { createInMemoryJobFinderRepository } from "./in-memory-repository";
@@ -95,7 +95,7 @@ async function collectPagedSavedJobIds(
 
 describe("repository collection pagination and persistence", () => {
   test("keeps 5,000 saved jobs and ordered history across singleton writes and restart", async () => {
-    const temp = await createTempRepository("nordri-db-collection-scale-");
+    const temp = await createTempRepository("nestor-db-collection-scale-");
     const savedJobs = createSavedJobs(LARGE_COLLECTION_SIZE);
     const profileCopilotMessages = createProfileCopilotMessages(
       LARGE_COLLECTION_SIZE,
@@ -212,7 +212,7 @@ describe("repository collection pagination and persistence", () => {
   }, 30_000);
 
   test("application record batches preserve rows beyond the first 1,000", async () => {
-    const temp = await createTempRepository("nordri-db-application-scale-");
+    const temp = await createTempRepository("nestor-db-application-scale-");
     const applicationRecords = createApplicationRecords(1_001);
     const seed = { ...createSeed(), applicationRecords };
     let fileRepository = await createFileJobFinderRepository({
@@ -306,7 +306,7 @@ describe("repository collection pagination and persistence", () => {
   }, 30_000);
 
   test("row-local saved-job commits preserve concurrent changes instead of replaying stale collections", async () => {
-    const temp = await createTempRepository("nordri-db-saved-job-delta-");
+    const temp = await createTempRepository("nestor-db-saved-job-delta-");
     const savedJobs = createSavedJobs(1_001);
     const seed = { ...createSeed(), savedJobs };
     let fileRepository = await createFileJobFinderRepository({

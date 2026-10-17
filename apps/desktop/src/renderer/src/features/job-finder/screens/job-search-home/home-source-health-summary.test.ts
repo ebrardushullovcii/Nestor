@@ -1,4 +1,4 @@
-import { buildDiscoveryCardOnlyEvidenceWarning } from "@nordri/contracts";
+import { buildDiscoveryCardOnlyEvidenceWarning } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import {
   extractCardOnlyEvidenceWarning,

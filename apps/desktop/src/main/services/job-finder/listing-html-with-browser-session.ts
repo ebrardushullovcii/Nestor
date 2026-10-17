@@ -1,7 +1,7 @@
 import type {
   ListingHtmlFetchResult,
   ListingHtmlFetcher,
-} from "@nordri/job-finder";
+} from "@nestor/job-finder";
 
 /**
  * A listing page that answered with a sign-in instead of the listing: an

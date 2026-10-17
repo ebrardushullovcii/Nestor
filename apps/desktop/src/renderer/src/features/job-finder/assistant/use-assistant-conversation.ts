@@ -11,7 +11,7 @@ import type {
   AssistantStatus,
   AssistantTaskPlan,
   AssistantTurn,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describeFailure } from "../lib/describe-failure";
 
 /**
@@ -179,7 +179,7 @@ export function useAssistantConversation(options: {
   onOpenRoute: (route: string) => Promise<AssistantNavigationDisplay> | void;
 }) {
   const bridge =
-    typeof window === "undefined" ? undefined : window.nordri?.assistant;
+    typeof window === "undefined" ? undefined : window.nestor?.assistant;
   const [state, setState] = useState<AssistantConversationState>(initialState);
   const stateRef = useRef(state);
   stateRef.current = state;

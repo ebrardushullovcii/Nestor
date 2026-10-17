@@ -1,5 +1,5 @@
 {
-  "name": "@nordri/ai-providers",
+  "name": "@nestor/ai-providers",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -13,8 +13,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@nordri/agent-runtime": "workspace:*",
-    "@nordri/contracts": "workspace:*",
+    "@nestor/agent-runtime": "workspace:*",
+    "@nestor/contracts": "workspace:*",
     "zod": "^3.24.2"
   }
 }

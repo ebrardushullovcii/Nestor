@@ -134,7 +134,7 @@ async function fetchProviderInventory(target) {
 
 async function waitForBridge(page) {
   await page.waitForFunction(
-    () => Boolean(window.nordri?.jobFinder?.test?.importResumeFromPath),
+    () => Boolean(window.nestor?.jobFinder?.test?.importResumeFromPath),
     undefined,
     { timeout: 20_000 },
   );
@@ -236,7 +236,7 @@ function compareInventories(inventories, appJobs) {
 async function run() {
   await mkdir(outputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-live-discovery-audit-"),
+    path.join(os.tmpdir(), "nestor-live-discovery-audit-"),
   );
   const inventories = await Promise.all(targets.map(fetchProviderInventory));
   const app = await electron.launch({
@@ -244,10 +244,10 @@ async function run() {
     cwd: desktopDir,
     env: {
       ...process.env,
-      NORDRI_BROWSER_AGENT: "1",
-      NORDRI_BROWSER_HEADLESS: "1",
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_USER_DATA_DIR: userDataDirectory,
+      NESTOR_BROWSER_AGENT: "1",
+      NESTOR_BROWSER_HEADLESS: "1",
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
     },
   });
 
@@ -258,7 +258,7 @@ async function run() {
 
     const imported = await page.evaluate(
       (sourcePath) =>
-        window.nordri.jobFinder.test.importResumeFromPath({
+        window.nestor.jobFinder.test.importResumeFromPath({
           sourcePath,
           useVision: false,
         }),
@@ -267,8 +267,8 @@ async function run() {
 
     const configured = await page.evaluate(
       async ({ profile, targetRoles: roles, targets: discoveryTargets }) => {
-        const workspace = await window.nordri.jobFinder.getWorkspace();
-        await window.nordri.jobFinder.saveWorkspaceInputs({
+        const workspace = await window.nestor.jobFinder.getWorkspace();
+        await window.nestor.jobFinder.saveWorkspaceInputs({
           profile,
           searchPreferences: {
             ...workspace.searchPreferences,
@@ -289,14 +289,14 @@ async function run() {
             },
           },
         });
-        await window.nordri.jobFinder.saveSettings({
+        await window.nestor.jobFinder.saveSettings({
           ...workspace.settings,
           humanReviewRequired: true,
           allowAutoSubmitOverride: false,
           discoveryOnly: true,
           resumeApplicationMode: "original_resume",
         });
-        return window.nordri.jobFinder.getWorkspace();
+        return window.nestor.jobFinder.getWorkspace();
       },
       {
         profile: imported.profile,
@@ -306,7 +306,7 @@ async function run() {
     );
 
     const discovered = await page.evaluate(() =>
-      window.nordri.jobFinder.runDiscovery(),
+      window.nestor.jobFinder.runDiscovery(),
     );
     const appJobs = discovered.discoveryJobs ?? [];
     const latestRun = discovered.recentDiscoveryRuns?.[0] ?? null;

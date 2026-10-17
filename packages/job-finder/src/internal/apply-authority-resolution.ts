@@ -1,13 +1,13 @@
 import { readSalaryDisclosurePreference } from "./salary-disclosure-preference";
 import { randomUUID } from "node:crypto";
 
-import type { ApplyAuthority } from "@nordri/browser-agent";
+import type { ApplyAuthority } from "@nestor/browser-agent";
 import {
   ApplicationAuthorityEnvelopeSchema,
   isActiveApplicationAuthorityEnvelope,
   type ApplicationAuthorityEnvelope,
-} from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 
 import {
   recordApplicationAuthoritySuccessor,

@@ -118,7 +118,7 @@ function toTargetInput(target) {
 
 async function waitForBridge(page) {
   await page.waitForFunction(
-    () => Boolean(window.nordri?.jobFinder?.test?.importResumeFromPath),
+    () => Boolean(window.nestor?.jobFinder?.test?.importResumeFromPath),
     undefined,
     { timeout: 20_000 },
   );
@@ -179,7 +179,7 @@ async function auditProfile(profile) {
   const profileOutputDir = path.join(outputDir, profile.slug);
   await mkdir(profileOutputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), `nordri-${profile.slug}-`),
+    path.join(os.tmpdir(), `nestor-${profile.slug}-`),
   );
   const originalResumeText = await readFile(profile.resumePath, "utf8");
   const app = await electron.launch({
@@ -187,10 +187,10 @@ async function auditProfile(profile) {
     cwd: desktopDir,
     env: {
       ...process.env,
-      NORDRI_BROWSER_AGENT: "1",
-      NORDRI_BROWSER_HEADLESS: "1",
-      NORDRI_ENABLE_TEST_API: "1",
-      NORDRI_USER_DATA_DIR: userDataDirectory,
+      NESTOR_BROWSER_AGENT: "1",
+      NESTOR_BROWSER_HEADLESS: "1",
+      NESTOR_ENABLE_TEST_API: "1",
+      NESTOR_USER_DATA_DIR: userDataDirectory,
     },
   });
 
@@ -200,7 +200,7 @@ async function auditProfile(profile) {
     await waitForBridge(page);
     const imported = await page.evaluate(
       (sourcePath) =>
-        window.nordri.jobFinder.test.importResumeFromPath({
+        window.nestor.jobFinder.test.importResumeFromPath({
           sourcePath,
           useVision: false,
         }),
@@ -208,8 +208,8 @@ async function auditProfile(profile) {
     );
     const configured = await page.evaluate(
       async ({ importedProfile, profileConfig }) => {
-        const workspace = await window.nordri.jobFinder.getWorkspace();
-        return window.nordri.jobFinder.saveWorkspaceInputs({
+        const workspace = await window.nestor.jobFinder.getWorkspace();
+        return window.nestor.jobFinder.saveWorkspaceInputs({
           profile: importedProfile,
           searchPreferences: {
             ...workspace.searchPreferences,
@@ -251,8 +251,8 @@ async function auditProfile(profile) {
       },
     );
     await page.evaluate(async () => {
-      const workspace = await window.nordri.jobFinder.getWorkspace();
-      await window.nordri.jobFinder.saveSettings({
+      const workspace = await window.nestor.jobFinder.getWorkspace();
+      await window.nestor.jobFinder.saveSettings({
         ...workspace.settings,
         humanReviewRequired: true,
         allowAutoSubmitOverride: false,
@@ -260,7 +260,7 @@ async function auditProfile(profile) {
         resumeApplicationMode: "tailored_per_job",
       });
       const now = new Date().toISOString();
-      await window.nordri.jobFinder.saveProfileSetupState({
+      await window.nestor.jobFinder.saveProfileSetupState({
         ...workspace.profileSetupState,
         status: "completed",
         currentStep: "ready_check",
@@ -270,7 +270,7 @@ async function auditProfile(profile) {
       });
     });
     const discovered = await page.evaluate(() =>
-      window.nordri.jobFinder.runDiscovery(),
+      window.nestor.jobFinder.runDiscovery(),
     );
     const jobs = discovered.discoveryJobs ?? [];
     const topJob = jobs[0] ?? null;
@@ -306,11 +306,11 @@ async function auditProfile(profile) {
       });
 
       await page.evaluate(async (jobId) => {
-        await window.nordri.jobFinder.queueJobForReview(jobId);
-        await window.nordri.jobFinder.generateResume(jobId);
+        await window.nestor.jobFinder.queueJobForReview(jobId);
+        await window.nestor.jobFinder.generateResume(jobId);
       }, topJob.id);
       const resumeWorkspace = await page.evaluate(
-        (jobId) => window.nordri.jobFinder.getResumeWorkspace(jobId),
+        (jobId) => window.nestor.jobFinder.getResumeWorkspace(jobId),
         topJob.id,
       );
       const generatedText = draftText(resumeWorkspace);
@@ -376,7 +376,7 @@ async function auditProfile(profile) {
     }
 
     const latestWorkspace = await page.evaluate(() =>
-      window.nordri.jobFinder.getWorkspace(),
+      window.nestor.jobFinder.getWorkspace(),
     );
     const report = {
       auditedAt: new Date().toISOString(),

@@ -1,4 +1,4 @@
-import { ApplicationRecordSchema } from "@nordri/contracts";
+import { ApplicationRecordSchema } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 
 import { createWorkspaceServiceHarness } from "./workspace-service.test-harness";

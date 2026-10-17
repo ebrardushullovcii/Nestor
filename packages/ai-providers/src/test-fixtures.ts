@@ -3,20 +3,20 @@ import type {
   JobFinderSettings,
   JobPosting,
   JobSearchPreferences,
-} from '@nordri/contracts'
-import { JobPostingSchema } from '@nordri/contracts'
+} from '@nestor/contracts'
+import { JobPostingSchema } from '@nestor/contracts'
 import type { JobFinderAiClient } from './shared'
 
 export function createEnvironment(
   overrides: Partial<Record<string, string | undefined>> = {}
 ) {
   return {
-    NORDRI_AI_API_KEY: 'test-key',
-    NORDRI_AI_BASE_URL: 'https://example.com/v1',
-    NORDRI_AI_MODEL: 'test-model',
-    NORDRI_AI_API_MODE: 'chat_completions',
-    NORDRI_AI_TIMEOUT_MS: undefined,
-    NORDRI_AI_RESUME_TIMEOUT_MS: undefined,
+    NESTOR_AI_API_KEY: 'test-key',
+    NESTOR_AI_BASE_URL: 'https://example.com/v1',
+    NESTOR_AI_MODEL: 'test-model',
+    NESTOR_AI_API_MODE: 'chat_completions',
+    NESTOR_AI_TIMEOUT_MS: undefined,
+    NESTOR_AI_RESUME_TIMEOUT_MS: undefined,
     ...overrides
   }
 }

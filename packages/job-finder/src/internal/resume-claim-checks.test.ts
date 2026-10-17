@@ -1,9 +1,9 @@
-import { ResumeDraftSchema } from "@nordri/contracts";
+import { ResumeDraftSchema } from "@nestor/contracts";
 import {
   createOpenAiCompatibleJobFinderAiClient,
   RESUME_CLAIM_CHECK_BATCH_SIZE,
-} from "@nordri/ai-providers";
-import type { ResumeClaimCheckInput } from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
+import type { ResumeClaimCheckInput } from "@nestor/ai-providers";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createSeed } from "../workspace-service.test-support";

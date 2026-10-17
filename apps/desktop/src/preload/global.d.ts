@@ -2,7 +2,7 @@ import type {
   ResumeBatchGenerationInput,
   ResumeBatchGenerationResult,
   ResumeBatchGenerationProgress,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   DesktopAssistantBridge,
   DesktopBrowserBridge,
@@ -158,15 +158,15 @@ import type {
   WorkspaceRevision,
   SaveUserActionAnswerDraftInput,
   UserActionCommandInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   JobFinderStartupDatabaseRecoveryFact,
   JobFinderStartupResetRecoveryFact,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 declare global {
   interface Window {
-    nordri: {
+    nestor: {
       browser: DesktopBrowserBridge;
       assistant: DesktopAssistantBridge;
       ping: () => Promise<DesktopPlatformPing>;

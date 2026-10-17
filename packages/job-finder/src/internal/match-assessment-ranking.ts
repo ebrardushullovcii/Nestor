@@ -1,4 +1,4 @@
-import type { MatchAssessment } from "@nordri/contracts";
+import type { MatchAssessment } from "@nestor/contracts";
 
 const recommendationPriority: Record<
   MatchAssessment["recommendation"],

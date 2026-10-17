@@ -1,4 +1,4 @@
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   SourceDebugPhaseSummarySchema,
   type JobDiscoveryTarget,
@@ -8,7 +8,7 @@ import {
   type SourceDebugPhaseSummary,
   type SourceDebugWorkerAttempt,
   type SourceInstructionArtifact,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   formatStatusLabel,
   splitCustomDiscoveryInstructions,

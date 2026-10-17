@@ -17,7 +17,7 @@ import {
   SubmissionIdempotencyRecordSchema,
   SubmissionOutcomeRecordSchema,
   SubmissionPreflightRecordSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { DatabaseSync } from "node:sqlite";
 
 import { secureDatabaseFile } from "./internal/migrations";

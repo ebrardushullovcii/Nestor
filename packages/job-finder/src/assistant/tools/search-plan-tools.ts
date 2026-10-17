@@ -6,7 +6,7 @@ import {
   SaveJobSearchCampaignInputSchema,
   type AssistantChangeReceipt,
   type JobSearchCampaign,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { z } from "zod";
 import { deepEqual, diffValues, undoChangeEntries } from "../change-diff";
 import {

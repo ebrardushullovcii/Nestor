@@ -1,4 +1,4 @@
-import { ResumeLanguageTranslationSchema } from "@nordri/contracts";
+import { ResumeLanguageTranslationSchema } from "@nestor/contracts";
 import { buildResumeSkillContextFilter } from "./resume-skill-context";
 import {
   TailoredResumeDraftSchema,

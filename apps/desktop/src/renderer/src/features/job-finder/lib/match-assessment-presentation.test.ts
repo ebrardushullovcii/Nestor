@@ -1,4 +1,4 @@
-import { MatchAssessmentSchema, type SavedJob } from "@nordri/contracts";
+import { MatchAssessmentSchema, type SavedJob } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
 import {

@@ -9,7 +9,7 @@ import {
   type OutcomeEvent,
   OutcomeEventSchema,
   UNKNOWN_JOB_SOURCE_BUCKET_KEY,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import {
   OUTCOME_DEFAULT_MINIMUM_SAMPLE_FOR_CONFIDENCE,

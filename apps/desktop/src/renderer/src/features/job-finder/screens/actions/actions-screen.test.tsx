@@ -5,7 +5,7 @@ import {
   ApplicationRecordSchema,
   UserActionRequestSchema,
   type UserActionCommandInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { countNeedsYouItems } from "../../lib/needs-you-count";
 import { afterEach, describe, expect, it, vi } from "vitest";
 

@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import type { ReviewQueueItem, TailoredAsset } from "@nordri/contracts";
+import type { ReviewQueueItem, TailoredAsset } from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReviewQueueListPanel } from "./review-queue-list-panel";
 import { describeApplyAllOutcome } from "./review-queue-mission-panel-helpers";

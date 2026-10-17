@@ -1,7 +1,7 @@
 import type {
   SourceDebugRunRecord,
   SourceInstructionArtifact,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import { describeLearnedInstructionUsage } from "./profile-source-debug-instruction-utils";
 

@@ -1,4 +1,4 @@
-import type { ApplicationAttemptListRow } from "@nordri/contracts";
+import type { ApplicationAttemptListRow } from "@nestor/contracts";
 import {
   formatDuration,
   formatStatusLabel,

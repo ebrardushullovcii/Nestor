@@ -3,7 +3,7 @@ import {
   getResumeEntryFieldTargetId,
   getResumeSectionBulletTargetId,
   getResumeSectionTextTargetId,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   ResumeClaimAssessment,
   ResumeClaimAssessmentStatus,
@@ -14,7 +14,7 @@ import type {
   ResumeDraftPatch,
   ResumeDraftSection,
   ResumeDraftSourceRef,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * Shown in every grounding disclosure so users never assume proposed wording

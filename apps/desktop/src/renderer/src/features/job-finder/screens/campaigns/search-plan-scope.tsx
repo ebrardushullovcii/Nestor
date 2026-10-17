@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { JobSearchCampaign } from "@nordri/contracts";
+import type { JobSearchCampaign } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import {
   Select,

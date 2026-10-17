@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
-import { ApplicationRecordSchema } from "@nordri/contracts";
+import { ApplicationRecordSchema } from "@nestor/contracts";
 import { ApplicationsDetailPanelTimelineSection } from "./applications-detail-panel-timeline-section";
 afterEach(cleanup);
 it("shows the person's recent send above older unsent activity without mutating history", () => {

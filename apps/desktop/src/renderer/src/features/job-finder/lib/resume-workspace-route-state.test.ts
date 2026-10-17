@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import {
   RESUME_WORKSPACE_REQUIRED_COLLECTIONS,
   resolveResumeWorkspaceRouteState,

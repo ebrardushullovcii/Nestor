@@ -10,7 +10,7 @@ import type {
   ApplicationRecord,
   CandidateAsset,
   RecordOutcomeInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   deviceTimeZone,
   resolvePlanTimeZone,
@@ -168,7 +168,7 @@ export function ApplicationsCrmDetail(props: {
 
   useEffect(() => {
     let active = true;
-    void window.nordri.jobFinder
+    void window.nestor.jobFinder
       .listCandidateAssets({ includeDeleted: false })
       .then((result) => {
         if (!active) return;

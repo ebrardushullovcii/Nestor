@@ -1,4 +1,4 @@
-import type { RawApplyPage, UserActionRequest } from "@nordri/contracts";
+import type { RawApplyPage, UserActionRequest } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 
 import { inspectApplicationAccessPage } from "./application-access-page";

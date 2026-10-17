@@ -3,8 +3,8 @@ import type {
   InterviewChatImageAttachmentInput,
   InterviewHotkeyAction,
   InterviewWorkspaceView,
-} from "@nordri/contracts";
-import { interviewChatLimits } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { interviewChatLimits } from "@nestor/contracts";
 import {
   Camera,
   Headphones,
@@ -153,7 +153,7 @@ export function InterviewVisibleChat(props: InterviewVisibleChatProps) {
     setSending(true);
     setErrorMessage(null);
     try {
-      await window.nordri.liveAssistant.sendChatMessage({
+      await window.nestor.liveAssistant.sendChatMessage({
         conversationId: `interview_${session.id}`,
         sessionId: session.id,
         content: draft,
@@ -163,7 +163,7 @@ export function InterviewVisibleChat(props: InterviewVisibleChatProps) {
       for (const image of pendingImages) URL.revokeObjectURL(image.previewUrl);
       setPendingImages([]);
       props.onWorkspaceChange(
-        await window.nordri.liveAssistant.getWorkspace(),
+        await window.nestor.liveAssistant.getWorkspace(),
       );
     } catch (error) {
       setErrorMessage(
@@ -200,7 +200,7 @@ export function InterviewVisibleChat(props: InterviewVisibleChatProps) {
     visible: boolean,
   ) {
     props.onWorkspaceChange(
-      await window.nordri.liveAssistant.updateOverlayPreference({
+      await window.nestor.liveAssistant.updateOverlayPreference({
         surfaceKind,
         visible,
       }),

@@ -1,7 +1,7 @@
 import { assertPersonAnswerAuthority } from "../person-answer-authority";
 import { readAssistantWorkState } from "../work-state";
 import { profileProposalPreview } from "../proposal-preview";
-import { isResumeImportRunInProgress } from "@nordri/contracts";
+import { isResumeImportRunInProgress } from "@nestor/contracts";
 import {
   NonEmptyStringSchema,
   ProfileCopilotPatchOperationSchema,
@@ -18,8 +18,8 @@ import {
   type JobFinderWorkspaceSnapshot,
   type ResumeImportFieldCandidate,
   type ProfileCopilotPatchOperation,
-} from "@nordri/contracts";
-import { findBulletsOnTwoCards } from "@nordri/ai-providers";
+} from "@nestor/contracts";
+import { findBulletsOnTwoCards } from "@nestor/ai-providers";
 import { z } from "zod";
 
 import {

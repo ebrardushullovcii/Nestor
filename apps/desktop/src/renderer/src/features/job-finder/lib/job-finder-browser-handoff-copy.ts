@@ -1,4 +1,4 @@
-import { JOB_FINDER_BROWSER_LABEL } from "@nordri/contracts";
+import { JOB_FINDER_BROWSER_LABEL } from "@nestor/contracts";
 import { isEmployerAbsenceLabel } from "./job-employer-location-display";
 
 /**
@@ -23,8 +23,8 @@ import { isEmployerAbsenceLabel } from "./job-employer-location-display";
  * Every other form here is derived from it, so the app cannot drift back into
  * calling one window several things.
  *
- * It is defined in `@nordri/contracts` rather than here because
- * `@nordri/job-finder` writes user-facing copy about the same window and
+ * It is defined in `@nestor/contracts` rather than here because
+ * `@nestor/job-finder` writes user-facing copy about the same window and
  * cannot import from the desktop renderer — the dependency runs the other way.
  * Contracts is the one package both already depend on. This module keeps
  * ownership of every derived form and re-exports the label so renderer code has

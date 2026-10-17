@@ -8,7 +8,7 @@ import {
   JobSearchPreferencesSchema,
   getDefaultCampaignConfiguration,
   normalizeCompanyName,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { quarantineAgentAnswers } from "../agent-answer-migration";
 import { migrateDiscoveryStorage } from "./discovery-storage";

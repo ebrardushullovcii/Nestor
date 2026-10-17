@@ -2,12 +2,12 @@ import type {
   ResumeBatchGenerationInput,
   ResumeBatchGenerationResult,
   ResumeBatchGenerationProgress,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   JobFinderWorkspaceEntityMutationInput,
   JobFinderWorkspaceSyncResult,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 const {
   mockExposeInMainWorld,
@@ -92,7 +92,7 @@ const exposedJobFinder = (() => {
     | { jobFinder: ExposedJobFinderApi }
     | undefined;
   if (!exposed) {
-    throw new Error("Preload did not expose the nordri API.");
+    throw new Error("Preload did not expose the nestor API.");
   }
   return exposed.jobFinder;
 })();
@@ -750,7 +750,7 @@ describe("preload application authority boundary", () => {
 
 describe("preload desktop test API boundary", () => {
   it("omits the test surface entirely when the test API is disabled", () => {
-    expect(process.env.NORDRI_ENABLE_TEST_API).not.toBe("1");
+    expect(process.env.NESTOR_ENABLE_TEST_API).not.toBe("1");
     expect(
       (exposedJobFinder as unknown as { test?: unknown }).test,
     ).toBeUndefined();

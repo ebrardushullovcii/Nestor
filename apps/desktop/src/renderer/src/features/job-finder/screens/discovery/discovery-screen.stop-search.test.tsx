@@ -6,7 +6,7 @@ import type {
   DiscoveryRunRecord,
   JobSearchPreferences,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

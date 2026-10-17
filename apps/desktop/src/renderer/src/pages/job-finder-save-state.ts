@@ -24,7 +24,7 @@ export const initialJobFinderSaveState: JobFinderSaveState = {
   version: 0
 }
 
-const SAVE_RECEIPT_STORAGE_KEY = 'nordri.job-finder.save-receipt.v1'
+const SAVE_RECEIPT_STORAGE_KEY = 'nestor.job-finder.save-receipt.v1'
 
 /**
  * Shown in place of the Retry action when the protected surface changed after

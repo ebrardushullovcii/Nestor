@@ -1,5 +1,5 @@
 import { ArrowLeft } from "lucide-react";
-import type { ResumeDraft } from "@nordri/contracts";
+import type { ResumeDraft } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { formatRelativeTimestamp } from "./resume-workspace-time";
 import {

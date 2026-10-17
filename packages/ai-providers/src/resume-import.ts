@@ -5,13 +5,13 @@ import type {
   ResumeDocumentBundle,
   ResumeImportFieldCandidate,
   ResumeImportTargetSection,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   NonEmptyStringSchema,
   ResumeImportFieldCandidateDraftSchema,
   type ResumeImportVisionArtifact,
   type AgentProviderStatus,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { z } from "zod";
 
 import {

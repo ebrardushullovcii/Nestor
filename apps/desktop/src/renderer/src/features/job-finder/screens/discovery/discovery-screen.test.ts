@@ -4,7 +4,7 @@ import type {
   JobDiscoveryTarget,
   JobSearchPreferences,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   DISCOVERY_CLEAR_MISMATCH_SCORE_FLOOR,
   getDiscoveryConfiguredFilters,

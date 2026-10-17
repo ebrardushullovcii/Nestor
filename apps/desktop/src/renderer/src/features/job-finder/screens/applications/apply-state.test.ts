@@ -3,9 +3,9 @@ import {
   APPLICATION_SKIPPED_BY_PERSON_LABEL,
   PREPARED_PAGE_CLOSED_SUMMARY,
   ApplicationCrmDataSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import {
   applyActionLabel,
   applyAllActionLabel,

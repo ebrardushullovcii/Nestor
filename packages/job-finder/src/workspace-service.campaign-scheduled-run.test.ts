@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   CampaignNotificationSchema,
   type CampaignPauseWindow,
@@ -9,8 +9,8 @@ import {
   type JobSearchCampaignSchedule,
   type JobSearchPreferences,
   type SaveJobSearchCampaignInput,
-} from "@nordri/contracts";
-import { JobSearchCampaignScheduleSchema } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { JobSearchCampaignScheduleSchema } from "@nestor/contracts";
 
 import { createWorkspaceServiceHarness } from "./workspace-service.test-harness";
 import {

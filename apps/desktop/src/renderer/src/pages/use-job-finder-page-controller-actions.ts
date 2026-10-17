@@ -1,4 +1,4 @@
-import type { ResumeBatchGenerationProgress } from "@nordri/contracts";
+import type { ResumeBatchGenerationProgress } from "@nestor/contracts";
 import { FAILURE_SENTENCES } from "@renderer/features/job-finder/lib/describe-failure";
 import {
   JOB_FINDER_BROWSER_NAME,
@@ -11,7 +11,7 @@ import {
   evaluateProfileSetupReadiness,
   getProfileSetupReadinessBlockers,
   isRunnableJobDiscoveryTarget,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   AppearanceTheme,
   AssistantResumeBatchState,
@@ -50,7 +50,7 @@ import type {
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
   UpdateAiBehaviorInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   collectPreparedApplicationJobIds,
   countTailoredDraftPreparationEligible,
@@ -122,7 +122,7 @@ import { COMMAND_PENDING_RELEASE_MS } from "@renderer/features/job-finder/lib/di
 import {
   describeResumeIdentityOwnershipChoice,
   useResumeSourceNameForProfile,
-} from "@nordri/job-finder/resume-identity";
+} from "@nestor/job-finder/resume-identity";
 import { describeFailure } from "@renderer/features/job-finder/lib/describe-failure";
 import { describeApplicationDefaultsSave } from "@renderer/features/job-finder/screens/settings/settings-application-defaults-save-copy";
 
@@ -1406,7 +1406,7 @@ export function createPrimaryPageActions(
     };
     const batchStartedAt = Date.now();
     const stages = new Map<string, ResumeBatchGenerationProgress["stage"]>();
-    const unsubscribeProgress = window.nordri.jobFinder.onResumeBatchProgress(
+    const unsubscribeProgress = window.nestor.jobFinder.onResumeBatchProgress(
       (progress) => {
         if (
           progress.batchId !== batch.id ||
@@ -1426,7 +1426,7 @@ export function createPrimaryPageActions(
     );
     uiResumeBatch = batch;
     const syncBatch = async () => {
-      const result = await window.nordri.assistant.syncResumeBatch(batch);
+      const result = await window.nestor.assistant.syncResumeBatch(batch);
       if (result.providerBlock) batch.providerBlock = result.providerBlock;
       if (result.stopRequested) {
         batch.stopRequested = true;
@@ -1482,7 +1482,7 @@ export function createPrimaryPageActions(
                 const generated = await withPendingScope(
                   jobFinderPendingActions.resumeJob(jobId),
                   () =>
-                    window.nordri.jobFinder.generateResumeForBatch({
+                    window.nestor.jobFinder.generateResumeForBatch({
                       batchId: batch.id,
                       jobId,
                       regenerate:
@@ -2467,7 +2467,7 @@ export function createPrimaryPageActions(
       tailoredDraftPreparationStopRequested = true;
       if (uiResumeBatch && !uiResumeBatch.done) {
         uiResumeBatch.stopRequested = true;
-        void window.nordri.assistant
+        void window.nestor.assistant
           .syncResumeBatch(uiResumeBatch)
           .catch(() => undefined);
       }

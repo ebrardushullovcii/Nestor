@@ -1,4 +1,4 @@
-import type { DiscoveryLedgerEntry, JobPosting } from "@nordri/contracts";
+import type { DiscoveryLedgerEntry, JobPosting } from "@nestor/contracts";
 
 import { classifyDiscoveryPostingFreshness } from "./workspace-discovery-ledger";
 

@@ -4,7 +4,7 @@ import type {
   JobPosting,
   JobSearchPreferences,
   MatchAssessment,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   applyFitJudgment,
   readCarriedJudgment,

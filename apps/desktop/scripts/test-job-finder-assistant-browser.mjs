@@ -7,7 +7,7 @@ import path from "node:path";
  * next to the sidebar, collecting jobs from the page, tab switching, and a
  * person's click taking a lent tab back (ADR 0038). Live model:
  *
- *   pnpm --filter @nordri/desktop qa --provider configured --script scripts/test-job-finder-assistant-browser.mjs
+ *   pnpm --filter @nestor/desktop qa --provider configured --script scripts/test-job-finder-assistant-browser.mjs
  *
  * The Playwright-launched window does not get OS focus by itself, so the
  * script asks macOS to activate it. The takeover step simulates the person's
@@ -20,9 +20,9 @@ const run = promisify(execFile);
 
 const currentConversation = (qa) =>
   qa.page.evaluate(async () => {
-    const list = await window.nordri.assistant.listConversations();
+    const list = await window.nestor.assistant.listConversations();
     if (!list.currentConversationId) return null;
-    return window.nordri.assistant.readConversation({
+    return window.nestor.assistant.readConversation({
       conversationId: list.currentConversationId,
     });
   });
@@ -141,12 +141,12 @@ export default async function browserHarness(qa) {
 
   await qa.page.waitForFunction(
     () =>
-      typeof window.nordri?.jobFinder?.test?.loadAgentOwnedBrowserDemo ===
+      typeof window.nestor?.jobFinder?.test?.loadAgentOwnedBrowserDemo ===
       "function",
   );
   await qa.page.evaluate(
     (input) =>
-      window.nordri.jobFinder.test.loadAgentOwnedBrowserDemo(input),
+      window.nestor.jobFinder.test.loadAgentOwnedBrowserDemo(input),
     {
       sourceUrl: site("/greenhouse/"),
       applicationUrl: site("/greenhouse/apply/3"),
@@ -179,7 +179,7 @@ export default async function browserHarness(qa) {
   if (!(await sidebar.isVisible())) await qa.page.keyboard.press("Meta+I");
   await sidebar.waitFor({ state: "visible" });
   await qa.page.evaluate(
-    (url) => window.nordri.browser.command({ type: "open", url }),
+    (url) => window.nestor.browser.command({ type: "open", url }),
     site("/greenhouse/"),
   );
   await qa.page.waitForTimeout(3000);
@@ -216,11 +216,11 @@ export default async function browserHarness(qa) {
 
   // Tab switching: a second tab, then back; the chip and the model follow the visible tab.
   await qa.page.evaluate(() =>
-    window.nordri.browser.command({ type: "new_tab" }),
+    window.nestor.browser.command({ type: "new_tab" }),
   );
   await qa.page.waitForTimeout(800);
   await qa.page.evaluate(
-    (url) => window.nordri.browser.command({ type: "navigate", url }),
+    (url) => window.nestor.browser.command({ type: "navigate", url }),
     site("/lever/"),
   );
   await qa.page.waitForTimeout(2500);
@@ -240,7 +240,7 @@ export default async function browserHarness(qa) {
   // Takeover by click: while the assistant works in the lent tab, the person
   // clicks the page. The second time the pointer is already resting on the
   // same pixel as the first click, which must still count as the person.
-  const warp = process.env.NORDRI_QA_WARP ?? "";
+  const warp = process.env.NESTOR_QA_WARP ?? "";
   const home = warp ? (await run(warp, [])).stdout.trim().split(/\s+/u) : null;
   const takeover = async (id, text, returnHome) => {
     before = await send(qa, text);
@@ -301,7 +301,7 @@ export default async function browserHarness(qa) {
         return `clicked at ${input.x},${input.y}`;
       }, target);
       if (warp && home && returnHome) await run(warp, home);
-      if (!warp) clicked += " (no pointer warp: set NORDRI_QA_WARP)";
+      if (!warp) clicked += " (no pointer warp: set NESTOR_QA_WARP)";
     }
     view = await waitReply(qa, before);
     const activity = view.messages

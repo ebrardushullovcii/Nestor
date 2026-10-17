@@ -1,5 +1,5 @@
-import type { CandidateProfile } from "@nordri/contracts";
-import type { JobFinderRepository, ProfileCommitOutcome } from "@nordri/db";
+import type { CandidateProfile } from "@nestor/contracts";
+import type { JobFinderRepository, ProfileCommitOutcome } from "@nestor/db";
 
 /**
  * Surfaces a profile compare-and-swap conflict that survived one deterministic

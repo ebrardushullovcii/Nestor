@@ -1,4 +1,4 @@
-import type { JobFinderResumeWorkspace } from "@nordri/contracts";
+import type { JobFinderResumeWorkspace } from "@nestor/contracts";
 import { formatStatedNormalizedCompensation } from "../../lib/normalized-compensation";
 import { ExternalUrlLink } from "../../components/open-outside-links";
 import { ResumeClaimTrustPanel } from "./resume-claim-trust-panel";

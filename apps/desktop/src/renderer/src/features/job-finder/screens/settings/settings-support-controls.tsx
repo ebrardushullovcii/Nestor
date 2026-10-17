@@ -29,7 +29,7 @@ export function SettingsSupportControls() {
     });
 
     try {
-      const result = await window.nordri.jobFinder.exportDiagnostics();
+      const result = await window.nestor.jobFinder.exportDiagnostics();
 
       setExportState(
         result.status === "saved"

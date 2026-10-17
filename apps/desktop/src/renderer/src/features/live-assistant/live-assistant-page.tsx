@@ -17,7 +17,7 @@ import type {
   InterviewTranscriptSource,
   InterviewWorkspaceView,
   InterviewLiveSession,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   Archive,
   Camera,
@@ -42,7 +42,7 @@ import {
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@renderer/components/ui/button";
-import { NordriWordmark } from "@renderer/components/brand/nordri-wordmark";
+import { NestorWordmark } from "@renderer/components/brand/nestor-wordmark";
 import { ModuleSwitch } from "@renderer/components/module-switch";
 import { cn } from "@renderer/lib/cn";
 import { AnswerCueOverlay, TranscriptOverlay } from "./interview-overlays";
@@ -171,7 +171,7 @@ export function getInterviewDocumentTitle(
   activeTab: "setup" | "assist" | "review" | "settings",
   isLiveSession: boolean,
 ) {
-  return `${getInterviewModeLabel(activeTab, isLiveSession)} | Live Assistant | Nordri`;
+  return `${getInterviewModeLabel(activeTab, isLiveSession)} | Live Assistant | Nestor`;
 }
 
 export function shouldApplyInterviewWorkspaceSnapshot(
@@ -189,7 +189,7 @@ export function shouldApplyInterviewWorkspaceSnapshot(
 }
 
 const LAST_JOB_FINDER_ROUTE_STORAGE_KEY =
-  "nordri.live-assistant.last-job-finder-route";
+  "nestor.live-assistant.last-job-finder-route";
 const JOB_FINDER_ROUTE_FALLBACK = "/job-finder";
 const JOB_FINDER_ROUTE_PATTERN = /^\/job-finder(?:$|[/?#])/;
 
@@ -325,7 +325,7 @@ export function LiveAssistantPage() {
 
   async function loadWorkspace() {
     try {
-      const workspace = await window.nordri.liveAssistant.getWorkspace();
+      const workspace = await window.nestor.liveAssistant.getWorkspace();
       setActiveTab(getInitialInterviewTab(workspace));
       setState({ status: "ready", workspace, exportResult: null });
     } catch (error) {
@@ -347,7 +347,7 @@ export function LiveAssistantPage() {
 
   useEffect(() => {
     void loadWorkspace();
-    return window.nordri.liveAssistant.onWorkspaceChange(
+    return window.nestor.liveAssistant.onWorkspaceChange(
       applyWorkspaceSnapshot,
     );
   }, []);
@@ -355,7 +355,7 @@ export function LiveAssistantPage() {
   useEffect(() => {
     let cancelled = false;
 
-    const unsubscribe = window.nordri.window.onControlsStateChange(
+    const unsubscribe = window.nestor.window.onControlsStateChange(
       (controlsState) => {
         if (!cancelled) {
           setWindowControlsState(controlsState);
@@ -364,8 +364,8 @@ export function LiveAssistantPage() {
     );
 
     void Promise.all([
-      window.nordri.ping(),
-      window.nordri.window.getControlsState(),
+      window.nestor.ping(),
+      window.nestor.window.getControlsState(),
     ])
       .then(([platformResponse, controlsState]) => {
         if (!cancelled) {
@@ -395,15 +395,15 @@ export function LiveAssistantPage() {
   }
 
   function minimizeWindow() {
-    void runWindowAction(() => window.nordri.window.minimize());
+    void runWindowAction(() => window.nestor.window.minimize());
   }
 
   function toggleWindowExpand() {
-    void runWindowAction(() => window.nordri.window.toggleMaximize());
+    void runWindowAction(() => window.nestor.window.toggleMaximize());
   }
 
   function closeWindow() {
-    void window.nordri.window.close();
+    void window.nestor.window.close();
   }
 
   async function updateWorkspace(
@@ -421,7 +421,7 @@ export function LiveAssistantPage() {
 
   async function perform(action: InterviewHotkeyAction) {
     await updateWorkspace(action, () =>
-      window.nordri.liveAssistant.performAction(action),
+      window.nestor.liveAssistant.performAction(action),
     );
     if (action === "end_session") {
       setActiveTab("review");
@@ -430,19 +430,19 @@ export function LiveAssistantPage() {
 
   function saveSetupPreference(input: SaveInterviewSetupInput) {
     void updateWorkspace("setup_preferences", () =>
-      window.nordri.liveAssistant.saveSetup(input),
+      window.nestor.liveAssistant.saveSetup(input),
     );
   }
 
   async function verifyOverlayProtection() {
     await updateWorkspace("verify_overlay_protection", () =>
-      window.nordri.liveAssistant.verifyOverlayProtection(),
+      window.nestor.liveAssistant.verifyOverlayProtection(),
     );
   }
 
   async function resetOverlayLayout() {
     await updateWorkspace("reset_overlay_layout", () =>
-      window.nordri.liveAssistant.resetOverlayPreferences(),
+      window.nestor.liveAssistant.resetOverlayPreferences(),
     );
   }
 
@@ -451,7 +451,7 @@ export function LiveAssistantPage() {
     visible: boolean,
   ) {
     await updateWorkspace(`set_${overlay.surfaceKind}_${String(visible)}`, () =>
-      window.nordri.liveAssistant.updateOverlayPreference({
+      window.nestor.liveAssistant.updateOverlayPreference({
         surfaceKind: overlay.surfaceKind,
         visible,
       }),
@@ -464,13 +464,13 @@ export function LiveAssistantPage() {
       state.workspace.activeSession?.status === "reconfiguring"
     ) {
       await updateWorkspace("finish_reconfiguration", () =>
-        window.nordri.liveAssistant.finishReconfiguration(),
+        window.nestor.liveAssistant.finishReconfiguration(),
       );
       return;
     }
 
     await updateWorkspace("begin_reconfiguration", () =>
-      window.nordri.liveAssistant.beginReconfiguration(),
+      window.nestor.liveAssistant.beginReconfiguration(),
     );
   }
 
@@ -499,7 +499,7 @@ export function LiveAssistantPage() {
     }
 
     appliedTargetContextKeyRef.current = targetContextKey;
-    void window.nordri.liveAssistant
+    void window.nestor.liveAssistant
       .saveSetup({
         targetContext: {
           kind: targetContextKind,
@@ -530,7 +530,7 @@ export function LiveAssistantPage() {
     const text = transcriptDraft.trim();
     setTranscriptDraft("");
     await updateWorkspace("add_transcript_segment", () =>
-      window.nordri.liveAssistant.addTranscriptSegment({
+      window.nestor.liveAssistant.addTranscriptSegment({
         sessionId: currentActiveSession.id,
         source: transcriptSource,
         text,
@@ -590,7 +590,7 @@ export function LiveAssistantPage() {
     setReviewedSession(null);
     setReviewLoadError(null);
     if (latestArchive && activeTab === "review") {
-      void window.nordri.liveAssistant.getSession(latestArchive.id).then(
+      void window.nestor.liveAssistant.getSession(latestArchive.id).then(
         (session) => {
           if (!cancelled) {
             setReviewedSession(session);
@@ -634,7 +634,7 @@ export function LiveAssistantPage() {
   const activeSession = workspace.activeSession;
   const isLiveSession = pageHasLiveSession;
   const advancedSurfaceUiEnabled =
-    import.meta.env.VITE_NORDRI_INTERVIEW_ADVANCED_SURFACES === "1";
+    import.meta.env.VITE_NESTOR_INTERVIEW_ADVANCED_SURFACES === "1";
   const rehearsal = workspace.setup.rehearsal;
   const reviewSession = activeSession ? null : reviewedSession;
   const transcriptSegments = reviewSession?.transcriptSegments ?? [];
@@ -728,7 +728,7 @@ export function LiveAssistantPage() {
 
   async function acceptSetup() {
     await updateWorkspace("accept_setup", () =>
-      window.nordri.liveAssistant.saveSetup({
+      window.nestor.liveAssistant.saveSetup({
         consent: {
           ...workspace.setup.consent,
           modelTransmission: true,
@@ -742,13 +742,13 @@ export function LiveAssistantPage() {
 
   async function runQuickCheck() {
     await updateWorkspace("rehearsal", () =>
-      window.nordri.liveAssistant.runRehearsal(),
+      window.nestor.liveAssistant.runRehearsal(),
     );
   }
 
   async function startInterview() {
     await updateWorkspace("start", () =>
-      window.nordri.liveAssistant.startSession(),
+      window.nestor.liveAssistant.startSession(),
     );
     setActiveTab("assist");
   }
@@ -772,7 +772,7 @@ export function LiveAssistantPage() {
 
     setPendingAction(`export_${format}`);
     try {
-      const exportResult = await window.nordri.liveAssistant.exportSession(
+      const exportResult = await window.nestor.liveAssistant.exportSession(
         reviewSession.id,
         format,
       );
@@ -803,7 +803,7 @@ export function LiveAssistantPage() {
     setPendingAction(action);
     setJobFinderWriteBackStatus(null);
     try {
-      await window.nordri.liveAssistant.recordJobFinderFollowUp(input);
+      await window.nestor.liveAssistant.recordJobFinderFollowUp(input);
       setJobFinderWriteBackStatus(
         action === "mark_interviewed"
           ? "Job Finder application marked interviewed."
@@ -849,12 +849,12 @@ export function LiveAssistantPage() {
           >
             <div className="flex min-w-0 flex-col">
               <Link
-                aria-label="Nordri"
+                aria-label="Nestor"
                 className="text-(--headline-primary)"
                 style={noDragRegionStyle}
                 to={jobFinderReturnRoute}
               >
-                <NordriWordmark className="block h-[1.05rem] w-auto sm:h-[1.3rem]" />
+                <NestorWordmark className="block h-[1.05rem] w-auto sm:h-[1.3rem]" />
               </Link>
               {/* Mirrors the Job Finder shell: the module switch sits
                   directly under the wordmark, at the head of the module's own
@@ -1709,7 +1709,7 @@ export function LiveAssistantPage() {
                           onClick={() => {
                             if (latestCue && reviewSession) {
                               void updateWorkspace("prep", () =>
-                                window.nordri.liveAssistant.saveCueAsPrepArtifact(
+                                window.nestor.liveAssistant.saveCueAsPrepArtifact(
                                   {
                                     sessionId: reviewSession.id,
                                     cueCardId: latestCue.id,
@@ -2078,7 +2078,7 @@ export function LiveAssistantPage() {
 
           setDeleteSessionError(null);
           void updateWorkspace("delete", () =>
-            window.nordri.liveAssistant.deleteSession(reviewSession.id),
+            window.nestor.liveAssistant.deleteSession(reviewSession.id),
           )
             .then(() => {
               setDeleteConfirmationOpen(false);
@@ -2103,13 +2103,13 @@ function useInterviewPopupWorkspace() {
 
   useEffect(() => {
     let mounted = true;
-    const unsubscribe = window.nordri.liveAssistant.onWorkspaceChange(
+    const unsubscribe = window.nestor.liveAssistant.onWorkspaceChange(
       (nextWorkspace) => {
         if (mounted) setWorkspace(nextWorkspace);
       },
     );
 
-    void window.nordri.liveAssistant.getWorkspace().then((nextWorkspace) => {
+    void window.nestor.liveAssistant.getWorkspace().then((nextWorkspace) => {
       if (mounted) setWorkspace(nextWorkspace);
     });
 
@@ -2142,14 +2142,14 @@ export function InterviewTranscriptOverlayRoute() {
     const segments = workspace.activeSession?.transcriptSegments ?? [];
     const text = segments.map((segment) => segment.text).join("\n");
     if (!text) return;
-    await window.nordri.liveAssistant.writeClipboardText({ text });
+    await window.nestor.liveAssistant.writeClipboardText({ text });
     setCopyLabel("Copied");
     window.setTimeout(() => setCopyLabel("Copy transcript"), 1_500);
   }
 
   async function hideTranscript() {
     setWorkspace(
-      await window.nordri.liveAssistant.updateOverlayPreference({
+      await window.nestor.liveAssistant.updateOverlayPreference({
         surfaceKind: "live_transcript_overlay",
         visible: false,
       }),

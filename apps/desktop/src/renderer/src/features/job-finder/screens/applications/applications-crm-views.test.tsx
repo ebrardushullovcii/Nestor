@@ -1,6 +1,6 @@
 import { ToastProvider } from "@renderer/components/ui/toast";
 // @vitest-environment jsdom
-import type { ApplicationCrmBulkStageMutationInput } from "@nordri/contracts";
+import type { ApplicationCrmBulkStageMutationInput } from "@nestor/contracts";
 
 import { useState } from "react";
 import {
@@ -11,7 +11,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { ApplicationRecordSchema } from "@nordri/contracts";
+import { ApplicationRecordSchema } from "@nestor/contracts";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { ApplicationsCrmViews } from "./applications-crm-views";
@@ -885,7 +885,7 @@ test("restores a named Show filter after remounting", async () => {
 
 test("keeps Sort beside Show, uses compact dates and adds Applied to older column choices", () => {
   window.localStorage.setItem(
-    "nordri.job-finder.applications-crm.columns.v1",
+    "nestor.job-finder.applications-crm.columns.v1",
     JSON.stringify(["job", "updated"]),
   );
   const view = render(
@@ -960,11 +960,11 @@ test("sort and Show changes return to page one without following the old selecti
 
 test("a requested record opens despite persisted search and Show filters", () => {
   window.localStorage.setItem(
-    "nordri.job-finder.collection.applications-crm.v1",
+    "nestor.job-finder.collection.applications-crm.v1",
     JSON.stringify({ density: "comfortable", query: "hidden", savedViews: [] }),
   );
   window.localStorage.setItem(
-    "nordri.job-finder.applications-crm.saved-view.v1",
+    "nestor.job-finder.applications-crm.saved-view.v1",
     "offers",
   );
   render(
@@ -988,7 +988,7 @@ test("a requested record opens despite persisted search and Show filters", () =>
 
 test("older saved views explain that Show was not recorded", async () => {
   window.localStorage.setItem(
-    "nordri.job-finder.collection.applications-crm.v1",
+    "nestor.job-finder.collection.applications-crm.v1",
     JSON.stringify({
       density: "comfortable",
       query: "",

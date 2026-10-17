@@ -12,7 +12,7 @@ import {
   type ProfileSetupReadiness,
   type ProfileSetupState,
   type ProfileSetupStep,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { profileSetupStepDefinitions } from "./profile-setup-steps";
 import { deriveJobSourceLabel } from "../../../lib/job-source-display-name";
 

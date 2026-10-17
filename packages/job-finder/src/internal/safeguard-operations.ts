@@ -2,7 +2,7 @@
  * Pure, immutable operations over `JobFinderIntelligenceSafeguards`.
  *
  * Every function validates its inputs with the existing safeguard schemas from
- * `@nordri/contracts` and returns freshly schema-parsed values. Inputs are
+ * `@nestor/contracts` and returns freshly schema-parsed values. Inputs are
  * never mutated and ids/timestamps/evidence are always supplied by the caller;
  * the operations never mint ids, clocks, or evidence themselves.
  *
@@ -44,7 +44,7 @@ import {
   type SafeguardDismissalReason,
   type SafeguardEntryKind,
   type SimultaneousApplicationConflict,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   AUTOMATIC_APPLICATION_FAILURE_PAUSE_ID,

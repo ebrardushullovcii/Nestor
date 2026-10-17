@@ -22,9 +22,9 @@ describe("JobFinderShellBrand token classes", () => {
     expect(wordmark).not.toBeNull();
     expect(subtitle).not.toBeNull();
 
-    expect(wordmark?.contains(getByRole("img", { name: "Nordri" }))).toBe(true);
+    expect(wordmark?.contains(getByRole("img", { name: "Nestor" }))).toBe(true);
     expect(
-      getByRole("img", { name: "Nordri" }).getAttribute("class"),
+      getByRole("img", { name: "Nestor" }).getAttribute("class"),
     ).toContain("text-(--headline-primary)");
     expect(subtitle?.className).toContain("tracking-(--tracking-caps)");
     expect(subtitle?.className).toContain("text-[0.72rem]");

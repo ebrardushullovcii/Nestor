@@ -5,7 +5,7 @@ import { resolveBrandIconPaths } from "./brand-icons";
 describe("resolveBrandIconPaths", () => {
   it.each([
     "/project/apps/desktop",
-    "/Applications/Nordri.app/Contents/Resources/app.asar",
+    "/Applications/Nestor.app/Contents/Resources/app.asar",
   ])("resolves runtime images inside the app at %s", (appPath) => {
     const icon = path.join(appPath, "assets/brand/app-icon.png");
     expect(

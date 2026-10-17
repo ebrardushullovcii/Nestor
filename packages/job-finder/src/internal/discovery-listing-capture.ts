@@ -2,7 +2,7 @@ import {
   deriveListingDetailCapture,
   type ListingDetailCaptureState,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * Run-level accounting for "did this search read the listings it kept?".

@@ -1,7 +1,7 @@
 import {
   ResumeGenerationStrategyPolicySchema,
   type ResumeGenerationStrategyPolicy,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import {
   JobFinderResumeWorkspaceStrategyContextSchema,
   type JobFinderIntelligenceState,
@@ -9,7 +9,7 @@ import {
   type ResumeStrategy,
   type ResumeTemplateId,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   recommendResumeStrategy,
   type RecommendResumeStrategyResult,

@@ -1,4 +1,4 @@
-import type { PlanSafeguardPause } from "@nordri/contracts";
+import type { PlanSafeguardPause } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 
 export function PlanSafeguardPauseCards(props: {

@@ -1,6 +1,6 @@
 # AI provider setup
 
-Nordri uses a mixed OpenCode Go route:
+Nestor uses a mixed OpenCode Go route:
 
 - Muse Spark 1.3 Contributor with `xhigh` reasoning handles text, tool-based
   agent work, and image-capable résumé, browser, and Live Assistant analysis
@@ -18,36 +18,36 @@ only an API key. See ADR 0019; the contract-first agent boundaries from ADR
 Create an OpenCode Go key, then use the same key for both text and vision:
 
 ```dotenv
-NORDRI_AI_API_KEY=your-opencode-go-key
-NORDRI_AI_BASE_URL=https://opencode.ai/zen/go/v1
-NORDRI_AI_MODEL=muse-spark-1.3-contributor
-NORDRI_AI_API_MODE=responses
-NORDRI_AI_REASONING_EFFORT=xhigh
+NESTOR_AI_API_KEY=your-opencode-go-key
+NESTOR_AI_BASE_URL=https://opencode.ai/zen/go/v1
+NESTOR_AI_MODEL=muse-spark-1.3-contributor
+NESTOR_AI_API_MODE=responses
+NESTOR_AI_REASONING_EFFORT=xhigh
 # Browser agents (search, source checks, applying) and page reads take many
 # short turns; they think briefly. Resume writing keeps the effort above.
-NORDRI_AI_AGENT_REASONING_EFFORT=low
+NESTOR_AI_AGENT_REASONING_EFFORT=low
 
 # Aggressive resume tailoring runs on its own dedicated route so the whole
 # aggressive lifecycle (draft, re-tailor, and model-backed review/regenerate)
 # stays on one provider. Reasoning effort is read from its own env var.
-NORDRI_AI_AGGRESSIVE_MODEL=deepseek-v4.1-flash
-NORDRI_AI_AGGRESSIVE_API_MODE=chat_completions
-NORDRI_AI_AGGRESSIVE_REASONING_EFFORT=high
+NESTOR_AI_AGGRESSIVE_MODEL=deepseek-v4.1-flash
+NESTOR_AI_AGGRESSIVE_API_MODE=chat_completions
+NESTOR_AI_AGGRESSIVE_REASONING_EFFORT=high
 
-NORDRI_AI_VISION_BASE_URL=https://opencode.ai/zen/go/v1
-NORDRI_AI_VISION_MODEL=muse-spark-1.3-contributor
-NORDRI_AI_VISION_API_MODE=responses
-NORDRI_AI_VISION_REASONING_EFFORT=xhigh
-NORDRI_RESUME_VISION_MODEL=muse-spark-1.3-contributor
-NORDRI_RESUME_VISION_REASONING_EFFORT=xhigh
-NORDRI_BROWSER_VISION_MODEL=muse-spark-1.3-contributor
-NORDRI_BROWSER_VISION_REASONING_EFFORT=xhigh
-NORDRI_INTERVIEW_AI_MODEL=muse-spark-1.3-contributor
-NORDRI_INTERVIEW_AI_API_MODE=responses
-NORDRI_INTERVIEW_REASONING_EFFORT=xhigh
-NORDRI_INTERVIEW_VISION_MODEL=muse-spark-1.3-contributor
-NORDRI_INTERVIEW_VISION_API_MODE=responses
-NORDRI_INTERVIEW_VISION_REASONING_EFFORT=xhigh
+NESTOR_AI_VISION_BASE_URL=https://opencode.ai/zen/go/v1
+NESTOR_AI_VISION_MODEL=muse-spark-1.3-contributor
+NESTOR_AI_VISION_API_MODE=responses
+NESTOR_AI_VISION_REASONING_EFFORT=xhigh
+NESTOR_RESUME_VISION_MODEL=muse-spark-1.3-contributor
+NESTOR_RESUME_VISION_REASONING_EFFORT=xhigh
+NESTOR_BROWSER_VISION_MODEL=muse-spark-1.3-contributor
+NESTOR_BROWSER_VISION_REASONING_EFFORT=xhigh
+NESTOR_INTERVIEW_AI_MODEL=muse-spark-1.3-contributor
+NESTOR_INTERVIEW_AI_API_MODE=responses
+NESTOR_INTERVIEW_REASONING_EFFORT=xhigh
+NESTOR_INTERVIEW_VISION_MODEL=muse-spark-1.3-contributor
+NESTOR_INTERVIEW_VISION_API_MODE=responses
+NESTOR_INTERVIEW_VISION_REASONING_EFFORT=xhigh
 ```
 
 Use the raw API model IDs shown above. The `opencode-go/...` prefix is only for
@@ -67,16 +67,16 @@ route, so Luna is not needed (the block below shows the 1.2 ids; 1.3 is the
 current default):
 
 ```dotenv
-NORDRI_AI_API_KEY=your-opencode-go-key
-NORDRI_AI_BASE_URL=https://opencode.ai/zen/go/v1
-NORDRI_AI_MODEL=muse-spark-1.2-contributor
-NORDRI_AI_API_MODE=responses
-NORDRI_AI_REASONING_EFFORT=xhigh
+NESTOR_AI_API_KEY=your-opencode-go-key
+NESTOR_AI_BASE_URL=https://opencode.ai/zen/go/v1
+NESTOR_AI_MODEL=muse-spark-1.2-contributor
+NESTOR_AI_API_MODE=responses
+NESTOR_AI_REASONING_EFFORT=xhigh
 
-NORDRI_AI_VISION_BASE_URL=https://opencode.ai/zen/go/v1
-NORDRI_AI_VISION_MODEL=muse-spark-1.2-contributor
-NORDRI_AI_VISION_API_MODE=responses
-NORDRI_AI_VISION_REASONING_EFFORT=xhigh
+NESTOR_AI_VISION_BASE_URL=https://opencode.ai/zen/go/v1
+NESTOR_AI_VISION_MODEL=muse-spark-1.2-contributor
+NESTOR_AI_VISION_API_MODE=responses
+NESTOR_AI_VISION_REASONING_EFFORT=xhigh
 ```
 
 The shared text variables cover Job Finder generative work, browser-agent
@@ -103,8 +103,8 @@ documentation or tracked examples, and rotate any temporary key shared through
 a conversation.
 
 Live Job Finder search during a desktop test-API session also requires
-`NORDRI_TEST_API_USE_LIVE_AI=1` for model/tool escalation.
-`NORDRI_ENABLE_TEST_API=1` alone forces the deterministic client (no
+`NESTOR_TEST_API_USE_LIVE_AI=1` for model/tool escalation.
+`NESTOR_ENABLE_TEST_API=1` alone forces the deterministic client (no
 `chatWithTools`). Discovery still runs the ADR 0013 compact-first page scan and
 can finish with zero-new / already-saved results when that scan finds listings;
 model escalation is unavailable until live AI is enabled.
@@ -118,7 +118,7 @@ provider acceptance evidence together.
 ## Manual Zen fallback when Go quota is exhausted
 
 This is **operational guidance for agents and developers**, not application
-behavior. Nordri does **not** auto-switch AI routes, rotate models, or
+behavior. Nestor does **not** auto-switch AI routes, rotate models, or
 recover from quota errors at runtime. When Go usage is exhausted or rate
 limited, edit ignored `.env.local` manually and restart the desktop app.
 
@@ -136,12 +136,12 @@ The same OpenCode API key works on both endpoints.
 Keep Go with Muse Contributor on the Responses API:
 
 ```dotenv
-NORDRI_AI_BASE_URL=https://opencode.ai/zen/go/v1
-NORDRI_AI_MODEL=muse-spark-1.2-contributor
-NORDRI_AI_API_MODE=responses
-NORDRI_AI_VISION_BASE_URL=https://opencode.ai/zen/go/v1
-NORDRI_AI_VISION_MODEL=muse-spark-1.2-contributor
-NORDRI_AI_VISION_API_MODE=responses
+NESTOR_AI_BASE_URL=https://opencode.ai/zen/go/v1
+NESTOR_AI_MODEL=muse-spark-1.2-contributor
+NESTOR_AI_API_MODE=responses
+NESTOR_AI_VISION_BASE_URL=https://opencode.ai/zen/go/v1
+NESTOR_AI_VISION_MODEL=muse-spark-1.2-contributor
+NESTOR_AI_VISION_API_MODE=responses
 ```
 
 ### When Go quota or rate limit is hit
@@ -150,13 +150,13 @@ Switch **all** shared base URLs in `.env.local` to Zen and point each surface
 at the appropriate free model:
 
 ```dotenv
-NORDRI_AI_BASE_URL=https://opencode.ai/zen/v1
-NORDRI_AI_MODEL=deepseek-v4-flash-free
-NORDRI_AI_API_MODE=chat_completions
+NESTOR_AI_BASE_URL=https://opencode.ai/zen/v1
+NESTOR_AI_MODEL=deepseek-v4-flash-free
+NESTOR_AI_API_MODE=chat_completions
 
-NORDRI_AI_VISION_BASE_URL=https://opencode.ai/zen/v1
-NORDRI_AI_VISION_MODEL=muse-spark-1.2-contributor-free
-NORDRI_AI_VISION_API_MODE=responses
+NESTOR_AI_VISION_BASE_URL=https://opencode.ai/zen/v1
+NESTOR_AI_VISION_MODEL=muse-spark-1.2-contributor-free
+NESTOR_AI_VISION_API_MODE=responses
 ```
 
 - **Text / tool loops:** `deepseek-v4-flash-free` via Chat Completions (no
@@ -170,7 +170,7 @@ If Zen returns HTTP 429, manually swap the **text** model in `.env.local`:
 
 1. Start with `deepseek-v4-flash-free` (Chat Completions).
 2. On rate limit, switch text to `muse-spark-1.2-contributor-free`
-   (Responses, `NORDRI_AI_API_MODE=responses`).
+   (Responses, `NESTOR_AI_API_MODE=responses`).
 3. On the next rate limit, switch back to `deepseek-v4-flash-free`.
 
 Keep vision on `muse-spark-1.2-contributor-free` throughout — DeepSeek Free
@@ -191,23 +191,23 @@ does not accept image input. Restart the app after each change.
 
 ## Desktop test API precedence for Live Assistant
 
-With `NORDRI_ENABLE_TEST_API=1`, Live Assistant providers resolve to the
+With `NESTOR_ENABLE_TEST_API=1`, Live Assistant providers resolve to the
 deterministic runtime regardless of ambient interview or shared credentials.
 Live AI during a test-API run requires the explicit, narrowly named opt-in:
 
 ```dotenv
-NORDRI_INTERVIEW_TEST_USE_LIVE_AI=1
+NESTOR_INTERVIEW_TEST_USE_LIVE_AI=1
 ```
 
 Production runs with the test API absent keep configured behavior unchanged,
 and explicitly configured local STT commands stay available under the test API
 because they execute offline. The release acceptance harness additionally
-strips every `NORDRI_INTERVIEW_*_API_KEY` variable plus the shared
-`NORDRI_AI_API_KEY`, `NORDRI_AI_VISION_API_KEY`, and
-`NORDRI_RESUME_VISION_API_KEY` keys (and this opt-in) from its launch
+strips every `NESTOR_INTERVIEW_*_API_KEY` variable plus the shared
+`NESTOR_AI_API_KEY`, `NESTOR_AI_VISION_API_KEY`, and
+`NESTOR_RESUME_VISION_API_KEY` keys (and this opt-in) from its launch
 environment, so no ambient developer-shell credential can win. The Job Finder
 resume benchmarks keep their own documented `--use-configured-ai`
-`NORDRI_TEST_API_USE_LIVE_AI` exceptions; this Live Assistant switch is
+`NESTOR_TEST_API_USE_LIVE_AI` exceptions; this Live Assistant switch is
 separate and narrower.
 
 ## Local Codex subscription proxy
@@ -230,12 +230,12 @@ If Codex is already signed in locally, the explicit login step may not be
 needed. The client key is a non-secret placeholder because the proxy is bound
 to loopback:
 
-    NORDRI_AI_API_KEY=unused
-    NORDRI_AI_BASE_URL=http://127.0.0.1:10531/v1
-    NORDRI_AI_MODEL=gpt-5.6-luna
-    NORDRI_AI_API_MODE=responses
-    NORDRI_AI_REASONING_EFFORT=high
-    NORDRI_RESUME_VISION_MODEL=gpt-5.6-luna
+    NESTOR_AI_API_KEY=unused
+    NESTOR_AI_BASE_URL=http://127.0.0.1:10531/v1
+    NESTOR_AI_MODEL=gpt-5.6-luna
+    NESTOR_AI_API_MODE=responses
+    NESTOR_AI_REASONING_EFFORT=high
+    NESTOR_RESUME_VISION_MODEL=gpt-5.6-luna
 
 Before using it with candidate data:
 
@@ -255,7 +255,7 @@ Before using it with candidate data:
 A legacy provider can still be used explicitly:
 
 ```dotenv
-NORDRI_AI_API_MODE=chat_completions
+NESTOR_AI_API_MODE=chat_completions
 ```
 
 That mode is now the intended DeepSeek text route. Keep Luna image work on the
@@ -270,16 +270,16 @@ browser vision) goes through one transport
 - Requests are streamed. On the Responses route the model is asked for
   reasoning summaries, whose events keep the connection visibly alive while
   it thinks; on Chat Completions the reasoning deltas do the same.
-- Two clocks: an idle clock (`NORDRI_AI_IDLE_TIMEOUT_MS`, default 120s of
+- Two clocks: an idle clock (`NESTOR_AI_IDLE_TIMEOUT_MS`, default 120s of
   silence) retries an attempt that has gone quiet, and a total clock
-  (`NORDRI_AI_TIMEOUT_MS`, default 300s; `NORDRI_AI_RESUME_TIMEOUT_MS`,
+  (`NESTOR_AI_TIMEOUT_MS`, default 300s; `NESTOR_AI_RESUME_TIMEOUT_MS`,
   default 600s) caps the whole wait across attempts.
-- Retries (`NORDRI_AI_MAX_ATTEMPTS`, default 5) cover network errors, idle
+- Retries (`NESTOR_AI_MAX_ATTEMPTS`, default 5) cover network errors, idle
   timeouts, streams the gateway closed before completing, and HTTP
-  408/409/425/429/5xx, with backoff from `NORDRI_AI_RETRY_BASE_DELAY_MS`
+  408/409/425/429/5xx, with backoff from `NESTOR_AI_RETRY_BASE_DELAY_MS`
   (default 1s) doubling to 20s and honouring `Retry-After`. Validation errors
   (4xx) and user cancellations are never retried.
-- `NORDRI_AI_STREAMING=0` sends plain JSON requests; use it only for a
+- `NESTOR_AI_STREAMING=0` sends plain JSON requests; use it only for a
   gateway that rejects `stream: true`, since it removes the liveness signal.
 
 When a call still fails, the deterministic fallback runs and the note says

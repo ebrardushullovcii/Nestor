@@ -6,7 +6,7 @@ import {
   ApplicationDocumentRevisionSchema,
   ApplicationRecordSchema,
   ApplyRunDetailsSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApplicationsApplicationDocuments } from "./applications-application-documents";
 
@@ -72,7 +72,7 @@ describe("ApplicationsApplicationDocuments", () => {
       .fn()
       .mockResolvedValueOnce({ documents: [] })
       .mockResolvedValue({ documents: [proposed] });
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: { jobFinder: { listApplicationDocuments } },
     });
@@ -153,7 +153,7 @@ describe("ApplicationsApplicationDocuments", () => {
     const listApplicationDocuments = vi
       .fn()
       .mockResolvedValue({ documents: [otherDraft, proposed, approved] });
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: { jobFinder: { listApplicationDocuments } },
     });
@@ -226,7 +226,7 @@ describe("ApplicationsApplicationDocuments", () => {
       });
       return Promise.resolve(currentDocument);
     });
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         jobFinder: {
@@ -362,7 +362,7 @@ describe("ApplicationsApplicationDocuments", () => {
       });
       return Promise.resolve(currentDocument);
     });
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         jobFinder: {
@@ -445,7 +445,7 @@ describe("ApplicationsApplicationDocuments", () => {
     async (content) => {
       const approveApplicationDocument = vi.fn();
       const editApplicationDocument = vi.fn();
-      Object.defineProperty(window, "nordri", {
+      Object.defineProperty(window, "nestor", {
         configurable: true,
         value: {
           jobFinder: {
@@ -497,7 +497,7 @@ describe("ApplicationsApplicationDocuments", () => {
     const listApplicationDocuments = vi.fn(() =>
       Promise.resolve({ documents: [proposed] }),
     );
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         jobFinder: {
@@ -568,7 +568,7 @@ describe("ApplicationsApplicationDocuments", () => {
       documents: [newDraft],
       approvedRevisions: [approved],
     });
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: { jobFinder: { listApplicationDocuments } },
     });
@@ -647,7 +647,7 @@ it("shows a review reason without internal copy or IPC prefixes", async () => {
     requiresGroundingReview: true,
     reviewReason: "Agree how to handle the location mismatch before sending.",
   });
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       jobFinder: {
@@ -684,7 +684,7 @@ it("shows a review reason without internal copy or IPC prefixes", async () => {
 });
 
 it("strips the IPC prefix from a document failure", async () => {
-  Object.defineProperty(window, "nordri", {
+  Object.defineProperty(window, "nestor", {
     configurable: true,
     value: {
       jobFinder: {

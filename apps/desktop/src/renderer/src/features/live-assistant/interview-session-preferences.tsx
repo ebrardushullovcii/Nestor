@@ -1,7 +1,7 @@
 import type {
   InterviewWorkspaceView,
   SaveInterviewSetupInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Camera, Languages, SlidersHorizontal } from "lucide-react";
 import {
   Select,

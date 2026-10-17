@@ -6,7 +6,7 @@ import {
   AssistantMessageSchema,
   type AssistantEvent,
   type AssistantNavigationDisplay,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAssistantConversation } from "./use-assistant-conversation";
 
@@ -80,7 +80,7 @@ function setup(
     acknowledgeNavigation: vi.fn(() => Promise.resolve()),
     selectConversation: vi.fn(() => Promise.resolve()),
   };
-  (window as unknown as { nordri: unknown }).nordri = {
+  (window as unknown as { nestor: unknown }).nestor = {
     assistant: bridge,
   };
   const hook = renderHook(() => useAssistantConversation({ onOpenRoute }));
@@ -96,7 +96,7 @@ function setup(
 
 afterEach(() => {
   cleanup();
-  delete (window as { nordri?: unknown }).nordri;
+  delete (window as { nestor?: unknown }).nestor;
 });
 
 describe("assistant older history", () => {

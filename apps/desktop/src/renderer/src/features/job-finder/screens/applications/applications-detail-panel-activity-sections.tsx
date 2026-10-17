@@ -9,7 +9,7 @@ import type {
   JobFinderApplyConsentActionInput,
   JobFinderApplyRunDetailsQuery,
   SaveApplicationAnswerCommandInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { ApplicationsDetailPanelAttemptSection } from "./applications-detail-panel-attempt-section";
 import { ApplicationsDetailPanelPrivacyReceiptSection } from "./applications-detail-panel-privacy-receipt-section";
 import { ApplicationsDetailPanelReviewDataSection } from "./applications-detail-panel-review-data-section";

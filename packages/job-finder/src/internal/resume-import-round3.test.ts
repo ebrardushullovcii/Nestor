@@ -11,7 +11,7 @@ import {
   ResumeImportFieldCandidateSchema,
   type ResumeImportFieldCandidate,
   type CandidateProfile,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createAiClient,
   createFreshStartSeedProfile,

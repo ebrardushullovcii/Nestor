@@ -53,7 +53,7 @@ export async function createAgentSession({
       provider,
       parallelGroup: lease.parallelGroup,
       sessionId: lease.sessionId,
-      browserHost: env.NORDRI_BROWSER_HOST,
+      browserHost: env.NESTOR_BROWSER_HOST,
       userDataDir: path.join(runDir, "user-data"),
       sites: null,
       app: null,
@@ -118,8 +118,8 @@ export async function createAgentSession({
         timeout: 30000,
         env: {
           ...env,
-          NORDRI_ENABLE_TEST_API: env.NORDRI_ENABLE_TEST_API ?? "1",
-          NORDRI_USER_DATA_DIR: qa.userDataDir,
+          NESTOR_ENABLE_TEST_API: env.NESTOR_ENABLE_TEST_API ?? "1",
+          NESTOR_USER_DATA_DIR: qa.userDataDir,
         },
       });
       child = qa.app.process();
@@ -170,7 +170,7 @@ export async function createAgentSession({
       qa.page = await qa.app.firstWindow();
       await qa.page.waitForLoadState("domcontentloaded");
       await qa.page.waitForFunction(
-        () => Boolean(window.nordri?.jobFinder),
+        () => Boolean(window.nestor?.jobFinder),
         null,
         { timeout: 30000 },
       );

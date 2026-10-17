@@ -14,8 +14,8 @@ import type {
   ApplyJobResult,
   ApplyRunSummary,
   ApplicationRecord,
-} from "@nordri/contracts";
-import type { ApplicationRecordBatchCommitResult } from "@nordri/db";
+} from "@nestor/contracts";
+import type { ApplicationRecordBatchCommitResult } from "@nestor/db";
 import {
   projectApplicationRecordsActivity,
   APPLICATION_CRM_STAGE_NAMES,
@@ -28,7 +28,7 @@ import {
   ApplicationRecordSchema,
   resolveApplicationCrmStageSource,
   resolveApplicationCrmTrackedStage,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export interface ApplicationCrmRepository {
   listApplicationRecords(): Promise<readonly ApplicationRecord[]>;
@@ -1398,7 +1398,7 @@ export function exportApplicationCrm(input: {
     const provenance =
       applicationCrmProvenance(record) === "user_recorded_local"
         ? "Recorded by you"
-        : "Recorded by Nordri";
+        : "Recorded by Nestor";
     const nextReminder = crm.reminders
       .filter((reminder) => reminder.status === "pending")
       .sort((left, right) => left.dueAt.localeCompare(right.dueAt))[0];

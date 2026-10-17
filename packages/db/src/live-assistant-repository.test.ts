@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   InterviewLiveSessionSchema,
   InterviewWorkspaceSnapshotSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { createFileLiveAssistantRepository } from "./live-assistant-repository";
@@ -38,7 +38,7 @@ function overlay(surfaceKind: string) {
 describe("createFileLiveAssistantRepository", () => {
   test("loads a workspace saved before the Live Assistant rename", async () => {
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-live-assistant-"),
+      path.join(os.tmpdir(), "nestor-live-assistant-"),
     );
     temporaryDirectories.push(directory);
     const filePath = path.join(directory, "live-assistant-workspace.json");
@@ -64,7 +64,7 @@ describe("createFileLiveAssistantRepository", () => {
 
   test("returns null when nothing was saved yet", async () => {
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-live-assistant-"),
+      path.join(os.tmpdir(), "nestor-live-assistant-"),
     );
     temporaryDirectories.push(directory);
 
@@ -76,7 +76,7 @@ describe("createFileLiveAssistantRepository", () => {
   });
   test("rolls back interrupted migration and import, retaining the original legacy file", async () => {
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-live-assistant-"),
+      path.join(os.tmpdir(), "nestor-live-assistant-"),
     );
     temporaryDirectories.push(directory);
     const filePath = path.join(directory, "live-assistant-workspace.json");
@@ -151,7 +151,7 @@ describe("createFileLiveAssistantRepository", () => {
 
   test("refuses ambiguous duplicate session ids without losing the legacy bodies", async () => {
     const directory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-live-assistant-"),
+      path.join(os.tmpdir(), "nestor-live-assistant-"),
     );
     temporaryDirectories.push(directory);
     const filePath = path.join(directory, "live-assistant-workspace.json");

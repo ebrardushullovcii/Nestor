@@ -17,7 +17,7 @@ import {
   collapsesSideMenuWithAssistant,
   type AssistantMessagePart,
   type JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { z } from "zod";
 
 import { diffValues } from "../change-diff";

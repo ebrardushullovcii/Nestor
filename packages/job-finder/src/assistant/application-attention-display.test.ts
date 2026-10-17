@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ApplyJobResultSchema } from "@nordri/contracts";
+import { ApplyJobResultSchema } from "@nestor/contracts";
 import {
   applyResultHasQuestionForPerson,
   getPausedQuestionText,

@@ -29,7 +29,7 @@ import {
   type SetCampaignResumeStrategyDefaultInput,
   type SetCompanyPreferenceInput,
   type SetOutcomeSuggestionEnabledInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   appendRapidReviewDecisions,

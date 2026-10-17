@@ -3,7 +3,7 @@ import {
   DiscoveryRunRecordSchema,
   ResumeImportRunSchema,
   type JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
 import { buildJobFinderPerformanceSnapshot } from "./performance-evidence";

@@ -10,22 +10,27 @@ import {
 import path from "node:path";
 
 /**
- * Nordri was called UnEmployed, and Live Assistant was called Interview
- * Helper (ADR 0040). Electron derives the default userData directory from the
- * app name, so the rename alone would open an empty workspace. This moves the
- * old directory and the old module file names once, before anything opens
- * them. It never merges into a directory that already holds data.
+ * Nestor was called Nordri (ADR 0052) and before that UnEmployed, and Live
+ * Assistant was called Interview Helper (ADR 0040). Electron derives the
+ * default userData directory from the app name, so a rename alone would open an
+ * empty workspace. This moves the newest old directory and the old entry names
+ * once, before anything opens them. It never merges into a directory that
+ * already holds data.
  */
-const LEGACY_APP_NAMES: Readonly<Record<string, string>> = {
+const LEGACY_APP_NAMES: Readonly<Record<string, readonly string[]>> = {
   // Development builds take their name from apps/desktop/package.json.
-  "@nordri/desktop": "@unemployed/desktop",
+  "@nestor/desktop": ["@nordri/desktop", "@unemployed/desktop"],
   // Packaged builds take it from electron-builder's productName.
-  Nordri: "UnEmployed",
+  Nestor: ["Nordri", "UnEmployed"],
 };
 
+// Earlier names first: an entry moves only while its new name is still free.
 const LEGACY_ENTRY_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["interview-helper-workspace.json", "live-assistant-workspace.json"],
   ["interview-helper-screenshots", "live-assistant-screenshots"],
+  // The embedded browser's sign-ins live in its persistent partition.
+  [path.join("Partitions", "nordri-browser"), path.join("Partitions", "nestor-browser")],
+  [path.join("Partitions", "unemployed-browser"), path.join("Partitions", "nestor-browser")],
 ];
 
 export type LegacyUserDataMigrationResult = {
@@ -48,31 +53,29 @@ export function migrateLegacyDesktopUserData(
     skippedReason: null,
   };
   const target = app.getPath("userData");
-  const legacyName = LEGACY_APP_NAMES[app.getName()];
-
-  // Any overridden directory (NORDRI_USER_DATA_DIR, a --user-data-dir switch)
+  // Any overridden directory (NESTOR_USER_DATA_DIR, a --user-data-dir switch)
   // is an isolated session for tests or QA. It must never adopt the person's
   // real workspace, so only the name-derived default location migrates.
   const appData = app.getPath("appData");
   const usesDefaultLocation =
     !options.configuredDirectory &&
     path.resolve(target) === path.resolve(appData, app.getName());
-  if (usesDefaultLocation && legacyName) {
-    const legacy = path.join(appData, legacyName);
-    if (legacy !== target && existsSync(legacy)) {
-      if (!existsSync(target) || isEmptyDirectory(target)) {
-        if (existsSync(target)) rmdirSync(target);
-        mkdirSync(path.dirname(target), { recursive: true });
-        renameSync(legacy, target);
-        result.movedDirectory = { from: legacy, to: target };
-        // Drop the now-empty "@unemployed" scope folder in development.
-        const legacyParent = path.dirname(legacy);
-        if (legacyParent !== appData && isEmptyDirectory(legacyParent)) {
-          rmdirSync(legacyParent);
-        }
-      } else {
-        result.skippedReason = "target-has-data";
+  const legacy = (LEGACY_APP_NAMES[app.getName()] ?? [])
+    .map((name) => path.join(appData, name))
+    .find((directory) => directory !== target && existsSync(directory));
+  if (usesDefaultLocation && legacy) {
+    if (!existsSync(target) || isEmptyDirectory(target)) {
+      if (existsSync(target)) rmdirSync(target);
+      mkdirSync(path.dirname(target), { recursive: true });
+      renameSync(legacy, target);
+      result.movedDirectory = { from: legacy, to: target };
+      // Drop the now-empty old scope folder (e.g. "@nordri") in development.
+      const legacyParent = path.dirname(legacy);
+      if (legacyParent !== appData && isEmptyDirectory(legacyParent)) {
+        rmdirSync(legacyParent);
       }
+    } else {
+      result.skippedReason = "target-has-data";
     }
   }
 

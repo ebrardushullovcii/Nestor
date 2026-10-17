@@ -2,7 +2,7 @@ import {
   ApplicationAttemptBlockerSchema,
   applicationBlockerCodeValues,
   userActionRequestKindValues,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import {

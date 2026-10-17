@@ -4,16 +4,16 @@
     "baseUrl": ".",
     "jsx": "react-jsx",
     "paths": {
-      "@nordri/browser-agent": [
+      "@nestor/browser-agent": [
         "../../packages/browser-agent/src/index.ts"
       ],
-      "@nordri/job-finder/discovery-ordering": [
+      "@nestor/job-finder/discovery-ordering": [
         "../../packages/job-finder/src/discovery-ordering.ts"
       ],
-      "@nordri/job-finder/discovery-result-bands": [
+      "@nestor/job-finder/discovery-result-bands": [
         "../../packages/job-finder/src/discovery-result-bands.ts"
       ],
-      "@nordri/job-finder/resume-record-identity": [
+      "@nestor/job-finder/resume-record-identity": [
         "../../packages/job-finder/src/resume-record-identity.ts"
       ],
       "@renderer/*": ["src/renderer/src/*"]

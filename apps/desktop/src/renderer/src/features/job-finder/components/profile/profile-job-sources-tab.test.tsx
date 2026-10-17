@@ -16,7 +16,7 @@ import {
   type DiscoveryRunRecord,
   type SourceAccessPrompt,
   type SourceDebugRunDetails,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createSearchPreferencesEditorValues,
   type SearchPreferencesEditorValues,
@@ -25,7 +25,7 @@ import { buildJobSourceProgress } from "../../lib/profile-screen-view-model";
 import {
   deriveEnabledSourceHealthCounts,
   deriveSourceHealthSignals,
-} from "@nordri/job-finder/source-health";
+} from "@nestor/job-finder/source-health";
 import {
   JOB_SOURCES_PAGE_SIZE,
   parseJobSourceUrls,
@@ -502,7 +502,7 @@ describe("ProfileJobSourcesTab", () => {
     );
 
     // The Home dashboard derives identical numbers from the same workspace
-    // state through the shared `@nordri/job-finder/source-health`
+    // state through the shared `@nestor/job-finder/source-health`
     // classifier; assert the rendered cards agree with it exactly.
     const expectedCounts = deriveEnabledSourceHealthCounts(
       targets,

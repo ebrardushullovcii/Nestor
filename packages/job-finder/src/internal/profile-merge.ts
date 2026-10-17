@@ -1,15 +1,15 @@
-import { normalizePublicLinkUrl } from "@nordri/contracts";
+import { normalizePublicLinkUrl } from "@nestor/contracts";
 import type {
   ResumeProfileExtraction,
   TailoredResumeDraft,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import {
   CandidateProfileSchema,
   JobSearchPreferencesSchema,
   type CandidateProfile,
   type JobSearchPreferences,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   areEquivalentEducationRecords,
   areEquivalentExperienceRecords,

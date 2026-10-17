@@ -5,7 +5,7 @@ import {
   type SourceDebugRunRecord,
   type SourceDebugWorkerAttempt,
   type SourceInstructionArtifact,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   collectAttemptInstructionGuidance,
   filterSourceDebugWarnings,

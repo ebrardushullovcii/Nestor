@@ -1,7 +1,7 @@
 import type {
   SavedJob,
   SavedJobDiscoveryProvenance,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * One job, seen on several sources (ADR 0030).

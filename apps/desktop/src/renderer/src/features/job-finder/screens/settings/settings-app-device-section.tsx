@@ -4,7 +4,7 @@ import {
   type AppearanceTheme,
   type JobFinderSettings,
   type UpdateWorkspaceBehaviorInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { ToggleField } from "../../components/toggle-field";
 import {
   applyAppearancePreference,
@@ -219,7 +219,7 @@ export function SettingsAppDeviceSection({
         <p className="text-sm text-foreground-soft">
           Use View → Zoom In to make text bigger, Zoom Out to make it smaller,
           or Actual Size to reset it. Your chosen size is remembered when you
-          reopen Nordri.
+          reopen Nestor.
         </p>
       </div>
       {onUpdateWorkspaceBehavior ? (

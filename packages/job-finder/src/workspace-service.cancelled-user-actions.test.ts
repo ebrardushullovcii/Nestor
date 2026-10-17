@@ -4,7 +4,7 @@ import {
   ApplyJobResultSchema,
   ApplyRunSchema,
   UserActionRequestSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 import { getApplicationCrmData } from "./internal/application-crm";
 import {

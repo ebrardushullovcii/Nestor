@@ -7,7 +7,7 @@ import { formatDuration } from "@renderer/features/job-finder/lib/job-finder-uti
 import type {
   SourceAccessPrompt,
   SourceDebugRunRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   LearnedInstructionIntelligenceSummary,
   LearnedInstructionField,

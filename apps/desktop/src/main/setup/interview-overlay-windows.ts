@@ -15,7 +15,7 @@ import type {
   InterviewProtectedSurface,
   InterviewProtectedSurfaceKind,
   InterviewWorkspaceView,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { getLiveAssistantService } from "../services/live-assistant";
 import { resolveBrandIconPaths } from "./brand-icons";
 import { resolveVisibleInterviewPopupInputMode } from "./interview-surface-mode";

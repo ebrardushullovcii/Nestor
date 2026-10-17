@@ -1,4 +1,4 @@
-import type { AssistantScreen } from "@nordri/contracts";
+import type { AssistantScreen } from "@nestor/contracts";
 import { z } from "zod";
 
 import {

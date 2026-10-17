@@ -7,7 +7,7 @@ import {
   type InterviewLiveSession,
   type InterviewWorkspaceSnapshot,
   type InterviewWorkspaceView,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { chmod, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";

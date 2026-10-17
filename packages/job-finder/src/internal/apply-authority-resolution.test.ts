@@ -1,10 +1,10 @@
-import { createInMemoryJobFinderRepository } from "@nordri/db";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { createSeed } from "../workspace-service.test-fixtures";
 import { readSalaryDisclosurePreference } from "./salary-disclosure-preference";
 import {
   ApplicationAuthorityEnvelopeSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 

@@ -32,7 +32,7 @@ const useCurrentWorkspace =
   isEnabled(process.env.JOB_FINDER_APP_BENCHMARK_USE_CURRENT_WORKSPACE);
 
 function resolveBrowserAgentEnabledEffective(env = process.env) {
-  return !isDisabled(env.NORDRI_BROWSER_AGENT);
+  return !isDisabled(env.NESTOR_BROWSER_AGENT);
 }
 
 if (useCurrentWorkspace) {
@@ -218,7 +218,7 @@ function buildSettings(baseSettings) {
 async function launchAppForScenario({ seededInput }) {
   const userDataDirectory = useCurrentWorkspace
     ? null
-    : await mkdtemp(path.join(os.tmpdir(), "nordri-app-benchmark-"));
+    : await mkdtemp(path.join(os.tmpdir(), "nestor-app-benchmark-"));
   const app = await electron.launch({
     args: ["."],
     cwd: desktopDir,
@@ -226,12 +226,12 @@ async function launchAppForScenario({ seededInput }) {
       ...process.env,
       ...(useCurrentWorkspace
         ? {
-            NORDRI_ENABLE_TEST_API: "1",
-            NORDRI_TEST_API_USE_LIVE_AI: "1",
+            NESTOR_ENABLE_TEST_API: "1",
+            NESTOR_TEST_API_USE_LIVE_AI: "1",
           }
         : {}),
       ...(userDataDirectory
-        ? { NORDRI_USER_DATA_DIR: userDataDirectory }
+        ? { NESTOR_USER_DATA_DIR: userDataDirectory }
         : {}),
     },
   });
@@ -275,7 +275,7 @@ async function launchAppForScenario({ seededInput }) {
 
 async function waitForJobFinderBridge(window, timeout = 15000) {
   await window.waitForFunction(
-    () => Boolean(window.nordri?.jobFinder),
+    () => Boolean(window.nestor?.jobFinder),
     undefined,
     { timeout },
   );
@@ -317,18 +317,18 @@ async function resolveUsableWindow(app, preferredWindow = null) {
 
 async function seedWorkspace(window, input) {
   await window.evaluate(async ({ profile, searchPreferences, settings }) => {
-    await window.nordri.jobFinder.saveWorkspaceInputs({
+    await window.nestor.jobFinder.saveWorkspaceInputs({
       profile,
       searchPreferences,
     });
-    await window.nordri.jobFinder.saveSettings(settings);
-    return window.nordri.jobFinder.getWorkspace();
+    await window.nestor.jobFinder.saveSettings(settings);
+    return window.nestor.jobFinder.getWorkspace();
   }, input);
 }
 
 async function getWorkspace(window) {
   return window.evaluate(async () =>
-    window.nordri.jobFinder.getWorkspace(),
+    window.nestor.jobFinder.getWorkspace(),
   );
 }
 
@@ -377,13 +377,13 @@ async function resetDiscoveryState(window) {
   };
 
   await window.evaluate(async (state) => {
-    if (!window.nordri.jobFinder.test?.resetWorkspaceState) {
+    if (!window.nestor.jobFinder.test?.resetWorkspaceState) {
       throw new Error(
         "Current-workspace benchmark reset requires desktop test API support.",
       );
     }
 
-    return window.nordri.jobFinder.test.resetWorkspaceState(state);
+    return window.nestor.jobFinder.test.resetWorkspaceState(state);
   }, resetState);
 
   return originalWorkspaceSnapshot;
@@ -391,13 +391,13 @@ async function resetDiscoveryState(window) {
 
 async function restoreWorkspaceSnapshot(window, snapshot) {
   await window.evaluate(async (state) => {
-    if (!window.nordri.jobFinder.test?.resetWorkspaceState) {
+    if (!window.nestor.jobFinder.test?.resetWorkspaceState) {
       throw new Error(
         "Current-workspace benchmark restore requires desktop test API support.",
       );
     }
 
-    return window.nordri.jobFinder.test.resetWorkspaceState(state);
+    return window.nestor.jobFinder.test.resetWorkspaceState(state);
   }, snapshot);
 }
 
@@ -453,7 +453,7 @@ async function withScopedCurrentWorkspaceTargets(
   const saveScopedTargets = async (targetWindow) =>
     targetWindow.evaluate(
       async ({ profile, searchPreferences }) =>
-        window.nordri.jobFinder.saveWorkspaceInputs({
+        window.nestor.jobFinder.saveWorkspaceInputs({
           profile,
           searchPreferences,
         }),
@@ -478,7 +478,7 @@ async function withScopedCurrentWorkspaceTargets(
     await activeWindow
       .evaluate(
         async ({ profile, searchPreferences }) =>
-          window.nordri.jobFinder.saveWorkspaceInputs({
+          window.nestor.jobFinder.saveWorkspaceInputs({
             profile,
             searchPreferences,
           }),
@@ -793,14 +793,14 @@ async function executeBenchmarkPairScenarios({
         async () => {
           const snapshot = await scopedWindow.evaluate(
             async (targetId) =>
-              window.nordri.jobFinder.runSourceDebug(targetId),
+              window.nestor.jobFinder.runSourceDebug(targetId),
             target.id,
           );
           const latestRunId = snapshot?.recentSourceDebugRuns?.[0]?.id ?? null;
           const details = latestRunId
             ? await scopedWindow.evaluate(
                 async (runId) =>
-                  window.nordri.jobFinder.getSourceDebugRunDetails(runId),
+                  window.nestor.jobFinder.getSourceDebugRunDetails(runId),
                 latestRunId,
               )
             : null;
@@ -838,7 +838,7 @@ async function executeBenchmarkPairScenarios({
         () =>
           scopedWindow.evaluate(
             async (targetId) =>
-              window.nordri.jobFinder.runAgentDiscovery(
+              window.nestor.jobFinder.runAgentDiscovery(
                 undefined,
                 targetId,
               ),
@@ -915,7 +915,7 @@ async function runCurrentWorkspaceRunAllScenario(app, window, targets) {
         targets.map((target) => target.id),
         (scopedWindow) =>
           scopedWindow.evaluate(async () =>
-            window.nordri.jobFinder.runAgentDiscovery(),
+            window.nestor.jobFinder.runAgentDiscovery(),
           ),
         resetWorkspaceSnapshot,
       ),
@@ -973,7 +973,7 @@ async function runRunAllScenario(targets) {
         },
     runner: async (window) =>
       window.evaluate(async () =>
-        window.nordri.jobFinder.runAgentDiscovery(),
+        window.nestor.jobFinder.runAgentDiscovery(),
       ),
     scopeCurrentWorkspaceTargets: true,
   });
@@ -1039,8 +1039,8 @@ async function main() {
         cwd: desktopDir,
         env: {
           ...process.env,
-          NORDRI_ENABLE_TEST_API: "1",
-          NORDRI_TEST_API_USE_LIVE_AI: "1",
+          NESTOR_ENABLE_TEST_API: "1",
+          NESTOR_TEST_API_USE_LIVE_AI: "1",
         },
       });
 
@@ -1123,7 +1123,7 @@ async function main() {
       "These benchmarks run through the desktop Electron app and preload bridge, not the older service-only 013 harness.",
       ...(useCurrentWorkspace
         ? [
-            "Desktop test API is enabled for current-workspace reuse, with live AI/runtime forced through NORDRI_TEST_API_USE_LIVE_AI.",
+            "Desktop test API is enabled for current-workspace reuse, with live AI/runtime forced through NESTOR_TEST_API_USE_LIVE_AI.",
           ]
         : [
             "Desktop test API is intentionally not enabled here so the configured live AI/runtime path remains active.",
@@ -1136,12 +1136,12 @@ async function main() {
     ],
     useCurrentWorkspace,
     browserAgentEnabled:
-      process.env.NORDRI_BROWSER_AGENT ?? "(default=true)",
+      process.env.NESTOR_BROWSER_AGENT ?? "(default=true)",
     browserAgentEnabledEffective: resolveBrowserAgentEnabledEffective(),
     browserHeadless:
-      process.env.NORDRI_BROWSER_HEADLESS ?? "(default=false)",
+      process.env.NESTOR_BROWSER_HEADLESS ?? "(default=false)",
     browserHeadlessEffective: isEnabled(
-      process.env.NORDRI_BROWSER_HEADLESS,
+      process.env.NESTOR_BROWSER_HEADLESS,
     ),
     outputLabel,
     results,

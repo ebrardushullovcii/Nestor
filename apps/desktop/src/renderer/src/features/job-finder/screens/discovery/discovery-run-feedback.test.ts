@@ -2,7 +2,7 @@ import {
   DISCOVERY_NO_JOB_SITES_MESSAGE,
   DiscoveryRunRecordSchema,
   buildDiscoveryCardOnlyEvidenceWarning,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import {
   createDiscoveryRunCancelledFeedback,

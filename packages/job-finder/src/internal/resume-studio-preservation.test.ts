@@ -1,4 +1,4 @@
-import { completeTailoredResumeDraft } from "@nordri/ai-providers";
+import { completeTailoredResumeDraft } from "@nestor/ai-providers";
 import { describe, expect, test } from "vitest";
 import { sanitizeResumeDraft } from "./resume-workspace-helpers";
 import { createSeed } from "../workspace-service.test-support";

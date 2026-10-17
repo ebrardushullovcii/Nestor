@@ -16,19 +16,19 @@ describe("getTestWorkspaceOpeningHoldMs", () => {
   it("uses a bounded integer hold when the desktop test API is enabled", () => {
     expect(
       getTestWorkspaceOpeningHoldMs({
-        NORDRI_ENABLE_TEST_API: "1",
+        NESTOR_ENABLE_TEST_API: "1",
         [TEST_WORKSPACE_OPENING_HOLD_ENV]: "1200",
       }),
     ).toBe(1200);
     expect(
       getTestWorkspaceOpeningHoldMs({
-        NORDRI_ENABLE_TEST_API: "true",
+        NESTOR_ENABLE_TEST_API: "true",
         [TEST_WORKSPACE_OPENING_HOLD_ENV]: "9000",
       }),
     ).toBe(5000);
     expect(
       getTestWorkspaceOpeningHoldMs({
-        NORDRI_ENABLE_TEST_API: "1",
+        NESTOR_ENABLE_TEST_API: "1",
         [TEST_WORKSPACE_OPENING_HOLD_ENV]: "2.5",
       }),
     ).toBe(0);

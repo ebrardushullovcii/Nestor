@@ -1,4 +1,4 @@
-import type { ApplyPageSession } from "@nordri/contracts";
+import type { ApplyPageSession } from "@nestor/contracts";
 import type { Page } from "playwright";
 import type { ApplicationPreparationLease } from "./application-preparation-scheduler";
 

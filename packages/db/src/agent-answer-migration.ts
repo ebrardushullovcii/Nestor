@@ -4,7 +4,7 @@ import {
   type ApplicationQuestionRecord,
   type ApplicationAnswerRecord,
   type ApplicationReviewCard,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /** Old automatic answer memory is kept for the person to review, never treated as their fact. */
 export function quarantineAgentAnswers(

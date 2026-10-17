@@ -3,7 +3,7 @@ import {
   type ApplicationAnswerRecord,
   type ApplicationQuestionRecord,
   type ApplicationReviewCard,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 const SAYS_YES = /^(yes|true|agree|i agree|accept|checked|on|1)\b/iu;
 

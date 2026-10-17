@@ -56,7 +56,7 @@ import {
   type SaveJobSearchCampaignInput,
   type TailoredAsset,
   type ToggleCampaignRuleInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { createMonotonicTimestamp } from "./resume-draft-commit-support";
 import { countDiscoveryStrongMatches } from "../discovery-result-bands";

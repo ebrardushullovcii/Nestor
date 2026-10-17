@@ -5,8 +5,8 @@ import {
   SavedJobSchema,
   type JobSearchCampaign,
   type SaveJobSearchCampaignInput,
-} from "@nordri/contracts";
-import type { JobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import type { JobFinderRepository } from "@nestor/db";
 import { mergeSavedJobs } from "./internal/workspace-discovery-state-helpers";
 import { createJobFinderWorkspaceService } from "./index";
 import { createWorkspaceServiceHarness } from "./workspace-service.test-harness";

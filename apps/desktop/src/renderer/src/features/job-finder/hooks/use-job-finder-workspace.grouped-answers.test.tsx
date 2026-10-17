@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -26,7 +26,7 @@ describe("useJobFinderWorkspace grouped manual-answer actions", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         ping: vi.fn(() => Promise.resolve({ platform: "win32" as const })),
@@ -37,12 +37,12 @@ describe("useJobFinderWorkspace grouped manual-answer actions", () => {
           applyGroupedManualAnswer,
           snoozeGroupedDecision,
         },
-      } as unknown as Window["nordri"],
+      } as unknown as Window["nestor"],
     });
   });
 
   afterEach(() => {
-    Reflect.deleteProperty(window, "nordri");
+    Reflect.deleteProperty(window, "nestor");
   });
 
   it("projects a grouped manual answer and commits the returned snapshot", async () => {

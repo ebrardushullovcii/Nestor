@@ -37,14 +37,14 @@ import {
   type SavedJob,
   SetCompanyPreferenceInputSchema,
   type SetCompanyPreferenceInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { buildJobIdentityAliases, type JobIdentityInput } from "./job-identity";
 // ---------------------------------------------------------------------------
 // Normalization
 // ---------------------------------------------------------------------------
 
-export { normalizeCompanyName } from "@nordri/contracts";
+export { normalizeCompanyName } from "@nestor/contracts";
 
 /**
  * Normalizes an employer domain for exact comparison: lowercase, trimmed, a

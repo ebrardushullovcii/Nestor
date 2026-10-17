@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { CompanyEntity, ReviewCompanyMergeInput } from "@nordri/contracts";
+import type { CompanyEntity, ReviewCompanyMergeInput } from "@nestor/contracts";
 import { CompaniesScreen } from "./companies-screen";
 
 afterEach(() => {

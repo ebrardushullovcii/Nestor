@@ -18,7 +18,7 @@ import {
   type ProjectGroupedManualAnswerCommand,
   type SnoozeGroupedDecisionInput,
   type UserActionCommandInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ActionsScreen, QuestionAnswerForm } from "./actions-screen";

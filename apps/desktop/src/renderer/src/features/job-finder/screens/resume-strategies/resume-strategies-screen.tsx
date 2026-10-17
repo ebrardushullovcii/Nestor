@@ -6,7 +6,7 @@ import type {
   ResumeStrategyEvidenceBoundaries,
   SaveResumeStrategyInput,
   SetCampaignResumeStrategyDefaultInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
 import { EmptyState } from "../../components/empty-state";
@@ -93,9 +93,9 @@ function getSafeShortlistedReturnPath(value: string | null): string | null {
   }
 
   try {
-    const parsed = new URL(value, "https://nordri.internal");
+    const parsed = new URL(value, "https://nestor.internal");
     if (
-      parsed.origin !== "https://nordri.internal" ||
+      parsed.origin !== "https://nestor.internal" ||
       parsed.pathname !== "/job-finder/review-queue"
     ) {
       return null;

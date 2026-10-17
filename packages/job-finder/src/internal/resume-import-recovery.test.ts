@@ -4,7 +4,7 @@ import {
   ResumeImportRunSchema,
   isInterruptedResumeImportRun,
   type ResumeImportRun,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   clearSettledVisionDeferredWarnings,
   interruptedTextImportMessage,

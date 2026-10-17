@@ -5,7 +5,7 @@ import { afterEach, expect, test } from "vitest";
 import {
   CandidateProfileSchema,
   normalizePublicLinkUrl,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createProfileEditorValues,
   buildProfilePayload,

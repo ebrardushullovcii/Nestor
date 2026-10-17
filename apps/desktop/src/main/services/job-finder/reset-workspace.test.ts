@@ -1,6 +1,6 @@
 import path from "node:path";
 import type * as FsPromises from "node:fs/promises";
-import type * as ContractsModule from "@nordri/contracts";
+import type * as ContractsModule from "@nestor/contracts";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const {
@@ -127,7 +127,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-vi.mock("@nordri/contracts", async (importOriginal) => ({
+vi.mock("@nestor/contracts", async (importOriginal) => ({
   ...(await importOriginal<typeof ContractsModule>()),
   JobFinderWorkspaceSnapshotSchema: {
     parse: (value: unknown) => value,

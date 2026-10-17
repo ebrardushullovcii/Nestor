@@ -2,8 +2,8 @@ import {
   createStubBrowserSessionRuntime,
   type AgentDiscoveryOptions,
   type BrowserSessionRuntime,
-} from "@nordri/browser-runtime";
-import { DiscoveryRunResultSchema } from "@nordri/contracts";
+} from "@nestor/browser-runtime";
+import { DiscoveryRunResultSchema } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 
 import type { EmbeddedBrowser } from "./embedded-browser";
@@ -11,7 +11,7 @@ import {
   resolveSourceAccessProbeTab,
   withEmbeddedBrowserActivity,
 } from "./embedded-browser-runtime";
-import { describeApplicationPreparationProgress } from "@nordri/job-finder";
+import { describeApplicationPreparationProgress } from "@nestor/job-finder";
 
 describe("withEmbeddedBrowserActivity", () => {
   test("terminal cleanup reaches the host even when its automation page was detached", async () => {

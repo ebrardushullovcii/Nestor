@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { JobFinderIntelligenceSafeguardsSchema } from "@nordri/contracts";
+import { JobFinderIntelligenceSafeguardsSchema } from "@nestor/contracts";
 import { projectPlanSafeguardPauses } from "./plan-safeguard-pauses";
 
 test("projects only active plan pauses and removes dismissed pauses", () => {

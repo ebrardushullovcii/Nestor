@@ -1,19 +1,19 @@
 import type {
   BrowserSessionRuntime,
   OpenBrowserSessionOptions,
-} from "@nordri/browser-runtime";
+} from "@nestor/browser-runtime";
 import type {
   ApplyExecutionResult,
   BrowserSessionState,
   DiscoveryRunResult,
   JobSource,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   classifySourceAccess,
   collectVisibleAccessSignals,
   type VisibleAccessSignals,
-} from "@nordri/browser-runtime";
-import { describeApplicationPreparationProgress } from "@nordri/job-finder";
+} from "@nestor/browser-runtime";
+import { describeApplicationPreparationProgress } from "@nestor/job-finder";
 import { browserDisplayUrl } from "./browser-navigation";
 import type { EmbeddedBrowser } from "./embedded-browser";
 

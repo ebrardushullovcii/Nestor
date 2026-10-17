@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   JobFinderIntelligenceStateSchema,
   type JobFinderIntelligenceState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { getSingletonValue } from "./state";
 import { freezeProjection } from "./saved-job-projection";
 

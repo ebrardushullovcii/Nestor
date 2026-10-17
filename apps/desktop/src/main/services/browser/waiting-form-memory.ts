@@ -1,4 +1,4 @@
-import type { WaitingFormMemory } from "@nordri/contracts";
+import type { WaitingFormMemory } from "@nestor/contracts";
 
 // R3 measured about 470 MB for 7–10 renderers. Allow 768 MiB for retained
 // forms, with 96 MiB reserved before admitting another working tab. Keep

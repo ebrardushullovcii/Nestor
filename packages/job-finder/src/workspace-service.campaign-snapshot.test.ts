@@ -3,7 +3,7 @@ import {
   ApplyJobResultSchema,
   ApplyRunSchema,
   UserActionRequestSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import { createWorkspaceServiceHarness } from "./workspace-service.test-harness";

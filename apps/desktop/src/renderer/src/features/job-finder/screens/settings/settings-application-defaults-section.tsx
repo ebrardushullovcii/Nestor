@@ -5,7 +5,7 @@ import type {
   JobFinderSettings,
   ResumeTemplateDefinition,
   UpdateApplicationDefaultsInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Field, FieldLabel } from "@renderer/components/ui/field";
 import { FormSelect } from "../../components/form-select";
 import { ResumeThemePicker } from "../../components/resume-theme-picker";

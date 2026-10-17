@@ -1,5 +1,5 @@
 import { LIST_DETAIL_COLUMNS_CLASS } from "../../components/list-detail-columns";
-import { projectApplicationRecordsActivity } from "@nordri/contracts";
+import { projectApplicationRecordsActivity } from "@nestor/contracts";
 import type { ReactNode } from "react";
 import { useQuestionAnswerDrafts } from "../actions/use-question-answer-drafts";
 import { isSameSiteApplicationActive } from "../actions/actions-screen";
@@ -25,12 +25,12 @@ import type {
   JobFinderApplyRunDetailsQuery,
   JobFinderExactApplicationTarget,
   UserActionCommandInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   isListableCompanyName,
   isApplicationTrackedAsSentByPerson,
   PREPARED_PAGE_CLOSED_SUMMARY,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
 import { LockedScreenLayout } from "../../components/locked-screen-layout";

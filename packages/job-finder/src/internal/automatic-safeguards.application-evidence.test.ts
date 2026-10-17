@@ -1,4 +1,4 @@
-import { ApplyJobResultSchema, ApplyRunSchema } from "@nordri/contracts";
+import { ApplyJobResultSchema, ApplyRunSchema } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import { deriveApplicationFailureEvidence } from "./automatic-safeguards";

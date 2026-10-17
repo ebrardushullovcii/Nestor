@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { SourceDebugRunDetails } from "@nordri/contracts";
+import type { SourceDebugRunDetails } from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProfileSourceDebugReviewModal } from "./profile-source-debug-review-modal";
 

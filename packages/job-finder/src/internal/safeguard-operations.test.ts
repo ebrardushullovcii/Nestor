@@ -15,7 +15,7 @@ import {
   type ListingSignalRecord,
   type PreparedBatchSampleReview,
   type SimultaneousApplicationConflict,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   applyCompanyApplicationEvidence,

@@ -9,7 +9,7 @@ import {
   JobSearchPreferencesSchema,
   createFreshStartCandidateProfile,
   PROFILE_SETUP_PLACEHOLDER_HEADLINE,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createProfileEditorValues,
   createSearchPreferencesEditorValues,

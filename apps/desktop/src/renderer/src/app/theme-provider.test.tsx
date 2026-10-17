@@ -26,14 +26,14 @@ describe("ThemeProvider", () => {
     container?.remove();
     container = null;
     window.localStorage.clear();
-    Reflect.deleteProperty(window, "nordri");
+    Reflect.deleteProperty(window, "nestor");
     systemThemeOverride = null;
     vi.unstubAllGlobals();
   });
 
   function installThemeBridge() {
     Object.assign(window, {
-      nordri: {
+      nestor: {
         jobFinder: {
           test: {
             getSystemThemeOverride: () => systemThemeOverride,

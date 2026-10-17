@@ -2,11 +2,11 @@ import type {
   ApplicationRecord,
   CompanyEntity,
   JobListRow,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * Renderer-safe display projections for the Companies screens. These mirror
- * the authoritative pure operations in `@nordri/job-finder` (which the
+ * the authoritative pure operations in `@nestor/job-finder` (which the
  * main process uses) without pulling the job-finder package into the renderer
  * bundle. Semantics are intentionally identical: identity is only ever linked
  * through exact employer identity, and ambiguous near matches are surfaced

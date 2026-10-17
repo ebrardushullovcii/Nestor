@@ -1,4 +1,4 @@
-import type { ResumeDraftRevision } from "@nordri/contracts";
+import type { ResumeDraftRevision } from "@nestor/contracts";
 import type { DatabaseSync } from "node:sqlite";
 
 import { sortNewestFirst } from "./in-memory-repository-utils";

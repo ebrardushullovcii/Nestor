@@ -5,7 +5,7 @@ import {
   isApplicationWithdrawnByPerson,
   type ApplicationRecord,
   type JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   ApplyJobStateKind,
   ApplyMode,

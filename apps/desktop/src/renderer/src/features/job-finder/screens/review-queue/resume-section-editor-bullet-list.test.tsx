@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ResumeDraftBullet, ResumeDraftSection } from "@nordri/contracts";
+import type { ResumeDraftBullet, ResumeDraftSection } from "@nestor/contracts";
 import type { createResumeDraftPatch } from "./resume-section-editor-helpers";
 import { ResumeBulletListEditor } from "./resume-section-editor-bullet-list";
 import { ResumeSectionEditor } from "./resume-section-editor";

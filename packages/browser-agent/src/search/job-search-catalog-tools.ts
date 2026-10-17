@@ -1,9 +1,9 @@
-import { parseToolArguments, type AgentLoopTool } from "@nordri/agent-runtime";
+import { parseToolArguments, type AgentLoopTool } from "@nestor/agent-runtime";
 import {
   JobPostingSchema,
   ListingRejectionCategorySchema,
   type JobPosting,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /** The model selects existing records; it cannot invent or rewrite feed jobs. */
 export function createSearchCatalogTools(input: {

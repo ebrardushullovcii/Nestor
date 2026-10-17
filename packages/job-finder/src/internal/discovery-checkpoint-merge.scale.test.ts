@@ -2,7 +2,7 @@ import {
   JobPostingSchema,
   SavedJobSchema,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import { mergeDiscoveredPostings } from "./matching";

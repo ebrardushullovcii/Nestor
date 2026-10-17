@@ -58,7 +58,7 @@ import type {
   ResumeDraftPatch,
   SourceDebugRunDetails,
   UserActionCommandInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { PendingActionScope } from "./job-finder-pending-actions";
 import type {
   ActionState,

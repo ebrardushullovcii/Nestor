@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import type { JobSearchPreferences } from "@nordri/contracts";
-import type { ProfileCopilotPatchGroup } from "@nordri/contracts";
+import type { JobSearchPreferences } from "@nestor/contracts";
+import type { ProfileCopilotPatchGroup } from "@nestor/contracts";
 
 import { createDeterministicJobFinderAiClient } from "./index";
 import { createPreferences, createProfile } from "./test-fixtures";

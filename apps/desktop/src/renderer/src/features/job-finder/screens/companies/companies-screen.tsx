@@ -5,8 +5,8 @@ import type {
   CompanyPreference,
   ReviewCompanyMergeInput,
   JobListRow,
-} from "@nordri/contracts";
-import { isListableCompanyName } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { isListableCompanyName } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { EmptyState } from "../../components/empty-state";
 import {

@@ -1,7 +1,7 @@
 import { inferProfileTimeZone } from "@renderer/features/job-finder/lib/job-finder-timestamp-format";
 import { SearchPlanScope } from "@renderer/features/job-finder/screens/campaigns/search-plan-scope";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { projectPlanSafeguardPauses } from "@nordri/job-finder/plan-safeguard-pauses";
+import { projectPlanSafeguardPauses } from "@nestor/job-finder/plan-safeguard-pauses";
 import type { ReactNode } from "react";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
 import { describeSavedResumeLevel } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
@@ -41,12 +41,12 @@ import type {
   SetJobFinderActivityControlInput,
   UserActionCommandInput,
   UserActionRequestState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   AiBehaviorPreferenceSchema,
   ApplicationCrmSettingsSchema,
-} from "@nordri/contracts";
-import { isListableCompanyName } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { isListableCompanyName } from "@nestor/contracts";
 import { countActiveSafeguardBlockers } from "@renderer/features/job-finder/lib/safeguards-blocker-count";
 import { ApplicationsScreen } from "@renderer/features/job-finder/screens/applications/applications-screen";
 import type {
@@ -1412,7 +1412,7 @@ export function JobFinderDiscoveryRoute() {
         // The listing opens in the app's own browser (ADR 0017): the same
         // window the search used, so a sign-in it holds carries over.
         onOpenListing={(url) => {
-          void window.nordri.browser.command({ type: "open", url });
+          void window.nestor.browser.command({ type: "open", url });
         }}
         onAssessJobListing={context.onAssessJobListing}
         {...(context.onJudgeUnjudgedJobs
@@ -2856,7 +2856,7 @@ async function allowSiteSavesThenRetry(input: {
   onRetry: () => void;
 }): Promise<void> {
   const { host, onRetry } = input;
-  const api = window.nordri?.jobFinder;
+  const api = window.nestor?.jobFinder;
   if (!api || !host) {
     return;
   }

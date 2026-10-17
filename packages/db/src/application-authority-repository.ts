@@ -25,7 +25,7 @@ import {
   type SubmissionIdempotencyRecord,
   type SubmissionOutcomeRecord,
   type SubmissionPreflightRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createHash } from "node:crypto";
 
 import type {

@@ -1,4 +1,4 @@
-import type { JobSearchPreferences, SavedJob } from "@nordri/contracts";
+import type { JobSearchPreferences, SavedJob } from "@nestor/contracts";
 
 const GLOBAL_REMOTE_PREFERENCE_PATTERN =
   /^(?:remote(?:\s*[,/-]\s*(?:anywhere|worldwide|global))?|anywhere|worldwide|global)$/iu;

@@ -1,11 +1,11 @@
 import type {
   JobFinderSetResumeClaimConfirmationInput,
   ResumeClaimAssessment,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   isBlockingResumeClaimAssessment,
   resumeClaimOwnershipStatement,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 import {
   createAiClient,

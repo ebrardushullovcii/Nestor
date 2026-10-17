@@ -3,7 +3,7 @@
 import {
   JobListMatchAssessmentSchema,
   type JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   act,
   cleanup,
@@ -197,7 +197,7 @@ describe("JobFinderShell section navigation", () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
     scrollToMock.mockClear();
     scrollIntoViewMock.mockClear();
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         window: {
@@ -614,7 +614,7 @@ describe("JobFinderShell section navigation", () => {
     );
 
     const brand = document.querySelector<HTMLElement>("[data-desktop-brand]");
-    const brandName = screen.getByRole("img", { name: "Nordri" });
+    const brandName = screen.getByRole("img", { name: "Nestor" });
     const sectionNavigation = screen.getByRole("navigation", {
       name: "Job Finder sections",
     });
@@ -746,7 +746,7 @@ describe("JobFinderShell section navigation", () => {
       const lockup = document.querySelector<HTMLElement>(
         "[data-desktop-brand-lockup]",
       );
-      const wordmark = screen.getByRole("img", { name: "Nordri" });
+      const wordmark = screen.getByRole("img", { name: "Nestor" });
       expect(header?.className).toContain("overflow-visible");
       expect(lockup?.className).toContain("py-1");
       expect(wordmark.getAttribute("class")).toContain("block");
@@ -762,7 +762,7 @@ describe("JobFinderShell section navigation", () => {
   );
 
   it("keeps the macOS traffic-light inset when the window is maximized", async () => {
-    vi.mocked(window.nordri.window.getControlsState).mockResolvedValueOnce({
+    vi.mocked(window.nestor.window.getControlsState).mockResolvedValueOnce({
       ...windowControlsState,
       isMaximized: true,
     });
@@ -783,7 +783,7 @@ describe("JobFinderShell section navigation", () => {
   });
 
   it("moves the macOS wordmark fully left in native fullscreen", async () => {
-    vi.mocked(window.nordri.window.getControlsState).mockResolvedValueOnce({
+    vi.mocked(window.nestor.window.getControlsState).mockResolvedValueOnce({
       ...windowControlsState,
       isFullScreen: true,
       isMaximized: true,
@@ -1223,7 +1223,7 @@ describe("JobFinderShell section navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
 
     expect(shell?.dataset.sidebarCollapsed).toBe("true");
-    const collapsedWordmark = screen.getByRole("img", { name: "Nordri" });
+    const collapsedWordmark = screen.getByRole("img", { name: "Nestor" });
     const collapsedLockup = collapsedWordmark.closest<HTMLElement>(
       "[data-desktop-brand-lockup]",
     );
@@ -1252,7 +1252,7 @@ describe("JobFinderShell section navigation", () => {
       "min-[1440px]:pl-(--job-finder-side-width)",
     );
     expect(
-      window.localStorage.getItem("nordri.job-finder.sidebar-collapsed.v1"),
+      window.localStorage.getItem("nestor.job-finder.sidebar-collapsed.v1"),
     ).toBe("true");
 
     // Collapsing the rail does not move or shrink the module switch: it stays
@@ -1431,7 +1431,7 @@ describe("JobFinderShell section navigation", () => {
 
   it("names rail destinations after their visible labels and shares them through tooltips", async () => {
     window.localStorage.setItem(
-      "nordri.job-finder.sidebar-collapsed.v1",
+      "nestor.job-finder.sidebar-collapsed.v1",
       "true",
     );
     render(
@@ -1500,7 +1500,7 @@ describe("JobFinderShell section navigation", () => {
     );
 
     const initialMain = screen.getByRole("main", { name: "Find jobs" });
-    expect(document.title).toBe("Find jobs | Job Finder | Nordri");
+    expect(document.title).toBe("Find jobs | Job Finder | Nestor");
     expect(document.activeElement).toBe(initialMain);
     expect(screen.getByRole("status").textContent).toBe("Find jobs opened.");
 
@@ -1520,7 +1520,7 @@ describe("JobFinderShell section navigation", () => {
     );
 
     const settingsMain = screen.getByRole("main", { name: "Settings" });
-    expect(document.title).toBe("Settings | Job Finder | Nordri");
+    expect(document.title).toBe("Settings | Job Finder | Nestor");
     expect(document.activeElement).toBe(settingsMain);
     expect(settingsMain.className).toContain("outline-none");
     expect(screen.getByRole("status").textContent).toBe("Settings opened.");
@@ -1539,7 +1539,7 @@ describe("JobFinderShell section navigation", () => {
     );
 
     const main = screen.getByRole("main", { name: "Settings" });
-    expect(document.title).toBe("Settings | Job Finder | Nordri");
+    expect(document.title).toBe("Settings | Job Finder | Nestor");
     expect(document.activeElement).not.toBe(main);
     expect(scrollToMock).not.toHaveBeenCalled();
   });
@@ -1554,7 +1554,7 @@ describe("JobFinderShell section navigation", () => {
     );
 
     expect(screen.getByRole("main", { name: "Outcomes" })).toBeTruthy();
-    expect(document.title).toBe("Outcomes | Job Finder | Nordri");
+    expect(document.title).toBe("Outcomes | Job Finder | Nestor");
     expect(screen.getByRole("status").textContent).toBe("Outcomes opened.");
   });
 
@@ -2060,7 +2060,7 @@ describe("JobFinderShell compact nav responsive contract", () => {
     }
 
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         window: {
@@ -2450,7 +2450,7 @@ describe("JobFinderShell keyboard shortcuts", () => {
     }
 
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         window: {
@@ -2559,13 +2559,13 @@ describe("JobFinderShell keyboard shortcuts", () => {
     fireEvent.keyDown(document, { ctrlKey: true, key: "b" });
     expect(shell?.dataset.sidebarCollapsed).toBe("true");
     expect(
-      window.localStorage.getItem("nordri.job-finder.sidebar-collapsed.v1"),
+      window.localStorage.getItem("nestor.job-finder.sidebar-collapsed.v1"),
     ).toBe("true");
 
     fireEvent.keyDown(document, { metaKey: true, key: "b" });
     expect(shell?.dataset.sidebarCollapsed).toBe("false");
     expect(
-      window.localStorage.getItem("nordri.job-finder.sidebar-collapsed.v1"),
+      window.localStorage.getItem("nestor.job-finder.sidebar-collapsed.v1"),
     ).toBe("false");
 
     view.unmount();
@@ -2793,7 +2793,7 @@ describe("JobFinderShell responsive shell contract", () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
     scrollToMock.mockClear();
     scrollIntoViewMock.mockClear();
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         window: {
@@ -3601,7 +3601,7 @@ describe("compact navigation shares the header switcher's axis", () => {
     }
 
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         window: {

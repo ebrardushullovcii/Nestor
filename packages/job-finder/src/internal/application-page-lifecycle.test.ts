@@ -1,13 +1,13 @@
 import { releaseApplicationRecordAfterDismissedUserAction } from "./workspace-application-user-action";
 import { reconcileApplyRunAfterConfirmedSubmission } from "./workspace-apply-run-support";
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   ApplyJobResultSchema,
   ApplyRunSchema,
   ApplicationRecordSchema,
   UserActionRequestSchema,
   ApplicationPrivacyReceiptSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 import {
   createBrowserRuntime,

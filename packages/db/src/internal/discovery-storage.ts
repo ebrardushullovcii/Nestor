@@ -9,7 +9,7 @@ import {
   SavedJobSchema,
   type DiscoveryRunRecord,
   type JobFinderDiscoveryState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { normalizeLegacyDiscoveryState } from "./legacy";
 
 // The singleton contains only the small, frequently changed discovery fields.

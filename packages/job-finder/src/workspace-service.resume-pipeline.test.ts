@@ -1,4 +1,4 @@
-import { createOpenAiCompatibleJobFinderAiClient } from "@nordri/ai-providers";
+import { createOpenAiCompatibleJobFinderAiClient } from "@nestor/ai-providers";
 import { expect, test, vi } from "vitest";
 import {
   createSeed,

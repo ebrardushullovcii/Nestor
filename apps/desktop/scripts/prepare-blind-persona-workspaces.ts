@@ -29,7 +29,7 @@ import {
   createFreshStartCandidateProfile,
   createStarterJobDiscoveryTargets,
   deriveProfileSetupState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { _electron as electron } from "playwright";
 
 import {
@@ -130,7 +130,7 @@ export type LaunchSeedElectron = (input: {
 }) => Promise<ElectronSeedProcess>;
 
 interface SeedWindowGlobal {
-  nordri?: {
+  nestor?: {
     jobFinder?: {
       getWorkspace?(): Promise<unknown>;
       test?: {
@@ -171,10 +171,10 @@ const driverCdpFlag = "--driver-cdp";
 const startupWindowWidthFlag = "--window-width";
 const startupWindowHeightFlag = "--window-height";
 const startupZoomFactorFlag = "--zoom-factor";
-const startupWindowWidthEnvName = "NORDRI_STARTUP_WINDOW_WIDTH";
-const startupWindowHeightEnvName = "NORDRI_STARTUP_WINDOW_HEIGHT";
-const startupZoomFactorEnvName = "NORDRI_STARTUP_ZOOM_FACTOR";
-const testerSessionGeometryEnvName = "NORDRI_TESTER_SESSION_GEOMETRY";
+const startupWindowWidthEnvName = "NESTOR_STARTUP_WINDOW_WIDTH";
+const startupWindowHeightEnvName = "NESTOR_STARTUP_WINDOW_HEIGHT";
+const startupZoomFactorEnvName = "NESTOR_STARTUP_ZOOM_FACTOR";
+const testerSessionGeometryEnvName = "NESTOR_TESTER_SESSION_GEOMETRY";
 // Sensible launcher bounds: the desktop shell clamps the applied size to at
 // least 400px and the primary display work area, so requests below 400px or
 // beyond plausible display sizes would make the record lie about the result.
@@ -1165,13 +1165,13 @@ function minimalEnvironment(
     const value = ambient[name];
     if (value && !unsafeEnvironmentName.test(name)) env[name] = value;
   }
-  env.NORDRI_USER_DATA_DIR = path.resolve(userDataRoot);
-  env.NORDRI_TEST_API_USE_LIVE_AI = "0";
-  env.NORDRI_BROWSER_AGENT = "0";
-  env.NORDRI_BROWSER_HEADLESS = "1";
+  env.NESTOR_USER_DATA_DIR = path.resolve(userDataRoot);
+  env.NESTOR_TEST_API_USE_LIVE_AI = "0";
+  env.NESTOR_BROWSER_AGENT = "0";
+  env.NESTOR_BROWSER_HEADLESS = "1";
   env.JOB_FINDER_PREPARE_ONLY_AUTHORIZE_INTERMEDIATE_WRITES = "0";
   env.JOB_FINDER_COMPLETE_FLOW_AUTHORIZED_WRITE_DIAGNOSTIC = "0";
-  if (testApi) env.NORDRI_ENABLE_TEST_API = "1";
+  if (testApi) env.NESTOR_ENABLE_TEST_API = "1";
   return env;
 }
 
@@ -1704,14 +1704,14 @@ async function openAndLoad(app: ElectronSeedProcess): Promise<{
   await page.waitForFunction(
     () =>
       Boolean(
-        (globalThis as unknown as SeedWindowGlobal).nordri?.jobFinder
+        (globalThis as unknown as SeedWindowGlobal).nestor?.jobFinder
           ?.getWorkspace,
       ),
     undefined,
     { timeout: 30_000 },
   );
   return page.evaluate(async () => {
-    const api = (globalThis as unknown as SeedWindowGlobal).nordri
+    const api = (globalThis as unknown as SeedWindowGlobal).nestor
       ?.jobFinder;
     if (!api?.getWorkspace)
       throw new Error("Normal workspace API is unavailable.");
@@ -1819,14 +1819,14 @@ async function seedPersona(
       await page.waitForFunction(
         () =>
           Boolean(
-            (globalThis as unknown as SeedWindowGlobal).nordri?.jobFinder
+            (globalThis as unknown as SeedWindowGlobal).nestor?.jobFinder
               ?.test?.resetWorkspaceState,
           ),
         undefined,
         { timeout: 30_000 },
       );
       resetSnapshot = await page.evaluate(async (repositoryState) => {
-        const jobFinder = (globalThis as unknown as SeedWindowGlobal).nordri
+        const jobFinder = (globalThis as unknown as SeedWindowGlobal).nestor
           ?.jobFinder;
         const workspaceApi = jobFinder?.getWorkspace;
         if (!workspaceApi)
@@ -3058,7 +3058,7 @@ function assertTesterStartupZoomFactor(value: number, label: string): number {
   return value;
 }
 
-// Ambient NORDRI_STARTUP_* / marker values are stripped defensively (the
+// Ambient NESTOR_STARTUP_* / marker values are stripped defensively (the
 // allowlisted hardening already excludes them), then re-added strictly from
 // the validated flags together with the tester session marker. The desktop
 // shell ignores startup-geometry variables entirely without the marker.
@@ -3544,9 +3544,9 @@ tester window size (integers ${startupWindowMinPx}..${startupWindowMaxPx}; both 
 together) and --zoom-factor <n> requests native renderer zoom (finite
 ${startupZoomMin}..${startupZoomMax}, applied by the desktop shell via webContents.setZoomFactor
 after the document is ready; never CSS zoom or a --force-device-scale-factor
-override). The values are injected as NORDRI_STARTUP_WINDOW_WIDTH,
-NORDRI_STARTUP_WINDOW_HEIGHT, and NORDRI_STARTUP_ZOOM_FACTOR together
-with the NORDRI_TESTER_SESSION_GEOMETRY=1 session marker only after
+override). The values are injected as NESTOR_STARTUP_WINDOW_WIDTH,
+NESTOR_STARTUP_WINDOW_HEIGHT, and NESTOR_STARTUP_ZOOM_FACTOR together
+with the NESTOR_TESTER_SESSION_GEOMETRY=1 session marker only after
 allowlisted environment hardening (any ambient copies of these keys are
 stripped first), recorded under startupGeometry in the launch record with the
 requested request separated from the measured applied window truth, and
@@ -3600,7 +3600,7 @@ function assertKnownCliArgs(
 // whitespace padding, signs, exponents, or trailing units.
 // Canonical numeric syntax shared with the desktop shell parser: no
 // whitespace padding, signs, decimals, or exponent notation. Leading zeros
-// stay tolerated exactly like the NORDRI_STARTUP_* dimension syntax.
+// stay tolerated exactly like the NESTOR_STARTUP_* dimension syntax.
 function canonicalTesterAttempt(value: string): number {
   if (!/^\d+$/u.test(value)) {
     throw new Error(

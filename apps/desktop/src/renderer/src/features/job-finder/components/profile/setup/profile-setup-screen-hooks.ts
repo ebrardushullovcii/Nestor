@@ -5,7 +5,7 @@ import type {
   JobSearchPreferences,
   ProfileSetupState,
   ResumeImportFieldCandidateSummary,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type { ProfileBackgroundArrays } from "../profile-field-array-types";
 import {
   buildSearchPreferencesPayload,

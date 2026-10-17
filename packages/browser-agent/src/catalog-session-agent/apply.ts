@@ -3,7 +3,7 @@ import type {
   ApplyRecoveryContext,
   CandidateProfile,
   SavedJob,
-} from '@nordri/contracts'
+} from '@nestor/contracts'
 import { normalizeText, tokenize } from './shared'
 
 function buildProfileAnswerProvenance(input: {

@@ -1,4 +1,4 @@
-import type { ProfileSetupState } from "@nordri/contracts";
+import type { ProfileSetupState } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 import { buildProfileSectionStarterQuestion } from "./profile-copilot-prompts";
 

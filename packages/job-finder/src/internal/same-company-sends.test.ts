@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createInMemoryJobFinderRepository } from "@nordri/db";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 import {
   JobFinderIntelligenceStateSchema,
   ApplicationRecordSchema,
   SavedJobSchema,
   ApplyJobResultSchema,
   SafeguardMutationInputSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createSeed } from "../workspace-service.test-support";
 import {
   checkSameCompanySends,

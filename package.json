@@ -1,11 +1,11 @@
 {
-  "name": "nordri",
+  "name": "nestor",
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@10.8.0",
   "scripts": {
     "dev": "node scripts/run-turbo.mjs dev --parallel",
-    "desktop:dev": "pnpm --filter @nordri/desktop dev",
+    "desktop:dev": "pnpm --filter @nestor/desktop dev",
     "build": "node scripts/run-turbo.mjs build",
     "format": "prettier . --write --ignore-unknown",
     "format:check": "prettier . --check --ignore-unknown",

@@ -4,8 +4,8 @@ import type {
   ResumeDraft,
   ResumeDraftOrigin,
   ResumeValidationResult,
-} from "@nordri/contracts";
-import { isBlockingResumeClaimAssessment } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { isBlockingResumeClaimAssessment } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { StatusBadge } from "../../components/status-badge";
 

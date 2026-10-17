@@ -5,7 +5,7 @@ import {
   type DiscoveryLedgerEntry,
   type ListingSignalRecord,
   type SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 
 import { createSeed } from "../workspace-service.test-support";

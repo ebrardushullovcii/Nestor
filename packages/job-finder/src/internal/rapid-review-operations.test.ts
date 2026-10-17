@@ -6,7 +6,7 @@ import {
   type RapidReviewDecision,
   type RapidReviewDecisionLog,
   type RapidReviewUndo,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createSeed } from "../workspace-service.test-fixtures";
 import {
   appendRapidReviewDecision,

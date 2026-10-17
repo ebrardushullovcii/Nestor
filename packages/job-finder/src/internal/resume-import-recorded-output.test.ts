@@ -1,7 +1,7 @@
 import { applyResolvedResumeImportCandidatesToWorkspace } from "./resume-import-apply";
 import { describe, expect, test } from "vitest";
-import { CandidateProfileSchema } from "@nordri/contracts";
-import type { ResumeImportTextStage } from "@nordri/contracts";
+import { CandidateProfileSchema } from "@nestor/contracts";
+import type { ResumeImportTextStage } from "@nestor/contracts";
 import {
   createAiClient,
   createSeed,

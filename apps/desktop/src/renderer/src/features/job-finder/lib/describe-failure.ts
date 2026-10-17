@@ -338,16 +338,16 @@ export function describeWorkspaceRestoreFailure(
   const detail = failure.technicalDetails ?? "";
   const sentences: readonly [string, string][] = [
     [
-      "version Nordri cannot restore",
-      "This export uses a version Nordri cannot restore. Your workspace was kept.",
+      "version Nestor cannot restore",
+      "This export uses a version Nestor cannot restore. Your workspace was kept.",
     ],
     [
       "older export does not contain",
       "This older export does not contain the full workspace needed to restore it. Make a new export from the original workspace. Your current workspace was kept.",
     ],
     [
-      "not a Nordri workspace export",
-      "This file is not a Nordri workspace export. Choose an export made in Settings.",
+      "not a Nestor workspace export",
+      "This file is not a Nestor workspace export. Choose an export made in Settings.",
     ],
     [
       "incomplete or damaged",

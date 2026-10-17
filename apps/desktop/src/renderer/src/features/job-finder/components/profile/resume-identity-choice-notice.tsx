@@ -1,8 +1,8 @@
-import type { CandidateProfile } from "@nordri/contracts";
+import type { CandidateProfile } from "@nestor/contracts";
 import {
   describeResumeIdentityOwnershipChoice,
   resolveResumeIdentity,
-} from "@nordri/job-finder/resume-identity";
+} from "@nestor/job-finder/resume-identity";
 import { Button } from "@renderer/components/ui/button";
 
 // A quiet note, never a warning (N-020): resumes always print the profile's

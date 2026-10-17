@@ -2,7 +2,7 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { JobFinderDiagnosticExportResult } from "@nordri/contracts";
+import type { JobFinderDiagnosticExportResult } from "@nestor/contracts";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { SettingsSupportControls } from "./settings-support-controls";
 
@@ -30,7 +30,7 @@ describe("SettingsSupportControls", () => {
   function renderControls(
     exportDiagnostics: () => Promise<JobFinderDiagnosticExportResult>,
   ) {
-    Object.defineProperty(window, "nordri", {
+    Object.defineProperty(window, "nestor", {
       configurable: true,
       value: {
         jobFinder: {

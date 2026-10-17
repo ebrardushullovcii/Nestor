@@ -3,7 +3,7 @@ import type {
   ApplyRun,
   ApplyJobResult,
   JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /**
  * The parts of the workspace service "Apply to all" and "Try again for all"

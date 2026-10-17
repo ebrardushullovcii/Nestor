@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RecordOutcomeInput } from "@nordri/contracts";
+import type { RecordOutcomeInput } from "@nestor/contracts";
 import { ApplicationsOutcomeRecorder } from "./applications-outcome-recorder";
 
 const canonicalFieldTokens = [

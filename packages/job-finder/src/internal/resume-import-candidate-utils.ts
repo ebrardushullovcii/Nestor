@@ -2,13 +2,13 @@ import {
   ResumeImportExtractionStageSchema,
   buildCandidateConfidenceBreakdown,
   buildValuePreview,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import {
   ResumeImportFieldCandidateSchema,
   type ResumeDocumentBundle,
   type ResumeImportFieldCandidate,
   type ResumeImportFieldCandidateDraft,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { buildExtractionId } from "./profile-merge";
 

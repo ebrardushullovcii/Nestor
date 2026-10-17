@@ -1,7 +1,7 @@
-import type { AppearanceTheme } from '@nordri/contracts'
+import type { AppearanceTheme } from '@nestor/contracts'
 import { SYSTEM_THEME_CHANGE_EVENT } from '../../../shared/system-theme'
 
-export const STORAGE_KEY = 'nordri.appearance-theme'
+export const STORAGE_KEY = 'nestor.appearance-theme'
 export const DARK_QUERY = '(prefers-color-scheme: dark)'
 export { SYSTEM_THEME_CHANGE_EVENT }
 
@@ -12,8 +12,8 @@ export function readSystemThemeOverride(): ResolvedTheme | null {
     return null
   }
 
-  const nordriWindow = window as Window & {
-    nordri?: {
+  const nestorWindow = window as Window & {
+    nestor?: {
       jobFinder?: {
         test?: {
           getSystemThemeOverride?: () => ResolvedTheme | null
@@ -21,7 +21,7 @@ export function readSystemThemeOverride(): ResolvedTheme | null {
       }
     }
   }
-  const overrideValue = nordriWindow.nordri?.jobFinder?.test?.getSystemThemeOverride?.()
+  const overrideValue = nestorWindow.nestor?.jobFinder?.test?.getSystemThemeOverride?.()
 
   return overrideValue === 'dark' || overrideValue === 'light' ? overrideValue : null
 }

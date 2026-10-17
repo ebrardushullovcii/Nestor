@@ -3,7 +3,7 @@ import type {
   AssistantMessage,
   ApplicationQuestionRecord,
   ApplicationAnswerRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -17,7 +17,7 @@ import {
   type JobFinderDiagnosticExport,
   type JobFinderPerformanceSnapshot,
   type JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export function buildJobFinderDiagnosticExport(input: {
   workspace: JobFinderWorkspaceSnapshot;
@@ -152,7 +152,7 @@ export function buildJobFinderDiagnosticExport(input: {
 export function personalWorkspaceExportFileName(date = new Date()): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
-  return `nordri-workspace-${date.getFullYear()}-${month}-${day}.json`;
+  return `nestor-workspace-${date.getFullYear()}-${month}-${day}.json`;
 }
 
 /** Personal backup, separate from the redacted support report. No sign-in storage. */

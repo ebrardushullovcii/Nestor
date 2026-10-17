@@ -2,7 +2,7 @@ import type {
   JobFinderIntelligenceSafeguards,
   JobSearchCampaign,
   PlanSafeguardPause,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export const AUTOMATIC_DISCOVERY_FAILURE_PAUSE_ID =
   "automatic_discovery_failures";

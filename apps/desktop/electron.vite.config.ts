@@ -73,35 +73,35 @@ const osIntegrationPath = path.resolve(
 );
 
 const workspaceAliases = {
-  "@nordri/ai-providers": aiProvidersPath,
-  "@nordri/browser-agent": browserAgentPath,
-  "@nordri/browser-runtime": browserRuntimePath,
-  "@nordri/contracts": contractsPath,
-  "@nordri/core": corePath,
-  "@nordri/db": dbPath,
-  "@nordri/live-assistant": liveAssistantPath,
-  "@nordri/job-finder/assistant-attention": path.resolve(
+  "@nestor/ai-providers": aiProvidersPath,
+  "@nestor/browser-agent": browserAgentPath,
+  "@nestor/browser-runtime": browserRuntimePath,
+  "@nestor/contracts": contractsPath,
+  "@nestor/core": corePath,
+  "@nestor/db": dbPath,
+  "@nestor/live-assistant": liveAssistantPath,
+  "@nestor/job-finder/assistant-attention": path.resolve(
     currentDir,
     "../../packages/job-finder/src/assistant/attention.ts",
   ),
-  "@nordri/job-finder/discovery-ordering": jobFinderDiscoveryOrderingPath,
-  "@nordri/job-finder/discovery-result-bands":
+  "@nestor/job-finder/discovery-ordering": jobFinderDiscoveryOrderingPath,
+  "@nestor/job-finder/discovery-result-bands":
     jobFinderDiscoveryResultBandsPath,
-  "@nordri/job-finder/resume-record-identity":
+  "@nestor/job-finder/resume-record-identity":
     jobFinderResumeRecordIdentityPath,
-  "@nordri/job-finder/resume-identity": jobFinderResumeIdentityPath,
-  "@nordri/job-finder/apply-run-recovery": jobFinderApplyRunRecoveryPath,
-  "@nordri/job-finder/source-health": jobFinderSourceHealthPath,
-  "@nordri/job-finder/plan-safeguard-pauses":
+  "@nestor/job-finder/resume-identity": jobFinderResumeIdentityPath,
+  "@nestor/job-finder/apply-run-recovery": jobFinderApplyRunRecoveryPath,
+  "@nestor/job-finder/source-health": jobFinderSourceHealthPath,
+  "@nestor/job-finder/plan-safeguard-pauses":
     jobFinderPlanSafeguardPausesPath,
-  "@nordri/job-finder": jobFinderPath,
-  "@nordri/knowledge-base": knowledgeBasePath,
-  "@nordri/os-integration": osIntegrationPath,
+  "@nestor/job-finder": jobFinderPath,
+  "@nestor/knowledge-base": knowledgeBasePath,
+  "@nestor/os-integration": osIntegrationPath,
 };
 
 const mainWorkspaceAliases = {
   ...workspaceAliases,
-  "@nordri/job-finder/application-submission-runtime-main":
+  "@nestor/job-finder/application-submission-runtime-main":
     jobFinderApplicationSubmissionRuntimeMainPath,
 };
 

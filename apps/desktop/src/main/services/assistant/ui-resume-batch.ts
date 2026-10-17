@@ -1,7 +1,7 @@
 import type {
   AssistantResumeBatchState,
   ResumeBatchProviderBlock,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 /** The UI publishes its queue and checks this stop flag before each dispatch. */
 let batch: AssistantResumeBatchState | null = null;

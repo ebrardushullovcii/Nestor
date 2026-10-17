@@ -13,7 +13,7 @@ import type {
   AssistantAttachment,
   AssistantContextReference,
   AssistantEntityRef,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   composeContextReference,
@@ -32,7 +32,7 @@ import {
 export const ASSISTANT_SIDEBAR_MIN_WIDTH = 320;
 export const ASSISTANT_SIDEBAR_MAX_WIDTH = 480;
 export const ASSISTANT_SIDEBAR_DEFAULT_WIDTH = 400;
-const STORAGE_KEY = "nordri.assistant-sidebar.v1";
+const STORAGE_KEY = "nestor.assistant-sidebar.v1";
 
 interface StoredState {
   open: boolean;
@@ -237,7 +237,7 @@ export function AssistantProvider(props: { children: ReactNode }) {
       }
       let browser: AssistantContextReference["browser"] = null;
       try {
-        const state = await window.nordri?.browser?.getState();
+        const state = await window.nestor?.browser?.getState();
         const tab = state?.tabs.find((entry) => entry.id === state.activeTabId);
         if (
           state &&

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { ApplyAgentTimingSchema } from "@nordri/contracts";
-import type { RawApplyPage } from "@nordri/contracts";
+import { ApplyAgentTimingSchema } from "@nestor/contracts";
+import type { RawApplyPage } from "@nestor/contracts";
 import type { ApplyPageHands } from "./types";
 import { buildApplyFormObservation } from "./page-hands";
 import recordedPage from "./synthetic-page.snapshot.json";

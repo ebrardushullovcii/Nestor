@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { ResumeValidationResultSchema } from "@nordri/contracts";
+import { ResumeValidationResultSchema } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 import { createInMemoryJobFinderRepository } from "./index";
 import type { JobFinderRepository } from "./index";
@@ -23,7 +23,7 @@ for (const storage of ["memory", "file"] as const) {
     test("selects only requested drafts' latest results with stable timestamp ties and owned values", async () => {
       const temp =
         storage === "file"
-          ? await createTempRepository("nordri-latest-validation-")
+          ? await createTempRepository("nestor-latest-validation-")
           : null;
       const repo: JobFinderRepository = temp
         ? await temp.createRepository()
@@ -71,7 +71,7 @@ for (const storage of ["memory", "file"] as const) {
 }
 
 test("SQLite latest-validation read never parses old or unrelated bodies", async () => {
-  const temp = await createTempRepository("nordri-latest-validation-bounded-");
+  const temp = await createTempRepository("nestor-latest-validation-bounded-");
   const repo = await temp.createRepository();
   const db = new DatabaseSync(temp.filePath);
   try {

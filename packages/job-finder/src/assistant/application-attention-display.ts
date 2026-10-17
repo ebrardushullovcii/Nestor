@@ -1,4 +1,4 @@
-import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 type ApplyResult =
   | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
   | null;

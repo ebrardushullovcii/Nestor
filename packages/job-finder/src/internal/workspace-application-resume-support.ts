@@ -11,7 +11,7 @@ import {
   type TailoredAsset,
   type TailoringMode,
   type WorkHistoryReviewSuggestion,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createMatchAssessmentAsync } from "./matching";
 import {
   createMatchAssessmentContextFingerprint,
@@ -21,7 +21,7 @@ import { createMatchAssessmentPostingInput } from "./match-assessment-posting-in
 import { jobNeedsFitJudgment } from "./fit-judgment";
 import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import { readPlanAssessment, withPlanAssessment } from "./plan-assessment";
-import { fnv1a32 } from "@nordri/core";
+import { fnv1a32 } from "@nestor/core";
 import {
   buildResumeRenderDocument,
   buildTailoredAssetBridge,

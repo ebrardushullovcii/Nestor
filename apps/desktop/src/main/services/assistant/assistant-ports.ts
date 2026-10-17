@@ -8,13 +8,13 @@ import {
   type CandidateProfile,
   type CandidateAsset,
   type ResumeExportArtifactSummary,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   resolveApprovedResumeExportForApply,
   savedResumeDigestMatches,
   type AssistantHostPorts,
   type JobFinderWorkspaceService,
-} from "@nordri/job-finder";
+} from "@nestor/job-finder";
 
 import { readUiResumeBatch, stopUiResumeBatch } from "./ui-resume-batch";
 

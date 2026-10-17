@@ -3,13 +3,13 @@ import {
   normalizeWorkModeList,
   type CandidateProfile,
   type ResumeImportFieldCandidateSummary,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   areEquivalentEducationRecords,
   areEquivalentExperienceRecords,
   scoreEducationRecordCompleteness,
   scoreExperienceRecordCompleteness,
-} from "@nordri/job-finder/resume-record-identity";
+} from "@nestor/job-finder/resume-record-identity";
 import type {
   EducationFormEntry,
   ExperienceFormEntry,

@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import type {
   JobFinderSettings,
   ResumeTemplateDefinition,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Field, FieldLabel } from "@renderer/components/ui/field";

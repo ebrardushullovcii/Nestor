@@ -5,19 +5,19 @@ import type {
   SubmissionFinalControlIdentity,
   SubmissionOutcomeRetryEligibility,
   SubmissionPreflightRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   isActiveApplicationAuthorityEnvelope,
   describeBrowserError,
   SubmissionFinalControlIdentitySchema,
   SubmissionObservationIdentitySchema,
-} from "@nordri/contracts";
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+} from "@nestor/contracts";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import type {
   ApplicationFinalActionResult,
   ApplicationFormObservation,
   ExecuteExactlyOneFinalActionInput,
-} from "@nordri/browser-runtime";
+} from "@nestor/browser-runtime";
 
 import {
   buildSubmissionPreflightRecord,

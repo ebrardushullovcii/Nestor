@@ -2,7 +2,7 @@ import type {
   ResumeImportFieldCandidateSummary,
   ResumeImportRun,
   ResumeImportProgressEvent,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export function getRunningResumeImportProgress(
   run: ResumeImportRun | null,

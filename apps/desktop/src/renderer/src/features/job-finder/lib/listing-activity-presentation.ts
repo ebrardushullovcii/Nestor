@@ -1,4 +1,4 @@
-import type { ListingActivity } from "@nordri/contracts";
+import type { ListingActivity } from "@nestor/contracts";
 import { formatOptionalDateOnly } from "./job-finder-utils";
 
 export const listingActivityStatuses = [

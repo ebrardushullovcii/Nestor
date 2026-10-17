@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { SourceIntelligenceArtifactSchema } from "@nordri/contracts";
+import { SourceIntelligenceArtifactSchema } from "@nestor/contracts";
 import { createOpenAiCompatibleJobFinderAiClient } from "./openai-compatible";
 
 import {

@@ -15,7 +15,7 @@ import {
   TailoredAssetSchema,
   UserActionEventSchema,
   UserActionRequestSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   JobFinderDisplayCollections,
   SchemaParser,

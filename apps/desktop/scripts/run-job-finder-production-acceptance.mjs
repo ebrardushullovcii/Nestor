@@ -1144,7 +1144,7 @@ const productionTesterAmbientAllowlist = Object.freeze([
 // Ambient names recorded as stripped authority facts: the scripted test API,
 // home-directory hints, and anything shaped like a credential or proxy.
 const PRODUCTION_TESTER_FORBIDDEN_ENVIRONMENT_NAMES = Object.freeze([
-  "NORDRI_ENABLE_TEST_API",
+  "NESTOR_ENABLE_TEST_API",
   "HOME",
 ]);
 const productionTesterForbiddenNamePattern =
@@ -1152,10 +1152,10 @@ const productionTesterForbiddenNamePattern =
 
 function productionTesterGeometryEnvironmentNames() {
   return [
-    "NORDRI_STARTUP_WINDOW_WIDTH",
-    "NORDRI_STARTUP_WINDOW_HEIGHT",
-    "NORDRI_STARTUP_ZOOM_FACTOR",
-    "NORDRI_TESTER_SESSION_GEOMETRY",
+    "NESTOR_STARTUP_WINDOW_WIDTH",
+    "NESTOR_STARTUP_WINDOW_HEIGHT",
+    "NESTOR_STARTUP_ZOOM_FACTOR",
+    "NESTOR_TESTER_SESSION_GEOMETRY",
   ];
 }
 
@@ -1189,24 +1189,24 @@ export function productionTesterEnvironment(ambient, userDataRoot) {
   // Defensive deletions keep forbidden authority out even if an ambient name
   // ever collides with an injected one below.
   delete env.HOME;
-  delete env.NORDRI_ENABLE_TEST_API;
+  delete env.NESTOR_ENABLE_TEST_API;
   for (const name of productionTesterGeometryEnvironmentNames())
     delete env[name];
-  env.NORDRI_USER_DATA_DIR = userDataRoot;
-  env.NORDRI_TEST_API_USE_LIVE_AI = "0";
-  env.NORDRI_BROWSER_AGENT = "0";
-  env.NORDRI_BROWSER_HEADLESS = "1";
+  env.NESTOR_USER_DATA_DIR = userDataRoot;
+  env.NESTOR_TEST_API_USE_LIVE_AI = "0";
+  env.NESTOR_BROWSER_AGENT = "0";
+  env.NESTOR_BROWSER_HEADLESS = "1";
   env.JOB_FINDER_PREPARE_ONLY_AUTHORIZE_INTERMEDIATE_WRITES = "0";
   env.JOB_FINDER_COMPLETE_FLOW_AUTHORIZED_WRITE_DIAGNOSTIC = "0";
-  env.NORDRI_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES = "0";
-  env.NORDRI_TESTER_SESSION_GEOMETRY = "1";
-  env.NORDRI_STARTUP_WINDOW_WIDTH = String(
+  env.NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES = "0";
+  env.NESTOR_TESTER_SESSION_GEOMETRY = "1";
+  env.NESTOR_STARTUP_WINDOW_WIDTH = String(
     PRODUCTION_TESTER_GEOMETRY_REQUEST.width,
   );
-  env.NORDRI_STARTUP_WINDOW_HEIGHT = String(
+  env.NESTOR_STARTUP_WINDOW_HEIGHT = String(
     PRODUCTION_TESTER_GEOMETRY_REQUEST.height,
   );
-  env.NORDRI_STARTUP_ZOOM_FACTOR = String(
+  env.NESTOR_STARTUP_ZOOM_FACTOR = String(
     PRODUCTION_TESTER_GEOMETRY_REQUEST.zoomFactor,
   );
   return {
@@ -2514,7 +2514,7 @@ async function runAcceptedAppProductionTesterSession({
       const page = await app.firstWindow();
       await page.waitForLoadState("domcontentloaded");
       await page.waitForFunction(
-        () => Boolean(globalThis.nordri?.jobFinder?.getWorkspace),
+        () => Boolean(globalThis.nestor?.jobFinder?.getWorkspace),
         null,
         { timeout: 30_000 },
       );
@@ -2528,11 +2528,11 @@ async function runAcceptedAppProductionTesterSession({
         href: location.href,
         innerHeight: window.innerHeight,
         innerWidth: window.innerWidth,
-        preloadReady: Boolean(globalThis.nordri?.jobFinder?.getWorkspace),
+        preloadReady: Boolean(globalThis.nestor?.jobFinder?.getWorkspace),
         shellMounted: Boolean(
           document.querySelector("#root")?.childElementCount > 0,
         ),
-        testApiPresent: Boolean(globalThis.nordri?.jobFinder?.test),
+        testApiPresent: Boolean(globalThis.nestor?.jobFinder?.test),
       }));
       const applied = await app.evaluate(({ app, BrowserWindow, screen }) => {
         const win = BrowserWindow.getAllWindows()[0];
@@ -2567,15 +2567,15 @@ async function runAcceptedAppProductionTesterSession({
             providerSecretNameCount: environmentNames.filter((name) =>
               /API_KEY|API_TOKEN|SECRET|TOKEN|PROXY/i.test(name),
             ).length,
-            testApiAbsent: !("NORDRI_ENABLE_TEST_API" in process.env),
+            testApiAbsent: !("NESTOR_ENABLE_TEST_API" in process.env),
             userDataDirConfigured:
-              typeof process.env.NORDRI_USER_DATA_DIR === "string" &&
-              process.env.NORDRI_USER_DATA_DIR.length > 0,
+              typeof process.env.NESTOR_USER_DATA_DIR === "string" &&
+              process.env.NESTOR_USER_DATA_DIR.length > 0,
             writeAuthorizationFlagsZero: [
               "JOB_FINDER_PREPARE_ONLY_AUTHORIZE_INTERMEDIATE_WRITES",
               "JOB_FINDER_COMPLETE_FLOW_AUTHORIZED_WRITE_DIAGNOSTIC",
-              "NORDRI_TEST_API_USE_LIVE_AI",
-              "NORDRI_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES",
+              "NESTOR_TEST_API_USE_LIVE_AI",
+              "NESTOR_TEST_AUTHORIZE_INTERMEDIATE_ATS_WRITES",
             ].every((name) => process.env[name] === "0"),
           },
           contentBounds: win.getContentBounds(),
@@ -2620,13 +2620,13 @@ async function runAcceptedAppProductionTesterSession({
       // absent in a production-like session.
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.waitForFunction(
-        () => Boolean(globalThis.nordri?.jobFinder?.getWorkspace),
+        () => Boolean(globalThis.nestor?.jobFinder?.getWorkspace),
         null,
         { timeout: 30_000 },
       );
       const postReload = await page.evaluate(() => ({
-        preloadReady: Boolean(globalThis.nordri?.jobFinder?.getWorkspace),
-        testApiPresent: Boolean(globalThis.nordri?.jobFinder?.test),
+        preloadReady: Boolean(globalThis.nestor?.jobFinder?.getWorkspace),
+        testApiPresent: Boolean(globalThis.nestor?.jobFinder?.test),
       }));
       // Re-measure native zoom after the reload: Chromium re-applies
       // per-origin zoom at navigation commit, so post-reload zoom must still
@@ -2816,7 +2816,7 @@ async function runAcceptedAppProductionTesterSession({
         ),
         raw: rawChildEnvironmentAuthority ?? null,
       },
-      forbiddenNamesVerifiedAbsent: ["HOME", "NORDRI_ENABLE_TEST_API"],
+      forbiddenNamesVerifiedAbsent: ["HOME", "NESTOR_ENABLE_TEST_API"],
       injectedNames: hardenedEnvironment.injectedNames,
       strategy: "ambient-allowlist-plus-canonical-injection",
       strippedAmbientNames: hardenedEnvironment.strippedNames,
@@ -2983,7 +2983,7 @@ async function runAcceptedAppRuntimeProbe({
     args: [".", ...ACCEPTANCE_ZERO_NETWORK_LAUNCH_ARGS],
     cwd: acceptedAppRoot,
     env: acceptanceEnvironment({
-      NORDRI_USER_DATA_DIR: runtimeProbeUserDataDir,
+      NESTOR_USER_DATA_DIR: runtimeProbeUserDataDir,
     }),
   });
   // Main-process stdout/stderr capture for the deterministic launch;
@@ -2997,7 +2997,7 @@ async function runAcceptedAppRuntimeProbe({
     const page = await app.firstWindow();
     await page.waitForLoadState("domcontentloaded");
     await page.waitForFunction(
-      () => Boolean(globalThis.nordri?.jobFinder),
+      () => Boolean(globalThis.nestor?.jobFinder),
       null,
       {
         timeout: 30_000,
@@ -3005,7 +3005,7 @@ async function runAcceptedAppRuntimeProbe({
     );
     const startup = await page.evaluate(() => ({
       href: location.href,
-      preloadReady: Boolean(globalThis.nordri?.jobFinder),
+      preloadReady: Boolean(globalThis.nestor?.jobFinder),
       rendererReady: document.documentElement.childElementCount > 0,
       scriptCount: document.scripts.length,
     }));

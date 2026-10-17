@@ -5,7 +5,7 @@ import {
   type ResumeImportFieldCandidateDraft,
   type ResumeImportJsonValue,
   ResumeImportVisualEvidenceRefSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   ResumeImportAdjudicationResultSchema,
   ResumeImportStageExtractionResultSchema,

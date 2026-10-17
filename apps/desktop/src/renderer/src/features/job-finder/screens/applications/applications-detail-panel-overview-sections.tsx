@@ -2,7 +2,7 @@ import type {
   ApplicationAttemptListRow,
   ApplicationRecord,
   JobFinderRendererWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { ApplicationsDetailFactStrip } from "./applications-detail-fact-strip";
 import type { PlannedApplyStanding } from "./applications-recovery-state";
 

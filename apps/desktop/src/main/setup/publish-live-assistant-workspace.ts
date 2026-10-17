@@ -1,4 +1,4 @@
-import type { InterviewWorkspaceView } from "@nordri/contracts";
+import type { InterviewWorkspaceView } from "@nestor/contracts";
 
 interface LiveAssistantEventWindow {
   isDestroyed(): boolean;

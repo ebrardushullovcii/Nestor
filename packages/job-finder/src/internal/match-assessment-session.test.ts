@@ -1,4 +1,4 @@
-import { FitJudgmentSchema, type JobPosting } from "@nordri/contracts";
+import { FitJudgmentSchema, type JobPosting } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import {

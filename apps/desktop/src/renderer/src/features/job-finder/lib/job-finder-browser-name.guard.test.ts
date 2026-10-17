@@ -29,7 +29,7 @@ const RENDERER_ROOT = path.resolve(
 );
 
 /**
- * `@nordri/job-finder` writes user-facing copy about the same window (the
+ * `@nestor/job-finder` writes user-facing copy about the same window (the
  * per-source access prompt Discovery renders as its primary action), so a
  * renderer-only scan would leave a name the user reads unguarded.
  */

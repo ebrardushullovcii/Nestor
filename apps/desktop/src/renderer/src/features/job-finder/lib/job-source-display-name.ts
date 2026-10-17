@@ -1,4 +1,4 @@
-import type { JobDiscoveryTarget, JobSource } from "@nordri/contracts";
+import type { JobDiscoveryTarget, JobSource } from "@nestor/contracts";
 
 /**
  * Naming for job sources on user-facing surfaces.

@@ -147,50 +147,50 @@ test(
 
 test("deterministic mode strips credentials and conflicting Electron launch variables", async () => {
   const env = await sessionEnvironment("deterministic", {
-    NORDRI_AI_API_KEY: "should-not-leak",
+    NESTOR_AI_API_KEY: "should-not-leak",
     OPENAI_API_KEY: "also-secret",
     ELECTRON_RUN_AS_NODE: "1",
     ELECTRON_RENDERER_URL: "http://localhost:5173",
     NODE_OPTIONS: "--require some-hook",
-    NORDRI_TEST_RESUME_PREVIEW: "fail_once",
-    NORDRI_TEST_API_USE_LIVE_AI: "1",
-    NORDRI_INTERVIEW_TEST_USE_LIVE_AI: "1",
+    NESTOR_TEST_RESUME_PREVIEW: "fail_once",
+    NESTOR_TEST_API_USE_LIVE_AI: "1",
+    NESTOR_INTERVIEW_TEST_USE_LIVE_AI: "1",
   });
-  assert.equal(env.NORDRI_AI_API_KEY, "");
+  assert.equal(env.NESTOR_AI_API_KEY, "");
   assert.equal(env.OPENAI_API_KEY, "");
   assert.equal(env.ELECTRON_RUN_AS_NODE, undefined);
   assert.equal(env.ELECTRON_RENDERER_URL, undefined);
   assert.equal(env.NODE_OPTIONS, undefined);
-  assert.equal(env.NORDRI_TEST_RESUME_PREVIEW, "fail_once");
-  assert.equal(env.NORDRI_TEST_API_USE_LIVE_AI, "0");
-  assert.equal(env.NORDRI_INTERVIEW_TEST_USE_LIVE_AI, "0");
+  assert.equal(env.NESTOR_TEST_RESUME_PREVIEW, "fail_once");
+  assert.equal(env.NESTOR_TEST_API_USE_LIVE_AI, "0");
+  assert.equal(env.NESTOR_INTERVIEW_TEST_USE_LIVE_AI, "0");
   await assert.rejects(sessionEnvironment("typo"), /provider must/);
 });
 
 test("configured mode enables both real providers despite ambient test-mode flags", async () => {
   const env = await sessionEnvironment("configured", {
-    NORDRI_AI_API_KEY: "synthetic-test-key",
-    NORDRI_TEST_API_USE_LIVE_AI: "0",
-    NORDRI_INTERVIEW_TEST_USE_LIVE_AI: "0",
+    NESTOR_AI_API_KEY: "synthetic-test-key",
+    NESTOR_TEST_API_USE_LIVE_AI: "0",
+    NESTOR_INTERVIEW_TEST_USE_LIVE_AI: "0",
   });
-  assert.equal(env.NORDRI_AI_API_KEY, "synthetic-test-key");
-  assert.equal(env.NORDRI_TEST_API_USE_LIVE_AI, "1");
-  assert.equal(env.NORDRI_INTERVIEW_TEST_USE_LIVE_AI, "1");
+  assert.equal(env.NESTOR_AI_API_KEY, "synthetic-test-key");
+  assert.equal(env.NESTOR_TEST_API_USE_LIVE_AI, "1");
+  assert.equal(env.NESTOR_INTERVIEW_TEST_USE_LIVE_AI, "1");
 });
 
 test("both provider modes default to the embedded browser and preserve explicit host overrides", async () => {
   for (const provider of ["deterministic", "configured"]) {
     for (const unset of [undefined, ""]) {
       const defaultEnv = await sessionEnvironment(provider, {
-        NORDRI_BROWSER_HOST: unset,
+        NESTOR_BROWSER_HOST: unset,
       });
-      assert.equal(defaultEnv.NORDRI_BROWSER_HOST, "embedded");
+      assert.equal(defaultEnv.NESTOR_BROWSER_HOST, "embedded");
     }
     for (const host of ["embedded", "external"]) {
       const env = await sessionEnvironment(provider, {
-        NORDRI_BROWSER_HOST: host,
+        NESTOR_BROWSER_HOST: host,
       });
-      assert.equal(env.NORDRI_BROWSER_HOST, host);
+      assert.equal(env.NESTOR_BROWSER_HOST, host);
     }
   }
 });
@@ -204,7 +204,7 @@ test("artifact names cannot escape their session directory", () => {
 test("journal serializes asynchronous events and redacts known secrets", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "qa-journal-test-"));
   try {
-    const events = journal(root, { NORDRI_AI_API_KEY: "test-secret" });
+    const events = journal(root, { NESTOR_AI_API_KEY: "test-secret" });
     events.record("first", "test-secret");
     events.record("second", "Bearer example-token");
     await events.flush();

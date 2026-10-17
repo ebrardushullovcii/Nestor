@@ -2,7 +2,7 @@ import { clearResumeBatchLiveness } from "./internal/resume-batch-checkpoint";
 import type {
   BrowserSessionRuntime,
   OpenBrowserSessionOptions,
-} from "@nordri/browser-runtime";
+} from "@nestor/browser-runtime";
 import { addJobFromBrowserPage } from "./internal/workspace-browser-job";
 import { writeApplicationDocumentText } from "./internal/application-document-writer";
 import { randomUUID } from "node:crypto";
@@ -31,7 +31,7 @@ import {
   type SavedJob,
   type SetJobFinderActivityControlInput,
   type SourceDebugRunRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { mergeSessionStates } from "./internal/workspace-service-helpers";
 import {
   getActiveDiscoveryTargets,

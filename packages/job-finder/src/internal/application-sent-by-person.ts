@@ -1,11 +1,11 @@
-import { hasSubmissionConfirmationText } from "@nordri/browser-agent";
+import { hasSubmissionConfirmationText } from "@nestor/browser-agent";
 import {
   submissionConfirmationSummary,
   ApplicationRecordSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
   type ApplyJobResult,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { reconcileApplyRunAfterConfirmedSubmission } from "./workspace-apply-run-support";
 import type { WorkspaceServiceContext } from "./workspace-service-context";

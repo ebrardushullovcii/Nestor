@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { JobFinderRepositorySeed } from "@nordri/db";
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+import type { JobFinderRepositorySeed } from "@nestor/db";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   createSeed,
   createSavedJob,
@@ -165,7 +165,7 @@ describe("parallel application preparation", () => {
     "bounds %i workers and counts out-of-order results without closing active forms",
     async (concurrency) => {
       vi.stubEnv(
-        "NORDRI_APPLICATION_PREPARATION_CONCURRENCY",
+        "NESTOR_APPLICATION_PREPARATION_CONCURRENCY",
         String(concurrency),
       );
       const h = createParallelHarness(concurrency + 1);

@@ -2,7 +2,7 @@ import {
   JobPostingSchema,
   WorkModeListSchema,
   type JobPosting,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   buildGenericCanonicalUrl,
   buildGenericJobId,

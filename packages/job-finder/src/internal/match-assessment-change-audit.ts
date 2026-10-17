@@ -9,7 +9,7 @@ import {
   type MatchAssessmentInputChange,
   type MatchAssessmentOutputChange,
   type MatchAssessmentOutputChangeCode,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 export type MatchAssessmentChangeAuditInput = {
   previous: MatchAssessment;

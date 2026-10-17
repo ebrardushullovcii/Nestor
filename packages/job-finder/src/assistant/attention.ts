@@ -18,7 +18,7 @@ import {
   isApplicationWithdrawnByPerson,
   type JobFinderRendererWorkspaceSnapshot,
   type GroupedManualAnswerDecision,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { projectPlanSafeguardPauses } from "../plan-safeguard-pauses";
 
 type AttentionSnapshot = Pick<

@@ -7,7 +7,7 @@ import {
   JobFinderRepositoryStateSchema,
   SavedJobDiscoveryProvenanceSchema,
   type JobFinderRepositoryState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { deriveSourceAccessPrompts } from "../../../packages/job-finder/src/internal/workspace-source-access-prompts";
 import { describe, expect, it } from "vitest";
 

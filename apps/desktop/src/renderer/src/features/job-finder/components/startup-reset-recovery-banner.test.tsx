@@ -16,7 +16,7 @@ const getStartupResetRecovery =
 
 function installDesktopBridge() {
   Object.assign(window, {
-    nordri: {
+    nestor: {
       jobFinder: {
         getStartupResetRecovery,
       },

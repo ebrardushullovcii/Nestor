@@ -1,12 +1,12 @@
 import { expect, it, vi } from "vitest";
-import type { JudgeJobFitsInput } from "@nordri/ai-providers";
+import type { JudgeJobFitsInput } from "@nestor/ai-providers";
 import {
   DiscoveryRunResultSchema,
   JobPostingSchema,
   SaveJobSearchCampaignInputSchema,
   JobSearchCampaignCollectionSchema,
   SavedJobSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createSeed,
   createAgentAiClient,

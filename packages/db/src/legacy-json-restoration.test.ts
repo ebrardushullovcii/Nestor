@@ -10,7 +10,7 @@ type FileRepository = Awaited<ReturnType<typeof createFileJobFinderRepository>>;
 describe("createFileJobFinderRepository legacy restoration", () => {
   test("falls back safely when legacy JSON contains stale saved job records", async () => {
     const tempDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-db-legacy-"),
+      path.join(os.tmpdir(), "nestor-db-legacy-"),
     );
     const filePath = path.join(tempDirectory, "job-finder-state.sqlite");
     const legacyPath = path.join(tempDirectory, "job-finder-state.json");
@@ -56,7 +56,7 @@ describe("createFileJobFinderRepository legacy restoration", () => {
 
   test("migrates legacy string workMode values in saved jobs and experiences", async () => {
     const tempDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-db-work-mode-"),
+      path.join(os.tmpdir(), "nestor-db-work-mode-"),
     );
     const filePath = path.join(tempDirectory, "job-finder-state.sqlite");
     const legacyPath = path.join(tempDirectory, "job-finder-state.json");
@@ -155,7 +155,7 @@ describe("createFileJobFinderRepository legacy restoration", () => {
 
   test("migrates legacy source and adapter identifiers in restored JSON state", async () => {
     const tempDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-db-source-kinds-"),
+      path.join(os.tmpdir(), "nestor-db-source-kinds-"),
     );
     const filePath = path.join(tempDirectory, "job-finder-state.sqlite");
     const legacyPath = path.join(tempDirectory, "job-finder-state.json");
@@ -264,7 +264,7 @@ describe("createFileJobFinderRepository legacy restoration", () => {
 
   test("normalizes persisted terminal source-debug runs that still carry an active phase", async () => {
     const tempDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "nordri-db-persisted-source-debug-run-"),
+      path.join(os.tmpdir(), "nestor-db-persisted-source-debug-run-"),
     );
     const filePath = path.join(tempDirectory, "job-finder-state.sqlite");
     const legacyPath = path.join(tempDirectory, "job-finder-state.json");

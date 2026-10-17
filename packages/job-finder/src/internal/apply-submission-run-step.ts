@@ -5,8 +5,8 @@ import type {
   ApplicationAuthorityEnvelope,
   ApplicationResumeArtifact,
   JobSource,
-} from "@nordri/contracts";
-import { isActiveApplicationAuthorityEnvelope } from "@nordri/contracts";
+} from "@nestor/contracts";
+import { isActiveApplicationAuthorityEnvelope } from "@nestor/contracts";
 
 import type { SubmissionPreflightLineageFacts } from "./application-submission-preflight";
 import {

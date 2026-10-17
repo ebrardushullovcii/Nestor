@@ -3,7 +3,7 @@ import type {
   DesktopAudioCaptureAdapter,
   DesktopAudioCaptureCapability,
   DesktopCaptureCapabilityState,
-} from '@nordri/os-integration'
+} from '@nestor/os-integration'
 
 function microphoneStatusFromMediaAccess(
   mediaAccessStatus: ReturnType<typeof systemPreferences.getMediaAccessStatus>,

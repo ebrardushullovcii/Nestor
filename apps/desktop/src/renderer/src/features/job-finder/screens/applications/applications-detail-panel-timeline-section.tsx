@@ -1,4 +1,4 @@
-import type { ApplicationRecord } from "@nordri/contracts";
+import type { ApplicationRecord } from "@nestor/contracts";
 import { cn } from "@renderer/lib/utils";
 import {
   formatTimestamp,

@@ -1,6 +1,6 @@
 # ADR 0040: Nordri rebrand
 
-Status: accepted (2026-09-29).
+Status: accepted (2026-09-29). Product name changed by [ADR 0052](0052-nestor-rebrand.md): Nordri is now Nestor; the data-migration rules here still apply.
 
 ## Context
 

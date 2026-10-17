@@ -45,7 +45,7 @@ async function waitForCondition(
 }
 
 async function getWorkspace(window) {
-  return window.evaluate(() => window.nordri.jobFinder.getWorkspace());
+  return window.evaluate(() => window.nestor.jobFinder.getWorkspace());
 }
 
 async function waitForSetupStep(window, expectedStep) {
@@ -516,9 +516,9 @@ async function advanceSetupStep(window, nextStep) {
   }
 
   const snapshot = await window.evaluate(async (step) => {
-    const workspace = await window.nordri.jobFinder.getWorkspace();
+    const workspace = await window.nestor.jobFinder.getWorkspace();
 
-    return window.nordri.jobFinder.saveProfileSetupState({
+    return window.nestor.jobFinder.saveProfileSetupState({
       ...workspace.profileSetupState,
       status:
         workspace.profileSetupState.status === "completed"
@@ -813,7 +813,7 @@ async function captureBackgroundEditJump(window) {
 async function captureProfileSetup() {
   await mkdir(outputDir, { recursive: true });
   const userDataDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-profile-setup-"),
+    path.join(os.tmpdir(), "nestor-profile-setup-"),
   );
 
   let app;
@@ -824,20 +824,20 @@ async function captureProfileSetup() {
       cwd: desktopDir,
       env: {
         ...process.env,
-        NORDRI_ENABLE_TEST_API: "1",
-        NORDRI_BROWSER_AGENT: "0",
-        NORDRI_TEST_SYSTEM_THEME:
-          process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark",
-        NORDRI_TEST_PROFILE_COPILOT_DELAY_MS: "1200",
-        NORDRI_USER_DATA_DIR: userDataDirectory,
+        NESTOR_ENABLE_TEST_API: "1",
+        NESTOR_BROWSER_AGENT: "0",
+        NESTOR_TEST_SYSTEM_THEME:
+          process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark",
+        NESTOR_TEST_PROFILE_COPILOT_DELAY_MS: "1200",
+        NESTOR_USER_DATA_DIR: userDataDirectory,
       },
     });
 
     const window = await app.firstWindow();
     await window.waitForLoadState("domcontentloaded");
     await window.evaluate(async (theme) => {
-      await window.nordri.jobFinder.test?.setSystemThemeOverride(theme);
-    }, process.env.NORDRI_TEST_SYSTEM_THEME ?? "dark");
+      await window.nestor.jobFinder.test?.setSystemThemeOverride(theme);
+    }, process.env.NESTOR_TEST_SYSTEM_THEME ?? "dark");
     await window.evaluate(() => {
       window.location.hash = "#/job-finder/profile/setup";
     });
@@ -871,13 +871,13 @@ async function captureProfileSetup() {
     await writeJson("workspace-before-profile-setup.json", initialWorkspace);
 
     const importedWorkspace = await window.evaluate(async (sourcePath) => {
-      if (!window.nordri.jobFinder.test) {
+      if (!window.nestor.jobFinder.test) {
         throw new Error(
           "Desktop test API is not available in the renderer context.",
         );
       }
 
-      return window.nordri.jobFinder.test.importResumeFromPath(sourcePath);
+      return window.nestor.jobFinder.test.importResumeFromPath(sourcePath);
     }, defaultResumePath);
     await writeJson("workspace-after-setup-import.json", importedWorkspace);
 

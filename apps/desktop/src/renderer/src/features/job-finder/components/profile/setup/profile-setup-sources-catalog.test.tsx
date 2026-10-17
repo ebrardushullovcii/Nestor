@@ -16,7 +16,7 @@ import {
   evaluateProfileSetupReadiness,
   JobSearchPreferencesSchema,
   type JobSearchPreferences,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { LockedScreenLayout } from "../../locked-screen-layout";
 import {
   buildSearchPreferencesPayload,

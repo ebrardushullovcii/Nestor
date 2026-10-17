@@ -2,8 +2,8 @@ import {
   ApplicationCrmSettingsSchema,
   DiscoveryRunRecordSchema,
   SavedJobSchema,
-} from "@nordri/contracts";
-import { createInMemoryJobFinderRepository } from "@nordri/db";
+} from "@nestor/contracts";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createJobFinderWorkspaceService } from "./index";

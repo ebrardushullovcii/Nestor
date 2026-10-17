@@ -4,7 +4,7 @@ import {
   ApplicationRecordSchema,
   UNKNOWN_JOB_SOURCE_BUCKET_KEY,
   type OutcomeAnalyticsOverview,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { createWorkspaceServiceHarness } from "./workspace-service.test-harness";
 import { createSeed } from "./workspace-service.test-fixtures";

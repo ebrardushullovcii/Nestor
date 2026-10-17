@@ -1,8 +1,8 @@
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   createInMemoryJobFinderRepository,
   type JobFinderRepositorySeed,
-} from "@nordri/db";
+} from "@nestor/db";
 import { describe, expect, test, vi } from "vitest";
 import {
   CandidateAssetSchema,
@@ -10,7 +10,7 @@ import {
   ApplyExecutionResultSchema,
   ApplicationQuestionRecordSchema,
   ApplicationAnswerRecordSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import * as preparation from "./agent-application-preparation";
 
 import { createJobFinderWorkspaceService } from "../workspace-service";

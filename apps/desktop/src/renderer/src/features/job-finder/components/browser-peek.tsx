@@ -39,7 +39,7 @@ import {
   type DesktopBrowserCommand,
   type DesktopBrowserImportSource,
   type DesktopBrowserState,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   JOB_FINDER_BROWSER_LABEL,
   OPEN_JOB_FINDER_BROWSER_ACTION,
@@ -114,7 +114,7 @@ export function BrowserPeek(props: {
    */
   chromeInsetStart?: string | undefined;
 }) {
-  const bridge = window.nordri?.browser;
+  const bridge = window.nestor?.browser;
   const { showToast } = useToast();
   const lastSendNotice = useRef<string | null>(null);
   const [addingJob, setAddingJob] = useState(false);
@@ -142,7 +142,7 @@ export function BrowserPeek(props: {
     if (!savedJob || shortlisting) return;
     setShortlisting(true);
     try {
-      await window.nordri.jobFinder.queueJobForReview(savedJob.jobId);
+      await window.nestor.jobFinder.queueJobForReview(savedJob.jobId);
       setMessage(
         `${savedJob.title}${savedJob.company ? ` at ${savedJob.company}` : ""} added to Shortlisted.`,
       );

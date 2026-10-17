@@ -1,4 +1,4 @@
-import type { ResumeImportFieldCandidate } from "@nordri/contracts";
+import type { ResumeImportFieldCandidate } from "@nestor/contracts";
 
 import {
   areEquivalentEducationRecords,

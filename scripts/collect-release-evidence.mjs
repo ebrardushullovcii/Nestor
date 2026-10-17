@@ -42,9 +42,12 @@ const mirrorDirectory = path.join(
   "audits",
   "evidence-manifests",
 );
-const manifestKind = "nordri-release-evidence-manifest";
-// Manifests recorded before the Nordri rename (ADR 0040) keep their kind.
-const legacyManifestKinds = new Set(["unemployed-release-evidence-manifest"]);
+const manifestKind = "nestor-release-evidence-manifest";
+// Manifests recorded under earlier names (ADR 0040, ADR 0052) keep their kind.
+const legacyManifestKinds = new Set([
+  "unemployed-release-evidence-manifest",
+  "nordri-release-evidence-manifest",
+]);
 const isKnownManifestKind = (kind) =>
   kind === manifestKind || legacyManifestKinds.has(kind);
 const manifestSchemaVersion = 4;
@@ -1743,7 +1746,7 @@ async function runSelfCheck() {
   );
   expect(
     "sha256 hex digest shape",
-    /^[0-9a-f]{64}$/u.test(sha256Hex("nordri")),
+    /^[0-9a-f]{64}$/u.test(sha256Hex("nestor")),
   );
   expect(
     "run id shape",

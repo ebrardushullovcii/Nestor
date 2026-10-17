@@ -9,7 +9,7 @@ import type {
   JobFinderRendererWorkspaceSnapshot,
   SetJobFinderActivityControlInput,
   SafeguardMutationInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Search, ShieldCheck } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
 import { EmptyState } from "@renderer/features/job-finder/components/empty-state";

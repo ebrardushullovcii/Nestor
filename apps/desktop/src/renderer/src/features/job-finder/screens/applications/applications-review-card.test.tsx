@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { ApplicationReviewCardSchema } from "@nordri/contracts";
+import { ApplicationReviewCardSchema } from "@nestor/contracts";
 import {
   cleanup,
   fireEvent,
@@ -251,7 +251,7 @@ it("Open this page opens the record's own application tab without sending", asyn
   const onOpenPage = vi.fn(() => Promise.resolve());
   const onSubmit = vi.fn(() => Promise.resolve());
   const command = vi.fn();
-  vi.stubGlobal("nordri", { browser: { command } });
+  vi.stubGlobal("nestor", { browser: { command } });
   render(
     <ApplicationsReviewCard
       card={card()}

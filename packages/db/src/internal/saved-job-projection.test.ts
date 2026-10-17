@@ -145,7 +145,7 @@ test("corrupt changed rows fail instead of serving stale data", async () => {
 });
 
 test("another connection's commits invalidate cached rows and ordinary reads stay owned", async () => {
-  const fixture = await createTempRepository("nordri-projection-");
+  const fixture = await createTempRepository("nestor-projection-");
   const repository = await fixture.createRepository();
   const other = new DatabaseSync(fixture.filePath);
   try {

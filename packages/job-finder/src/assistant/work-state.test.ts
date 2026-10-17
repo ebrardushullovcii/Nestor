@@ -1,7 +1,7 @@
 import {
   DiscoveryRunRecordSchema,
   ResumeImportRunSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { expect, it, vi } from "vitest";
 import { createWorkspaceServiceHarness } from "../workspace-service.test-support";
 import { buildContextBlock, ASSISTANT_SYSTEM_PROMPT } from "./prompt";

@@ -11,7 +11,7 @@ import {
   type ApplicationAutomationMode,
   type AssistantInstructionGrant,
   type JobFinderWorkspaceSnapshot,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { z } from "zod";
 
 import type { JobFinderWorkspaceService } from "../../internal/workspace-service-contracts";

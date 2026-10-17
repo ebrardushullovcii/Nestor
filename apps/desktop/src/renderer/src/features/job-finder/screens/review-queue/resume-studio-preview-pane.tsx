@@ -5,7 +5,7 @@ import {
   RefreshCcw,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { JobFinderResumePreview } from "@nordri/contracts";
+import type { JobFinderResumePreview } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
 import { getJobFinderScrollBehavior } from "../../lib/job-finder-scroll-behavior";

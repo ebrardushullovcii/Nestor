@@ -5,7 +5,7 @@ import type {
   CompanyEntity,
   DiscoveryJobView,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   indexCompanyJobs,
   projectCompanyApplicationHistory,

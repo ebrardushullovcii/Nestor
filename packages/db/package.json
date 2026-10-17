@@ -1,5 +1,5 @@
 {
-  "name": "@nordri/db",
+  "name": "@nestor/db",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -13,7 +13,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@nordri/contracts": "workspace:*"
+    "@nestor/contracts": "workspace:*"
   }
 }
 

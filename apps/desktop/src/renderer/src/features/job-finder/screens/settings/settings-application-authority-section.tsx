@@ -1,5 +1,5 @@
 import { APPLICATION_BOUNDARY_SENTENCE } from "../safeguards/safeguards-application-boundary";
-import { CreateApplicationAuthorityEnvelopeInputSchema } from "@nordri/contracts";
+import { CreateApplicationAuthorityEnvelopeInputSchema } from "@nestor/contracts";
 import type {
   ApplicationAttestationKind,
   ApplicationAutomationMode,
@@ -9,7 +9,7 @@ import type {
   ApplicationAuthorityEnvelopeMutationResult,
   CreateApplicationAuthorityEnvelopeInput,
   UpdateApplicationAuthorityEnvelopeInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { useEffect, useId, useState } from "react";
 import { Button } from "@renderer/components/ui/button";
 import { Field, FieldLabel } from "@renderer/components/ui/field";
@@ -20,7 +20,7 @@ import { getJobFinderDateInputLocale } from "../../lib/job-finder-date-input-loc
 
 const jobFinderDateInputLocale = getJobFinderDateInputLocale();
 
-type AuthorityApi = Window["nordri"]["jobFinder"];
+type AuthorityApi = Window["nestor"]["jobFinder"];
 
 type AuthorityDraft = {
   mode: ApplicationAutomationMode;
@@ -279,7 +279,7 @@ export function SettingsApplicationAuthoritySection({
     if (typeof window === "undefined") {
       return null;
     }
-    return window.nordri?.jobFinder ?? null;
+    return window.nestor?.jobFinder ?? null;
   };
 
   const applyEnvelope = (envelope: ApplicationAuthorityEnvelope | null) => {

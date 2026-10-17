@@ -30,7 +30,7 @@ import type {
   SaveInterviewSetupInput,
   SendInterviewChatMessageInput,
   UpdateInterviewOverlayPreferenceInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   InterviewCueCardSchema,
   InterviewAudioTranscriptionInputSchema,
@@ -53,14 +53,14 @@ import {
   summarizeInterviewSession,
   SendInterviewChatMessageInputSchema,
   interviewChatLimits,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import type {
   CaptureProtectionState,
   DesktopAudioCaptureAdapter,
   DesktopScreenshotCaptureAdapter,
   OverlayWindowState,
   ProtectedOverlaySurfaceAdapter,
-} from "@nordri/os-integration";
+} from "@nestor/os-integration";
 
 export const liveAssistantPackageReady = true;
 

@@ -6,7 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { JobSearchCampaign } from "@nordri/contracts";
+import type { JobSearchCampaign } from "@nestor/contracts";
 import { afterEach, expect, it, vi } from "vitest";
 import { SearchPlanScope } from "./search-plan-scope";
 

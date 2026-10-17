@@ -1,7 +1,7 @@
 import {
   JobSearchPreferencesSchema,
   type JobSearchPreferences,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 // Preferences hold every source, hundreds of them. One workspace read used to
 // validate the same preferences four times on their way through

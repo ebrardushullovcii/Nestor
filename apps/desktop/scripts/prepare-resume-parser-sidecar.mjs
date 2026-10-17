@@ -35,7 +35,7 @@ function readCliOption(flag) {
 function shouldFailHard() {
   const cliMode = readCliOption("--mode") ?? null;
   const envMode =
-    process.env.NORDRI_RESUME_PARSER_PREPARE_MODE?.trim() ?? null;
+    process.env.NESTOR_RESUME_PARSER_PREPARE_MODE?.trim() ?? null;
   const mode = cliMode ?? envMode ?? "best-effort";
 
   return mode === "required";
@@ -44,7 +44,7 @@ function shouldFailHard() {
 function parseTargetMatrix() {
   const cliTarget =
     readCliOption("--target") ??
-    process.env.NORDRI_RESUME_PARSER_TARGET ??
+    process.env.NESTOR_RESUME_PARSER_TARGET ??
     null;
 
   if (!cliTarget || cliTarget === "current") {
@@ -109,7 +109,7 @@ function log(message) {
 }
 
 function buildPythonCandidates() {
-  const override = process.env.NORDRI_RESUME_PARSER_PYTHON?.trim();
+  const override = process.env.NESTOR_RESUME_PARSER_PYTHON?.trim();
 
   if (override) {
     return [{ command: override, args: [], label: override }];

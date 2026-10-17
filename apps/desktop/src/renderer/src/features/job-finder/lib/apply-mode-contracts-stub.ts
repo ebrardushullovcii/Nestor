@@ -1,9 +1,9 @@
 /**
  * Local stand-ins for the ADR 0022 contract names while they are still being
- * added to `@nordri/contracts` by the package owner.
+ * added to `@nestor/contracts` by the package owner.
  *
  * TODO(ADR 0022): delete this module and import `ApplyMode`, the apply-facts
- * record and the five per-job apply states from `@nordri/contracts` once
+ * record and the five per-job apply states from `@nestor/contracts` once
  * they land there. Nothing here describes behaviour — these are only the
  * names and shapes the renderer needs so the apply surface can be built
  * against them; no renderer file may define product types of its own once the

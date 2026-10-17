@@ -1,9 +1,9 @@
 import {
   createDeterministicJobFinderAiClient,
   type JobFinderAiClient,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import { describe, expect, test } from "vitest";
-import { createInMemoryJobFinderRepository } from "@nordri/db";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
 import { createJobFinderWorkspaceService } from "./index";
 import {
   createAgentAiClient,

@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { createFileJobFinderRepository } from "@nordri/db";
+import { createFileJobFinderRepository } from "@nestor/db";
 
 import {
   createApplyQueueDemoState,
@@ -29,7 +29,7 @@ afterEach(async () => {
 
 async function createTemporaryWorkspaceFilePath(): Promise<string> {
   const directory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-demo-state-"),
+    path.join(os.tmpdir(), "nestor-demo-state-"),
   );
   temporaryDirectories.push(directory);
   return path.join(directory, "job-finder-state.sqlite");

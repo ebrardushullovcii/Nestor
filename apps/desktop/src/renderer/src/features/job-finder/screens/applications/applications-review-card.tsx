@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ApplicationReviewCard } from "@nordri/contracts";
+import type { ApplicationReviewCard } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import {
   TECHNICAL_DETAILS_LABEL,

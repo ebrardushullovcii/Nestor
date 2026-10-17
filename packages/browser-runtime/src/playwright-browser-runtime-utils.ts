@@ -4,7 +4,7 @@ import { access, readFile } from "node:fs/promises";
 import net from "node:net";
 import { join } from "node:path";
 
-import { JobPostingSchema, type JobPosting } from "@nordri/contracts";
+import { JobPostingSchema, type JobPosting } from "@nestor/contracts";
 import type { Page } from "playwright";
 import type { AgentDiscoveryOptions } from "./runtime-types";
 

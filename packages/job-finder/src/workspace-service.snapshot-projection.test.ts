@@ -8,12 +8,12 @@ import {
   ProfileCopilotMessageSchema,
   ProfileReviewItemSchema,
   SavedJobSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   createFileJobFinderRepository,
   createInMemoryJobFinderRepository,
   type JobFinderRepository,
-} from "@nordri/db";
+} from "@nestor/db";
 import { describe, expect, test, vi } from "vitest";
 import { createJobFinderWorkspaceService } from "./index";
 import {
@@ -90,7 +90,7 @@ async function fixture(storage: "memory" | "file") {
   };
   const temp =
     storage === "file"
-      ? await mkdtemp(path.join(os.tmpdir(), "nordri-snapshot-projection-"))
+      ? await mkdtemp(path.join(os.tmpdir(), "nestor-snapshot-projection-"))
       : null;
   const repo = temp
     ? await createFileJobFinderRepository({

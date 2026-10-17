@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import type { JudgeJobFitsInput } from "@nordri/ai-providers";
+import type { JudgeJobFitsInput } from "@nestor/ai-providers";
 
 import { createSeed } from "../workspace-service.test-fixtures";
 import {

@@ -1,4 +1,4 @@
-import type { AssistantNavigationDisplay } from "@nordri/contracts";
+import type { AssistantNavigationDisplay } from "@nestor/contracts";
 
 /** A route request is complete only after its content is mounted and uncovered. */
 export async function waitForDisplayedDestination(
@@ -6,7 +6,7 @@ export async function waitForDisplayedDestination(
   readRoute: () => string,
   timeoutMs = 2_000,
 ): Promise<AssistantNavigationDisplay> {
-  const expected = new URL(route, "https://nordri.local");
+  const expected = new URL(route, "https://nestor.local");
   const deadline = Date.now() + timeoutMs;
   let display: AssistantNavigationDisplay = {
     displayedRoute: readRoute(),
@@ -16,7 +16,7 @@ export async function waitForDisplayedDestination(
     reason: "The requested page has not been displayed.",
   };
   do {
-    const actual = new URL(readRoute(), "https://nordri.local");
+    const actual = new URL(readRoute(), "https://nestor.local");
     const panel = document.querySelector('[role="tabpanel"][aria-labelledby]');
     const profileSection =
       panel?.getAttribute("aria-labelledby")?.replace(/-tab$/u, "") ?? null;
@@ -47,7 +47,7 @@ export async function waitForDisplayedDestination(
         ? "chat"
         : "none";
     try {
-      const browser = await window.nordri?.browser?.getState();
+      const browser = await window.nestor?.browser?.getState();
       if (
         browser &&
         browser.phase !== "closed" &&

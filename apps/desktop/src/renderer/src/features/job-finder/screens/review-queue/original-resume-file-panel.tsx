@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type {
   CandidateAssetListResult,
   ResumeSourceDocument,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   Card,
   CardHeader,
@@ -27,7 +27,7 @@ export function OriginalResumeFilePanel({
     setFile(null);
     setStatus(null);
     if (sourceId)
-      void window.nordri.jobFinder
+      void window.nestor.jobFinder
         .listCandidateAssets({
           includeDeleted: false,
           resumeSourceId: sourceId,
@@ -51,7 +51,7 @@ export function OriginalResumeFilePanel({
   async function openFile() {
     if (!file) return;
     try {
-      const result = await window.nordri.jobFinder.openCandidateAsset({
+      const result = await window.nestor.jobFinder.openCandidateAsset({
         assetId: file.id,
       });
       setStatus(

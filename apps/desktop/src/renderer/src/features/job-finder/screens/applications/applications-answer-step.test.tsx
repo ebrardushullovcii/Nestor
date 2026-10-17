@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { UserActionRequestSchema } from "@nordri/contracts";
+import { UserActionRequestSchema } from "@nestor/contracts";
 import { ApplicationAnswerStepCard } from "./applications-answer-step";
 afterEach(cleanup);
 it("offers Skip beside the waiting application's questions without authorizing a send", () => {

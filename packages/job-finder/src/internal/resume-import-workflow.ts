@@ -1,4 +1,4 @@
-import { ResumeImportStageUnreadError } from "@nordri/ai-providers";
+import { ResumeImportStageUnreadError } from "@nestor/ai-providers";
 import {
   CandidateProfileSchema,
   ResumeDocumentBundleSchema,
@@ -16,7 +16,7 @@ import {
   type ResumeImportTextStageTiming,
   type ResumeImportRun,
   type ResumeImportVisionArtifact,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 export { applyResolvedResumeImportCandidatesToWorkspace } from "./resume-import-apply";
@@ -43,7 +43,7 @@ import {
   type ResumeImportExtractionStage,
   type ResumeImportStageExtractionResult,
   type ResumeVisionExtractionResult,
-} from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
 import {
   normalizeSharedMemoryCandidates,
   promoteGroundedSharedMemoryCandidates,

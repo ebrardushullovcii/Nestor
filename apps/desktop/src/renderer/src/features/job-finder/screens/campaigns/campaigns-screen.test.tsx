@@ -12,13 +12,13 @@ import type {
   DiscoveryRunRecord,
   JobSearchCampaign,
   SaveJobSearchCampaignInput,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { round3SearchRun } from "../../lib/discovery-round3.test-fixture";
 import { resetJobFinderOverlaysForTests } from "../../lib/job-finder-overlay-ownership";
 import { deviceTimeZone } from "../../lib/job-finder-timestamp-format";
 import { describePlanRunFailure, CampaignsScreen } from "./campaigns-screen";
-import { resolveCampaignSourceTargetIds } from "@nordri/contracts";
+import { resolveCampaignSourceTargetIds } from "@nestor/contracts";
 
 afterEach(() => {
   cleanup();
@@ -676,7 +676,7 @@ describe("CampaignsScreen", () => {
 
   it("keeps no-match copy for a real persisted query even with no plans", () => {
     window.localStorage.setItem(
-      "nordri.job-finder.collection.campaigns.v1",
+      "nestor.job-finder.collection.campaigns.v1",
       JSON.stringify({
         density: "comfortable",
         query: "backend",

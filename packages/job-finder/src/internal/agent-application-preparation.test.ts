@@ -1,16 +1,16 @@
-import type { LLMClient } from "@nordri/browser-agent";
+import type { LLMClient } from "@nestor/browser-agent";
 import {
   ApplicationAuthorityEnvelopeSchema,
   AiBehaviorPreferenceSchema,
   ApplicationReviewCardSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createHash } from "node:crypto";
 
 import type { ApplySubmissionHandoff } from "./apply-submission-handoff";
-import type { ApplyPageSession, RawApplyPage } from "@nordri/contracts";
-import { CandidateProfileSchema, SavedJobSchema } from "@nordri/contracts";
-import type { ExecuteApplicationFlowInput } from "@nordri/browser-runtime";
+import type { ApplyPageSession, RawApplyPage } from "@nestor/contracts";
+import { CandidateProfileSchema, SavedJobSchema } from "@nestor/contracts";
+import type { ExecuteApplicationFlowInput } from "@nestor/browser-runtime";
 import { describe, expect, test, vi } from "vitest";
 
 import {

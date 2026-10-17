@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import type { ResumeDraft, ResumeDraftRevision } from "@nordri/contracts";
+import type { ResumeDraft, ResumeDraftRevision } from "@nestor/contracts";
 import { History, RotateCcw } from "lucide-react";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";

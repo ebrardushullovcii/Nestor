@@ -11,7 +11,7 @@ import { RotateCcw, X } from "lucide-react";
 import type {
   DiscoveryActivityEvent,
   DiscoveryRunRecord,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import {
   BoundedFloatingSurfaceScrollHint,

@@ -2,7 +2,7 @@ import type {
   ApplyRawPageHands,
   RawApplyControl,
   RawApplyPage,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   inferActionKind,

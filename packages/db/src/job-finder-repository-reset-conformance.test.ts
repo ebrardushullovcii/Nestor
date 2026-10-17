@@ -12,7 +12,7 @@ import {
   SourceDebugRunRecordSchema,
   SourceInstructionArtifactSchema,
   UserActionRequestSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import {
   createInMemoryJobFinderRepository,
@@ -1064,7 +1064,7 @@ const repositoryRuntimes: readonly RepositoryRuntime[] = [
     name: "file-backed sqlite",
     open: async () => {
       const temp = await createTempRepository(
-        "nordri-db-reset-conformance-",
+        "nestor-db-reset-conformance-",
       );
       const repository = await temp.createRepository();
       return {

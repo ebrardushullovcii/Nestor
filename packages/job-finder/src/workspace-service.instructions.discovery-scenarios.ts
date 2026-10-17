@@ -1,4 +1,4 @@
-import type { BrowserSessionRuntime } from "@nordri/browser-runtime";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import { describe, expect, test, vi } from "vitest";
 import {
   createAgentAiClient,

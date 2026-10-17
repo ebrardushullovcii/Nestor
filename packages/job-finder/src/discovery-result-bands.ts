@@ -2,7 +2,7 @@ import type {
   JobListMatchAssessment,
   ListingActivity,
   SavedJob,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 import { isProvisionalMatchAssessment } from "./discovery-ordering";
 import { isTargetTitleFamily } from "./internal/discovery-title-family";

@@ -7,7 +7,7 @@ import {
   type JobPosting,
   type SavedJob,
   type SavedJobDiscoveryProvenance,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createUniqueId } from "./shared";
 import {
   createJobIdentityIndex,

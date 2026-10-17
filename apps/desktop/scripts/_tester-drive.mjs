@@ -1,4 +1,4 @@
-// Tester driver: launches one isolated Nordri instance and serves an HTTP
+// Tester driver: launches one isolated Nestor instance and serves an HTTP
 // endpoint that evaluates posted JavaScript with Playwright handles.
 // Usage: node drive.mjs <port> <runDir>
 import http from "node:http";
@@ -26,7 +26,7 @@ async function currentPage() {
     if (open.length > 0) { mainWindowPage = open[0]; return mainWindowPage; }
     await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error("No Nordri window is open; restart with stop.sh and start.sh.");
+  throw new Error("No Nestor window is open; restart with stop.sh and start.sh.");
 }
 const nextOpenFile = path.join(runDir, "next-open.txt");
 // Native pickers return the file named in next-open.txt; links that would open
@@ -64,10 +64,10 @@ async function go(route) {
   await page.evaluate((hash) => { location.hash = hash; }, `#${route}`);
   await page.waitForTimeout(1200);
 }
-const ws = async () => (await currentPage()).evaluate(() => window.nordri.jobFinder.getWorkspace());
+const ws = async () => (await currentPage()).evaluate(() => window.nestor.jobFinder.getWorkspace());
 async function theme(value) {
   const page = await currentPage();
-  await page.evaluate((v) => window.nordri.jobFinder.test.setSystemThemeOverride(v), value);
+  await page.evaluate((v) => window.nestor.jobFinder.test.setSystemThemeOverride(v), value);
   await page.waitForTimeout(400);
 }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

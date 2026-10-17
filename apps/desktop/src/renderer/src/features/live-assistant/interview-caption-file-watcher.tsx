@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FileText, FileX2 } from "lucide-react";
-import type { InterviewWorkspaceView } from "@nordri/contracts";
+import type { InterviewWorkspaceView } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 
 function normalizeCaptionFileText(input: string) {
@@ -51,7 +51,7 @@ export function InterviewCaptionFileWatcher(props: {
   }, [props.listening]);
 
   async function selectCaptionFile() {
-    const result = await window.nordri.liveAssistant.selectCaptionFile();
+    const result = await window.nestor.liveAssistant.selectCaptionFile();
     if (!result.selected || !result.filePath) {
       setStatusLabel("Caption file selection canceled");
       return;
@@ -80,7 +80,7 @@ export function InterviewCaptionFileWatcher(props: {
         return;
       }
 
-      void window.nordri.liveAssistant
+      void window.nestor.liveAssistant
         .readCaptionFile({ filePath })
         .then((result) => {
           const nextText = normalizeCaptionFileText(result.text);
@@ -102,7 +102,7 @@ export function InterviewCaptionFileWatcher(props: {
           }
 
           setStatusLabel("Caption file text added to transcript");
-          return window.nordri.liveAssistant
+          return window.nestor.liveAssistant
             .addTranscriptSegment({
               sessionId: sessionIdRef.current,
               source: "meeting_native_transcript",

@@ -6,7 +6,7 @@ import {
   CandidateProfileSchema,
   RESUME_IMPORT_INTERRUPTED_MESSAGE,
   ResumeImportRunSchema,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import {
   ProfileSetupImportNotice,
   buildProfileSetupImportNotice,

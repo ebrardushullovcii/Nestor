@@ -1,4 +1,4 @@
-import { resumeComparisonNeedsRefresh } from "@nordri/contracts";
+import { resumeComparisonNeedsRefresh } from "@nestor/contracts";
 import {
   resumeFactIsCovered,
   resumeSentences,
@@ -11,8 +11,8 @@ import {
   skillsAreEquivalent,
   type ResumeGenerationEvidenceItem,
   type TailoredResumeDraft,
-} from "@nordri/ai-providers";
-import type { ResumeGenerationStrategyPolicy } from "@nordri/ai-providers";
+} from "@nestor/ai-providers";
+import type { ResumeGenerationStrategyPolicy } from "@nestor/ai-providers";
 import {
   ResumeAssistantMessageSchema,
   ResumeDraftRevisionSchema,
@@ -47,9 +47,9 @@ import {
   type TailoredAsset,
   type WorkHistoryReviewAcknowledgment,
   type WorkHistoryReviewSuggestion,
-} from "@nordri/contracts";
-import { fnv1a32 } from "@nordri/core";
-import { createLocalKnowledgeIndex } from "@nordri/knowledge-base";
+} from "@nestor/contracts";
+import { fnv1a32 } from "@nestor/core";
+import { createLocalKnowledgeIndex } from "@nestor/knowledge-base";
 import {
   createUniqueId,
   normalizeText,

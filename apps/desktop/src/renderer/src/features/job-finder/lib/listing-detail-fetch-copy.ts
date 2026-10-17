@@ -2,7 +2,7 @@ import {
   deriveListingDetailCapture,
   type ListingDetailCapture,
   type ListingDetailFetch,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 
 const READ_IT = "Use Open listing below to read it in the Job Finder browser.";
 

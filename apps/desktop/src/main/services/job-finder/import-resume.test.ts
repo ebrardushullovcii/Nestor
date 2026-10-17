@@ -13,7 +13,7 @@ import {
   type ResumeDocumentBundle,
   type ResumeImportProgressEvent,
   type ResumeSourceDocument,
-} from "@nordri/contracts";
+} from "@nestor/contracts";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 
 const {
@@ -259,7 +259,7 @@ function createSnapshot(baseResume: ResumeSourceDocument) {
 
 async function createTempResumeFile(fileName = "resume.pdf") {
   const directory = await mkdtemp(
-    path.join(os.tmpdir(), "nordri-import-resume-test-"),
+    path.join(os.tmpdir(), "nestor-import-resume-test-"),
   );
   const filePath = path.join(directory, fileName);
   return { directory, filePath };
@@ -556,7 +556,7 @@ describe("importing a stopped import's file again", () => {
 
   test("imports the saved copy under the file's own name, with no picker", async () => {
     const { RESUME_IMPORT_INTERRUPTED_MESSAGE, ResumeImportRunSchema } =
-      await import("@nordri/contracts");
+      await import("@nestor/contracts");
     const { retryInterruptedResumeImport } = await import("./import-resume");
     const { directory } = await createTempResumeFile();
     const documentsDirectory = path.join(directory, "documents");
