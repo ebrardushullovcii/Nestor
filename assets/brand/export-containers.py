@@ -17,7 +17,7 @@ def ico(output, directory, names):
 ico(ROOT/'desktop/windows/icon.ico', ROOT/'desktop/windows', [f'icon-{n}.png' for n in [16,20,24,32,40,48,64,128,256]])
 ico(ROOT/'web/favicon.ico', ROOT/'web', [f'favicon-{n}.png' for n in [16,32,48]])
 # Use Apple's native encoder for all standard and Retina representations.
-subprocess.run(['iconutil','-c','icns',str(ROOT/'desktop/macos/Nordri.iconset'),'-o',str(ROOT/'desktop/macos/icon.icns')],check=True)
+subprocess.run(['iconutil','-c','icns',str(ROOT/'desktop/macos/Nestor.iconset'),'-o',str(ROOT/'desktop/macos/icon.icns')],check=True)
 icns=(ROOT/'desktop/macos/icon.icns').read_bytes()
 assert icns[:4] == b'icns' and struct.unpack('>I', icns[4:8])[0] == len(icns)
 offset=8; types=[]
@@ -29,10 +29,10 @@ while offset<len(icns):
     offset+=length
 assert 'ic10' in types, types
 assert offset==len(icns)
-with tempfile.TemporaryDirectory(prefix='nordri-icns-check-') as directory:
+with tempfile.TemporaryDirectory(prefix='nestor-icns-check-') as directory:
     decoded=Path(directory)/'Decoded.iconset'
     subprocess.run(['iconutil','-c','iconset',str(ROOT/'desktop/macos/icon.icns'),'-o',str(decoded)],check=True)
-    for original in (ROOT/'desktop/macos/Nordri.iconset').glob('*.png'):
+    for original in (ROOT/'desktop/macos/Nestor.iconset').glob('*.png'):
         with Image.open(original) as expected, Image.open(decoded/original.name) as actual:
             assert actual.size==expected.size
             a=actual.convert('RGBA'); b=expected.convert('RGBA')
@@ -57,7 +57,7 @@ for file in (ROOT/'source').glob('*.svg'):
     tree=ET.parse(file)
     assert not any(e.tag.endswith('image') or e.tag.endswith('text') for e in tree.iter()), file
 
-# Check that the ring and all three stones are distinct even at 16px.
+# Check that the frame, the sky and the land stay separate shapes even at 16px.
 def components(image):
     alpha=image.convert('RGBA').getchannel('A')
     w,h=image.size
@@ -74,9 +74,9 @@ def components(image):
 for n in [16,32,48,64,128]:
     image=Image.open(ROOT/f'web/favicon-{n}.png')
     count=len(components(image))
-    assert count==4, (n,count)
+    assert count==3, (n,count)
 wordmark=Image.open(ROOT/'in-app/wordmark-1280.png')
-assert len(components(wordmark))==9, 'Wordmark must retain six letters and three separate stones.'
+assert len(components(wordmark))==6, 'Wordmark must retain six separate letters.'
 
 # The maskable foreground must fit the circle with radius 40% of the canvas.
 foreground=Image.open(ROOT/'desktop/macos/icon-composer-foreground.png')
@@ -85,11 +85,11 @@ for y in range(1024):
     for x in range(1024):
         if alpha.getpixel((x,y))>=128:
             assert (x-512)**2+(y-512)**2 <= (409.6)**2
-print(f'Validated {len(inventory)} PNG sizes and transparency; all favicons retain four separate shapes.')
+print(f'Validated {len(inventory)} PNG sizes and transparency; all favicons retain three separate shapes.')
 print('Validated Windows ICO: 16,20,24,32,40,48,64,128,256; favicon ICO: 16,32,48.')
 print('Validated macOS ICNS container and 1024px representation:', ','.join(types))
 print('Validated outlined SVGs and maskable icon safe zone.')
-print('Validated wordmark: six complete letter shapes plus three separate stones.')
+print('Validated wordmark: six complete letter shapes.')
 build=ROOT/'integration/electron-build'
 build.mkdir(parents=True,exist_ok=True)
 shutil.copy2(ROOT/'desktop/windows/icon.ico',build/'icon.ico')
