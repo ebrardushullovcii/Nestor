@@ -31,7 +31,8 @@ apps/desktop/test-fixtures/local/
 !.cursor/rules/
 !.cursor/rules/**
 .opencode/
-.claude/
+.claude/*
+!.claude/skills/
 docs/reviews/*.txt
 docs/audits/evidence/
 .codex/
