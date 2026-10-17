@@ -9,11 +9,11 @@ Proof means using the app the way a person would, action by action, and keeping 
 
 ## Rules (read first)
 
-- **Isolated instance only.** Every `up` makes a fresh `/tmp/nestor-verify-<label>-*` user-data folder and refuses anything else. Never point an instance at the default data location (`~/Library/Application Support/@nestor/desktop`, or the older `@nordri/desktop` that the owner's next normal start migrates). Never attach to, drive or stop the owner's `pnpm desktop:dev`.
+- **Isolated instance only.** Every `up` makes a fresh `/tmp/nestor-verify-<label>-*` user-data folder (`%TEMP%\nestor-verify-<label>-*` on Windows) and refuses anything else. Never point an instance at the default data location (`~/Library/Application Support/@nestor/desktop`, `%APPDATA%\@nestor\desktop` on Windows, or the older `@nordri/desktop` that the owner's next normal start migrates). Never attach to, drive or stop the owner's `pnpm desktop:dev`.
 - **Synthetic data only.** Use the resumes in `apps/desktop/test-fixtures/job-finder/` (`resume-import-sample.txt`, `resume-import-personas/`). Never a real resume, real credentials or a signed-in browser state, in the instance or in the evidence.
 - **Send only to the replica sites.** Each instance runs its own copy of `apps/desktop/test-fixtures/job-sites` on a free port. A send guard inside the app refuses every request to a non-loopback host (`--net replica`, the default) and logs it to `blocked-requests.jsonl`; `up` proves the guard with a self-test before anyone drives. Add only replica URLs as job sources. With `--net web` the app can read real sites, but every non-GET request to them is still refused, so a real employer gets nothing: anything outside the replica stays `prepare_only` (ADR 0012, 0024, `docs/TESTING.md`).
 - **Kill only what the run started.** `down` stops the recorded driver, Electron and replica-site PIDs (checked against their recorded start times) with their children, plus any process holding this instance's own data folder. Never `pkill`, `killall` or kill an Electron found by name.
-- **Never build in the main checkout** (`~/Projects/Personal/Nestor`): its `out/` feeds the owner's dev instance. `bin/build` refuses there. Driving from it is fine.
+- **Never build in the main checkout** (`~/Projects/Personal/Nestor` on the Mac, `D:\Projects-Personal\Nestor` on the Windows PC; `NESTOR_VERIFY_MAIN_CHECKOUT` overrides): its `out/` feeds the owner's dev instance. `bin/build` refuses there. Driving from it is fine.
 - **Machine load.** The Mac is shared with NEX. One build or full suite at a time; a few instances side by side are fine.
 - **Don't touch the focus or permission switches.** Instances never become the front app (see Gotchas). Turning on the microphone, system audio or screenshots in Live Assistant raises real macOS permission prompts on the owner's screen: leave them off unless the owner asked.
 
@@ -26,6 +26,8 @@ $V/build                                        # once per source change: pnpm b
 $V/up                                           # deterministic AI
 $V/up --ai live                                 # the app's real AI (needed for search, fit, resume, apply)
 ```
+
+On Windows the `bin/` scripts run from Git Bash as written. From PowerShell, call the same commands through node: `node .claude/skills/verify-nestor/bin/lib/cli.mjs up` (and `build`, `doctor`, `drive`, `db`, `down`; `website` is `bin/lib/website.mjs`).
 
 `up` prints `ready: label <label>` with the replica-sites URL, the private user-data folder and the evidence folder once the main window has loaded `window.nestor`, the user-data path is confirmed, and the send guard self-test passed. Measured 2026-10-17: about 2 s warm, 20 s cold.
 
@@ -42,7 +44,7 @@ Options: `--ai deterministic|live`, `--net replica|web`, `--video` (Playwright v
 $V/doctor
 ```
 
-Read-only. Checks: build stamp against the source; driver, Electron and replica-site PIDs alive and ours (start times match); the replica sites answer; the user-data folder is the private `/tmp` one, both on record and inside the app; the send guard self-test passed; the driver answers and names the current screen; nothing else holds the data folder; the instance is not the front app. It also lists other live instances and the load. Exit 1 means fix before driving. Run it first, and whenever something looks off.
+Read-only. Checks: build stamp against the source; driver, Electron and replica-site PIDs alive and ours (start times match); the replica sites answer; the user-data folder is the private temp one, both on record and inside the app; the send guard self-test passed; the driver answers and names the current screen; nothing else holds the data folder; the instance is not the front app. It also lists other live instances and the load. Exit 1 means fix before driving. Run it first, and whenever something looks off.
 
 ## Drive
 
@@ -161,6 +163,7 @@ Internals, for fixing the helpers: `bin/lib/cli.mjs` (commands), `bin/lib/driver
 ## Gotchas
 
 - **Focus.** macOS activates a regular app whenever it shows a window, even with `showInactive`. Instances therefore run from an APFS clone of the checkout's Electron.app marked `LSUIElement` (`.verify-state/_electron/<version>/`, instant, shares disk blocks), and the patch turns `show`/`focus`/`moveTop`/always-on-top into quiet versions. Consequences: no Dock icon or menu bar for the instance; a run cannot prove keyboard focus, always-on-top popups or the native pickers. Playwright input still reaches the unfocused window.
+- **Windows.** The window patch alone keeps instances in the background (`showInactive` does not activate there); they do get taskbar buttons. `doctor` checks the foreground window instead of the front app. With no `ps` or `lsof`, process start times and children come from PowerShell (`Get-CimInstance Win32_Process`), and "holds the data folder" means a process whose command line names it (every Chromium child carries `--user-data-dir`). That makes `doctor` and `down` take about 10 s. Measured 2026-10-17 on the Windows PC: build 2 min, `up` 6 s, Live Assistant journey 4 s.
 - **Unfocused means backstage.** While a run is going and the window is unfocused, the embedded browser parks its pages in a hidden panel window (by design). `shot --target browser` still captures them through `capturePage`.
 - **`navigator.webdriver` is true** in the in-app browser under Playwright. Google sign-in rejects at the email step and Cloudflare challenges it. Neither matters for the replica sites; do not conclude a real site is broken from this.
 - **The Job Finder browser peek is a modal.** After "Open the Job Finder browser" it covers the app; `drive press Escape` closes it before you click elsewhere.

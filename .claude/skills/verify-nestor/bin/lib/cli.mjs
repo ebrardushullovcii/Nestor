@@ -18,15 +18,19 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import {
+  appDataRoot,
   checkout,
   descendants,
   desktopDir,
   ensureDirs,
   evidenceDir,
   fail,
+  frontPid,
   holdersOf,
   isAlive,
   isMainCheckout,
+  isPrivateDataDir,
+  isWindows,
   label,
   loadAiEnv,
   readStamp,
@@ -38,6 +42,7 @@ import {
   stateDir,
   step,
   stillOurs,
+  tempRoot,
   workRoot,
   writeState,
 } from "./common.mjs";
@@ -98,10 +103,12 @@ async function build() {
       "Refusing to build in the main checkout: its out/ feeds the owner's pnpm desktop:dev. Use a worktree.",
     );
   const before = sourceFingerprint();
-  const result = spawnSync("pnpm", ["--filter", "@nestor/desktop", "build"], {
-    cwd: checkout,
-    stdio: "inherit",
-  });
+  // pnpm is a .cmd shim on Windows, which Node only starts through a shell.
+  const pnpmBuild = ["pnpm", "--filter", "@nestor/desktop", "build"];
+  const options = { cwd: checkout, stdio: "inherit" };
+  const result = isWindows
+    ? spawnSync(pnpmBuild.join(" "), { ...options, shell: true })
+    : spawnSync(pnpmBuild[0], pnpmBuild.slice(1), options);
   if (result.status !== 0) fail(`Build failed (exit ${result.status}).`);
   const after = sourceFingerprint();
   if (JSON.stringify(before) !== JSON.stringify(after))
@@ -224,9 +231,11 @@ async function up() {
     path.join(desktopDir, "package.json"),
     path.join(appDir, "package.json"),
   );
+  // A junction on Windows, where a directory symlink needs admin rights; ignored elsewhere.
   symlinkSync(
     path.join(desktopDir, "node_modules"),
     path.join(appDir, "node_modules"),
+    "junction",
   );
 
   const electronPath = quietElectron();
@@ -238,13 +247,12 @@ async function up() {
     existsSync(previous.userDataDir)
   )
     userDataDir = previous.userDataDir;
-  else userDataDir = mkdtempSync(path.join("/tmp", `nestor-verify-${label}-`));
-  const defaultLocation = path.join(
-    os.homedir(),
-    "Library/Application Support",
-  );
-  if (userDataDir.startsWith(defaultLocation))
-    fail("Refusing a user data folder in Application Support.");
+  else
+    userDataDir = mkdtempSync(path.join(tempRoot, `nestor-verify-${label}-`));
+  if (userDataDir.startsWith(appDataRoot) || !isPrivateDataDir(userDataDir))
+    fail(
+      `Refusing user data folder ${userDataDir}: not a private temp folder.`,
+    );
 
   const launch = {
     userDataDir,
@@ -280,6 +288,7 @@ async function up() {
     {
       cwd: desktopDir,
       detached: true,
+      windowsHide: true,
       stdio: ["ignore", log, log],
       env: { ...process.env, NESTOR_VERIFY_LABEL: label },
     },
@@ -365,8 +374,7 @@ async function doctor() {
       check(ok, "replica sites answer", state.sitesUrl);
     }
     check(
-      state.userDataDir?.startsWith("/tmp/nestor-verify-") ||
-        state.userDataDir?.startsWith("/private/tmp/nestor-verify-"),
+      isPrivateDataDir(state.userDataDir),
       "private user data folder",
       state.userDataDir,
     );
@@ -410,24 +418,14 @@ async function doctor() {
       );
     }
     if (
-      process.platform === "darwin" &&
+      (process.platform === "darwin" || isWindows) &&
       stillOurs(state.electronPid, state.electronStart)
     ) {
-      const front = spawnSync(
-        "lsappinfo",
-        [
-          "info",
-          "-only",
-          "pid",
-          spawnSync("lsappinfo", ["front"], { encoding: "utf8" }).stdout.trim(),
-        ],
-        { encoding: "utf8" },
-      ).stdout;
-      const frontPid = Number((front.match(/pid\s*=\s*(\d+)/) ?? [])[1]);
+      const front = frontPid();
       check(
-        !descendants(state.electronPid).includes(frontPid),
+        !descendants(state.electronPid).includes(front),
         "the instance is not the front app (focus patch)",
-        `front pid ${frontPid || "?"}`,
+        `front pid ${front || "?"}`,
       );
     }
   }
@@ -449,10 +447,12 @@ async function doctor() {
   info("other live instances", others.join(", ") || "none");
   info(
     "load",
-    os
-      .loadavg()
-      .map((n) => n.toFixed(1))
-      .join(" "),
+    isWindows
+      ? `${Math.round(os.freemem() / 2 ** 30)} of ${Math.round(os.totalmem() / 2 ** 30)} GB memory free (Windows reports no load average)`
+      : os
+          .loadavg()
+          .map((n) => n.toFixed(1))
+          .join(" "),
   );
   for (const c of checks)
     console.log(
@@ -581,7 +581,7 @@ async function down() {
       cpSync(path.join(stateDir, name), path.join(logs, name));
 
   if (!survivors.length) {
-    if (!keepData && state.userDataDir?.includes("/nestor-verify-"))
+    if (!keepData && isPrivateDataDir(state.userDataDir))
       rmSync(state.userDataDir, { recursive: true, force: true });
     if (keepData) {
       rmSync(path.join(stateDir, "app"), { recursive: true, force: true });

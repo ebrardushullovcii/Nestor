@@ -13,6 +13,8 @@ const QUESTION =
 
 export default async function journey({
   page,
+  app,
+  sleep,
   click,
   fill,
   shot,
@@ -65,11 +67,25 @@ export default async function journey({
   await fill("/^Ask a question/", QUESTION);
   await click("Send", { role: "button" });
   // The question is the first article in the conversation, the assistant's answer the second.
-  await p
-    .getByRole("main")
-    .getByRole("article")
-    .nth(1)
-    .waitFor({ timeout: 180000 });
+  const answer = p.getByRole("main").getByRole("article").nth(1);
+  await answer.waitFor({ timeout: 180000 });
+  // The popups can still be loading when the answer reaches the window (about 1 s
+  // on Windows); shoot them once the answer popup shows the question.
+  const popup = async (name) => {
+    for (let i = 0; i < 120; i += 1) {
+      const found = app
+        .windows()
+        .find((w) => w.url().includes(`/live-assistant/overlay/${name}`));
+      if (found) return found;
+      await sleep(250);
+    }
+    throw new Error(`The ${name} popup did not open`);
+  };
+  await popup("transcript");
+  await (await popup("answer")).getByText(QUESTION).waitFor({ timeout: 30000 });
+  // Typing in the composer leaves the screen scrolled to its bottom, past the
+  // conversation; bring the answer back into the shot.
+  await answer.evaluate((el) => el.scrollIntoView({ block: "center" }));
   await shot("la-session-answer");
   await shot("la-popups", { target: "overlay" });
 
