@@ -5,6 +5,7 @@ import {
   fakeResumeClaimCheck,
 } from "./workspace-service.test-runtimes";
 import {
+  createDocumentManager,
   createWorkspaceServiceHarness,
   createSeed,
 } from "./workspace-service.test-support";
@@ -352,6 +353,12 @@ describe("aggressive resume review routing", () => {
       seed,
       aiClient: {
         ...baseAiClient,
+        // The fact check finds the invented summary unbacked, so the writer
+        // is asked to repair it.
+        checkResumeClaims: fakeResumeClaimCheck({
+          "Directed a fictional lunar migration for the target employer.":
+            "unsupported",
+        }),
         async createResumeDraft(input) {
           const draft = await baseAiClient.createResumeDraft(input);
           const preview = await input.renderPreview?.({
@@ -375,6 +382,51 @@ describe("aggressive resume review routing", () => {
 
     expect(requiredModelRepairCount).toBeGreaterThan(0);
     expect(personConfirmationCount).toBeGreaterThanOrEqual(0);
+  });
+
+  test("generation preview leaves a resume over the page target for the person", async () => {
+    const baseDocumentManager = createDocumentManager();
+    let requiredModelRepairs: readonly { category: string }[] | null = null;
+    const baseAiClient = createAiClient();
+    const { workspaceService } = createWorkspaceServiceHarness({
+      documentManager: {
+        ...baseDocumentManager,
+        async renderResumeArtifact(input) {
+          return {
+            ...(await baseDocumentManager.renderResumeArtifact(input)),
+            pageCount: 4,
+          };
+        },
+      },
+      aiClient: {
+        ...baseAiClient,
+        async createResumeDraft(input) {
+          const draft = await baseAiClient.createResumeDraft(input);
+          const preview = await input.renderPreview?.({
+            draft,
+            templateId:
+              input.selectedTemplateId ?? input.settings.resumeTemplateId,
+          });
+          requiredModelRepairs = preview?.requiredModelRepairs ?? null;
+          return draft;
+        },
+      },
+    });
+
+    await workspaceService.generateResume("job_ready");
+    const workspace = await workspaceService.getResumeWorkspace("job_ready");
+
+    expect(requiredModelRepairs).not.toBeNull();
+    expect(
+      requiredModelRepairs!.some(
+        (repair) => repair.category === "page_overflow",
+      ),
+    ).toBe(false);
+    expect(
+      workspace.validation?.issues.some(
+        (issue) => issue.category === "page_overflow",
+      ),
+    ).toBe(true);
   });
 
   test("generation preview leaves aggressive confirm-needed claims for the person", async () => {

@@ -1,4 +1,4 @@
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 
 export const RESUME_WORKSPACE_REQUIRED_COLLECTIONS = [
   "discovery_jobs",
@@ -26,8 +26,8 @@ export type ResumeWorkspaceRouteState =
  * as the job stays in the hydrated queue, the route remains available.
  */
 export function resolveResumeWorkspaceRouteState(input: {
-  hydration: JobFinderWorkspaceSnapshot["hydration"];
-  reviewQueue: readonly JobFinderWorkspaceSnapshot["reviewQueue"][number][];
+  hydration: JobFinderRendererWorkspaceSnapshot["hydration"];
+  reviewQueue: readonly JobFinderRendererWorkspaceSnapshot["reviewQueue"][number][];
   jobId: string;
 }): ResumeWorkspaceRouteState {
   const isHydrating =

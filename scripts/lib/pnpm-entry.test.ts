@@ -12,6 +12,12 @@ import {
   writePnpmPathShims,
 } from "./pnpm-entry.mjs";
 
+// Some cases build a Unix PATH from real temp directories or run shell scripts
+// directly. A Windows drive letter breaks the ":" PATH split and Windows
+// cannot run a shebang file, so those cases skip there.
+const POSIX_ONLY = "needs a POSIX PATH and shebang execution";
+const onWindows = process.platform === "win32";
+
 // Same approved scratch root the release evidence collector uses for
 // disposable fixtures.
 const approvedTempRoot = path.join(os.tmpdir(), "opencode");
@@ -113,7 +119,10 @@ describe("resolveShellFreePnpmInvocation", () => {
     expect(invocation?.entryPoint).toBe(vendored);
   });
 
-  test("requires a shebang for PATH scripts and skips non-script entries", () => {
+  test("requires a shebang for PATH scripts and skips non-script entries", ({
+    skip,
+  }) => {
+    skip(onWindows, POSIX_ONLY);
     const root = makeFixture("path-shebang");
     const plain = makeFixture("path-plain");
     writeFileSync(path.join(plain, "pnpm"), "console.log('not a script');\n");
@@ -400,7 +409,10 @@ describe("resolveVerifiedPnpmLauncher", () => {
 });
 
 describe("writePnpmPathShims", () => {
-  test("writes a POSIX trampoline that safely forwards arguments through spaced and quoted paths", () => {
+  test("writes a POSIX trampoline that safely forwards arguments through spaced and quoted paths", ({
+    skip,
+  }) => {
+    skip(onWindows, POSIX_ONLY);
     const root = makeFixture("shim-posix");
     const entry = path.join(root, "odd pnpm's dir", "pnpm-stub.cjs");
     writeFileEnsuringDir(
@@ -458,7 +470,10 @@ describe("writePnpmPathShims", () => {
 });
 
 describe("run-turbo argument contract", () => {
-  test("forwards existing turbo arguments through the verified pnpm entry without Corepack", () => {
+  test("forwards existing turbo arguments through the verified pnpm entry without Corepack", ({
+    skip,
+  }) => {
+    skip(onWindows, POSIX_ONLY);
     const root = makeFixture("turbo-e2e");
     const recordPath = path.join(root, "record.json");
     const fakeEntry = path.join(root, "fake pnpm store", "pnpm.cjs");

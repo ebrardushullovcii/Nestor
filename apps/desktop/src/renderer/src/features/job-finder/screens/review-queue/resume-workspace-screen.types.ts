@@ -2,7 +2,7 @@ import type {
   JobFinderResumePreview,
   JobFinderResumeWorkspace,
   JobFinderSetResumeClaimConfirmationInput,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ResumeAssistantMessage,
   ResumeDraft,
   ResumeSourceDocument,
@@ -68,7 +68,7 @@ export interface ResumeWorkspaceScreenProps {
    */
   onSetResumeClaimConfirmation?: (
     input: JobFinderSetResumeClaimConfirmationInput,
-  ) => Promise<JobFinderWorkspaceSnapshot>;
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   onRegenerateDraft: (jobId: string) => void;
   onRestoreRevision: (jobId: string, revisionId: string) => void;
   /** Removes one accepted AI edit and keeps later edits. */

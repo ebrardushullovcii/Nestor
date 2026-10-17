@@ -8,15 +8,15 @@ import type {
   ApplicationAutomationMode,
   CandidateProfile,
   JobFinderApplicationStartTarget,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   BrowserSessionState,
   GlobalDailyApplicationPreparationCapacity,
   ResumeApplicationMode,
   TailoringMode,
   ResumeSourceDocument,
   ReviewQueueItem,
-  SavedJob,
-  TailoredAsset,
+  JobListRow,
+  TailoredAssetSummary,
 } from "@nordri/contracts";
 import { Button, ProgressBar } from "@renderer/components/ui";
 import { cn } from "@renderer/lib/cn";
@@ -35,8 +35,6 @@ import {
   describeAiUnavailableResume,
   describeUntailorableListing,
 } from "./resume-workspace-utils";
-import { resolveResumeIdentity } from "@nordri/job-finder/resume-identity";
-import { ResumeIdentityChoiceNotice } from "../../components/profile/resume-identity-choice-notice";
 
 const dailyCapacityLimitDescriptionId =
   "employer-application-daily-capacity-limit";
@@ -64,7 +62,7 @@ interface ReviewQueueMissionPanelProps {
   /** Takes the person to Safeguards when one is holding preparation back. */
   onOpenSafeguards?: () => void;
   /** Live apply results, so the start control follows the run record. */
-  applyJobResults?: JobFinderWorkspaceSnapshot["applyJobResults"];
+  applyJobResults?: JobFinderRendererWorkspaceSnapshot["applyJobResults"];
   /** A safeguard holding preparation back, in plain words. */
   safeguardBlocker?: string | null;
   onClaimResumeIdentity?: () => void;
@@ -77,9 +75,11 @@ interface ReviewQueueMissionPanelProps {
   ) => void;
   originalResume?: ResumeSourceDocument;
   profile?: CandidateProfile;
-  selectedAsset: TailoredAsset | null;
+  selectedAsset: TailoredAssetSummary | null;
   selectedItem: ReviewQueueItem | null;
-  selectedJob: SavedJob | null;
+  selectedJob: JobListRow | null;
+  /** The written preference verdict, read with the job detail. */
+  preferenceExplanation?: string | null;
 }
 
 /** The four resume levels a job can be sent with, in order of how far they go. */
@@ -111,7 +111,7 @@ const RESUME_LEVEL_OPTIONS: readonly {
   {
     id: "aggressive",
     label: "Aggressive",
-    detail: "Stretches toward the posting; you confirm the stretches.",
+    detail: "Stretches toward the posting to get you the interview.",
     tailoringMode: "aggressive",
   },
 ];
@@ -160,15 +160,13 @@ export function ReviewQueueMissionPanel({
   onOpenSafeguards,
   applyJobResults = [],
   safeguardBlocker = null,
-  onClaimResumeIdentity,
-  onKeepResumeIdentity,
   onRemoveReviewJob,
   onSetJobResumeApplicationMode,
   originalResume,
-  profile,
   selectedAsset,
   selectedItem,
   selectedJob,
+  preferenceExplanation = null,
 }: ReviewQueueMissionPanelProps) {
   const {
     isGenerating,
@@ -263,9 +261,6 @@ export function ReviewQueueMissionPanel({
   const dailyCapacityDescription = formatDailyPreparationCapacitySummaryText(
     globalDailyApplicationPreparationCapacity,
   );
-  const resumeIdentityDiffers =
-    profile !== undefined &&
-    resolveResumeIdentity(profile).mismatchReasons.length > 0;
   const showsApplyOutcome =
     primaryApplicationAction.kind === "start_apply" ||
     primaryApplicationAction.kind === "approve_and_apply";
@@ -500,16 +495,6 @@ export function ReviewQueueMissionPanel({
             </p>
           </div>
         ) : null}
-        {resumeIdentityDiffers &&
-        profile &&
-        onKeepResumeIdentity &&
-        onClaimResumeIdentity ? (
-          <ResumeIdentityChoiceNotice
-            onKeepResumeName={onKeepResumeIdentity}
-            onUseProfileName={onClaimResumeIdentity}
-            profile={profile}
-          />
-        ) : null}
         {!existingApplication && primaryApplicationAction.blocker ? (
           primaryApplicationAction.blockerTone === "info" ? (
             <p
@@ -548,8 +533,7 @@ export function ReviewQueueMissionPanel({
             >
               {selectedJob.matchAssessment.recommendation === "skip"
                 ? selectedJob.matchAssessment.recommendationRationale
-                : selectedJob.matchAssessment.dimensions?.preferenceAlignment
-                    .explanation}
+                : preferenceExplanation}
               {selectedJob.matchAssessment.gaps.length > 0
                 ? ` ${selectedJob.matchAssessment.gaps.join(" ")}`
                 : ""}

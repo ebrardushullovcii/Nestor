@@ -1,4 +1,3 @@
-import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -165,7 +164,9 @@ describe("createFileJobFinderRepository legacy restoration", () => {
     const legacyTarget = seed.searchPreferences.discovery?.targets?.[0];
 
     if (!legacyTarget) {
-      throw new Error("Expected a seeded discovery target for legacy-restoration tests.");
+      throw new Error(
+        "Expected a seeded discovery target for legacy-restoration tests.",
+      );
     }
 
     try {
@@ -266,17 +267,10 @@ describe("createFileJobFinderRepository legacy restoration", () => {
       path.join(os.tmpdir(), "nordri-db-persisted-source-debug-run-"),
     );
     const filePath = path.join(tempDirectory, "job-finder-state.sqlite");
-    let firstRepository: FileRepository | null = null;
+    const legacyPath = path.join(tempDirectory, "job-finder-state.json");
     let secondRepository: FileRepository | null = null;
 
     try {
-      firstRepository = await createFileJobFinderRepository({
-        filePath,
-        seed: createSeed(),
-      });
-      await firstRepository.close();
-      firstRepository = null;
-
       const legacyRun = {
         id: "legacy_source_debug_run",
         targetId: "target_primary",
@@ -302,23 +296,19 @@ describe("createFileJobFinderRepository legacy restoration", () => {
         phaseSummaries: [],
         instructionArtifactId: null,
       };
-      const database = new DatabaseSync(filePath);
-      try {
-        database
-          .prepare(
-            "INSERT OR REPLACE INTO singleton_state (key, value) VALUES (?, ?)",
-          )
-          .run(
-            "discovery_state",
-            JSON.stringify({
-              ...createSeed().discovery,
-              activeSourceDebugRun: legacyRun,
-              recentSourceDebugRuns: [legacyRun],
-            }),
-          );
-      } finally {
-        database.close();
-      }
+      // A workspace saved before discovery moved into its own tables keeps
+      // the whole discovery state in one blob; restoring it normalizes runs.
+      await writeFile(
+        legacyPath,
+        JSON.stringify({
+          ...createSeed(),
+          discovery: {
+            ...createSeed().discovery,
+            activeSourceDebugRun: legacyRun,
+            recentSourceDebugRuns: [legacyRun],
+          },
+        }),
+      );
 
       secondRepository = await createFileJobFinderRepository({
         filePath,
@@ -333,9 +323,6 @@ describe("createFileJobFinderRepository legacy restoration", () => {
     } finally {
       if (secondRepository) {
         await secondRepository.close();
-      }
-      if (firstRepository) {
-        await firstRepository.close();
       }
       await rm(tempDirectory, { recursive: true, force: true });
     }

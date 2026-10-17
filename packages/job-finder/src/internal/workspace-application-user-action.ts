@@ -1132,10 +1132,13 @@ export async function retireCancelledApplicationUserActions(
   repository: JobFinderRepository,
   runId?: string,
 ): Promise<void> {
+  const display = await repository.readDisplayCollections?.();
   const [runs, requests, results] = await Promise.all([
-    repository.listApplyRuns(),
-    repository.listUserActionRequests({ scopeType: "application" }),
-    repository.listApplyJobResults(),
+    display?.applyRuns ?? repository.listApplyRuns(),
+    display?.userActionRequests.filter(
+      (request) => request.scope.type === "application",
+    ) ?? repository.listUserActionRequests({ scopeType: "application" }),
+    display?.applyJobResults ?? repository.listApplyJobResults(),
   ]);
   const cancelledRunIds = new Set(
     runs

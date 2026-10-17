@@ -5,7 +5,7 @@ import type {
   CandidateProfile,
   DiscoveryRunRecord,
   EditableSourceInstructionArtifact,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   JobSearchPreferences,
   ProfileSetupState,
   ProfileSetupReviewActionOptions,
@@ -163,7 +163,7 @@ export function ProfileScreen(props: {
   discoveryRuns?: readonly DiscoveryRunRecord[];
   recentSourceDebugRuns: readonly SourceDebugRunRecord[];
   searchPreferences: JobSearchPreferences;
-  sourceAccessPrompts: JobFinderWorkspaceSnapshot["sourceAccessPrompts"];
+  sourceAccessPrompts: JobFinderRendererWorkspaceSnapshot["sourceAccessPrompts"];
   sourceInstructionArtifacts: readonly SourceInstructionArtifact[];
 }) {
   const {

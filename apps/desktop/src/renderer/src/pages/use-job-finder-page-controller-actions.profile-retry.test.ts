@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import type {
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ProfileCopilotMessage,
 } from "@nordri/contracts";
 import type { JobFinderShellActions } from "@renderer/features/job-finder/lib/job-finder-types";
@@ -62,10 +62,10 @@ test.each([
     // snapshot may predate the failed request.
     const workspace = {
       profileCopilotMessages: [],
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     const latest = {
       profileCopilotMessages: messages,
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     type Args = Parameters<typeof createPrimaryPageActions>[0];
     const args = {
       actions: {

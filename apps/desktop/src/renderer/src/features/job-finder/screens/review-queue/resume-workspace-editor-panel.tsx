@@ -23,10 +23,7 @@ import {
   describeResumeDraftProvenance,
   describeResumeGenerationPath,
   type ResumeGenerationPathInput,
-  isGeneratedResumeOrigin,
 } from "./resume-workspace-utils";
-
-import { listGeneratedReviewLines } from "./resume-review-context";
 
 type ResumeDraftSection = ResumeDraft["sections"][number];
 type DraftAcknowledgments = ResumeDraft["workHistoryReviewAcknowledgments"];
@@ -162,16 +159,6 @@ export function ResumeWorkspaceEditorPanel(
       "Saved your draft before adding this skill.",
     );
   };
-  const generatedLines = props.showGeneratedLineMarkers
-    ? listGeneratedReviewLines(props.draft).filter(
-        ({ bullet }) =>
-          isGeneratedResumeOrigin(bullet.origin) &&
-          // A single skill word ("React") is not a generated line; counting
-          // eight of them made a "14 lines" warning read as theatre.
-          bullet.text.trim().split(/\s+/u).length >= 4,
-      )
-    : [];
-  const generatedBulletCount = generatedLines.length;
   const generationPath = describeResumeGenerationPath(
     props.tailoredAssetGeneration ?? {
       generationMethod: "deterministic",
@@ -303,43 +290,6 @@ export function ResumeWorkspaceEditorPanel(
                   </Button>
                 ) : null}
               </span>
-            </div>
-          ) : null}
-          {props.showGeneratedLineMarkers && generatedBulletCount > 0 ? (
-            <div
-              // The lines themselves carry the marks and Lines to confirm
-              // is the review box; this is the explanation, in plain text.
-              className="text-(length:--text-small) leading-6 text-foreground-muted"
-              data-resume-inference-disclosure
-              role="note"
-            >
-              Aggressive tailoring generated {generatedBulletCount} bullet{" "}
-              {generatedBulletCount === 1 ? "line" : "lines"} in this draft
-              instead of reusing your resume wording. Marked lines may stretch
-              your saved evidence in small, deliberate ways — rounded years and
-              technologies the job asks for that your experience makes credible
-              — so the resume clears screening for the first interview. Skills
-              the job asked for are listed under Lines to confirm. Each stays
-              unapproved until you check it against what you can prove in the
-              interview.
-              <details className="mt-1.5">
-                <summary className="cursor-pointer text-xs font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
-                  See generated lines
-                </summary>
-                <ul className="mt-2 grid gap-2">
-                  {generatedLines.map(({ bullet, context }) => (
-                    <li
-                      key={bullet.id}
-                      className="min-w-0 [overflow-wrap:anywhere]"
-                    >
-                      <p className="text-xs font-medium text-foreground">
-                        {context}
-                      </p>
-                      <p className="text-foreground-soft">{bullet.text}</p>
-                    </li>
-                  ))}
-                </ul>
-              </details>
             </div>
           ) : null}
         </div>

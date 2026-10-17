@@ -1,5 +1,5 @@
 import type { ApplicationRecord } from "./discovery";
-import type { ApplyJobResult, ApplyRunSummary } from "./apply";
+import type { ApplyJobResultListRow, ApplyRunSummary } from "./apply";
 import { z } from "zod";
 
 import {
@@ -563,10 +563,10 @@ export const APPLICATION_SKIPPED_BY_PERSON_LABEL = "Skipped at your request.";
 /** Project retained records from the latest attempt without changing the person's stage. */
 export function projectApplicationRecordsActivity(input: {
   records: readonly ApplicationRecord[];
-  results: readonly ApplyJobResult[];
+  results: readonly ApplyJobResultListRow[];
   runs?: readonly ApplyRunSummary[];
 }): ApplicationRecord[] {
-  const latest = new Map<string, ApplyJobResult>();
+  const latest = new Map<string, ApplyJobResultListRow>();
   for (const result of input.results) {
     if (!result.applicationRecordId) continue;
     const previous = latest.get(result.applicationRecordId);

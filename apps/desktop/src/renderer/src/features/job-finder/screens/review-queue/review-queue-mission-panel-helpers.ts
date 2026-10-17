@@ -3,8 +3,8 @@ import type {
   ApplicationAutomationMode,
   BrowserSessionState,
   ReviewQueueItem,
-  SavedJob,
-  TailoredAsset,
+  JobListRow,
+  TailoredAssetSummary,
 } from "@nordri/contracts";
 import { JOB_FINDER_BROWSER_NAME } from "../../lib/job-finder-browser-handoff-copy";
 import {
@@ -66,7 +66,7 @@ export interface PrimaryApplicationAction {
 }
 
 export function getApplySupportState(
-  selectedJob: SavedJob | null,
+  selectedJob: JobListRow | null,
 ): ApplySupportState {
   if (
     !selectedJob ||
@@ -190,7 +190,8 @@ export function getPrimaryApplicationAction(input: {
       : "";
     return {
       blocker:
-        failureDetail || "The last attempt to write this resume did not finish.",
+        failureDetail ||
+        "The last attempt to write this resume did not finish.",
       enabled: !isSelectedJobPending,
       kind: "generate_resume",
       label: "Try again",
@@ -334,7 +335,7 @@ function getBrowserActionMessage(browserSession: BrowserSessionState) {
  */
 export function getReadinessDescription(input: {
   selectedItem: ReviewQueueItem | null;
-  selectedJob: SavedJob | null;
+  selectedJob: JobListRow | null;
   hasGenerationFailure: boolean;
   needsGeneration: boolean;
   isGenerating: boolean;
@@ -411,9 +412,9 @@ export function buildMissionPanelState(input: {
   browserSession: BrowserSessionState;
   isApplyPending: boolean;
   isJobPending: (jobId: string) => boolean;
-  selectedAsset: TailoredAsset | null;
+  selectedAsset: TailoredAssetSummary | null;
   selectedItem: ReviewQueueItem | null;
-  selectedJob: SavedJob | null;
+  selectedJob: JobListRow | null;
   isSelectedJobPendingTooLong?: boolean;
   safeguardBlocker?: string | null;
   /** The still-running apply result for the selected job, when there is one. */
@@ -504,18 +505,18 @@ export function buildMissionPanelState(input: {
           // looking for a reason that was already on screen.
           null
         : getReadinessDescription({
-          selectedItem,
-          selectedJob,
-          hasGenerationFailure,
-          needsGeneration,
-          isGenerating,
-          hasReadyApprovedAsset,
-          resumeReviewStatus,
-          applySupportState,
-          browserActionMessage,
-          draftNeedsPersonReview,
-          isSelectedJobPendingTooLong,
-        });
+            selectedItem,
+            selectedJob,
+            hasGenerationFailure,
+            needsGeneration,
+            isGenerating,
+            hasReadyApprovedAsset,
+            resumeReviewStatus,
+            applySupportState,
+            browserActionMessage,
+            draftNeedsPersonReview,
+            isSelectedJobPendingTooLong,
+          });
   const isGenerationAction = needsGeneration || hasGenerationFailure;
   const isPrimaryApplyPending = isApplyPending && !isGenerationAction;
 

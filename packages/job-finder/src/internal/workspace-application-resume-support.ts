@@ -25,7 +25,6 @@ import { fnv1a32 } from "@nordri/core";
 import {
   buildResumeRenderDocument,
   buildTailoredAssetBridge,
-  listUnresolvedWorkHistoryOmissionSuggestions,
   sanitizeResumeDraft,
   seedResumeDraft,
   validateResumeDraft,
@@ -146,7 +145,7 @@ export async function resolveResumeStrategyContextForJob(
   const [intelligenceState, campaignState, savedJobs] = await Promise.all([
     ctx.repository.getIntelligenceState(),
     ctx.repository.getCampaignState(),
-    ctx.repository.listSavedJobs(),
+    ctx.repository.listSavedJobsByIds([jobId]),
   ]);
   const job = savedJobs.find((entry) => entry.id === jobId);
 
@@ -171,7 +170,7 @@ export async function resolveEffectiveResumeTailoringStrengthForJob(
   const [strategyContext, searchPreferences, savedJobs] = await Promise.all([
     resolveResumeStrategyContextForJob(ctx, jobId),
     ctx.repository.getSearchPreferences(),
-    ctx.repository.listSavedJobs(),
+    ctx.repository.listSavedJobsByIds([jobId]),
   ]);
   // The level the person picked for this job on Shortlisted wins over a
   // strategy and over the profile-wide setting.
@@ -198,6 +197,8 @@ export async function sanitizeAndCheckResumeDraft(
   options: {
     /** A freshly generated resume also gets the checker's fixes applied. */
     fixGeneratedLines?: boolean;
+    signal?: AbortSignal;
+    getRemainingBudgetMs?: () => number;
   } = {},
 ): Promise<ResumeDraft> {
   const sanitized = sanitizeResumeDraft(input);
@@ -210,6 +211,10 @@ export async function sanitizeAndCheckResumeDraft(
     job: input.job,
     profile: input.profile,
     tailoringStrength,
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.getRemainingBudgetMs
+      ? { getRemainingBudgetMs: options.getRemainingBudgetMs }
+      : {}),
   };
   const checked = await withResumeClaimChecks({
     ...checkInput,
@@ -416,29 +421,6 @@ export function buildWorkHistoryReviewSuggestionsFromValidation(input: {
     });
 }
 
-/**
- * Canonical gate input: projects the work-history review suggestions exactly
- * as the Resume Studio workspace does (from the persisted draft plus its
- * latest persisted validation) and keeps only omission-class suggestions that
- * no exact current acknowledgment satisfies.
- */
-export async function loadUnresolvedWorkHistoryOmissionSuggestions(
-  ctx: WorkspaceServiceContext,
-  draft: ResumeDraft,
-): Promise<WorkHistoryReviewSuggestion[]> {
-  const validation =
-    (await ctx.repository.listResumeValidationResults(draft.id))[0] ?? null;
-
-  return listUnresolvedWorkHistoryOmissionSuggestions({
-    draftId: draft.id,
-    suggestions: buildWorkHistoryReviewSuggestionsFromValidation({
-      draft,
-      validation,
-    }),
-    acknowledgments: draft.workHistoryReviewAcknowledgments,
-  });
-}
-
 export interface LoadedResumeWorkspaceState {
   profile: Awaited<
     ReturnType<WorkspaceServiceContext["repository"]["getProfile"]>
@@ -508,12 +490,12 @@ export async function loadResumeWorkspaceState(
   jobId: string,
 ): Promise<LoadedResumeWorkspaceState> {
   const templates = ctx.documentManager.listResumeTemplates();
-  const [profileState, rawSettings, savedJobs, tailoredAssets, draft] =
+  const [profileState, rawSettings, savedJobs, tailoredAsset, draft] =
     await Promise.all([
       ctx.repository.getProfileWithRevision(),
       ctx.repository.getSettings(),
-      ctx.repository.listSavedJobs(),
-      ctx.repository.listTailoredAssets(),
+      ctx.repository.listSavedJobsByIds([jobId]),
+      ctx.repository.getTailoredAssetByJobId(jobId),
       ctx.repository.getResumeDraftByJobId(jobId),
     ]);
   const settings = normalizeJobFinderSettings(rawSettings, templates);
@@ -530,8 +512,7 @@ export async function loadResumeWorkspaceState(
     templates,
     job,
     draft,
-    tailoredAsset:
-      tailoredAssets.find((entry) => entry.jobId === jobId) ?? null,
+    tailoredAsset,
   };
 }
 
@@ -977,6 +958,10 @@ export async function buildResumeWorkspace(
   ctx: WorkspaceServiceContext,
   jobId: string,
 ): Promise<JobFinderResumeWorkspace> {
+  const listingGeneration = ctx.listingAssessmentGenerationRef?.current ?? 0;
+  const isCurrentListingCheck = () =>
+    listingGeneration === (ctx.listingAssessmentGenerationRef?.current ?? 0) &&
+    !ctx.isWorkspaceClosing?.();
   const {
     job: initialJob,
     draft,
@@ -1021,7 +1006,7 @@ export async function buildResumeWorkspace(
   const postingFingerprint = createMatchAssessmentPostingFingerprint(
     createMatchAssessmentPostingInput(job),
   );
-  const checkKey = `${planId ?? ""}:${contextFingerprint}:${postingFingerprint}`;
+  const checkKey = `${listingGeneration}:${planId ?? ""}:${contextFingerprint}:${postingFingerprint}`;
   let check = checks.get(jobId);
   if (
     job.matchAssessment.requirementsSource !== "model" ||
@@ -1034,48 +1019,63 @@ export async function buildResumeWorkspace(
       const runningCheck = check;
       void (async () => {
         try {
-          const assessment = await createMatchAssessmentAsync(
-            ctx.aiClient,
-            profile,
-            searchPreferences,
-            job,
-          );
-          await assertResumeProfileRevisionCurrent(
-            ctx,
-            profileRevision,
-            "checking listing requirements",
-            profile,
-          );
-          const [currentPreferences, currentCampaignState] = await Promise.all([
-            ctx.repository.getSearchPreferences(),
-            ctx.repository.getCampaignState(),
-          ]);
-          const currentPlan = currentCampaignState?.campaigns.find(
-            (plan) => plan.id === planId,
-          );
-          const currentGoals = currentPlan
-            ? searchPreferencesForCampaignRun(currentPlan)
-            : currentPreferences;
-          if (
-            createMatchAssessmentContextFingerprint(profile, currentGoals) !==
-            createMatchAssessmentContextFingerprint(profile, searchPreferences)
-          ) {
-            throw new Error("Search goals changed during the listing check.");
-          }
-          await ctx.repository.commitSavedJobDelta({
-            update: (current) =>
-              current.id === jobId &&
-              createMatchAssessmentPostingFingerprint(
-                createMatchAssessmentPostingInput(current),
-              ) === postingFingerprint
-                ? withPlanAssessment(current, planId, assessment)
-                : current,
-          });
-          runningCheck.state = "complete";
+          const check = async (signal?: AbortSignal) => {
+            signal?.throwIfAborted();
+            if (!isCurrentListingCheck()) return;
+            const assessment = await createMatchAssessmentAsync(
+              ctx.aiClient,
+              profile,
+              searchPreferences,
+              job,
+              signal,
+            );
+            await assertResumeProfileRevisionCurrent(
+              ctx,
+              profileRevision,
+              "checking listing requirements",
+              profile,
+            );
+            const [currentPreferences, currentCampaignState] =
+              await Promise.all([
+                ctx.repository.getSearchPreferences(),
+                ctx.repository.getCampaignState(),
+              ]);
+            const currentPlan = currentCampaignState?.campaigns.find(
+              (plan) => plan.id === planId,
+            );
+            const currentGoals = currentPlan
+              ? searchPreferencesForCampaignRun(currentPlan)
+              : currentPreferences;
+            if (
+              createMatchAssessmentContextFingerprint(profile, currentGoals) !==
+              createMatchAssessmentContextFingerprint(
+                profile,
+                searchPreferences,
+              )
+            ) {
+              throw new Error("Search goals changed during the listing check.");
+            }
+            signal?.throwIfAborted();
+            if (!isCurrentListingCheck()) return;
+            await ctx.repository.commitSavedJobDelta({
+              updateJobIds: [jobId],
+              update: (current) =>
+                current.id === jobId &&
+                createMatchAssessmentPostingFingerprint(
+                  createMatchAssessmentPostingInput(current),
+                ) === postingFingerprint
+                  ? withPlanAssessment(current, planId, assessment)
+                  : current,
+            });
+            runningCheck.state = "complete";
+          };
+          if (ctx.withListingAssessmentSlot)
+            await ctx.withListingAssessmentSlot(check);
+          else await check();
         } catch {
           runningCheck.state = "failed";
         } finally {
-          ctx.onListingAssessmentFinished?.();
+          if (isCurrentListingCheck()) ctx.onListingAssessmentFinished?.();
         }
       })();
     }

@@ -12,6 +12,18 @@ import type { ReactNode } from "react";
 // DiscoveryScreen suites).
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { LIST_DETAIL_COLUMNS_CLASS } from "../../components/list-detail-columns";
+
+// Job details load over IPC in the app; here the listed row is the detail.
+vi.mock("../../hooks/use-job-detail", () => ({
+  useJobDetail: (row: unknown) => ({
+    job: row,
+    error: null,
+    loading: false,
+    retry: () => undefined,
+  }),
+  clearJobDetailCache: () => undefined,
+}));
 
 vi.mock(
   "@renderer/features/job-finder/components/locked-screen-layout",
@@ -387,9 +399,7 @@ describe("DiscoveryScreen established-results layout", () => {
     expect(Array.from(layout.children)).toEqual([resultsPane, detailsPane]);
     expect(screen.queryByRole("region", { name: "Current search" })).toBeNull();
     expect(layout.className).toContain("grid-cols-1");
-    expect(layout.className).toContain(
-      "xl:grid-cols-[minmax(30rem,1.35fr)_minmax(25rem,0.9fr)]",
-    );
+    expect(layout.className).toContain(LIST_DETAIL_COLUMNS_CLASS);
     expect(layout.className).not.toContain("lg:grid-cols-");
     expect(layout.className).not.toContain("2xl:grid-cols-");
     expect(layout.className).toContain("min-h-0");

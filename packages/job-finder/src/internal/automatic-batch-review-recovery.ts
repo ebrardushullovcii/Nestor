@@ -13,7 +13,8 @@ export async function reconcileAutomaticBatchSampleReviews(
     "repository" | "withIntelligenceTransition"
   >,
 ): Promise<void> {
-  const initial = await ctx.repository.getIntelligenceState();
+  const initial = await (ctx.repository.readIntelligenceProjection?.() ??
+    ctx.repository.getIntelligenceState());
   if (
     !initial.safeguards.preparedBatchSampleReviews.some(
       (review) =>

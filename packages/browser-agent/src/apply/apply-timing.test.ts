@@ -212,9 +212,9 @@ test("records question reading separately from answer checks and persists stored
   let ms = 0;
   const timing = createApplyTiming(() => new Date(ms));
   const client = timing.model({
-    chatWithTools: async () => {
+    chatWithTools: () => {
       ms += 25;
-      return {};
+      return Promise.resolve({});
     },
   });
   await client.chatWithTools([], [], { parallelToolCalls: true });

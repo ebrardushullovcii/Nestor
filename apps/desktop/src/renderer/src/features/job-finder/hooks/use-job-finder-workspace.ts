@@ -1,3 +1,5 @@
+import { clearJobDetailCache } from "./use-job-detail";
+import { clearTailoredAssetDetailCache } from "./use-tailored-asset-detail";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ApplicationCrmBulkStageMutationInput,
@@ -24,7 +26,8 @@ import type {
   JobFinderSetWorkHistoryReviewAcknowledgmentInput,
   JobFinderSettings,
   JobFinderSearchRequest,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
+  JobFinderWorkspaceDelta,
   JobFinderWorkspaceEntityMutation,
   JobFinderWorkspaceSyncResult,
   JobSearchPreferences,
@@ -71,6 +74,12 @@ import {
   type JobFinderStartupDatabaseRecoveryFact,
 } from "../../../../../shared/job-finder-startup-db-recovery";
 
+/** How long update-driven syncs rest, as a multiple of the last sync. */
+const UPDATE_SYNC_REST_FACTOR = 2;
+/** A stalled sync never leaves the workspace stale for longer than this. */
+const MAX_UPDATE_SYNC_REST_MS = 8_000;
+const MAX_WORKSPACE_BASELINES = 4;
+
 type JobFinderWorkspaceState =
   | { status: "loading" }
   | {
@@ -78,7 +87,7 @@ type JobFinderWorkspaceState =
       actions: JobFinderShellActions;
       platform: "darwin" | "win32" | "linux";
       resumeImportProgress: ResumeImportProgressEvent | null;
-      workspace: JobFinderWorkspaceSnapshot;
+      workspace: JobFinderRendererWorkspaceSnapshot;
     }
   | {
       status: "error";
@@ -108,8 +117,7 @@ type StartupDatabaseRecoveryFactRequest =
 
 function requestStartupDatabaseRecoveryFact(): StartupDatabaseRecoveryFactRequest {
   try {
-    const recoveryBridge =
-      window.nordri?.jobFinder?.getStartupDatabaseRecovery;
+    const recoveryBridge = window.nordri?.jobFinder?.getStartupDatabaseRecovery;
     if (typeof recoveryBridge === "function") {
       return recoveryBridge().catch(() => null);
     }
@@ -136,9 +144,13 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
   );
   const [loadRequest, setLoadRequest] = useState(0);
   const performanceRunRef = useRef(0);
-  const workspaceRef = useRef<JobFinderWorkspaceSnapshot | null>(null);
+  const workspaceRef = useRef<JobFinderRendererWorkspaceSnapshot | null>(null);
   const workspaceRevisionRef = useRef<WorkspaceRevision>(0);
+  const workspaceBaselinesRef = useRef(
+    new Map<WorkspaceRevision, JobFinderRendererWorkspaceSnapshot>(),
+  );
   const workspaceCommitVersionRef = useRef(0);
+  const requestBackgroundSyncRef = useRef<(() => void) | null>(null);
   // Progress belongs to the import invocation that registered its callback.
   // A native file picker may settle after a route change or a renderer reload;
   // request identity keeps a late event from repainting a newer import.
@@ -172,7 +184,25 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
   }, []);
 
   const commitWorkspace = useCallback(
-    (workspace: JobFinderWorkspaceSnapshot) => {
+    (
+      workspace: JobFinderRendererWorkspaceSnapshot,
+      revision: WorkspaceRevision = 0,
+      resetBaselines = false,
+    ) => {
+      const baselines = workspaceBaselinesRef.current;
+      if (revision === 0 || resetBaselines) {
+        baselines.clear();
+      }
+      workspaceRevisionRef.current = revision;
+      if (revision !== 0) {
+        // Retain workspace references, sharing unchanged immutable rows.
+        baselines.set(revision, workspace);
+        while (baselines.size > MAX_WORKSPACE_BASELINES) {
+          const oldestRevision = baselines.keys().next().value;
+          if (oldestRevision === undefined) break;
+          baselines.delete(oldestRevision);
+        }
+      }
       workspaceCommitVersionRef.current += 1;
       workspaceRef.current = workspace;
       setWorkspaceState((currentState) =>
@@ -184,6 +214,23 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     [],
   );
 
+  const applyWorkspaceDelta = useCallback((delta: JobFinderWorkspaceDelta) => {
+    if (delta.currentRevision <= workspaceRevisionRef.current) {
+      return { status: "stale" } as const;
+    }
+    const baseline = workspaceBaselinesRef.current.get(delta.baseRevision);
+    if (!baseline) {
+      return { status: "gap" } as const;
+    }
+    // A cumulative delta describes this exact baseline, not the newer UI.
+    // Reconstruct from it so intermediate additions and reverted fields vanish.
+    return applyJobFinderWorkspaceDelta({
+      revision: delta.baseRevision,
+      workspace: baseline,
+      delta,
+    });
+  }, []);
+
   const recoverFullWorkspaceOnce = useCallback(
     async (sequence?: number) => {
       const requestSequence = sequence ?? beginWorkspaceRequest();
@@ -194,8 +241,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
             return workspaceRef.current ?? result.snapshot;
           }
 
-          workspaceRevisionRef.current = result.currentRevision;
-          commitWorkspace(result.snapshot);
+          commitWorkspace(result.snapshot, result.currentRevision, true);
           return result.snapshot;
         }
       } catch {
@@ -207,7 +253,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         return workspaceRef.current ?? workspace;
       }
 
-      workspaceRevisionRef.current = 0;
       commitWorkspace(workspace);
       return workspace;
     },
@@ -227,14 +272,14 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
 
   const runWorkspaceAction = useCallback(
     async (
-      action: () => Promise<JobFinderWorkspaceSnapshot>,
+      action: () => Promise<JobFinderRendererWorkspaceSnapshot>,
       options?: { allowDuringBootstrap?: boolean },
     ) => {
       if (!options?.allowDuringBootstrap) {
         assertWorkspaceHydrated();
       }
       const sequence = beginWorkspaceRequest();
-      let workspace: JobFinderWorkspaceSnapshot;
+      let workspace: JobFinderRendererWorkspaceSnapshot;
       try {
         workspace = await action();
       } catch (error) {
@@ -265,7 +310,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       // The revision can only be carried forward once the mutation response
       // itself carries it (see `runWorkspaceEntityMutation`, which does exactly
       // that through the typed sync envelope).
-      workspaceRevisionRef.current = 0;
       commitWorkspace(workspace);
       return workspace;
     },
@@ -283,7 +327,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
   // terminal outcome (completed vs user-cancelled) without re-deriving it
   // from a later refresh.
   const runWorkspaceResultAction = useCallback(
-    async <T extends { snapshot: JobFinderWorkspaceSnapshot }>(
+    async <T extends { snapshot: JobFinderRendererWorkspaceSnapshot }>(
       action: () => Promise<T>,
     ): Promise<T> => {
       assertWorkspaceHydrated();
@@ -293,7 +337,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         return { ...result, snapshot: workspaceRef.current ?? result.snapshot };
       }
 
-      workspaceRevisionRef.current = 0;
       commitWorkspace(result.snapshot);
       return result;
     },
@@ -310,14 +353,13 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     (
       result: JobFinderWorkspaceSyncResult,
       sequence: number,
-    ): JobFinderWorkspaceSnapshot | null => {
+    ): JobFinderRendererWorkspaceSnapshot | null => {
       if (!isCurrentWorkspaceRequest(sequence)) {
         return workspaceRef.current;
       }
 
       if (result.kind === "snapshot") {
-        workspaceRevisionRef.current = result.currentRevision;
-        commitWorkspace(result.snapshot);
+        commitWorkspace(result.snapshot, result.currentRevision);
         return result.snapshot;
       }
 
@@ -326,20 +368,18 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         return null;
       }
 
-      const applied = applyJobFinderWorkspaceDelta({
-        revision: workspaceRevisionRef.current,
-        workspace,
-        delta: result.delta,
-      });
+      const applied = applyWorkspaceDelta(result.delta);
+      if (applied.status === "stale") {
+        return workspace;
+      }
       if (applied.status !== "applied") {
         return null;
       }
 
-      workspaceRevisionRef.current = applied.revision;
-      commitWorkspace(applied.workspace);
+      commitWorkspace(applied.workspace, applied.revision);
       return applied.workspace;
     },
-    [commitWorkspace, isCurrentWorkspaceRequest],
+    [applyWorkspaceDelta, commitWorkspace, isCurrentWorkspaceRequest],
   );
 
   const syncWorkspace = useCallback(async () => {
@@ -372,28 +412,24 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     const baseRevision = workspaceRevisionRef.current || null;
 
     try {
-      const result =
-        await window.nordri.jobFinder.syncWorkspace(baseRevision);
+      const result = await window.nordri.jobFinder.syncWorkspace(baseRevision);
       if (workspaceCommitVersionRef.current !== commitVersion) {
         return workspaceRef.current;
       }
 
       if (result.kind === "snapshot") {
-        workspaceRevisionRef.current = result.currentRevision;
-        commitWorkspace(result.snapshot);
+        commitWorkspace(result.snapshot, result.currentRevision);
         return result.snapshot;
       }
 
       const workspace = workspaceRef.current;
       if (workspace) {
-        const applied = applyJobFinderWorkspaceDelta({
-          revision: workspaceRevisionRef.current,
-          workspace,
-          delta: result.delta,
-        });
+        const applied = applyWorkspaceDelta(result.delta);
+        if (applied.status === "stale") {
+          return workspace;
+        }
         if (applied.status === "applied") {
-          workspaceRevisionRef.current = applied.revision;
-          commitWorkspace(applied.workspace);
+          commitWorkspace(applied.workspace, applied.revision);
           return applied.workspace;
         }
       }
@@ -405,41 +441,81 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     if (workspaceCommitVersionRef.current !== commitVersion) {
       return workspaceRef.current ?? workspace;
     }
-    workspaceRevisionRef.current = 0;
     commitWorkspace(workspace);
     return workspace;
-  }, [commitWorkspace]);
+  }, [applyWorkspaceDelta, commitWorkspace]);
 
   useEffect(() => {
     let disposed = false;
     let syncing = false;
     let queued = false;
-    const converge = () => {
-      if (disposed) return;
-      if (syncing) {
-        queued = true;
-        return;
-      }
+    let waitTimer: number | undefined;
+    let nextSyncAt = 0;
+    const startSync = () => {
       syncing = true;
+      const startedAt = Date.now();
       void syncWorkspaceFromUpdate().finally(() => {
         syncing = false;
+        // A search sends updates several times a second, and each sync makes
+        // main rebuild the whole workspace, which takes seconds once it holds
+        // a few thousand jobs. Resting twice as long as the sync took keeps
+        // those rebuilds to about a third of main's time at any size.
+        const finishedAt = Date.now();
+        nextSyncAt =
+          finishedAt +
+          Math.min(
+            MAX_UPDATE_SYNC_REST_MS,
+            UPDATE_SYNC_REST_FACTOR * (finishedAt - startedAt),
+          );
         if (queued) {
           queued = false;
           converge();
         }
       });
     };
+    const converge = () => {
+      if (disposed) return;
+      if (syncing || waitTimer !== undefined) {
+        queued = true;
+        return;
+      }
+      const wait = nextSyncAt - Date.now();
+      if (wait <= 0) {
+        startSync();
+        return;
+      }
+      waitTimer = window.setTimeout(() => {
+        waitTimer = undefined;
+        if (disposed) return;
+        // The sync starting now covers every update that arrived meanwhile.
+        queued = false;
+        startSync();
+      }, wait);
+    };
+    requestBackgroundSyncRef.current = converge;
     const subscribe = window.nordri.jobFinder.onWorkspaceUpdate;
     // Test hosts and a renderer that survived a development preload refresh
     // can briefly expose the earlier bridge shape. The next mount subscribes;
     // this mount keeps its ordinary mutation-driven convergence.
-    if (typeof subscribe !== "function") return;
-    const unsubscribe = subscribe(converge);
+    const unsubscribe =
+      typeof subscribe === "function" ? subscribe(converge) : undefined;
     return () => {
       disposed = true;
-      unsubscribe();
+      if (requestBackgroundSyncRef.current === converge) {
+        requestBackgroundSyncRef.current = null;
+      }
+      if (waitTimer !== undefined) window.clearTimeout(waitTimer);
+      unsubscribe?.();
     };
   }, [syncWorkspaceFromUpdate]);
+
+  /**
+   * Asks for a background refresh on the same paced path as main's update
+   * notices, so progress refreshes during a search never stack on them.
+   */
+  const requestWorkspaceRefresh = useCallback(() => {
+    requestBackgroundSyncRef.current?.();
+  }, []);
 
   const runWorkspaceEntityMutation = useCallback(
     async (mutation: JobFinderWorkspaceEntityMutation) => {
@@ -480,6 +556,8 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         runWorkspaceAction(() =>
           window.nordri.jobFinder.analyzeProfileFromResume(),
         ),
+      judgeUnjudgedJobs: () =>
+        runWorkspaceAction(() => window.nordri.jobFinder.judgeUnjudgedJobs()),
       openBrowserSession: (input?: JobFinderOpenBrowserSessionInput) =>
         runWorkspaceAction(() =>
           window.nordri.jobFinder.openBrowserSession(input),
@@ -494,9 +572,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           window.nordri.jobFinder.performUserAction(command),
         ),
       approveApply: (input: JobFinderApplicationStartTarget) =>
-        runWorkspaceAction(() =>
-          window.nordri.jobFinder.approveApply(input),
-        ),
+        runWorkspaceAction(() => window.nordri.jobFinder.approveApply(input)),
       dismissDiscoveryJob: (
         jobId: string,
         reasons: readonly DiscoveryFeedbackReason[],
@@ -521,6 +597,20 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           type: "restore_dismissed_discovery_job",
           jobId,
         }),
+      removeJobsFromReview: (jobIds: readonly string[]) =>
+        runWorkspaceEntityMutation({
+          type: "remove_jobs_from_review",
+          jobIds: [...jobIds],
+        }),
+      dismissDiscoveryJobs: (
+        jobIds: readonly string[],
+        reasons: readonly DiscoveryFeedbackReason[],
+      ) =>
+        runWorkspaceEntityMutation({
+          type: "dismiss_discovery_jobs",
+          jobIds: [...jobIds],
+          reasons: [...reasons],
+        }),
       removeJobFromReview: (jobId: string) =>
         runWorkspaceEntityMutation({
           type: "remove_job_from_review",
@@ -544,17 +634,11 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         ),
       restoreResumeDraftRevision: (jobId: string, revisionId: string) =>
         runWorkspaceAction(() =>
-          window.nordri.jobFinder.restoreResumeDraftRevision(
-            jobId,
-            revisionId,
-          ),
+          window.nordri.jobFinder.restoreResumeDraftRevision(jobId, revisionId),
         ),
       undoResumeAssistantEdit: (jobId: string, revisionId: string) =>
         runWorkspaceAction(() =>
-          window.nordri.jobFinder.undoResumeAssistantEdit(
-            jobId,
-            revisionId,
-          ),
+          window.nordri.jobFinder.undoResumeAssistantEdit(jobId, revisionId),
         ),
       exportResumePdf: (
         jobId: string,
@@ -611,9 +695,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           patchIds,
         ),
       generateResume: (jobId: string) =>
-        runWorkspaceAction(() =>
-          window.nordri.jobFinder.generateResume(jobId),
-        ),
+        runWorkspaceAction(() => window.nordri.jobFinder.generateResume(jobId)),
       startApplyCopilotRun: (input: JobFinderApplyCopilotActionInput) =>
         runWorkspaceAction(() =>
           window.nordri.jobFinder.startApplyCopilotRun(input),
@@ -637,9 +719,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           window.nordri.jobFinder.approveApplyRun(input),
         ),
       cancelApplyRun: (input: JobFinderApplyRunActionInput) =>
-        runWorkspaceAction(() =>
-          window.nordri.jobFinder.cancelApplyRun(input),
-        ),
+        runWorkspaceAction(() => window.nordri.jobFinder.cancelApplyRun(input)),
       resolveApplyConsentRequest: (input: JobFinderApplyConsentActionInput) =>
         runWorkspaceAction(() =>
           window.nordri.jobFinder.resolveApplyConsentRequest(input),
@@ -674,9 +754,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         ),
       runApplicationNoResponseAutomation: (settings?: ApplicationCrmSettings) =>
         runWorkspaceAction(() =>
-          window.nordri.jobFinder.runApplicationNoResponseAutomation(
-            settings,
-          ),
+          window.nordri.jobFinder.runApplicationNoResponseAutomation(settings),
         ),
       exportApplicationCrm: (input: ApplicationCrmExportInput) =>
         window.nordri.jobFinder.exportApplicationCrm(input),
@@ -729,6 +807,11 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           type: "queue_job_for_review",
           jobId,
         }),
+      queueJobsForReview: (jobIds: readonly string[]) =>
+        runWorkspaceEntityMutation({
+          type: "queue_jobs_for_review",
+          jobIds: [...jobIds],
+        }),
       setJobResumeApplicationMode: (
         jobId: string,
         resumeApplicationMode: ResumeApplicationMode,
@@ -741,10 +824,19 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           ...(resumeTailoringMode === undefined ? {} : { resumeTailoringMode }),
         }),
       refreshWorkspace: syncWorkspace,
+      requestWorkspaceRefresh,
       resetBrowser: () =>
         runWorkspaceAction(() => window.nordri.jobFinder.resetBrowser()),
-      resetWorkspace: () =>
-        runWorkspaceAction(() => window.nordri.jobFinder.resetWorkspace()),
+      resetWorkspace: () => {
+        clearJobDetailCache();
+        clearTailoredAssetDetailCache();
+        return runWorkspaceAction(() =>
+          window.nordri.jobFinder.resetWorkspace(),
+        ).finally(() => {
+          clearJobDetailCache();
+          clearTailoredAssetDetailCache();
+        });
+      },
       runAgentDiscovery: (
         onProgress?: (event: DiscoveryActivityEvent) => void,
         targetId?: string,
@@ -767,11 +859,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         options?: { readabilityTimeoutMs?: number },
       ) =>
         runWorkspaceAction(() =>
-          window.nordri.jobFinder.runSourceDebug(
-            targetId,
-            onProgress,
-            options,
-          ),
+          window.nordri.jobFinder.runSourceDebug(targetId, onProgress, options),
         ),
       getSourceDebugRunDetails: (runId: string) =>
         window.nordri.jobFinder.getSourceDebugRunDetails(runId),
@@ -824,9 +912,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           ),
         ),
       saveProfile: (profile: CandidateProfile) =>
-        runWorkspaceAction(() =>
-          window.nordri.jobFinder.saveProfile(profile),
-        ),
+        runWorkspaceAction(() => window.nordri.jobFinder.saveProfile(profile)),
       saveWorkspaceInputs: (
         profile: CandidateProfile,
         searchPreferences: JobSearchPreferences,
@@ -857,9 +943,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         ),
       markCampaignNotificationRead: (notificationId: string) =>
         runWorkspaceAction(() =>
-          window.nordri.jobFinder.markCampaignNotificationRead(
-            notificationId,
-          ),
+          window.nordri.jobFinder.markCampaignNotificationRead(notificationId),
         ),
       markAllCampaignNotificationsRead: () =>
         runWorkspaceAction(() =>
@@ -912,9 +996,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           window.nordri.jobFinder.mutateRapidReview(input),
         ),
       recordOutcome: (input: RecordOutcomeInput) =>
-        runWorkspaceAction(() =>
-          window.nordri.jobFinder.recordOutcome(input),
-        ),
+        runWorkspaceAction(() => window.nordri.jobFinder.recordOutcome(input)),
       saveResumeStrategy: (input: SaveResumeStrategyInput) =>
         runWorkspaceAction(() =>
           window.nordri.jobFinder.saveResumeStrategy(input),
@@ -1016,22 +1098,15 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         context?: ProfileCopilotContext,
       ) =>
         runWorkspaceAction(() =>
-          window.nordri.jobFinder.sendProfileCopilotMessage(
-            content,
-            context,
-          ),
+          window.nordri.jobFinder.sendProfileCopilotMessage(content, context),
         ),
       applyProfileCopilotPatchGroup: (patchGroupId: string) =>
         runWorkspaceAction(() =>
-          window.nordri.jobFinder.applyProfileCopilotPatchGroup(
-            patchGroupId,
-          ),
+          window.nordri.jobFinder.applyProfileCopilotPatchGroup(patchGroupId),
         ),
       rejectProfileCopilotPatchGroup: (patchGroupId: string) =>
         runWorkspaceAction(() =>
-          window.nordri.jobFinder.rejectProfileCopilotPatchGroup(
-            patchGroupId,
-          ),
+          window.nordri.jobFinder.rejectProfileCopilotPatchGroup(patchGroupId),
         ),
       undoProfileRevision: (revisionId: string) =>
         runWorkspaceAction(() =>
@@ -1039,6 +1114,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         ),
     }),
     [
+      requestWorkspaceRefresh,
       runWorkspaceAction,
       runWorkspaceResultAction,
       runWorkspaceEntityMutation,
@@ -1057,8 +1133,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       try {
         const [platformResponse, bootstrap] = await Promise.all([
           window.nordri.ping(),
-          typeof window.nordri.jobFinder.getWorkspaceBootstrap ===
-          "function"
+          typeof window.nordri.jobFinder.getWorkspaceBootstrap === "function"
             ? window.nordri.jobFinder.getWorkspaceBootstrap()
             : recoverFullWorkspaceOnce(),
         ]);
@@ -1069,9 +1144,14 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           // this identity check to report a real failure; without recording it
           // here, that error is silently discarded because the ref is still
           // null while the shell is already showing the bootstrap.
-          workspaceRef.current = bootstrap;
-          if (bootstrap.hydration?.phase === "bootstrap") {
-            workspaceRevisionRef.current = 0;
+          if (
+            typeof window.nordri.jobFinder.getWorkspaceBootstrap === "function"
+          ) {
+            // Bootstrap is an unrevisioned snapshot, even when fully hydrated.
+            commitWorkspace(bootstrap);
+          } else {
+            // The legacy recovery path already recorded its revisioned snapshot.
+            workspaceRef.current = bootstrap;
           }
           setWorkspaceState({
             status: "ready",
@@ -1210,6 +1290,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
   }, [
     actions,
     beginWorkspaceRequest,
+    commitWorkspace,
     isCurrentWorkspaceRequest,
     loadRequest,
     recoverFullWorkspaceOnce,

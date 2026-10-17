@@ -18,6 +18,7 @@ import {
   stripPictographGlyphs,
   type ExtractedListingDetail,
 } from "./listing-detail-extraction";
+import { getAiProviderAccessFailure } from "@nordri/ai-providers";
 import { collapseRepeatedLocationTokens } from "./listing-field-shapes";
 import { enrichDiscoveredPosting } from "./matching";
 import { listUnreadSightings } from "./listing-sightings";
@@ -134,6 +135,13 @@ export interface EnrichSavedJobListingDetailsResult {
   jobs: SavedJob[];
   changedJobIds: string[];
   summary: ListingDetailEnrichmentSummary;
+  /**
+   * The first read the AI service itself refused (no funds, no access). The
+   * job records a failed read either way; a caller that needs the body, such
+   * as the resume writer, rethrows this so the work pauses instead of going
+   * ahead without the listing.
+   */
+  providerAccessError?: unknown;
 }
 
 const DEFAULT_CONCURRENCY = 4;
@@ -153,6 +161,7 @@ const DEFAULT_MAX_JOBS = LISTING_DETAIL_READS_PER_RUN;
 const RETRY_AFTER_SUCCESSFUL_ATTEMPT_MS = 24 * 60 * 60 * 1000;
 const RETRY_AFTER_FAILED_ATTEMPT_MS = 60 * 60 * 1000;
 const MAX_RESPONSE_CHARACTERS = 1_500_000;
+const MAX_RESPONSE_BYTES = MAX_RESPONSE_CHARACTERS * 4;
 const SUMMARY_MAX_LENGTH = 420;
 
 const BROWSER_LIKE_HEADERS = {
@@ -170,7 +179,37 @@ export function createDefaultListingHtmlFetcher(): ListingHtmlFetcher {
       redirect: "follow",
       signal: options.signal,
     });
-    const text = await response.text();
+    let text = "";
+    const reader = response.body?.getReader();
+    if (reader) {
+      let bytesRead = 0;
+      const decoder = new TextDecoder();
+      try {
+        while (true) {
+          options.signal.throwIfAborted();
+          const { done, value } = await reader.read();
+          if (done) {
+            text += decoder.decode();
+            break;
+          }
+          const accepted = value.subarray(0, MAX_RESPONSE_BYTES - bytesRead);
+          bytesRead += accepted.byteLength;
+          text += decoder.decode(accepted, { stream: true });
+          if (
+            bytesRead >= MAX_RESPONSE_BYTES ||
+            text.length >= MAX_RESPONSE_CHARACTERS
+          ) {
+            await reader.cancel();
+            break;
+          }
+        }
+      } catch (error) {
+        await reader.cancel(error).catch(() => undefined);
+        throw error;
+      } finally {
+        reader.releaseLock();
+      }
+    }
     return {
       status: response.status,
       html:
@@ -755,6 +794,7 @@ export async function enrichSavedJobListingDetails(
     elapsedMs: 0,
   };
   const updated = new Map<string, SavedJob>();
+  let providerAccessError: unknown;
   let rateLimitPauseUntilMs = 0;
   let rateLimitRetryAfterAtMs = 0;
   let rateLimitRetriesLeft = RATE_LIMIT_RETRIES_PER_PASS;
@@ -951,6 +991,11 @@ export async function enrichSavedJobListingDetails(
           return;
         }
         summary.failed += 1;
+        if (
+          providerAccessError === undefined &&
+          getAiProviderAccessFailure(error)
+        )
+          providerAccessError = error;
         updated.set(
           job.id,
           recordFailedAttempt(
@@ -982,6 +1027,7 @@ export async function enrichSavedJobListingDetails(
     jobs: input.jobs.map((job) => updated.get(job.id) ?? job),
     changedJobIds: [...updated.keys()],
     summary,
+    ...(providerAccessError === undefined ? {} : { providerAccessError }),
   };
 }
 

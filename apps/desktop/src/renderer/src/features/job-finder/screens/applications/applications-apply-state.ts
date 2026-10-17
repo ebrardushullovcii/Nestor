@@ -1,4 +1,4 @@
-import type { ApplicationRecord, ApplyJobResult } from "@nordri/contracts";
+import type { ApplicationRecord, ApplyJobResultListRow } from "@nordri/contracts";
 
 import type { BadgeTone } from "../../lib/job-finder-types";
 
@@ -37,7 +37,7 @@ function employerOf(record: ApplicationRecord): string | null {
 }
 
 function submissionOutcomeOf(
-  applyResult: ApplyJobResult | null | undefined,
+  applyResult: ApplyJobResultListRow | null | undefined,
 ): "submitted" | "outcome_uncertain" | "not_submitted" | null {
   const outcome = applyResult?.privacyReceipt?.submissionOutcome?.outcome;
   return outcome ?? null;
@@ -52,7 +52,7 @@ function submissionOutcomeOf(
  */
 export function getApplicationApplyPresentation(input: {
   record: ApplicationRecord;
-  applyResult?: ApplyJobResult | null;
+  applyResult?: ApplyJobResultListRow | null;
 }): ApplicationApplyPresentation {
   const { record, applyResult } = input;
   const employer = employerOf(record);

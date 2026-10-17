@@ -1,6 +1,6 @@
 # ADR 0045: Resume batches can be continued after a restart
 
-Status: accepted (2026-10-05)
+Status: accepted (2026-10-05). Shortlisted concurrency is superseded by [ADR 0048](0048-shortlisted-resume-pipeline.md).
 
 ## Context
 

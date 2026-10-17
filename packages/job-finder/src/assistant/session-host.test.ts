@@ -378,6 +378,8 @@ describe("assistant session host", () => {
       world.harness.workspaceService,
       "getWorkspaceSnapshot",
     ).mockResolvedValue(current);
+    world.harness.workspaceService.getWorkspaceProjection = () =>
+      world.harness.workspaceService.getWorkspaceSnapshot();
     await sendAndWait(world.host, "Is this resume approved?");
     expect(inputs[0]).toContain('"approved":true');
     expect(inputs[1]).toContain('"approved":false');
@@ -1110,6 +1112,8 @@ describe("assistant session host", () => {
           } as (typeof snapshot.userActionRequests)[number],
         ],
       });
+    harness.workspaceService.getWorkspaceProjection =
+      service.getWorkspaceSnapshot;
     await repository.upsertMessage(
       AssistantMessageSchema.parse({
         id: "message_question",
@@ -1298,10 +1302,10 @@ describe("assistant session host", () => {
     expect((await hostNotes())[0]).toContain("waiting on the person");
     expect((await hostNotes())[0]).toContain("Sign in to continue");
     expect((await hostNotes())[0]).toContain("nothing has been sent");
-    const snapshotReads = vi.spyOn(
-      harness.workspaceService,
-      "getWorkspaceSnapshot",
+    const snapshotReads = vi.fn(() =>
+      harness.workspaceService.getWorkspaceSnapshot(),
     );
+    harness.workspaceService.getWorkspaceProjection = snapshotReads;
     await Promise.all(Array.from({ length: 10 }, () => host.checkWatches()));
     expect(snapshotReads).toHaveBeenCalledTimes(1);
     expect(chat).toHaveBeenCalledTimes(1);
@@ -1992,26 +1996,28 @@ describe("assistant session host", () => {
       modelHandle: {
         ...createScriptedAssistantModelHandle(),
         createModel: () => ({
-          chatWithTools: async () => {
+          chatWithTools: () => {
             calls += 1;
-            return calls === 1
-              ? {
-                  content: "",
-                  toolCalls: [
-                    {
-                      id: "show",
-                      type: "function" as const,
-                      function: {
-                        name: "show_jobs",
-                        arguments: '{"jobIds":["job_ready"]}',
+            return Promise.resolve(
+              calls === 1
+                ? {
+                    content: "",
+                    toolCalls: [
+                      {
+                        id: "show",
+                        type: "function" as const,
+                        function: {
+                          name: "show_jobs",
+                          arguments: '{"jobIds":["job_ready"]}',
+                        },
                       },
-                    },
-                  ],
-                }
-              : {
-                  content:
-                    "The listing asks for design experience. Your saved profile shows that experience.",
-                };
+                    ],
+                  }
+                : {
+                    content:
+                      "The listing asks for design experience. Your saved profile shows that experience.",
+                  },
+            );
           },
         }),
       },
@@ -2025,7 +2031,7 @@ describe("assistant session host", () => {
     expect(calls).toBe(2);
     expect(parts[0]).toMatchObject({
       type: "text",
-      text: expect.stringContaining("design experience"),
+      text: expect.stringContaining("design experience") as unknown,
     });
     expect(
       parts.some((part) => part.type === "records" && part.kind === "jobs"),
@@ -2038,9 +2044,9 @@ describe("assistant session host", () => {
     const requests: unknown[] = [];
     ports.browser = {
       visibleTab: () => null,
-      lease: async (input) => {
+      lease: (input) => {
         requests.push(input);
-        return {
+        return Promise.resolve({
           leaseId: "exact",
           tabId: "retained",
           applicationResultId: "prepared",
@@ -2050,7 +2056,7 @@ describe("assistant session host", () => {
           currentUrl: () => "https://example.test/form",
           childTabIds: () => [],
           release,
-        };
+        });
       },
     };
     const conversation = await host.createConversation();
@@ -2143,9 +2149,9 @@ describe("assistant session host", () => {
       | undefined;
     ports.browser = {
       visibleTab: () => null,
-      lease: async (input) => {
+      lease: (input) => {
         noteChange = input.onApplicationChange;
-        return {
+        return Promise.resolve({
           leaseId: "edit",
           tabId: "retained",
           applicationResultId: "prepared",
@@ -2155,7 +2161,7 @@ describe("assistant session host", () => {
           currentUrl: () => "https://example.test/form",
           childTabIds: () => [],
           release: () => Promise.resolve(),
-        };
+        });
       },
     };
     const conversation = await host.createConversation();

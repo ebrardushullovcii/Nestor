@@ -112,6 +112,12 @@ it("uses the running plan and the run's source IDs when another plan is selected
   vi.spyOn(workspaceService, "getWorkspaceSnapshot").mockResolvedValue(
     snapshot,
   );
+  // The assistant reads the display projection when the service offers it.
+  if (workspaceService.getWorkspaceProjection)
+    vi.spyOn(
+      workspaceService as Required<typeof workspaceService>,
+      "getWorkspaceProjection",
+    ).mockResolvedValue(snapshot);
   const startSearch = vi.fn();
   const outcome = await searchForJobsTool.execute(
     { goal: "More Go roles", freshness: "any" },

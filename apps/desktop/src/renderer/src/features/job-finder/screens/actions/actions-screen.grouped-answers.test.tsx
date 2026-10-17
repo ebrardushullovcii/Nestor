@@ -14,7 +14,7 @@ import {
   type ApplyRunDetails,
   type CandidateProfile,
   type GroupedManualAnswerDecision,
-  type JobFinderWorkspaceSnapshot,
+  type JobFinderRendererWorkspaceSnapshot,
   type ProjectGroupedManualAnswerCommand,
   type SnoozeGroupedDecisionInput,
   type UserActionCommandInput,
@@ -112,12 +112,12 @@ function createDecision(
   });
 }
 
-function createJobs(): JobFinderWorkspaceSnapshot["discoveryJobs"] {
+function createJobs(): JobFinderRendererWorkspaceSnapshot["discoveryJobs"] {
   return [
     { id: "job_a", title: "Senior Engineer", company: "Acme" },
     { id: "job_b", title: "Staff Engineer", company: "Beta" },
     { id: "job_c", title: "Principal Engineer", company: "Gamma" },
-  ] as unknown as JobFinderWorkspaceSnapshot["discoveryJobs"];
+  ] as unknown as JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
 }
 
 function renderScreen(props: {
@@ -167,7 +167,7 @@ describe("ActionsScreen persisted grouped reusable answers", () => {
         ],
         updatedAt: "2026-08-15T09:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationAttempts"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationAttempts"];
     const onCommand = vi.fn();
     const { getByRole, getByText, queryByLabelText, queryByRole } = render(
       <ActionsScreen
@@ -217,7 +217,7 @@ describe("ActionsScreen persisted grouped reusable answers", () => {
         ],
         updatedAt: "2026-08-15T09:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationAttempts"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationAttempts"];
     const onProject =
       vi.fn<(command: ProjectGroupedManualAnswerCommand) => void>();
     const onCommand = vi.fn();
@@ -313,7 +313,7 @@ describe("ActionsScreen persisted grouped reusable answers", () => {
         ],
         updatedAt: "2026-08-15T09:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationAttempts"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationAttempts"];
     const onCommand = vi.fn();
     const { getByLabelText, getByRole, getByTestId, getByText, queryByText } =
       render(
@@ -533,7 +533,7 @@ describe("Needs you question step shapes", () => {
 
   function attemptsWith(
     questions: ReadonlyArray<Record<string, unknown>>,
-  ): JobFinderWorkspaceSnapshot["applicationAttempts"] {
+  ): JobFinderRendererWorkspaceSnapshot["applicationAttempts"] {
     return [
       {
         applicationRecordId: "application_job_a",
@@ -542,7 +542,7 @@ describe("Needs you question step shapes", () => {
         questions,
         updatedAt: "2026-08-15T09:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationAttempts"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationAttempts"];
   }
 
   function renderStep(
@@ -1127,7 +1127,7 @@ it("shows questions alongside a required file without turning the upload into a 
               },
             ],
           },
-        ] as unknown as JobFinderWorkspaceSnapshot["applicationAttempts"]
+        ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationAttempts"]
       }
       discoveryJobs={[]}
       isPending={() => false}
@@ -1210,7 +1210,7 @@ it("restores prior one-use values and save choice after reopening Needs you for 
               answerOptions: [],
             })),
           },
-        ] as unknown as JobFinderWorkspaceSnapshot["applicationAttempts"]
+        ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationAttempts"]
       }
       discoveryJobs={[]}
       isPending={() => false}
@@ -1259,7 +1259,7 @@ it("a delayed draft restore keeps the person's newer edits", async () => {
               },
             ],
           },
-        ] as unknown as JobFinderWorkspaceSnapshot["applicationAttempts"]
+        ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationAttempts"]
       }
       discoveryJobs={[]}
       isPending={() => false}

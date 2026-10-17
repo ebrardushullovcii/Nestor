@@ -428,6 +428,9 @@ test("unfinished answers survive reopening and are scoped to the exact request",
   expect(
     (await reopened.getUserActionRequest(request.id))?.answerDraft,
   ).toBeNull();
+  // Open SQLite files cannot be removed on Windows.
+  await reopened.close();
+  await repository.close();
 });
 
 test.each(["memory", "file"] as const)(
@@ -468,5 +471,6 @@ test.each(["memory", "file"] as const)(
     expect(
       (await repository.getUserActionRequest(request.id))?.answerDraft?.answers,
     ).toEqual({ Start: "Friday", Interview: "Thursday" });
+    await repository.close();
   },
 );

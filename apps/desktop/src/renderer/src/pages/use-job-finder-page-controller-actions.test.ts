@@ -6,7 +6,7 @@ import {
   JobSearchPreferencesSchema,
   type DiscoveryActivityEvent,
   type JobFinderAgentDiscoveryResult,
-  type JobFinderWorkspaceSnapshot,
+  type JobFinderRendererWorkspaceSnapshot,
   type ResumeExtractionStatus,
   type ResumeDraft,
 } from "@nordri/contracts";
@@ -101,7 +101,7 @@ describe("describePreparedApplicationSubmitResult", () => {
           privacyReceipt: { submissionOutcome: { outcome } },
         },
       ],
-    }) as unknown as JobFinderWorkspaceSnapshot;
+    }) as unknown as JobFinderRendererWorkspaceSnapshot;
 
   it("reports sent only for a confirmed submitted outcome", () => {
     expect(
@@ -536,6 +536,32 @@ describe("createDiscoveryWorkspaceRefreshCoordinator", () => {
     }
   });
 
+  it("sends progress refreshes to the paced background refresh and reads directly only at the end", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const refreshWorkspace = vi.fn().mockResolvedValue({});
+      const requestProgressiveRefresh = vi.fn();
+      const coordinator = createDiscoveryWorkspaceRefreshCoordinator(
+        refreshWorkspace,
+        { intervalMs: 250, requestProgressiveRefresh },
+      );
+
+      coordinator.notifyRunStarted();
+      await vi.advanceTimersByTimeAsync(250);
+      coordinator.notifyJobsPersisted();
+      await vi.advanceTimersByTimeAsync(250);
+      expect(requestProgressiveRefresh).toHaveBeenCalledTimes(2);
+      expect(refreshWorkspace).not.toHaveBeenCalled();
+
+      await coordinator.flushFinal();
+      expect(refreshWorkspace).toHaveBeenCalledTimes(1);
+      coordinator.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps refreshes single-flight when another source completes during a slow read", async () => {
     vi.useFakeTimers();
 
@@ -668,33 +694,36 @@ describe("createPrimaryPageActions", () => {
     input: {
       profile?: typeof completeSetupProfile;
       preferences?: typeof completeSetupPreferences;
-      reviewItems?: JobFinderWorkspaceSnapshot["profileSetupState"]["reviewItems"];
+      reviewItems?: JobFinderRendererWorkspaceSnapshot["profileSetupState"]["reviewItems"];
       locationPathname?: string;
     } = {},
   ) {
     const profile = input.profile ?? completeSetupProfile;
     const searchPreferences = input.preferences ?? completeSetupPreferences;
-    const profileSetupState: JobFinderWorkspaceSnapshot["profileSetupState"] = {
-      status: "in_progress",
-      currentStep: "answers",
-      completedAt: null,
-      lastResumedAt: null,
-      reviewItems: input.reviewItems ?? [],
-    };
+    const profileSetupState: JobFinderRendererWorkspaceSnapshot["profileSetupState"] =
+      {
+        status: "in_progress",
+        currentStep: "answers",
+        completedAt: null,
+        lastResumedAt: null,
+        reviewItems: input.reviewItems ?? [],
+      };
     const snapshot = {
       profile,
       profileSetupState,
       searchPreferences,
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     const saveProfileSetupState = vi.fn(
-      (nextState: JobFinderWorkspaceSnapshot["profileSetupState"]) =>
+      (nextState: JobFinderRendererWorkspaceSnapshot["profileSetupState"]) =>
         Promise.resolve({ ...snapshot, profileSetupState: nextState }),
     );
     const navigate = vi.fn();
     const runSaveAction = vi.fn(
       async (saveInput: {
-        action: () => Promise<JobFinderWorkspaceSnapshot>;
-        onSuccess: (result: JobFinderWorkspaceSnapshot) => void | Promise<void>;
+        action: () => Promise<JobFinderRendererWorkspaceSnapshot>;
+        onSuccess: (
+          result: JobFinderRendererWorkspaceSnapshot,
+        ) => void | Promise<void>;
       }) => {
         const result = await saveInput.action();
         await saveInput.onSuccess(result);
@@ -809,17 +838,19 @@ describe("createPrimaryPageActions", () => {
         lastResumedAt: null,
         reviewItems: [],
       },
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     const savedSnapshot = {
       ...staleWorkspace,
       searchPreferences: completeSetupPreferences,
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     const navigate = vi.fn();
     type PrimaryPageActionArgs = Parameters<typeof createPrimaryPageActions>[0];
     const pageActions = createPrimaryPageActions({
       actions: {
         saveProfileSetupState: vi.fn(
-          (nextState: JobFinderWorkspaceSnapshot["profileSetupState"]) =>
+          (
+            nextState: JobFinderRendererWorkspaceSnapshot["profileSetupState"],
+          ) =>
             Promise.resolve({ ...savedSnapshot, profileSetupState: nextState }),
         ),
         saveWorkspaceInputs: vi.fn().mockResolvedValue(savedSnapshot),
@@ -829,9 +860,9 @@ describe("createPrimaryPageActions", () => {
       runAction: vi.fn(),
       runSaveAction: vi.fn(
         async (saveInput: {
-          action: () => Promise<JobFinderWorkspaceSnapshot>;
+          action: () => Promise<JobFinderRendererWorkspaceSnapshot>;
           onSuccess: (
-            result: JobFinderWorkspaceSnapshot,
+            result: JobFinderRendererWorkspaceSnapshot,
           ) => void | Promise<void>;
         }) => {
           await saveInput.onSuccess(await saveInput.action());
@@ -872,9 +903,11 @@ describe("createPrimaryPageActions", () => {
         lastResumedAt: null,
         reviewItems: [],
       },
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     const saveProfileSetupState = vi.fn(
-      async (nextState: JobFinderWorkspaceSnapshot["profileSetupState"]) => {
+      async (
+        nextState: JobFinderRendererWorkspaceSnapshot["profileSetupState"],
+      ) => {
         await saveGate;
         return { ...snapshot, profileSetupState: nextState };
       },
@@ -891,9 +924,9 @@ describe("createPrimaryPageActions", () => {
       runAction: vi.fn(),
       runSaveAction: vi.fn(
         async (saveInput: {
-          action: () => Promise<JobFinderWorkspaceSnapshot>;
+          action: () => Promise<JobFinderRendererWorkspaceSnapshot>;
           onSuccess: (
-            result: JobFinderWorkspaceSnapshot,
+            result: JobFinderRendererWorkspaceSnapshot,
           ) => void | Promise<void>;
         }) => {
           const result = await saveInput.action();
@@ -1129,7 +1162,7 @@ describe("createPrimaryPageActions", () => {
       settings: {
         resumeApplicationMode: "tailored_per_job",
       },
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     const saveWorkspaceInputs = vi.fn(
       (
         profile: typeof completeSetupProfile,
@@ -1158,15 +1191,19 @@ describe("createPrimaryPageActions", () => {
       },
     );
     const saveProfileSetupState = vi.fn(
-      (profileSetupState: JobFinderWorkspaceSnapshot["profileSetupState"]) => {
+      (
+        profileSetupState: JobFinderRendererWorkspaceSnapshot["profileSetupState"],
+      ) => {
         persistedSnapshot = { ...persistedSnapshot, profileSetupState };
         return Promise.resolve(persistedSnapshot);
       },
     );
     const runSaveAction = vi.fn(
       async (saveInput: {
-        action: () => Promise<JobFinderWorkspaceSnapshot>;
-        onSuccess: (result: JobFinderWorkspaceSnapshot) => void | Promise<void>;
+        action: () => Promise<JobFinderRendererWorkspaceSnapshot>;
+        onSuccess: (
+          result: JobFinderRendererWorkspaceSnapshot,
+        ) => void | Promise<void>;
       }) => {
         await saveInput.onSuccess(await saveInput.action());
         return true;
@@ -1268,9 +1305,9 @@ describe("createPrimaryPageActions", () => {
         lastResumedAt: null,
         reviewItems: [],
       },
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     let shouldCreateImportReview = true;
-    const persistedSetupStates: JobFinderWorkspaceSnapshot["profileSetupState"][] =
+    const persistedSetupStates: JobFinderRendererWorkspaceSnapshot["profileSetupState"][] =
       [];
     const saveWorkspaceInputs = vi.fn(
       (
@@ -1313,7 +1350,9 @@ describe("createPrimaryPageActions", () => {
       },
     );
     const saveProfileSetupState = vi.fn(
-      (profileSetupState: JobFinderWorkspaceSnapshot["profileSetupState"]) => {
+      (
+        profileSetupState: JobFinderRendererWorkspaceSnapshot["profileSetupState"],
+      ) => {
         persistedSnapshot = { ...persistedSnapshot, profileSetupState };
         persistedSetupStates.push(profileSetupState);
         return Promise.resolve(persistedSnapshot);
@@ -1322,8 +1361,10 @@ describe("createPrimaryPageActions", () => {
     const navigate = vi.fn();
     const runSaveAction = vi.fn(
       async (saveInput: {
-        action: () => Promise<JobFinderWorkspaceSnapshot>;
-        onSuccess: (result: JobFinderWorkspaceSnapshot) => void | Promise<void>;
+        action: () => Promise<JobFinderRendererWorkspaceSnapshot>;
+        onSuccess: (
+          result: JobFinderRendererWorkspaceSnapshot,
+        ) => void | Promise<void>;
       }) => {
         await saveInput.onSuccess(await saveInput.action());
         return true;
@@ -1451,7 +1492,7 @@ describe("createPrimaryPageActions", () => {
       )
       .mockResolvedValueOnce({
         profile: completeSetupProfile,
-      } as JobFinderWorkspaceSnapshot);
+      } as JobFinderRendererWorkspaceSnapshot);
     const { runAction } = createActionRunners({
       setActionState: applyActionState,
       setPendingActionState: applyPendingActionState,
@@ -1465,7 +1506,7 @@ describe("createPrimaryPageActions", () => {
       setActionState: applyActionState,
       workspace: {
         profile: completeSetupProfile,
-      } as JobFinderWorkspaceSnapshot,
+      } as JobFinderRendererWorkspaceSnapshot,
     } as unknown as PrimaryPageActionArgs);
 
     pageActions.onImportResume();
@@ -1499,12 +1540,12 @@ describe("createPrimaryPageActions", () => {
         pending = typeof next === "function" ? next(pending) : next;
       },
     });
-    let finish!: (snapshot: JobFinderWorkspaceSnapshot) => void;
+    let finish!: (snapshot: JobFinderRendererWorkspaceSnapshot) => void;
     const importResume = vi
       .fn<JobFinderShellActions["importResume"]>()
       .mockResolvedValueOnce({
         profile: completeSetupProfile,
-      } as JobFinderWorkspaceSnapshot)
+      } as JobFinderRendererWorkspaceSnapshot)
       .mockImplementationOnce(
         () =>
           new Promise((resolve) => {
@@ -1535,7 +1576,7 @@ describe("createPrimaryPageActions", () => {
           extractionStatus: "ready",
         },
       },
-    } as JobFinderWorkspaceSnapshot);
+    } as JobFinderRendererWorkspaceSnapshot);
     await vi.waitFor(() =>
       expect(state.message).toContain("fatima-noor.md was imported"),
     );
@@ -1604,7 +1645,7 @@ describe("createPrimaryPageActions", () => {
               : null,
           },
         }),
-      } as JobFinderWorkspaceSnapshot);
+      } as JobFinderRendererWorkspaceSnapshot);
     }
     type PrimaryPageActionArgs = Parameters<typeof createPrimaryPageActions>[0];
     const pageActions = createPrimaryPageActions({
@@ -1615,7 +1656,7 @@ describe("createPrimaryPageActions", () => {
       setActionState: applyActionState,
       workspace: {
         profile: completeSetupProfile,
-      } as JobFinderWorkspaceSnapshot,
+      } as JobFinderRendererWorkspaceSnapshot,
     } as unknown as PrimaryPageActionArgs);
 
     for (const expectation of extractionStatusExpectations) {
@@ -1684,7 +1725,7 @@ describe("createPrimaryPageActions", () => {
   it("resolves one ordinary hide mutation and propagates synchronous failures", async () => {
     const dismissDiscoveryJob = vi
       .fn<JobFinderShellActions["dismissDiscoveryJob"]>()
-      .mockResolvedValueOnce({} as JobFinderWorkspaceSnapshot)
+      .mockResolvedValueOnce({} as JobFinderRendererWorkspaceSnapshot)
       .mockImplementationOnce(() => {
         throw new Error("Synchronous dismissal failure.");
       });
@@ -1721,7 +1762,7 @@ describe("createPrimaryPageActions", () => {
     /nothing (?:was |is )?submitted|no application (?:was |is )?submitted|(?:was|were) not submitted|without final submit|non-submitting|(?:stops?|stopped|stopping|pauses?|paused|pausing)(?: before)?(?: the)? final submit/i;
 
   it("keeps a 511-source discovery run to one final snapshot read", async () => {
-    const snapshot = {} as JobFinderWorkspaceSnapshot;
+    const snapshot = {} as JobFinderRendererWorkspaceSnapshot;
     const workspace = {
       searchPreferences: JobSearchPreferencesSchema.parse({
         targetRoles: ["Engineer"],
@@ -1739,7 +1780,7 @@ describe("createPrimaryPageActions", () => {
           ],
         },
       }),
-    } as JobFinderWorkspaceSnapshot;
+    } as JobFinderRendererWorkspaceSnapshot;
     const refreshWorkspace = vi
       .fn<JobFinderShellActions["refreshWorkspace"]>()
       .mockResolvedValue(snapshot);
@@ -1802,7 +1843,7 @@ describe("createPrimaryPageActions", () => {
   });
 
   it("routes application-default saves through the scoped action without touching tracker CRM or whole-object save", async () => {
-    const snapshot = {} as JobFinderWorkspaceSnapshot;
+    const snapshot = {} as JobFinderRendererWorkspaceSnapshot;
     const saveSettings = vi.fn<JobFinderShellActions["saveSettings"]>();
     const updateApplicationDefaults = vi
       .fn<JobFinderShellActions["updateApplicationDefaults"]>()
@@ -1824,7 +1865,7 @@ describe("createPrimaryPageActions", () => {
         updateTrackerCrm,
       } as unknown as JobFinderShellActions,
       runSaveAction,
-      workspace: {} as JobFinderWorkspaceSnapshot,
+      workspace: {} as JobFinderRendererWorkspaceSnapshot,
     } as unknown as PrimaryPageActionArgs);
 
     await pageActions.onUpdateApplicationDefaults({
@@ -1842,7 +1883,7 @@ describe("createPrimaryPageActions", () => {
   });
 
   it("routes appearance and workspace-behavior saves through their scoped methods", async () => {
-    const snapshot = {} as JobFinderWorkspaceSnapshot;
+    const snapshot = {} as JobFinderRendererWorkspaceSnapshot;
     const saveSettings = vi.fn<JobFinderShellActions["saveSettings"]>();
     const updateApplicationDefaults =
       vi.fn<JobFinderShellActions["updateApplicationDefaults"]>();
@@ -1871,7 +1912,7 @@ describe("createPrimaryPageActions", () => {
         updateAiBehavior,
       } as unknown as JobFinderShellActions,
       runSaveAction,
-      workspace: {} as JobFinderWorkspaceSnapshot,
+      workspace: {} as JobFinderRendererWorkspaceSnapshot,
     } as unknown as PrimaryPageActionArgs);
 
     const behaviorCompleted = await pageActions.onUpdateWorkspaceBehavior({
@@ -1917,7 +1958,7 @@ describe("createPrimaryPageActions", () => {
         updateApplicationDefaults,
       } as unknown as JobFinderShellActions,
       runSaveAction,
-      workspace: {} as JobFinderWorkspaceSnapshot,
+      workspace: {} as JobFinderRendererWorkspaceSnapshot,
     } as unknown as PrimaryPageActionArgs);
 
     const completed = await pageActions.onUpdateApplicationDefaults({
@@ -1941,7 +1982,7 @@ describe("createPrimaryPageActions", () => {
     });
     const updateAppearanceTheme = vi
       .fn<JobFinderShellActions["updateAppearanceTheme"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
 
     const completed = await runSaveAction({
       action: () => updateAppearanceTheme("dark"),
@@ -1961,7 +2002,7 @@ describe("createPrimaryPageActions", () => {
   it("describes a staged automatic run as fill-only preparation without granting submit authority", async () => {
     const startAutoApplyRun = vi
       .fn<JobFinderShellActions["startAutoApplyRun"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const runAction = vi.fn().mockResolvedValue(true);
     type PrimaryPageActionArgs = Parameters<typeof createPrimaryPageActions>[0];
     const pageActions = createPrimaryPageActions({
@@ -1994,7 +2035,7 @@ describe("createPrimaryPageActions", () => {
   it("marks the one-job apply action pending before navigating to Applications", async () => {
     const startApplyCopilotRun = vi
       .fn<JobFinderShellActions["startApplyCopilotRun"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const runAction = vi.fn(() => new Promise<boolean>(() => undefined));
     const navigate = vi.fn();
     type PrimaryPageActionArgs = Parameters<typeof createPrimaryPageActions>[0];
@@ -2025,7 +2066,7 @@ describe("createPrimaryPageActions", () => {
     try {
       const startAutoApplyRun = vi
         .fn<JobFinderShellActions["startAutoApplyRun"]>()
-        .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+        .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
       const runAction = vi.fn().mockResolvedValue(true);
       const setResumeWorkspaceDirty = vi.fn();
       type PrimaryPageActionArgs = Parameters<
@@ -2070,7 +2111,7 @@ describe("createPrimaryPageActions", () => {
   });
 
   it("starts the Review Queue Apply Copilot without visual checkpoints or the legacy approval path", async () => {
-    const snapshot = {} as JobFinderWorkspaceSnapshot;
+    const snapshot = {} as JobFinderRendererWorkspaceSnapshot;
     const startApplyCopilotRun = vi
       .fn<JobFinderShellActions["startApplyCopilotRun"]>()
       .mockResolvedValue(snapshot);
@@ -2123,7 +2164,7 @@ describe("createPrimaryPageActions", () => {
   it("describes application startup without contradicting the chosen apply mode", async () => {
     const startApplyCopilotRun = vi
       .fn<JobFinderShellActions["startApplyCopilotRun"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const runAction = vi.fn().mockResolvedValue(true);
     type PrimaryPageActionArgs = Parameters<typeof createPrimaryPageActions>[0];
     const pageActions = createPrimaryPageActions({
@@ -2204,7 +2245,7 @@ describe("createPrimaryPageActions", () => {
   it("reports consent decisions without promising prepare-only behavior or submission outcomes", () => {
     const resolveApplyConsentRequest = vi
       .fn<JobFinderShellActions["resolveApplyConsentRequest"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const runAction = vi.fn().mockResolvedValue(true);
     type PrimaryPageActionArgs = Parameters<typeof createPrimaryPageActions>[0];
     const pageActions = createPrimaryPageActions({
@@ -2323,7 +2364,7 @@ describe("createPrimaryPageActions", () => {
   it("selects a resume strategy and explains that reuse never approves the resume", async () => {
     const selectResumeStrategy = vi
       .fn<JobFinderShellActions["selectResumeStrategy"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     type PrimaryPageActionArgs = Parameters<typeof createPrimaryPageActions>[0];
     const setActionState = vi.fn();
     const setPendingActionState = vi.fn();
@@ -2371,7 +2412,7 @@ describe("createPrimaryPageActions", () => {
   it("shortlists the exact clicked job without navigating or resetting resume workspace state", async () => {
     const queueJobForReview = vi
       .fn<JobFinderShellActions["queueJobForReview"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const navigate = vi.fn();
     const setSelectedReviewJobId = vi.fn();
     const setResumeWorkspaceDirty = vi.fn();
@@ -2416,10 +2457,70 @@ describe("createPrimaryPageActions", () => {
     expect(confirmLeaveDirtyResumeWorkspace).not.toHaveBeenCalled();
   });
 
+  it("shortlists all selected IDs once across controller rebuilds and releases the bulk guard", async () => {
+    const jobIds = Array.from({ length: 50 }, (_, index) => `job-${index}`);
+    let finish!: (workspace: JobFinderRendererWorkspaceSnapshot) => void;
+    const pending = new Promise<JobFinderRendererWorkspaceSnapshot>(
+      (resolve) => {
+        finish = resolve;
+      },
+    );
+    const queueJobsForReview = vi
+      .fn<NonNullable<JobFinderShellActions["queueJobsForReview"]>>()
+      .mockReturnValueOnce(pending)
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
+    const queueJobForReview =
+      vi.fn<JobFinderShellActions["queueJobForReview"]>();
+    const setSelectedReviewJobId = vi.fn();
+    const setActionState = vi.fn();
+    const setPendingActionState = vi.fn();
+    const navigate = vi.fn();
+    const setResumeWorkspaceDirty = vi.fn();
+    const { withPendingScope } = createActionRunners({
+      setActionState,
+      setPendingActionState,
+    });
+    const create = () =>
+      createPrimaryPageActions({
+        actions: { queueJobsForReview, queueJobForReview },
+        withPendingScope,
+        setActionState,
+        setPendingActionState,
+        setSelectedReviewJobId,
+        navigate,
+        setResumeWorkspaceDirty,
+      } as unknown as Parameters<typeof createPrimaryPageActions>[0]);
+    const first = create().onQueueJobs!([...jobIds, jobIds[0]!]);
+    expect(await create().onQueueJobs!(jobIds)).toMatchObject({
+      status: "failure",
+    });
+    expect(queueJobsForReview).toHaveBeenCalledExactlyOnceWith(jobIds);
+    finish({} as JobFinderRendererWorkspaceSnapshot);
+    expect(await first).toEqual({
+      status: "success",
+      message: "50 jobs added to Shortlisted.",
+    });
+    expect(setSelectedReviewJobId).toHaveBeenCalledExactlyOnceWith("job-0");
+    expect(navigate).not.toHaveBeenCalled();
+    expect(setResumeWorkspaceDirty).not.toHaveBeenCalled();
+    expect(queueJobForReview).not.toHaveBeenCalled();
+    queueJobsForReview.mockRejectedValueOnce(
+      new Error("Synthetic write failure"),
+    );
+    expect(await create().onQueueJobs!(["job-50"])).toEqual({
+      status: "failure",
+      message: "Synthetic write failure",
+    });
+    expect(await create().onQueueJobs!(["job-51"])).toMatchObject({
+      status: "success",
+    });
+    expect(queueJobsForReview).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps single-job resume generation selecting its target", async () => {
     const generateResume = vi
       .fn<JobFinderShellActions["generateResume"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const setSelectedReviewJobId = vi.fn();
     const setActionState = vi.fn();
     const setPendingActionState = vi.fn();
@@ -2443,7 +2544,7 @@ describe("createPrimaryPageActions", () => {
   it("skips selection changes when a batch generates drafts with selectAfter disabled", async () => {
     const generateResume = vi
       .fn<JobFinderShellActions["generateResume"]>()
-      .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
     const setSelectedReviewJobId = vi.fn();
     const setActionState = vi.fn();
     const setPendingActionState = vi.fn();
@@ -2510,7 +2611,7 @@ describe("createPrimaryPageActions", () => {
           );
       const setWorkHistoryReviewAcknowledgment = vi
         .fn<JobFinderShellActions["setWorkHistoryReviewAcknowledgment"]>()
-        .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+        .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
       const runResumeWorkspaceAction = vi.fn(
         async (
           action: () => Promise<unknown>,
@@ -2646,7 +2747,7 @@ describe("createPrimaryPageActions", () => {
       const refreshResumeWorkspace = vi.fn().mockResolvedValue(true);
       const setWorkHistoryReviewAcknowledgment = vi
         .fn<JobFinderShellActions["setWorkHistoryReviewAcknowledgment"]>()
-        .mockResolvedValue({} as JobFinderWorkspaceSnapshot);
+        .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
       type PrimaryPageActionArgs = Parameters<
         typeof createPrimaryPageActions
       >[0];
@@ -2706,7 +2807,7 @@ describe("createPrimaryPageActions", () => {
     it("keeps a delayed application start failure on Applications after its navigation commits", async () => {
       setJobFinderStatusRoute("/job-finder/review-queue");
       let rejectStart: (reason: Error) => void = () => undefined;
-      const pendingStart = new Promise<JobFinderWorkspaceSnapshot>(
+      const pendingStart = new Promise<JobFinderRendererWorkspaceSnapshot>(
         (_resolve, reject) => {
           rejectStart = reject;
         },
@@ -2849,7 +2950,7 @@ describe("createPrimaryPageActions resume PDF export", () => {
     const exportResult = {
       outcome: "saved" as const,
       outputPath: "/tmp/alex-resume.pdf",
-      snapshot: {} as JobFinderWorkspaceSnapshot,
+      snapshot: {} as JobFinderRendererWorkspaceSnapshot,
     };
     const exportResumePdf = vi.fn().mockResolvedValue(exportResult);
     const runResumeWorkspaceAction = vi.fn(
@@ -2926,7 +3027,7 @@ describe("createPrimaryPageActions auto-apply queue outcomes", () => {
   function createQueueHarness(input?: {
     capacity?: Record<string, unknown> | null;
     confirmLeave?: boolean;
-    queueRunBehavior?: () => Promise<JobFinderWorkspaceSnapshot>;
+    queueRunBehavior?: () => Promise<JobFinderRendererWorkspaceSnapshot>;
   }) {
     let latestMessage: string | null = null;
     const wrappedSetActionState = vi.fn(
@@ -2949,7 +3050,7 @@ describe("createPrimaryPageActions auto-apply queue outcomes", () => {
     });
     const startAutoApplyQueueRun = vi.fn(
       input?.queueRunBehavior ??
-        (() => Promise.resolve({} as JobFinderWorkspaceSnapshot)),
+        (() => Promise.resolve({} as JobFinderRendererWorkspaceSnapshot)),
     );
     const confirmLeaveDirtyResumeWorkspace = vi
       .fn<(pendingAction: string) => Promise<boolean>>()
@@ -2970,7 +3071,7 @@ describe("createPrimaryPageActions auto-apply queue outcomes", () => {
           input?.capacity === undefined
             ? {}
             : { globalDailyApplicationPreparationCapacity: input.capacity },
-      } as unknown as JobFinderWorkspaceSnapshot,
+      } as unknown as JobFinderRendererWorkspaceSnapshot,
     } as unknown as PrimaryPageActionArgs);
 
     return {
@@ -3077,7 +3178,7 @@ describe("resume save revision acknowledgment", () => {
     } as ResumeDraft;
     const snapshot = {
       resumeDrafts: [{ ...draft, updatedAt: "2026-10-01T10:00:00.000Z" }],
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     const onSaved = vi.fn();
     const refreshResumeWorkspace = vi.fn(() => {
       expect(onSaved).toHaveBeenCalledWith(snapshot.resumeDrafts[0]!.updatedAt);
@@ -3154,7 +3255,7 @@ it.each([true, false])(
       resumeExportArtifacts: [
         { jobId: approved ? "job_pdf" : "another_job", isApproved: true },
       ],
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     const pageActions = createPrimaryPageActions({
       workspace,
       latestWorkspaceRef: { current: workspace },
@@ -3223,7 +3324,7 @@ it("uses warning toast tone unless every selected send has site confirmation", (
   };
   const snapshot = {
     applyJobResults: [result],
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
   expect(preparedApplicationsToastTone(snapshot, ["job"])).toBe("warning");
   snapshot.applyJobResults[0]!.state = "submitted";
   expect(preparedApplicationsToastTone(snapshot, ["job"])).toBe("warning");

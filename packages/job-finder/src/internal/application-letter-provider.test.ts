@@ -273,10 +273,12 @@ describe("the saved letter preference", () => {
 test("an unsupported letter is handed back with its reason and is never rendered", async () => {
   const renderLetter = vi.fn();
   const letterProvider = provider({
-    writeLetter: async () => {
-      throw new ApplicationLetterGroundingError(
-        "The claimed result is not in your profile or resume.",
-        "Draft needing review",
+    writeLetter: () => {
+      return Promise.reject(
+        new ApplicationLetterGroundingError(
+          "The claimed result is not in your profile or resume.",
+          "Draft needing review",
+        ),
       );
     },
     renderLetter,

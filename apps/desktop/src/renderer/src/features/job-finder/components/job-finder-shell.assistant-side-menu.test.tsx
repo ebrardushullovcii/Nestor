@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import {
   act,
   cleanup,
@@ -42,7 +42,7 @@ const windowControlsState = {
 
 function createWorkspace(
   collapseSideMenuWithAssistant?: boolean,
-): JobFinderWorkspaceSnapshot {
+): JobFinderRendererWorkspaceSnapshot {
   return {
     applicationRecords: [],
     discoveryJobs: [],
@@ -59,7 +59,7 @@ function createWorkspace(
       collapseSideMenuWithAssistant === undefined
         ? {}
         : { collapseSideMenuWithAssistant },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function setWindowWidth(width: number) {

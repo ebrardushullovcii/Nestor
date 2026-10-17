@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type {
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   DesktopPlatformPing,
 } from "@nordri/contracts";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -23,14 +23,14 @@ function blockedFact(): JobFinderStartupDatabaseRecoveryBlockedFact {
   };
 }
 
-function workspaceSnapshot(): JobFinderWorkspaceSnapshot {
+function workspaceSnapshot(): JobFinderRendererWorkspaceSnapshot {
   return {
     hydration: { phase: "complete", deferredCollections: [] },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function configureWindowNordri(overrides: {
-  getWorkspaceBootstrap?: () => Promise<JobFinderWorkspaceSnapshot>;
+  getWorkspaceBootstrap?: () => Promise<JobFinderRendererWorkspaceSnapshot>;
   getStartupDatabaseRecovery?: () => Promise<unknown>;
 }) {
   Object.defineProperty(window, "nordri", {

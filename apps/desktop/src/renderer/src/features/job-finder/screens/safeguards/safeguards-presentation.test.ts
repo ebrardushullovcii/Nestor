@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import { describe, expect, it, vi } from "vitest";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import {
   ApplicationRecordSchema,
   JobFinderIntelligenceSafeguardsSchema,
@@ -14,13 +14,160 @@ import {
 
 const now = "2026-08-15T10:00:00.000Z";
 
+it.each([3_000, 10_000])(
+  "indexes %i retained jobs once for 50 labels and reuses the index on event-only updates",
+  (count) => {
+    let idReads = 0;
+    let titleReads = 0;
+    const jobs = Array.from({ length: count }, (_, index) => ({
+      get id() {
+        idReads++;
+        return `scale_job_${index}`;
+      },
+      get title() {
+        titleReads++;
+        return `Role ${index}`;
+      },
+      company: "Synthetic employer",
+      location: "Remote",
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
+    const firstBoundary = Math.floor(count / 3);
+    const workspace = workspaceWith({
+      discoveryJobs: jobs.slice(0, firstBoundary),
+      companyJobs: jobs.slice(firstBoundary, 2 * firstBoundary),
+      dismissedDiscoveryJobs: jobs.slice(2 * firstBoundary),
+      campaigns: [],
+      applicationRecords: [],
+    });
+    const arrays = [
+      workspace.discoveryJobs,
+      workspace.companyJobs,
+      workspace.dismissedDiscoveryJobs,
+    ];
+    const finds = arrays.map((collection) => vi.spyOn(collection, "find"));
+    const signals = Array.from({ length: 50 }, (_, index) => ({
+      id: `signal_scale_${index}`,
+      jobId: `scale_job_${Math.floor((index * count) / 50)}`,
+      signal: "suspicious",
+      confidence: 0.9,
+      detectedAt: now,
+      provenance: "browser",
+      explanation: `Signal ${index}`,
+      recoveryGuidance: "Inspect the listing.",
+    }));
+    const safeguards = buildSafeguards({ signals });
+    const first = buildSafeguardsPresentationModel({ workspace, safeguards });
+    expect(idReads).toBe(count);
+    expect(titleReads).toBe(50);
+    expect(first.rows).toHaveLength(50);
+    expect(first.rows[49]!.lineage.jobs).toEqual([
+      `Role ${Math.floor((49 * count) / 50)} · Remote · Synthetic employer`,
+    ]);
+    const again = buildSafeguardsPresentationModel({
+      workspace: { ...workspace, generatedAt: "2026-10-13T10:00:00.000Z" },
+      safeguards: buildSafeguards({
+        signals: signals.map((signal) => ({
+          ...signal,
+          explanation: "Updated event",
+        })),
+      }),
+    });
+    expect(again.rows).toHaveLength(50);
+    expect(idReads).toBe(count);
+    expect(titleReads).toBe(50);
+    // A different company collection does not invalidate unchanged job arrays.
+    buildSafeguardsPresentationModel({
+      workspace: {
+        ...workspace,
+        intelligence: { ...workspace.intelligence, companies: [] },
+      },
+      safeguards,
+    });
+    expect(idReads).toBe(count);
+    const changed = workspace.dismissedDiscoveryJobs.map((job, index) =>
+      index === 0 ? { ...job, title: "Updated role" } : job,
+    );
+    const beforeRebuild = idReads;
+    buildSafeguardsPresentationModel({
+      workspace: { ...workspace, dismissedDiscoveryJobs: changed },
+      safeguards,
+    });
+    expect(idReads - beforeRebuild).toBe(count - 1);
+    for (const find of finds) {
+      expect(find).not.toHaveBeenCalled();
+      find.mockRestore();
+    }
+  },
+);
+
+it("preserves first-match job precedence and application fallback when collections change", () => {
+  const firstJob = {
+    id: "same",
+    title: "Discovery title",
+    company: "Discovery employer",
+    location: "Remote",
+  };
+  const workspace = workspaceWith({
+    discoveryJobs: [
+      firstJob,
+    ] as JobFinderRendererWorkspaceSnapshot["discoveryJobs"],
+    companyJobs: [
+      { ...firstJob, title: "Company title" },
+    ] as JobFinderRendererWorkspaceSnapshot["companyJobs"],
+    dismissedDiscoveryJobs: [
+      { ...firstJob, title: "Dismissed title" },
+    ] as JobFinderRendererWorkspaceSnapshot["dismissedDiscoveryJobs"],
+    applicationRecords: [
+      {
+        id: "record",
+        jobId: "fallback",
+        title: "Application title",
+        company: "Application employer",
+      },
+    ] as JobFinderRendererWorkspaceSnapshot["applicationRecords"],
+    campaigns: [],
+  });
+  const safeguards = buildSafeguards({
+    signals: ["same", "fallback", "missing"].map((jobId) => ({
+      id: `signal_${jobId}`,
+      jobId,
+      signal: "closed",
+      confidence: 1,
+      detectedAt: now,
+      provenance: "browser",
+      explanation: "Closed listing",
+      recoveryGuidance: "Inspect the listing",
+    })),
+  });
+  const build = (input: JobFinderRendererWorkspaceSnapshot) =>
+    buildSafeguardsPresentationModel({ workspace: input, safeguards }).rows.map(
+      (row) => row.lineage.jobs[0],
+    );
+  expect(build(workspace)).toEqual([
+    "Discovery title · Remote · Discovery employer",
+    "Application title · Application employer",
+    "missing",
+  ]);
+  expect(build({ ...workspace, discoveryJobs: [], companyJobs: [] })[0]).toBe(
+    "Dismissed title · Remote · Discovery employer",
+  );
+  expect(
+    build({
+      ...workspace,
+      applicationRecords: [
+        { ...workspace.applicationRecords[0]!, title: "Changed application" },
+      ],
+    })[1],
+  ).toBe("Changed application · Application employer");
+});
+
 function emptySafeguards() {
   return JobFinderIntelligenceSafeguardsSchema.parse({});
 }
 
 function workspaceWith(
-  overrides: Partial<JobFinderWorkspaceSnapshot> = {},
-): JobFinderWorkspaceSnapshot {
+  overrides: Partial<JobFinderRendererWorkspaceSnapshot> = {},
+): JobFinderRendererWorkspaceSnapshot {
   return {
     module: "job-finder",
     generatedAt: now,
@@ -37,7 +184,7 @@ function workspaceWith(
         company: "Northwind Labs",
         location: "Hybrid, London",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["discoveryJobs"],
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["discoveryJobs"],
     applicationRecords: [
       {
         id: "application_a",
@@ -45,10 +192,10 @@ function workspaceWith(
         title: "Senior Product Designer",
         company: "Signal Systems",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationRecords"],
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"],
     campaigns: [
       { id: "campaign_1", name: "Fall campaign", jobIds: ["job_ready"] },
-    ] as unknown as JobFinderWorkspaceSnapshot["campaigns"],
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["campaigns"],
     intelligence: {
       companies: [
         {
@@ -58,9 +205,9 @@ function workspaceWith(
         },
       ],
       safeguards: emptySafeguards(),
-    } as unknown as JobFinderWorkspaceSnapshot["intelligence"],
+    } as unknown as JobFinderRendererWorkspaceSnapshot["intelligence"],
     ...overrides,
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function buildSafeguards(overrides: {
@@ -224,7 +371,7 @@ describe("buildSafeguardsPresentationModel", () => {
             jobId: "job_generating",
             applicationRecordId: null,
           },
-        ] as JobFinderWorkspaceSnapshot["applyJobResults"],
+        ] as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
       }),
     });
 
@@ -484,7 +631,7 @@ describe("filterSafeguardRows", () => {
             detail:
               "Job Finder stopped after your search plan's safety rule was reached.",
           },
-        ] as unknown as JobFinderWorkspaceSnapshot["applyRuns"],
+        ] as unknown as JobFinderRendererWorkspaceSnapshot["applyRuns"],
       }),
     });
 
@@ -531,7 +678,7 @@ describe("filterSafeguardRows", () => {
             updatedAt: now,
             summary: "Filled in and ready to send.",
           },
-        ] as unknown as JobFinderWorkspaceSnapshot["applyRuns"],
+        ] as unknown as JobFinderRendererWorkspaceSnapshot["applyRuns"],
         applyJobResults: [
           {
             id: "result_sent",
@@ -553,7 +700,7 @@ describe("filterSafeguardRows", () => {
             reviewCard: { waitingOnYou: [] },
             updatedAt: now,
           },
-        ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"],
+        ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
       }),
     });
 
@@ -603,13 +750,13 @@ it("keeps an old same-company conflict limited to its two applications and uses 
     jobId: `job_${index}`,
     title: `Role ${index}`,
     company: "Synthetic Employer",
-  })) as JobFinderWorkspaceSnapshot["applicationRecords"];
+  })) as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
   workspace.discoveryJobs = workspace.applicationRecords.map((record) => ({
     id: record.jobId,
     title: record.title,
     company: record.company,
     location: "Remote",
-  })) as JobFinderWorkspaceSnapshot["discoveryJobs"];
+  })) as JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
   const safeguards = JobFinderIntelligenceSafeguardsSchema.parse({
     simultaneousApplicationConflicts: [
       {

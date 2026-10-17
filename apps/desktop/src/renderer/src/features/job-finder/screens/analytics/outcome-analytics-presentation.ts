@@ -1,4 +1,4 @@
-import type { ApplyJobResult, ApplyRunSummary } from "@nordri/contracts";
+import type { ApplyJobResultListRow, ApplyRunSummary } from "@nordri/contracts";
 import {
   type ApplicationOutcome,
   type OutcomeAnalyticsBucket,
@@ -545,7 +545,7 @@ export function countOutcomeEvents(events: readonly OutcomeEvent[]): number {
 
 /** Verified employer receipts are the funnel denominator; reported outcomes stay distinct. */
 export function deriveVerifiedApplicationFunnel(input: {
-  results: readonly ApplyJobResult[];
+  results: readonly ApplyJobResultListRow[];
   runs: readonly ApplyRunSummary[];
   events: readonly OutcomeEvent[];
   campaignId?: string;

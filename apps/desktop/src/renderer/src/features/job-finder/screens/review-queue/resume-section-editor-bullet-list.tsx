@@ -1,8 +1,5 @@
 import { Eye, EyeOff, Lock, LockOpen, MoveDown, MoveUp } from "lucide-react";
-import type {
-  ResumeDraftBullet,
-  ResumeDraftSection,
-} from "@nordri/contracts";
+import type { ResumeDraftBullet, ResumeDraftSection } from "@nordri/contracts";
 import {
   getResumeEntryBulletTargetId,
   getResumeSectionBulletTargetId,

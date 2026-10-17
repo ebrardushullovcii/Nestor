@@ -3,7 +3,7 @@ import type {
   ApplicationPrivacyReceipt,
   ApplyRunDetails,
   ApplySubmitApproval,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import {
   CONFIRM_STEP_DONE_ACTION,
@@ -24,7 +24,7 @@ export { TECHNICAL_DETAILS_LABEL };
 export type QueueEntry = {
   jobId: string;
   label: string;
-  runResult: JobFinderWorkspaceSnapshot["applyJobResults"][number] | null;
+  runResult: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null;
   includeInRecovery: boolean;
 };
 
@@ -43,9 +43,9 @@ const ACTIONABLE_ANSWER_REQUEST_STATES = new Set([
 export function findActionableApplicationAnswerRequest(input: {
   applicationRecordId: string;
   jobId: string;
-  run: JobFinderWorkspaceSnapshot["applyRuns"][number] | null;
+  run: JobFinderRendererWorkspaceSnapshot["applyRuns"][number] | null;
   requests:
-    | readonly JobFinderWorkspaceSnapshot["userActionRequests"][number][]
+    | readonly JobFinderRendererWorkspaceSnapshot["userActionRequests"][number][]
     | undefined;
 }) {
   const { applicationRecordId, jobId, run, requests } = input;
@@ -100,7 +100,7 @@ const BACKGROUND_PAGE_PAUSE_PATTERN =
   /blocked a background page request|blocked a form submission before your review/i;
 
 export function applyResultIsBackgroundPagePause(
-  result: JobFinderWorkspaceSnapshot["applyJobResults"][number] | null,
+  result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null,
 ): boolean {
   return Boolean(
     result && BACKGROUND_PAGE_PAUSE_PATTERN.test(getApplyResultCorpus(result)),
@@ -195,7 +195,7 @@ export const FIELD_SAVE_PAUSE_GUIDANCE = `${FIELD_SAVE_PAUSE_NEXT_STEP} Use "${R
 export const FINISH_IN_BROWSER_OPENED_STATUS = JOB_FINDER_BROWSER_OPENED_STATUS;
 
 function getApplyResultCorpus(
-  result: JobFinderWorkspaceSnapshot["applyJobResults"][number],
+  result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number],
 ): string {
   return [result.summary, result.detail, result.blockerSummary]
     .filter(Boolean)
@@ -207,7 +207,7 @@ function getApplyResultCorpus(
  * with the saved profile keep the existing conflicting-fields copy.
  */
 export function applyResultIsFieldSavePause(
-  result: JobFinderWorkspaceSnapshot["applyJobResults"][number] | null,
+  result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null,
 ): boolean {
   if (!result || !applyResultNeedsManualFieldFinish(result)) {
     return false;
@@ -223,7 +223,7 @@ export function applyResultIsFieldSavePause(
 
 /** One-line reason for a manual-finish pause, or null when not a manual finish. */
 export function getManualFieldFinishReason(
-  result: JobFinderWorkspaceSnapshot["applyJobResults"][number] | null,
+  result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null,
 ): string | null {
   if (!applyResultNeedsManualFieldFinish(result)) {
     return null;
@@ -239,7 +239,7 @@ export function getManualFieldFinishReason(
 }
 
 export function getManualFieldFinishNextStep(
-  result: JobFinderWorkspaceSnapshot["applyJobResults"][number] | null,
+  result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null,
 ): string {
   if (applyResultIsBackgroundPagePause(result)) {
     return `${BACKGROUND_PAGE_PAUSE_REASON} ${BACKGROUND_PAGE_PAUSE_ACTION}`;
@@ -250,7 +250,7 @@ export function getManualFieldFinishNextStep(
 }
 
 export function getManualFieldFinishGuidance(
-  result: JobFinderWorkspaceSnapshot["applyJobResults"][number] | null,
+  result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null,
 ): string {
   if (applyResultIsBackgroundPagePause(result)) {
     return getManualFieldFinishNextStep(result);
@@ -280,7 +280,7 @@ export function getApplyResultDestinationUrl(
 }
 
 const APPLY_RUN_STATE_LABELS: Partial<
-  Record<JobFinderWorkspaceSnapshot["applyRuns"][number]["state"], string>
+  Record<JobFinderRendererWorkspaceSnapshot["applyRuns"][number]["state"], string>
 > = {
   paused_for_user_review: "Paused for your review",
   paused_for_consent: "Paused — needs something from you",
@@ -288,7 +288,7 @@ const APPLY_RUN_STATE_LABELS: Partial<
 };
 
 const APPLY_RUN_MODE_LABELS: Partial<
-  Record<JobFinderWorkspaceSnapshot["applyRuns"][number]["mode"], string>
+  Record<JobFinderRendererWorkspaceSnapshot["applyRuns"][number]["mode"], string>
 > = {
   // "Guided preparation" is a name used nowhere else in the product; every
   // other surface says preparation or "Fill it in".
@@ -299,14 +299,14 @@ const APPLY_RUN_MODE_LABELS: Partial<
 
 /** Sentence-case run state for people instead of a title-cased status code. */
 export function formatApplyRunStateLabel(
-  state: JobFinderWorkspaceSnapshot["applyRuns"][number]["state"],
+  state: JobFinderRendererWorkspaceSnapshot["applyRuns"][number]["state"],
 ): string {
   return APPLY_RUN_STATE_LABELS[state] ?? formatStatusLabel(state);
 }
 
 /** Sentence-case run mode for people instead of a title-cased mode code. */
 export function formatApplyRunModeLabel(
-  mode: JobFinderWorkspaceSnapshot["applyRuns"][number]["mode"],
+  mode: JobFinderRendererWorkspaceSnapshot["applyRuns"][number]["mode"],
 ): string {
   return APPLY_RUN_MODE_LABELS[mode] ?? formatStatusLabel(mode);
 }
@@ -390,7 +390,7 @@ export function getCustomerFacingApplyText(
 }
 
 export function applyResultNeedsResumeAttachment(
-  result: JobFinderWorkspaceSnapshot["applyJobResults"][number] | null,
+  result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null,
 ): boolean {
   if (!result) {
     return false;
@@ -421,7 +421,7 @@ export function applyResultNeedsResumeAttachment(
 }
 
 export function applyResultIsServiceWorkerBlocked(
-  result: JobFinderWorkspaceSnapshot["applyJobResults"][number] | null,
+  result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null,
 ): boolean {
   if (!result) {
     return false;
@@ -440,7 +440,7 @@ export function applyResultIsServiceWorkerBlocked(
  * retry path where preparation is still the right primary action.
  */
 export function applyResultNeedsManualFieldFinish(
-  result: JobFinderWorkspaceSnapshot["applyJobResults"][number] | null,
+  result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null,
 ): boolean {
   if (!result) {
     return false;
@@ -470,7 +470,7 @@ export function applyResultNeedsManualFieldFinish(
 export function applicationNeedsPrimaryRecovery(input: {
   lastAttemptState: ApplicationRecord["lastAttemptState"] | null | undefined;
   visibleApplyResult:
-    | JobFinderWorkspaceSnapshot["applyJobResults"][number]
+    | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
     | null;
 }): boolean {
   const { lastAttemptState, visibleApplyResult } = input;
@@ -510,7 +510,7 @@ export function applicationNeedsPrimaryRecovery(input: {
  */
 export function applyRunJobNeedsPreparation(
   runResult:
-    | JobFinderWorkspaceSnapshot["applyJobResults"][number]
+    | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
     | null
     | undefined,
 ): boolean {
@@ -527,9 +527,9 @@ export function applyRunJobNeedsPreparation(
 
 export function buildQueueEntries(input: {
   applicationRecords: readonly ApplicationRecord[];
-  applyJobResults: JobFinderWorkspaceSnapshot["applyJobResults"];
-  discoveryJobs: JobFinderWorkspaceSnapshot["discoveryJobs"];
-  selectedRun: JobFinderWorkspaceSnapshot["applyRuns"][number] | null;
+  applyJobResults: JobFinderRendererWorkspaceSnapshot["applyJobResults"];
+  discoveryJobs: JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
+  selectedRun: JobFinderRendererWorkspaceSnapshot["applyRuns"][number] | null;
 }): QueueEntry[] {
   const { applicationRecords, applyJobResults, discoveryJobs, selectedRun } =
     input;
@@ -555,7 +555,7 @@ export function buildQueueEntries(input: {
           (record) => record.id === runResult.applicationRecordId,
         ) ?? null)
       : null;
-    const relatedSavedJob = discoveryJobsById.get(jobId) ?? null;
+    const relatedJobListRow = discoveryJobsById.get(jobId) ?? null;
     const includeInRecovery = applyRunJobNeedsPreparation(runResult);
 
     return {
@@ -564,15 +564,15 @@ export function buildQueueEntries(input: {
         ? formatApplicationEmployerAriaLabel({
             title: relatedRecord.title,
             company: relatedRecord.company,
-            ...(relatedSavedJob?.canonicalUrl
-              ? { canonicalUrl: relatedSavedJob.canonicalUrl }
+            ...(relatedJobListRow?.canonicalUrl
+              ? { canonicalUrl: relatedJobListRow.canonicalUrl }
               : {}),
           })
-        : relatedSavedJob
+        : relatedJobListRow
           ? formatApplicationEmployerAriaLabel({
-              title: relatedSavedJob.title,
-              company: relatedSavedJob.company,
-              canonicalUrl: relatedSavedJob.canonicalUrl,
+              title: relatedJobListRow.title,
+              company: relatedJobListRow.company,
+              canonicalUrl: relatedJobListRow.canonicalUrl,
             })
           : jobId,
       runResult,
@@ -597,7 +597,7 @@ export function getApplyDetailsStatusBadge(
 }
 
 export function getQueueRecoveryTone(
-  state: JobFinderWorkspaceSnapshot["applyJobResults"][number]["state"] | null,
+  state: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]["state"] | null,
 ) {
   if (state === "awaiting_review" || state === "submitted") {
     return "positive" as const;
@@ -621,7 +621,7 @@ export function getQueueRecoveryTone(
 
 export function getQueueStateExplanation(
   input: {
-    runState: JobFinderWorkspaceSnapshot["applyRuns"][number]["state"];
+    runState: JobFinderRendererWorkspaceSnapshot["applyRuns"][number]["state"];
     selectedJobCount: number;
     blockedJobCount: number;
     skippedJobCount: number;

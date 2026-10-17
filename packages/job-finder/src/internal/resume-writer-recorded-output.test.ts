@@ -85,19 +85,23 @@ describe("recorded synthetic writer and checker responses", () => {
           textContent: record.original,
         },
       };
-      const checker = vi.fn(async (input: ResumeClaimCheckInput) =>
-        input.claims.map((claim) => ({
-          id: claim.id,
-          verdict:
-            claim.text === record.bad ? record.verdict : ("supported" as const),
-          reason: "Recorded synthetic fact check.",
-          evidenceIds: [],
-          fix: claim.text === record.bad ? record.fix : null,
-          style:
-            claim.text === record.bad && record.verdict === "supported"
-              ? "Repeated tools make this hard to read."
-              : null,
-        })),
+      const checker = vi.fn((input: ResumeClaimCheckInput) =>
+        Promise.resolve(
+          input.claims.map((claim) => ({
+            id: claim.id,
+            verdict:
+              claim.text === record.bad
+                ? record.verdict
+                : ("supported" as const),
+            reason: "Recorded synthetic fact check.",
+            evidenceIds: [],
+            fix: claim.text === record.bad ? record.fix : null,
+            style:
+              claim.text === record.bad && record.verdict === "supported"
+                ? "Repeated tools make this hard to read."
+                : null,
+          })),
+        ),
       );
       const base = {
         aiClient: { checkResumeClaims: checker },
@@ -137,19 +141,21 @@ describe("recorded synthetic writer and checker responses", () => {
       text: original,
       origin: "user_edited",
     });
-    const checker = vi.fn(async (input: ResumeClaimCheckInput) => {
+    const checker = vi.fn((input: ResumeClaimCheckInput) => {
       expect(input.resumeLines).toContainEqual({
         section: "summary",
         text: original,
       });
-      return input.claims.map((claim) => ({
-        id: claim.id,
-        verdict: "supported" as const,
-        reason: "Already stated in the earlier line.",
-        evidenceIds: [],
-        style: "Repeats the earlier achievement.",
-        fix: "",
-      }));
+      return Promise.resolve(
+        input.claims.map((claim) => ({
+          id: claim.id,
+          verdict: "supported" as const,
+          reason: "Already stated in the earlier line.",
+          evidenceIds: [],
+          style: "Repeats the earlier achievement.",
+          fix: "",
+        })),
+      );
     });
     const base = {
       aiClient: { checkResumeClaims: checker },

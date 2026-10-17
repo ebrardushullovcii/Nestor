@@ -7,7 +7,7 @@ import { enrichSearchPreferencesFromProfile } from "./workspace-helpers";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 
 function sameAssessment(left: MatchAssessment, right: MatchAssessment) {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return left === right || JSON.stringify(left) === JSON.stringify(right);
 }
 
 /**
@@ -52,7 +52,20 @@ export async function reassessSavedJobs(
       ? job
       : { ...job, matchAssessment: next };
   };
-  await ctx.repository.commitSavedJobDelta({ update: reassess });
+  const [savedJobs, discovery] = await Promise.all([
+    ctx.repository.readSavedJobsProjection(),
+    ctx.repository.readDiscoveryDisplayProjection(),
+  ]);
+  const changedIds = savedJobs
+    .filter((job) => reassess(job) !== job)
+    .map((job) => job.id);
+  if (changedIds.length > 0)
+    await ctx.repository.commitSavedJobDelta({
+      updateJobIds: changedIds,
+      update: reassess,
+    });
+  if (!discovery.pendingDiscoveryJobs.some((job) => reassess(job) !== job))
+    return;
   await ctx.persistDiscoveryState((current) => {
     const pendingDiscoveryJobs = current.pendingDiscoveryJobs.map(reassess);
     return pendingDiscoveryJobs.every(

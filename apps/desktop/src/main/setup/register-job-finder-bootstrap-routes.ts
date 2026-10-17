@@ -5,6 +5,7 @@ import {
   getJobFinderWorkspaceService,
   isDesktopTestApiEnabled,
 } from "../services/job-finder";
+import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-workspace-view";
 
 export const TEST_WORKSPACE_OPENING_HOLD_ENV =
   "NORDRI_TEST_WORKSPACE_OPENING_HOLD_MS";
@@ -45,14 +46,19 @@ export function registerJobFinderBootstrapDesktopRoutes(ipcMain: IpcMain) {
   ipcMain.handle("job-finder:get-workspace", async () => {
     await waitForOpeningHold();
     const workspaceService = await getJobFinderWorkspaceService();
-    return workspaceService.getWorkspaceSnapshot();
+    return toRendererWorkspaceSnapshot(
+      await (workspaceService.getWorkspaceProjection?.() ??
+        workspaceService.getWorkspaceSnapshot()),
+    );
   });
 
   ipcMain.handle("job-finder:get-workspace-bootstrap", async () => {
     await waitForOpeningHold();
     const workspaceService = await getJobFinderWorkspaceService();
-    return JobFinderWorkspaceSnapshotSchema.parse(
-      await workspaceService.getWorkspaceBootstrap(),
+    return toRendererWorkspaceSnapshot(
+      JobFinderWorkspaceSnapshotSchema.parse(
+        await workspaceService.getWorkspaceBootstrap(),
+      ),
     );
   });
 }

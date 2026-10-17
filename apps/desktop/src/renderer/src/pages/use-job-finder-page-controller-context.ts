@@ -9,7 +9,7 @@ import type {
   CampaignRuleFunnelProjection,
   DiscoveryActivityEvent,
   JobFinderResumeWorkspace,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ProfileCopilotMessage,
   ProfileSetupState,
   ProjectGroupedManualAnswerCommand,
@@ -75,7 +75,7 @@ type BuildJobFinderPageContextArgs = {
   isCurrentResumeWorkspaceJob: (jobId: string) => boolean;
   discoveryRunFeedback: DiscoveryRunFeedback | null;
   liveDiscoveryEvents: readonly DiscoveryActivityEvent[];
-  latestWorkspaceRef: MutableRefObject<JobFinderWorkspaceSnapshot | null>;
+  latestWorkspaceRef: MutableRefObject<JobFinderRendererWorkspaceSnapshot | null>;
   locationPathname: string;
   navigate: (
     path: string,
@@ -154,7 +154,7 @@ type BuildJobFinderPageContextArgs = {
   tailoredDraftPreparationRunRef: MutableRefObject<boolean>;
   tailoredDraftPreparationStopRequestedRef: MutableRefObject<boolean>;
   tailoredDraftPreparationDisposedRef: MutableRefObject<boolean>;
-  workspace: JobFinderWorkspaceSnapshot;
+  workspace: JobFinderRendererWorkspaceSnapshot;
 };
 
 export function buildJobFinderPageContext(

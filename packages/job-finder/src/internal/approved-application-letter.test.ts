@@ -9,9 +9,10 @@ import {
   type ApplyPageSession,
 } from "@nordri/contracts";
 import type { ExecuteApplicationFlowInput } from "@nordri/browser-runtime";
+import type * as BrowserAgent from "@nordri/browser-agent";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 vi.mock("@nordri/browser-agent", async (original) => ({
-  ...(await original<typeof import("@nordri/browser-agent")>()),
+  ...(await original<typeof BrowserAgent>()),
   replaceApprovedApplicationLetter: vi.fn(),
 }));
 import { replaceApprovedApplicationLetter } from "@nordri/browser-agent";
@@ -54,7 +55,7 @@ function setup(held = true) {
     job: { jobId: "job", applicationRecordId: "application" },
   } as ApplicationDocumentRevision;
   const job = SavedJobSchema.parse({
-    ...createSeed().savedJobs![0],
+    ...createSeed().savedJobs[0],
     id: "job",
     source: "target_site",
     sourceJobId: "job",
@@ -93,7 +94,7 @@ function setup(held = true) {
   const installPrepareOnlyGuard = vi.fn();
   const executeApplicationFlow = vi.fn(
     async (_source, input: ExecuteApplicationFlowInput) =>
-      input.prepareApplicationForm!({
+      input.prepareApplicationForm({
         session: { installPrepareOnlyGuard } as unknown as ApplyPageSession,
         currentUrl: "https://synthetic.example/form",
         startedAt: at,
@@ -101,18 +102,22 @@ function setup(held = true) {
   );
   const ctx = {
     repository: {
-      listApplyJobResults: async () => [result],
-      listSavedJobs: async () => [job],
-      upsertApplyJobResult: async (entry: typeof result) => {
+      listApplyJobResults: () => Promise.resolve([result]),
+      listSavedJobs: () => Promise.resolve([job]),
+      upsertApplyJobResult: (entry: typeof result) => {
         result = entry;
+
+        return Promise.resolve();
       },
     },
     browserRuntime: {
-      hasApplicationPageBinding: async () => held,
+      hasApplicationPageBinding: () => Promise.resolve(held),
       executeApplicationFlow,
     },
     aiClient: { chatWithTools: vi.fn() },
-    documentManager: { getApprovedApplicationLetter: async () => document },
+    documentManager: {
+      getApprovedApplicationLetter: () => Promise.resolve(document),
+    },
   } as unknown as WorkspaceServiceContext;
   return {
     ctx,
@@ -138,10 +143,8 @@ test("an approval replaces the held attachment, persists its new review and neve
       },
     ],
   });
-  await refreshApprovedApplicationLetter(
-    fixture.ctx,
-    fixture.document,
-    async () => fixture.facts,
+  await refreshApprovedApplicationLetter(fixture.ctx, fixture.document, () =>
+    Promise.resolve(fixture.facts),
   );
   expect(fixture.result().reviewCard?.letter).toMatchObject({
     text: "Approved revision two",
@@ -164,10 +167,8 @@ test.each([false, true])(
   async (held) => {
     const fixture = setup(held);
     vi.mocked(replaceApprovedApplicationLetter).mockResolvedValueOnce(null);
-    await refreshApprovedApplicationLetter(
-      fixture.ctx,
-      fixture.document,
-      async () => fixture.facts,
+    await refreshApprovedApplicationLetter(fixture.ctx, fixture.document, () =>
+      Promise.resolve(fixture.facts),
     );
     expect(fixture.result().reviewCard?.letter).toMatchObject({
       text: "Earlier letter",
@@ -181,10 +182,8 @@ test("approving the displayed text again cannot clear an unresolved form replace
   const fixture = setup(false);
   fixture.result().reviewCard!.letter!.needsRefresh = true;
   fixture.document.content = "Earlier letter";
-  await refreshApprovedApplicationLetter(
-    fixture.ctx,
-    fixture.document,
-    async () => fixture.facts,
+  await refreshApprovedApplicationLetter(fixture.ctx, fixture.document, () =>
+    Promise.resolve(fixture.facts),
   );
   expect(fixture.result().reviewCard?.letter?.needsRefresh).toBe(true);
 });

@@ -62,6 +62,15 @@ async function readNativeCaptionFileText(filePath: string) {
 }
 
 export function registerLiveAssistantRouteHandlers(ipcMain: IpcMain) {
+  ipcMain.handle(
+    "live-assistant:get-session",
+    async (_event, payload: unknown) => {
+      const input = InterviewSessionIdInputSchema.parse(payload);
+      const service = await getLiveAssistantService();
+      return service.getSession(input.sessionId);
+    },
+  );
+
   ipcMain.handle("live-assistant:get-workspace", async () => {
     const service = await getLiveAssistantService();
     return service.getWorkspace();

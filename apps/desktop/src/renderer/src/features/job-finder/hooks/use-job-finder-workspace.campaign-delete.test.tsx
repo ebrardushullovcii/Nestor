@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type {
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   JobFinderWorkspaceSyncResult,
 } from "@nordri/contracts";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -17,7 +17,7 @@ function createCampaignWorkspace(input: {
   campaignIds: readonly string[];
   activeCampaignId: string | null;
   generatedAt?: string;
-}): JobFinderWorkspaceSnapshot {
+}): JobFinderRendererWorkspaceSnapshot {
   return {
     generatedAt: input.generatedAt ?? "2026-08-09T10:00:00.000Z",
     hydration: { phase: "complete", deferredCollections: [] },
@@ -43,12 +43,12 @@ function createCampaignWorkspace(input: {
     selectedApplicationRecordId: null,
     campaigns: input.campaignIds.map(identified),
     activeCampaignId: input.activeCampaignId,
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function snapshotResult(
   currentRevision: number,
-  snapshot: JobFinderWorkspaceSnapshot,
+  snapshot: JobFinderRendererWorkspaceSnapshot,
 ): JobFinderWorkspaceSyncResult {
   return {
     kind: "snapshot",
@@ -72,7 +72,7 @@ function deferred<T>(): {
 
 const DELETED_CAMPAIGN_ID = "campaign-deleted";
 
-function initialCampaignWorkspace(): JobFinderWorkspaceSnapshot {
+function initialCampaignWorkspace(): JobFinderRendererWorkspaceSnapshot {
   return createCampaignWorkspace({
     campaignIds: ["campaign-kept", DELETED_CAMPAIGN_ID],
     activeCampaignId: DELETED_CAMPAIGN_ID,
@@ -86,9 +86,9 @@ describe("useJobFinderWorkspace campaign deletion", () => {
     >();
   const deleteJobSearchCampaign =
     vi.fn<(campaignId: string) => Promise<boolean>>();
-  const getWorkspace = vi.fn<() => Promise<JobFinderWorkspaceSnapshot>>();
+  const getWorkspace = vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
   const checkBrowserSession =
-    vi.fn<() => Promise<JobFinderWorkspaceSnapshot>>();
+    vi.fn<() => Promise<JobFinderRendererWorkspaceSnapshot>>();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -112,7 +112,7 @@ describe("useJobFinderWorkspace campaign deletion", () => {
   });
 
   async function renderReadyWorkspace(
-    initialWorkspace: JobFinderWorkspaceSnapshot,
+    initialWorkspace: JobFinderRendererWorkspaceSnapshot,
   ) {
     syncWorkspace.mockResolvedValueOnce(snapshotResult(1, initialWorkspace));
     const { result } = renderHook(() => useJobFinderWorkspace());
@@ -261,10 +261,10 @@ describe("useJobFinderWorkspace campaign deletion", () => {
       activeCampaignId: "campaign-newer",
       generatedAt: "2026-08-09T10:07:00.000Z",
     });
-    const newerAction = deferred<JobFinderWorkspaceSnapshot>();
+    const newerAction = deferred<JobFinderRendererWorkspaceSnapshot>();
     checkBrowserSession.mockImplementationOnce(() => newerAction.promise);
 
-    let newerActionPromise!: Promise<JobFinderWorkspaceSnapshot>;
+    let newerActionPromise!: Promise<JobFinderRendererWorkspaceSnapshot>;
     act(() => {
       if (result.current.status !== "ready") {
         throw new Error("Expected a ready Job Finder workspace.");

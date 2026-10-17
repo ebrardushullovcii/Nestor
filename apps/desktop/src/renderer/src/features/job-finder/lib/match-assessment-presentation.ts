@@ -3,7 +3,7 @@ import type {
   JobRequirementEvidenceStatus,
   MatchLocationReach,
   RoleSuitabilityState,
-  SavedJob,
+  JobListRow,
   TitleFamilyMatch,
 } from "@nordri/contracts";
 import type { BadgeTone } from "./job-finder-types";
@@ -97,7 +97,7 @@ export const FIT_UPPER_BOUND_REASON =
  * percentage in the headline position.
  */
 export function getMatchAssessmentPresentation(
-  job: Pick<SavedJob, "discoveryMethod" | "matchAssessment">,
+  job: Pick<JobListRow, "discoveryMethod" | "matchAssessment">,
 ): MatchAssessmentPresentation {
   const hasAssessmentBinding = [
     job.matchAssessment.contextFingerprint,
@@ -206,7 +206,7 @@ const LOCATION_REACH_TIE_BREAK_REASON: Partial<
  * when the assessment itself said nothing.
  */
 export function describeMatchTieBreakReason(
-  job: Pick<SavedJob, "matchAssessment">,
+  job: Pick<JobListRow, "matchAssessment">,
 ): string | null {
   const assessment = job.matchAssessment;
   const titleFamily = assessment.titleFamilyMatch;

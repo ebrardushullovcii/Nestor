@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
   GroupedManualAnswerDecision,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
@@ -71,7 +71,7 @@ function createContext(
       intelligence: {
         groupedDecisions: [createDecision()],
       },
-    } as unknown as JobFinderWorkspaceSnapshot,
+    } as unknown as JobFinderRendererWorkspaceSnapshot,
     ...overrides,
   } as unknown as JobFinderPageContext;
 }

@@ -10,7 +10,10 @@ import type { SavedJob } from "@nordri/contracts";
 import { afterEach, expect, it, vi } from "vitest";
 import { DiscoveryAssessmentContinuation } from "./discovery-assessment-continuation";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 it("offers a bounded continuation and shows progress while a listing is being read", async () => {
   const jobs = Array.from(
@@ -68,6 +71,43 @@ it("does not offer another assessment while discovery is running", () => {
     />,
   );
   expect(screen.queryByRole("button")).toBeNull();
+});
+
+it("keeps the whole-plan count while the next twenty begin with the visible page", async () => {
+  const jobs = Array.from(
+    { length: 100 },
+    (_, index) =>
+      ({
+        id: `unread_${index}`,
+        discoveryMethod: "browser_agent",
+        matchAssessment: { score: 0, judgment: null },
+      }) as SavedJob,
+  );
+  const onAssess = vi.fn(() => Promise.resolve());
+  render(
+    <DiscoveryAssessmentContinuation
+      jobs={jobs}
+      preferredJobs={[jobs[90]!, jobs[91]!, jobs[90]!]}
+      isSearchRunning={false}
+      onAssess={onAssess}
+      onJudgeAll={() => Promise.resolve()}
+    />,
+  );
+  expect(
+    screen.getByRole("button", { name: "Judge fit for all 100" }),
+  ).toBeTruthy();
+  await act(async () => {
+    fireEvent.click(
+      screen.getByRole("button", { name: "Assess next 20 listings" }),
+    );
+    await Promise.resolve();
+  });
+  expect(onAssess).toHaveBeenCalledTimes(20);
+  expect(onAssess.mock.calls.slice(0, 3)).toEqual([
+    ["unread_90"],
+    ["unread_91"],
+    ["unread_0"],
+  ]);
 });
 
 it("explains navigation and stops before the next listing after unmount", async () => {
@@ -133,4 +173,109 @@ it("uses the actual singular count and shows the service failure", async () => {
   expect(screen.getByRole("alert").textContent).toBe(
     "The AI is unavailable. Try again.",
   );
+});
+
+it("judges every unjudged job at once and says how many are left", async () => {
+  const jobs = Array.from(
+    { length: 130 },
+    (_, index) =>
+      ({
+        id: `unread_${index}`,
+        discoveryMethod: "browser_agent",
+        matchAssessment: { judgment: null },
+      }) as SavedJob,
+  );
+  let finish: () => void = () => undefined;
+  const onJudgeAll = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(
+    <DiscoveryAssessmentContinuation
+      jobs={jobs}
+      isSearchRunning={false}
+      onAssess={vi.fn()}
+      onJudgeAll={onJudgeAll}
+    />,
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "Judge fit for all 130" }),
+  );
+  expect(onJudgeAll).toHaveBeenCalledOnce();
+  expect(screen.getByText(/Judging fit · 130 left/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Assess next/ })).toBeNull();
+
+  await act(() => {
+    finish();
+    return Promise.resolve();
+  });
+  expect(screen.queryByText(/Judging fit ·/)).toBeNull();
+});
+
+it("shows backend progress after returning to the page and keeps saved counts visible", () => {
+  const fitJudgmentProgress = {
+    planId: "plan",
+    phase: "judging" as const,
+    judged: 20,
+    processed: 20,
+    total: 130,
+    startedAt: "2026-10-13T01:00:00.000Z",
+    updatedAt: "2026-10-13T01:00:30.000Z",
+  };
+  const view = render(
+    <DiscoveryAssessmentContinuation
+      jobs={[]}
+      isSearchRunning={false}
+      fitJudgmentProgress={fitJudgmentProgress}
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toContain(
+    "20 of 130 scores saved",
+  );
+  expect(screen.getByRole("status").textContent).toContain(
+    "Waiting for the model",
+  );
+  view.rerender(
+    <DiscoveryAssessmentContinuation
+      jobs={[]}
+      isSearchRunning={false}
+      fitJudgmentProgress={{
+        ...fitJudgmentProgress,
+        judged: 40,
+        processed: 40,
+        phase: "saving",
+      }}
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toContain(
+    "40 of 130 scores saved",
+  );
+  expect(screen.getByRole("status").textContent).toContain("Saving this batch");
+});
+
+it("keeps elapsed time moving while a model batch is pending", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-13T01:00:00.000Z"));
+  render(
+    <DiscoveryAssessmentContinuation
+      jobs={[]}
+      isSearchRunning={false}
+      fitJudgmentProgress={{
+        planId: "plan",
+        phase: "judging",
+        judged: 0,
+        processed: 0,
+        total: 60,
+        startedAt: "2026-10-13T01:00:00.000Z",
+        updatedAt: "2026-10-13T01:00:00.000Z",
+      }}
+    />,
+  );
+  expect(screen.getByText("0s elapsed")).toBeTruthy();
+  void act(() => vi.advanceTimersByTime(4000));
+  expect(screen.getByText("4s elapsed")).toBeTruthy();
+  expect(screen.getByText(/0 of 60 scores saved/)).toBeTruthy();
 });

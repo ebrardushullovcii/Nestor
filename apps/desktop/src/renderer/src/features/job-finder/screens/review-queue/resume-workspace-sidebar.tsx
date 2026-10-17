@@ -218,7 +218,7 @@ export function ResumeWorkspaceSidebar({
                 <p className="break-words">
                   Employer site:{" "}
                   <ExternalUrlLink
-                  className="break-words"
+                    className="break-words"
                     label={employerHost}
                     url={job.employerWebsiteUrl}
                   />
@@ -228,7 +228,7 @@ export function ResumeWorkspaceSidebar({
                 <p className="break-words">
                   Apply route:{" "}
                   <ExternalUrlLink
-                  className="break-words"
+                    className="break-words"
                     label={applicationHost}
                     url={job.applicationUrl}
                   />

@@ -22,6 +22,7 @@ import type {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import type { JobFinderAutoApplyQueueStartOutcome } from "@renderer/features/job-finder/lib/job-finder-types";
+import { clearJobDetailCache } from "../../hooks/use-job-detail";
 import { ReviewQueueScreen } from "./review-queue-screen";
 import type { TailoredDraftPreparationViewState } from "./review-queue-status";
 
@@ -41,6 +42,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  clearJobDetailCache();
   vi.unstubAllGlobals();
 });
 
@@ -92,8 +94,18 @@ function createOriginalResume(): ResumeSourceDocument {
   } as unknown as ResumeSourceDocument;
 }
 
+function omitListingText(job: SavedJob) {
+  const row: Omit<SavedJob, "description" | "summary"> &
+    Partial<Pick<SavedJob, "description" | "summary">> = { ...job };
+  delete row.description;
+  delete row.summary;
+  return row;
+}
+
 function renderScreen(props: {
-  resumeBatchCheckpoint?: Parameters<typeof ReviewQueueScreen>[0]["resumeBatchCheckpoint"];
+  resumeBatchCheckpoint?: Parameters<
+    typeof ReviewQueueScreen
+  >[0]["resumeBatchCheckpoint"];
   applicationAutomationMode?: ApplicationAutomationMode;
   applicationRecords?: readonly ApplicationRecord[];
   dailyCapacity?: GlobalDailyApplicationPreparationCapacity;
@@ -113,11 +125,30 @@ function renderScreen(props: {
   ) => Promise<JobFinderAutoApplyQueueStartOutcome>;
   onStopTailoredDraftPreparation?: () => void;
   onSelectItem?: (jobId: string) => void;
+  onReadJobListing?: (jobId: string) => Promise<void>;
   queue: readonly ReviewQueueItem[];
   selectedItem?: ReviewQueueItem | null;
   selectedJob?: SavedJob | null;
   selectedAsset?: TailoredAsset | null;
 }) {
+  Object.defineProperty(window, "nordri", {
+    configurable: true,
+    value: {
+      ...window.nordri,
+      jobFinder: {
+        ...window.nordri?.jobFinder,
+        getJobDetail: vi.fn((_jobId: string, planId: string | null) =>
+          Promise.resolve({
+            job: props.selectedJob,
+            planId,
+          }),
+        ),
+      },
+    },
+  });
+  const selectedRow = props.selectedJob
+    ? omitListingText(props.selectedJob)
+    : null;
   return render(
     <MemoryRouter>
       <ReviewQueueScreen
@@ -165,11 +196,14 @@ function renderScreen(props: {
         onRemoveReviewJob={vi.fn()}
         onSetJobResumeApplicationMode={vi.fn()}
         onSelectItem={props.onSelectItem ?? vi.fn()}
+        {...(props.onReadJobListing
+          ? { onReadJobListing: props.onReadJobListing }
+          : {})}
         originalResume={createOriginalResume()}
         queue={props.queue}
         selectedAsset={props.selectedAsset ?? null}
         selectedItem={props.selectedItem ?? null}
-        selectedJob={props.selectedJob ?? null}
+        selectedJob={selectedRow}
       />
     </MemoryRouter>,
   );
@@ -224,7 +258,9 @@ describe("ReviewQueueScreen tailored draft preparation (controlled)", () => {
       expect(
         document.querySelector("[data-resume-draft-expected-wait]")
           ?.textContent,
-      ).toBe("Writing and checking the facts can take a few minutes, especially for Aggressive resumes.");
+      ).toBe(
+        "Writing and checking the facts can take a few minutes, especially for Aggressive resumes.",
+      );
 
       act(() => {
         vi.advanceTimersByTime(3_000);
@@ -313,9 +349,7 @@ describe("ReviewQueueScreen tailored draft preparation (controlled)", () => {
 
     expect(screen.getByText(/Writing resumes · 1 of 3 finished/)).toBeTruthy();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Stop new resumes" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Stop new resumes" }));
 
     expect(onStopTailoredDraftPreparation).toHaveBeenCalledTimes(1);
   });
@@ -664,7 +698,7 @@ describe("ReviewQueueScreen job details honesty", () => {
     } as unknown as SavedJob;
   }
 
-  it("presents an unverified score provisionally and drops an echoed summary", () => {
+  it("presents an unverified score provisionally and drops an echoed summary", async () => {
     const selectedItem = createEligibleItem("job_title_only");
     renderScreen({
       queue: [selectedItem],
@@ -683,14 +717,15 @@ describe("ReviewQueueScreen job details honesty", () => {
       "Not judged yet",
     );
     // The preview points to the available full-details control; the stored
-    // assessment explanation remains inside its breakdown.
+    // assessment explanation remains inside its breakdown, which reads the
+    // full assessment with the job detail.
     expect(
-      screen.getAllByText(
+      await screen.findAllByText(
         "The AI judges each job against your profile and goals after a search. Choose Read and assess listing to judge this one now.",
       ),
     ).toHaveLength(1);
     expect(
-      screen.getByText(
+      await screen.findByText(
         "The listing text was not captured. Open the full job details to read it.",
       ),
     ).toBeTruthy();
@@ -706,6 +741,45 @@ describe("ReviewQueueScreen job details honesty", () => {
     expect(
       openListing.compareDocumentPosition(breakdown) &
         Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("offers to read a missing listing again and says why a read failed", async () => {
+    const selectedItem = createEligibleItem("job_card_only");
+    let fail: (error: Error) => void = () => undefined;
+    const onReadJobListing = vi.fn(
+      () =>
+        new Promise<void>((_, reject) => {
+          fail = reject;
+        }),
+    );
+    renderScreen({
+      queue: [selectedItem],
+      selectedItem,
+      onReadJobListing,
+      selectedJob: buildJob({
+        jobId: selectedItem.jobId,
+        summary: selectedItem.title,
+        title: selectedItem.title,
+      }),
+    });
+    const read = await screen.findByRole("button", {
+      name: "Read the listing again",
+    });
+    fireEvent.click(read);
+    expect(onReadJobListing).toHaveBeenCalledWith(selectedItem.jobId);
+    expect(
+      screen.getByRole("button", {
+        name: /Reading the listing/u,
+      }),
+    ).toBeTruthy();
+    await act(async () => {
+      fail(new Error("The site refused the request."));
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Read the listing again" }),
     ).toBeTruthy();
   });
 
@@ -764,7 +838,7 @@ describe("ReviewQueueScreen job details honesty", () => {
     expect(screen.queryByText(/54%/)).toBeNull();
   });
 
-  it("keeps real listing text and a plain score when evidence was checked", () => {
+  it("keeps real listing text and a plain score when evidence was checked", async () => {
     const selectedItem = createEligibleItem("job_verified");
     const job = buildJob({
       jobId: selectedItem.jobId,
@@ -803,12 +877,12 @@ describe("ReviewQueueScreen job details honesty", () => {
       "64% fit",
     );
     expect(
-      screen.getByText(
+      await screen.findByText(
         "Own the deployment pipeline for the payments platform.",
       ),
     ).toBeTruthy();
   });
-  it("keeps country suitability beside original-resume readiness (R3-177)", () => {
+  it("keeps country suitability beside original-resume readiness (R3-177)", async () => {
     const item = {
       ...createEligibleItem("job_overseas"),
       resumeApplicationMode: "original_resume" as const,
@@ -840,12 +914,15 @@ describe("ReviewQueueScreen job details honesty", () => {
         },
       } as SavedJob,
     });
-    expect(screen.getByTestId("queue-suitability-warning").textContent).toContain(
-      "Remote UK only",
+    // The written preference verdict arrives with the job detail.
+    await vi.waitFor(() =>
+      expect(
+        screen.getByTestId("queue-suitability-warning").textContent,
+      ).toContain("Remote UK only"),
     );
-    expect(screen.getByTestId("queue-suitability-warning").textContent).toContain(
-      "UK work permission",
-    );
+    expect(
+      screen.getByTestId("queue-suitability-warning").textContent,
+    ).toContain("UK work permission");
     expect(screen.getByTestId("application-action-row").textContent).toContain(
       "Apply",
     );
@@ -882,7 +959,6 @@ describe("ReviewQueueScreen job details honesty", () => {
       reason,
     );
   });
-
 });
 
 describe("ReviewQueueScreen readiness agreement", () => {
@@ -925,13 +1001,10 @@ describe("ReviewQueueScreen readiness agreement", () => {
     expect(screen.queryByText("Ready to apply")).toBeNull();
   });
 });
-it("lists unfinished jobs after restart and continues only their batch", () => {
+it("offers no second button for unfinished jobs that Create missing resumes already covers", () => {
   const onPrepareTailoredDrafts = vi.fn();
   renderScreen({
-    queue: [
-      createEligibleItem("unfinished"),
-      createEligibleItem("untouched"),
-    ],
+    queue: [createEligibleItem("unfinished"), createEligibleItem("untouched")],
     resumeBatchCheckpoint: {
       id: "batch",
       jobIds: ["finished", "unfinished"],
@@ -943,12 +1016,37 @@ it("lists unfinished jobs after restart and continues only their batch", () => {
     onPrepareTailoredDrafts,
   });
   expect(
-    screen.getByText(
-      "The previous resume batch stopped when the app closed. Finished resumes were kept.",
+    screen.queryByText(
+      "The previous resume batch did not finish. Finished resumes were kept.",
     ),
-  ).toBeTruthy();
+  ).toBeNull();
+  expect(screen.queryByRole("button", { name: "Continue batch" })).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Create 2 missing resumes" }),
+  );
+  expect(onPrepareTailoredDrafts).toHaveBeenCalledWith([
+    "unfinished",
+    "untouched",
+  ]);
+});
+
+it("keeps the unfinished-batch notice when the batch carries a per-job choice", () => {
+  const onPrepareTailoredDrafts = vi.fn();
+  renderScreen({
+    queue: [createEligibleItem("unfinished"), createEligibleItem("untouched")],
+    resumeBatchCheckpoint: {
+      id: "batch",
+      jobIds: ["finished", "unfinished"],
+      activeJobIds: [],
+      completedJobIds: ["finished"],
+      done: false,
+      stopRequested: false,
+      requests: [{ jobId: "unfinished", level: "aggressive" }],
+    },
+    onPrepareTailoredDrafts,
+  });
   expect(
-    screen.getByText("Still need resumes: Role unfinished at Acme."),
+    screen.getByText("1 unfinished resume is saved in this batch."),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Continue batch" }));
   expect(onPrepareTailoredDrafts).toHaveBeenCalledWith(["unfinished"]);
@@ -1053,4 +1151,104 @@ it("shows an assistant-owned batch in the usual control with progress, time left
       value: previous,
     });
   }
+});
+
+it("a 200-job unfinished batch of missing resumes is picked up by Create missing resumes and ticked jobs", () => {
+  const queue = Array.from({ length: 200 }, (_, index) =>
+    createEligibleItem(`unfinished-${index}`),
+  );
+  const checkpoint = {
+    id: "large-batch",
+    jobIds: queue.map((item) => item.jobId),
+    activeJobIds: [],
+    completedJobIds: [],
+    done: false,
+    stopRequested: false,
+  };
+  const onPrepareTailoredDrafts = vi.fn();
+  renderScreen({
+    queue,
+    resumeBatchCheckpoint: checkpoint,
+    onPrepareTailoredDrafts,
+  });
+  expect(
+    screen.queryByRole("button", { name: "Dismiss resume batch notice" }),
+  ).toBeNull();
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Select the 50 jobs on this page" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Select Role unfinished-50" }),
+  );
+  expect(
+    screen.getByRole("button", { name: "Create 51 resumes" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Create 200 missing resumes" }),
+  );
+  expect(onPrepareTailoredDrafts).toHaveBeenCalledExactlyOnceWith(
+    checkpoint.jobIds,
+  );
+});
+
+it("shows a durable provider pause reason and retains a dismissible Continue control", () => {
+  const queue = [
+    createEligibleItem("blocked-one"),
+    createEligibleItem("blocked-two"),
+  ];
+  const onPrepareTailoredDrafts = vi.fn();
+  const providerBlock = {
+    reason: "funding" as const,
+    message:
+      "The AI service is unavailable because its provider rejected the request for insufficient funds. Try again after service is restored.",
+  };
+  const checkpoint = {
+    id: "funding-blocked-batch",
+    jobIds: queue.map((item) => item.jobId),
+    activeJobIds: [],
+    completedJobIds: [],
+    done: false,
+    stopRequested: true,
+    running: false,
+    providerBlock,
+  };
+  const view = renderScreen({
+    queue,
+    resumeBatchCheckpoint: checkpoint,
+    onPrepareTailoredDrafts,
+    draftPreparation: {
+      status: "stopped",
+      attemptedCount: 50,
+      completedCount: 0,
+      failedCount: 0,
+      totalCount: 2,
+      eligibleRemainingCount: 2,
+      currentIndex: null,
+      providerBlock,
+    },
+  });
+  expect(
+    screen.getByText(/The resume batch is paused.*insufficient funds/),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Run it again to retry the failed/)).toBeNull();
+  expect(onPrepareTailoredDrafts).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Continue batch" }));
+  expect(onPrepareTailoredDrafts).toHaveBeenCalledWith(checkpoint.jobIds);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Dismiss resume batch notice" }),
+  );
+  expect(
+    screen.queryByText(/The resume batch is paused.*insufficient funds/),
+  ).toBeNull();
+  view.unmount();
+  renderScreen({
+    queue,
+    resumeBatchCheckpoint: checkpoint,
+    onPrepareTailoredDrafts,
+  });
+  expect(
+    screen.queryByText(/The resume batch is paused.*insufficient funds/),
+  ).toBeNull();
 });

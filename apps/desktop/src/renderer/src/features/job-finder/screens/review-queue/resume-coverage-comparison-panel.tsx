@@ -307,7 +307,6 @@ export function ResumeCoverageComparisonPanel(props: {
                   </>
                 );
               })()}
-
             </article>
           ))}
         </div>

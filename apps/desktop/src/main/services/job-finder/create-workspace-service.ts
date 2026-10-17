@@ -627,6 +627,7 @@ export async function createJobFinderWorkspaceServiceAsync(
     onDetachedApplyRunFinished: () => publishJobFinderWorkspaceUpdate(),
     onResumeEvidenceFinished: () => publishJobFinderWorkspaceUpdate(),
     onListingAssessmentFinished: () => publishJobFinderWorkspaceUpdate(),
+    onFitJudgmentProgress: () => publishJobFinderWorkspaceUpdate(),
     // The embedded browser keeps its own pause flag. Every activity-control
     // change (Home's button, or an explicit click resuming paused work) is
     // mirrored onto it, so a resume never leaves the browser refusing work

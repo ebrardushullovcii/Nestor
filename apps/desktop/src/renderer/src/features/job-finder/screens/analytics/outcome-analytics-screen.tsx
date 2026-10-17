@@ -1,4 +1,4 @@
-import type { ApplyJobResult, ApplyRunSummary } from "@nordri/contracts";
+import type { ApplyJobResultListRow, ApplyRunSummary } from "@nordri/contracts";
 import { useEffect, useMemo, useState } from "react";
 import type {
   JobDiscoveryTarget,
@@ -292,7 +292,7 @@ export function OutcomeAnalyticsScreen(props: {
   onSetOutcomeSuggestionEnabled: (
     input: SetOutcomeSuggestionEnabledInput,
   ) => Promise<boolean>;
-  applyJobResults?: readonly ApplyJobResult[];
+  applyJobResults?: readonly ApplyJobResultListRow[];
   applyRuns?: readonly ApplyRunSummary[];
   overview: OutcomeAnalyticsOverview | null;
   resumeStrategies: readonly ResumeStrategy[];

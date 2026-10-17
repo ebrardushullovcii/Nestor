@@ -1,3 +1,7 @@
+import { cn } from "@renderer/lib/cn";
+import { LIST_DETAIL_COLUMNS_CLASS } from "../../components/list-detail-columns";
+import { InterruptedResumeBatchNotice } from "./interrupted-resume-batch-notice";
+import { useJobDetail } from "../../hooks/use-job-detail";
 import {
   type ReactNode,
   useCallback,
@@ -13,13 +17,13 @@ import type {
   CandidateProfile,
   GlobalDailyApplicationPreparationCapacity,
   JobFinderApplicationStartTarget,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ResumeApplicationMode,
   TailoringMode,
   ResumeSourceDocument,
   ReviewQueueItem,
-  SavedJob,
-  TailoredAsset,
+  JobListRow,
+  TailoredAssetSummary,
 } from "@nordri/contracts";
 import {
   APPLICATION_PREPARATION_BATCH_LIMIT,
@@ -36,6 +40,7 @@ import { EmptyState } from "../../components/empty-state";
 import { StatusBadge } from "../../components/status-badge";
 import { MatchEvidenceMatrix } from "../../components/match-evidence-matrix";
 import { jobDescriptionToText } from "../../lib/job-description-text";
+import { describeListingReadFailure } from "../../lib/describe-failure";
 import {
   formatJobEmployerLocationLine,
   scrubJobAbsencePlaceholdersList,
@@ -45,7 +50,10 @@ import { RESUME_DRAFT_LONG_RUNNING_MS } from "@renderer/features/job-finder/lib/
 import type { JobFinderAutoApplyQueueStartOutcome } from "../../lib/job-finder-types";
 import { useStableCallback } from "../../hooks/use-stable-callback";
 import { ReviewQueueListPanel } from "./review-queue-list-panel";
-import { collectPreparedApplicationJobIds } from "./review-queue-status";
+import {
+  collectPreparedApplicationJobIds,
+  isTailoredDraftPreparationEligible,
+} from "./review-queue-status";
 import { ReviewQueueMissionPanel } from "./review-queue-mission-panel";
 import { useAssistantContextSource } from "../../assistant/assistant-provider";
 import { buildListContext } from "../../assistant/assistant-context-capture";
@@ -64,7 +72,7 @@ export function ReviewQueueScreen(props: {
   browserSession: BrowserSessionState;
   campaignId: string;
   draftPreparation: TailoredDraftPreparationViewState;
-  resumeBatchCheckpoint?: JobFinderWorkspaceSnapshot["intelligence"]["resumeBatchCheckpoint"];
+  resumeBatchCheckpoint?: JobFinderRendererWorkspaceSnapshot["intelligence"]["resumeBatchCheckpoint"];
   globalDailyApplicationPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
   isApplyPending: boolean;
   /**
@@ -72,7 +80,7 @@ export function ReviewQueueScreen(props: {
    * rather than a local pending flag that expires after about a minute while
    * a real run keeps going for several.
    */
-  applyJobResults?: JobFinderWorkspaceSnapshot["applyJobResults"];
+  applyJobResults?: JobFinderRendererWorkspaceSnapshot["applyJobResults"];
   isJobPending: (jobId: string) => boolean;
   onPrepareTailoredDrafts: (jobIds?: readonly string[]) => void;
   onStopTailoredDraftPreparation: () => void;
@@ -96,6 +104,10 @@ export function ReviewQueueScreen(props: {
   onClaimResumeIdentity?: () => void;
   onKeepResumeIdentity?: () => void;
   onRemoveReviewJob: (jobId: string) => void;
+  /** Moves the selected jobs back to Find jobs in one request. */
+  onRemoveReviewJobs?: (jobIds: readonly string[]) => Promise<void>;
+  /** Reads a job's listing again when the search kept only its card. */
+  onReadJobListing?: (jobId: string) => Promise<void>;
   onSetJobResumeApplicationMode: (
     jobId: string,
     resumeApplicationMode: ResumeApplicationMode,
@@ -105,10 +117,10 @@ export function ReviewQueueScreen(props: {
   originalResume: ResumeSourceDocument;
   profile?: CandidateProfile;
   queue: readonly ReviewQueueItem[];
-  selectedAsset: TailoredAsset | null;
+  selectedAsset: TailoredAssetSummary | null;
   selectedItem: ReviewQueueItem | null;
-  selectedJob: SavedJob | null;
-  tailoredAssets?: readonly TailoredAsset[] | undefined;
+  selectedJob: JobListRow | null;
+  tailoredAssets?: readonly TailoredAssetSummary[] | undefined;
 }) {
   const {
     resumeOperationStarts,
@@ -137,6 +149,8 @@ export function ReviewQueueScreen(props: {
     onClaimResumeIdentity,
     onKeepResumeIdentity,
     onRemoveReviewJob,
+    onRemoveReviewJobs,
+    onReadJobListing,
     onSetJobResumeApplicationMode,
     onSelectItem,
     originalResume,
@@ -147,6 +161,35 @@ export function ReviewQueueScreen(props: {
     selectedJob,
     tailoredAssets,
   } = props;
+  const selectedDetail = useJobDetail(selectedJob, props.campaignId);
+  const [listingRead, setListingRead] = useState<{
+    jobId: string;
+    pending: boolean;
+    error: string | null;
+  } | null>(null);
+  const readSelectedListing = (jobId: string, listingUrl: string) => {
+    if (!onReadJobListing) return;
+    setListingRead({ jobId, pending: true, error: null });
+    void onReadJobListing(jobId)
+      .then(() =>
+        setListingRead((current) =>
+          current?.jobId === jobId ? null : current,
+        ),
+      )
+      .catch((error: unknown) =>
+        setListingRead((current) =>
+          current?.jobId === jobId
+            ? {
+                jobId,
+                pending: false,
+                error: describeListingReadFailure(error, { listingUrl }),
+              }
+            : current,
+        ),
+      );
+  };
+  const selectedListingRead =
+    listingRead && listingRead.jobId === selectedJob?.id ? listingRead : null;
   const previewState =
     selectedItem &&
     selectedItem.resumeApplicationMode !== "original_resume" &&
@@ -233,7 +276,7 @@ export function ReviewQueueScreen(props: {
       return "";
     }
     const text = jobDescriptionToText(
-      selectedJob.summary ?? selectedJob.description,
+      selectedDetail.job?.summary ?? selectedDetail.job?.description ?? "",
     ).trim();
     return text.toLowerCase() === selectedJob.title.trim().toLowerCase()
       ? ""
@@ -362,7 +405,8 @@ export function ReviewQueueScreen(props: {
         );
   };
   const interruptedJobIds =
-    props.draftPreparation.status === "idle" &&
+    (props.draftPreparation.status === "idle" ||
+      !!props.draftPreparation.providerBlock) &&
     props.resumeBatchCheckpoint &&
     !props.resumeBatchCheckpoint.done &&
     !props.resumeBatchCheckpoint.running
@@ -375,6 +419,17 @@ export function ReviewQueueScreen(props: {
   const interruptedJobs = queue.filter((item) =>
     interruptedJobIds.includes(item.jobId),
   );
+  // When every unfinished job still needs a resume, Create missing resumes
+  // already picks them up; a second button for the same work only confused.
+  // A batch the AI service paused keeps its notice, which says why, and so
+  // does one that carries per-job choices (a level or a language).
+  const interruptedNoticeAddsNothing =
+    !props.resumeBatchCheckpoint?.providerBlock &&
+    !props.resumeBatchCheckpoint?.requests?.length &&
+    interruptedJobs.length === interruptedJobIds.length &&
+    interruptedJobs.every((item) =>
+      isTailoredDraftPreparationEligible(item, preparedJobIds),
+    );
   // Below the `xl` two-pane breakpoint the job column stacks under the list,
   // so selecting a job moved the one next action below the fold with nothing
   // saying so. Find jobs and Applications both reveal their stacked detail
@@ -400,7 +455,7 @@ export function ReviewQueueScreen(props: {
   });
   return (
     <LockedScreenLayout
-      contentClassName="xl:overflow-hidden"
+      contentClassName="xl:flex xl:flex-col xl:overflow-hidden"
       lockContentHeight
       topContent={
         <PageHeaderStack
@@ -411,42 +466,37 @@ export function ReviewQueueScreen(props: {
       }
     >
       {batchStopError ? <p role="alert">{batchStopError}</p> : null}
-      {interruptedJobIds.length > 0 ? (
-        <div
-          className="mb-3 rounded-(--radius-field) border border-warning/30 px-4 py-3 text-sm"
-          role="status"
-        >
-          <p>
-            {props.resumeBatchCheckpoint?.stopRequested
-              ? "The previous resume batch was stopped. Finished resumes were kept."
-              : "The previous resume batch stopped when the app closed. Finished resumes were kept."}
-          </p>
-          <p className="text-foreground-muted">
-            {interruptedJobs.length === interruptedJobIds.length
-              ? `Still need resumes: ${interruptedJobs.map((item) => `${item.title} at ${item.company}`).join("; ")}.`
-              : `${interruptedJobIds.length} unfinished ${interruptedJobIds.length === 1 ? "resume is" : "resumes are"} saved in this batch.`}
-          </p>
-          <Button
-            onClick={() => onPrepareTailoredDrafts(interruptedJobIds)}
-            size="sm"
-            type="button"
-          >
-            Continue batch
-          </Button>
-        </div>
+      {interruptedJobIds.length > 0 &&
+      props.resumeBatchCheckpoint &&
+      !interruptedNoticeAddsNothing ? (
+        <InterruptedResumeBatchNotice
+          noticeId={`${props.resumeBatchCheckpoint.id}|${props.resumeBatchCheckpoint.completedJobIds.length}|${props.resumeBatchCheckpoint.stopRequested}`}
+          stopped={props.resumeBatchCheckpoint.stopRequested}
+          {...(props.resumeBatchCheckpoint.providerBlock
+            ? { providerBlock: props.resumeBatchCheckpoint.providerBlock }
+            : {})}
+          jobIds={interruptedJobIds}
+          jobs={interruptedJobs}
+          onContinue={() => onPrepareTailoredDrafts(interruptedJobIds)}
+        />
       ) : null}
-      <div className="grid min-w-0 items-stretch gap-4 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(24rem,0.72fr)_minmax(34rem,1fr)] assistant-docked:xl:grid-cols-[minmax(16rem,0.72fr)_minmax(0,1fr)] xl:overflow-hidden">
+      <div
+        className={cn(
+          "grid min-w-0 items-stretch gap-4 xl:flex-1 xl:min-h-0 xl:overflow-hidden",
+          LIST_DETAIL_COLUMNS_CLASS,
+        )}
+      >
         <ReviewQueueListPanel
           key={props.campaignId}
           campaignId={props.campaignId}
           draftPreparation={visibleDraftPreparation}
-          interruptedResumeJobIds={interruptedJobIds}
           isApplyToAllPending={applyAllPending || isApplyPending}
           applicationBatchLimit={applicationBatchLimit}
           isJobPending={isJobPending}
           onApplyToAllReady={handleApplyToAllReady}
           applyAllOutcome={describeApplyAllOutcome(applicationAutomationMode)}
           onPrepareTailoredDrafts={onPrepareTailoredDrafts}
+          {...(onRemoveReviewJobs ? { onRemoveJobs: onRemoveReviewJobs } : {})}
           {...(onOpenSafeguards ? { onOpenSafeguards } : {})}
           safeguardBlocker={safeguardBlocker ?? null}
           onSelectItem={selectItemAndRevealWorkspace}
@@ -529,6 +579,10 @@ export function ReviewQueueScreen(props: {
                 selectedAsset={selectedAsset}
                 selectedItem={selectedItem}
                 selectedJob={selectedJob}
+                preferenceExplanation={
+                  selectedDetail.job?.matchAssessment.dimensions
+                    ?.preferenceAlignment.explanation ?? null
+                }
               />
             ) : null}
             {selectedItem && (selectedAsset || previewState === "missing") ? (
@@ -571,10 +625,47 @@ export function ReviewQueueScreen(props: {
                       </p>
                     ) : (
                       <p className="text-(length:--text-small) leading-6 text-foreground-soft">
-                        The listing text was not captured. Open the full job
-                        details to read it.
+                        {selectedDetail.loading
+                          ? "Loading job details…"
+                          : (selectedDetail.error ??
+                            "The listing text was not captured. Open the full job details to read it.")}
+                        {selectedDetail.error ? (
+                          <Button onClick={selectedDetail.retry}>Retry</Button>
+                        ) : null}
                       </p>
                     )}
+                    {!selectedJobSummaryText &&
+                    !selectedDetail.loading &&
+                    !selectedDetail.error &&
+                    onReadJobListing ? (
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <Button
+                          disabled={selectedListingRead?.pending === true}
+                          onClick={() =>
+                            readSelectedListing(
+                              selectedJob.id,
+                              selectedJob.canonicalUrl,
+                            )
+                          }
+                          pending={selectedListingRead?.pending === true}
+                          size="sm"
+                          type="button"
+                          variant="secondary"
+                        >
+                          {selectedListingRead?.pending
+                            ? "Reading the listing… about a minute"
+                            : "Read the listing again"}
+                        </Button>
+                        {selectedListingRead?.error ? (
+                          <p
+                            className="text-(length:--text-small) text-foreground-soft"
+                            role="alert"
+                          >
+                            {selectedListingRead.error}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                       <strong
                         aria-label={
@@ -611,15 +702,21 @@ export function ReviewQueueScreen(props: {
                       How this was scored
                     </summary>
                     <div className="px-4 pb-4">
-                      <MatchEvidenceMatrix
-                        assessment={selectedJob.matchAssessment}
-                        listingCapture={
-                          selectedJob.listingDetailCapture?.state ?? null
-                        }
-                        scoreLabel={
-                          selectedJobAssessment?.breakdownScoreLabel ?? null
-                        }
-                      />
+                      {selectedDetail.job ? (
+                        <MatchEvidenceMatrix
+                          assessment={selectedDetail.job.matchAssessment}
+                          listingCapture={
+                            selectedJob.listingDetailCapture?.state ?? null
+                          }
+                          scoreLabel={
+                            selectedJobAssessment?.breakdownScoreLabel ?? null
+                          }
+                        />
+                      ) : (
+                        <p className="text-(length:--text-small) leading-6 text-foreground-soft">
+                          {selectedDetail.error ?? "Loading job details…"}
+                        </p>
+                      )}
                     </div>
                   </details>
                 </div>

@@ -351,7 +351,8 @@ describe("ResumeWorkspaceEditorPanel", () => {
     );
     expect(card?.getAttribute("data-resume-editor-entry-hidden")).toBe("true");
     expect(
-      card?.querySelector("[data-resume-editor-entry-hidden-note]")?.textContent,
+      card?.querySelector("[data-resume-editor-entry-hidden-note]")
+        ?.textContent,
     ).toBe(
       "Hidden — this entry stays in your draft but is left off the resume.",
     );
@@ -914,6 +915,7 @@ describe("ResumeWorkspaceEditorPanel", () => {
           onAcknowledgeWorkHistoryOmission={vi.fn()}
           onApplyPatch={vi.fn()}
           onDraftChange={vi.fn()}
+          onIncludeWorkHistoryRole={vi.fn()}
           onRemoveWorkHistoryOmissionAcknowledgment={vi.fn()}
           onSectionChange={vi.fn()}
           onSelectEntry={vi.fn()}
@@ -964,7 +966,7 @@ describe("ResumeWorkspaceEditorPanel", () => {
     expect(decisionsSection.className).not.toMatch(/w-\[\d+px\]/);
   });
 
-  it("always discloses AI assistance while reserving line markers for aggressive tailoring", () => {
+  it("always discloses AI assistance and marks generated lines without a lecture", () => {
     const generatedDraft: ResumeDraft = {
       ...draft,
       generationMethod: "ai",
@@ -1049,21 +1051,11 @@ describe("ResumeWorkspaceEditorPanel", () => {
 
     renderWithMarkers(true);
     const markedContainer = container as HTMLDivElement;
-    const disclosure = markedContainer.querySelector(
-      "[data-resume-inference-disclosure]",
-    );
-    expect(disclosure?.textContent).toContain(
-      "Aggressive tailoring generated 1 bullet line",
-    );
-    const details = disclosure?.querySelector("details");
-    expect(details?.open).toBe(false);
-    expect(details?.querySelector("summary")?.textContent).toBe(
-      "See generated lines",
-    );
-    expect(details?.textContent).toContain("Summary");
-    expect(details?.textContent).toContain(
-      "Generated a measurable delivery metric line.",
-    );
+    // Aggressive was the person's choice; the lines carry their marks and no
+    // paragraph explains the level back to them.
+    expect(
+      markedContainer.querySelector("[data-resume-inference-disclosure]"),
+    ).toBeNull();
     expect(markedContainer.textContent).toContain("AI-generated");
     expect(
       markedContainer.querySelector("[data-resume-ai-assistance-disclosure]")

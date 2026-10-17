@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { SavedJob } from "@nordri/contracts";
+import type { JobListRow } from "@nordri/contracts";
 import {
   compareDiscoveryFitTieBreaks,
   compareDiscoveryJobs,
@@ -90,7 +90,7 @@ export { compareDiscoveryJobs as compareDiscoveryFitOrder };
 // ago") names no sortable instant, so it stays unknown rather than borrowing
 // a hidden provider date or fabricating one. Shared with the
 // discovery-ordering package so every consumer resolves recency identically.
-export function getListingRecencyTimestamp(job: SavedJob): number | null {
+export function getListingRecencyTimestamp(job: JobListRow): number | null {
   const recency = getDiscoveryListingRecencyKey({
     postedAt: job.postedAt,
     postedAtText: job.postedAtText,
@@ -111,8 +111,8 @@ const companyNameCollator = new Intl.Collator("en", {
  * shuffling between renders.
  */
 export function compareDiscoveryResults(
-  left: SavedJob,
-  right: SavedJob,
+  left: JobListRow,
+  right: JobListRow,
   sort: DiscoveryResultsSort,
   leftSourceIndex: number,
   rightSourceIndex: number,

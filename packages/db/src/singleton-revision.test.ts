@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -373,45 +373,41 @@ describe("singleton profile revisions", () => {
 });
 
 describe("singleton_state revision migration", () => {
-  function createLegacyVersion10Database(filePath: string): void {
+  /**
+   * A workspace as version 10 left it: every table the earlier migrations
+   * created, but singleton_state without its revision column and no record of
+   * migration 11 onwards. It is built from a current workspace and rolled back
+   * to that shape, so it carries the tables a real version 10 file had.
+   */
+  async function createLegacyVersion10Database(
+    filePath: string,
+  ): Promise<void> {
+    const current = await createFileJobFinderRepository({
+      filePath,
+      seed: createSeed(),
+    });
+    await current.close();
     const database = new DatabaseSync(filePath);
-    database.exec(`
-      PRAGMA journal_mode = WAL;
-      CREATE TABLE singleton_state (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      CREATE TABLE saved_jobs (
-        id TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      CREATE TABLE schema_migrations (
-        version INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    const insertMigration = database.prepare(
-      "INSERT INTO schema_migrations (version, name) VALUES (?, ?)",
-    );
-    for (const [version, name] of [
-      [1, "job_finder_baseline"],
-      [2, "job_finder_source_debug_artifacts"],
-      [3, "job_finder_resume_workspace"],
-      [4, "job_finder_resume_import_runs"],
-      [5, "job_finder_profile_copilot_history"],
-      [6, "job_finder_apply_foundation"],
-      [7, "job_finder_apply_foundation_dedupe"],
-      [8, "repair_legacy_profile_achievement_fragments"],
-      [9, "job_finder_user_actions"],
-      [10, "job_search_campaigns"],
-    ] as const) {
-      insertMigration.run(version, name);
+    try {
+      database.exec(`
+        BEGIN;
+        CREATE TABLE singleton_state_v10 (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+        INSERT INTO singleton_state_v10 (key, value)
+          SELECT key, value FROM singleton_state WHERE key = 'profile';
+        DROP TABLE singleton_state;
+        ALTER TABLE singleton_state_v10 RENAME TO singleton_state;
+        DELETE FROM schema_migrations WHERE version > 10;
+        COMMIT;
+      `);
+      database
+        .prepare("UPDATE singleton_state SET value = ? WHERE key = 'profile'")
+        .run(JSON.stringify(createSeed().profile));
+    } finally {
+      database.close();
     }
-    database
-      .prepare("INSERT INTO singleton_state (key, value) VALUES (?, ?)")
-      .run("profile", JSON.stringify(createSeed().profile));
-    database.close();
   }
 
   test("legacy database gains revision 1 without changing values, idempotently", async () => {
@@ -420,7 +416,7 @@ describe("singleton_state revision migration", () => {
     );
     const filePath = path.join(tempDirectory, "job-finder-state.sqlite");
     try {
-      createLegacyVersion10Database(filePath);
+      await createLegacyVersion10Database(filePath);
 
       const firstOpen = await createFileJobFinderRepository({
         filePath,
@@ -470,7 +466,7 @@ describe("singleton_state revision migration", () => {
     } finally {
       await cleanupTempDirectoryWithRetry(tempDirectory);
     }
-  });
+  }, 30_000);
 
   test("fresh bootstrap initializes revision 1 deterministically", async () => {
     const tempDirectory = await mkdtemp(
@@ -492,4 +488,36 @@ describe("singleton_state revision migration", () => {
       await cleanupTempDirectoryWithRetry(tempDirectory);
     }
   });
+});
+
+test("a workspace that fails to open leaves its file unlocked", async () => {
+  const tempDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "nordri-db-failed-open-"),
+  );
+  const filePath = path.join(tempDirectory, "job-finder-state.sqlite");
+  // Claims every migration up to 10 but has none of their tables, so opening
+  // it fails after the connection is open.
+  const database = new DatabaseSync(filePath);
+  database.exec(`
+    CREATE TABLE singleton_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE saved_jobs (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  for (let version = 1; version <= 10; version += 1)
+    database
+      .prepare("INSERT INTO schema_migrations (version, name) VALUES (?, ?)")
+      .run(version, `migration_${version}`);
+  database.close();
+
+  await expect(
+    createFileJobFinderRepository({ filePath, seed: createSeed() }),
+  ).rejects.toThrow();
+  // On Windows an orphaned connection keeps the file locked until exit.
+  await expect(
+    rm(tempDirectory, { recursive: true, force: true }),
+  ).resolves.toBeUndefined();
 });

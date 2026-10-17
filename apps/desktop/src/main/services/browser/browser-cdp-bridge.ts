@@ -44,6 +44,8 @@ export interface BrowserCdpHost {
       keyDown?: { code: string; key: string } | null;
     },
   ): void;
+  /** Keep hidden pages awake only while browser commands need them. */
+  onAutomationCommand?(pageId: string, active: boolean): void;
 }
 interface AttachedPage {
   page: BrowserCdpPage;
@@ -617,13 +619,19 @@ export class BrowserCdpBridge {
         if (text.includes(token)) resolve(binding.target.page.id);
       }
     }
-    const result: unknown =
-      await binding.target.page.contents.debugger.sendCommand(
-        method,
-        params,
-        binding.nativeSessionId,
-      );
-    return record(result) ? result : {};
+    const pageId = binding.target.page.id;
+    this.host.onAutomationCommand?.(pageId, true);
+    try {
+      const result: unknown =
+        await binding.target.page.contents.debugger.sendCommand(
+          method,
+          params,
+          binding.nativeSessionId,
+        );
+      return record(result) ? result : {};
+    } finally {
+      this.host.onAutomationCommand?.(pageId, false);
+    }
   }
 
   /**

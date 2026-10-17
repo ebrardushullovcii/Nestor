@@ -323,7 +323,7 @@ async function ledgerleafRun(conditionalContact = false) {
     ],
   });
   const model: LLMClient = {
-    chatWithTools: async (messages, definitions) => {
+    chatWithTools: (messages, definitions) => {
       const name = definitions[0]?.function.name;
       if (name === "report_question_kinds") {
         calls.classifications += 1;
@@ -335,21 +335,23 @@ async function ledgerleafRun(conditionalContact = false) {
         calls.questionsRead.push(
           questions.map((question) => question.question),
         );
-        return reply(name, {
-          questions: questions.map((question) => ({
-            index: question.index,
-            required: question.nativeRequired,
-            asksAboutPay:
-              question.question.includes("salary") ||
-              question.question === "Salary currency",
-            declarationKind: null,
-            eligibilityKind: question.question.includes("authorized")
-              ? "work_authorization"
-              : question.question.includes("sponsorship")
-                ? "visa_sponsorship"
-                : null,
-          })),
-        });
+        return Promise.resolve(
+          reply(name, {
+            questions: questions.map((question) => ({
+              index: question.index,
+              required: question.nativeRequired,
+              asksAboutPay:
+                question.question.includes("salary") ||
+                question.question === "Salary currency",
+              declarationKind: null,
+              eligibilityKind: question.question.includes("authorized")
+                ? "work_authorization"
+                : question.question.includes("sponsorship")
+                  ? "visa_sponsorship"
+                  : null,
+            })),
+          }),
+        );
       }
       if (name === "report_answer_checks") {
         const answers = (
@@ -358,15 +360,17 @@ async function ledgerleafRun(conditionalContact = false) {
           }
         ).answers;
         calls.checks.push(answers);
-        return reply(name, {
-          checks: answers.map((answer, index) => ({
-            index,
-            supported:
-              !answer.question.includes("authorized") &&
-              !answer.question.includes("sponsorship"),
-            reason: "Eligibility is not recorded for this synthetic persona.",
-          })),
-        });
+        return Promise.resolve(
+          reply(name, {
+            checks: answers.map((answer, index) => ({
+              index,
+              supported:
+                !answer.question.includes("authorized") &&
+                !answer.question.includes("sponsorship"),
+              reason: "Eligibility is not recorded for this synthetic persona.",
+            })),
+          }),
+        );
       }
       calls.turns += 1;
       if (step === 0) {
@@ -379,11 +383,14 @@ async function ledgerleafRun(conditionalContact = false) {
           (field) =>
             !values.has(currentFields()[Number(field.ref.slice(1))].name),
         );
-        return fields.length
-          ? reply("fill_fields", { fields, thenContinue: "a0" })
-          : reply("click", { ref: "a0" });
+        return Promise.resolve(
+          fields.length
+            ? reply("fill_fields", { fields, thenContinue: "a0" })
+            : reply("click", { ref: "a0" }),
+        );
       }
-      if (step === 1 && !addedHistory) return reply("click", { ref: "e0" });
+      if (step === 1 && !addedHistory)
+        return Promise.resolve(reply("click", { ref: "e0" }));
       if (step === 1) {
         const fields = [
           { tool: "type", ref: "c0", text: "Principal Frontend Engineer" },
@@ -409,47 +416,55 @@ async function ledgerleafRun(conditionalContact = false) {
             })
           )
             calls.misses.push(field.text);
-        return reply("fill_fields", { fields, thenContinue: "a0" });
+        return Promise.resolve(
+          reply("fill_fields", { fields, thenContinue: "a0" }),
+        );
       }
       if (step === 2)
-        return reply("fill_fields", {
-          fields: [
-            {
-              tool: "type",
-              ref: "c0",
-              text: "120000",
-              storedFactId: "profile.answerBank.salaryExpectations",
-            },
-            { tool: "select", ref: "c1", option: "USD" },
-            { tool: "select", ref: "c2", option: "Immediate" },
-            {
-              tool: "set_checkbox",
-              ref: "c6",
-              checked: true,
-              storedFactId: "profile.skills.8",
-            },
-            { tool: "type", ref: "c7", text: "0" },
-            { tool: "type", ref: "c8", text: "0" },
-          ],
-          thenContinue: "a0",
-        });
+        return Promise.resolve(
+          reply("fill_fields", {
+            fields: [
+              {
+                tool: "type",
+                ref: "c0",
+                text: "120000",
+                storedFactId: "profile.answerBank.salaryExpectations",
+              },
+              { tool: "select", ref: "c1", option: "USD" },
+              { tool: "select", ref: "c2", option: "Immediate" },
+              {
+                tool: "set_checkbox",
+                ref: "c6",
+                checked: true,
+                storedFactId: "profile.skills.8",
+              },
+              { tool: "type", ref: "c7", text: "0" },
+              { tool: "type", ref: "c8", text: "0" },
+            ],
+            thenContinue: "a0",
+          }),
+        );
       if (
         step === 3 &&
         !calls.checks.some((batch) =>
           batch.some((answer) => answer.question.includes("authorized")),
         )
       )
-        return reply("fill_fields", {
-          fields: [
-            { tool: "set_checkbox", ref: "c0", checked: true },
-            { tool: "set_checkbox", ref: "c2", checked: true },
-          ],
-        });
+        return Promise.resolve(
+          reply("fill_fields", {
+            fields: [
+              { tool: "set_checkbox", ref: "c0", checked: true },
+              { tool: "set_checkbox", ref: "c2", checked: true },
+            ],
+          }),
+        );
       // Four eligibility/personal questions remain on the first handoff step.
-      return reply("finish", {
-        reason: "The remaining questions need your answers.",
-        needsPerson: true,
-      });
+      return Promise.resolve(
+        reply("finish", {
+          reason: "The remaining questions need your answers.",
+          needsPerson: true,
+        }),
+      );
     },
   };
   return { result: await runApplyAgent(input, model), calls, values };

@@ -20,7 +20,7 @@ import {
   isApplicationWithdrawnByPerson,
   type ApplicationCrmStageDefinition,
   type ApplicationRecord,
-  type ApplyJobResult,
+  type ApplyJobResultListRow,
 } from "@nordri/contracts";
 import {
   applicationCrmDataForView,
@@ -54,7 +54,7 @@ import {
 } from "../../components/list-row";
 import {
   CollectionPagination,
-  COLLECTION_PAGE_SIZE,
+  JOB_LIST_PAGE_SIZE,
 } from "../../components/collection-pagination";
 import {
   focusCollectionItem,
@@ -111,10 +111,10 @@ interface ApplicationsRecordsPanelProps {
    * states (ADR 0022) from what the run recorded rather than the older
    * "Needs recovery" / "Waiting on consent" vocabulary.
    */
-  latestApplyResultByRecordId?: ReadonlyMap<string, ApplyJobResult>;
+  latestApplyResultByRecordId?: ReadonlyMap<string, ApplyJobResultListRow>;
   /** What each result's run is doing, so a planned job is never "Filling in". */
   readApplyRunContext?: (
-    result: ApplyJobResult | null,
+    result: ApplyJobResultListRow | null,
   ) => ApplyRunContext | null;
   /** The mode chosen in Settings; decides what a finished fill means. */
   applyMode?: ApplyMode;
@@ -197,7 +197,7 @@ export function ApplicationsRecordsPanel({
   const [page, setPage] = useState(1);
   const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
   const recordsRegionRef = useRef<HTMLUListElement | null>(null);
-  const pageCount = Math.max(1, Math.ceil(recordCount / COLLECTION_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(recordCount / JOB_LIST_PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
   const relatedJobsById = useMemo(
     () => new Map(discoveryJobs.map((job) => [job.id, job] as const)),
@@ -224,7 +224,7 @@ export function ApplicationsRecordsPanel({
     if (lastPagedSelection.current === selectedRecordId) return;
     if (selectedRecordIndex < 0) return;
     lastPagedSelection.current = selectedRecordId;
-    setPage(Math.floor(selectedRecordIndex / COLLECTION_PAGE_SIZE) + 1);
+    setPage(Math.floor(selectedRecordIndex / JOB_LIST_PAGE_SIZE) + 1);
   }, [selectedRecordId, selectedRecordIndex]);
   useEffect(() => {
     if (!pendingFocusId) return;
@@ -245,7 +245,7 @@ export function ApplicationsRecordsPanel({
       const nextIndex = applicationRecords.findIndex(
         (record) => record.id === nextRecordId,
       );
-      setPage(Math.floor(nextIndex / COLLECTION_PAGE_SIZE) + 1);
+      setPage(Math.floor(nextIndex / JOB_LIST_PAGE_SIZE) + 1);
       onSelectRecord(nextRecordId);
       setPendingFocusId(nextRecordId);
     },
@@ -269,8 +269,8 @@ export function ApplicationsRecordsPanel({
   const pagedRecords = useMemo(
     () =>
       applicationRecords.slice(
-        (currentPage - 1) * COLLECTION_PAGE_SIZE,
-        currentPage * COLLECTION_PAGE_SIZE,
+        (currentPage - 1) * JOB_LIST_PAGE_SIZE,
+        currentPage * JOB_LIST_PAGE_SIZE,
       ),
     [applicationRecords, currentPage],
   );
@@ -603,7 +603,7 @@ export function ApplicationsRecordsPanel({
           itemLabel="applications"
           onPageChange={setPage}
           page={currentPage}
-          pageSize={COLLECTION_PAGE_SIZE}
+          pageSize={JOB_LIST_PAGE_SIZE}
           totalCount={recordCount}
         />
       ) : null}

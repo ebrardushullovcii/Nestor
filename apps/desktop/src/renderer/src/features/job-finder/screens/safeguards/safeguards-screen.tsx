@@ -3,10 +3,10 @@ import {
   PageHeaderStack,
   type PageStatusItem,
 } from "../../components/page-header";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type {
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   SetJobFinderActivityControlInput,
   SafeguardMutationInput,
 } from "@nordri/contracts";
@@ -22,6 +22,10 @@ import {
 } from "@renderer/features/job-finder/lib/job-finder-daily-capacity";
 import { cn } from "@renderer/lib/utils";
 import { SafeguardsApplicationBoundary } from "./safeguards-application-boundary";
+import {
+  CollectionPagination,
+  COLLECTION_PAGE_SIZE,
+} from "../../components/collection-pagination";
 import {
   buildSafeguardsPresentationModel,
   filterSafeguardRows,
@@ -203,7 +207,7 @@ export function SafeguardsScreen(props: {
     input: SetJobFinderActivityControlInput,
   ) => Promise<boolean>;
   onResetBrowser?: () => Promise<boolean>;
-  workspace: JobFinderWorkspaceSnapshot | null;
+  workspace: JobFinderRendererWorkspaceSnapshot | null;
 }) {
   const { actionMessage, isPending, onMutateSafeguards, workspace } = props;
   const [searchParams] = useSearchParams();
@@ -211,6 +215,7 @@ export function SafeguardsScreen(props: {
     searchParams.get("tab") === "reviews" ? "reviews" : "all",
   );
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const { showToast } = useToast();
   const [browserResetPending, setBrowserResetPending] = useState(false);
   const [browserResetError, setBrowserResetError] = useState<string | null>(
@@ -233,6 +238,23 @@ export function SafeguardsScreen(props: {
         : null,
     [workspace],
   );
+  const activeTab = model && countForTab(model.counts, tab) > 0 ? tab : "all";
+  const visibleRows = useMemo(
+    () => (model ? filterSafeguardRows(model.rows, activeTab, query) : []),
+    [model, activeTab, query],
+  );
+  const pageCount = Math.max(
+    1,
+    Math.ceil(visibleRows.length / COLLECTION_PAGE_SIZE),
+  );
+  const currentPage = Math.min(page, pageCount);
+  const pagedRows = visibleRows.slice(
+    (currentPage - 1) * COLLECTION_PAGE_SIZE,
+    currentPage * COLLECTION_PAGE_SIZE,
+  );
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
 
   if (!workspace || !model) {
     return (
@@ -252,8 +274,6 @@ export function SafeguardsScreen(props: {
   const visibleTabs = TAB_ORDER.filter(
     (entry) => entry.id === "all" || countForTab(model.counts, entry.id) > 0,
   );
-  const activeTab = visibleTabs.some((entry) => entry.id === tab) ? tab : "all";
-  const visibleRows = filterSafeguardRows(model.rows, activeTab, query);
   const isNoMatch = !isEmpty && visibleRows.length === 0;
   // The event engine is secondary to the boundary above it, so it stays
   // folded away unless something is actually blocking work.
@@ -394,7 +414,10 @@ export function SafeguardsScreen(props: {
                   <Input
                     aria-label="Search safeguards"
                     className="pl-9"
-                    onChange={(event) => setQuery(event.target.value)}
+                    onChange={(event) => {
+                      setQuery(event.target.value);
+                      setPage(1);
+                    }}
                     placeholder="Search safeguards"
                     type="search"
                     value={query}
@@ -418,7 +441,10 @@ export function SafeguardsScreen(props: {
                             : "text-muted-foreground hover:text-foreground",
                         )}
                         key={entry.id}
-                        onClick={() => setTab(entry.id)}
+                        onClick={() => {
+                          setTab(entry.id);
+                          setPage(1);
+                        }}
                         type="button"
                       >
                         {entry.label}
@@ -448,7 +474,7 @@ export function SafeguardsScreen(props: {
               />
             ) : (
               <div className="grid min-w-0 gap-3">
-                {visibleRows.map((row) => (
+                {pagedRows.map((row) => (
                   <SafeguardRowCard
                     isPending={isPending}
                     key={row.key}
@@ -459,6 +485,13 @@ export function SafeguardsScreen(props: {
                     row={row}
                   />
                 ))}
+                <CollectionPagination
+                  itemLabel="safeguards"
+                  onPageChange={setPage}
+                  page={currentPage}
+                  pageSize={COLLECTION_PAGE_SIZE}
+                  totalCount={visibleRows.length}
+                />
               </div>
             )}
           </div>

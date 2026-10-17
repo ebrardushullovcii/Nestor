@@ -2,7 +2,7 @@ import type {
   ApplyRunSummary,
   DiscoveryActivityEvent,
   DiscoveryRunRecord,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ResumeImportRun,
 } from "@nordri/contracts";
 import { JobFinderIntelligenceStateSchema } from "@nordri/contracts";
@@ -14,8 +14,8 @@ import {
 import type { TailoredDraftPreparationViewState } from "../../screens/review-queue/review-queue-status";
 
 function createWorkspace(
-  overrides: Partial<JobFinderWorkspaceSnapshot> = {},
-): JobFinderWorkspaceSnapshot {
+  overrides: Partial<JobFinderRendererWorkspaceSnapshot> = {},
+): JobFinderRendererWorkspaceSnapshot {
   return {
     activeDiscoveryRun: null,
     applicationRecords: [],
@@ -32,7 +32,7 @@ function createWorkspace(
       },
     },
     ...overrides,
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function createDiscoveryRun(
@@ -139,7 +139,7 @@ describe("buildJobFinderTaskCenterModel", () => {
             applicationPreparationStartedAt: null,
             applicationPreparationStartedLocalDate: null,
           },
-        ] as JobFinderWorkspaceSnapshot["applyJobResults"],
+        ] as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
       }),
       isDiscoveryPending: false,
       isResumeImportPending: false,
@@ -158,7 +158,7 @@ describe("buildJobFinderTaskCenterModel", () => {
         discoveryJobs: [
           { id: "job_1", company: "Dusk", title: "Frontend" },
           { id: "job_2", company: "Cedar", title: "Frontend" },
-        ] as unknown as JobFinderWorkspaceSnapshot["discoveryJobs"],
+        ] as unknown as JobFinderRendererWorkspaceSnapshot["discoveryJobs"],
         applyRuns: [
           createApplyRun({
             mode: "queue_auto",
@@ -181,7 +181,7 @@ describe("buildJobFinderTaskCenterModel", () => {
             jobId: "job_2",
             state: "filling",
           },
-        ] as JobFinderWorkspaceSnapshot["applyJobResults"],
+        ] as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
       }),
       isDiscoveryPending: false,
       isResumeImportPending: false,
@@ -352,7 +352,7 @@ describe("buildJobFinderTaskCenterModel", () => {
           targetLabel: "Mercury careers",
           phases: [],
           updatedAt: "2026-07-31T10:00:07.000Z",
-        } as unknown as JobFinderWorkspaceSnapshot["activeSourceDebugRun"],
+        } as unknown as JobFinderRendererWorkspaceSnapshot["activeSourceDebugRun"],
       }),
       isDiscoveryPending: false,
       isResumeImportPending: false,
@@ -683,7 +683,7 @@ describe("buildJobFinderTaskCenterModel", () => {
             })),
             historyLimit: 5,
           },
-        } as unknown as JobFinderWorkspaceSnapshot["searchPreferences"],
+        } as unknown as JobFinderRendererWorkspaceSnapshot["searchPreferences"],
       }),
       isDiscoveryPending: true,
       isResumeImportPending: false,
@@ -827,7 +827,7 @@ describe("buildJobFinderTaskCenterModel", () => {
             blockerReason: "required_human_input",
             updatedAt: "2026-07-31T10:00:06.000Z",
           },
-        ] as JobFinderWorkspaceSnapshot["applyJobResults"],
+        ] as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
       }),
       isDiscoveryPending: false,
       isResumeImportPending: false,
@@ -877,7 +877,7 @@ describe("buildJobFinderTaskCenterModel", () => {
             state: "prepared",
             updatedAt: "2026-07-31T10:00:07.000Z",
           },
-        ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"],
+        ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
       }),
       isDiscoveryPending: false,
       isResumeImportPending: false,
@@ -910,7 +910,7 @@ describe("buildJobFinderTaskCenterModel", () => {
             state: "prepared",
             updatedAt: "2026-07-31T10:00:07.000Z",
           },
-        ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"],
+        ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
       }),
       isDiscoveryPending: false,
       isResumeImportPending: false,
@@ -940,7 +940,7 @@ describe("buildJobFinderTaskCenterModel", () => {
             state: "submitted",
             updatedAt: "2026-07-31T10:00:06.000Z",
           },
-        ] as JobFinderWorkspaceSnapshot["applyJobResults"],
+        ] as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
       }),
       isDiscoveryPending: false,
       isResumeImportPending: false,
@@ -980,7 +980,7 @@ describe("buildJobFinderTaskCenterModel", () => {
             state: "failed",
             updatedAt: "2026-07-31T10:30:00.000Z",
           },
-        ] as JobFinderWorkspaceSnapshot["applyJobResults"],
+        ] as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
       }),
       isDiscoveryPending: false,
       isResumeImportPending: false,
@@ -1057,7 +1057,7 @@ describe("buildJobFinderTaskCenterModel", () => {
               submissionOutcome: { outcome: "outcome_uncertain" },
             },
           },
-        ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"],
+        ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
       }),
       isDiscoveryPending: false,
       isResumeImportPending: false,
@@ -1090,21 +1090,21 @@ describe("buildJobFinderTaskCenterModel", () => {
             state: "awaiting_review",
             updatedAt: "2026-07-31T10:00:06.000Z",
           },
-        ] as JobFinderWorkspaceSnapshot["applyJobResults"],
+        ] as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
         applicationRecords: [
           {
             id: "application_1",
             jobId: "job_1",
             lastAttemptState: "unsupported",
           },
-        ] as JobFinderWorkspaceSnapshot["applicationRecords"],
+        ] as JobFinderRendererWorkspaceSnapshot["applicationRecords"],
         userActionRequests: [
           {
             id: "handoff_1",
             state: "cancelled",
             scope: { type: "application", runId: run.id },
           },
-        ] as JobFinderWorkspaceSnapshot["userActionRequests"],
+        ] as JobFinderRendererWorkspaceSnapshot["userActionRequests"],
       }),
       isDiscoveryPending: false,
       isResumeImportPending: false,
@@ -1147,8 +1147,7 @@ describe("buildJobFinderTaskCenterModel", () => {
               blockerReason: null,
               blockerSummary: null,
               listingSignalEvidence: null,
-              visualObservationSets: [],
-              visualCheckpoints: [],
+
               latestQuestionCount: 0,
               latestAnswerCount: 0,
               pendingConsentRequestCount: 0,
@@ -1166,7 +1165,7 @@ describe("buildJobFinderTaskCenterModel", () => {
               },
               updatedAt: "2026-07-31T10:00:06.000Z",
             },
-          ] as JobFinderWorkspaceSnapshot["applyJobResults"],
+          ] as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
         }),
         isDiscoveryPending: false,
         isResumeImportPending: false,
@@ -1195,7 +1194,7 @@ describe("buildJobFinderTaskCenterModel", () => {
               state: "page_opened",
               scope: { type: "application", runId: run.id },
             },
-          ] as JobFinderWorkspaceSnapshot["userActionRequests"],
+          ] as JobFinderRendererWorkspaceSnapshot["userActionRequests"],
         }),
         isDiscoveryPending: false,
         isResumeImportPending: false,
@@ -1240,11 +1239,11 @@ describe("buildJobFinderTaskCenterModel", () => {
               startedAt: "2026-07-31T10:00:00.000Z",
               updatedAt: "2026-07-31T10:00:00.000Z",
             },
-          ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"],
+          ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
           discoveryJobs: [
             { id: "job_1", title: "Backend Engineer", company: "Willow" },
             { id: "job_2", title: "Data Engineer", company: "Meadow" },
-          ] as unknown as JobFinderWorkspaceSnapshot["discoveryJobs"],
+          ] as unknown as JobFinderRendererWorkspaceSnapshot["discoveryJobs"],
         }),
         isDiscoveryPending: false,
         isResumeImportPending: false,
@@ -1294,7 +1293,7 @@ describe("buildJobFinderTaskCenterModel", () => {
               startedAt: "2026-07-31T10:20:00.000Z",
               updatedAt: "2026-07-31T10:30:00.000Z",
             },
-          ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"],
+          ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
         }),
         isDiscoveryPending: false,
         isResumeImportPending: false,
@@ -1529,7 +1528,7 @@ describe("buildJobFinderTaskCenterModel", () => {
               privacyReceipt: {
                 submissionOutcome: { outcome: "outcome_uncertain" },
               },
-            } as JobFinderWorkspaceSnapshot["applyJobResults"][number],
+            } as JobFinderRendererWorkspaceSnapshot["applyJobResults"][number],
           ],
         }),
         isDiscoveryPending: false,
@@ -1563,7 +1562,7 @@ describe("buildJobFinderTaskCenterModel", () => {
         jobId: "shared_job",
         updatedAt,
         privacyReceipt: { submissionOutcome: { outcome } },
-      }) as JobFinderWorkspaceSnapshot["applyJobResults"][number];
+      }) as JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
     const superseded = result(
       "old_uncertain",
       "application_one",
@@ -1582,7 +1581,7 @@ describe("buildJobFinderTaskCenterModel", () => {
       "2026-08-28T10:03:00.000Z",
       "outcome_uncertain",
     );
-    const build = (results: JobFinderWorkspaceSnapshot["applyJobResults"]) =>
+    const build = (results: JobFinderRendererWorkspaceSnapshot["applyJobResults"]) =>
       buildJobFinderTaskCenterModel({
         workspace: createWorkspace({ applyJobResults: results }),
         isDiscoveryPending: false,
@@ -1642,14 +1641,14 @@ test("counts cancellation separately while the other application still needs the
         state: "awaiting_review",
         updatedAt: "2026-10-01T10:00:00.000Z",
       },
-    ] as JobFinderWorkspaceSnapshot["applyJobResults"],
+    ] as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
     userActionRequests: [
       {
         id: "other_step",
         state: "pending",
         scope: { type: "application", runId: run.id, jobId: "job_2" },
       },
-    ] as JobFinderWorkspaceSnapshot["userActionRequests"],
+    ] as JobFinderRendererWorkspaceSnapshot["userActionRequests"],
   });
   const task = buildJobFinderTaskCenterModel({
     workspace,
@@ -1697,7 +1696,7 @@ test.each([
           state,
           startedAt: "2026-10-01T10:00:00.000Z",
           updatedAt: "2026-10-01T10:01:00.000Z",
-        })) as JobFinderWorkspaceSnapshot["applyJobResults"],
+        })) as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
       }),
       isDiscoveryPending: false,
       isResumeImportPending: false,

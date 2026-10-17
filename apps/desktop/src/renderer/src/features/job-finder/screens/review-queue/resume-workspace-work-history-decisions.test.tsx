@@ -224,7 +224,7 @@ describe("ResumeWorkHistoryDecisions", () => {
     cleanup();
   });
 
-  it("renders nothing when no omission decisions are projected", () => {
+  it("renders nothing when no role was left off", () => {
     const { container } = render(
       <ResumeWorkHistoryDecisions
         acknowledgments={[]}
@@ -232,6 +232,7 @@ describe("ResumeWorkHistoryDecisions", () => {
         draftId="draft_1"
         suggestions={[compactSuggestion]}
         onAcknowledge={vi.fn()}
+        onIncludeRole={vi.fn()}
         onRemoveAcknowledgment={vi.fn()}
       />,
     );
@@ -239,7 +240,8 @@ describe("ResumeWorkHistoryDecisions", () => {
     expect(container.querySelector("section")).toBeNull();
   });
 
-  it("shows needs-decision entries with exact messages and polite status", () => {
+  it("lists the roles left off this resume quietly, each with Add back, and asks for no decision", () => {
+    const onIncludeRole = vi.fn();
     render(
       <ResumeWorkHistoryDecisions
         acknowledgments={[]}
@@ -247,90 +249,43 @@ describe("ResumeWorkHistoryDecisions", () => {
         draftId="draft_1"
         suggestions={[weakFitSuggestion, gapCoverageSuggestion]}
         onAcknowledge={vi.fn()}
+        onIncludeRole={onIncludeRole}
         onRemoveAcknowledgment={vi.fn()}
       />,
     );
 
-    expect(screen.getAllByText("Hidden").length).toBe(2);
+    expect(screen.getByText("Left off this resume")).toBeTruthy();
+    const addBack = screen.getAllByRole("button", { name: /^Add back:/ });
+    expect(addBack).toHaveLength(2);
     expect(
-      screen.getByText(
-        "Hidden for review: this role has a weaker career-family fit.",
-      ),
-    ).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toContain(
-      "2 of 2 hidden roles are off this resume",
+      screen.queryByRole("button", { name: /Leave this role off/ }),
+    ).toBeNull();
+    const section = document.querySelector(
+      "[data-resume-work-history-decisions]",
     );
+    expect(section?.className).not.toContain("warning");
 
-    const keepButton = screen.getByRole("button", {
-      name: "Leave this role off · Weak fit: Hidden for review: this role has a weaker career-family fit.",
-    });
-    expect(keepButton.getAttribute("aria-pressed")).toBe("false");
-    expect(keepButton.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(addBack[0]!);
+    expect(onIncludeRole).toHaveBeenCalledWith(weakFitSuggestion);
   });
 
-  it("toggles acknowledged entries to left-off and removes by acknowledgment id", () => {
-    const onAcknowledge = vi.fn();
-    const onRemoveAcknowledgment = vi.fn();
-
-    render(
-      <ResumeWorkHistoryDecisions
-        acknowledgments={[matchingAcknowledgment]}
-        disabled={false}
-        draftId="draft_1"
-        suggestions={[weakFitSuggestion]}
-        onAcknowledge={onAcknowledge}
-        onRemoveAcknowledgment={onRemoveAcknowledgment}
-      />,
-    );
-
-    expect(screen.getAllByText("Left off").length).toBeGreaterThan(0);
-    expect(screen.getByRole("status").textContent).toContain(
-      "leave every listed hidden role off this resume",
-    );
-
-    const undoButton = screen.getByRole("button", {
-      name: "Undo leave-off · Weak fit: Hidden for review: this role has a weaker career-family fit.",
-    });
-    expect(undoButton.getAttribute("aria-pressed")).toBe("true");
-
-    fireEvent.click(undoButton);
-    expect(onRemoveAcknowledgment).toHaveBeenCalledOnce();
-    expect(onRemoveAcknowledgment).toHaveBeenCalledWith(
-      "work_history_ack_experience_9_1",
-    );
-    expect(onAcknowledge).not.toHaveBeenCalled();
-  });
-
-  it("renders one wrapping column without fixed widths and disables buttons while pending", () => {
-    const onAcknowledge = vi.fn();
-
+  it("keeps Add back inert while workspace work is pending", () => {
+    const onIncludeRole = vi.fn();
     render(
       <ResumeWorkHistoryDecisions
         acknowledgments={[]}
         disabled
         draftId="draft_1"
         suggestions={[weakFitSuggestion]}
-        onAcknowledge={onAcknowledge}
+        onAcknowledge={vi.fn()}
+        onIncludeRole={onIncludeRole}
         onRemoveAcknowledgment={vi.fn()}
       />,
     );
 
-    const section = document.querySelector(
-      "[data-resume-work-history-decisions]",
-    );
-    expect(section?.className).toContain("grid-cols-1");
-    expect(section?.className).toContain("min-w-0");
-    expect(section?.className).not.toMatch(/w-\[\d+px\]/);
-
-    const keepButton = screen.getByRole("button", {
-      name: /Leave this role off · Weak fit:/,
-    });
-    // Pending keeps the control exposed but inert instead of natively
-    // disabled, so focus survives the in-flight decision.
-    expect(keepButton.hasAttribute("disabled")).toBe(false);
-    expect(keepButton.getAttribute("aria-disabled")).toBe("true");
-
-    fireEvent.click(keepButton);
-    expect(onAcknowledge).not.toHaveBeenCalled();
+    const addBack = screen.getByRole("button", { name: /^Add back:/ });
+    expect(addBack.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(addBack);
+    expect(onIncludeRole).not.toHaveBeenCalled();
   });
 });

@@ -19,7 +19,7 @@ import {
   APPLICATION_SKIPPED_BY_PERSON_LABEL,
   PREPARED_PAGE_CLOSED_SUMMARY,
   WITHDRAWAL_UNDONE_SUMMARY,
-  type JobFinderWorkspaceSnapshot,
+  type JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import {
   JOB_FINDER_BROWSER_NAME,
@@ -32,7 +32,7 @@ import {
   getCustomerFacingApplyText,
 } from "./applications-detail-panel-helpers";
 
-type ApplyResult = JobFinderWorkspaceSnapshot["applyJobResults"][number] | null;
+type ApplyResult = JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null;
 
 /**
  * One state, one sentence, one action.
@@ -170,7 +170,7 @@ export interface ApplyRunContext {
 }
 
 type ApplyRunState = NonNullable<
-  JobFinderWorkspaceSnapshot["applyRuns"]
+  JobFinderRendererWorkspaceSnapshot["applyRuns"]
 >[number]["state"];
 
 /** Where a planned (not yet started) application stands. */
@@ -181,10 +181,10 @@ export type PlannedApplyStanding =
   | "waiting_tab";
 
 export function buildApplyRunContextReader(workspace: {
-  applyRuns?: JobFinderWorkspaceSnapshot["applyRuns"] | null;
-  applyJobResults?: JobFinderWorkspaceSnapshot["applyJobResults"] | null;
+  applyRuns?: JobFinderRendererWorkspaceSnapshot["applyRuns"] | null;
+  applyJobResults?: JobFinderRendererWorkspaceSnapshot["applyJobResults"] | null;
   activityControl?: Pick<
-    JobFinderWorkspaceSnapshot["activityControl"],
+    JobFinderRendererWorkspaceSnapshot["activityControl"],
     "paused" | "pauseBehavior"
   > | null;
 }): (result: ApplyResult) => ApplyRunContext | null {

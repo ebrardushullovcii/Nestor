@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import {
   RESUME_WORKSPACE_REQUIRED_COLLECTIONS,
   resolveResumeWorkspaceRouteState,
 } from "./resume-workspace-route-state";
 
-type ReviewQueueItem = JobFinderWorkspaceSnapshot["reviewQueue"][number];
+type ReviewQueueItem = JobFinderRendererWorkspaceSnapshot["reviewQueue"][number];
 
 function hydrate(
   phase: "bootstrap" | "complete",
   deferred: ReadonlyArray<
-    JobFinderWorkspaceSnapshot["hydration"]["deferredCollections"][number]
+    JobFinderRendererWorkspaceSnapshot["hydration"]["deferredCollections"][number]
   > = [],
-): JobFinderWorkspaceSnapshot["hydration"] {
+): JobFinderRendererWorkspaceSnapshot["hydration"] {
   return {
     phase,
     deferredCollections: phase === "bootstrap" ? [...deferred] : [],

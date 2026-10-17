@@ -1,8 +1,7 @@
 import type {
   ApplicationRecord,
   CompanyEntity,
-  DiscoveryJobView,
-  SavedJob,
+  JobListRow,
 } from "@nordri/contracts";
 
 /**
@@ -14,8 +13,7 @@ import type {
  * for review, never silently merged.
  */
 
-export type CompanyListingJob = SavedJob &
-  Partial<Pick<DiscoveryJobView, "listingActivity">>;
+export type CompanyListingJob = JobListRow;
 
 export type CompanyJobIndex = ReadonlyMap<string, CompanyListingJob>;
 
@@ -41,7 +39,7 @@ export type CompanyOpeningsProjection = {
   lastOpenedAt: string | null;
 };
 
-function getListingOrderDate(job: SavedJob): string | null {
+function getListingOrderDate(job: JobListRow): string | null {
   return job.postedAt ?? job.providerUpdatedAt;
 }
 
@@ -178,7 +176,7 @@ export type CompanyDuplicateJobGroup = {
   jobIds: string[];
 };
 
-function jobIdentityKeys(job: SavedJob): {
+function jobIdentityKeys(job: JobListRow): {
   strong: ReadonlySet<string>;
   weak: ReadonlySet<string>;
 } {
@@ -233,7 +231,7 @@ function jobIdentityKeys(job: SavedJob): {
  */
 export function projectCompanyDuplicateJobs(input: {
   company: CompanyEntity;
-  jobs: readonly SavedJob[];
+  jobs: readonly JobListRow[];
 }): CompanyDuplicateJobGroup[] {
   const linked = input.jobs.filter((job) =>
     input.company.jobIds.includes(job.id),

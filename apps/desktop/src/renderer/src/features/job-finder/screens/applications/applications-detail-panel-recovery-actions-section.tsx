@@ -1,7 +1,7 @@
 import type {
   GlobalDailyApplicationPreparationCapacity,
   JobFinderExactApplicationTarget,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import { useId, useState } from "react";
 import {
@@ -203,11 +203,11 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   selectedRecordLastActionLabel?: string | null;
   selectedRecordTrackedAsApplied?: boolean;
   personSendReceiptSummary?: string | null;
-  selectedRun: JobFinderWorkspaceSnapshot["applyRuns"][number] | null;
+  selectedRun: JobFinderRendererWorkspaceSnapshot["applyRuns"][number] | null;
   /** What the visible result's run is doing (a planned job's standing). */
   visibleApplyRunContext?: ApplyRunContext | null;
   visibleApplyResult:
-    | JobFinderWorkspaceSnapshot["applyJobResults"][number]
+    | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
     | null;
 }) {
   const {

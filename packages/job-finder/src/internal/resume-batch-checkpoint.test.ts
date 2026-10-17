@@ -55,8 +55,10 @@ test("a running receipt becomes recoverable in a restarted process", () => {
     withResumeBatchLiveness(repository, state).resumeBatchCheckpoint?.running,
   ).toBe(true);
   expect(
-    withResumeBatchLiveness({}, JSON.parse(JSON.stringify(state)))
-      .resumeBatchCheckpoint?.running,
+    withResumeBatchLiveness(
+      {},
+      JSON.parse(JSON.stringify(state)) as typeof state,
+    ).resumeBatchCheckpoint?.running,
   ).toBe(false);
   markResumeBatchRunning(repository, {
     ...batch,

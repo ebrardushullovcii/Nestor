@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import {
+  JobListMatchAssessmentSchema,
+  type JobFinderRendererWorkspaceSnapshot,
+} from "@nordri/contracts";
 import {
   act,
   cleanup,
@@ -10,7 +13,8 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { Link, MemoryRouter } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { Link, MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -31,10 +35,13 @@ const windowControlsState = {
 const scrollToMock = vi.fn();
 const scrollIntoViewMock = vi.fn();
 
-function createWorkspace(): JobFinderWorkspaceSnapshot {
+function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
   return {
     applicationRecords: [],
-    discoveryJobs: Array.from({ length: 24 }, () => ({})),
+    discoveryJobs: Array.from({ length: 24 }, (_, index) => ({
+      id: `job_${index}`,
+      matchAssessment: JobListMatchAssessmentSchema.parse({ score: 70 }),
+    })),
     profileSetupState: {
       completedAt: null,
       currentStep: "import",
@@ -44,10 +51,10 @@ function createWorkspace(): JobFinderWorkspaceSnapshot {
     },
     reviewQueue: [],
     userActionRequests: [],
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
-function createWorkspaceWithActiveApplyRun(): JobFinderWorkspaceSnapshot {
+function createWorkspaceWithActiveApplyRun(): JobFinderRendererWorkspaceSnapshot {
   const workspace = createWorkspace();
   workspace.applyRuns = [
     {
@@ -63,15 +70,16 @@ function createWorkspaceWithActiveApplyRun(): JobFinderWorkspaceSnapshot {
       pendingJobs: 1,
       blockedJobs: 0,
       failedJobs: 0,
-    } as unknown as JobFinderWorkspaceSnapshot["applyRuns"][number],
+    } as unknown as JobFinderRendererWorkspaceSnapshot["applyRuns"][number],
   ];
   workspace.discoveryJobs = [
     {
       id: "job_1",
       company: "Mercury",
       title: "Software Engineer",
+      matchAssessment: JobListMatchAssessmentSchema.parse({ score: 70 }),
     },
-  ] as JobFinderWorkspaceSnapshot["discoveryJobs"];
+  ] as JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
   return workspace;
 }
 
@@ -229,6 +237,52 @@ describe("JobFinderShell section navigation", () => {
     window.localStorage.clear();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("shows which sidebar screen is opening while a slow route loads", async () => {
+    let finish!: () => void;
+    const SlowScreen = lazy(
+      () =>
+        new Promise<{ default: () => React.JSX.Element }>((resolve) => {
+          finish = () => resolve({ default: () => <h1>Loaded Home</h1> });
+        }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/job-finder/discovery"]}>
+        <Routes>
+          <Route
+            element={
+              <JobFinderShell platform="win32" workspace={createWorkspace()}>
+                <Suspense fallback={<div>Opening screen</div>}>
+                  <Outlet />
+                </Suspense>
+              </JobFinderShell>
+            }
+          >
+            <Route
+              path="/job-finder/discovery"
+              element={<h1>Loaded Find jobs</h1>}
+            />
+            <Route path="/job-finder/home" element={<SlowScreen />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    const sidebar = screen.getByRole("navigation", {
+      name: "Job Finder sidebar destinations",
+    });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Home" }));
+    // The route container is keyed, so a cold lazy route shows its opening
+    // surface while the new screen loads rather than keeping the old page.
+    expect(await screen.findByText("Opening screen")).toBeTruthy();
+    act(() => {
+      finish();
+    });
+    expect(
+      await screen.findByRole("heading", { name: "Loaded Home" }),
+    ).toBeTruthy();
+    expect(screen.queryByText("Opening Home…")).toBeNull();
+    expect(screen.getByRole("main").getAttribute("aria-busy")).toBe("false");
   });
 
   it("moves complete navigation labels into More at a 200% viewport", async () => {
@@ -872,7 +926,7 @@ describe("JobFinderShell section navigation", () => {
     workspace.campaigns = [
       { id: "campaign_default", jobIds: [], name: "My job search" },
       { id: "campaign_second", jobIds: [], name: "Backend roles" },
-    ] as unknown as JobFinderWorkspaceSnapshot["campaigns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["campaigns"];
     workspace.intelligence = {
       companies: [
         {
@@ -896,7 +950,7 @@ describe("JobFinderShell section navigation", () => {
         simultaneousApplicationConflicts: [],
         updatedAt: null,
       },
-    } as unknown as JobFinderWorkspaceSnapshot["intelligence"];
+    } as unknown as JobFinderRendererWorkspaceSnapshot["intelligence"];
 
     render(
       <MemoryRouter initialEntries={["/job-finder/discovery"]}>
@@ -1901,7 +1955,7 @@ describe("JobFinderShell section navigation", () => {
     workspace.campaigns = [
       { id: "campaign_default", name: "My job search" },
       { id: "campaign_second", name: "Backend roles" },
-    ] as unknown as JobFinderWorkspaceSnapshot["campaigns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["campaigns"];
 
     render(
       <MemoryRouter initialEntries={["/job-finder/campaigns"]}>
@@ -1923,7 +1977,7 @@ describe("JobFinderShell section navigation", () => {
     const workspace = createWorkspace();
     workspace.campaigns = [
       { id: "campaign_default", name: "My job search" },
-    ] as unknown as JobFinderWorkspaceSnapshot["campaigns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["campaigns"];
 
     render(
       <MemoryRouter initialEntries={["/job-finder/campaigns"]}>
@@ -2214,21 +2268,31 @@ describe("JobFinderShell compact nav responsive contract", () => {
 
   it("hides zero count badges while distinguishing inventory from attention counts", () => {
     const workspace = createWorkspace() as unknown as Record<string, unknown> &
-      JobFinderWorkspaceSnapshot;
+      JobFinderRendererWorkspaceSnapshot;
     workspace.campaigns = [
       {
         id: "campaign_1",
         jobIds: ["job_1", "job_2"],
         name: "My plan",
       },
-    ] as JobFinderWorkspaceSnapshot["campaigns"];
+    ] as JobFinderRendererWorkspaceSnapshot["campaigns"];
     workspace.discoveryJobs = [
-      { id: "job_1", company: "Acme", title: "Engineer I" },
-      { id: "job_2", company: "Globex", title: "Engineer II" },
-    ] as JobFinderWorkspaceSnapshot["discoveryJobs"];
+      {
+        id: "job_1",
+        company: "Acme",
+        title: "Engineer I",
+        matchAssessment: JobListMatchAssessmentSchema.parse({ score: 70 }),
+      },
+      {
+        id: "job_2",
+        company: "Globex",
+        title: "Engineer II",
+        matchAssessment: JobListMatchAssessmentSchema.parse({ score: 70 }),
+      },
+    ] as JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
     workspace.userActionRequests = [
       { id: "request_1", state: "pending" },
-    ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"];
 
     render(
       <MemoryRouter initialEntries={["/job-finder/home"]}>
@@ -2437,7 +2501,7 @@ describe("JobFinderShell keyboard shortcuts", () => {
     );
   }
 
-  function createSearchableWorkspace(): JobFinderWorkspaceSnapshot {
+  function createSearchableWorkspace(): JobFinderRendererWorkspaceSnapshot {
     const workspace = createWorkspace();
     workspace.activeCampaignId = "campaign-active";
     workspace.campaigns = [
@@ -2449,19 +2513,21 @@ describe("JobFinderShell keyboard shortcuts", () => {
         name: "Active plan",
         status: "active",
       },
-    ] as JobFinderWorkspaceSnapshot["campaigns"];
+    ] as JobFinderRendererWorkspaceSnapshot["campaigns"];
     workspace.discoveryJobs = [
       {
         id: "job_1",
         company: "Acme",
         title: "Platform Engineer",
+        matchAssessment: JobListMatchAssessmentSchema.parse({ score: 70 }),
       },
       {
         id: "job_2",
         company: "Globex",
         title: "Field Engineer",
+        matchAssessment: JobListMatchAssessmentSchema.parse({ score: 70 }),
       },
-    ] as JobFinderWorkspaceSnapshot["discoveryJobs"];
+    ] as JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
     return workspace;
   }
 

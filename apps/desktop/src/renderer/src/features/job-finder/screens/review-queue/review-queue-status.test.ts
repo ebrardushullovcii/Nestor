@@ -6,6 +6,7 @@ import type {
 import { describe, expect, it, vi } from "vitest";
 import {
   collectInProgressApplicationJobIds,
+  findPossibleDuplicateJobIds,
   collectPreparedApplicationJobIds,
   countQueueStageReady,
   describeTailoredDraftPreparationBlocker,
@@ -194,6 +195,34 @@ describe("tailored draft preparation", () => {
     }
   });
 
+  it("counts a resume written without the listing as missing until it is approved", () => {
+    const untailored = createItem("untailored", {
+      assetStatus: "ready",
+      resumeAssetId: "resume_untailored",
+      resumeReview: { status: "needs_review" },
+      resumeWrittenWithoutListing: true,
+    });
+    expect(isTailoredDraftPreparationEligible(untailored)).toBe(true);
+    expect(
+      isTailoredDraftPreparationEligible({
+        ...untailored,
+        resumeReview: {
+          status: "approved",
+          approvedAt: "2026-08-20T00:00:00.000Z",
+          approvedExportId: "export-approved",
+          approvedFormat: "pdf",
+          approvedFilePath: "C:/resume.pdf",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isTailoredDraftPreparationEligible({
+        ...untailored,
+        resumeApplicationMode: "original_resume",
+      }),
+    ).toBe(false);
+  });
+
   it("deduplicates in stable order and queues every missing resume", () => {
     const queue = [
       ...Array.from({ length: 33 }, (_, index) => createItem(`job-${index}`)),
@@ -206,7 +235,7 @@ describe("tailored draft preparation", () => {
     expect(getTailoredDraftPreparationCandidates(queue, 50)).toHaveLength(33);
   });
 
-  it("runs at most two drafts, accounts for out-of-order failures, and stops new work", async () => {
+  it("bounds admitted jobs and accounts for out-of-order failures when Stop is pressed", async () => {
     const settle = new Map<string, (success: boolean) => void>();
     const generate = vi.fn(
       (id: string) =>
@@ -215,33 +244,31 @@ describe("tailored draft preparation", () => {
     const progress = vi.fn();
     let stop = false;
     const promise = prepareTailoredDraftBatch(
-      ["1", "2", "3", "4"].map((id) => createItem(id)),
+      Array.from({ length: 150 }, (_, i) => createItem(String(i + 1))),
       generate,
       { onProgress: progress, shouldStop: () => stop },
     );
-    expect(generate.mock.calls).toEqual([["1"], ["2"]]);
+    expect(generate).toHaveBeenCalledTimes(100);
+    stop = true;
     settle.get("2")!(false);
     await vi.waitFor(() =>
-      expect(generate.mock.calls).toEqual([["1"], ["2"], ["3"]]),
+      expect(progress).toHaveBeenLastCalledWith({
+        completedCount: 0,
+        currentIndex: 100,
+        failedCount: 1,
+        totalCount: 150,
+      }),
     );
-    expect(progress).toHaveBeenLastCalledWith({
-      completedCount: 0,
-      currentIndex: 3,
-      failedCount: 1,
-      totalCount: 4,
-    });
-    stop = true;
-    settle.get("3")!(true);
-    settle.get("1")!(true);
-    await expect(promise).resolves.toEqual({
-      attemptedCount: 3,
-      completedCount: 2,
+    for (const [id, resolve] of settle) if (id !== "2") resolve(true);
+    expect(await promise).toMatchObject({
+      attemptedCount: 100,
+      completedCount: 99,
       failedCount: 1,
       failedJobIds: ["2"],
       stopped: true,
-      totalCount: 4,
+      totalCount: 150,
     });
-    expect(generate).toHaveBeenCalledTimes(3);
+    expect(generate).toHaveBeenCalledTimes(100);
   });
 
   it("stops scheduling after the current draft finishes", async () => {
@@ -949,7 +976,7 @@ it("reports a removed active draft separately from written resumes", async () =>
   ).toBe("Wrote 0 resumes · 1 removed from the shortlist.");
 });
 
-it("finishes all 33 missing resumes from one queue while keeping two active", async () => {
+it("finishes all 33 missing resumes from one admitted queue", async () => {
   const candidates = getTailoredDraftPreparationCandidates(
     Array.from({ length: 33 }, (_, i) => createItem(`batch_${i}`)),
   );
@@ -970,5 +997,53 @@ it("finishes all 33 missing resumes from one queue while keeping two active", as
     failedCount: 0,
   });
   expect(generate).toHaveBeenCalledTimes(33);
-  expect(maxActive).toBeLessThanOrEqual(2);
+  expect(maxActive).toBe(33);
+});
+
+it("a blocked service pauses new admissions without counting the unstarted queue as failures", async () => {
+  const candidates = Array.from({ length: 200 }, (_, index) =>
+    createItem(`blocked_${index}`),
+  );
+  const generate = vi.fn(() => Promise.resolve("blocked" as const));
+  const result = await prepareTailoredDraftBatch(candidates, generate);
+  expect(generate).toHaveBeenCalledTimes(100);
+  expect(result).toMatchObject({
+    stopped: true,
+    completedCount: 0,
+    failedCount: 0,
+    failedJobIds: [],
+    totalCount: 200,
+  });
+  expect(
+    getTailoredDraftPreparationResultMessage({
+      ...result,
+      status: "stopped",
+      currentIndex: null,
+      eligibleRemainingCount: 200,
+      providerBlock: {
+        reason: "funding",
+        message:
+          "The AI service is unavailable because its provider rejected the request for insufficient funds.",
+      },
+    }),
+  ).toContain("200 unfinished resumes remain");
+});
+
+describe("possible duplicate shortlisted jobs", () => {
+  it("flags one posting saved under two addresses but not the same role in another place", () => {
+    const item = (jobId: string, title: string, location: string) => ({
+      jobId,
+      title,
+      company: "Example Co",
+      location,
+    });
+    expect([
+      ...findPossibleDuplicateJobIds([
+        item("a", "Senior Backend Engineer – Mobile App (f/m/x)", "Remote"),
+        item("b", "Senior Backend Engineer - Mobile App (f/m/x)", "remote"),
+        item("c", "Senior SRE", "Toronto"),
+        item("d", "Senior SRE", "Paris"),
+      ]),
+    ]).toEqual(["a", "b"]);
+  });
 });

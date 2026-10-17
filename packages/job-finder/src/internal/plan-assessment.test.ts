@@ -7,6 +7,18 @@ import {
   readPlanAssessment,
   withPlanAssessment,
 } from "./plan-assessment";
+it("reuses immutable plan views and replaces them when the plan or saved evidence changes", () => {
+  const base = createSeed().savedJobs[0]!;
+  const a = { ...base.matchAssessment, score: 90 };
+  const b = { ...base.matchAssessment, score: 20 };
+  const saved = Object.freeze({ ...base, planAssessments: { a, b } });
+  const first = readPlanAssessment(saved, "a");
+  expect(readPlanAssessment(saved, "a")).toBe(first);
+  expect(readPlanAssessment(saved, "b").matchAssessment.score).toBe(20);
+  const changed = Object.freeze({ ...saved, planAssessments: { a: b, b } });
+  expect(readPlanAssessment(changed, "a").matchAssessment.score).toBe(20);
+  expect(readPlanAssessment(changed, "a")).not.toBe(first);
+});
 it("stores each plan's verdict independently and shows the selected plan's score", () => {
   const job = createSeed().savedJobs[0]!;
   const a = { ...job.matchAssessment, score: 90 };

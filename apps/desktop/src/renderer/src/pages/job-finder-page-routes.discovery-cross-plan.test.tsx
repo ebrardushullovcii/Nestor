@@ -11,7 +11,7 @@ import {
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Link, MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import {
   JobFinderApplicationsRoute,
@@ -62,7 +62,7 @@ function renderJobLink(
     dismissedDiscoveryJobs: [],
     hydration: { phase: "ready", deferredCollections: [] },
     searchPreferences: { discovery: { targets: [] } },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
   const context = new Proxy(
     {
       workspace,

@@ -1,5 +1,5 @@
 import type {
-  ApplicationAttempt,
+  ApplicationAttemptListRow,
   ApplicationRecord,
   GlobalDailyApplicationPreparationCapacity,
 } from "@nordri/contracts";
@@ -103,7 +103,7 @@ export function resolveUnambiguousApplicationRecordIdByJobId(
 }
 
 function attemptBelongsToRecord(
-  attempt: ApplicationAttempt,
+  attempt: ApplicationAttemptListRow,
   record: ApplicationRecord,
   unambiguousRecordIdByJobId: Map<string, string> | null,
 ) {
@@ -119,10 +119,10 @@ function attemptBelongsToRecord(
 
 export function getLatestApplicationAttemptForRecord(
   record: ApplicationRecord,
-  applicationAttempts: readonly ApplicationAttempt[],
+  applicationAttempts: readonly ApplicationAttemptListRow[],
   applicationRecords?: readonly ApplicationRecord[],
 ) {
-  let latestAttempt: ApplicationAttempt | null = null;
+  let latestAttempt: ApplicationAttemptListRow | null = null;
   let latestUpdatedAt = Number.NEGATIVE_INFINITY;
   const unambiguousRecordIdByJobId = applicationRecords
     ? resolveUnambiguousApplicationRecordIdByJobId(applicationRecords)

@@ -1,4 +1,4 @@
-import type { SavedJob } from "@nordri/contracts";
+import type { JobListRow } from "@nordri/contracts";
 import {
   DISCOVERY_CLEAR_MISMATCH_SCORE_FLOOR,
   DISCOVERY_WEAKER_MATCH_SCORE_FLOOR,
@@ -37,7 +37,7 @@ export interface DiscoveryResultGroupHeading {
  * current assessment at all. They are kept visible — they were never judged
  * against — but they are never counted as recommended results.
  */
-export function isDiscoveryUncheckedResult(job: SavedJob): boolean {
+export function isDiscoveryUncheckedResult(job: JobListRow): boolean {
   return getDiscoveryResultGroup(job) === "unchecked";
 }
 
@@ -47,7 +47,7 @@ export function isDiscoveryUncheckedResult(job: SavedJob): boolean {
  * control; the unchecked band is deliberately not in it, because hiding a row
  * behind "also found" is a judgement and no judgement was made.
  */
-export function isDiscoveryAlsoFoundResult(job: SavedJob): boolean {
+export function isDiscoveryAlsoFoundResult(job: JobListRow): boolean {
   const group = getDiscoveryResultGroup(job);
   return group === "weaker" || group === "mismatches";
 }
@@ -61,7 +61,7 @@ export function isDiscoveryAlsoFoundResult(job: SavedJob): boolean {
  * a badge reading nothing beside a list of 13 rows is its own untruth.
  */
 export function countDiscoveryDefaultVisibleResults(
-  jobs: readonly SavedJob[],
+  jobs: readonly JobListRow[],
 ): number {
   let count = 0;
   for (const job of jobs) {
@@ -74,7 +74,7 @@ export function countDiscoveryDefaultVisibleResults(
 
 /** How many results were found by title alone and never checked further. */
 export function countDiscoveryUncheckedResults(
-  jobs: readonly SavedJob[],
+  jobs: readonly JobListRow[],
 ): number {
   let count = 0;
   for (const job of jobs) {
@@ -98,8 +98,8 @@ const DISCOVERY_RESULT_GROUP_ORDER: Record<DiscoveryResultGroupId, number> = {
  * two runs with a differently-captioned band between them.
  */
 export function orderDiscoveryResultsByGroup(
-  jobs: readonly SavedJob[],
-): SavedJob[] {
+  jobs: readonly JobListRow[],
+): JobListRow[] {
   return jobs
     .map((job, sourceIndex) => ({ job, sourceIndex }))
     .sort((left, right) => {
@@ -180,7 +180,7 @@ export interface DiscoveryResultGroupHeadingOptions {
  * Pass the whole ranked list plus a `window` when the list is paginated.
  */
 export function buildDiscoveryResultGroupHeadings(
-  jobs: readonly SavedJob[],
+  jobs: readonly JobListRow[],
   ranked: boolean,
   options: DiscoveryResultGroupHeadingOptions = {},
 ): ReadonlyMap<string, DiscoveryResultGroupHeading> {
@@ -207,7 +207,7 @@ export function buildDiscoveryResultGroupHeadings(
  * unheaded run are absent from the map.
  */
 export function buildDiscoveryHeadedGroupByJobId(
-  jobs: readonly SavedJob[],
+  jobs: readonly JobListRow[],
   ranked: boolean,
   options: DiscoveryResultGroupHeadingOptions = {},
 ): ReadonlyMap<string, DiscoveryResultGroupId> {
@@ -244,7 +244,7 @@ interface DiscoveryResultRun {
  * filed under the previous band's label.
  */
 function forEachHeadedDiscoveryResultRun(
-  jobs: readonly SavedJob[],
+  jobs: readonly JobListRow[],
   ranked: boolean,
   options: DiscoveryResultGroupHeadingOptions,
   visit: (run: DiscoveryResultRun) => void,

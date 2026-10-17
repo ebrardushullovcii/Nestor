@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { Suspense } from "react";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   MemoryRouter,
@@ -69,7 +69,7 @@ vi.mock(
   }),
 );
 
-function workspace(): JobFinderWorkspaceSnapshot {
+function workspace(): JobFinderRendererWorkspaceSnapshot {
   return {
     activeCampaignId: "campaign_1",
     campaigns: [
@@ -102,7 +102,7 @@ function workspace(): JobFinderWorkspaceSnapshot {
       },
     },
     hydration: { phase: "ready", deferredCollections: [] },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function createContext(

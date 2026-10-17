@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Captions, CaptionsOff } from "lucide-react";
-import type { InterviewWorkspaceSnapshot } from "@nordri/contracts";
+import type { InterviewWorkspaceView } from "@nordri/contracts";
 import { Button } from "@renderer/components/ui/button";
 
 export function InterviewNativeCaptionWatcher(props: {
   sessionId: string;
   language: string;
   listening: boolean;
-  onWorkspaceChange: (workspace: InterviewWorkspaceSnapshot) => void;
+  onWorkspaceChange: (workspace: InterviewWorkspaceView) => void;
 }) {
   const [enabled, setEnabled] = useState(false);
   const [statusLabel, setStatusLabel] = useState("Native caption watcher idle");

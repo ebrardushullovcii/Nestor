@@ -6,7 +6,7 @@ import {
   UserActionRequestSchema,
   PREPARED_PAGE_CLOSED_SUMMARY,
   ApplyRunSchema,
-  type JobFinderWorkspaceSnapshot,
+  type JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import { ApplicationAnswerStepCard } from "./applications-answer-step";
 import {
@@ -59,7 +59,7 @@ it.each([false, true])(
   },
 );
 
-type ApplyResult = JobFinderWorkspaceSnapshot["applyJobResults"][number];
+type ApplyResult = JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
 
 function buildResult(overrides: Partial<ApplyResult>): ApplyResult {
   return {
@@ -137,7 +137,7 @@ describe("ApplicationsDetailPanelRecoveryActionsSection · a sent application", 
       mode: "queue_auto",
       state: "completed",
       jobIds: ["job_1", "job_2"],
-    } as unknown as JobFinderWorkspaceSnapshot["applyRuns"][number];
+    } as unknown as JobFinderRendererWorkspaceSnapshot["applyRuns"][number];
     const entries = [
       {
         jobId: "job_2",

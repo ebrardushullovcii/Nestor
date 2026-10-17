@@ -1,4 +1,4 @@
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import { describe, expect, it } from "vitest";
 
 import { createJobFinderWorkspaceDeltaTracker } from "./workspace-delta";
@@ -14,7 +14,7 @@ function createWorkspace(input: {
   companyJobs?: readonly Record<string, unknown>[];
   applicationRecords?: readonly Record<string, unknown>[];
   dailyCapacity?: Record<string, unknown> | null;
-}): JobFinderWorkspaceSnapshot {
+}): JobFinderRendererWorkspaceSnapshot {
   return {
     generatedAt: input.generatedAt,
     profile: { summary: input.profileSummary ?? "Original summary" },
@@ -41,7 +41,7 @@ function createWorkspace(input: {
     dashboard: {
       globalDailyApplicationPreparationCapacity: input.dailyCapacity ?? null,
     },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 describe("Job Finder workspace delta tracker", () => {
@@ -158,7 +158,7 @@ describe("Job Finder workspace delta tracker", () => {
     });
   });
 
-  it("falls back to a revisioned snapshot for untracked scalar changes", () => {
+  it("replaces a changed untracked field in a delta instead of resending the workspace", () => {
     const tracker = createJobFinderWorkspaceDeltaTracker();
     const initial = createWorkspace({
       generatedAt: "2026-08-09T10:00:00.000Z",
@@ -174,12 +174,39 @@ describe("Job Finder workspace delta tracker", () => {
 
     tracker.synchronize(null, initial);
 
-    expect(tracker.synchronize(1, changed)).toMatchObject({
-      kind: "snapshot",
-      currentRevision: 2,
-      reason: "unsupported_change",
-      snapshot: changed,
+    const result = tracker.synchronize(1, changed);
+    expect(result).toMatchObject({
+      kind: "delta",
+      delta: {
+        baseRevision: 1,
+        currentRevision: 2,
+        replaced: { profile: changed.profile },
+      },
     });
+    if (result.kind !== "delta") throw new Error("expected a delta");
+    // Unchanged plan state, notifications and dashboard are left out.
+    expect(result.delta).not.toHaveProperty("campaigns");
+    expect(result.delta).not.toHaveProperty("dashboard");
+    expect(result.delta).not.toHaveProperty("campaignNotifications");
+    expect(Object.keys(result.delta.replaced ?? {})).toEqual(["profile"]);
+  });
+
+  it("sends nothing for unchanged plan state on an idle refresh", () => {
+    const tracker = createJobFinderWorkspaceDeltaTracker();
+    const workspace = createWorkspace({
+      generatedAt: "2026-08-09T10:00:00.000Z",
+      jobIds: ["job-1"],
+      selectedJobId: "job-1",
+    });
+    tracker.synchronize(null, workspace);
+    const result = tracker.synchronize(1, {
+      ...workspace,
+      generatedAt: "2026-08-09T10:00:05.000Z",
+    });
+    if (result.kind !== "delta") throw new Error("expected a delta");
+    expect(result.delta).not.toHaveProperty("campaigns");
+    expect(result.delta).not.toHaveProperty("replaced");
+    expect(result.delta.discoveryJobs).toEqual({ upserts: [], removedIds: [] });
   });
 
   it("recovers stale mutation revisions with one full snapshot", () => {
@@ -195,6 +222,45 @@ describe("Job Finder workspace delta tracker", () => {
     expect(tracker.synchronize(0, workspace)).toMatchObject({
       kind: "snapshot",
       currentRevision: 2,
+      reason: "stale_base",
+    });
+  });
+
+  it("keeps concurrent mutation replies as deltas and omits unchanged intelligence", () => {
+    const tracker = createJobFinderWorkspaceDeltaTracker();
+    const initial = createWorkspace({
+      generatedAt: "2026-10-13T10:00:00.000Z",
+      jobIds: ["job-1"],
+      selectedJobId: "job-1",
+    });
+    const first = {
+      ...initial,
+      generatedAt: "2026-10-13T10:00:01.000Z",
+      selectedDiscoveryJobId: null,
+    };
+    const second = {
+      ...first,
+      generatedAt: "2026-10-13T10:00:02.000Z",
+      discoveryJobs: [],
+    };
+    tracker.synchronize(null, initial);
+    expect(tracker.synchronize(1, first).kind).toBe("delta");
+    const concurrent = tracker.synchronize(1, second);
+    expect(concurrent).toMatchObject({
+      kind: "delta",
+      delta: {
+        baseRevision: 1,
+        currentRevision: 3,
+        discoveryJobs: { removedIds: ["job-1"] },
+      },
+    });
+    if (concurrent.kind === "delta")
+      expect(concurrent.delta).not.toHaveProperty("intelligence");
+    // Old baselines expire, bounding retained snapshot arrays and scalar state.
+    for (let revision = 3; revision <= 6; revision++)
+      tracker.synchronize(revision, second);
+    expect(tracker.synchronize(1, second)).toMatchObject({
+      kind: "snapshot",
       reason: "stale_base",
     });
   });
@@ -311,6 +377,48 @@ describe("Job Finder workspace delta tracker", () => {
       kind: "delta",
       delta: {
         discoveryJobs: { upserts: [currentJob], removedIds: [] },
+      },
+    });
+  });
+
+  it("sends only the running search's new activity", () => {
+    const tracker = createJobFinderWorkspaceDeltaTracker();
+    const withRun = (runId: string, eventIds: readonly string[]) =>
+      ({
+        ...createWorkspace({
+          generatedAt: "2026-08-09T10:00:00.000Z",
+          jobIds: [],
+          selectedJobId: null,
+        }),
+        activeDiscoveryRun: {
+          id: runId,
+          activity: eventIds.map((id) => ({ id })),
+        },
+      }) as unknown as JobFinderRendererWorkspaceSnapshot;
+
+    tracker.synchronize(null, withRun("run-1", ["a", "b"]));
+    expect(
+      tracker.synchronize(1, withRun("run-1", ["a", "b", "c"])),
+    ).toMatchObject({
+      kind: "delta",
+      delta: {
+        activeDiscoveryRunActivityFrom: 2,
+        activeDiscoveryRun: { id: "run-1", activity: [{ id: "c" }] },
+      },
+    });
+    // Another run, or a history that does not continue the held one, goes whole.
+    expect(tracker.synchronize(2, withRun("run-2", ["x"]))).toMatchObject({
+      kind: "delta",
+      delta: {
+        activeDiscoveryRunActivityFrom: null,
+        activeDiscoveryRun: { id: "run-2", activity: [{ id: "x" }] },
+      },
+    });
+    expect(tracker.synchronize(3, withRun("run-2", ["y", "z"]))).toMatchObject({
+      kind: "delta",
+      delta: {
+        activeDiscoveryRunActivityFrom: null,
+        activeDiscoveryRun: { activity: [{ id: "y" }, { id: "z" }] },
       },
     });
   });
@@ -466,7 +574,7 @@ describe("Job Finder workspace delta tracker", () => {
     expect(deltaDurationMs).toBeLessThan(SCALE_OPERATION_BUDGET_MS);
 
     const fallbackStartedAt = performance.now();
-    const fallbackResult = tracker.synchronize(1, current);
+    const fallbackResult = tracker.synchronize(0, current);
     const fallbackDurationMs = performance.now() - fallbackStartedAt;
 
     expect(fallbackResult).toMatchObject({

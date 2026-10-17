@@ -3,7 +3,6 @@ import {
   JobSearchCampaignCollectionSchema,
   JobSearchCampaignSchema,
   resolveCampaignSourceTargetIds,
-  JobSearchPreferencesSchema,
   getDefaultCampaignConfiguration,
   type ApplyJobResult,
   type ApplyRun,
@@ -21,6 +20,7 @@ import {
   type UserActionRequest,
 } from "@nordri/contracts";
 import type { JobFinderRepository } from "@nordri/db";
+import { parseSearchPreferencesOnce } from "./validated-search-preferences";
 import { projectPlanSafeguardPauses } from "../plan-safeguard-pauses";
 import type { SourceAccessPrompt } from "@nordri/contracts";
 import {
@@ -169,8 +169,7 @@ function isAdoptionLineageCampaign(campaign: JobSearchCampaign): boolean {
   return campaign.history.some((entry) => entry.id === ADOPTION_HISTORY_ID);
 }
 
-const RETENTION_RECONCILED_HISTORY_ID =
-  "campaign_history_retention_reconciled";
+const RETENTION_RECONCILED_HISTORY_ID = "campaign_history_retention_reconciled";
 const RETENTION_RECONCILED_SUMMARY =
   "Reconciled retention with the current workspace.";
 
@@ -197,7 +196,9 @@ function recordRetentionReconciliation(
         : -1,
   );
   const olderEntries =
-    sorted[0]?.id === RETENTION_RECONCILED_HISTORY_ID ? sorted.slice(1) : sorted;
+    sorted[0]?.id === RETENTION_RECONCILED_HISTORY_ID
+      ? sorted.slice(1)
+      : sorted;
 
   return [
     {
@@ -235,12 +236,12 @@ function sameStringValues(
  */
 export function reconcileCampaignState(input: {
   state: JobSearchCampaignCollection;
-  savedJobs: readonly SavedJob[];
+  savedJobs: readonly Pick<SavedJob, "id">[];
   searchPreferences: JobSearchPreferences;
   now: string;
 }): JobSearchCampaignCollection | null {
   const savedJobIds = input.savedJobs.map((job) => job.id);
-  const searchPreferences = JobSearchPreferencesSchema.parse(
+  const searchPreferences = parseSearchPreferencesOnce(
     input.searchPreferences,
   );
   const serializedSearchPreferences = JSON.stringify(searchPreferences);
@@ -349,7 +350,7 @@ export async function ensureCampaignState(input: {
     const campaign = createDefaultCampaign(
       input.searchPreferences,
       now,
-      (await input.repository.listSavedJobs()).map((job) => job.id),
+      await input.repository.listSavedJobIds(),
       (await input.repository.getDiscoveryState()).recentRuns,
     );
     const created = JobSearchCampaignCollectionSchema.parse({
@@ -360,9 +361,13 @@ export async function ensureCampaignState(input: {
     return created;
   }
 
+  // Every snapshot runs this, and only the ids matter: parsing every saved
+  // job here doubled the cost of each workspace refresh.
   const reconciled = reconcileCampaignState({
     state: existing,
-    savedJobs: await input.repository.listSavedJobs(),
+    savedJobs: (await input.repository.listSavedJobIds()).map((id) => ({
+      id,
+    })),
     searchPreferences: input.searchPreferences,
     now,
   });
@@ -561,10 +566,10 @@ export function deriveDashboardSummary(input: {
         appliedAt !== null && Number.isFinite(Date.parse(appliedAt)),
     )
     .map((appliedAt) => Date.parse(appliedAt));
-  const unresolvedActions = projectPlanSafeguardPauses(input.safeguards, input.campaigns.campaigns).length + countNeedsYouItems(
-    input.userActionRequests,
-    input.groupedDecisions,
-  );
+  const unresolvedActions =
+    projectPlanSafeguardPauses(input.safeguards, input.campaigns.campaigns)
+      .length +
+    countNeedsYouItems(input.userActionRequests, input.groupedDecisions);
   const crm = projectApplicationCrmDashboard({
     records: input.applicationRecords,
     now: input.generatedAt,

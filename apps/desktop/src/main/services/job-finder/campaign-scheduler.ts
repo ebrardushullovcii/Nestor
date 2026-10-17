@@ -64,9 +64,17 @@ function createDefaultTimer(
 
 async function defaultTick(): Promise<void> {
   const service = await getJobFinderWorkspaceService();
-  await service.runDueScheduledCampaigns(undefined, () => {
-    publishJobFinderWorkspaceUpdate();
-  });
+  const onActivity = () => publishJobFinderWorkspaceUpdate();
+  if (service.processDueScheduledCampaigns) {
+    const changed = await service.processDueScheduledCampaigns(
+      undefined,
+      onActivity,
+    );
+    if (changed) publishJobFinderWorkspaceUpdate();
+    return;
+  }
+  // Older service implementations still return a snapshot per tick.
+  await service.runDueScheduledCampaigns(undefined, onActivity);
   publishJobFinderWorkspaceUpdate();
 }
 

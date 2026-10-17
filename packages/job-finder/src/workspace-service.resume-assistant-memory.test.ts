@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 import type { ReviseResumeDraftInput } from "@nordri/ai-providers";
-import { createAiClient } from "./workspace-service.test-runtimes";
+import {
+  createAiClient,
+  fakeResumeClaimCheck,
+} from "./workspace-service.test-runtimes";
 import { createWorkspaceServiceHarness } from "./workspace-service.test-support";
 
 const UNGROUNDED_SUMMARY =
@@ -13,6 +16,9 @@ describe("Resume Studio Assistant memory and approval check", () => {
     const { workspaceService } = createWorkspaceServiceHarness({
       aiClient: {
         ...baseAiClient,
+        checkResumeClaims: fakeResumeClaimCheck({
+          [UNGROUNDED_SUMMARY]: "unsupported",
+        }),
         reviseResumeDraft(input) {
           seen.push(input);
           const section = input.draft.sections.find((entry) =>

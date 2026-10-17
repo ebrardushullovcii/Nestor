@@ -1,11 +1,11 @@
 import { withPersonAnswerSources } from "./application-review-source";
 import { ApplicationsDisclosureSummary } from "./applications-disclosure-summary";
 import type {
-  ApplicationAttempt,
+  ApplicationAttemptListRow,
   ApplicationRecord,
   ApplyRunDetails,
   ClearApplicationAnswerCommandInput,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   JobFinderApplyConsentActionInput,
   JobFinderApplyRunDetailsQuery,
   SaveApplicationAnswerCommandInput,
@@ -21,8 +21,8 @@ export function ApplicationsDetailPanelActivitySections(props: {
   applyRunDetailsError: string | null;
   applyRunDetailsStatus: "idle" | "loading" | "ready" | "error";
   applyRunHistory: Array<{
-    result: JobFinderWorkspaceSnapshot["applyJobResults"][number];
-    run: JobFinderWorkspaceSnapshot["applyRuns"][number] | null;
+    result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
+    run: JobFinderRendererWorkspaceSnapshot["applyRuns"][number] | null;
   }>;
   isApplyRequestPending: (requestId: string) => boolean;
   onExportApplicationPacket: (
@@ -56,10 +56,10 @@ export function ApplicationsDetailPanelActivitySections(props: {
   applicationPageClosed?: boolean;
   selectedApplyRunDetails: ApplyRunDetails | null;
   selectedApplyRunId: string | null;
-  selectedAttempt: ApplicationAttempt | null;
+  selectedAttempt: ApplicationAttemptListRow | null;
   selectedRecord: ApplicationRecord;
   visibleApplyResult:
-    | JobFinderWorkspaceSnapshot["applyJobResults"][number]
+    | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
     | null;
 }) {
   const {

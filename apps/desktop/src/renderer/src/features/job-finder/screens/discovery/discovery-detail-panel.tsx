@@ -457,6 +457,60 @@ function useDiscoveryDetailScrollEdges(
   return edges;
 }
 
+interface ListingTexts {
+  listingText: string;
+  fullListingText: string;
+  hasFullListingText: boolean;
+}
+
+let lastListingTexts: {
+  title: string;
+  summary: string | null | undefined;
+  description: string | undefined;
+  texts: ListingTexts;
+} | null = null;
+
+/**
+ * The listing as readable text. The panel re-renders on every list update,
+ * and converting a long listing each time cost tens of milliseconds, so the
+ * last job's texts are kept until a different listing is shown.
+ */
+function readListingTexts(
+  job: Pick<SavedJob, "title" | "summary" | "description"> | null,
+): ListingTexts {
+  if (!job) {
+    return { listingText: "", fullListingText: "", hasFullListingText: false };
+  }
+  if (
+    lastListingTexts &&
+    lastListingTexts.title === job.title &&
+    lastListingTexts.summary === job.summary &&
+    lastListingTexts.description === job.description
+  ) {
+    return lastListingTexts.texts;
+  }
+  // An echoed job title is not listing text; it reads as a bug under an
+  // "About this job" heading.
+  const title = job.title.trim().toLowerCase();
+  const text = jobDescriptionToText(job.summary ?? job.description).trim();
+  const listingText = text.toLowerCase() === title ? "" : text;
+  const fullListingText = jobDescriptionToText(job.description, true).trim();
+  const texts = {
+    listingText,
+    fullListingText,
+    hasFullListingText:
+      fullListingText.replace(/\s+/g, " ").length > listingText.length &&
+      fullListingText.toLowerCase() !== title,
+  };
+  lastListingTexts = {
+    title: job.title,
+    summary: job.summary,
+    description: job.description,
+    texts,
+  };
+  return texts;
+}
+
 export function DiscoveryDetailPanel({
   applicationRecords = [],
   reviewQueue = [],
@@ -638,26 +692,8 @@ export function DiscoveryDetailPanel({
         .filter(Boolean)
         .join(" · ")
     : "";
-  // An echoed job title is not listing text; it reads as a bug under an
-  // "About this job" heading.
-  const listingText = (() => {
-    if (!selectedJob) {
-      return "";
-    }
-    const text = jobDescriptionToText(
-      selectedJob.summary ?? selectedJob.description,
-    ).trim();
-    return text.toLowerCase() === selectedJob.title.trim().toLowerCase()
-      ? ""
-      : text;
-  })();
-  const fullListingText = jobDescriptionToText(
-    selectedJob?.description,
-    true,
-  ).trim();
-  const hasFullListingText =
-    fullListingText.replace(/\s+/g, " ").length > listingText.length &&
-    fullListingText.toLowerCase() !== selectedJob?.title.trim().toLowerCase();
+  const { listingText, fullListingText, hasFullListingText } =
+    readListingTexts(selectedJob);
   // Sources hand over summaries cut mid-sentence ("...data science, A"). When
   // the full text is one click away, end the excerpt on a whole word with an
   // ellipsis instead of a dangling fragment.

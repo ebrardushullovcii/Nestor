@@ -1,5 +1,5 @@
 import type {
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   ReviewQueueItem,
 } from "@nordri/contracts";
 import {
@@ -18,7 +18,7 @@ import {
 
 const NOW = Date.parse("2026-08-15T12:00:00.000Z");
 
-function workspace(): JobFinderWorkspaceSnapshot {
+function workspace(): JobFinderRendererWorkspaceSnapshot {
   return {
     activeCampaignId: "campaign-1",
     activityControl: { paused: false, pausedAt: null, reason: null },
@@ -107,7 +107,7 @@ function workspace(): JobFinderWorkspaceSnapshot {
       rapidReviewLogs: [],
       outcomeAnalytics: null,
     },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function completedRun(counts: { found: number; new: number }) {
@@ -137,10 +137,10 @@ function completedRun(counts: { found: number; new: number }) {
 }
 
 function withJobs(
-  base: JobFinderWorkspaceSnapshot,
+  base: JobFinderRendererWorkspaceSnapshot,
   count: number,
   options: { weaker?: number } = {},
-): JobFinderWorkspaceSnapshot {
+): JobFinderRendererWorkspaceSnapshot {
   const weaker = options.weaker ?? 0;
   const ids = Array.from({ length: count + weaker }, (_u, i) => `job_${i}`);
   return {
@@ -171,7 +171,7 @@ function withJobs(
     recentDiscoveryRuns: [
       completedRun({ found: count + weaker, new: count + weaker }),
     ],
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function queueItem(
@@ -197,9 +197,9 @@ function queueItem(
 }
 
 function withShortlist(
-  base: JobFinderWorkspaceSnapshot,
+  base: JobFinderRendererWorkspaceSnapshot,
   items: readonly ReviewQueueItem[],
-): JobFinderWorkspaceSnapshot {
+): JobFinderRendererWorkspaceSnapshot {
   const ids = new Set([
     ...base.campaigns.flatMap((campaign) => campaign.jobIds),
     ...items.map((item) => item.jobId),
@@ -211,13 +211,13 @@ function withShortlist(
       jobIds: [...ids],
     })),
     reviewQueue: items,
-  } as JobFinderWorkspaceSnapshot;
+  } as JobFinderRendererWorkspaceSnapshot;
 }
 
 function withDailyPreparationRemaining(
-  base: JobFinderWorkspaceSnapshot,
+  base: JobFinderRendererWorkspaceSnapshot,
   remaining: number,
-): JobFinderWorkspaceSnapshot {
+): JobFinderRendererWorkspaceSnapshot {
   return {
     ...base,
     dashboard: {
@@ -231,11 +231,11 @@ function withDailyPreparationRemaining(
         resetsAt: "2026-08-16T00:00:00.000Z",
       },
     },
-  } as JobFinderWorkspaceSnapshot;
+  } as JobFinderRendererWorkspaceSnapshot;
 }
 
 function build(
-  ws: JobFinderWorkspaceSnapshot,
+  ws: JobFinderRendererWorkspaceSnapshot,
   overrides: Partial<BuildJobSearchHomeModelInput> = {},
 ) {
   return buildJobSearchHomeModel({
@@ -391,7 +391,7 @@ describe("buildJobSearchHomeModel · while something runs", () => {
       ],
       targetExecutions: [],
       summary: { targetsPlanned: 1, targetsCompleted: 0 },
-    } as unknown as JobFinderWorkspaceSnapshot["activeDiscoveryRun"];
+    } as unknown as JobFinderRendererWorkspaceSnapshot["activeDiscoveryRun"];
     const model = build(ws);
     expect(model.now).toHaveLength(1);
     expect(model.now[0]).toMatchObject({
@@ -471,7 +471,7 @@ describe("buildJobSearchHomeModel · while something runs", () => {
         lastActionLabel: "Filling in",
         lastUpdatedAt: "2026-08-15T11:59:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyRuns = [
       {
         id: "apply-1",
@@ -491,7 +491,7 @@ describe("buildJobSearchHomeModel · while something runs", () => {
         blockedJobs: 0,
         failedJobs: 0,
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyRuns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyRuns"];
     const model = build(ws);
     expect(model.now[0]).toMatchObject({
       title: "Applying: Employer · Job 0",
@@ -528,7 +528,7 @@ describe("buildJobSearchHomeModel · while something runs", () => {
         blockedJobs: 0,
         failedJobs: 0,
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyRuns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyRuns"];
     ws.applyJobResults = [
       {
         id: "result-0",
@@ -540,7 +540,7 @@ describe("buildJobSearchHomeModel · while something runs", () => {
         startedAt: "2026-08-15T11:58:30.000Z",
         updatedAt: "2026-08-15T11:59:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
     const model = build(ws);
     expect(model.now[0]).toMatchObject({
       title: "Waiting to apply: Employer · Job 0",
@@ -595,14 +595,14 @@ describe("buildJobSearchHomeModel · after a search", () => {
         url: "http://localhost:47950/authboard/",
         enabled: true,
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["searchPreferences"]["discovery"]["targets"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["searchPreferences"]["discovery"]["targets"];
     ws.recentDiscoveryRuns = [
       {
         ...ws.recentDiscoveryRuns[0]!,
         scope: "single_target",
         targetIds: ["target-2"],
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["recentDiscoveryRuns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["recentDiscoveryRuns"];
     const model = build(ws);
     expect(model.statusLine).toBe(
       "Last search of Sign-in board finished 2 hours ago · 10 found · 10 new.",
@@ -624,7 +624,7 @@ describe("buildJobSearchHomeModel · after a search", () => {
     const ws = workspace();
     ws.recentDiscoveryRuns = [
       completedRun({ found: 0, new: 0 }),
-    ] as unknown as JobFinderWorkspaceSnapshot["recentDiscoveryRuns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["recentDiscoveryRuns"];
     const model = build(ws);
     expect(model.next.id).toBe("nothing_found");
     expect(model.next.primary).toEqual({
@@ -645,7 +645,7 @@ describe("buildJobSearchHomeModel · after a search", () => {
         searchIntent: "frontend",
         searchFreshness: "recent",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["recentDiscoveryRuns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["recentDiscoveryRuns"];
     expect(buildInterruptedSearchRetryRequest(ws)).toEqual({
       intent: "frontend",
       freshness: "recent",
@@ -681,7 +681,7 @@ describe("buildJobSearchHomeModel · after a search", () => {
     const ws = workspace();
     ws.recentDiscoveryRuns = [
       { ...completedRun({ found: 0, new: 0 }), state: "failed" },
-    ] as unknown as JobFinderWorkspaceSnapshot["recentDiscoveryRuns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["recentDiscoveryRuns"];
     const model = build(ws);
     expect(model.next.id).toBe("search_failed");
     expect(model.next.title).toBe("Your last search failed");
@@ -695,7 +695,7 @@ describe("buildJobSearchHomeModel · after a search", () => {
         ...ws.searchPreferences.discovery.targets[0]!,
         staleReason: "connection_failed",
         lastVerifiedAt: "2026-08-15T09:00:00.000Z",
-      } as unknown as JobFinderWorkspaceSnapshot["searchPreferences"]["discovery"]["targets"][number],
+      } as unknown as JobFinderRendererWorkspaceSnapshot["searchPreferences"]["discovery"]["targets"][number],
     ];
     const model = build(ws);
     expect(model.problems).toHaveLength(1);
@@ -944,7 +944,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         lastActionLabel: "Filled in",
         lastUpdatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = [
       {
         id: "result-0",
@@ -955,7 +955,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         blockerReason: null,
         updatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
     const model = build(ws);
     expect(model.next).toMatchObject({
       id: "send",
@@ -990,7 +990,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       questionSummary: { total: 0, answered: 0 },
       lastActionLabel: "Filled in",
       lastUpdatedAt: "2026-08-15T11:00:00.000Z",
-    })) as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = ["job_0", "job_1"].map((jobId, index) => ({
       id: `result-${index}`,
       runId: "apply-1",
@@ -999,7 +999,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       state: "awaiting_review",
       blockerReason: null,
       updatedAt: "2026-08-15T11:00:00.000Z",
-    })) as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
 
     const model = build(ws, { applicationAutomationMode: "autonomous_submit" });
 
@@ -1028,7 +1028,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       questionSummary: { total: 0, answered: 0 },
       lastActionLabel: "Filled in",
       lastUpdatedAt: "2026-08-15T11:00:00.000Z",
-    })) as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = ["job_0", "job_1"].map((jobId, index) => ({
       id: `result-${index}`,
       runId: "apply-1",
@@ -1042,7 +1042,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       detail: "Nothing was sent.",
       blockerReason: null,
       updatedAt: "2026-08-15T11:00:00.000Z",
-    })) as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
     ws.userActionRequests = [
       {
         id: "action-1",
@@ -1059,7 +1059,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         createdAt: "2026-08-15T10:00:00.000Z",
         updatedAt: "2026-08-15T10:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"];
 
     const model = build(ws, { applicationAutomationMode: "autonomous_submit" });
 
@@ -1094,7 +1094,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         questionSummary: { total: 0, answered: 0 },
         lastUpdatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = [
       {
         id: "result-0",
@@ -1106,7 +1106,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         summary: "This job is no longer taking applications.",
         updatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
     expect(build(ws).next.id).not.toBe("retry");
   });
 
@@ -1131,7 +1131,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         lastActionLabel: "The prepared application page is no longer open.",
         lastUpdatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = [
       {
         id: "result-0",
@@ -1142,7 +1142,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         blockerReason: "unexpected_navigation",
         updatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
     const model = build(ws);
     // The form had been filled in; after a restart its page is gone. Home
     // used to say the attempt "stopped before the form was finished".
@@ -1188,7 +1188,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         lastActionLabel: "The prepared application page is no longer open.",
         lastUpdatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = [
       {
         id: "result-0",
@@ -1203,7 +1203,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         },
         updatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
     const model = build(ws);
     expect(model.next.id).toBe("retry");
     expect(model.next.detail).not.toContain("was filled in");
@@ -1225,7 +1225,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       questionSummary: { total: 0, answered: 0 },
       lastActionLabel: "Stopped",
       lastUpdatedAt: "2026-08-15T11:00:00.000Z",
-    })) as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = [
       {
         id: "result-0",
@@ -1247,7 +1247,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         summary: "Job Finder could not open the application page",
         updatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
 
     const model = build(ws, {
       applicationAutomationMode: "autonomous_submit",
@@ -1272,7 +1272,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       questionSummary: { total: 0, answered: 0 },
       lastActionLabel: "Stopped",
       lastUpdatedAt: "2026-08-15T11:00:00.000Z",
-    })) as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = [
       {
         id: "result-0",
@@ -1292,7 +1292,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         blockerReason: null,
         updatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
 
     const model = build(ws, {
       applicationAutomationMode: "autonomous_submit",
@@ -1353,7 +1353,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       questionSummary: { total: 0, answered: 0 },
       lastActionLabel: "Application preparation stopped.",
       lastUpdatedAt: "2026-08-15T11:00:00.000Z",
-    })) as JobFinderWorkspaceSnapshot["applicationRecords"];
+    })) as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = Array.from({ length: 4 }, (_unused, index) => ({
       id: `result-${index}`,
       runId: `apply-${index}`,
@@ -1362,7 +1362,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       state: "failed",
       blockerReason: "unexpected_navigation",
       updatedAt: "2026-08-15T11:00:00.000Z",
-    })) as JobFinderWorkspaceSnapshot["applyJobResults"];
+    })) as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
 
     const partial = build(withDailyPreparationRemaining(ws, 2));
     expect(partial.next).toMatchObject({
@@ -1408,7 +1408,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         createdAt: "2026-08-15T10:00:00.000Z",
         updatedAt: "2026-08-15T10:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"];
     const model = build(ws);
     expect(countNeedsYou(ws)).toBe(1);
     expect(model.next).toMatchObject({
@@ -1479,7 +1479,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
         lastActionLabel: "Sent",
         lastUpdatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     const model = build(ws);
     expect(model.next).toMatchObject({
       id: "caught_up",
@@ -1512,10 +1512,10 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
     });
 
   function failedApplications(
-    ws: JobFinderWorkspaceSnapshot,
+    ws: JobFinderRendererWorkspaceSnapshot,
     jobIds: readonly string[],
     result: Record<string, unknown> = {},
-  ): JobFinderWorkspaceSnapshot {
+  ): JobFinderRendererWorkspaceSnapshot {
     ws.applicationRecords = [
       ...(ws.applicationRecords ?? []),
       ...jobIds.map((jobId) => ({
@@ -1530,7 +1530,7 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
         lastActionLabel: "Stopped",
         lastUpdatedAt: "2026-08-15T11:00:00.000Z",
       })),
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = [
       ...(ws.applyJobResults ?? []),
       ...jobIds.map((jobId) => ({
@@ -1543,7 +1543,7 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
         updatedAt: "2026-08-15T11:00:00.000Z",
         ...result,
       })),
-    ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
     return ws;
   }
 
@@ -1597,7 +1597,7 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
         lastActionLabel: "Filled in",
         lastUpdatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = [
       {
         id: "result-job_0",
@@ -1608,7 +1608,7 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
         blockerReason: null,
         updatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
     failedApplications(ws, ["job_1", "job_2"]);
     const model = build(ws);
     expect(model.next.id).toBe("send");
@@ -1638,7 +1638,7 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
         createdAt: "2026-08-15T10:00:00.000Z",
         updatedAt: "2026-08-15T10:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"];
     const model = build(ws);
     expect(model.next.id).toBe("needs_you");
     expect(model.next.detail).toContain("A job source wants you to sign in");
@@ -1665,7 +1665,7 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
           },
         ],
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["recentDiscoveryRuns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["recentDiscoveryRuns"];
     const model = build(ws);
     expect(model.next).toMatchObject({
       id: "source_failed",
@@ -1706,7 +1706,7 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
           ],
         },
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["recentDiscoveryRuns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["recentDiscoveryRuns"];
     const model = build(ws);
     expect(model.next.id).toBe("look_through");
     expect(model.next.detail).toContain("You stopped the search");
@@ -1857,7 +1857,7 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
       paused: true,
       pausedAt: "2026-08-15T11:00:00.000Z",
       reason: "Paused by you.",
-    } as JobFinderWorkspaceSnapshot["activityControl"];
+    } as JobFinderRendererWorkspaceSnapshot["activityControl"];
     ws.userActionRequests = [
       {
         id: "action-1",
@@ -1874,7 +1874,7 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
         createdAt: "2026-08-15T10:00:00.000Z",
         updatedAt: "2026-08-15T10:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"];
     const model = build(ws);
     expect(model.next.id).toBe("paused");
     expect(model.next.secondary).toEqual([
@@ -1903,7 +1903,7 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
         lastActionLabel: "Filled in",
         lastUpdatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = [
       {
         id: "result-job_0",
@@ -1914,7 +1914,7 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
         blockerReason: null,
         updatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
     failedApplications(ws, ["job_1", "job_2", "job_3"]);
     const model = build(ws);
     expect(model.next.id).toBe("send");
@@ -1959,7 +1959,7 @@ describe("buildJobSearchHomeModel · planned jobs of a stopped or paused batch",
       questionSummary: { total: 0, answered: 0 },
       lastActionLabel: "",
       lastUpdatedAt: "2026-08-15T11:00:00.000Z",
-    })) as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyRuns = [
       {
         id: "apply-1",
@@ -1972,7 +1972,7 @@ describe("buildJobSearchHomeModel · planned jobs of a stopped or paused batch",
         createdAt: "2026-08-15T10:00:00.000Z",
         updatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyRuns"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyRuns"];
     ws.applyJobResults = [
       {
         id: "result-0",
@@ -1992,19 +1992,19 @@ describe("buildJobSearchHomeModel · planned jobs of a stopped or paused batch",
         startedAt: "2026-08-15T10:00:00.000Z",
         updatedAt: "2026-08-15T10:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
     ws.activityControl = paused
       ? ({
           paused: true,
           pausedAt: "2026-08-15T10:20:00.000Z",
           reason: null,
           pauseBehavior: "finish_current",
-        } as JobFinderWorkspaceSnapshot["activityControl"])
+        } as JobFinderRendererWorkspaceSnapshot["activityControl"])
       : ({
           paused: false,
           pausedAt: null,
           reason: null,
-        } as JobFinderWorkspaceSnapshot["activityControl"]);
+        } as JobFinderRendererWorkspaceSnapshot["activityControl"]);
     return ws;
   }
 
@@ -2040,7 +2040,7 @@ describe("buildJobSearchHomeModel · planned jobs of a stopped or paused batch",
       ...ws.applyJobResults[0]!,
       state: "failed",
       blockerReason: "unexpected_navigation",
-    } as JobFinderWorkspaceSnapshot["applyJobResults"][number];
+    } as JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
     const model = build(withDailyPreparationRemaining(ws, 1));
     expect(model.next).toMatchObject({
       id: "retry",
@@ -2068,8 +2068,8 @@ describe("buildJobSearchHomeModel · planned jobs of a stopped or paused batch",
 
 describe("buildJobSearchHomeModel · tracker dates", () => {
   function withTrackedApplication(
-    base: JobFinderWorkspaceSnapshot,
-  ): JobFinderWorkspaceSnapshot {
+    base: JobFinderRendererWorkspaceSnapshot,
+  ): JobFinderRendererWorkspaceSnapshot {
     return {
       ...base,
       applicationRecords: [
@@ -2107,7 +2107,7 @@ describe("buildJobSearchHomeModel · tracker dates", () => {
           },
         }),
       ],
-    } as JobFinderWorkspaceSnapshot;
+    } as JobFinderRendererWorkspaceSnapshot;
   }
 
   it.each(["search", "limit"])(
@@ -2118,7 +2118,7 @@ describe("buildJobSearchHomeModel · tracker dates", () => {
         state.activeDiscoveryRun = {
           ...state.recentDiscoveryRuns[0],
           state: "running",
-        } as JobFinderWorkspaceSnapshot["activeDiscoveryRun"];
+        } as JobFinderRendererWorkspaceSnapshot["activeDiscoveryRun"];
       }
       if (mode === "limit") {
         state.dashboard.globalDailyApplicationPreparationCapacity = {
@@ -2174,7 +2174,7 @@ describe("buildJobSearchHomeModel · tracker dates", () => {
             scope: { type: "discovery_source", targetId: "source-1" },
             summary: "Sign in",
           },
-        ] as unknown as JobFinderWorkspaceSnapshot["userActionRequests"];
+        ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"];
       const model = build(state);
       expect(model.next.id).toBe(mode);
       expect(model.next.detail).toContain("Send a thank-you note");
@@ -2239,7 +2239,7 @@ describe("buildJobSearchHomeModel · applications the person stopped or may have
         lastActionLabel: "Stopped",
         lastUpdatedAt: "2026-08-15T11:00:00.000Z",
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applicationRecords"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
     ws.applyJobResults = [
       {
         id: "result-0",
@@ -2249,7 +2249,7 @@ describe("buildJobSearchHomeModel · applications the person stopped or may have
         updatedAt: "2026-08-15T11:00:00.000Z",
         ...result,
       },
-    ] as unknown as JobFinderWorkspaceSnapshot["applyJobResults"];
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
     return ws;
   }
 

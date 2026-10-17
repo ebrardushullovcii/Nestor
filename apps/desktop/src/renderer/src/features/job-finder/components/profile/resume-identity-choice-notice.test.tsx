@@ -47,7 +47,7 @@ describe("ResumeIdentityChoiceNotice", () => {
     );
     expect(screen.queryByRole("button", { name: /instead/ })).toBeNull();
     fireEvent.click(
-      screen.getByRole("button", { name: "This resume is mine" }),
+      screen.getByRole("button", { name: "Got it" }),
     );
     expect(onUseProfileName).toHaveBeenCalledOnce();
   });

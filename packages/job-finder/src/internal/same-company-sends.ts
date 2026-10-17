@@ -23,6 +23,14 @@ export function groupCompanyConflicts(
   records: readonly ApplicationRecord[],
   jobs: readonly SavedJob[],
 ): JobFinderIntelligenceState {
+  if (state.safeguards.simultaneousApplicationConflicts.length === 0)
+    return state;
+  const recordsById = new Map(records.map((record) => [record.id, record]));
+  const recordsByJobId = new Map<string, ApplicationRecord>();
+  for (const record of records)
+    if (!recordsByJobId.has(record.jobId))
+      recordsByJobId.set(record.jobId, record);
+  const jobsById = new Map(jobs.map((job) => [job.id, job]));
   const groups = new Map<string, SimultaneousApplicationConflict>();
   const unresolved: SimultaneousApplicationConflict[] = [];
   for (const conflict of state.safeguards.simultaneousApplicationConflicts) {
@@ -32,18 +40,15 @@ export function groupCompanyConflicts(
         conflict.applicationRecordId,
         conflict.conflictingApplicationRecordId,
       ].flatMap((id) => {
-        const record = records.find((record) => record.id === id);
+        const record = recordsById.get(id);
         return record ? [record.jobId] : [];
       });
     const company =
       conflict.companyName ??
-      jobs.find((job) => job.id === ids[0])?.company ??
-      records.find((record) => record.id === conflict.applicationRecordId)
-        ?.company;
+      jobsById.get(ids[0] ?? "")?.company ??
+      recordsById.get(conflict.applicationRecordId)?.company;
     const names = ids.map(
-      (id) =>
-        jobs.find((job) => job.id === id)?.company ??
-        records.find((record) => record.jobId === id)?.company,
+      (id) => jobsById.get(id)?.company ?? recordsByJobId.get(id)?.company,
     );
     if (
       !company ||

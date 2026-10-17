@@ -453,7 +453,7 @@ describe("ProfileScreen ready-state density and save-bar footprint", () => {
     );
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Keep my profile name",
+        name: "Got it",
       }),
     );
     expect(onSaveAll).toHaveBeenCalledTimes(1);

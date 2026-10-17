@@ -98,20 +98,28 @@ function getStatusPresentation(
       explanation: "Reworded, with candidate evidence linked below.",
     };
   }
-  if (claim.status === "review" && claim.claimOrigin === "user_edited") {
+  // Only a generated line the evidence contradicts asks for a decision; a
+  // stretch, an unchecked line and the person's own edit never do.
+  if (claim.status === "confirm_needed") {
     return {
-      label: "Review your edit",
+      label: "Aggressive stretch",
       tone: "neutral" as const,
       explanation:
-        "This edit is yours, but it has not been automatically verified against saved evidence.",
+        "A deliberate stretch from Aggressive tailoring. Edit or remove it if you would rather not use it.",
+    };
+  }
+  if (claim.claimOrigin === "user_edited") {
+    return {
+      label: "Yours",
+      tone: "neutral" as const,
+      explanation: "Your own wording.",
     };
   }
   if (claim.status === "review") {
     return {
-      label: "Needs your decision",
-      tone: "critical" as const,
-      explanation:
-        "Your saved evidence does not show this generated wording. Edit it, or approve it as accurate in Tools.",
+      label: "Not checked",
+      tone: "neutral" as const,
+      explanation: "The AI has not checked this line yet.",
     };
   }
   return {
@@ -170,9 +178,6 @@ export function ResumeClaimTrustPanel(props: {
     isBlockingClaim(claim, props.draft),
   );
   const blockingCount = blocking.length;
-  const userBlockingCount = blocking.filter(
-    (claim) => claim.claimOrigin === "user_edited",
-  ).length;
   const supportedCount = assessments.filter(
     (claim) => claim.status === "exact" || claim.status === "paraphrase",
   ).length;
@@ -199,11 +204,10 @@ export function ResumeClaimTrustPanel(props: {
         </StatusBadge>
       </div>
 
-      <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+      <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
         {[
           ["Supported", supportedCount],
-          ["Generated lines to decide", blockingCount - userBlockingCount],
-          ["Your edits to decide", userBlockingCount],
+          ["Lines to decide", blockingCount],
         ].map(([label, value]) => (
           <div
             className="rounded-(--radius-field) border border-(--surface-panel-border) bg-(--surface-panel) p-3"

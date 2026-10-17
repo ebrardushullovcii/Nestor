@@ -1,4 +1,4 @@
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 
 import { isDiscoveryAlsoFoundResult } from "../screens/discovery/discovery-result-groups";
 import { countActiveSafeguardBlockers } from "./safeguards-blocker-count";
@@ -23,7 +23,7 @@ import { countWorkspaceNeedsYouItems } from "./needs-you-count";
  * whole discovery inventory is in scope, which is what the routes show too.
  */
 export function selectCampaignJobIds(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
 ): ReadonlySet<string> {
   const activeCampaign = workspace.campaigns?.find(
     (campaign) => campaign.id === workspace.activeCampaignId,
@@ -42,7 +42,7 @@ export function selectCampaignJobIds(
  * below the user's targets.
  */
 export function countDiscoveryVisibleJobs(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
   campaignJobIds: ReadonlySet<string> = selectCampaignJobIds(workspace),
 ): number {
   // Exactly the rows Find jobs lists by default: every kept job the person
@@ -58,7 +58,7 @@ export function countDiscoveryVisibleJobs(
 }
 
 export function countShortlistedJobs(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
   campaignJobIds: ReadonlySet<string> = selectCampaignJobIds(workspace),
 ): number {
   return (workspace.reviewQueue ?? []).filter((item) =>
@@ -67,7 +67,7 @@ export function countShortlistedJobs(
 }
 
 export function countApplicationRecords(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
   campaignJobIds: ReadonlySet<string> = selectCampaignJobIds(workspace),
 ): number {
   return (workspace.applicationRecords ?? []).filter((record) =>
@@ -80,27 +80,27 @@ export function countApplicationRecords(
  * something the user chose, so a single plan reports 0 and the badge hides.
  */
 export function countUserCreatedSearchPlans(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
 ): number {
   const plans = workspace.campaigns ?? [];
   return plans.length > 1 ? plans.length : 0;
 }
 
 export function countOutcomeEvents(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
 ): number {
   return (workspace.intelligence?.outcomeEvents ?? []).length;
 }
 
 export function countResumeApproaches(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
 ): number {
   return (workspace.intelligence?.resumeStrategies ?? []).length;
 }
 
 /** Inventory: what the Companies page lists. */
 export function countKnownCompanies(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
 ): number {
   return (workspace.intelligence?.companies ?? []).length;
 }
@@ -113,7 +113,7 @@ export function countKnownCompanies(
  * with the attention treatment and a noun ("2 to review").
  */
 export function countCompaniesAwaitingMergeReview(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
 ): number {
   return (workspace.intelligence?.companies ?? []).filter((company) =>
     company.mergeReviewCandidates.some(
@@ -140,7 +140,7 @@ const NO_SAFEGUARDS = {
  */
 export function countWorkspaceSafeguardBlockers(
   workspace: Pick<
-    JobFinderWorkspaceSnapshot,
+    JobFinderRendererWorkspaceSnapshot,
     | "applyRuns"
     | "applyJobResults"
     | "userActionRequests"
@@ -156,18 +156,18 @@ export function countWorkspaceSafeguardBlockers(
 }
 
 export function countSafeguardBlockers(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
 ): number {
   return countWorkspaceSafeguardBlockers(workspace);
 }
 
-export function countNeedsYou(workspace: JobFinderWorkspaceSnapshot): number {
+export function countNeedsYou(workspace: JobFinderRendererWorkspaceSnapshot): number {
   return countWorkspaceNeedsYouItems(workspace);
 }
 
 export function countUnreadCampaignNotifications(
   notifications:
-    | JobFinderWorkspaceSnapshot["campaignNotifications"]
+    | JobFinderRendererWorkspaceSnapshot["campaignNotifications"]
     | undefined,
 ): number {
   return (notifications ?? []).filter((notification) => notification.unread)

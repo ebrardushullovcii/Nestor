@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import {
   act,
   cleanup,
@@ -69,7 +69,7 @@ function createContext(
       activeCampaignId: "campaign_1",
       campaigns: [],
       hydration: { phase: "ready", deferredCollections: [] },
-    } as unknown as JobFinderWorkspaceSnapshot,
+    } as unknown as JobFinderRendererWorkspaceSnapshot,
     ...overrides,
   } as unknown as JobFinderPageContext;
 }
@@ -108,7 +108,7 @@ describe("JobFinderCampaignsRoute", () => {
         activeCampaignId: "campaign_1",
         campaigns: [{ id: "campaign_1" }, { id: "campaign_2" }],
         hydration: { phase: "ready", deferredCollections: [] },
-      } as unknown as JobFinderWorkspaceSnapshot,
+      } as unknown as JobFinderRendererWorkspaceSnapshot,
     });
     render(
       <MemoryRouter
@@ -142,7 +142,7 @@ describe("JobFinderCampaignsRoute", () => {
       activeCampaignId: "campaign_1",
       campaigns: [{ id: "campaign_1" }, { id: "campaign_2" }],
       hydration: { phase: "ready", deferredCollections: [] },
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
     const view = (revision: number) => (
       <MemoryRouter
         initialEntries={["/job-finder/campaigns?campaignId=campaign_2"]}
@@ -203,7 +203,7 @@ describe("JobFinderCampaignsRoute", () => {
             { id: "campaign_3" },
           ],
           hydration: { phase: "ready", deferredCollections: [] },
-        } as unknown as JobFinderWorkspaceSnapshot,
+        } as unknown as JobFinderRendererWorkspaceSnapshot,
       });
       return (
         <>
@@ -269,7 +269,7 @@ describe("JobFinderCampaignsRoute", () => {
         activeCampaignId: "campaign_1",
         campaigns: [{ id: "campaign_1" }, { id: "campaign_2" }],
         hydration: { phase: "ready", deferredCollections: [] },
-      } as unknown as JobFinderWorkspaceSnapshot,
+      } as unknown as JobFinderRendererWorkspaceSnapshot,
     });
     render(
       <MemoryRouter
@@ -310,7 +310,7 @@ describe("JobFinderCampaignsRoute", () => {
         activeCampaignId: "campaign_1",
         campaigns: [{ id: "campaign_1" }, { id: "campaign_2" }],
         hydration: { phase: "ready", deferredCollections: [] },
-      } as unknown as JobFinderWorkspaceSnapshot,
+      } as unknown as JobFinderRendererWorkspaceSnapshot,
     });
     function LocationProbe() {
       return <span data-testid="location">{useLocation().pathname}</span>;
@@ -351,7 +351,7 @@ describe("JobFinderCampaignsRoute", () => {
         activeCampaignId: "campaign_1",
         campaigns: [{ id: "campaign_1" }, { id: "campaign_2" }],
         hydration: { phase: "ready", deferredCollections: [] },
-      } as unknown as JobFinderWorkspaceSnapshot,
+      } as unknown as JobFinderRendererWorkspaceSnapshot,
     });
     render(
       <MemoryRouter initialEntries={[campaignPlanEditorHref("campaign_2")]}>

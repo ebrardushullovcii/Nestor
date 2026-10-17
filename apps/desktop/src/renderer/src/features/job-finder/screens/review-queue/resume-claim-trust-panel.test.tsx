@@ -83,19 +83,31 @@ describe("ResumeClaimTrustPanel", () => {
     });
   }
 
-  it("explains candidate-only evidence and distinguishes blockers from user edits", () => {
+  it("explains candidate-only evidence; only an unbacked generated line asks for a decision", () => {
     renderPanel(
       [
         buildClaim(1),
         buildClaim(2, {
           claimOrigin: "ai_generated",
-          status: "review",
+          status: "unsupported",
           evidenceRefs: [],
+          verifier: "model_fact_check_v1",
         }),
         buildClaim(3, {
           claimOrigin: "user_edited",
           status: "review",
           evidenceRefs: [],
+        }),
+        buildClaim(4, {
+          claimOrigin: "ai_generated",
+          status: "review",
+          evidenceRefs: [],
+        }),
+        buildClaim(5, {
+          claimOrigin: "ai_generated",
+          status: "confirm_needed",
+          evidenceRefs: [],
+          verifier: "model_fact_check_v1",
         }),
       ],
       true,
@@ -104,14 +116,16 @@ describe("ResumeClaimTrustPanel", () => {
     expect(container?.textContent).toContain("Candidate evidence only");
     expect(container?.textContent).toContain("1 blocking");
     expect(container?.textContent).toContain("Needs your decision");
-    expect(container?.textContent).toContain("Review your edit");
+    expect(container?.textContent).toContain("Yours");
+    expect(container?.textContent).toContain("Not checked");
+    expect(container?.textContent).toContain("Aggressive stretch");
     expect(container?.textContent).toContain(
       "Save your edits to refresh claim evidence",
     );
-    expect(container?.querySelectorAll("details")).toHaveLength(3);
+    expect(container?.querySelectorAll("details")).toHaveLength(5);
   });
 
-  it("counts the person's own unsupported edit as theirs and drops it once approved", () => {
+  it("never counts the person's own edit as a decision, and drops an approved generated line", () => {
     const edit = buildClaim(1, {
       claimOrigin: "user_edited",
       status: "unsupported",
@@ -119,13 +133,22 @@ describe("ResumeClaimTrustPanel", () => {
       verifier: "deterministic_candidate_evidence_v2",
     });
     renderPanel([edit]);
+    expect(container?.textContent).toContain("Nothing blocking");
+    expect(container?.textContent).toContain("Lines to decide0");
+
+    const generated = {
+      ...edit,
+      claimOrigin: "ai_generated",
+      verifier: "model_fact_check_v1",
+    };
+    act(() => root?.unmount());
+    container?.remove();
+    renderPanel([generated]);
     expect(container?.textContent).toContain("1 blocking");
-    expect(container?.textContent).toContain("Your edits to decide1");
-    expect(container?.textContent).toContain("Generated lines to decide0");
 
     act(() => root?.unmount());
     container?.remove();
-    renderPanel([edit], false, [
+    renderPanel([generated], false, [
       {
         id: "claim_confirmation_1",
         draftId: "draft_1",
@@ -133,7 +156,7 @@ describe("ResumeClaimTrustPanel", () => {
         sectionId: "section_experience",
         entryId: "entry_1",
         bulletId: "bullet_1",
-        confirmedClaimContentHash: edit.contentHash,
+        confirmedClaimContentHash: generated.contentHash,
         ownershipStatement: resumeClaimOwnershipStatement,
         confirmedAt: assessedAt,
       },
@@ -151,7 +174,9 @@ describe("ResumeClaimTrustPanel", () => {
       }),
     ]);
 
-    expect(container?.textContent).toContain("Your wording, kept word for word");
+    expect(container?.textContent).toContain(
+      "Your wording, kept word for word",
+    );
     // The reworded line is still credited to the generator.
     expect(container?.textContent).toContain("AI generated");
   });

@@ -160,8 +160,7 @@ describe("createJobFinderWorkspaceService", () => {
                     recordId: null,
                   },
                   label: "LinkedIn URL",
-                  value:
-                    "https://www.linkedin.com/in/robin-example-example0/",
+                  value: "https://www.linkedin.com/in/robin-example-example0/",
                   normalizedValue: null,
                   valuePreview:
                     "https://www.linkedin.com/in/robin-example-example0/",
@@ -222,8 +221,7 @@ describe("createJobFinderWorkspaceService", () => {
                     recordId: null,
                   },
                   label: "LinkedIn URL",
-                  value:
-                    "https://www.linkedin.com/in/robin-example-example0/",
+                  value: "https://www.linkedin.com/in/robin-example-example0/",
                   normalizedValue: null,
                   valuePreview:
                     "https://www.linkedin.com/in/robin-example-example0/",
@@ -425,7 +423,9 @@ describe("createJobFinderWorkspaceService", () => {
     expect(snapshot.latestResumeImportReviewCandidates).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          target: expect.objectContaining({ section: "proof_point" }),
+          target: expect.objectContaining({
+            section: "proof_point",
+          }) as unknown,
           resolution: "needs_review",
         }),
       ]),

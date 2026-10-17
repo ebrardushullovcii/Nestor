@@ -32,10 +32,10 @@ import type { JobFinderPageContext } from "./job-finder-page-context";
 import type {
   ApplicationCrmSettings,
   CampaignRuleFunnelProjection,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   JobSearchCampaign,
   RapidReviewDecisionLog,
-  SavedJob,
+  JobListRow,
   SaveCampaignRuleInput,
   SaveJobSearchCampaignInput,
   SetJobFinderActivityControlInput,
@@ -176,9 +176,11 @@ function useJobFinderPageContext() {
   return useOutletContext<JobFinderPageContext>();
 }
 
-export function selectRapidReviewScope(workspace: JobFinderWorkspaceSnapshot): {
+export function selectRapidReviewScope(
+  workspace: JobFinderRendererWorkspaceSnapshot,
+): {
   campaign: JobSearchCampaign | null;
-  jobs: readonly SavedJob[];
+  jobs: readonly JobListRow[];
   log: RapidReviewDecisionLog | null;
 } {
   const campaign =
@@ -209,7 +211,7 @@ type CampaignJobIndex = ReadonlyArray<{
  * targets (5,000 discovered jobs / 1,001 application records).
  */
 function indexCampaignJobIds(
-  campaigns: JobFinderWorkspaceSnapshot["campaigns"],
+  campaigns: JobFinderRendererWorkspaceSnapshot["campaigns"],
 ): CampaignJobIndex {
   return campaigns.map((campaign) => ({
     id: campaign.id,
@@ -240,7 +242,7 @@ function onlyValue(values: ReadonlySet<string>): string | null {
 }
 
 export function selectCampaignApplicationsScope(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
   allPlans = false,
   campaignId = workspace.activeCampaignId,
 ) {
@@ -279,7 +281,7 @@ export function selectCampaignApplicationsScope(
   );
   const resultsByApplicationRecordId = new Map<
     string,
-    JobFinderWorkspaceSnapshot["applyJobResults"]
+    JobFinderRendererWorkspaceSnapshot["applyJobResults"]
   >();
   for (const result of workspace.applyJobResults) {
     if (!result.applicationRecordId) continue;
@@ -354,7 +356,7 @@ export function selectCampaignApplicationsScope(
 }
 
 function campaignForApplicationRecordLink(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
   recordId: string,
 ): JobSearchCampaign | null {
   const record = workspace.applicationRecords.find(
@@ -446,10 +448,10 @@ export function WorkspaceStateScreen(props: {
 }
 
 type JobFinderDeferredCollection =
-  JobFinderWorkspaceSnapshot["hydration"]["deferredCollections"][number];
+  JobFinderRendererWorkspaceSnapshot["hydration"]["deferredCollections"][number];
 
 export function isJobFinderHydratingCollections(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
   collections: readonly JobFinderDeferredCollection[],
 ): boolean {
   return (
@@ -468,7 +470,7 @@ export function isJobFinderHydratingCollections(
 export function JobFinderHydrationGate(props: {
   children: ReactNode;
   collections: readonly JobFinderDeferredCollection[];
-  workspace: JobFinderWorkspaceSnapshot;
+  workspace: JobFinderRendererWorkspaceSnapshot;
 }) {
   const isHydrating = isJobFinderHydratingCollections(
     props.workspace,
@@ -533,6 +535,8 @@ export function JobFinderCompaniesRoute() {
 export function JobFinderCompanyDetailRoute() {
   const context = useJobFinderPageContext();
   const { companyId } = useParams<{ companyId: string }>();
+  const [searchParams] = useSearchParams();
+  const navigationContext = readJobFinderNavigationContext(searchParams);
 
   const company =
     context.workspace.intelligence.companies.find(
@@ -559,6 +563,8 @@ export function JobFinderCompanyDetailRoute() {
         />
       ) : (
         <CompanyDetailScreen
+          selectedJobId={navigationContext.jobId}
+          selectedApplicationRecordId={navigationContext.applicationRecordId}
           actionMessage={context.actionState.message}
           applicationRecords={context.workspace.applicationRecords}
           companies={context.workspace.intelligence.companies}
@@ -1147,13 +1153,19 @@ export function JobFinderDiscoveryRoute() {
   const activeCampaign = context.workspace.campaigns.find(
     (campaign) => campaign.id === context.workspace.activeCampaignId,
   );
-  const campaignJobIds = new Set(activeCampaign?.jobIds ?? []);
-  const jobs = context.workspace.discoveryJobs.filter((job) =>
-    campaignJobIds.has(job.id),
-  );
-  const dismissedJobs = context.workspace.dismissedDiscoveryJobs.filter((job) =>
-    campaignJobIds.has(job.id),
-  );
+  // A search re-renders this route several times a second; a new list on
+  // every render made the results re-filter and re-sort every job each time.
+  const activeCampaignJobIds = activeCampaign?.jobIds;
+  const { discoveryJobs, dismissedDiscoveryJobs } = context.workspace;
+  const { jobs, dismissedJobs } = useMemo(() => {
+    const campaignJobIds = new Set(activeCampaignJobIds ?? []);
+    return {
+      jobs: discoveryJobs.filter((job) => campaignJobIds.has(job.id)),
+      dismissedJobs: dismissedDiscoveryJobs.filter((job) =>
+        campaignJobIds.has(job.id),
+      ),
+    };
+  }, [activeCampaignJobIds, discoveryJobs, dismissedDiscoveryJobs]);
   const requestedJob = navigationContext.jobId
     ? (jobs.find((job) => job.id === navigationContext.jobId) ?? null)
     : null;
@@ -1325,6 +1337,7 @@ export function JobFinderDiscoveryRoute() {
         actionState={context.actionState}
         activityPaused={context.workspace.activityControl?.paused ?? false}
         activeRun={context.workspace.activeDiscoveryRun}
+        fitJudgmentProgress={context.workspace.fitJudgmentProgress ?? null}
         applicationRecords={context.workspace.applicationRecords}
         reviewQueue={context.workspace.reviewQueue}
         campaigns={context.workspace.campaigns}
@@ -1402,7 +1415,14 @@ export function JobFinderDiscoveryRoute() {
           void window.nordri.browser.command({ type: "open", url });
         }}
         onAssessJobListing={context.onAssessJobListing}
+        {...(context.onJudgeUnjudgedJobs
+          ? { onJudgeUnjudgedJobs: context.onJudgeUnjudgedJobs }
+          : {})}
         onQueueJob={context.onQueueJob}
+        {...(context.onQueueJobs ? { onQueueJobs: context.onQueueJobs } : {})}
+        {...(context.onDismissJobs
+          ? { onDismissJobs: context.onDismissJobs }
+          : {})}
         onRunAgentDiscovery={context.onRunAgentDiscovery}
         // Parsed through the schema so a workspace that never saved AI
         // behavior still shows the default the next search will actually use.
@@ -1652,6 +1672,10 @@ function JobFinderReviewQueueRouteContent() {
         onClaimResumeIdentity={context.onClaimResumeIdentity}
         onKeepResumeIdentity={context.onKeepResumeIdentity}
         onRemoveReviewJob={context.onRemoveReviewJob}
+        onReadJobListing={context.onAssessJobListing}
+        {...(context.onRemoveReviewJobs
+          ? { onRemoveReviewJobs: context.onRemoveReviewJobs }
+          : {})}
         onSetJobResumeApplicationMode={context.onSetJobResumeApplicationMode}
         onSelectItem={handleSelectItem}
         originalResume={context.workspace.profile.baseResume}
@@ -1828,7 +1852,7 @@ export async function runJobFinderApplicationBrowserHandoff(input: {
   onPerformUserAction: (
     command: UserActionCommandInput,
   ) => void | Promise<boolean>;
-  requests: JobFinderWorkspaceSnapshot["userActionRequests"];
+  requests: JobFinderRendererWorkspaceSnapshot["userActionRequests"];
   target: FinishInBrowserInput;
 }): Promise<FinishInBrowserOutcome> {
   const request = (input.requests ?? []).find(
@@ -1907,7 +1931,7 @@ export async function runJobFinderApplicationBrowserHandoff(input: {
  * back to the job match, which is all such rows can be matched on.
  */
 function findPendingBrowserStepRequest(
-  requests: JobFinderWorkspaceSnapshot["userActionRequests"],
+  requests: JobFinderRendererWorkspaceSnapshot["userActionRequests"],
   selectedRecord: { id: string; jobId: string } | null,
 ) {
   if (!selectedRecord) {
@@ -2575,6 +2599,7 @@ export function selectJobFinderActionsScope(context: JobFinderPageContext) {
 
 export function JobFinderActionsRoute() {
   const context = useJobFinderPageContext();
+  const [searchParams] = useSearchParams();
   const scope = useMemo(
     () => selectJobFinderActionsScope(context),
     // Only the fields selectJobFinderActionsScope reads: the outlet context
@@ -2595,6 +2620,11 @@ export function JobFinderActionsRoute() {
       workspace={context.workspace}
     >
       <ActionsScreen
+        selectedApplicationRecordId={
+          readJobFinderNavigationContext(searchParams).applicationRecordId
+        }
+        selectedRequestId={searchParams.get("requestId")}
+        selectedDecisionId={searchParams.get("decisionId")}
         safeguardPauses={projectPlanSafeguardPauses(
           context.workspace.intelligence?.safeguards,
           context.workspace.campaigns,
@@ -2640,7 +2670,7 @@ export function JobFinderActionsRoute() {
 }
 
 export function selectOutcomeAnalyticsScope(
-  workspace: JobFinderWorkspaceSnapshot,
+  workspace: JobFinderRendererWorkspaceSnapshot,
 ) {
   const intelligence = workspace.intelligence;
   return {

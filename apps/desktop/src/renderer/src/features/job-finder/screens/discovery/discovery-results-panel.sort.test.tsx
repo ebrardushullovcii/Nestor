@@ -106,6 +106,38 @@ afterEach(() => {
 });
 
 describe("DiscoveryResultsPanel result sorting", () => {
+  it("keeps both assessment controls in the toolbar on every results page", () => {
+    const onJudge = vi.fn(() => Promise.resolve());
+    const onAssess = vi.fn(() => Promise.resolve());
+    render(
+      <DiscoveryResultsPanel
+        browserSession={browserSession}
+        hasCompletedSearch
+        jobs={createJobs()}
+        selectedJob={null}
+        onSelectJob={vi.fn()}
+        onJudgeUnjudgedJobs={onJudge}
+        onAssessJobListing={onAssess}
+      />,
+    );
+    const all = screen.getByRole("button", { name: "Judge fit for all 60" });
+    const next = screen.getByRole("button", {
+      name: "Assess next 20 listings",
+    });
+    expect(all.closest("header")).toBe(next.closest("header"));
+    expect(all.closest("header")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(
+      screen
+        .getByRole("button", { name: "Judge fit for all 60" })
+        .closest("header"),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: "Assess next 20 listings" })
+        .closest("header"),
+    ).not.toBeNull();
+  });
   it("shows a compact source line with the full configured name available to assistive technology", () => {
     const source = JobDiscoveryTargetSchema.parse({
       id: "target_results_source",
@@ -233,9 +265,7 @@ describe("DiscoveryResultsPanel result sorting", () => {
   it("orders recency newest-first using available listing dates", () => {
     renderResults(createJobs(12));
 
-    expect(
-      screen.getByRole("option", { name: "Newest first" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Newest first" })).toBeTruthy();
 
     fireEvent.change(screen.getByRole("combobox", { name: "Sort results" }), {
       target: { value: "recent" },

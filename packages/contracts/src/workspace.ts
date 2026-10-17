@@ -22,6 +22,7 @@ import { ApplicationCrmSettingsSchema } from "./application-crm";
 import {
   ApplyJobResultSchema,
   ApplyJobResultSummarySchema,
+  ApplyJobResultListRowSchema,
   ApplyRunSchema,
   ApplyRunSummarySchema,
   ApplySubmitApprovalSchema,
@@ -49,6 +50,7 @@ import {
   ApplicationRecordSchema,
   DiscoveryLedgerEntrySchema,
   DiscoveryJobViewSchema,
+  JobListRowSchema,
   DiscoveryFeedbackReasonSchema,
   DiscoveryAdapterSessionStateSchema,
   DiscoveryRunRecordSchema,
@@ -57,6 +59,8 @@ import {
   ReviewQueueItemSchema,
   SavedJobSchema,
   TailoredAssetSchema,
+  TailoredAssetSummarySchema,
+  ApplicationAttemptListRowSchema,
 } from "./discovery";
 import { CandidateProfileSchema } from "./profile";
 import {
@@ -1404,7 +1408,18 @@ export type JobFinderWorkspaceHydration = z.infer<
   typeof JobFinderWorkspaceHydrationSchema
 >;
 
-export const JobFinderWorkspaceSnapshotSchema = z.object({
+export const FitJudgmentProgressSchema = z.object({
+  planId: NonEmptyStringSchema.nullable(),
+  phase: z.enum(["judging", "saving", "completed", "failed"]),
+  judged: z.number().int().nonnegative(),
+  processed: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  startedAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema,
+});
+export type FitJudgmentProgress = z.infer<typeof FitJudgmentProgressSchema>;
+
+const WorkspaceSnapshotCoreSchema = z.object({
   module: z.literal("job-finder"),
   generatedAt: IsoDateTimeSchema,
   hydration: JobFinderWorkspaceHydrationSchema.default({}),
@@ -1458,10 +1473,41 @@ export const JobFinderWorkspaceSnapshotSchema = z.object({
   campaignNotifications: z.array(CampaignNotificationSchema).default([]),
   dashboard: JobFinderDashboardSummarySchema,
   activityControl: JobFinderActivityControlSchema.default({}),
-  intelligence: JobFinderIntelligenceStateSchema.default({}),
 });
+const SnapshotIntelligenceSchema = JobFinderIntelligenceStateSchema.default({});
+const WorkspaceSnapshotBaseSchema: z.ZodObject<
+  typeof WorkspaceSnapshotCoreSchema.shape & {
+    intelligence: typeof SnapshotIntelligenceSchema;
+  }
+> = WorkspaceSnapshotCoreSchema.extend({
+  intelligence: SnapshotIntelligenceSchema,
+});
+const OptionalFitJudgmentProgressSchema =
+  FitJudgmentProgressSchema.nullable().optional();
+export const JobFinderWorkspaceSnapshotSchema: z.ZodObject<
+  typeof WorkspaceSnapshotBaseSchema.shape & {
+    fitJudgmentProgress: typeof OptionalFitJudgmentProgressSchema;
+  }
+> = WorkspaceSnapshotBaseSchema.extend({
+  fitJudgmentProgress: OptionalFitJudgmentProgressSchema,
+});
+
 export type JobFinderWorkspaceSnapshot = z.infer<
   typeof JobFinderWorkspaceSnapshotSchema
+>;
+
+/** The IPC workspace carries every job identity, with detail evidence kept in main. */
+export const JobFinderRendererWorkspaceSnapshotSchema =
+  JobFinderWorkspaceSnapshotSchema.extend({
+    tailoredAssets: z.array(TailoredAssetSummarySchema).default([]),
+    applyJobResults: z.array(ApplyJobResultListRowSchema).default([]),
+    applicationAttempts: z.array(ApplicationAttemptListRowSchema).default([]),
+    discoveryJobs: z.array(JobListRowSchema).default([]),
+    dismissedDiscoveryJobs: z.array(JobListRowSchema).default([]),
+    companyJobs: z.array(JobListRowSchema).default([]),
+  });
+export type JobFinderRendererWorkspaceSnapshot = z.infer<
+  typeof JobFinderRendererWorkspaceSnapshotSchema
 >;
 
 export const JobFinderAgentDiscoveryOutcomeSchema = z.enum([
@@ -1481,11 +1527,11 @@ export type JobFinderAgentDiscoveryOutcome = z.infer<
  */
 export type JobFinderAgentDiscoveryResult = {
   outcome: JobFinderAgentDiscoveryOutcome;
-  snapshot: JobFinderWorkspaceSnapshot;
+  snapshot: JobFinderRendererWorkspaceSnapshot;
 };
 type JobFinderAgentDiscoveryResultInput = {
   outcome: z.input<typeof JobFinderAgentDiscoveryOutcomeSchema>;
-  snapshot: z.input<typeof JobFinderWorkspaceSnapshotSchema>;
+  snapshot: z.input<typeof JobFinderRendererWorkspaceSnapshotSchema>;
 };
 export const JobFinderAgentDiscoveryResultSchema: z.ZodType<
   JobFinderAgentDiscoveryResult,
@@ -1494,7 +1540,7 @@ export const JobFinderAgentDiscoveryResultSchema: z.ZodType<
 > = z
   .object({
     outcome: JobFinderAgentDiscoveryOutcomeSchema,
-    snapshot: JobFinderWorkspaceSnapshotSchema,
+    snapshot: JobFinderRendererWorkspaceSnapshotSchema,
   })
   .strict();
 
@@ -1511,12 +1557,12 @@ export const JobFinderAgentDiscoveryResultSchema: z.ZodType<
 export type JobFinderResumePdfExportResult = {
   outcome: "saved" | "cancelled";
   outputPath: string | null;
-  snapshot: JobFinderWorkspaceSnapshot;
+  snapshot: JobFinderRendererWorkspaceSnapshot;
 };
 type JobFinderResumePdfExportResultInput = {
   outcome: "saved" | "cancelled";
   outputPath?: string | null | undefined;
-  snapshot: z.input<typeof JobFinderWorkspaceSnapshotSchema>;
+  snapshot: z.input<typeof JobFinderRendererWorkspaceSnapshotSchema>;
 };
 export const JobFinderResumePdfExportResultSchema: z.ZodType<
   JobFinderResumePdfExportResult,
@@ -1526,7 +1572,7 @@ export const JobFinderResumePdfExportResultSchema: z.ZodType<
   .object({
     outcome: z.enum(["saved", "cancelled"]),
     outputPath: NonEmptyStringSchema.nullable().default(null),
-    snapshot: JobFinderWorkspaceSnapshotSchema,
+    snapshot: JobFinderRendererWorkspaceSnapshotSchema,
   })
   .strict();
 
@@ -1546,6 +1592,12 @@ export const JobFinderWorkspaceEntityMutationSchema = z.discriminatedUnion(
       .object({
         type: z.literal("queue_job_for_review"),
         jobId: NonEmptyStringSchema,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("queue_jobs_for_review"),
+        jobIds: z.array(NonEmptyStringSchema).min(1).max(10_000),
       })
       .strict(),
     z
@@ -1575,6 +1627,19 @@ export const JobFinderWorkspaceEntityMutationSchema = z.discriminatedUnion(
       .object({
         type: z.literal("restore_dismissed_discovery_job"),
         jobId: NonEmptyStringSchema,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("remove_jobs_from_review"),
+        jobIds: z.array(NonEmptyStringSchema).min(1).max(10_000),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("dismiss_discovery_jobs"),
+        jobIds: z.array(NonEmptyStringSchema).min(1).max(10_000),
+        reasons: z.array(DiscoveryFeedbackReasonSchema).max(9),
       })
       .strict(),
   ],
@@ -1611,41 +1676,70 @@ const WorkspaceDeltaRemovalIdsSchema = z
   .array(NonEmptyStringSchema)
   .default([]);
 
+/** Whole top-level workspace fields a delta replaces; typed by the snapshot. */
+const JobFinderWorkspaceDeltaReplacedSchema =
+  JobFinderRendererWorkspaceSnapshotSchema.partial() as unknown as z.ZodType<
+    Partial<JobFinderRendererWorkspaceSnapshot>,
+    z.ZodTypeDef,
+    unknown
+  >;
+
 export const JobFinderWorkspaceDeltaSchema = z
   .object({
     baseRevision: WorkspaceRevisionSchema,
     currentRevision: WorkspaceRevisionSchema,
     generatedAt: IsoDateTimeSchema,
     discoveryRunState: DiscoveryRunStateSchema,
+    fitJudgmentProgress: FitJudgmentProgressSchema.nullable().optional(),
     activeDiscoveryRun: DiscoveryRunRecordSchema.nullable(),
-    discoverySessions: z.array(DiscoveryAdapterSessionStateSchema).default([]),
-    sourceAccessPrompts: z.array(SourceAccessPromptSchema).default([]),
-    latestResumeImportRun: ResumeImportRunSchema.nullable(),
-    campaigns: z.array(JobSearchCampaignSchema).min(1),
+    /**
+     * When set, `activeDiscoveryRun.activity` holds only the events after the
+     * first this-many, which the receiver already has for the same run. A
+     * long search's history only grows, so each delta carries what is new.
+     */
+    activeDiscoveryRunActivityFrom: z
+      .number()
+      .int()
+      .nonnegative()
+      .nullable()
+      .default(null),
+    // The fields below are sent only when they changed; an absent field
+    // keeps what the receiver holds. Plan state alone is hundreds of KB with
+    // a large search, and resending it on every refresh dominated the delta.
+    discoverySessions: z.array(DiscoveryAdapterSessionStateSchema).optional(),
+    sourceAccessPrompts: z.array(SourceAccessPromptSchema).optional(),
+    latestResumeImportRun: ResumeImportRunSchema.nullable().optional(),
+    campaigns: z.array(JobSearchCampaignSchema).min(1).optional(),
     activeCampaignId: NonEmptyStringSchema,
-    campaignNotifications: z.array(CampaignNotificationSchema).default([]),
-    dashboard: JobFinderDashboardSummarySchema,
-    activityControl: JobFinderActivityControlSchema,
-    intelligence: JobFinderIntelligenceStateSchema,
+    campaignNotifications: z.array(CampaignNotificationSchema).optional(),
+    dashboard: JobFinderDashboardSummarySchema.optional(),
+    activityControl: JobFinderActivityControlSchema.optional(),
+    intelligence: JobFinderIntelligenceStateSchema.optional(),
+    /**
+     * Other top-level workspace fields that changed (the profile, resumes,
+     * settings and so on), each replaced whole. Without it any such change
+     * made the sender resend the complete workspace.
+     */
+    replaced: JobFinderWorkspaceDeltaReplacedSchema.optional(),
     selectedDiscoveryJobId: NonEmptyStringSchema.nullable(),
     selectedReviewJobId: NonEmptyStringSchema.nullable(),
     selectedApplyRunId: NonEmptyStringSchema.nullable(),
     selectedApplicationRecordId: NonEmptyStringSchema.nullable(),
     discoveryJobs: z
       .object({
-        upserts: z.array(DiscoveryJobViewSchema).default([]),
+        upserts: z.array(JobListRowSchema).default([]),
         removedIds: WorkspaceDeltaRemovalIdsSchema,
       })
       .strict(),
     dismissedDiscoveryJobs: z
       .object({
-        upserts: z.array(DiscoveryJobViewSchema).default([]),
+        upserts: z.array(JobListRowSchema).default([]),
         removedIds: WorkspaceDeltaRemovalIdsSchema,
       })
       .strict(),
     companyJobs: z
       .object({
-        upserts: z.array(DiscoveryJobViewSchema).default([]),
+        upserts: z.array(JobListRowSchema).default([]),
         removedIds: WorkspaceDeltaRemovalIdsSchema,
       })
       .strict()
@@ -1670,7 +1764,7 @@ export const JobFinderWorkspaceDeltaSchema = z
       .strict(),
     applyJobResults: z
       .object({
-        upserts: z.array(ApplyJobResultSummarySchema).default([]),
+        upserts: z.array(ApplyJobResultListRowSchema).default([]),
         removedIds: WorkspaceDeltaRemovalIdsSchema,
       })
       .strict(),
@@ -1682,7 +1776,7 @@ export const JobFinderWorkspaceDeltaSchema = z
       .strict(),
     applicationAttempts: z
       .object({
-        upserts: z.array(ApplicationAttemptSchema).default([]),
+        upserts: z.array(ApplicationAttemptListRowSchema).default([]),
         removedIds: WorkspaceDeltaRemovalIdsSchema,
       })
       .strict(),
@@ -1701,11 +1795,11 @@ export const JobFinderWorkspaceDeltaSchema = z
   })
   .strict()
   .superRefine((delta, context) => {
-    if (delta.currentRevision !== delta.baseRevision + 1) {
+    if (delta.currentRevision <= delta.baseRevision) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["currentRevision"],
-        message: "Workspace deltas must advance exactly one revision.",
+        message: "Workspace deltas must advance beyond their base revision.",
       });
     }
   });
@@ -1731,7 +1825,7 @@ type JobFinderWorkspaceSyncResultValue =
       kind: "snapshot";
       currentRevision: WorkspaceRevision;
       reason: "initial" | "stale_base" | "revision_gap" | "unsupported_change";
-      snapshot: JobFinderWorkspaceSnapshot;
+      snapshot: JobFinderRendererWorkspaceSnapshot;
     };
 
 export const JobFinderWorkspaceSyncResultSchema = z.discriminatedUnion("kind", [
@@ -1751,7 +1845,7 @@ export const JobFinderWorkspaceSyncResultSchema = z.discriminatedUnion("kind", [
         "revision_gap",
         "unsupported_change",
       ]),
-      snapshot: JobFinderWorkspaceSnapshotSchema,
+      snapshot: JobFinderRendererWorkspaceSnapshotSchema,
     })
     .strict(),
 ]) as z.ZodType<JobFinderWorkspaceSyncResultValue>;
@@ -1929,4 +2023,11 @@ export interface ToolCall {
     name: string;
     arguments: string;
   };
+}
+
+/** Private model state retained only across turns on its originating route. */
+export interface ModelContinuation {
+  kind: "reasoning_content";
+  route: string;
+  text: string;
 }

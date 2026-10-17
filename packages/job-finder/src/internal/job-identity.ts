@@ -524,6 +524,65 @@ function intersectValues<T>(
   return intersection;
 }
 
+/** The inputs `buildJobIdentityAliases` reads, copied so a later change shows. */
+type AliasBasis = readonly (string | boolean | null | undefined)[];
+
+function readAliasBasis(input: JobIdentityInput): AliasBasis {
+  return [
+    input.source,
+    input.sourceJobId,
+    input.canonicalUrl,
+    input.applicationUrl,
+    input.providerKey,
+    input.providerBoardToken,
+    input.providerIdentifier,
+    input.title,
+    input.company,
+    input.location,
+    input.description,
+    input.postedAt,
+    input.postedAtText,
+    input.matchAcrossSources,
+    ...(input.alternateListingUrls ?? []),
+  ];
+}
+
+function sameAliasBasis(left: AliasBasis, right: AliasBasis): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+/**
+ * Aliases already built for an indexed value. A search builds several
+ * indexes over every saved job at each checkpoint, and normalizing each
+ * job's whole description every time took seconds at a few thousand jobs.
+ * Entries go with their values, and a value whose identity fields changed
+ * gets its aliases built again.
+ */
+const indexedAliasCache = new WeakMap<
+  object,
+  { basis: AliasBasis; aliases: readonly JobIdentityAlias[] }[]
+>();
+
+function readIndexedAliases(
+  value: object,
+  input: JobIdentityInput,
+): readonly JobIdentityAlias[] {
+  const basis = readAliasBasis(input);
+  const entries = indexedAliasCache.get(value);
+  const cached = entries?.find((entry) => sameAliasBasis(entry.basis, basis));
+  if (cached) return cached.aliases;
+  const aliases = buildJobIdentityAliases(input);
+  // One value is indexed with and without cross-source matching.
+  indexedAliasCache.set(value, [
+    { basis, aliases },
+    ...(entries ?? []).slice(0, 1),
+  ]);
+  return aliases;
+}
+
 export function createJobIdentityIndex<T extends object>(
   values: readonly T[],
   selectIdentity: (value: T) => JobIdentityInput,
@@ -532,7 +591,7 @@ export function createJobIdentityIndex<T extends object>(
   const aliasesByValue = new Map<T, readonly JobIdentityAlias[]>();
 
   const add = (value: T): void => {
-    const aliases = buildJobIdentityAliases(selectIdentity(value));
+    const aliases = readIndexedAliases(value, selectIdentity(value));
     aliasesByValue.set(value, aliases);
     for (const alias of aliases) {
       const matches = valuesByAlias.get(alias.key);

@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import {
   JobFinderHydrationGate,
   WorkspaceStateScreen,
@@ -10,13 +10,13 @@ import {
 
 function workspace(
   phase: "bootstrap" | "complete",
-): JobFinderWorkspaceSnapshot {
+): JobFinderRendererWorkspaceSnapshot {
   return {
     hydration: {
       phase,
       deferredCollections: phase === "bootstrap" ? ["discovery_jobs"] : [],
     },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 afterEach(() => {

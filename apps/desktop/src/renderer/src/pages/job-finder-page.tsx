@@ -54,10 +54,15 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
+  createContext,
+  memo,
   Suspense,
+  useCallback,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -70,6 +75,7 @@ import { WorkspaceStateScreen } from "./job-finder-page-routes";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
 import { JobFinderUnsavedChangesDialog } from "./job-finder-unsaved-changes-dialog";
 import { JobFinderWindowCloseGuard } from "./job-finder-window-close-guard";
+import type { JobFinderPageContext } from "./job-finder-page-context";
 import {
   type ApplyCopilotVisualCheckpointRequest,
   useJobFinderPageController,
@@ -604,9 +610,7 @@ function JobFinderOpeningShell() {
                   className="h-full w-11 rounded-none border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:bg-(--surface-panel-raised) hover:text-foreground"
                   disabled={!windowControlsState.isMinimizable}
                   onClick={() => {
-                    void runWindowAction(() =>
-                      window.nordri.window.minimize(),
-                    );
+                    void runWindowAction(() => window.nordri.window.minimize());
                   }}
                   size="icon-xs"
                   type="button"
@@ -742,7 +746,9 @@ function JobFinderOpeningShell() {
             style={noDragRegionStyle}
           >
             {!isSidebarCollapsed ? (
-              <span className="job-finder-sidebar-heading">Your job search</span>
+              <span className="job-finder-sidebar-heading">
+                Your job search
+              </span>
             ) : null}
             {/* The rail's collapse control is owned by the loaded shell; the
                 opening frame paints the same 36px box in the same place so
@@ -1129,6 +1135,35 @@ export function ApplyCopilotVisualCheckpointDialog(props: {
   );
 }
 
+const MemoizedJobFinderShell = memo(JobFinderShell);
+const MemoizedSourceCheckQueueRunner = memo(SourceCheckQueueRunner);
+const JobFinderPageRouteContext = createContext<JobFinderPageContext | null>(
+  null,
+);
+
+function JobFinderPageOutlet() {
+  const context = useContext(JobFinderPageRouteContext);
+  const location = useLocation();
+
+  return (
+    <Suspense
+      fallback={
+        <RouteSkeleton
+          panes={getRouteSkeletonPanes(location.pathname)}
+          title={getOpeningRouteLabel(location.pathname)}
+        />
+      }
+    >
+      <Outlet context={context} />
+      <JobFinderRouteReadyMarker />
+    </Suspense>
+  );
+}
+
+// Outlet reads its context independently. Updating the inspected row no longer
+// sends a new children prop through the shell and its workspace-wide summaries.
+const jobFinderPageOutlet = <JobFinderPageOutlet />;
+
 export function JobFinderPage() {
   const location = useLocation();
   const shellMarkedRef = useRef(false);
@@ -1152,7 +1187,69 @@ export function JobFinderPage() {
     workspaceState,
   } = useJobFinderPageController();
 
-  const routeContext = context;
+  const latestShellState = useRef({ context, workspace });
+  useLayoutEffect(() => {
+    latestShellState.current = { context, workspace };
+  }, [context, workspace]);
+  const discoveryPendingScopes = useMemo(
+    () => [
+      jobFinderPendingActions.discoveryAll(),
+      ...(workspace?.searchPreferences.discovery.targets ?? []).map((target) =>
+        jobFinderPendingActions.discoveryTarget(target.id),
+      ),
+    ],
+    [workspace?.searchPreferences.discovery.targets],
+  );
+  const isSourceDebugPending = useCallback(
+    (targetId: string) =>
+      latestShellState.current.context?.isPending(
+        jobFinderPendingActions.sourceDebug(targetId),
+      ) ?? false,
+    [],
+  );
+  const onRunSourceDebug = useCallback<
+    JobFinderPageContext["onRunSourceDebug"]
+  >(
+    (...args) => latestShellState.current.context?.onRunSourceDebug(...args),
+    [],
+  );
+  const onCancelApplyRun = useCallback(async (runId: string) => {
+    const current = latestShellState.current;
+    if (!current.workspace || !current.context) return false;
+    // Cancel stops the whole run. Prefer the actively filling result, then
+    // its first assigned application; a batch can have several applications.
+    let assignedResult = null;
+    for (const result of current.workspace.applyJobResults) {
+      if (result.runId !== runId || result.applicationRecordId === null)
+        continue;
+      assignedResult ??= result;
+      if (result.state === "filling") {
+        assignedResult = result;
+        break;
+      }
+    }
+    if (!assignedResult?.applicationRecordId) return false;
+    return current.context.onCancelApplyRun({
+      runId,
+      jobId: assignedResult.jobId,
+      applicationRecordId: assignedResult.applicationRecordId,
+    });
+  }, []);
+  const onCancelDiscovery = useCallback(
+    (runId: string) =>
+      latestShellState.current.context?.onCancelDiscovery?.(runId) ??
+      Promise.resolve(false),
+    [],
+  );
+  const onPrepareRemainingJobs = useCallback(
+    (jobIds: readonly string[]) =>
+      latestShellState.current.context?.onStartAutoApplyQueue([...jobIds]),
+    [],
+  );
+  const onStopTailoredDraftPreparation = useCallback(
+    () => latestShellState.current.context?.onStopTailoredDraftPreparation(),
+    [],
+  );
 
   useEffect(() => {
     if (!context || shellMarkedRef.current) {
@@ -1168,14 +1265,17 @@ export function JobFinderPage() {
     );
   }, [context]);
 
+  // The context object changes with every workspace refresh; the route mark
+  // belongs to route changes only (browsers keep every mark until cleared).
+  const hasContext = Boolean(context);
   useEffect(() => {
     // The marker is a post-commit signal for direct hash changes and older
     // preload builds that do not expose bootstrap timing marks.
-    if (!context) {
+    if (!hasContext) {
       return;
     }
     markJobFinderTiming(`job-finder:route:${location.pathname}:committed`);
-  }, [context, location.pathname]);
+  }, [hasContext, location.pathname]);
 
   if (!context || !workspace || !platform) {
     if (workspaceState.status === "loading") {
@@ -1226,76 +1326,35 @@ export function JobFinderPage() {
 
   return withJobFinderWindowCloseGuard(
     <ThemeProvider preference={appearanceTheme || "system"}>
-      <SourceCheckQueueRunner
-        isSourceDebugPending={(targetId) =>
-          context.isPending(jobFinderPendingActions.sourceDebug(targetId))
-        }
-        onRunSourceDebug={context.onRunSourceDebug}
+      <MemoizedSourceCheckQueueRunner
+        isSourceDebugPending={isSourceDebugPending}
+        onRunSourceDebug={onRunSourceDebug}
         recentSourceDebugRuns={workspace.recentSourceDebugRuns}
       />
       <AssistantProvider>
-      <JobFinderShell
-        isDiscoveryPending={context.isAnyPending([
-          jobFinderPendingActions.discoveryAll(),
-          ...workspace.searchPreferences.discovery.targets.map((target) =>
-            jobFinderPendingActions.discoveryTarget(target.id),
-          ),
-        ])}
-        isResumeImportPending={context.isPending(
-          jobFinderPendingActions.profileImport(),
-        )}
-        liveDiscoveryEvents={context.liveDiscoveryEvents}
-        onCancelApplyRun={(runId) => {
-          // Cancel stops the whole run; any one of its applications names it
-          // for the lineage check. A batch has several, and requiring exactly
-          // one made Cancel fail on every batch.
-          const assignedResults = workspace.applyJobResults.filter(
-            (result) =>
-              result.runId === runId && result.applicationRecordId !== null,
-          );
-          const result =
-            assignedResults.find((entry) => entry.state === "filling") ??
-            assignedResults[0];
-          if (!result?.applicationRecordId) {
-            return Promise.resolve(false);
-          }
-          return context.onCancelApplyRun({
-            runId,
-            jobId: result.jobId,
-            applicationRecordId: result.applicationRecordId,
-          });
-        }}
-        {...(context.onCancelDiscovery
-          ? { onCancelDiscovery: context.onCancelDiscovery }
-          : {})}
-        onDismissSavedStatus={dismissSavedStatus}
-        onNavigate={navigateFromShell}
-        onPrepareRemainingJobs={(jobIds) =>
-          context.onStartAutoApplyQueue([...jobIds])
-        }
-        onRetrySave={retryLastSave}
-        onStopTailoredDraftPreparation={context.onStopTailoredDraftPreparation}
-        platform={platform}
-        resumeImportProgress={context.resumeImportProgress}
-        saveState={saveState}
-        tailoredDraftPreparation={context.tailoredDraftPreparation}
-        workspace={workspace}
-      >
-        {/* CR-PKG06-01: the lazy fallback paints the destination's own frame
-            rather than a bordered card dead-centred in an empty viewport, so
-            the route resolves into the shape it was already showing. */}
-        <Suspense
-          fallback={
-            <RouteSkeleton
-              panes={getRouteSkeletonPanes(location.pathname)}
-              title={getOpeningRouteLabel(location.pathname)}
-            />
-          }
-        >
-          <Outlet context={routeContext} />
-          <JobFinderRouteReadyMarker />
-        </Suspense>
-      </JobFinderShell>
+        <JobFinderPageRouteContext.Provider value={context}>
+          <MemoizedJobFinderShell
+            isDiscoveryPending={context.isAnyPending(discoveryPendingScopes)}
+            isResumeImportPending={context.isPending(
+              jobFinderPendingActions.profileImport(),
+            )}
+            liveDiscoveryEvents={context.liveDiscoveryEvents}
+            onCancelApplyRun={onCancelApplyRun}
+            {...(context.onCancelDiscovery ? { onCancelDiscovery } : {})}
+            onDismissSavedStatus={dismissSavedStatus}
+            onNavigate={navigateFromShell}
+            onPrepareRemainingJobs={onPrepareRemainingJobs}
+            onRetrySave={retryLastSave}
+            onStopTailoredDraftPreparation={onStopTailoredDraftPreparation}
+            platform={platform}
+            resumeImportProgress={context.resumeImportProgress}
+            saveState={saveState}
+            tailoredDraftPreparation={context.tailoredDraftPreparation}
+            workspace={workspace}
+          >
+            {jobFinderPageOutlet}
+          </MemoizedJobFinderShell>
+        </JobFinderPageRouteContext.Provider>
       </AssistantProvider>
       <ApplyCopilotVisualCheckpointDialog
         onClose={cancelApplyCopilotVisualCheckpointRequest}

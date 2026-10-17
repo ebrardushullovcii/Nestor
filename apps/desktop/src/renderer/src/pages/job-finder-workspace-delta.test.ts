@@ -1,6 +1,6 @@
 import type {
   JobFinderWorkspaceDelta,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import { describe, expect, it } from "vitest";
 
@@ -14,7 +14,7 @@ function queued<T>(jobId: string): T {
   return { jobId } as T;
 }
 
-function createWorkspace(): JobFinderWorkspaceSnapshot {
+function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
   return {
     generatedAt: "2026-07-31T10:00:00.000Z",
     discoveryRunState: { status: "idle" },
@@ -40,7 +40,7 @@ function createWorkspace(): JobFinderWorkspaceSnapshot {
     dashboard: {
       globalDailyApplicationPreparationCapacity: null,
     },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function createDelta(
@@ -176,6 +176,25 @@ function expectApplied(
 }
 
 describe("applyJobFinderWorkspaceDelta", () => {
+  it("advances multiple revisions only from the exact matching baseline", () => {
+    const workspace = createWorkspace();
+    const delta = createDelta({ baseRevision: 1, currentRevision: 3 });
+    const applied = expectApplied(
+      applyJobFinderWorkspaceDelta({ revision: 1, workspace, delta }),
+    );
+    expect(applied.revision).toBe(3);
+    expect(applied.workspace.discoveryJobs.map(({ id }) => id)).toEqual([
+      "job-keep",
+      "job-new",
+    ]);
+    expect(
+      applyJobFinderWorkspaceDelta({ revision: 2, workspace, delta }),
+    ).toEqual({ status: "gap" });
+    expect(
+      applyJobFinderWorkspaceDelta({ revision: 3, workspace, delta }),
+    ).toEqual({ status: "stale" });
+  });
+
   it("applies entity slices and moves selection to valid current entities", () => {
     const result = applyJobFinderWorkspaceDelta({
       revision: 7,
@@ -238,6 +257,82 @@ describe("applyJobFinderWorkspaceDelta", () => {
       "job-old",
       "job-keep",
     ]);
+  });
+
+  it("appends a running search's new activity to what this window holds", () => {
+    const run = (activity: readonly string[]) =>
+      ({
+        id: "run-1",
+        state: "running",
+        activity: activity.map((id) => ({ id })),
+      }) as unknown as JobFinderRendererWorkspaceSnapshot["activeDiscoveryRun"];
+    const workspace = {
+      ...createWorkspace(),
+      activeDiscoveryRun: run(["a", "b"]),
+    };
+    const delta = {
+      ...createDelta(),
+      activeDiscoveryRun: run(["c"]),
+      activeDiscoveryRunActivityFrom: 2,
+    };
+
+    const result = applyJobFinderWorkspaceDelta({
+      revision: 7,
+      workspace,
+      delta,
+    });
+    expect(result.status).toBe("applied");
+    if (result.status === "applied") {
+      expect(
+        result.workspace.activeDiscoveryRun?.activity.map((event) => event.id),
+      ).toEqual(["a", "b", "c"]);
+    }
+
+    // Without the earlier events the window asks for the whole workspace.
+    expect(
+      applyJobFinderWorkspaceDelta({
+        revision: 7,
+        workspace: { ...workspace, activeDiscoveryRun: run(["a"]) },
+        delta,
+      }).status,
+    ).toBe("gap");
+    expect(
+      applyJobFinderWorkspaceDelta({
+        revision: 7,
+        workspace: {
+          ...workspace,
+          activeDiscoveryRun: { ...run(["a", "b"])!, id: "another-run" },
+        },
+        delta: { ...delta, currentRevision: 10 },
+      }).status,
+    ).toBe("gap");
+  });
+
+  it("keeps fields the delta leaves out and applies replaced fields", () => {
+    const workspace = {
+      ...createWorkspace(),
+      campaigns: [identified("plan-held")],
+      profile: { summary: "Old summary" },
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
+    const delta = createSliceDelta() as unknown as Record<string, unknown>;
+    delete delta.dashboard;
+    delete delta.discoverySessions;
+    delete delta.latestResumeImportRun;
+    delta.replaced = { profile: { summary: "New summary" } };
+    const result = expectApplied(
+      applyJobFinderWorkspaceDelta({
+        revision: 7,
+        workspace,
+        delta: delta as unknown as JobFinderWorkspaceDelta,
+      }),
+    );
+    expect(result.workspace.campaigns).toBe(workspace.campaigns);
+    expect(result.workspace.dashboard).toBe(workspace.dashboard);
+    expect(result.workspace.discoverySessions).toBe(
+      workspace.discoverySessions,
+    );
+    expect(result.workspace.latestResumeImportRun).toBeNull();
+    expect(result.workspace.profile).toEqual({ summary: "New summary" });
   });
 
   it("rejects a revision gap", () => {
@@ -390,7 +485,7 @@ describe("applyJobFinderWorkspaceDelta", () => {
     const workspace = {
       ...createWorkspace(),
       discoveryJobs,
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
 
     const noOpResult = expectApplied(
       applyJobFinderWorkspaceDelta({
@@ -443,7 +538,7 @@ describe("applyJobFinderWorkspaceDelta", () => {
     const workspace = {
       ...createWorkspace(),
       discoveryJobs: jobs,
-    } as unknown as JobFinderWorkspaceSnapshot;
+    } as unknown as JobFinderRendererWorkspaceSnapshot;
 
     let latest = workspace;
     const emptyStartedAt = performance.now();

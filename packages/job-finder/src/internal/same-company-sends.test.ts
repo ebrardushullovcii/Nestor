@@ -16,7 +16,7 @@ import {
 const at = "2026-10-05T10:00:00.000Z";
 const jobs = ["London", "Manchester", "Bristol"].map((location, i) =>
   SavedJobSchema.parse({
-    ...createSeed().savedJobs![0],
+    ...createSeed().savedJobs[0],
     id: `job_${i}`,
     title: "Engineer",
     company: "Synthetic",

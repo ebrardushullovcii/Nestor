@@ -5,9 +5,9 @@ import {
 } from "@nordri/job-finder/resume-identity";
 import { Button } from "@renderer/components/ui/button";
 
-// A warning, never a pause (N-020): resumes always print the profile's name
-// and contact details, so the person can keep going. One click confirms the
-// resume is theirs and the note goes away.
+// A quiet note, never a warning (N-020): resumes always print the profile's
+// name and contact details, so nothing waits on the person. One click
+// dismisses it for good.
 export function ResumeIdentityChoiceNotice(props: {
   profile: CandidateProfile;
   onKeepResumeName: () => void;
@@ -35,11 +35,11 @@ export function ResumeIdentityChoiceNotice(props: {
   if (emailOnly) {
     return (
       <div
-        className="grid min-w-0 gap-3 rounded-(--radius-field) border border-(--warning-border) bg-(--warning-surface) px-4 py-3"
+        className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-(length:--text-small) leading-5 text-foreground-soft"
         data-testid="resume-identity-choice"
         role="status"
       >
-        <p className="text-(length:--text-small) leading-6 text-(--warning-text)">
+        <p className="min-w-0">
           Your imported resume&apos;s email is “{choice.sourceEmail}” and your
           profile uses “{profileEmail}”. Resumes and applications use your
           profile&apos;s email.
@@ -49,9 +49,9 @@ export function ResumeIdentityChoiceNotice(props: {
             onClick={props.onUseProfileName}
             size="compact"
             type="button"
-            variant="primary"
+            variant="ghost"
           >
-            This resume is mine
+            Got it
           </Button>
         </div>
       </div>
@@ -60,11 +60,11 @@ export function ResumeIdentityChoiceNotice(props: {
 
   return (
     <div
-      className="grid min-w-0 gap-3 rounded-(--radius-field) border border-(--warning-border) bg-(--warning-surface) px-4 py-3"
+      className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-(length:--text-small) leading-5 text-foreground-soft"
       data-testid="resume-identity-choice"
       role="status"
     >
-      <p className="text-(length:--text-small) leading-6 text-(--warning-text)">
+      <p className="min-w-0">
         Your imported resume says “{sourceName}” and your profile says “
         {profileName}”. Resumes use your profile name.
       </p>
@@ -73,15 +73,15 @@ export function ResumeIdentityChoiceNotice(props: {
           onClick={props.onUseProfileName}
           size="compact"
           type="button"
-          variant="primary"
+          variant="ghost"
         >
-          Keep my profile name
+          Got it
         </Button>
         <Button
           onClick={props.onKeepResumeName}
           size="compact"
           type="button"
-          variant="outline"
+          variant="ghost"
         >
           Use “{sourceName}” instead
         </Button>

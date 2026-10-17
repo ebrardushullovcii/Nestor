@@ -1,6 +1,6 @@
 # ADR 0043: Bulk work queues the whole selection; Undo stays long enough to use
 
-Status: accepted (2026-10-05)
+Status: accepted (2026-10-05). Shortlisted concurrency is superseded by [ADR 0048](0048-shortlisted-resume-pipeline.md).
 
 ## Context
 

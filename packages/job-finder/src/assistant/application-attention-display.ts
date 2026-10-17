@@ -1,5 +1,7 @@
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
-type ApplyResult = JobFinderWorkspaceSnapshot["applyJobResults"][number] | null;
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
+type ApplyResult =
+  | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
+  | null;
 // Existing application display rules, shared without changing their meaning.
 
 /**

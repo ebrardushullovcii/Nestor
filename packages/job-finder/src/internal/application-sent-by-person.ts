@@ -91,10 +91,7 @@ export async function recordApplicationsSentByPerson(
   );
   if (!readWithPerson) return 0;
 
-  const [results, jobs] = await Promise.all([
-    ctx.repository.listApplyJobResults(),
-    ctx.repository.listSavedJobs(),
-  ]);
+  const results = await ctx.repository.listApplyJobResults();
   const newestByRecord = new Map<string, ApplyJobResult>();
   for (const result of results) {
     if (!result.applicationRecordId) continue;
@@ -103,15 +100,22 @@ export async function recordApplicationsSentByPerson(
       newestByRecord.set(result.applicationRecordId, result);
     }
   }
+  // A form the person was handed, with or without a question left for them,
+  // counts once its page shows the site's confirmation: they may have
+  // answered the last question and sent it themselves.
+  const handedOver = [...newestByRecord.values()].filter(
+    (result) =>
+      result.state === "awaiting_review" || result.state === "blocked",
+  );
+  // This check runs on a timer and whenever a tab moves, which is all the
+  // time during a search; it reads the saved jobs only when a form waits.
+  if (handedOver.length === 0) return 0;
+  const jobs = await ctx.repository.listSavedJobsByIds(
+    handedOver.map((result) => result.jobId),
+  );
 
   let recorded = 0;
-  for (const result of newestByRecord.values()) {
-    // A form the person was handed, with or without a question left for
-    // them, counts once its page shows the site's confirmation: they may have
-    // answered the last question and sent it themselves.
-    if (result.state !== "awaiting_review" && result.state !== "blocked") {
-      continue;
-    }
+  for (const result of handedOver) {
     const job = jobs.find((entry) => entry.id === result.jobId);
     if (!job) continue;
     const page = await readWithPerson(job.source, result.id).catch(() => null);

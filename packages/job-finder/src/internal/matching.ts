@@ -1012,8 +1012,7 @@ export async function createMatchAssessmentAsync(
     {
       score: assistedAssessment.score,
       recommendation:
-        assistedAssessment.recommendation ??
-        "review_before_applying",
+        assistedAssessment.recommendation ?? "review_before_applying",
       role: assistedAssessment.role ?? "unknown",
       roleExplanation: assistedAssessment.roleExplanation ?? null,
       preferences: assistedAssessment.preferences ?? "unknown",
@@ -1147,6 +1146,7 @@ export function mergeDiscoveredPostings(
   provenanceBuilder: (posting: JobPosting) => SavedJobDiscoveryProvenance,
   signal?: AbortSignal,
   assessPosting?: (posting: JobPosting) => MatchAssessment,
+  auditJobIds?: ReadonlySet<string>,
 ): MergeDiscoveryResult {
   // Check if already aborted
   if (signal?.aborted) {
@@ -1275,7 +1275,7 @@ export function mergeDiscoveredPostings(
   const auditRecordedAt = selectLatestDiscoveryTimestamp(discoveredPostings);
   const mergedJobs = jobsBeforeAudit.map((job) => {
     const previousJob = previousJobsById.get(job.id);
-    if (!previousJob) {
+    if (!previousJob || (auditJobIds && !auditJobIds.has(job.id))) {
       return job;
     }
 
@@ -1499,4 +1499,3 @@ function settleCanonicalRoute(
   }
   return applySightingRoute(enrichedPosting, winner);
 }
-

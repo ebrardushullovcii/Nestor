@@ -16,6 +16,7 @@ import {
 
 import { compareDiscoveryJobs } from "../discovery-ordering";
 import { resolveJobResumeApplicationMode } from "./job-resume-application-mode";
+import { memoizeBySameElements } from "./same-elements-memo";
 
 export { compareDiscoveryJobs };
 
@@ -702,6 +703,12 @@ export function buildReviewQueue(
         ...(draft && (linesToDecideByDraftId?.get(draft.id) ?? 0) > 0
           ? { resumeLinesToDecide: linesToDecideByDraftId!.get(draft.id)! }
           : {}),
+        ...(asset?.status === "ready" &&
+        asset.generationMethod === "deterministic" &&
+        (asset.generationReason === "listing_text_missing" ||
+          asset.generationReason === "listing_text_not_distinguishing")
+          ? { resumeWrittenWithoutListing: true }
+          : {}),
         updatedAt: updatedAtCandidates.sort().at(-1) ?? job.discoveredAt,
       };
     })
@@ -718,12 +725,37 @@ export function buildReviewQueue(
     });
 }
 
+// The utility-page check parses every job's address. Rows are immutable and
+// reused between refreshes, so the verdict is worked out once per row.
+const utilityVerdictByJob = new WeakMap<SavedJob, boolean>();
+function isCachedUtilityShortlistJob(job: SavedJob): boolean {
+  let verdict = utilityVerdictByJob.get(job);
+  if (verdict === undefined) {
+    verdict = isLikelyUtilityShortlistJob(job);
+    utilityVerdictByJob.set(job, verdict);
+  }
+  return verdict;
+}
+
+// Frozen jobs never change, so an unchanged refresh reuses the last
+// filtered, ordered list instead of re-sorting every saved job.
+const orderFrozenDiscoveryJobs = memoizeBySameElements(
+  (savedJobs: readonly SavedJob[]) =>
+    Object.freeze(orderDiscoveryJobs(savedJobs)) as SavedJob[],
+);
+
 export function buildDiscoveryJobs(savedJobs: readonly SavedJob[]): SavedJob[] {
+  return savedJobs.every((job) => Object.isFrozen(job))
+    ? orderFrozenDiscoveryJobs(savedJobs)
+    : orderDiscoveryJobs(savedJobs);
+}
+
+function orderDiscoveryJobs(savedJobs: readonly SavedJob[]): SavedJob[] {
   return [...savedJobs]
     .filter((job) => discoveryVisibleStatuses.has(job.status))
     .filter(
       (job) =>
-        !isDiscoveryIntakeCandidate(job) || !isLikelyUtilityShortlistJob(job),
+        !isDiscoveryIntakeCandidate(job) || !isCachedUtilityShortlistJob(job),
     )
     .map((job) => {
       const company = resolveSavedJobCompany(job);

@@ -1,5 +1,4 @@
 import { memo, type KeyboardEvent } from "react";
-import { Checkbox } from "@renderer/components/ui/checkbox";
 import {
   ProgressBar,
   SelectableRow,
@@ -16,6 +15,11 @@ import {
   jobFinderListRowTitleLineClassName,
 } from "../../components/list-row";
 import { StatusBadge } from "../../components/status-badge";
+import {
+  isSelectionClick,
+  LIST_SELECTION_GUTTER_CLASS,
+  ListRowSelectionCell,
+} from "../../components/list-selection";
 import type { BadgeTone } from "../../lib/job-finder-types";
 
 /**
@@ -31,11 +35,14 @@ import type { BadgeTone } from "../../lib/job-finder-types";
  * silently un-memoises every row, so derive it in the panel instead.
  */
 export interface ReviewQueueRowProps {
-  choosingResumes: boolean;
-  resumeSelected: boolean;
-  resumeSelectionDisabled: boolean;
-  onToggleResume: (jobId: string) => void;
+  /** Whether the row's checkbox is ticked. */
+  checked: boolean;
+  /** Disables the checkbox while a resume batch runs. */
+  selectionDisabled: boolean;
+  onToggleSelection: (jobId: string, shiftKey: boolean) => void;
   employerLocationLine: string | null;
+  /** Another shortlisted job has the same title, employer and place. */
+  possibleDuplicate: boolean;
   jobId: string;
   onSelect: (jobId: string) => void;
   onSelectionKeyDown: (
@@ -51,11 +58,11 @@ export interface ReviewQueueRowProps {
 }
 
 function ReviewQueueRowComponent({
-  choosingResumes,
-  resumeSelected,
-  resumeSelectionDisabled,
-  onToggleResume,
+  checked,
+  selectionDisabled,
+  onToggleSelection,
   employerLocationLine,
+  possibleDuplicate,
   jobId,
   onSelect,
   onSelectionKeyDown,
@@ -71,81 +78,97 @@ function ReviewQueueRowComponent({
     // primitive. The row's padding, margin and border-width are identical in
     // both states, so selecting a row can no longer resize it or move every
     // row below it.
-    <SelectableRow
-      as="div"
-      className={cn(
-        jobFinderListRowClassName,
-        "text-foreground",
-        choosingResumes && "grid-cols-[auto_minmax(0,1fr)] items-start",
-      )}
-      selected={selected}
-    >
-      {choosingResumes ? (
-        <Checkbox
-          aria-label={`Create resume for ${title}`}
-          className="mt-1"
-          checked={resumeSelected}
-          disabled={resumeSelectionDisabled}
-          onCheckedChange={() => onToggleResume(jobId)}
-        />
-      ) : null}
-      <button
-        aria-current={selected ? "true" : undefined}
-        aria-keyshortcuts="ArrowUp ArrowDown Home End"
-        className={cn(
-          jobFinderListRowLinesClassName,
-          "w-full text-left outline-none transition-colors hover:bg-transparent focus-visible:ring-[3px] focus-visible:ring-ring/40",
-        )}
-        data-collection-item-id={jobId}
-        onClick={() => onSelect(jobId)}
-        onKeyDown={(event) => onSelectionKeyDown(event, jobId)}
-        type="button"
+    <div className={cn("relative min-w-0", LIST_SELECTION_GUTTER_CLASS)}>
+      <ListRowSelectionCell
+        checked={checked}
+        disabled={selectionDisabled}
+        label={`Select ${title}`}
+        onToggle={({ shiftKey }) => onToggleSelection(jobId, shiftKey)}
+      />
+      <SelectableRow
+        as="div"
+        className={cn(jobFinderListRowClassName, "text-foreground")}
+        selected={selected}
       >
-        {/* Title line, with the one badge slot trailing it - the same slot
+        <button
+          aria-current={selected ? "true" : undefined}
+          aria-keyshortcuts="ArrowUp ArrowDown Home End"
+          className={cn(
+            jobFinderListRowLinesClassName,
+            "w-full text-left outline-none transition-colors hover:bg-transparent focus-visible:ring-[3px] focus-visible:ring-ring/40",
+          )}
+          data-collection-item-id={jobId}
+          onClick={(event) => {
+            // Ctrl/Cmd+click ticks the row and Shift+click ticks a range,
+            // without opening it.
+            if (!selectionDisabled && isSelectionClick(event)) {
+              event.preventDefault();
+              onToggleSelection(jobId, event.shiftKey);
+              return;
+            }
+            onSelect(jobId);
+          }}
+          onKeyDown={(event) => onSelectionKeyDown(event, jobId)}
+          type="button"
+        >
+          {/* Title line, with the one badge slot trailing it - the same slot
             Find jobs and Applications use. The badge renders for every row,
             selected or not: hiding it on the selected row made that row look
             stripped of its state rather than merely selected. */}
-        <div className={jobFinderListRowTitleLineClassName}>
-          <strong className={jobFinderListRowTitleClassName}>{title}</strong>
-          <div className={jobFinderListRowBadgeSlotClassName}>
-            <SelectableRowLine className="flex justify-end">
-              <StatusBadge
-                className="max-w-none shrink-0 whitespace-nowrap"
-                tone={statusTone}
-              >
-                {statusLabel}
-              </StatusBadge>
-            </SelectableRowLine>
+          <div className={jobFinderListRowTitleLineClassName}>
+            <strong className={jobFinderListRowTitleClassName}>{title}</strong>
+            <div className={jobFinderListRowBadgeSlotClassName}>
+              <SelectableRowLine className="flex justify-end">
+                <StatusBadge
+                  className="max-w-none shrink-0 whitespace-nowrap"
+                  tone={statusTone}
+                >
+                  {statusLabel}
+                </StatusBadge>
+              </SelectableRowLine>
+            </div>
           </div>
-        </div>
-        {employerLocationLine ? (
-          <span className={jobFinderListRowMetaClassName}>
-            {employerLocationLine}
-          </span>
-        ) : null}
-        {/* The resume-state caption renders on every row too, so a selected
+          {employerLocationLine ? (
+            <span className={jobFinderListRowMetaClassName}>
+              {employerLocationLine}
+            </span>
+          ) : null}
+          {possibleDuplicate ? (
+            <span
+              className={cn(
+                jobFinderListRowMetaClassName,
+                "text-(--warning-text)",
+              )}
+              data-testid="review-queue-possible-duplicate"
+            >
+              Possibly saved twice: another shortlisted job has the same title,
+              employer and place.
+            </span>
+          ) : null}
+          {/* The resume-state caption renders on every row too, so a selected
             row keeps the same shape as its neighbours. */}
-        <SelectableRowLine
-          className={cn(
-            jobFinderListRowStatusClassName,
-            "font-medium text-foreground-soft",
-          )}
-        >
-          {resumePolicyCaption}
-        </SelectableRowLine>
-        {showProgress ? (
-          <div className="grid min-w-0 w-full gap-1.5">
-            {/* Row-level progress had no real percentage behind it either; it
+          <SelectableRowLine
+            className={cn(
+              jobFinderListRowStatusClassName,
+              "font-medium text-foreground-soft",
+            )}
+          >
+            {resumePolicyCaption}
+          </SelectableRowLine>
+          {showProgress ? (
+            <div className="grid min-w-0 w-full gap-1.5">
+              {/* Row-level progress had no real percentage behind it either; it
                 only needs to say "this one is running". */}
-            <ProgressBar
-              ariaLabel="Resume preparation in progress"
-              className="h-1.5 w-full overflow-hidden rounded-full bg-(--surface-progress-track)"
-              indeterminate
-            />
-          </div>
-        ) : null}
-      </button>
-    </SelectableRow>
+              <ProgressBar
+                ariaLabel="Resume preparation in progress"
+                className="h-1.5 w-full overflow-hidden rounded-full bg-(--surface-progress-track)"
+                indeterminate
+              />
+            </div>
+          ) : null}
+        </button>
+      </SelectableRow>
+    </div>
   );
 }
 

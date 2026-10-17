@@ -588,72 +588,34 @@ describe("work-history review acknowledgment commands", () => {
     ).resolves.toBeTruthy();
   });
 
-  test("automatic apply prerequisites stay blocked while an omission is unresolved", async () => {
+  test("hidden roles never hold an application back", async () => {
     const { workspaceService, repository } = createHiddenRoleHarness();
-    const { workspace, salesSuggestion, gapSuggestion } =
-      await generateWithSuggestions(workspaceService);
+    await generateWithSuggestions(workspaceService);
 
-    for (const suggestion of [salesSuggestion, gapSuggestion]) {
-      await workspaceService.setWorkHistoryReviewAcknowledgment(
-        buildAcknowledgeInput({
-          jobId: "job_ready",
-          draftId: workspace.draft.id,
-          draftUpdatedAt: (await repository.getResumeDraftByJobId("job_ready"))!
-            .updatedAt,
-          suggestion,
-        }),
-      );
-    }
-
+    // No acknowledgments: which roles show is the writer's call for the job.
     const exported = await workspaceService.exportResumePdf("job_ready");
     const exportArtifact = exported.resumeExportArtifacts.find(
       (artifact) => artifact.jobId === "job_ready",
     )!;
     await workspaceService.approveResume("job_ready", exportArtifact.id);
+    expect(
+      (await repository.getResumeDraftByJobId("job_ready"))!
+        .workHistoryReviewAcknowledgments,
+    ).toEqual([]);
 
-    const approvedDraft = await repository.getResumeDraftByJobId("job_ready");
+    const autoApplyOutcome = await workspaceService
+      .startAutoApplyRun("job_ready")
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(String(autoApplyOutcome)).not.toMatch(/hidden role/i);
 
-    // Simulate drift the defense-in-depth gate exists for: an approved draft
-    // whose acknowledgment no longer matches the projected guidance.
-    await repository.upsertResumeDraft({
-      ...approvedDraft!,
-      workHistoryReviewAcknowledgments:
-        approvedDraft!.workHistoryReviewAcknowledgments.map((acknowledgment) =>
-          acknowledgment.profileRecordId === HIDDEN_SALES_ROLE_ID
-            ? { ...acknowledgment, messageContentHash: "fnv1a32:00000000" }
-            : acknowledgment,
-        ),
-    });
-
-    await expect(
-      workspaceService.startAutoApplyRun("job_ready"),
-    ).rejects.toThrow(/confirm the hidden role.* then apply again/i);
-    expect(await repository.listApplyRuns()).toEqual([]);
-
-    const blockedSnapshot = await workspaceService.startApplyCopilotRun(
-      "job_ready",
+    const snapshot = await workspaceService.startApplyCopilotRun("job_ready");
+    const record = snapshot.applicationRecords.find(
+      (entry) => entry.jobId === "job_ready",
     );
-    const blockedRecord = blockedSnapshot.applicationRecords.find(
-      (record) => record.jobId === "job_ready",
-    );
-
-    expect(blockedRecord).toMatchObject({
-      lastAttemptState: "paused",
-      latestBlocker: {
-        code: "requires_manual_review",
-      },
-    });
-    expect(blockedRecord?.nextActionLabel).toMatch(
-      /open this job's resume in resume studio.*then apply again/i,
-    );
-    expect(blockedSnapshot.applyRuns.at(-1)).toMatchObject({
-      state: "paused_for_user_review",
-      submittedJobs: 0,
-    });
-    expect(blockedSnapshot.applyJobResults.at(-1)).toMatchObject({
-      state: "blocked",
-      blockerReason: "required_human_input",
-    });
+    expect(record?.nextActionLabel ?? "").not.toMatch(/hidden role/i);
   });
 
   test("compact-only drafts never block approval", async () => {

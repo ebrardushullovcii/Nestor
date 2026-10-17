@@ -1,8 +1,10 @@
-import { useLayoutEffect, useRef } from "react";
-import { Button } from "@renderer/components/ui/button";
+import { useTransition } from "react";
+import { LoaderCircle } from "lucide-react";
+import { PageNavigation } from "./page-navigation";
 
 export const COLLECTION_PAGE_SIZE = 40;
 export const APPLICATION_CRM_PAGE_SIZE = 50;
+export const JOB_LIST_PAGE_SIZE = 50;
 
 interface CollectionPaginationProps {
   itemLabel: string;
@@ -28,41 +30,7 @@ export function CollectionPagination({
   const currentPage = Math.min(Math.max(page, 1), pageCount);
   const firstItem = (currentPage - 1) * pageSize + 1;
   const lastItem = Math.min(currentPage * pageSize, totalCount);
-  const previousButtonRef = useRef<HTMLButtonElement>(null);
-  const nextButtonRef = useRef<HTMLButtonElement>(null);
-  const pendingFocusRef = useRef<"previous" | "next" | null>(null);
-
-  useLayoutEffect(() => {
-    const focusDirection = pendingFocusRef.current;
-    if (!focusDirection) {
-      return;
-    }
-    pendingFocusRef.current = null;
-
-    const primaryTarget =
-      focusDirection === "next"
-        ? nextButtonRef.current
-        : previousButtonRef.current;
-    const fallbackTarget =
-      focusDirection === "next"
-        ? previousButtonRef.current
-        : nextButtonRef.current;
-    const target =
-      primaryTarget && !primaryTarget.disabled
-        ? primaryTarget
-        : fallbackTarget && !fallbackTarget.disabled
-          ? fallbackTarget
-          : null;
-    target?.focus();
-  }, [currentPage]);
-
-  const handlePageChange = (
-    nextPage: number,
-    focusDirection: "previous" | "next",
-  ) => {
-    pendingFocusRef.current = focusDirection;
-    onPageChange(nextPage);
-  };
+  const [isPagePending, startPageTransition] = useTransition();
 
   if (pageCount <= 1) {
     return null;
@@ -71,47 +39,36 @@ export function CollectionPagination({
   return (
     // One line: "1–40 of 353" on the left, the page buttons on the right.
     <nav
+      aria-busy={isPagePending}
       aria-label={`${itemLabel} pagination`}
-      className="flex h-11 flex-none items-center justify-between gap-3 border-t border-(--surface-panel-border) px-3"
+      className="@container flex h-11 flex-none items-center justify-between gap-3 border-t border-(--surface-panel-border) px-3"
       data-collection-pagination
     >
       <p
         aria-live="polite"
-        className="min-w-0 truncate text-(length:--text-small) tabular-nums text-foreground-muted"
+        className="inline-flex min-w-0 items-center gap-2 truncate text-(length:--text-small) tabular-nums text-foreground-muted"
       >
-        {firstItem}–{lastItem} of {totalCount}
+        {isPagePending ? (
+          <>
+            <LoaderCircle
+              aria-hidden="true"
+              className="size-3 motion-safe:animate-spin"
+            />
+            Loading {itemLabel.toLowerCase()}…
+          </>
+        ) : (
+          `${firstItem}–${lastItem} of ${totalCount}`
+        )}
         <span className="sr-only"> {itemLabel}</span>
       </p>
-      <div className="flex shrink-0 items-center gap-1">
-        <Button
-          aria-label="Previous page"
-          disabled={currentPage === 1}
-          onClick={() => handlePageChange(currentPage - 1, "previous")}
-          ref={previousButtonRef}
-          size="xs"
-          type="button"
-          variant="ghost"
-        >
-          Previous
-        </Button>
-        <span
-          aria-current="page"
-          className="min-w-16 text-center text-(length:--text-small) tabular-nums text-foreground-soft"
-        >
-          Page {currentPage} of {pageCount}
-        </span>
-        <Button
-          aria-label="Next page"
-          disabled={currentPage === pageCount}
-          onClick={() => handlePageChange(currentPage + 1, "next")}
-          ref={nextButtonRef}
-          size="xs"
-          type="button"
-          variant="ghost"
-        >
-          Next
-        </Button>
-      </div>
+      <PageNavigation
+        page={currentPage}
+        pageCount={pageCount}
+        pending={isPagePending}
+        onPageChange={(nextPage) =>
+          startPageTransition(() => onPageChange(nextPage))
+        }
+      />
     </nav>
   );
 }

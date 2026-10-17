@@ -14,16 +14,17 @@ const mocks = vi.hoisted(() => ({
   load: vi.fn<(file: string) => Promise<void>>(),
   count: vi.fn(),
   windows: [] as { destroyed: boolean }[],
+  mkdir: vi.fn(),
+  write: vi.fn<(file: string, contents: string | Buffer) => Promise<void>>(),
+  failWindow: false,
+  maximumWindows: 0,
 }));
 
 vi.mock("node:fs/promises", () => ({
-  mkdir: vi.fn(),
+  mkdir: mocks.mkdir,
   mkdtemp: mocks.mkdtemp,
   rm: mocks.rm,
-  writeFile: vi.fn((file: string, contents: string | Buffer) => {
-    mocks.files.set(file, contents);
-    return Promise.resolve();
-  }),
+  writeFile: mocks.write,
   readFile: vi.fn((file: string) => Promise.resolve(mocks.files.get(file))),
 }));
 vi.mock("./resume-document", () => ({ getPdfPageCount: mocks.count }));
@@ -35,7 +36,15 @@ vi.mock("electron", () => ({
       printToPDF: mocks.print,
     };
     constructor() {
+      if (mocks.failWindow) {
+        mocks.failWindow = false;
+        throw new Error("Window failed");
+      }
       mocks.windows.push(this);
+      mocks.maximumWindows = Math.max(
+        mocks.maximumWindows,
+        mocks.windows.filter((window) => !window.destroyed).length,
+      );
     }
     loadFile = mocks.load;
     isDestroyed() {
@@ -53,6 +62,12 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.files.clear();
   mocks.windows.length = 0;
+  mocks.maximumWindows = 0;
+  mocks.failWindow = false;
+  mocks.write.mockImplementation((file, contents) => {
+    mocks.files.set(file, contents);
+    return Promise.resolve();
+  });
   let directoryId = 0;
   mocks.mkdtemp.mockImplementation((prefix: string) =>
     Promise.resolve(`${prefix}${++directoryId}`),
@@ -78,7 +93,10 @@ beforeEach(() => {
     outputDirectory: "/synthetic-output",
   });
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 async function flush() {
   for (let i = 0; i < 30; i++) await Promise.resolve();
@@ -208,4 +226,119 @@ test("slow measurements return an unknown count within the preview budget and re
   expect(mocks.rm).toHaveBeenCalledTimes(1);
   expect(mocks.windows.every((window) => window.destroyed)).toBe(true);
   expect((await manager.renderResumePreview(input)).pageCount).toBe(2);
+});
+
+function finalResume(onQueueWait?: (milliseconds: number) => void) {
+  return manager.renderResumeArtifact({
+    ...input,
+    settings: { ...input.settings, resumeFormat: "pdf" },
+    ...(onQueueWait ? { onQueueWait } : {}),
+  });
+}
+
+test("shares two PDF windows across final resumes, letters and another manager's preview", async () => {
+  const releases: Array<(buffer: Buffer) => void> = [];
+  mocks.print.mockImplementation(
+    () => new Promise<Buffer>((resolve) => releases.push(resolve)),
+  );
+  const first = finalResume();
+  const second = finalResume();
+  await flush();
+  const anotherManager = createLocalJobFinderDocumentManager({
+    outputDirectory: "/another-synthetic-output",
+  });
+  const preview = anotherManager.renderResumePreview(input);
+  const letter = manager.renderLetterArtifact!({
+    text: "Synthetic application letter",
+    job: input.job,
+    profile: input.profile,
+    settings: input.settings,
+    fileType: "pdf",
+  });
+  await flush();
+  expect(mocks.windows).toHaveLength(2);
+  expect(mocks.mkdir).toHaveBeenCalledTimes(2);
+  expect(mocks.write).toHaveBeenCalledTimes(2);
+  releases[0]!(Buffer.from("first PDF"));
+  releases[1]!(Buffer.from("second PDF"));
+  await flush();
+  expect(mocks.windows).toHaveLength(4);
+  expect(mocks.maximumWindows).toBe(2);
+  releases[2]!(Buffer.from("third PDF"));
+  releases[3]!(Buffer.from("fourth PDF"));
+  await Promise.all([first, second, preview, letter]);
+  expect(mocks.windows.every((window) => window.destroyed)).toBe(true);
+});
+
+test.each(["mkdir", "write", "load", "print", "window"] as const)(
+  "releases PDF capacity when %s fails so queued final renders finish",
+  async (step) => {
+    if (step === "window") mocks.failWindow = true;
+    else mocks[step].mockRejectedValueOnce(new Error("Render failed"));
+    const renders = [finalResume(), finalResume(), finalResume()];
+    const results = await Promise.allSettled(renders);
+    expect(results.map((result) => result.status)).toEqual([
+      "rejected",
+      "fulfilled",
+      "fulfilled",
+    ]);
+    expect(mocks.maximumWindows).toBeLessThanOrEqual(2);
+    expect(mocks.windows.every((window) => window.destroyed)).toBe(true);
+  },
+);
+
+test("a preview cancelled behind final renders never creates a window or HTML file", async () => {
+  const releases: Array<(buffer: Buffer) => void> = [];
+  mocks.print.mockImplementation(
+    () => new Promise<Buffer>((resolve) => releases.push(resolve)),
+  );
+  const first = finalResume();
+  const second = finalResume();
+  await flush();
+  const controller = new AbortController();
+  const preview = manager.renderResumePreview(input, controller.signal);
+  const cancelled = expect(preview).rejects.toMatchObject({
+    name: "AbortError",
+  });
+  await flush();
+  controller.abort();
+  await cancelled;
+  expect(mocks.windows).toHaveLength(2);
+  expect(mocks.mkdir).toHaveBeenCalledTimes(2);
+  expect(mocks.write).toHaveBeenCalledTimes(2);
+  for (const release of releases) release(Buffer.from("synthetic PDF"));
+  await Promise.all([first, second]);
+  await flush();
+  expect(mocks.windows).toHaveLength(2);
+  expect(mocks.print).toHaveBeenCalledTimes(2);
+  expect(mocks.mkdir).toHaveBeenCalledTimes(2);
+  expect(mocks.windows.every((window) => window.destroyed)).toBe(true);
+});
+
+test("reports only PDF admission wait and starts the two-minute deadline after admission", async () => {
+  vi.useFakeTimers();
+  const releases: Array<(buffer: Buffer) => void> = [];
+  mocks.print.mockImplementation(
+    () => new Promise<Buffer>((resolve) => releases.push(resolve)),
+  );
+  const first = finalResume();
+  const second = finalResume();
+  const secondDeadline = expect(second).rejects.toThrow(
+    "did not finish rendering within 2 minutes",
+  );
+  const onQueueWait = vi.fn();
+  const third = finalResume(onQueueWait);
+  await flush();
+  expect(onQueueWait).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(119_000);
+  releases[0]!(Buffer.from("first PDF"));
+  await flush();
+  expect(onQueueWait).toHaveBeenCalledTimes(1);
+  expect(onQueueWait.mock.calls[0]![0]).toBeGreaterThanOrEqual(119_000);
+  await vi.advanceTimersByTimeAsync(2_000);
+  await secondDeadline;
+  releases[2]!(Buffer.from("third PDF"));
+  await Promise.all([first, third]);
+  expect(mocks.maximumWindows).toBe(2);
+  expect(mocks.windows.every((window) => window.destroyed)).toBe(true);
 });

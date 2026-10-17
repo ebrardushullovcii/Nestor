@@ -131,7 +131,8 @@ describe("R3-142 fit scores beside cards", () => {
         recommendation: "review_before_applying",
       }),
     };
-    vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
+    ctx.service.getWorkspaceProjection = vi.fn(() => Promise.resolve(snapshot));
+    const canonicalRead = vi.spyOn(ctx.service, "getWorkspaceSnapshot");
     const first = await showJobsTool.execute({ jobIds: [job.id, job.id] }, ctx);
     expect(first.data).toMatchObject({
       jobs: [{ id: job.id, fit: "75% fit" }],
@@ -146,6 +147,7 @@ describe("R3-142 fit scores beside cards", () => {
     expect(reassessed.parts?.[0]).toMatchObject({
       rows: [{ status: "81% fit" }],
     });
+    expect(canonicalRead).not.toHaveBeenCalled();
     expect(ASSISTANT_SYSTEM_PROMPT).toContain(
       "Never reuse a score from an earlier conversation read",
     );
@@ -313,7 +315,8 @@ it("R3-161 restricts a top-five query to the requested local origin and reports 
   ];
   snapshot.companyJobs = [];
   snapshot.dismissedDiscoveryJobs = [];
-  vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
+  ctx.service.getWorkspaceProjection = vi.fn(() => Promise.resolve(snapshot));
+  const canonicalRead = vi.spyOn(ctx.service, "getWorkspaceSnapshot");
   const result = await queryJobsTool.execute(
     queryJobsTool.input.parse({
       scope: "all",
@@ -328,6 +331,7 @@ it("R3-161 restricts a top-five query to the requested local origin and reports 
     jobs: [{ id: "local" }],
     sourceRestriction: { listingOrigins: ["http://127.0.0.1:47950"] },
   });
+  expect(canonicalRead).not.toHaveBeenCalled();
   expect(ASSISTANT_SYSTEM_PROMPT).toContain(
     "do not widen sources without the person's request",
   );
@@ -417,9 +421,10 @@ it("reports source switches from saved state and counts only actual switch chang
     ctx,
   );
   expect(result.summary).toContain("0 turned off");
+  const expectedSources: unknown = expect.arrayContaining([
+    expect.objectContaining({ id: source.id, enabled: false }),
+  ]);
   expect(result.data).toMatchObject({
-    sources: expect.arrayContaining([
-      expect.objectContaining({ id: source.id, enabled: false }),
-    ]),
+    sources: expectedSources,
   });
 });

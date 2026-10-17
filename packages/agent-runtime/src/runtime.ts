@@ -11,6 +11,7 @@ import {
   type AgentToolPermission,
   type Tool,
   type ToolCall,
+  type ModelContinuation,
 } from "@nordri/contracts";
 import type { z } from "zod";
 
@@ -21,6 +22,7 @@ export interface AgentTaskMessage {
   content: string;
   toolCallId?: string;
   toolCalls?: ToolCall[];
+  continuation?: ModelContinuation;
 }
 
 export interface AgentTaskModel {
@@ -30,7 +32,11 @@ export interface AgentTaskModel {
     messages: readonly AgentTaskMessage[];
     tools: readonly Tool[];
     signal?: AbortSignal;
-  }): Promise<{ content?: string; toolCalls?: ToolCall[] }>;
+  }): Promise<{
+    content?: string;
+    toolCalls?: ToolCall[];
+    continuation?: ModelContinuation;
+  }>;
 }
 
 export interface AgentTaskToolContext<TState, TDraft> {
@@ -90,6 +96,8 @@ export interface AgentTaskRunOptions<TState, TDraft> {
   }) => unknown;
   readonly signal?: AbortSignal;
   readonly timeBudgetMs?: number;
+  /** Cumulative host queue wait excluded from the budget; never model/tool execution. */
+  readonly getExcludedElapsedMs?: () => number;
   /** Maximum time for one provider turn; also capped by the task time left. */
   readonly modelTurnTimeoutMs?: number;
   /** A provider-call ceiling used as the deterministic cost guard. */
@@ -204,6 +212,13 @@ export async function runAgentTask<TState, TDraft>(
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
   const timeBudgetMs = Math.max(1_000, options.timeBudgetMs ?? 90_000);
+  const budgetElapsedMs = () => {
+    const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+    const excludedMs = options.getExcludedElapsedMs?.() ?? 0;
+    return Number.isFinite(excludedMs)
+      ? elapsedMs - Math.min(elapsedMs, Math.max(0, excludedMs))
+      : elapsedMs;
+  };
   const modelTurnTimeoutMs = Math.max(
     10,
     options.modelTurnTimeoutMs ?? timeBudgetMs,
@@ -256,7 +271,7 @@ export async function runAgentTask<TState, TDraft>(
       stopReason = "cancelled";
       break;
     }
-    if (Date.now() - startedAtMs >= timeBudgetMs) {
+    if (budgetElapsedMs() >= timeBudgetMs) {
       stopReason = "time_budget";
       break;
     }
@@ -307,10 +322,7 @@ export async function runAgentTask<TState, TDraft>(
         providerCalls += 1;
         const turnController = new AbortController();
         turnTimeout = turnController;
-        const remainingMs = Math.max(
-          1,
-          timeBudgetMs - (Date.now() - startedAtMs),
-        );
+        const remainingMs = Math.max(1, timeBudgetMs - budgetElapsedMs());
         const turnTimer = setTimeout(
           () => turnController.abort(),
           Math.min(modelTurnTimeoutMs, remainingMs),
@@ -354,7 +366,7 @@ export async function runAgentTask<TState, TDraft>(
           stopReason = "time_budget";
           break;
         }
-        if (Date.now() - startedAtMs >= timeBudgetMs) {
+        if (budgetElapsedMs() >= timeBudgetMs) {
           stopReason = "time_budget";
           break;
         }
@@ -373,6 +385,7 @@ export async function runAgentTask<TState, TDraft>(
       role: "assistant",
       content: response.content ?? "",
       ...(response.toolCalls ? { toolCalls: response.toolCalls } : {}),
+      ...(response.continuation ? { continuation: response.continuation } : {}),
     });
 
     const calls = response.toolCalls ?? [];

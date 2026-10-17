@@ -1,9 +1,13 @@
-import type { JobFinderAiClient } from "@nordri/ai-providers";
+import {
+  ResumeProposalValidationError,
+  type JobFinderAiClient,
+} from "@nordri/ai-providers";
 import {
   ResumeLanguageTranslationSchema,
   type ResumeDraft,
   type ResumeDraftSourceRef,
   type SavedJob,
+  type AgentTaskValidationIssue,
 } from "@nordri/contracts";
 
 /** One model call translates every displayed field together, preserving structure. */
@@ -152,13 +156,29 @@ export function applyResumeLanguage(
   const { draft, fields } = resumeLanguageFields(source);
   const targets = new Map(fields.map((field) => [field.id, field]));
   const seen = new Set<string>();
-  for (const translation of result.translations) {
-    const target = targets.get(translation.id);
-    if (!target || seen.has(translation.id))
-      throw new Error(
-        "The resume writer returned an unknown or repeated field.",
-      );
+  const issues: AgentTaskValidationIssue[] = [];
+  for (const [index, translation] of result.translations.entries()) {
+    if (!targets.has(translation.id) || seen.has(translation.id)) {
+      const repeated = seen.has(translation.id);
+      issues.push({
+        code: repeated
+          ? "resume_translation_repeated_field"
+          : "resume_translation_unknown_field",
+        message: `${repeated ? "Repeated" : "Unknown"} translation field '${translation.id}'. Use an exact current languageFields ID once, and omit unchanged fields.`,
+        path: ["languagePresentation", "translations", index, "id"],
+      });
+    }
     seen.add(translation.id);
+  }
+  if (issues.length > 0) {
+    throw new ResumeProposalValidationError(
+      "The resume writer returned an unknown or repeated field.",
+      issues,
+      fields.map(({ id, text }) => ({ id, text })),
+    );
+  }
+  for (const translation of result.translations) {
+    const target = targets.get(translation.id)!;
     if (translation.text !== target.text) target.write(translation.text);
   }
   return {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import {
   GroupedManualAnswerDecisionSchema,
   type GroupedManualAnswerDecision,
@@ -21,7 +21,7 @@ const windowControlsState = {
 function createWorkspace(input: {
   decisions?: readonly GroupedManualAnswerDecision[];
   requests?: readonly UserActionRequest[];
-}): JobFinderWorkspaceSnapshot {
+}): JobFinderRendererWorkspaceSnapshot {
   return {
     applicationRecords: [],
     discoveryJobs: [],
@@ -35,7 +35,7 @@ function createWorkspace(input: {
     },
     reviewQueue: [],
     userActionRequests: input.requests ?? [],
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 function createRequest(id: string, state: string): UserActionRequest {

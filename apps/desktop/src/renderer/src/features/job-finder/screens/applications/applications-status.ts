@@ -1,8 +1,8 @@
 import type {
-  ApplicationAttempt,
+  ApplicationAttemptListRow,
   ApplicationAttemptQuestion,
   ApplicationRecord,
-  ApplyJobResult,
+  ApplyJobResultListRow,
 } from "@nordri/contracts";
 import {
   formatStatusLabel,
@@ -115,7 +115,7 @@ export function getApplicationLatestActivityLabel(
 export function getApplicationSubmissionAnswer(
   record: ApplicationRecord,
   employerName?: string | null,
-  applyResult?: ApplyJobResult | null,
+  applyResult?: ApplyJobResultListRow | null,
 ): { headline: string; detail: string; submitted: boolean } {
   const employer = employerName?.trim() || record.company?.trim() || null;
   const submitted =
@@ -491,7 +491,7 @@ export function getApplicationReadableNextStepLabel(
  * "6 questions" and drew 4 controls. One selector, both screens.
  */
 export function listPendingApplicationQuestions(input: {
-  applicationAttempts: readonly ApplicationAttempt[];
+  applicationAttempts: readonly ApplicationAttemptListRow[];
   applicationRecordId?: string | null;
   jobId: string;
 }): readonly ApplicationAttemptQuestion[] {

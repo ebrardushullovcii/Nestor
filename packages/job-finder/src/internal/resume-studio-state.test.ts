@@ -228,7 +228,7 @@ test("persists an unfinished resume batch independently of running memory", asyn
   ).toBe(true);
 });
 
-test("a validation blocker reaches the Shortlisted review gate", async () => {
+test("a stored error from an older check never reaches the Shortlisted review gate", async () => {
   const seed = createSeed();
   const { repository, workspaceService } = createWorkspaceServiceHarness();
   const draft = seedResumeDraft({
@@ -255,7 +255,8 @@ test("a validation blocker reaches the Shortlisted review gate", async () => {
   const item = (await workspaceService.getWorkspaceSnapshot()).reviewQueue.find(
     (item) => item.jobId === draft.jobId,
   );
-  expect(item?.resumeLinesToDecide).toBe(1);
+  // Only an unbacked generated line can wait on the person (ADR 0051).
+  expect(item?.resumeLinesToDecide).toBeUndefined();
 });
 
 test("every current-role suggestion names its entry and displayed dates", () => {

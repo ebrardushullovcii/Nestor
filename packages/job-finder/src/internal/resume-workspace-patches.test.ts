@@ -351,7 +351,7 @@ describe("resume workspace patch generated-claim provenance", () => {
     expect(userBullet.lastGeneratedContentHash ?? null).toBeNull();
   });
 
-  test("a normalization-only patch cannot escape the generated-line gate", () => {
+  test("a normalization-only patch keeps the line's generated origin", () => {
     const { profile, job } = (() => {
       const seed = createSeed();
       const job = seed.savedJobs.find((entry) => entry.id === "job_ready");
@@ -361,21 +361,9 @@ describe("resume workspace patch generated-claim provenance", () => {
       return { profile: seed.profile, job };
     })();
 
-    const beforeValidation = validateResumeDraft({
-      draft: createGeneratedDraft(),
-      job,
-      profile,
-    });
-    expect(
-      hasBlockingResumeClaimAssessment({
-        validation: beforeValidation,
-        draft: createGeneratedDraft(),
-      }),
-    ).toBe(true);
-
     // Whitespace/punctuation-only rewrite with a user patch: without the
-    // anti-flip rule this would reclassify the claim as user-authored and
-    // drop the confirmation gate entirely. Case-only rewrites are not a
+    // anti-flip rule this would reclassify the claim as user-authored, and
+    // the person's own lines are never fact-checked against them. Case-only rewrites are not a
     // normalization fixture here — mid-sentence capital letters genuinely
     // change classification (they become evidence-required named words), so
     // the canonical classifier fail-closes them to unsupported.
@@ -396,14 +384,14 @@ describe("resume workspace patch generated-claim provenance", () => {
       (assessment) => assessment.bulletId === "experience_1_bullet_1",
     );
     expect(rewrittenAssessment?.claimOrigin).toBe("ai_generated");
-    // Not checked by the model yet: a generated line waits for the person.
+    // Not checked by the model yet; that does not hold the resume back.
     expect(rewrittenAssessment?.status).toBe("review");
     expect(
       hasBlockingResumeClaimAssessment({
         validation: afterValidation,
         draft: patchedDraft,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 

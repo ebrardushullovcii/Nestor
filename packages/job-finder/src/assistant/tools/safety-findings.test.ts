@@ -5,6 +5,7 @@ import {
   ApplyRunSchema,
   ApplicationCrmDataSchema,
   ApplicationRecordSchema,
+  ListingActivitySchema,
   type ApplicationRecord,
   AssistantResultSetSchema,
   AssistantMessageSchema,
@@ -51,6 +52,9 @@ import { interviewForModel } from "./format";
 
 function world() {
   const { workspaceService: service } = createWorkspaceServiceHarness();
+  // Test cases substitute canonical snapshots below; display reads see the
+  // same synthetic substitutions rather than the repository behind the spy.
+  service.getWorkspaceProjection = () => service.getWorkspaceSnapshot();
   const changes: unknown[] = [];
   const openInApp = vi.fn(() => Promise.resolve());
   const publishWorkspaceUpdate = vi.fn();
@@ -846,6 +850,7 @@ describe("R3 assistant safety findings", () => {
 
   it("R3-035 keeps exact partial progress when selection stops", async () => {
     const ctx = world();
+    delete ctx.service.queueJobsForReview;
     const snapshot = await ctx.service.getWorkspaceSnapshot();
     const job = {
       ...snapshot.discoveryJobs[0]!,
@@ -961,8 +966,54 @@ it("chat uses the shared Needs you projection for paused records without live re
   });
 });
 
+it("bulk selection submits eligible jobs once and preserves held-back outcomes", async () => {
+  const ctx = world();
+  const snapshot = await ctx.service.getWorkspaceSnapshot();
+  snapshot.applicationRecords = [];
+  const job = snapshot.discoveryJobs[0]!;
+  snapshot.discoveryJobs = Array.from({ length: 50 }, (_, index) => ({
+    ...job,
+    id: `batch_${index}`,
+    status: "discovered",
+    listingActivity:
+      index === 49
+        ? ListingActivitySchema.parse({
+            status: "closed",
+            observedAt: new Date().toISOString(),
+            signalId: "synthetic_closed",
+            provenance: "system",
+            explanation: "The listing is closed.",
+            detail: null,
+            confidence: 1,
+          })
+        : { status: "unknown" },
+  }));
+  vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
+  const single = vi.spyOn(ctx.service, "queueJobForReview");
+  const batch = vi.fn<(jobIds: readonly string[]) => Promise<void>>(() =>
+    Promise.resolve(),
+  );
+  ctx.service.queueJobsForReview = batch;
+  const result = await shortlistJobsTool.execute(
+    {
+      jobIds: snapshot.discoveryJobs.map((job) => job.id),
+      evenIfExcludedOrApplied: false,
+    },
+    ctx,
+  );
+  expect(batch).toHaveBeenCalledOnce();
+  expect(batch.mock.calls[0]?.[0]).toHaveLength(49);
+  expect(single).not.toHaveBeenCalled();
+  expect(result.summary).toContain("Shortlisted 49 jobs of 50");
+  expect(result.data).toContainEqual({
+    jobId: "batch_49",
+    outcome: "refused: the listing says it is closed",
+  });
+});
+
 it("bulk selection starts at most three slow reads and retains out-of-order outcomes on Stop", async () => {
   const ctx = world();
+  delete ctx.service.queueJobsForReview;
   const snapshot = await ctx.service.getWorkspaceSnapshot();
   snapshot.applicationRecords = [];
   const job = snapshot.discoveryJobs[0]!;

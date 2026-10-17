@@ -43,9 +43,7 @@ interface GroundedResumePayload {
 function computeExpectedCharBudget(modelContextWindowTokens: number): number {
   const promptTokens = Math.ceil(SYSTEM_PROMPT.length / 3);
   const availableInputTokens =
-    Math.floor(modelContextWindowTokens * 0.72) -
-    4_096 -
-    promptTokens;
+    Math.floor(modelContextWindowTokens * 0.72) - 4_096 - promptTokens;
 
   return availableInputTokens * 3;
 }
@@ -283,9 +281,7 @@ describe("openai compatible request compaction for grounded resume generation", 
       userPayload,
     });
 
-    expect(
-      ResumeImportJsonValueSchema.safeParse(compacted).success,
-    ).toBe(true);
+    expect(ResumeImportJsonValueSchema.safeParse(compacted).success).toBe(true);
 
     const grounded = compacted as unknown as GroundedResumePayload;
     const boundedDescription =
@@ -339,9 +335,7 @@ describe("openai compatible request compaction for grounded resume generation", 
       userPayload,
     });
 
-    expect(
-      ResumeImportJsonValueSchema.safeParse(compacted).success,
-    ).toBe(true);
+    expect(ResumeImportJsonValueSchema.safeParse(compacted).success).toBe(true);
 
     const grounded = compacted as unknown as GroundedResumePayload;
 
@@ -531,9 +525,7 @@ describe("openai compatible request compaction for grounded resume generation", 
       userPayload,
     });
 
-    expect(
-      ResumeImportJsonValueSchema.safeParse(compacted).success,
-    ).toBe(true);
+    expect(ResumeImportJsonValueSchema.safeParse(compacted).success).toBe(true);
 
     const grounded = compacted as unknown as GroundedResumePayload;
     const items = grounded.groundingEvidence?.items ?? [];
@@ -574,9 +566,9 @@ describe("openai compatible request compaction for grounded resume generation", 
     ]);
 
     // Generic profile fillers are the lowest-value items and all omit.
-    expect(
-      keptIds.some((id) => (id ?? "").startsWith("profile:filler:")),
-    ).toBe(false);
+    expect(keptIds.some((id) => (id ?? "").startsWith("profile:filler:"))).toBe(
+      false,
+    );
 
     const metadata = grounded.groundingEvidence?.compaction;
     expect(metadata?.applied).toBe(true);
@@ -653,9 +645,7 @@ describe("openai compatible request compaction for grounded resume generation", 
       userPayload,
     });
 
-    expect(
-      ResumeImportJsonValueSchema.safeParse(compacted).success,
-    ).toBe(true);
+    expect(ResumeImportJsonValueSchema.safeParse(compacted).success).toBe(true);
 
     const grounded = compacted as unknown as GroundedResumePayload;
     const metadata = grounded.groundingEvidence?.compaction;
@@ -719,9 +709,7 @@ describe("openai compatible request compaction for grounded resume generation", 
       userPayload,
     });
 
-    expect(
-      ResumeImportJsonValueSchema.safeParse(compacted).success,
-    ).toBe(true);
+    expect(ResumeImportJsonValueSchema.safeParse(compacted).success).toBe(true);
 
     const grounded = compacted as unknown as GroundedResumePayload;
     const compactedResumeText = grounded.baseResumeText ?? "";
@@ -809,5 +797,48 @@ describe("full fit evidence", () => {
         userPayload: { job: { description: "requirement ".repeat(10000) } },
       }),
     ).toThrow("exceed the model's input limit");
+  });
+});
+
+describe("full resume context", () => {
+  test("preserves long listing text and every evidence item when the complete request fits", () => {
+    const payload = {
+      targetJob: {
+        description: "Listing paragraph. ".repeat(1_000),
+        minimumQualifications: Array.from(
+          { length: 25 },
+          (_, index) => `Requirement ${index}`,
+        ),
+      },
+      groundingEvidence: {
+        items: Array.from({ length: 80 }, (_, index) => ({
+          id: `evidence_${index}`,
+          text: `Saved fact ${index}`,
+        })),
+      },
+    };
+    expect(
+      compactOpenAiCompatibleUserPayload({
+        operation: "createResumeDraft",
+        modelContextWindowTokens: 196_000,
+        systemPrompt: SYSTEM_PROMPT,
+        userPayload: payload,
+        preserveFullPayload: true,
+      }),
+    ).toEqual(payload);
+  });
+
+  test("rejects an oversized resume request instead of silently truncating candidate or listing evidence", () => {
+    expect(() =>
+      compactOpenAiCompatibleUserPayload({
+        operation: "createResumeDraft",
+        modelContextWindowTokens: 16_000,
+        systemPrompt: SYSTEM_PROMPT,
+        userPayload: {
+          targetJob: { description: "Required experience. ".repeat(10_000) },
+        },
+        preserveFullPayload: true,
+      }),
+    ).toThrow("no candidate facts or listing details were omitted");
   });
 });

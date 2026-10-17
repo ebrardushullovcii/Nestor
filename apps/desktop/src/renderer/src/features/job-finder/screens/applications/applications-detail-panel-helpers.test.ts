@@ -1,6 +1,6 @@
 import type {
   ApplicationPrivacyReceipt,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
 } from "@nordri/contracts";
 import { describe, expect, it } from "vitest";
 import {
@@ -46,16 +46,16 @@ describe("findActionableApplicationAnswerRequest", () => {
       applicationRecordId: "record_1",
     },
   } as unknown as NonNullable<
-    JobFinderWorkspaceSnapshot["userActionRequests"]
+    JobFinderRendererWorkspaceSnapshot["userActionRequests"]
   >[number];
 
   const run = (
-    state: JobFinderWorkspaceSnapshot["applyRuns"][number]["state"],
+    state: JobFinderRendererWorkspaceSnapshot["applyRuns"][number]["state"],
   ) =>
     ({
       id: "run_current",
       state,
-    }) as JobFinderWorkspaceSnapshot["applyRuns"][number];
+    }) as JobFinderRendererWorkspaceSnapshot["applyRuns"][number];
 
   it("keeps a cancelled run's stale answer request out of Applications", () => {
     expect(
@@ -227,7 +227,7 @@ describe("applyResultNeedsResumeAttachment", () => {
       detail: input.detail,
       summary: input.detail,
       blockerSummary: null,
-    } as JobFinderWorkspaceSnapshot["applyJobResults"][number];
+    } as JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
   }
 
   it("detects only a current failed or blocked resume attachment", () => {
@@ -385,12 +385,12 @@ describe("buildQueueEntries recovery population", () => {
           applicationRecordId: null,
           state: "blocked",
         },
-      ] as JobFinderWorkspaceSnapshot["applyJobResults"],
+      ] as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
       discoveryJobs: [],
       selectedRun: {
         id: "run_blocked",
         jobIds: ["job_blocked"],
-      } as JobFinderWorkspaceSnapshot["applyRuns"][number],
+      } as JobFinderRendererWorkspaceSnapshot["applyRuns"][number],
     });
 
     expect(entries).toHaveLength(1);
@@ -415,8 +415,7 @@ describe("service-worker site block helpers", () => {
       blockerReason: "site_protection" as const,
       blockerSummary: "Service worker interference",
       listingSignalEvidence: null,
-      visualObservationSets: [],
-      visualCheckpoints: [],
+
       latestQuestionCount: 0,
       latestAnswerCount: 0,
       pendingConsentRequestCount: 0,
@@ -466,9 +465,9 @@ describe("manual field-finish helpers", () => {
     summary: string;
     detail?: string;
     blockerSummary?: string | null;
-    blockerReason?: JobFinderWorkspaceSnapshot["applyJobResults"][number]["blockerReason"];
-    state?: JobFinderWorkspaceSnapshot["applyJobResults"][number]["state"];
-  }): JobFinderWorkspaceSnapshot["applyJobResults"][number] {
+    blockerReason?: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]["blockerReason"];
+    state?: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]["state"];
+  }): JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] {
     return {
       id: "result_field",
       runId: "run_field",
@@ -484,8 +483,7 @@ describe("manual field-finish helpers", () => {
       blockerReason: input.blockerReason ?? "required_human_input",
       blockerSummary: input.blockerSummary ?? input.summary,
       listingSignalEvidence: null,
-      visualObservationSets: [],
-      visualCheckpoints: [],
+
       latestQuestionCount: 0,
       latestAnswerCount: 0,
       pendingConsentRequestCount: 0,
@@ -685,7 +683,7 @@ it("lets the person retry a cancelled item without including it in the remaining
   const result = {
     state: "cancelled",
     applicationRecordId: "application_1",
-  } as JobFinderWorkspaceSnapshot["applyJobResults"][number];
+  } as JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
   expect(
     applicationNeedsPrimaryRecovery({
       lastAttemptState: "cancelled",

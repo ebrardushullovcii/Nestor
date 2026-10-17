@@ -262,7 +262,7 @@ describe("checkResumeAssistantProposal", () => {
 });
 
 describe("listResumeLinesToConfirm", () => {
-  test("lists the lines still waiting for Keep or Remove and skips kept ones", () => {
+  test("lists only unbacked generated lines not yet approved; stretches are not chores", () => {
     const assessment = (input: Record<string, unknown>) =>
       ResumeClaimAssessmentSchema.parse({
         field: "section_bullet",
@@ -277,14 +277,21 @@ describe("listResumeLinesToConfirm", () => {
       id: "a1",
       bulletId: "skill_sql",
       claimText: "SQL",
-      status: "confirm_needed",
+      status: "unsupported",
     });
     const kept = assessment({
       id: "a2",
       bulletId: "skill_apis",
       claimText: "APIs",
-      status: "confirm_needed",
+      status: "unsupported",
       contentHash: "fnv1a32:0000000b",
+    });
+    const stretch = assessment({
+      id: "a4",
+      bulletId: "skill_go",
+      claimText: "Go",
+      status: "confirm_needed",
+      contentHash: "fnv1a32:0000000c",
     });
     const exact = assessment({
       id: "a3",
@@ -308,7 +315,7 @@ describe("listResumeLinesToConfirm", () => {
             },
           ] as never,
         },
-        claimAssessments: [waiting, kept, exact],
+        claimAssessments: [waiting, kept, exact, stretch],
       }),
     ).toEqual([
       {

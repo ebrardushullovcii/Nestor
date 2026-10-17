@@ -413,7 +413,13 @@ export function recoverInterruptedDiscoveryRun(
   run: DiscoveryRunRecord,
   completedAt: string,
 ): DiscoveryRunRecord {
-  let recoveredRun = run;
+  // Recovery receives borrowed frozen canonical rows. Own the two mutable
+  // accumulator containers while sharing checkpoint bodies and untouched rows.
+  let recoveredRun = {
+    ...run,
+    targetExecutions: [...run.targetExecutions],
+    activity: [...run.activity],
+  };
 
   for (const targetExecution of run.targetExecutions) {
     if (targetExecution.state !== "running") {

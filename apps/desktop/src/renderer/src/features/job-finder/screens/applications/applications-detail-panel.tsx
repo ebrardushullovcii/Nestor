@@ -11,12 +11,12 @@ import {
   type ApplicationCrmStageDefinition,
 } from "@nordri/contracts";
 import type {
-  ApplicationAttempt,
+  ApplicationAttemptListRow,
   ApplicationRecord,
   ApplyRunDetails,
   ClearApplicationAnswerCommandInput,
   GlobalDailyApplicationPreparationCapacity,
-  JobFinderWorkspaceSnapshot,
+  JobFinderRendererWorkspaceSnapshot,
   SaveApplicationAnswerCommandInput,
   JobFinderApplyConsentActionInput,
   JobFinderApplyRunActionInput,
@@ -64,7 +64,7 @@ import { formatApplicationEmployerLine } from "../../lib/job-employer-location-d
 
 function buildLiveAssistantApplicationHref(input: {
   record: ApplicationRecord;
-  relatedJob: JobFinderWorkspaceSnapshot["discoveryJobs"][number] | null;
+  relatedJob: JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number] | null;
 }) {
   const { record, relatedJob } = input;
   const employerLine = formatApplicationEmployerLine({
@@ -78,7 +78,8 @@ function buildLiveAssistantApplicationHref(input: {
     record.lastActionLabel
       ? `Latest application activity: ${record.lastActionLabel}`
       : null,
-    relatedJob?.summary ? `Job summary: ${relatedJob.summary}` : null,
+    relatedJob?.matchAssessment.judgment?.summary
+      ? `Job fit: ${relatedJob.matchAssessment.judgment.summary}` : null,
   ].filter((entry): entry is string => Boolean(entry));
   const params = new URLSearchParams({
     source: "job_application",
@@ -107,7 +108,7 @@ interface ApplicationsDetailPanelProps {
   customStages?: readonly ApplicationCrmStageDefinition[];
   /** What each result's run is doing, so a planned job is never "Filling in". */
   readApplyRunContext?: (
-    result: JobFinderWorkspaceSnapshot["applyJobResults"][number] | null,
+    result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null,
   ) => ApplyRunContext | null;
   applyRunDetails: ApplyRunDetails | null;
   applyRunDetailsTarget: {
@@ -117,17 +118,17 @@ interface ApplicationsDetailPanelProps {
   } | null;
   applyRunDetailsError: string | null;
   applyRunDetailsStatus: "idle" | "loading" | "ready" | "error";
-  applicationAttempts?: readonly ApplicationAttempt[];
+  applicationAttempts?: readonly ApplicationAttemptListRow[];
   applicationRecords: readonly ApplicationRecord[];
-  applyJobResults: JobFinderWorkspaceSnapshot["applyJobResults"];
+  applyJobResults: JobFinderRendererWorkspaceSnapshot["applyJobResults"];
   dailyPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
-  discoveryJobs: JobFinderWorkspaceSnapshot["discoveryJobs"];
+  discoveryJobs: JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
   applyRunHistory: Array<{
-    result: JobFinderWorkspaceSnapshot["applyJobResults"][number];
-    run: JobFinderWorkspaceSnapshot["applyRuns"][number] | null;
+    result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
+    run: JobFinderRendererWorkspaceSnapshot["applyRuns"][number] | null;
   }>;
   effectiveSelectedApplyResult:
-    | JobFinderWorkspaceSnapshot["applyJobResults"][number]
+    | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
     | null;
   hasAnyApplications: boolean;
   hasVisibleApplications: boolean;
@@ -185,7 +186,7 @@ interface ApplicationsDetailPanelProps {
   confirmFinishedInBrowserStatus?: ConfirmFinishedInBrowserStatus;
   confirmFinishedInBrowserBlockerText?: string | null;
   selectedApplyRunId: string | null;
-  selectedAttempt: ApplicationAttempt | null;
+  selectedAttempt: ApplicationAttemptListRow | null;
   selectedRecord: ApplicationRecord | null;
   selectedRecordCompanyId?: string | null;
 }

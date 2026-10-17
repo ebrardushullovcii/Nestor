@@ -1,4 +1,4 @@
-import type { JobFinderWorkspaceSnapshot } from "@nordri/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nordri/contracts";
 import { describe, expect, it } from "vitest";
 import {
   classifyPausedApplyRun,
@@ -7,7 +7,7 @@ import {
 
 function workspace(
   resultStates: readonly string[],
-): JobFinderWorkspaceSnapshot {
+): JobFinderRendererWorkspaceSnapshot {
   const jobIds = resultStates.map((_state, index) => `job_${index}`);
   return {
     applyRuns: [
@@ -39,7 +39,7 @@ function workspace(
         ],
       },
     },
-  } as unknown as JobFinderWorkspaceSnapshot;
+  } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
 describe("classifyPausedApplyRun", () => {

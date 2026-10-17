@@ -1070,20 +1070,22 @@ describe("createJobFinderWorkspaceService", () => {
 
     expect(snapshot.recentSourceDebugRuns[0]?.state).toBe("completed");
   });
-
 });
 
 test("cancellation with an ordinary runtime error does not mark a healthy source broken", async () => {
   const controller = new AbortController();
-  const base = createCatalogBrowserSessionRuntime({ sessions: [], catalog: [] });
+  const base = createCatalogBrowserSessionRuntime({
+    sessions: [],
+    catalog: [],
+  });
   const { workspaceService } = createWorkspaceServiceHarness({
     seed: createSeed(),
     aiClient: createAgentAiClient(),
     browserRuntime: {
       ...base,
-      runAgentDiscovery: async () => {
+      runAgentDiscovery: () => {
         controller.abort();
-        throw new Error("The operation was stopped");
+        return Promise.reject(new Error("The operation was stopped"));
       },
     },
   });
@@ -1092,5 +1094,7 @@ test("cancellation with an ordinary runtime error does not mark a healthy source
     controller.signal,
   );
   expect(snapshot.recentSourceDebugRuns[0]?.state).toBe("cancelled");
-  expect(snapshot.searchPreferences.discovery.targets[0]?.staleReason).toBeNull();
+  expect(
+    snapshot.searchPreferences.discovery.targets[0]?.staleReason,
+  ).toBeNull();
 });

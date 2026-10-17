@@ -3,7 +3,6 @@ import {
   DiscoveryActivityEventSchema,
   DiscoveryTargetExecutionSchema,
   isFinishedDiscoveryTargetExecutionState,
-  JobFinderDiscoveryStateSchema,
   type AgentDiscoveryProgress,
   type DiscoveryActivityEvent,
   type BrowserRunWaitReason,
@@ -340,7 +339,10 @@ export function finalizeDiscoveryState(
     ? { ...run, cancellationRequestedAt }
     : run;
   const isRunning = persistedRun.state === "running";
-  return JobFinderDiscoveryStateSchema.parse({
+  // The repository validates changed rows at the write boundary. Parsing the
+  // whole state here copied every old run, checkpoint and ledger entry on each
+  // progress update, even though they were already validated and unchanged.
+  return {
     ...current,
     runState: persistedRun.state,
     activeRun: isRunning ? persistedRun : null,
@@ -348,5 +350,5 @@ export function finalizeDiscoveryState(
       ...(isRunning ? [] : [persistedRun]),
       ...current.recentRuns.filter((entry) => entry.id !== persistedRun.id),
     ].slice(0, historyLimit),
-  });
+  };
 }

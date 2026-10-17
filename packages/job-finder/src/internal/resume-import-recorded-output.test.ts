@@ -181,15 +181,15 @@ async function replay(refresh = false) {
     aiClient: {
       ...base,
       getStatus: () => ({ ...base.getStatus(), kind: "openai_compatible" }),
-      extractResumeImportStage: async (input) => {
+      extractResumeImportStage: (input) => {
         seen.push(input.documentBundle.fullText ?? "");
-        return {
+        return Promise.resolve({
           stage: input.stage,
           analysisProviderKind: "openai_compatible",
           analysisProviderLabel: "Recorded synthetic model",
           candidates: outputs[input.stage],
           notes: [],
-        };
+        });
       },
     },
   });
@@ -334,14 +334,14 @@ describe("recorded synthetic import responses", () => {
           value: expect.objectContaining({
             title: "Ledger rewrite",
             heroMetric: "85 ms",
-          }),
+          }) as unknown,
         }),
         expect.objectContaining({
           resolution: "needs_review",
           value: expect.objectContaining({
             title: "Sales target",
             claim: "Exceeded target by 20%.",
-          }),
+          }) as unknown,
         }),
       ]),
     );

@@ -9,6 +9,7 @@ import type {
 import type {
   ApplyJobResult,
   JobFinderDiscoveryState,
+  FitJudgmentProgress,
   JobFinderWorkspaceSnapshot,
   JobSearchPreferences,
   JobDiscoveryTarget,
@@ -73,6 +74,13 @@ export interface WorkspaceServiceContext {
   researchAdapter?: ResumeResearchAdapter;
   repository: JobFinderRepository;
   listingAssessmentJobIds?: Set<string>;
+  listingAssessmentGenerationRef?: MutableRef<number>;
+  listingAssessmentAbortControllerRef?: MutableRef<AbortController>;
+  withListingAssessmentSlot?: <T>(
+    operation: (signal: AbortSignal) => Promise<T>,
+  ) => Promise<T>;
+  isWorkspaceClosing?: () => boolean;
+  fitJudgmentProgressRef?: MutableRef<FitJudgmentProgress | null>;
   onListingAssessmentFinished?: () => void;
   activeDiscoveryAbortControllerRef: MutableRef<AbortController | null>;
   /**
@@ -137,8 +145,13 @@ export interface WorkspaceServiceContext {
   persistDiscoveryState: (
     updater: (current: JobFinderDiscoveryState) => JobFinderDiscoveryState,
   ) => Promise<JobFinderDiscoveryState>;
+  /**
+   * `knownSessions` are the sessions the caller just read; when the browser
+   * reports nothing new against them, nothing is written.
+   */
   refreshDiscoverySessions: (
     searchPreferences: JobSearchPreferences,
+    knownSessions?: JobFinderDiscoveryState["sessions"],
   ) => Promise<JobFinderDiscoveryState["sessions"]>;
   saveDiscoveryTargetUpdate: (
     targetId: string,

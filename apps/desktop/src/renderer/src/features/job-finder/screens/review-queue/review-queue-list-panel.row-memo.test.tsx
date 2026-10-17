@@ -162,7 +162,7 @@ describe("ReviewQueueListPanel row memoisation", () => {
           isJobPending={() => false}
           onSelectItem={vi.fn()}
           queue={queue}
-            selectedItem={queue[0] ?? null}
+          selectedItem={queue[0] ?? null}
         />
       </MemoryRouter>,
     );
@@ -175,7 +175,7 @@ describe("ReviewQueueListPanel row memoisation", () => {
           isJobPending={() => false}
           onSelectItem={vi.fn()}
           queue={queue}
-            selectedItem={queue[2] ?? null}
+          selectedItem={queue[2] ?? null}
         />
       </MemoryRouter>,
     );

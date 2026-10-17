@@ -65,10 +65,43 @@ export function jobNeedsFitJudgment(
   }
   return (
     judgment.contextFingerprint !== contextFingerprint ||
-    judgment.postingFingerprint !==
-      createMatchAssessmentPostingFingerprint(
-        createMatchAssessmentPostingInput(job),
-      )
+    judgment.postingFingerprint !== fitPostingFingerprint(job)
+  );
+}
+
+/**
+ * How worth a model call a job is when not every unjudged job will get one.
+ * An out-of-date verdict's score is the best guess there is; a job never
+ * judged sits in the middle; one the model already called a skip or an
+ * unrelated role goes last, so a capped or stopped pass spends its calls on
+ * the likeliest fits.
+ */
+function fitJudgingPromise(job: { matchAssessment: MatchAssessment }): number {
+  const assessment = job.matchAssessment;
+  if (
+    assessment.recommendation === "skip" ||
+    assessment.titleFamilyMatch === "unrelated"
+  ) {
+    return 0;
+  }
+  return assessment.judgment ? 1 + assessment.score / 100 : 1.5;
+}
+
+/** Most promising first, then the newest find. */
+export function compareFitJudgingPromise(
+  left: { matchAssessment: MatchAssessment; discoveredAt?: string | null },
+  right: { matchAssessment: MatchAssessment; discoveredAt?: string | null },
+): number {
+  return (
+    fitJudgingPromise(right) - fitJudgingPromise(left) ||
+    (right.discoveredAt ?? "").localeCompare(left.discoveredAt ?? "")
+  );
+}
+
+/** What a verdict was given on: it changes when the listing does. */
+export function fitPostingFingerprint(job: JobPosting): string {
+  return createMatchAssessmentPostingFingerprint(
+    createMatchAssessmentPostingInput(job),
   );
 }
 
@@ -97,6 +130,9 @@ export async function judgeJobFitsInBatches<
   concurrency?: number;
   retryDelayMs?: number;
   onProgress?: (completed: number, total: number) => void;
+  onBatchJudged?: (
+    judgments: ReadonlyMap<string, FitJudgment>,
+  ) => Promise<void>;
 }): Promise<Map<string, FitJudgment>> {
   const judgments = new Map<string, FitJudgment>();
   const judgeJobFits = input.aiClient.judgeJobFits?.bind(input.aiClient);
@@ -151,6 +187,14 @@ export async function judgeJobFitsInBatches<
         }),
       );
     }
+    await input.onBatchJudged?.(
+      new Map(
+        batch.flatMap((job) => {
+          const judgment = judgments.get(job.id);
+          return judgment ? [[job.id, judgment] as const] : [];
+        }),
+      ),
+    );
   };
 
   let completed = 0;

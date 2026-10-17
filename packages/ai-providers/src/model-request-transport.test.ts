@@ -9,7 +9,12 @@ import {
 
 function sseResponse(
   events: readonly string[],
-  options: { status?: number; chunkDelayMs?: number; hang?: boolean } = {},
+  options: {
+    status?: number;
+    chunkDelayMs?: number;
+    hang?: boolean;
+    onCancel?: () => void;
+  } = {},
 ): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -25,6 +30,9 @@ function sseResponse(
       if (!options.hang) {
         controller.close();
       }
+    },
+    cancel() {
+      options.onCancel?.();
     },
   });
   return new Response(stream, {
@@ -52,6 +60,268 @@ const baseInput = {
 };
 
 describe("performModelRequest", () => {
+  test("returns complete chat output, reasoning, tool calls and final usage without waiting for EOF", async () => {
+    const cancelled = vi.fn();
+    const response = sseResponse(
+      [
+        JSON.stringify({
+          choices: [{ delta: { reasoning_content: "Private continuation" } }],
+        }),
+        JSON.stringify({
+          choices: [
+            {
+              delta: {
+                content: '{"ok":true}',
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_1",
+                    type: "function",
+                    function: {
+                      name: "render_resume_preview",
+                      arguments: '{"part":',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        JSON.stringify({
+          choices: [
+            {
+              delta: {
+                tool_calls: [{ index: 0, function: { arguments: "1}" } }],
+              },
+              finish_reason: "tool_calls",
+            },
+          ],
+        }),
+        JSON.stringify({
+          choices: [],
+          usage: {
+            prompt_tokens: 21,
+            completion_tokens: 9,
+            total_tokens: 30,
+            completion_tokens_details: { reasoning_tokens: 4 },
+          },
+        }),
+        "[DONE]",
+      ],
+      { hang: true, onCancel: cancelled },
+    );
+    const fetchImpl = vi.fn(() => response);
+    const payload = await performModelRequest({
+      ...baseInput,
+      totalTimeoutMs: 100,
+      idleTimeoutMs: 1_000,
+      maxAttempts: 1,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(payload.choices?.[0]?.message).toMatchObject({
+      content: '{"ok":true}',
+      reasoning_content: "Private continuation",
+      tool_calls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: { name: "render_resume_preview", arguments: '{"part":1}' },
+        },
+      ],
+    });
+    expect(payload.choices?.[0]?.finish_reason).toBe("tool_calls");
+    expect(payload.usage).toEqual({
+      prompt_tokens: 21,
+      completion_tokens: 9,
+      total_tokens: 30,
+      completion_tokens_details: { reasoning_tokens: 4 },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(response.body?.locked).toBe(false);
+  });
+
+  test("returns the completed Responses payload and usage without waiting for EOF", async () => {
+    const cancelled = vi.fn();
+    const response = sseResponse(
+      [
+        JSON.stringify({
+          type: "response.output_text.delta",
+          delta: "unfinished delta",
+        }),
+        JSON.stringify({
+          type: "response.completed",
+          response: {
+            status: "completed",
+            output: [
+              {
+                type: "message",
+                content: [{ type: "output_text", text: "Complete final text" }],
+              },
+              {
+                type: "function_call",
+                call_id: "call_2",
+                name: "finish_task",
+                arguments: "{}",
+              },
+            ],
+            usage: {
+              input_tokens: 21,
+              output_tokens: 9,
+              total_tokens: 30,
+              output_tokens_details: { reasoning_tokens: 4 },
+            },
+          },
+        }),
+      ],
+      { hang: true, onCancel: cancelled },
+    );
+    const fetchImpl = vi.fn(() => response);
+    const payload = await performModelRequest({
+      ...baseInput,
+      apiMode: "responses",
+      totalTimeoutMs: 100,
+      idleTimeoutMs: 1_000,
+      maxAttempts: 1,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(payload.choices?.[0]?.message?.content).toBe("Complete final text");
+    expect(payload.choices?.[0]?.message?.tool_calls).toEqual([
+      {
+        id: "call_2",
+        type: "function",
+        function: { name: "finish_task", arguments: "{}" },
+      },
+    ]);
+    expect(payload.usage).toMatchObject({
+      prompt_tokens: 21,
+      completion_tokens: 9,
+      completion_tokens_details: { reasoning_tokens: 4 },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(response.body?.locked).toBe(false);
+  });
+
+  test("waits past finish_reason for final usage and the terminal marker", async () => {
+    const encoder = new TextEncoder();
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null =
+      null;
+    const cancelled = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+      cancel: cancelled,
+    });
+    const response = new Response(stream, {
+      headers: { "content-type": "text/event-stream" },
+    });
+    const send = (event: unknown) => {
+      if (!streamController) throw new Error("Stream was not started");
+      streamController.enqueue(
+        encoder.encode(
+          `data: ${typeof event === "string" ? event : JSON.stringify(event)}\n\n`,
+        ),
+      );
+    };
+    let settled = false;
+    const result = performModelRequest({
+      ...baseInput,
+      totalTimeoutMs: 200,
+      maxAttempts: 1,
+      fetchImpl: (() => Promise.resolve(response)) as typeof fetch,
+    }).then((payload) => {
+      settled = true;
+      return payload;
+    });
+    send({
+      choices: [{ delta: { content: "Final content" }, finish_reason: "stop" }],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    send({
+      choices: [],
+      usage: { prompt_tokens: 7, completion_tokens: 2, total_tokens: 9 },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    send("[DONE]");
+    const payload = await result;
+    expect(payload.usage).toEqual({
+      prompt_tokens: 7,
+      completion_tokens: 2,
+      total_tokens: 9,
+    });
+    expect(cancelled).toHaveBeenCalledTimes(1);
+  });
+
+  test("retries a malformed terminal Responses event without returning partial content", async () => {
+    const cancelled = vi.fn();
+    const invalid = sseResponse(
+      [
+        JSON.stringify({
+          type: "response.output_text.delta",
+          delta: '{"partial":true',
+        }),
+        JSON.stringify({ type: "response.completed", response: "malformed" }),
+      ],
+      { hang: true, onCancel: cancelled },
+    );
+    const fetchImpl = vi
+      .fn()
+      .mockReturnValueOnce(invalid)
+      .mockReturnValueOnce(
+        sseResponse([
+          JSON.stringify({
+            type: "response.completed",
+            response: { output_text: "Fresh completed output" },
+          }),
+        ]),
+      );
+    const payload = await performModelRequest({
+      ...baseInput,
+      apiMode: "responses",
+      totalTimeoutMs: 2_000,
+      maxAttempts: 2,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(payload.choices?.[0]?.message?.content).toBe(
+      "Fresh completed output",
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(invalid.body?.locked).toBe(false);
+  });
+
+  test("cancels an explicitly incomplete open stream and rejects its output", async () => {
+    const cancelled = vi.fn();
+    const response = sseResponse(
+      [
+        JSON.stringify({
+          type: "response.incomplete",
+          response: {
+            status: "incomplete",
+            incomplete_details: { reason: "max_output_tokens" },
+          },
+        }),
+      ],
+      { hang: true, onCancel: cancelled },
+    );
+    const fetchImpl = vi.fn(() => response);
+    await expect(
+      performModelRequest({
+        ...baseInput,
+        apiMode: "responses",
+        maxAttempts: 1,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow("incomplete response: max_output_tokens");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(response.body?.locked).toBe(false);
+  });
+
   test("sends stream: true and reassembles streamed chat content and tool calls", async () => {
     const fetchImpl = vi.fn(
       (_url: string | URL | Request, init?: RequestInit) => {
