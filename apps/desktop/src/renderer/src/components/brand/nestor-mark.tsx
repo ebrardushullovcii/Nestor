@@ -1,0 +1,32 @@
+export function NestorMark({
+  className,
+  title = "Nestor",
+}: {
+  className?: string;
+  title?: string;
+}) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 1024 1024"
+      className={className}
+      role="img"
+      aria-label={title}
+      focusable="false"
+    >
+      <title>{title}</title>
+      <path
+        d="M160 952 L160 424 A352 352 0 0 1 864 424 L864 952 L746 952 L746 424 A234 234 0 0 0 278 424 L278 952 Z"
+        fill="currentColor"
+      />
+      <path
+        d="M322 693 L322 424 A190 190 0 0 1 702 424 L702 693 Z"
+        fill="var(--brand-stone-blue)"
+      />
+      <path
+        d="M322 737 L702 737 L702 952 L322 952 Z"
+        fill="var(--brand-stone-sage)"
+      />
+    </svg>
+  );
+}
