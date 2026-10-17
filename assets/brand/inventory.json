@@ -471,112 +471,112 @@
   {
     "path": "in-app/wordmark-320.png",
     "width": 320,
-    "height": 61,
+    "height": 60,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-640.png",
     "width": 640,
-    "height": 121,
+    "height": 119,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-1280.png",
     "width": 1280,
-    "height": 243,
+    "height": 239,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-2560.png",
     "width": 2560,
-    "height": 485,
+    "height": 478,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-on-dark-320.png",
     "width": 320,
-    "height": 61,
+    "height": 60,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-on-dark-640.png",
     "width": 640,
-    "height": 121,
+    "height": 119,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-on-dark-1280.png",
     "width": 1280,
-    "height": 243,
+    "height": 239,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-on-dark-2560.png",
     "width": 2560,
-    "height": 485,
+    "height": 478,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-monochrome-320.png",
     "width": 320,
-    "height": 61,
+    "height": 60,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-monochrome-640.png",
     "width": 640,
-    "height": 121,
+    "height": 119,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-monochrome-1280.png",
     "width": 1280,
-    "height": 243,
+    "height": 239,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-monochrome-2560.png",
     "width": 2560,
-    "height": 485,
+    "height": 478,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-monochrome-white-320.png",
     "width": 320,
-    "height": 61,
+    "height": 60,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-monochrome-white-640.png",
     "width": 640,
-    "height": 121,
+    "height": 119,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-monochrome-white-1280.png",
     "width": 1280,
-    "height": 243,
+    "height": 239,
     "transparent": true,
     "format": "png"
   },
   {
     "path": "in-app/wordmark-monochrome-white-2560.png",
     "width": 2560,
-    "height": 485,
+    "height": 478,
     "transparent": true,
     "format": "png"
   },
@@ -667,7 +667,7 @@
   {
     "path": "preview/wordmark.png",
     "width": 1280,
-    "height": 243,
+    "height": 239,
     "transparent": true,
     "format": "png"
   }
