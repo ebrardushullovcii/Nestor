@@ -28,6 +28,8 @@ Local-first Electron monorepo (pnpm + turbo) with two modules: `Job Finder` and 
 
 The user usually has `pnpm desktop:dev` running. For "use it like a user" checks: build with `pnpm --filter @nestor/desktop build`, launch an isolated instance with a temporary user-data directory and synthetic profile data, drive it, keep screenshots, and batch the fixes. Rebuild when needed and verify that the inspected app contains the final changes. Details and safety rules: `docs/TESTING.md`.
 
+The `verify-nestor` skill (`.claude/skills/verify-nestor/`; Codex finds it through `.agents/skills/verify-nestor/`) does this end to end: isolated instances side by side, saved journeys, sends to the replica sites only, evidence in `~/Projects/nestor-agent-work/<label>/verify`.
+
 ## Website and marketing
 
 - `apps/website/` is the public landing page (https://trynestor.netlify.app): static HTML, CSS and JS outside the pnpm workspace. Netlify deploys it from GitHub whenever a merge to `main` changes that folder; never deploy it from local files. Its `README.md` covers the forms and assets.
