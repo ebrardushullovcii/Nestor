@@ -48,24 +48,16 @@ async function main() {
   }
   for (const name of ['mark', 'mark-on-dark', 'mark-monochrome', 'mark-monochrome-white', 'wordmark', 'wordmark-on-dark', 'wordmark-monochrome', 'wordmark-monochrome-white'])
     fs.copyFileSync(path.join(root, 'source', `${name}.svg`), path.join(root, 'in-app', `${name}.svg`));
-  const inner = name => {
-    const svg = fs.readFileSync(path.join(root, 'source', name), 'utf8');
-    return svg.slice(svg.indexOf('</title>') + 8, svg.lastIndexOf('</svg>'));
+  const word = fs.readFileSync(path.join(root, 'source/wordmark.svg'), 'utf8');
+  const content = word.slice(word.indexOf('</title>') + 8, word.lastIndexOf('</svg>'));
+  const [wordX, wordY, wordWidth, wordHeight] = word.match(/viewBox="([^"]+)"/)[1].split(' ').map(Number);
+  const social = (w, h, logoWidth) => {
+    const scale = logoWidth / wordWidth;
+    const x = (w - logoWidth) / 2, y = (h - wordHeight * scale) / 2;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="#f5f2eb"/><g transform="translate(${x} ${y}) scale(${scale}) translate(${-wordX} ${-wordY})">${content}</g></svg>`;
   };
-  const [, , wordWidth, wordHeight] = fs.readFileSync(path.join(root, 'source/wordmark.svg'), 'utf8').match(/viewBox="([^"]+)"/)[1].split(' ').map(Number);
-  // The mark's artwork spans x 160-864 and y 72-952 of its 1024 canvas.
-  const place = (name, x, y, scale, originX, originY) => `<g transform="translate(${x} ${y}) scale(${scale}) translate(${-originX} ${-originY})">${inner(name)}</g>`;
-  const card = (w, h, body) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="#f5f2eb"/>${body}</svg>`;
-  // Landscape: mark beside the wordmark, cap height about a third of the mark.
-  const markH = 236, markW = markH * 704 / 880, capH = 84, wordW = capH * wordWidth / wordHeight, gapX = 64;
-  const startX = (1200 - markW - gapX - wordW) / 2, markY = (630 - markH) / 2;
-  fs.writeFileSync(path.join(root, 'source/social-card.svg'), card(1200, 630,
-    place('mark.svg', startX, markY, markH / 880, 160, 72) + place('wordmark.svg', startX + markW + gapX, markY + markH - capH - 2, capH / wordHeight, 0, 0)));
-  // Square: mark above the wordmark.
-  const sqMarkH = 380, sqWordW = 520, sqWordH = sqWordW * wordHeight / wordWidth, sqGap = 96;
-  const sqTop = (1080 - sqMarkH - sqGap - sqWordH) / 2;
-  fs.writeFileSync(path.join(root, 'source/social-square.svg'), card(1080, 1080,
-    place('mark.svg', (1080 - sqMarkH * 704 / 880) / 2, sqTop, sqMarkH / 880, 160, 72) + place('wordmark.svg', (1080 - sqWordW) / 2, sqTop + sqMarkH + sqGap, sqWordW / wordWidth, 0, 0)));
+  fs.writeFileSync(path.join(root, 'source/social-card.svg'), social(1200, 630, 860));
+  fs.writeFileSync(path.join(root, 'source/social-square.svg'), social(1080, 1080, 840));
   await render('social-card.svg', 'social/og-image.png', 1200, true, 630);
   await render('social-square.svg', 'social/square.png', 1080, true, 1080);
   await sharp(path.join(root, 'social/og-image.png')).jpeg({ quality: 95, chromaSubsampling: '4:4:4' }).withIccProfile('srgb').toFile(path.join(root, 'social/og-image.jpg'));

@@ -8,7 +8,12 @@ import { NestorWordmark } from "./nestor-wordmark";
 afterEach(cleanup);
 
 describe.each([
-  ["wordmark", NestorWordmark, "0 0 2194 416", ["currentColor"]],
+  [
+    "wordmark",
+    NestorWordmark,
+    "52 152 2246 419",
+    ["currentColor", "var(--brand-stone-blue)", "var(--brand-stone-sage)"],
+  ],
   [
     "mark",
     NestorMark,
@@ -51,9 +56,9 @@ it("keeps the wordmark aligned to the start of its container", () => {
   ).toBe("xMinYMid meet");
 });
 
-it("draws the wordmark as six separate letters", () => {
+it("draws six letters with three separate stones inside the O", () => {
   const { getByRole } = render(<NestorWordmark />);
   expect(
     getByRole("img", { name: "Nestor" }).querySelectorAll("path"),
-  ).toHaveLength(6);
+  ).toHaveLength(9);
 });

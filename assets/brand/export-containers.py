@@ -57,7 +57,7 @@ for file in (ROOT/'source').glob('*.svg'):
     tree=ET.parse(file)
     assert not any(e.tag.endswith('image') or e.tag.endswith('text') for e in tree.iter()), file
 
-# Check that the frame, the sky and the land stay separate shapes even at 16px.
+# Check that the ring and all three stones stay separate shapes even at 16px.
 def components(image):
     alpha=image.convert('RGBA').getchannel('A')
     w,h=image.size
@@ -74,9 +74,9 @@ def components(image):
 for n in [16,32,48,64,128]:
     image=Image.open(ROOT/f'web/favicon-{n}.png')
     count=len(components(image))
-    assert count==3, (n,count)
+    assert count==4, (n,count)
 wordmark=Image.open(ROOT/'in-app/wordmark-1280.png')
-assert len(components(wordmark))==6, 'Wordmark must retain six separate letters.'
+assert len(components(wordmark))==9, 'Wordmark must retain six letters and three separate stones.'
 
 # The maskable foreground must fit the circle with radius 40% of the canvas.
 foreground=Image.open(ROOT/'desktop/macos/icon-composer-foreground.png')
@@ -85,11 +85,11 @@ for y in range(1024):
     for x in range(1024):
         if alpha.getpixel((x,y))>=128:
             assert (x-512)**2+(y-512)**2 <= (409.6)**2
-print(f'Validated {len(inventory)} PNG sizes and transparency; all favicons retain three separate shapes.')
+print(f'Validated {len(inventory)} PNG sizes and transparency; all favicons retain four separate shapes.')
 print('Validated Windows ICO: 16,20,24,32,40,48,64,128,256; favicon ICO: 16,32,48.')
 print('Validated macOS ICNS container and 1024px representation:', ','.join(types))
 print('Validated outlined SVGs and maskable icon safe zone.')
-print('Validated wordmark: six complete letter shapes.')
+print('Validated wordmark: six complete letter shapes plus three separate stones.')
 build=ROOT/'integration/electron-build'
 build.mkdir(parents=True,exist_ok=True)
 shutil.copy2(ROOT/'desktop/windows/icon.ico',build/'icon.ico')
