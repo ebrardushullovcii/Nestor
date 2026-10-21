@@ -22,6 +22,9 @@ export function textRetentionError(
   ) {
     return "The field changed before its answer could be checked. Read the current page before trying again.";
   }
+  // Page reads blank a password field's value, so an empty one proves nothing;
+  // the write's own immediate read already caught a refused password.
+  if (control.credentialRole === "password") return null;
   return value.trim().length > 0 && current.value.trim().length === 0
     ? CLEARED_TEXT_ERROR
     : null;
