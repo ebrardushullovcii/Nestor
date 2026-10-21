@@ -6,6 +6,7 @@ import {
   buildFitEvidenceInstructions,
   buildJobFitAssessmentPayload,
   buildJobFitJudgingPayload,
+  buildJobFitJudgingRequest,
   buildJobFitJudgingPrompt,
   normalizeJobFitJudgments,
 } from "./openai-compatible-fit";
@@ -381,6 +382,172 @@ test("fit inputs label personal facts and preferences in plain words", () => {
   expect(buildJobFitJudgingPrompt()).toContain(
     "never field names, key=value text or true/false flags",
   );
+});
+
+test("batch dates and jobs follow the reusable person and goals prefix", () => {
+  const input = {
+    assessmentDate: "2026-10-21",
+    profile: createProfile(),
+    searchPreferences: createPreferences(),
+    jobs: [{ jobId: "first", posting: createJobPosting() }],
+  };
+  const first = JSON.stringify(buildJobFitJudgingPayload(input));
+  const next = JSON.stringify(
+    buildJobFitJudgingPayload({
+      ...input,
+      assessmentDate: "2026-10-22",
+      jobs: [{ jobId: "second", posting: createJobPosting() }],
+    }),
+  );
+  const prefix = first.slice(0, first.indexOf(',"assessmentDate"'));
+  expect(prefix).toContain('"person"');
+  expect(prefix).toContain('"goals"');
+  expect(next.startsWith(prefix)).toBe(true);
+});
+
+test("columnar batch inputs keep every job field and all supplied evidence", () => {
+  const first = createJobPosting();
+  first.minimumQualifications = ["Dutch C1", "Java", "Security clearance"];
+  first.description =
+    "Read this complete listing, including its last condition.";
+  const input = {
+    assessmentDate: "2026-10-21",
+    profile: createProfile(),
+    searchPreferences: createPreferences(),
+    jobs: Array.from({ length: 20 }, (_, index) => ({
+      jobId: String(index),
+      posting: {
+        ...first,
+        title: `Role ${index}`,
+        salaryText: index ? null : "$90,000",
+      },
+    })),
+  };
+  const { jobs, ...context } = buildJobFitJudgingPayload(input);
+  const {
+    jobColumns,
+    jobs: rows,
+    ...wireContext
+  } = buildJobFitJudgingRequest(input);
+  expect(wireContext).toEqual(context);
+  expect(
+    rows.map((row) =>
+      Object.fromEntries(
+        jobColumns.map((column, index) => [column, row[index]]),
+      ),
+    ),
+  ).toEqual(jobs);
+  expect(JSON.stringify(buildJobFitJudgingRequest(input)).length).toBeLessThan(
+    JSON.stringify(buildJobFitJudgingPayload(input)).length,
+  );
+  expect(buildJobFitJudgingRequest({ ...input, jobs: [] }).jobs).toEqual([]);
+});
+
+test("short batch ids map only to this request's jobs without changing verdicts", async () => {
+  const verdict = {
+    jobId: "1",
+    score: 43,
+    recommendation: "skip",
+    role: "adjacent",
+    roleExplanation: "You have related experience.",
+    preferences: "conflict",
+    preferencesExplanation: "You cannot work from this country.",
+    locationReach: "outside_area",
+    reasons: ["You know the required tools."],
+    gaps: ["You lack permission to work there."],
+    summary: "Your work permission does not cover this country.",
+    listingClosed: true,
+    listingClosedEvidence: "This listing is closed.",
+  };
+  const mock = mockCapturingJsonFetch({
+    choices: [
+      {
+        message: {
+          content: JSON.stringify({
+            judgments: [
+              verdict,
+              { ...verdict, score: 99 }, // Duplicate, first answer stands.
+              { ...verdict, jobId: "2" }, // Outside this batch.
+              { ...verdict, jobId: "workspace_id_one" }, // No id aliasing.
+            ],
+          }),
+        },
+      },
+    ],
+  });
+  try {
+    const client = createOpenAiCompatibleJobFinderAiClient({
+      apiKey: "synthetic-key",
+      baseUrl: "https://example.com/v1",
+      model: "synthetic-model",
+      streaming: false,
+      maxAttempts: 1,
+    });
+    const input = {
+      assessmentDate: "2026-10-21",
+      profile: createProfile(),
+      searchPreferences: createPreferences(),
+      jobs: [
+        { jobId: "workspace_id_one", posting: createJobPosting() },
+        { jobId: "workspace_id_two", posting: createJobPosting() },
+      ],
+    };
+    const result = await client.judgeJobFits!(input);
+    const body = JSON.parse(mock.getCapturedBody()) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const sent = JSON.parse(
+      body.messages.find((message) => message.role === "user")!.content,
+    ) as ReturnType<typeof buildJobFitJudgingRequest>;
+    expect(sent).toEqual(
+      buildJobFitJudgingRequest({
+        ...input,
+        jobs: input.jobs.map((job, index) => ({
+          ...job,
+          jobId: String(index),
+        })),
+      }),
+    );
+    expect(result).toEqual([{ ...verdict, jobId: "workspace_id_two" }]);
+    const next = await client.judgeJobFits!({
+      ...input,
+      jobs: input.jobs.map((job) => ({ ...job, jobId: `next_${job.jobId}` })),
+    });
+    expect(next).toEqual([{ ...verdict, jobId: "next_workspace_id_two" }]);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("an oversized batch fails before sending rather than truncating column positions", async () => {
+  const mock = mockCapturingJsonFetch({});
+  try {
+    const client = createOpenAiCompatibleJobFinderAiClient({
+      apiKey: "synthetic-key",
+      baseUrl: "https://example.com/v1",
+      model: "synthetic-model",
+      contextWindowTokens: 16_000,
+      streaming: false,
+      maxAttempts: 1,
+    });
+    await expect(
+      client.judgeJobFits!({
+        assessmentDate: "2026-10-21",
+        profile: createProfile(),
+        searchPreferences: createPreferences(),
+        jobs: Array.from({ length: 20 }, (_, index) => ({
+          jobId: `job_${index}`,
+          posting: {
+            ...createJobPosting(),
+            description: "Complete listing evidence. ".repeat(120),
+          },
+        })),
+      }),
+    ).rejects.toThrow("no candidate facts or listing details were omitted");
+    expect(mock.getCapturedBody()).toBe("");
+  } finally {
+    mock.restore();
+  }
 });
 
 test("the full listing judge gets plain preferences and keeps all listing and profile evidence", () => {

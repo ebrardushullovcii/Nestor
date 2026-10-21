@@ -71,7 +71,7 @@ import {
 import {
   buildFitEvidenceInstructions,
   buildJobFitAssessmentPayload,
-  buildJobFitJudgingPayload,
+  buildJobFitJudgingRequest,
   buildJobFitJudgingPrompt,
   normalizeJobFitJudgments,
 } from "./openai-compatible-fit";
@@ -345,6 +345,10 @@ export function createOpenAiCompatibleJobFinderAiClient(
         DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
       systemPrompt,
       userPayload,
+      // Column names and row positions must survive together. The batch
+      // builder already bounds evidence; generic array trimming would
+      // silently change its meaning when a small context window is used.
+      preserveFullPayload: operation === "judgeJobFits",
     });
 
     if (options?.signal?.aborted) {
@@ -652,18 +656,30 @@ export function createOpenAiCompatibleJobFinderAiClient(
       if (rest.jobs.length === 0) {
         return [];
       }
+      // Short request-local ids avoid repeating opaque workspace ids in both
+      // directions. Only ids in this batch can be mapped back to a saved job.
+      const jobs = rest.jobs.map((job, index) => ({
+        ...job,
+        jobId: String(index),
+      }));
       const payload = await fetchModelJson(
         "judgeJobFits",
         buildJobFitJudgingPrompt(),
-        buildJobFitJudgingPayload(rest),
+        buildJobFitJudgingRequest({ ...rest, jobs }),
         {
+          conversationKey: modelConversationKeys.fitJudging(input.profile),
           ...(signal ? { signal } : {}),
           reasoningEffort: reasoningEffortFor("fit_batch"),
         },
       );
-      return normalizeJobFitJudgments(
-        payload,
-        new Set(rest.jobs.map((job) => job.jobId)),
+      const jobIds = new Map(
+        jobs.map((job, index) => [job.jobId, rest.jobs[index]!.jobId]),
+      );
+      return normalizeJobFitJudgments(payload, new Set(jobIds.keys())).map(
+        (judgment) => ({
+          ...judgment,
+          jobId: jobIds.get(judgment.jobId)!,
+        }),
       );
     },
     async checkResumeClaims(input) {

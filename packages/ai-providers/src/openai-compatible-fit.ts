@@ -20,6 +20,7 @@ import type { AssessJobFitInput, JobFitJudgmentResult } from "./shared";
  */
 
 export const JOB_FIT_JUDGING_BATCH_SIZE = 20;
+
 /** Shared by preliminary and full reads so a rescore keeps the same constraints. */
 export function buildFitEvidenceInstructions(): string {
   return [
@@ -43,6 +44,7 @@ export function buildJobFitJudgingPrompt(): string {
     buildFitEvidenceInstructions(),
     "These batch inputs are bounded excerpts and saved facts, without the raw imported resume. An evidenceOmitted flag or excerpt marker means some listing text was omitted: say that in the summary, treat requirements as provisional and request a full read for decisive unknowns. Missing wording in an excerpt is not proof of missing candidate ability.",
     "You judge how well each job fits one person who is looking for work.",
+    "Input jobs are row arrays: jobColumns names each field in order. Each row contains the same listing evidence as an object with those field names.",
     'Return JSON {"judgments": [...]} with one entry per job, each with the jobId exactly as given.',
     'role: "exact" when the job is the kind of work the person is looking for, in any wording or language; "adjacent" when it is related work they could credibly do; "conflict" when it is a different occupation, or a level far from theirs; "unknown" when the listing says too little.',
     'preferences: compare the job\'s place, work mode, level, employment type and pay with the person\'s goals: "aligned", "mixed", "conflict" when it contradicts a goal the person set, "unknown" when the listing is silent, "not_configured" when the person set no goals.',
@@ -351,10 +353,25 @@ export function buildJobFitJudgingPayload(input: {
   jobs: ReadonlyArray<{ jobId: string; posting: JobPosting }>;
 }) {
   return {
-    assessmentDate: input.assessmentDate,
     person: compactPerson(input.profile),
     goals: compactGoals(input.searchPreferences),
+    assessmentDate: input.assessmentDate,
     jobs: input.jobs.map((job) => compactJob(job.jobId, job.posting)),
+  };
+}
+
+/** Lossless wire representation: repeated field names travel once per batch. */
+export function buildJobFitJudgingRequest(
+  input: Parameters<typeof buildJobFitJudgingPayload>[0],
+) {
+  const { jobs, ...context } = buildJobFitJudgingPayload(input);
+  const jobColumns = Object.keys(jobs[0] ?? {}) as Array<
+    keyof (typeof jobs)[number]
+  >;
+  return {
+    ...context,
+    jobColumns,
+    jobs: jobs.map((job) => jobColumns.map((column) => job[column])),
   };
 }
 

@@ -98,6 +98,10 @@ export const modelConversationKeys = {
   listingReading(profile: { id: string }): string {
     return `listing-reading:${profile.id}`;
   },
+  /** Fit batches share the person's evidence and goals across searches. */
+  fitJudging(profile: { id: string }): string {
+    return `fit-judging:${profile.id}`;
+  },
   profileCopilot(profile: { id: string }): string {
     return `profile-copilot:${profile.id}`;
   },

@@ -2209,6 +2209,7 @@ export function createWorkspaceDiscoveryMethods(
     const searchFitBatcher = createSearchFitBatcher({
       batchSize: JOB_FIT_JUDGING_BATCH_SIZE,
       concurrency: SEARCH_FIT_JUDGING_CONCURRENCY,
+      finishConcurrency: 5,
       partialWaitMs: SEARCH_FIT_PARTIAL_BATCH_WAIT_MS,
       maxWaitMs: SEARCH_FIT_MAX_BATCH_WAIT_MS,
       // A batch the model or the save failed leaves its jobs unjudged; the

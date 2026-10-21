@@ -11,6 +11,8 @@
 export function createSearchFitBatcher(input: {
   batchSize: number;
   concurrency: number;
+  /** Once source agents finish, the fit queue can use their freed capacity. */
+  finishConcurrency?: number;
   partialWaitMs: number;
   maxWaitMs: number;
   /** Judges one batch; a rejection leaves its jobs unjudged. */
@@ -40,10 +42,11 @@ export function createSearchFitBatcher(input: {
     timer = null;
   };
   const pump = (): void => {
-    while (!closed && inFlight.size < input.concurrency && due()) {
-      const batch = queue
-        .splice(0, input.batchSize)
-        .map((entry) => entry.id);
+    const concurrency = flushing
+      ? (input.finishConcurrency ?? input.concurrency)
+      : input.concurrency;
+    while (!closed && inFlight.size < concurrency && due()) {
+      const batch = queue.splice(0, input.batchSize).map((entry) => entry.id);
       started += 1;
       const running: Promise<void> = input
         .judge(batch)
@@ -60,7 +63,7 @@ export function createSearchFitBatcher(input: {
       closed ||
       flushing ||
       queue.length === 0 ||
-      inFlight.size >= input.concurrency
+      inFlight.size >= concurrency
     )
       return;
     const waited = now() - queue[0]!.queuedAt;

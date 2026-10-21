@@ -103,3 +103,48 @@ test("stop drops what is waiting and sends nothing more", async () => {
   await batcher.finish();
   expect(judge).not.toHaveBeenCalled();
 });
+
+test("finishing uses freed source capacity without changing batches or judging any job twice", async () => {
+  vi.useFakeTimers();
+  const measure = async (finishConcurrency: number) => {
+    const batches: string[][] = [];
+    let inFlight = 0;
+    let peak = 0;
+    const start = Date.now();
+    const batcher = createSearchFitBatcher({
+      batchSize: 20,
+      concurrency: 3,
+      finishConcurrency,
+      partialWaitMs: 20_000,
+      maxWaitMs: 90_000,
+      judge: (ids) => {
+        batches.push([...ids]);
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        return new Promise<void>((resolve) =>
+          setTimeout(() => {
+            inFlight -= 1;
+            resolve();
+          }, 97_000),
+        );
+      },
+    });
+    batcher.enqueue(Array.from({ length: 5_700 }, (_, i) => `job_${i}`));
+    expect(inFlight).toBe(3);
+    expect(peak).toBe(3);
+    const finishing = batcher.finish();
+    expect(inFlight).toBe(finishConcurrency);
+    await vi.runAllTimersAsync();
+    await finishing;
+    expect(peak).toBe(finishConcurrency);
+    expect(batcher.waiting).toBe(0);
+    return { batches, duration: Date.now() - start };
+  };
+  const before = await measure(3);
+  const after = await measure(5);
+  expect(after.batches).toEqual(before.batches);
+  expect(new Set(after.batches.flat()).size).toBe(5_700);
+  expect(after.batches).toHaveLength(285);
+  expect(before.duration).toBe(95 * 97_000);
+  expect(after.duration).toBe(57 * 97_000);
+});
