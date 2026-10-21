@@ -187,7 +187,10 @@ function describeControl(
 }
 
 /** The page, written out for the model. Nothing here is a DOM handle. */
-export function describeObservation(observation: ApplyFormObservation): string {
+export function describeObservation(
+  observation: ApplyFormObservation,
+  options: { linkLimit?: number } = {},
+): string {
   const step =
     observation.step.index !== null && observation.step.total !== null
       ? `Step ${observation.step.index} of ${observation.step.total}.`
@@ -244,7 +247,7 @@ export function describeObservation(observation: ApplyFormObservation): string {
       : null,
     links.length > 0
       ? `Links:\n${links
-          .slice(0, 80)
+          .slice(0, options.linkLimit ?? 80)
           .map(
             (link) =>
               `- ${link.ref}: ${link.label} → ${link.href}${link.opensNewWindow ? " (opens a new tab; follow_link opens it here)" : ""}`,

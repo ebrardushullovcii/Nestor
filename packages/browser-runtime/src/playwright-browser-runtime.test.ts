@@ -1938,6 +1938,98 @@ describe("playwright browser runtime", () => {
     },
   );
 
+  test("runAgentDiscovery hands the page reader the search's goals and keeps its rejections", async () => {
+    const userDataDir = await mkdtemp(
+      join(tmpdir(), "nestor-browser-runtime-agent-selection-context-"),
+    );
+    let readBack: Awaited<
+      ReturnType<browserAgent.JobExtractor["extractJobsFromPage"]>
+    > = [];
+    vi.doMock("@nestor/browser-agent", async (importOriginal) => ({
+      ...(await importOriginal<typeof browserAgent>()),
+      runJobSearchAgent: vi.fn(async (input: browserAgent.JobSearchAgentInput) => {
+        readBack = await input.jobExtractor.extractJobsFromPage({
+          pageText: "Senior Engineer at Example",
+          pageUrl: "https://example.com/jobs",
+          pageType: "search_results",
+          maxJobs: 12,
+          selectionContext: '{"targetRoles":["Engineer"]}',
+        });
+        return { jobs: [], steps: 1, incomplete: false, transcriptMessageCount: 2 };
+      }),
+    }));
+    try {
+      const chromeExecutablePath = join(userDataDir, "chrome.exe");
+      await writeFile(chromeExecutablePath, "", "utf8");
+      const debugPort = await reserveFreePort();
+      const page = {
+        bringToFront: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+        evaluate: vi.fn().mockResolvedValue(200),
+        goto: vi.fn().mockResolvedValue({ status: () => 200 }),
+        isClosed: () => false,
+        url: () => "about:blank",
+      };
+      const fakeContext = {
+        newPage: vi.fn().mockResolvedValue(page),
+        pages: () => [page],
+      };
+      const fakeBrowser = {
+        close: vi.fn(),
+        contexts: () => [fakeContext],
+        isConnected: () => true,
+        once: vi.fn(() => fakeBrowser),
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve({}),
+        } as Response),
+      );
+      execFileMock.mockImplementation((...args: unknown[]) => {
+        maybeInvokeExecFileCallback(args);
+      });
+      spawnMock.mockReturnValue(createMockChildProcess({ pid: 54649 }));
+      connectOverCDPMock.mockResolvedValue(fakeBrowser);
+      const rejected = {
+        ...createTestJob(),
+        searchRejection: { category: "place" as const, reason: "US only." },
+      };
+      const jobExtractor = vi.fn().mockResolvedValue([rejected]);
+      const { createBrowserAgentRuntime } =
+        await import("./playwright-browser-runtime");
+      const runtime = createBrowserAgentRuntime({
+        userDataDir,
+        chromeExecutablePath,
+        debugPort,
+        jobExtractor,
+      });
+      await runtime.runAgentDiscovery!("target_site", {
+        maxSteps: 3,
+        targetJobCount: 1,
+        userProfile: createTestProfile(),
+        searchPreferences: { targetRoles: [], locations: [] },
+        startingUrls: ["https://example.com/jobs"],
+        navigationHostnames: ["example.com"],
+        siteLabel: "Example Jobs",
+        sourceCatalog: [createTestJob()],
+      });
+      expect(jobExtractor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          selectionContext: '{"targetRoles":["Engineer"]}',
+        }),
+      );
+      expect(readBack[0]?.searchRejection).toEqual({
+        category: "place",
+        reason: "US only.",
+      });
+    } finally {
+      vi.doUnmock("@nestor/browser-agent");
+      await rm(userDataDir, { recursive: true, force: true });
+    }
+  });
+
   test("runAgentDiscovery reuses an already-open matching page instead of navigating a blank tab", async () => {
     const userDataDir = await mkdtemp(
       join(tmpdir(), "nestor-browser-runtime-agent-ready-blank-"),

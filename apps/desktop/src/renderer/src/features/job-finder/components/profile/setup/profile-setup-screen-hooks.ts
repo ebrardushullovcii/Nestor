@@ -341,26 +341,34 @@ export function useProfileSetupForms(input: {
   // searchPreferences arrive with a new object identity even when nothing in
   // them changed; content fingerprints, not identity, decide when a form may
   // be reseeded so unrelated commits cannot erase dirty drafts.
+  // Computed on the first render only: as useRef arguments they were
+  // rebuilt on every render (six walks of the profile and of every saved
+  // source) and thrown away, about 40 ms per Profile tab switch.
+  const [initialFingerprints] = useState(() => ({
+    profile: buildComparableValueFingerprint(input.profile),
+    reviewCandidates: buildComparableValueFingerprint(
+      input.latestResumeImportReviewCandidates,
+    ),
+    searchPreferences: buildComparableValueFingerprint(input.searchPreferences),
+  }));
   const loadedProfileContentFingerprintRef = useRef(
-    buildComparableValueFingerprint(input.profile),
+    initialFingerprints.profile,
   );
   const loadedReviewCandidatesContentFingerprintRef = useRef(
-    buildComparableValueFingerprint(input.latestResumeImportReviewCandidates),
+    initialFingerprints.reviewCandidates,
   );
   const loadedSearchPreferencesContentFingerprintRef = useRef(
-    buildComparableValueFingerprint(input.searchPreferences),
+    initialFingerprints.searchPreferences,
   );
   // Seen-fingerprints advance on every effect run (including conflicted
   // merges) so repeated snapshots cannot re-trigger handling, while the
   // loaded-fingerprints above only move when a form actually adopts content.
-  const seenProfileContentFingerprintRef = useRef(
-    buildComparableValueFingerprint(input.profile),
-  );
+  const seenProfileContentFingerprintRef = useRef(initialFingerprints.profile);
   const seenReviewCandidatesContentFingerprintRef = useRef(
-    buildComparableValueFingerprint(input.latestResumeImportReviewCandidates),
+    initialFingerprints.reviewCandidates,
   );
   const seenSearchPreferencesContentFingerprintRef = useRef(
-    buildComparableValueFingerprint(input.searchPreferences),
+    initialFingerprints.searchPreferences,
   );
   // The newest canonical values seen from the workspace. Screens save against
   // these, so own-save echo detection matches the payload the save emitted

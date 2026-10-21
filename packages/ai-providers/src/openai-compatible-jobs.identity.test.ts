@@ -59,6 +59,38 @@ describe("posting URL identity", () => {
     expect(new Set(jobs.map((job) => job.sourceJobId)).size).toBe(2);
   });
 
+  test("keeps the reader's rejection, and a posting whose rejection is malformed", () => {
+    const card = (id: string, searchRejection: unknown) => ({
+      canonicalUrl: `https://careers.example.test/jobs/${id}`,
+      title: "Platform Engineer",
+      company: "Northwind",
+      location: "Manchester",
+      description: "Build reliable platforms.",
+      workMode: ["hybrid"],
+      applyPath: "unknown",
+      easyApplyEligible: false,
+      searchRejection,
+    });
+    const jobs = normalizeExtractedJobs({
+      payload: {
+        jobs: [
+          card("1", { category: "place", reason: "US only." }),
+          card("2", { category: "location", reason: "US only." }),
+          card("3", null),
+        ],
+      },
+      pageHostLabel: "careers.example.test",
+      pageUrl: "https://careers.example.test/careers",
+      pageType: "search_results",
+      effectiveMaxJobs: 3,
+    });
+    expect(jobs.map((job) => job.searchRejection ?? null)).toEqual([
+      { category: "place", reason: "US only." },
+      null,
+      null,
+    ]);
+  });
+
   test("keeps a posting's apply link apart from its own page", () => {
     const prompt = buildJobsExtractionPrompt({
       pageHostLabel: "careers.example.test",

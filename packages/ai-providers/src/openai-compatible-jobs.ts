@@ -237,7 +237,14 @@ export function normalizeExtractedJobs(input: {
       ...(typeof raw.needsRenderedPage === "boolean"
         ? { needsRenderedPage: raw.needsRenderedPage }
         : {}),
-      searchRejection: raw.searchRejection ?? null,
+      // A rejection in a shape the schema does not know (a made-up
+      // category) is dropped, never the posting it is attached to.
+      searchRejection: (() => {
+        const rejection = JobPostingSchema.shape.searchRejection.safeParse(
+          raw.searchRejection ?? null,
+        );
+        return rejection.success ? (rejection.data ?? null) : null;
+      })(),
       source: "target_site" as const,
       sourceJobId: derivedSourceJobId,
       discoveryMethod: "browser_agent" as const,

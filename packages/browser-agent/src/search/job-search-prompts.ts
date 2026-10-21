@@ -8,6 +8,15 @@ import type { AgentConfig } from "../types";
  * try in what order: the model has the page and decides.
  */
 
+/** How a remote posting counts against the person's places, in one sentence (also handed to the page reader). */
+export function describeRemoteHandling(config: AgentConfig): string | null {
+  const guidance = config.promptContext.searchGuidance;
+  if (guidance === undefined) return null;
+  return guidance.remoteCountsAsAnyLocation
+    ? "Remote roles: a posting that is remote for the person's country or region counts as matching their locations, even when the office is somewhere else. A posting remote only within other countries does not."
+    : "Remote roles: do not count a remote posting as a location match on its own; the role must fit the listed locations and work modes.";
+}
+
 function listOrNone(
   values: readonly string[] | undefined,
   none: string,
@@ -42,12 +51,7 @@ export function createJobSearchPrompts(config: AgentConfig): {
       : selectivity === "balanced"
         ? "Search focus: save close matches, and also adjacent roles the person could plausibly do well with their experience. Skip postings that are clearly a different job or level."
         : "Search focus: save only strong fits. Prefer close matches to the requested roles, locations, work modes, skills, and experience over filling the list.";
-  const remoteHandling =
-    promptContext.searchGuidance === undefined
-      ? null
-      : promptContext.searchGuidance.remoteCountsAsAnyLocation
-        ? "Remote roles: a posting that is remote for the person's country or region counts as matching their locations, even when the office is somewhere else."
-        : "Remote roles: do not count a remote posting as a location match on its own; the role must fit the listed locations and work modes.";
+  const remoteHandling = describeRemoteHandling(config);
   const searchIntent = promptContext.searchRequest?.intent.trim() ?? "";
   const freshnessInstruction =
     promptContext.searchRequest?.freshness === "recent"
@@ -123,7 +127,7 @@ export function createJobSearchPrompts(config: AgentConfig): {
     "- Explicit exclusions and the person's source notes apply in every breadth, including wide searches. Keep plausible related roles, not unrelated job families. Extraction receives these instructions too. Your finish report must agree with what you saved; do not say no suitable jobs were kept when saved_jobs contains unsuitable ones.",
     `- Work eligibility: ${JSON.stringify(config.userProfile.workEligibility)}. Saved authorization: ${config.userProfile.answerBank.workAuthorization ?? "not stated"}. Saved availability: ${config.userProfile.answerBank.availability ?? "not stated"}. Remote country restrictions still apply.`,
     "- Work the site out the way a person would. Use its search and filters when they help; scroll or page through results.",
-    "- Save from the results pages: extract_jobs on a page of results reads every listing in one step. Pass rejected with each listing URL, category and a short plain reason for every card you rule out; saying it in your final answer does not record the rejection. Cover every results page and paginate or scroll until the source is exhausted; tell the person what remains if you stop early. It tells you what was new and what you already had; saved_jobs lists everything so far. Never reopen a posting you already saved.",
+    `- Save from the results pages: extract_jobs on a page of results reads every listing in one step, including listings below the part on screen and links not shown in your view, so there is no need to scroll, observe or read_text first. Scroll first only when more listings load as you scroll. A page read again unchanged finds nothing new; go to the next page instead. Pass rejected with each listing URL, category and a short plain reason for every card you rule out; saying it in your final answer does not record the rejection.${packet ? "" : " The page reader also checks each listing against the person's goals. A card that leaves the deciding detail unclear (remote with only a city named, no level stated) is kept, not rejected: every kept job's full listing is read and judged afterwards."} Cover every results page and paginate or scroll until the source is exhausted; tell the person what remains if you stop early. It tells you what was new and what you already had; saved_jobs lists everything so far. Never reopen a posting you already saved.`,
     packet
       ? null
       : "- After the search, Job Finder reads each saved job's full listing and judges how well it fits, so do not open postings just to read their details. Open one only when its card does not show enough to tell whether it could fit, such as a bare title that could mean several kinds of work.",
@@ -174,7 +178,7 @@ export function createJobSearchPrompts(config: AgentConfig): {
       : `Find jobs on ${promptContext.siteLabel}. Start here:`,
     ...config.startingUrls.map((url) => `- ${url}`),
     "",
-    "Begin by looking at the page.",
+    "The page you landed on is shown below; work from it.",
   ].join("\n");
 
   return { system, user };

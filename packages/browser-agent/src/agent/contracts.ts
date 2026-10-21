@@ -89,6 +89,7 @@ export interface JobExtractor {
         | 'employerWebsiteUrl'
         | 'employerDomain'
         | 'benefits'
+        | 'searchRejection'
       >
     >
   >>

@@ -575,6 +575,42 @@ describe("runAgentLoop", () => {
     }
   });
 
+  test("a host can keep fewer recent tool answers whole", async () => {
+    let looks = 0;
+    const look = tool("look", () => {
+      looks += 1;
+      return Promise.resolve({
+        kind: "ok",
+        content: `Page ${looks}\n${"x".repeat(3_000)}`,
+        progress: true,
+      });
+    });
+    const turns: AgentLoopToolCall[][] = Array.from({ length: 8 }, () => [
+      call("look"),
+    ]);
+    turns.push([call("finish", { reason: "Done" })]);
+    const result = await runAgentLoop({
+      messages: opening,
+      model: scripted(turns),
+      tools: [look, finishTool],
+      subjectLabel: "the site",
+      staleToolResultKeepRecent: 2,
+    });
+    const answers = result.messages.filter(
+      (message) =>
+        message.role === "tool" && message.content.startsWith("Page"),
+    );
+    // Eight answers, two kept whole: six are stale, shortened four at a time.
+    expect(
+      answers.filter((answer) =>
+        answer.content.includes("Older answer shortened"),
+      ),
+    ).toHaveLength(4);
+    for (const recent of answers.slice(-2)) {
+      expect(recent.content.length).toBeGreaterThan(3_000);
+    }
+  });
+
   test("a tool that hangs is given up after its deadline and the run carries on", async () => {
     let calls = 0;
     const hang = tool(

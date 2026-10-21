@@ -104,6 +104,11 @@ export interface JobPageExtractionInput {
   pageUrl: string;
   pageType: "search_results" | "job_detail";
   maxJobs: number;
+  /**
+   * The person's goals for this page read, so the reader can say which
+   * listings do not fit (opaque to the runtime; built by the search agent).
+   */
+  selectionContext?: string;
   signal?: AbortSignal;
 }
 
@@ -3271,6 +3276,7 @@ export function createBrowserAgentRuntime(
               pageUrl: string;
               pageType: AgentExtractorPageType;
               maxJobs: number;
+              selectionContext?: string;
               signal?: AbortSignal;
             }) => {
               const extractionInput: JobPageExtractionInput = {
@@ -3278,6 +3284,9 @@ export function createBrowserAgentRuntime(
                 pageUrl: input.pageUrl,
                 pageType: input.pageType,
                 maxJobs: input.maxJobs,
+                ...(input.selectionContext
+                  ? { selectionContext: input.selectionContext }
+                  : {}),
               };
               if (input.signal) {
                 extractionInput.signal = input.signal;
@@ -3315,6 +3324,9 @@ export function createBrowserAgentRuntime(
                 employerWebsiteUrl: job.employerWebsiteUrl,
                 employerDomain: job.employerDomain,
                 benefits: job.benefits,
+                ...(job.searchRejection
+                  ? { searchRejection: job.searchRejection }
+                  : {}),
               }));
             },
           },

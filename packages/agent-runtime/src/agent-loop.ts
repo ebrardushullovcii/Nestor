@@ -171,6 +171,11 @@ export interface AgentLoopOptions {
    * it can always look at the page anew. Null keeps every answer whole.
    */
   staleToolResultChars?: number | null;
+  /**
+   * How many of the newest tool answers stay whole. Defaults to four; a host
+   * whose answers are long page views can keep fewer.
+   */
+  staleToolResultKeepRecent?: number;
   /** Output cap for one model turn. Omit to use the provider default. */
   modelMaxOutputTokens?: number;
   parallelToolCalls?: boolean;
@@ -330,6 +335,7 @@ function shortenStaleToolResults(
   messages: AgentLoopMessage[],
   openingCount: number,
   maxChars: number,
+  keepRecent: number,
 ): AgentLoopMessage[] {
   const stale: number[] = [];
   let seen = 0;
@@ -338,7 +344,7 @@ function shortenStaleToolResults(
     if (message?.role !== "tool") continue;
     seen += 1;
     if (
-      seen > STALE_TOOL_RESULT_KEEP_RECENT &&
+      seen > keepRecent &&
       message.content.length > maxChars + STALE_TOOL_RESULT_NOTE.length + 2
     ) {
       stale.push(index);
@@ -398,6 +404,12 @@ export async function runAgentLoop(
     options.staleToolResultChars === undefined
       ? DEFAULT_STALE_TOOL_RESULT_CHARS
       : options.staleToolResultChars;
+  const staleToolResultKeepRecent = Math.max(
+    1,
+    Math.floor(
+      options.staleToolResultKeepRecent ?? STALE_TOOL_RESULT_KEEP_RECENT,
+    ),
+  );
 
   let messages: AgentLoopMessage[] = [...options.messages];
   const openingCount = messages.length;
@@ -860,6 +872,7 @@ export async function runAgentLoop(
         messages,
         openingCount,
         staleToolResultChars,
+        staleToolResultKeepRecent,
       );
     }
     const beforeCompaction = messages;

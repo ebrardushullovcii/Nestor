@@ -36,6 +36,11 @@ export interface PageToolPolicy {
     reason: string;
     fromUrl: string | null;
   }) => Promise<{ allowed: boolean; verdict: string }>;
+  /**
+   * How a page view is written for the model. Defaults to the full view; a
+   * host can send a leaner one or say a view is unchanged.
+   */
+  describe?: (observation: ApplyFormObservation) => string;
 }
 
 export interface PageToolsState {
@@ -81,6 +86,7 @@ export function createPageTools(
     visitedUrls: [],
     approvedOrigins: new Map(),
   };
+  const describe = policy.describe ?? describeObservation;
 
   /**
    * Whether the run may go to an address.
@@ -168,12 +174,12 @@ export function createPageTools(
         const back = await hands.goBack();
         observation = await observe();
         notes.push(`${verdict.refusal}${back.ok ? " Job Finder went back." : ""}`);
-        return ok(`${notes.join(" ")}\n\nThe page now:\n\n${describeObservation(observation)}`);
+        return ok(`${notes.join(" ")}\n\nThe page now:\n\n${describe(observation)}`);
       }
       if (verdict.note) notes.push(verdict.note);
     }
     return ok(
-      `${notes.join(" ")}\n\nThe page now:\n\n${describeObservation(observation)}`,
+      `${notes.join(" ")}\n\nThe page now:\n\n${describe(observation)}`,
       true,
     );
   };
@@ -184,7 +190,7 @@ export function createPageTools(
     const current = await observe();
     if (seenSignature && current.signature !== seenSignature) {
       return ok(
-        `The page changed since you last looked, so that step was not taken. Decide again from the page as it is now:\n\n${describeObservation(current)}`,
+        `The page changed since you last looked, so that step was not taken. Decide again from the page as it is now:\n\n${describe(current)}`,
       );
     }
     return null;
@@ -201,7 +207,7 @@ export function createPageTools(
           parameters: { type: "object", properties: {} },
         },
       },
-      execute: async () => ok(describeObservation(await observe())),
+      execute: async () => ok(describe(await observe())),
     },
     {
       definition: {
@@ -263,7 +269,7 @@ export function createPageTools(
         const moved = await hands.navigate(url);
         if (!moved.ok) {
           return ok(
-            `${url} would not open: ${moved.error}\n\nThe page now:\n\n${describeObservation(await observe())}`,
+            `${url} would not open: ${moved.error}\n\nThe page now:\n\n${describe(await observe())}`,
           );
         }
         return settle(
@@ -308,7 +314,7 @@ export function createPageTools(
         const moved = await hands.followLink(ref);
         if (!moved.ok) {
           return ok(
-            `That link would not open: ${moved.error}\n\nThe page now:\n\n${describeObservation(await observe())}`,
+            `That link would not open: ${moved.error}\n\nThe page now:\n\n${describe(await observe())}`,
           );
         }
         return settle(
@@ -362,7 +368,7 @@ export function createPageTools(
         const pressed = await hands.clickElement(ref);
         if (!pressed.ok) {
           return ok(
-            `"${label}" would not press: ${pressed.error}\n\nThe page now:\n\n${describeObservation(await observe())}`,
+            `"${label}" would not press: ${pressed.error}\n\nThe page now:\n\n${describe(await observe())}`,
           );
         }
         const before = seen?.signature ?? "";
@@ -375,8 +381,16 @@ export function createPageTools(
           state.observation &&
           state.observation.signature === before
         ) {
+          // Reuse the view settle already wrote: describing the page twice
+          // would let a host's "unchanged" note point at a view never sent.
+          const marker = "\n\nThe page now:\n\n";
+          const at = outcome.content.indexOf(marker);
+          const view =
+            at >= 0
+              ? outcome.content.slice(at + marker.length)
+              : describe(state.observation);
           return ok(
-            `Pressed "${label}", and the page did not change. If it should have, something may be covering it or it may need a moment; otherwise try another way.\n\nThe page now:\n\n${describeObservation(state.observation)}`,
+            `Pressed "${label}", and the page did not change. If it should have, something may be covering it or it may need a moment; otherwise try another way.${marker}${view}`,
           );
         }
         return outcome;
@@ -452,7 +466,7 @@ export function createPageTools(
           return ok(`The field would not take that: ${written.error}`);
         }
         return ok(
-          `Typed into ${ref}. The page now:\n\n${describeObservation(await observe())}`,
+          `Typed into ${ref}. The page now:\n\n${describe(await observe())}`,
           true,
         );
       },
@@ -485,7 +499,7 @@ export function createPageTools(
           return ok(`The list did not take "${option}": ${chosen.error}`);
         }
         return ok(
-          `Chose "${option}" in ${ref}. The page now:\n\n${describeObservation(await observe())}`,
+          `Chose "${option}" in ${ref}. The page now:\n\n${describe(await observe())}`,
           true,
         );
       },
@@ -515,7 +529,7 @@ export function createPageTools(
         const set = await hands.setToggle(ref, args.checked !== false);
         if (!set.ok) return ok(`The box would not change: ${set.error}`);
         return ok(
-          `${args.checked !== false ? "Ticked" : "Unticked"} ${ref}. The page now:\n\n${describeObservation(await observe())}`,
+          `${args.checked !== false ? "Ticked" : "Unticked"} ${ref}. The page now:\n\n${describe(await observe())}`,
           true,
         );
       },
@@ -542,7 +556,7 @@ export function createPageTools(
         const chosen = allowed.find((entry) => entry === direction) ?? "down";
         await hands.scroll(chosen);
         return ok(
-          `Scrolled ${chosen}. The page now:\n\n${describeObservation(await observe())}`,
+          `Scrolled ${chosen}. The page now:\n\n${describe(await observe())}`,
         );
       },
     },
@@ -566,7 +580,7 @@ export function createPageTools(
           typeof requested === "number" ? Math.max(0, Math.min(30_000, requested)) : 1_000;
         await hands.wait(milliseconds);
         return ok(
-          `Waited ${Math.round(milliseconds)}ms. The page now:\n\n${describeObservation(await observe())}`,
+          `Waited ${Math.round(milliseconds)}ms. The page now:\n\n${describe(await observe())}`,
         );
       },
     },
@@ -583,7 +597,7 @@ export function createPageTools(
         const back = await hands.goBack();
         if (!back.ok) {
           return ok(
-            `Could not go back: ${back.error}\n\nThe page now:\n\n${describeObservation(await observe())}`,
+            `Could not go back: ${back.error}\n\nThe page now:\n\n${describe(await observe())}`,
           );
         }
         return settle(`Went back to ${back.url}.`);
