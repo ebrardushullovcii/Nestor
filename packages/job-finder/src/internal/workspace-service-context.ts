@@ -82,6 +82,7 @@ export interface WorkspaceServiceContext {
   isWorkspaceClosing?: () => boolean;
   fitJudgmentProgressRef?: MutableRef<FitJudgmentProgress | null>;
   onListingAssessmentFinished?: () => void;
+  onSavedJobsRescored?: () => void;
   activeDiscoveryAbortControllerRef: MutableRef<AbortController | null>;
   /**
    * The run id the in-flight discovery pipeline belongs to. A stop request

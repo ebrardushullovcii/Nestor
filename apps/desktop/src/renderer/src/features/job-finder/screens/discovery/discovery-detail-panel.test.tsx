@@ -1895,3 +1895,57 @@ it("wraps a long employer name in the Companies button instead of widening the c
   expect(button.className).toContain("whitespace-normal");
   expect(button.className).toContain("max-w-full");
 });
+
+it("puts the verdict, the deciding facts and the triage actions above the listing text", () => {
+  cleanup();
+  const onShortlist = vi.fn();
+  const onNotInterested = vi.fn();
+  const onSkip = vi.fn();
+  render(
+    <MemoryRouter>
+      <DiscoveryDetailPanel
+        discoveryTargets={[]}
+        isJobPending={() => false}
+        onDismissJob={vi.fn()}
+        onQueueJob={vi.fn()}
+        selectedJob={createSelectedJob({ id: "job_triage" })}
+        triage={{
+          goneThrough: 23,
+          total: 678,
+          weaker: false,
+          nextTitle: "Staff Engineer",
+          onShortlist,
+          onNotInterested,
+          onSkip,
+          undo: { label: "Undo: show Role again", onUndo: vi.fn() },
+          failure: null,
+        }}
+      />
+    </MemoryRouter>,
+  );
+  const summary = screen.getByTestId("discovery-detail-primary-action");
+  const verdict = screen.getByTestId("discovery-detail-verdict");
+  expect(summary.contains(verdict)).toBe(true);
+  expect(summary.contains(screen.getByTestId("discovery-detail-key-facts"))).toBe(
+    true,
+  );
+  // One verdict, at the top: the scroll area does not repeat it.
+  expect(screen.getAllByTestId("discovery-detail-why-it-fits")).toHaveLength(1);
+  expect(
+    verdict.compareDocumentPosition(
+      screen.getByTestId("discovery-detail-listing-text"),
+    ) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(screen.getByText("23 of 678 gone through")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: /^Shortlist job/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Not interested$/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Skip/ }));
+  expect(onShortlist).toHaveBeenCalledTimes(1);
+  expect(onNotInterested).toHaveBeenCalledTimes(1);
+  expect(onSkip).toHaveBeenCalledTimes(1);
+  // The reasons form stays one press away under its own name.
+  expect(
+    screen.getByRole("button", { name: "Not interested because…" }),
+  ).toBeTruthy();
+});

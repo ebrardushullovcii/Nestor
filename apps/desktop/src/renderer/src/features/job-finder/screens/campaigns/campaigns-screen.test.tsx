@@ -2885,7 +2885,7 @@ it("uses the shared run report for the plan card without replacing new jobs with
   expect(details.textContent).toContain("25 new to you");
   expect(details.textContent).toContain("22 kept");
   expect(details.textContent).toContain(
-    "52 postings seen · 25 unique jobs · 25 new to you · 22 kept by this plan · 27 duplicates merged · 0 rejected · 0 deferred · 7 pages covered",
+    "52 postings seen · 25 unique jobs · 25 new to you · 22 kept by this plan · 27 duplicates merged · 7 pages covered",
   );
   expect(details.textContent).not.toContain("22 new to you");
 });

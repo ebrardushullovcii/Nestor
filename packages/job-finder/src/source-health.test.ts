@@ -685,6 +685,15 @@ describe("deriveRepeatedlyFailingTargetIds", () => {
       failed("Public provider API collection failed: Greenhouse API request timed out."),
       failed("Public provider API collection failed: fetch failed"),
       failed("Public provider API collection failed: fetch failed"),
+      failed(
+        "The job board did not answer in time; it is tried again on the next search.",
+      ),
+      failed(
+        "The job board could not be reached; it is tried again on the next search.",
+      ),
+      failed(
+        "The job board answered with an error (HTTP 503); it is tried again on the next search.",
+      ),
     ];
     expect([...deriveRepeatedlyFailingTargetIds(runs)]).toEqual([]);
     expect(
@@ -693,6 +702,24 @@ describe("deriveRepeatedlyFailingTargetIds", () => {
         deriveSourceHealthSignals({ recentRuns: runs }),
       ),
     ).toBe(false);
+  });
+
+  test("a board address with no job list counts against the source", () => {
+    const missing = {
+      targetExecutions: [
+        {
+          targetId: "api",
+          state: "failed" as const,
+          startedAt: null,
+          completedAt: null,
+          warning:
+            "No job list was found at this board's address (HTTP 404). Check the address with Edit.",
+        },
+      ],
+    };
+    expect([...deriveRepeatedlyFailingTargetIds([missing, missing])]).toEqual(
+      ["api"],
+    );
   });
 
   test("two failed runs in a row mark that source, and that source only", () => {

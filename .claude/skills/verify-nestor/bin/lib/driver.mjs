@@ -1,7 +1,7 @@
 // The long-lived driver for one instance. `up` starts it detached; it owns the
 // replica sites server and the Electron app, and answers `drive` commands on a
 // private loopback port. Never start it by hand.
-import { spawn } from "node:child_process";
+import childProcess, { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
@@ -32,6 +32,17 @@ import {
 import { rows, saveRows, tables } from "./sqlite.mjs";
 
 const { _electron } = requireDesktop("playwright");
+
+// Windows: the driver runs detached with no console, and Playwright starts
+// Electron through `cmd /c`, so every launch opened a visible terminal on the
+// owner's screen. Hide the console of everything this process spawns.
+if (process.platform === "win32") {
+  const realSpawn = childProcess.spawn;
+  childProcess.spawn = (command, args, options) =>
+    args === undefined || Array.isArray(args)
+      ? realSpawn(command, args ?? [], { ...options, windowsHide: true })
+      : realSpawn(command, { ...args, windowsHide: true });
+}
 const patchPath = path.join(import.meta.dirname, "instance-patch.cjs");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const launch = JSON.parse(
@@ -105,6 +116,9 @@ async function startSites() {
         ),
       },
       stdio: ["ignore", "ignore", "pipe"],
+      // The driver runs detached without a console; without this the sites
+      // server opens a visible terminal window on the owner's screen.
+      windowsHide: true,
     },
   );
   let output = "";
@@ -171,6 +185,13 @@ async function startApp() {
         appendFileSync(path.join(stateDir, "app.log"), redact(c, env)),
       );
       const page = await mainPage(60);
+      // Windows: park the window off-screen so it never covers the owner's
+      // screen; it keeps rendering for screenshots and Playwright input.
+      if (process.platform === "win32")
+        await app
+          .browserWindow(page)
+          .then((win) => win.evaluate((w) => w.setPosition(-6000, 0)))
+          .catch(() => {});
       await page.waitForFunction(
         () => Boolean(window.nestor?.jobFinder),
         null,

@@ -241,15 +241,14 @@ describe("SafeguardsScreen", () => {
 
   it("shows an empty state when no safeguards exist", () => {
     renderScreen({});
-    expect(screen.getByText("No safety events yet")).toBeTruthy();
-    // The empty state describes the rule conditionally instead of rendering a
-    // card for a threshold nothing has crossed.
+    // One all-clear line says it: no events card holding "0" with an empty
+    // state under it. The rule for when an event is recorded is its tooltip.
+    const line = screen.getByText(/Nothing is being held back right now/i);
+    expect(line.textContent).toContain("No safety events yet.");
     expect(
-      screen.getByText(/only when one of its limits is actually reached/i),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(/Nothing is being held back right now/i),
-    ).toBeTruthy();
+      line.closest("[data-safeguard-empty]")?.getAttribute("title"),
+    ).toMatch(/only when one of its limits is actually reached/i);
+    expect(document.querySelector("[data-safeguard-events]")).toBeNull();
   });
 
   it("hides the search and category filters when there is nothing to filter", () => {
@@ -268,8 +267,9 @@ describe("SafeguardsScreen", () => {
     const emptyPanel = document.querySelector<HTMLElement>(
       "[data-safeguard-empty]",
     );
+    // A single line, not a panel.
     expect(emptyPanel).toBeTruthy();
-    expect(emptyPanel?.firstElementChild?.className).toContain("min-h-40");
+    expect(emptyPanel?.className).not.toContain("min-h");
   });
 
   it("keeps the search field and category filters in a responsive non-clipping toolbar", () => {
@@ -526,7 +526,7 @@ describe("SafeguardsScreen", () => {
     expect(screen.queryByText(/Within limit/i)).toBeNull();
     // No raw machine timestamp survives to the user.
     expect(document.body.textContent).not.toContain("2026-08-01T00:00:00.000Z");
-    expect(screen.getByText("No safety events yet")).toBeTruthy();
+    expect(document.body.textContent).toContain("No safety events yet.");
   });
 
   it("gives a named recovery action a control that performs it", () => {

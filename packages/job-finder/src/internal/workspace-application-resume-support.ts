@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   JobFinderResumeWorkspaceSchema,
   resolveEffectiveResumeTailoringStrength,
@@ -656,6 +658,36 @@ export async function previewResumeDraft(
     state.profileRevision,
     "preparing this resume preview",
   );
+  // Opening the studio, coming back to it and pressing Refresh render the
+  // same draft again; each render checked every line and built the page
+  // (0.15-0.3 s of the app's main thread). The answer for the same draft,
+  // stored draft, profile revision, settings, templates and job is reused.
+  const previewKey = createHash("sha256")
+    .update(JSON.stringify(draft))
+    .update(
+      JSON.stringify([
+        state.draft
+          ? [
+              state.draft.id,
+              state.draft.updatedAt,
+              state.draft.status,
+              state.draft.approvedAt,
+              state.draft.approvedExportId,
+            ]
+          : null,
+        state.profileRevision,
+        state.settings,
+        state.templates.map(({ id, label }) => [id, label]),
+      ]),
+    )
+    .update(JSON.stringify(state.job))
+    .digest("base64url");
+  const previews =
+    rememberedPreviews.get(ctx) ?? new Map<string, JobFinderResumePreview>();
+  rememberedPreviews.set(ctx, previews);
+  const remembered = previews.get(previewKey);
+  if (remembered) return remembered;
+
   const persistedDraft = state.draft
     ? normalizeResumeDraftTemplate(state.draft, state.templates)
     : null;
@@ -728,7 +760,7 @@ export async function previewResumeDraft(
     "completing this resume preview",
   );
 
-  return {
+  const result: JobFinderResumePreview = {
     draftId: sanitizedDraft.id,
     revisionKey: createDraftRevisionKey(sanitizedDraft),
     html: preview.html,
@@ -746,7 +778,21 @@ export async function previewResumeDraft(
       entryCount: countVisibleEntries(sanitizedDraft),
     },
   };
+  previews.delete(previewKey);
+  previews.set(previewKey, result);
+  for (const key of previews.keys()) {
+    if (previews.size <= REMEMBERED_PREVIEWS) break;
+    previews.delete(key);
+  }
+  return result;
 }
+
+/** Recent previews kept per workspace (each is one rendered page of HTML). */
+const REMEMBERED_PREVIEWS = 8;
+const rememberedPreviews = new WeakMap<
+  WorkspaceServiceContext,
+  Map<string, JobFinderResumePreview>
+>();
 
 export async function fetchAndPersistResearch(
   ctx: WorkspaceServiceContext,

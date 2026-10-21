@@ -573,11 +573,13 @@ describe("ReviewQueueMissionPanel", () => {
 
 it("explains that changing a written level starts a draft before the click", () => {
   renderPanel();
+  // The chosen level's description, then what another level costs.
   expect(
-    screen.getByText(
-      "Choosing another level writes a new draft. Original uses your file unchanged.",
-    ),
+    screen.getByText(/Choosing another level writes a new draft\./),
   ).toBeTruthy();
+  expect(
+    screen.getByRole("radio", { name: /Light/ }).getAttribute("title"),
+  ).toContain("Writes a new draft.");
 });
 
 it("lets a person remove a job during writing and explains remaining AI work", () => {

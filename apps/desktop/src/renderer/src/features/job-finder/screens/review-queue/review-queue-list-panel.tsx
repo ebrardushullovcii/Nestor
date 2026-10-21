@@ -1,6 +1,7 @@
 import { estimateResumeBatchMinutesLeft } from "@nestor/contracts";
 import type { ReviewQueueItem, TailoredAssetSummary } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui";
+import { X } from "lucide-react";
 import { SegmentedControl } from "@renderer/components/ui/segmented-control";
 import { cn } from "@renderer/lib/cn";
 import {
@@ -406,6 +407,19 @@ export function ReviewQueueListPanel({
     ? null
     : getTailoredDraftPreparationResultMessage(draftPreparation);
   const draftRunCount = draftEligibleCount;
+  // The batch's result is news: it shows under the batch control until the
+  // person dismisses it, and a new result shows again.
+  const [dismissedDraftPreparationResult, setDismissedDraftPreparationResult] =
+    useState<string | null>(null);
+  const isDraftBatchRunning = draftPreparation.status === "running";
+  useEffect(() => {
+    if (isDraftBatchRunning) setDismissedDraftPreparationResult(null);
+  }, [isDraftBatchRunning]);
+  const visibleDraftPreparationResult =
+    draftPreparationResultMessage &&
+    draftPreparationResultMessage !== dismissedDraftPreparationResult
+      ? draftPreparationResultMessage
+      : null;
   // The bulk buttons act on every shortlisted job. Say so only when some of
   // the jobs they would touch are not in the list on screen.
   const visibleJobIds = new Set(filteredJobIds);
@@ -452,7 +466,7 @@ export function ReviewQueueListPanel({
       isDraftPreparationRunning ||
       draftEligibleCount > 0 ||
       readyToApplyCount > 0 ||
-      draftPreparationResultMessage !== null);
+      visibleDraftPreparationResult !== null);
 
   const showsSelectionBar = queue.length > 1 && visibleQueue.length > 0;
   const bulkActions = showsAllJobsRow ? (
@@ -488,6 +502,10 @@ export function ReviewQueueListPanel({
                         draftPreparation.completedCount +
                         draftPreparation.failedCount,
                     },
+                draftPreparation.writingCount === undefined
+                  ? undefined
+                  : draftPreparation.writingCount +
+                      (draftPreparation.processingCount ?? 0),
               );
               return !draftPreparation.stopRequested && minutes !== null
                 ? ` · about ${minutes} min left`
@@ -646,6 +664,9 @@ export function ReviewQueueListPanel({
           {totalReadyToApplyCount - readyToApplyCount} remain after this batch.
         </p>
       ) : null}
+
+      {/* Apply to all can send applications, so what it does in the saved
+          mode stays in view beside it rather than in a tooltip. */}
       {!isDraftPreparationRunning &&
       !isSelecting &&
       !safeguardBlockerSentence &&
@@ -667,13 +688,25 @@ export function ReviewQueueListPanel({
           {safeguardBlockerSentence}
         </p>
       ) : null}
-      {draftPreparationResultMessage && !isDraftPreparationRunning ? (
+      {visibleDraftPreparationResult && !isDraftPreparationRunning ? (
         <p
           aria-live="polite"
-          className="m-0 min-w-0 text-xs text-primary"
+          className="m-0 flex min-w-0 items-center gap-2 text-xs text-primary"
           role="status"
         >
-          {draftPreparationResultMessage}
+          <span className="min-w-0">{visibleDraftPreparationResult}</span>
+          <Button
+            aria-label="Dismiss the batch result"
+            className="h-5 min-h-5 px-1.5 text-foreground-muted"
+            onClick={() =>
+              setDismissedDraftPreparationResult(visibleDraftPreparationResult)
+            }
+            size="xs"
+            type="button"
+            variant="ghost"
+          >
+            <X aria-hidden="true" className="size-3" />
+          </Button>
         </p>
       ) : null}
     </>

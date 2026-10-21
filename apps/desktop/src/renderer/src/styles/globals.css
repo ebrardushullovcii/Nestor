@@ -979,6 +979,24 @@
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+/* A loading line that would show for a blink is not shown at all: it stays
+   invisible for 300ms and appears only for a slow read, so a screen that
+   fills in quickly never flashes "Loading…" it immediately takes back. No
+   timer is involved, so first paint stays timer-free. */
+@keyframes delayed-appear {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.delayed-appear {
+  animation: delayed-appear 1ms linear 300ms both;
+}
+
 @keyframes button-pending-rail-slide {
   0% {
     transform: translateX(0%);

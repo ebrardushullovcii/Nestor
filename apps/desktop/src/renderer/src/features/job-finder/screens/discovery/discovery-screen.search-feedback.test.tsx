@@ -65,8 +65,11 @@ vi.mock("./discovery-detail-panel", () => ({
   ),
 }));
 vi.mock("./discovery-filters-panel", () => ({
-  DiscoveryFiltersPanel: () => (
-    <section aria-label="Current search">Current search</section>
+  DiscoveryFiltersPanel: ({ headerAction }: { headerAction?: ReactNode }) => (
+    <section aria-label="Current search">
+      Current search
+      {headerAction}
+    </section>
   ),
 }));
 vi.mock("./discovery-results-panel", () => ({

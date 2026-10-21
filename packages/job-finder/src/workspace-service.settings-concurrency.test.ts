@@ -458,6 +458,7 @@ describe("fault ordering for scoped saves", () => {
       ...base,
       clearResumeApproval: () =>
         Promise.reject(new Error("invalidation failed")),
+      staleResumeDrafts: () => Promise.reject(new Error("invalidation failed")),
     };
     const service = createTestHarness(repository);
 

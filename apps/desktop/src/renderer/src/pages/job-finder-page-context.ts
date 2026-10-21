@@ -142,22 +142,41 @@ export interface JobFinderPageContext {
     reasons: readonly DiscoveryFeedbackReason[],
     action?: "hide_job" | "hide_and_exclude_employer",
     expectedNormalizedCompanyName?: string | null,
+    /** `quiet`: no success message; the triage bar says it and offers Undo. */
+    options?: { quiet?: boolean },
   ) => Promise<void>;
   onPreviewEmployerExclusion: (
     jobId: string,
   ) => Promise<EmployerExclusionPreview>;
   onRemoveEmployerExclusion: (input: RemoveEmployerExclusionInput) => void;
-  onRestoreDismissedJob: (jobId: string) => void;
+  /** `quiet`: no success message; the triage bar's Undo asked for it. */
+  onRestoreDismissedJob: (
+    jobId: string,
+    options?: { quiet?: boolean },
+  ) => void;
   onEditResumeWorkspace: (jobId: string) => void;
   onGenerateResume: (
     jobId: string,
     options?: { selectAfter?: boolean },
   ) => Promise<boolean>;
   onRemoveReviewJob: (jobId: string) => void;
-  onRemoveReviewJobs?: (jobIds: readonly string[]) => Promise<void>;
+  onRemoveReviewJobs?: (
+    jobIds: readonly string[],
+    options?: { quiet?: boolean },
+  ) => Promise<void>;
   onMutateRapidReview: (input: RapidReviewMutationInput) => Promise<void>;
   onMutateSafeguards: (input: SafeguardMutationInput) => Promise<boolean>;
   onApproveCurrentResume: (jobId: string) => void;
+  /**
+   * Approves the resume in the background and opens the next one to review
+   * (or Shortlisted when none is left). `exportId` approves a PDF already
+   * built from the saved draft instead of building one.
+   */
+  onApproveResumeAndContinue: (
+    jobId: string,
+    nextJobId: string | null,
+    exportId?: string,
+  ) => void;
   /** Approves a Light or Tailored draft and starts the application in one press. */
   onApproveResumeAndApply: (jobId: string) => void;
   onApproveResume: (jobId: string, exportId: string) => void;
@@ -271,7 +290,11 @@ export interface JobFinderPageContext {
   profileCopilotPendingContextKey: string | null;
   onAssessJobListing: (jobId: string) => Promise<void>;
   onJudgeUnjudgedJobs?: () => Promise<void>;
-  onQueueJob: (jobId: string) => Promise<JobFinderQueuedJobOutcome>;
+  /** `quiet`: no success message; the triage bar says it and offers Undo. */
+  onQueueJob: (
+    jobId: string,
+    options?: { quiet?: boolean },
+  ) => Promise<JobFinderQueuedJobOutcome>;
   onQueueJobs?: (
     jobIds: readonly string[],
   ) => Promise<JobFinderQueuedJobOutcome>;

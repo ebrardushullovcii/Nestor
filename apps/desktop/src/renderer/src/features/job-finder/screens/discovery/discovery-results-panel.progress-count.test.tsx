@@ -187,7 +187,7 @@ it("reads the same report for the live line and source summary regardless of dis
   expect(
     screen.getByTestId("discovery-source-summaries").textContent,
   ).toContain(
-    "52 inspected · 25 saved · 0 rejected · 27 duplicates · 0 deferred · 7 pages covered",
+    "52 inspected · 25 saved · 27 duplicates · 7 pages covered",
   );
   expect(screen.queryByText(/28 listings recorded/)).toBeNull();
 });

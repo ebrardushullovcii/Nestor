@@ -1333,13 +1333,26 @@ export type ResumeResearchArtifactSummary = z.infer<
   typeof ResumeResearchArtifactSummarySchema
 >;
 
-/** Two completed resumes establish an observed average or measured queue throughput. */
+/**
+ * Two completed resumes establish an observed average or measured queue
+ * throughput. With `inFlight` known, the rest is counted in waves of that
+ * many resumes written side by side: ten at once finish together, not one
+ * after another.
+ */
 export function estimateResumeBatchMinutesLeft(
   durationsMs: readonly number[],
   remainingCount: number,
   observed?: { elapsedMs: number; completedCount: number },
+  inFlight?: number,
 ): number | null {
   if (durationsMs.length < 2 || remainingCount <= 0) return null;
+  if (inFlight !== undefined && inFlight > 0) {
+    const average =
+      durationsMs.reduce((sum, duration) => sum + duration, 0) /
+      durationsMs.length;
+    const waves = Math.ceil(remainingCount / inFlight);
+    return Math.max(1, Math.ceil((average * waves) / 60_000));
+  }
   if (observed && observed.completedCount >= 2 && observed.elapsedMs > 0)
     return Math.max(
       1,

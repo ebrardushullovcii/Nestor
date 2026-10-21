@@ -293,6 +293,47 @@ describe("commitDiscoveryFeedbackUpdate", () => {
     }
   });
 
+  test("a hide that leaves preferences and plans as they were rewrites neither", async () => {
+    const temp = await createTempRepository("nestor-db-feedback-untouched-");
+    try {
+      const repository = await temp.createRepository();
+      const job = createSavedJob();
+      await repository.commitSavedJobDelta({ upserts: [job] });
+      const revisions = () => {
+        const reader = new DatabaseSync(temp.filePath, { readOnly: true });
+        try {
+          return Object.fromEntries(
+            reader
+              .prepare(
+                "SELECT key, revision FROM singleton_state WHERE key IN ('search_preferences', 'campaign_state', 'profile')",
+              )
+              .all()
+              .map((row) => [String(row.key), Number(row.revision)]),
+          );
+        } finally {
+          reader.close();
+        }
+      };
+      const before = revisions();
+
+      await repository.commitDiscoveryFeedbackUpdate(job.id, (current) => ({
+        result: "committed",
+        savedJob: SavedJobSchema.parse({ ...current.job!, status: "archived" }),
+        searchPreferences: current.searchPreferences,
+        campaignState: current.campaignState,
+        discoveryState: current.discoveryState,
+      }));
+
+      expect(revisions()).toEqual(before);
+      expect(
+        (await repository.listSavedJobs()).find((entry) => entry.id === job.id),
+      ).toMatchObject({ status: "archived" });
+      await repository.close();
+    } finally {
+      await cleanupTempDirectoryWithRetry(temp.tempDirectory);
+    }
+  });
+
   test("file repository commits feedback atomically and survives restart", async () => {
     const temp = await createTempRepository("nestor-db-feedback-atomic-");
     try {

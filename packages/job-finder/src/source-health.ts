@@ -191,9 +191,10 @@ export type EnabledSourceHealthCounts = {
 
 // "fetch failed" and "API request timed out" are this computer's connection
 // or a busy search, not the site: one 900-source search left 663 sources
-// failing with them, and Home called every one broken.
+// failing with them, and Home called every one broken. A job board feed that
+// fails for a passing reason says it "is tried again on the next search".
 const RUN_SIDE_FAILURE_PATTERN =
-  /ERR_INTERNET_DISCONNECTED|ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_TIMED_OUT|fetch failed|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|did not answer in time|ran out of time|was stopped/iu;
+  /ERR_INTERNET_DISCONNECTED|ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_TIMED_OUT|fetch failed|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|did not answer in time|could not be reached|tried again on the next search|ran out of time|was stopped/iu;
 
 /** A failure that says something about the site rather than this run. */
 function failedOnSite(execution: {

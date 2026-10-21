@@ -220,3 +220,15 @@ describe("AI provider rate limits", () => {
     expect(isAiProviderRateLimited("429")).toBe(false);
   });
 });
+
+test("a request the service never finished answering counts as busy, not failed", async () => {
+  const { ModelRequestTimeoutError } = await import("./model-request-transport");
+  const { isAiServiceBusy } = await import("./ai-provider-access-failure");
+  const wrapped = new Error("The AI could not write this resume in time.", {
+    cause: new ModelRequestTimeoutError("total", 300_000),
+  });
+  expect(isAiServiceBusy(wrapped)).toBe(true);
+  expect(isAiServiceBusy(new Error("Model returned a non-JSON response"))).toBe(
+    false,
+  );
+});

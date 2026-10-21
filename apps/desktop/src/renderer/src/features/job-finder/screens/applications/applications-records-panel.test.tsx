@@ -235,7 +235,7 @@ describe("ApplicationsRecordsPanel", () => {
     ).toBeNull();
   });
 
-  it("shows stage filters only when there are applications to filter", () => {
+  it("shows no filter row when there is nothing to filter", () => {
     const record: ApplicationRecord = {
       id: "application_1",
       jobId: "job_1",
@@ -285,9 +285,11 @@ describe("ApplicationsRecordsPanel", () => {
       </MemoryRouter>,
     );
 
+    // One application: no search, stage or view could change the list, so
+    // the panel opens on the row itself.
     expect(
-      screen.getByRole("group", { name: "Application filters" }),
-    ).toBeTruthy();
+      screen.queryByRole("group", { name: "Application filters" }),
+    ).toBeNull();
   });
 
   it("gives each row one clear whole-row details action", () => {
@@ -514,7 +516,7 @@ describe("ApplicationsRecordsPanel", () => {
     const { container } = render(
       <MemoryRouter>
         <ApplicationsRecordsPanel
-          activeFilter="all"
+          activeFilter="needs_action"
           applicationRecords={[record]}
           filterCounts={{
             all: 1,
@@ -553,8 +555,8 @@ describe("ApplicationsRecordsPanel", () => {
       expect(filterButton.className).toContain("h-6");
     }
 
-    // Zero-count views are hidden so a single record cannot wrap the filter
-    // row; All and the waiting-on-you view always stay reachable.
+    // Views that could not change the list are hidden; the active view and
+    // All, the way back from it, stay reachable.
     expect(screen.queryByRole("button", { name: /submitted/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /manual only/i })).toBeNull();
     expect(screen.getByRole("button", { name: /^All/ })).toBeTruthy();
@@ -562,8 +564,8 @@ describe("ApplicationsRecordsPanel", () => {
       screen.getByRole("button", { name: /waiting on you/i }),
     ).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /waiting on you/i }));
-    expect(onFilterChange).toHaveBeenCalledWith("needs_action");
+    fireEvent.click(screen.getByRole("button", { name: /^All/ }));
+    expect(onFilterChange).toHaveBeenCalledWith("all");
   });
 
   it("names the waiting-applications filter apart from the Needs you step badge", () => {
@@ -628,7 +630,9 @@ describe("ApplicationsRecordsPanel", () => {
     render(
       <MemoryRouter>
         <ApplicationsRecordsPanel
-          activeFilter="all"
+          // Both applications wait on the person, so the view is offered
+          // only once it is the active one.
+          activeFilter="needs_action"
           applicationRecords={applicationRecords}
           filterCounts={filterCounts}
           hasAnyApplications
@@ -1261,12 +1265,14 @@ it("counts chips from unarchived search and stage matches and keeps filters in o
       jobId: id,
       title: "Engineer",
       company: id === "other" ? "Other" : "Acme",
-      status: "submitted",
+      // "other" is still being filled in, so the Submitted view and the
+      // stage picker each have something to choose between.
+      status: id === "other" ? "drafting" : "submitted",
       lastActionLabel: "Sent",
       nextActionLabel: null,
       lastUpdatedAt: "2026-10-05T10:00:00Z",
       crm: {
-        stage: "applied",
+        stage: id === "other" ? "preparing" : "applied",
         stageSource: "user",
         stageChangedAt: "2026-10-05T10:00:00Z",
         archivedAt: id === "archived" ? "2026-10-05T10:00:00Z" : null,

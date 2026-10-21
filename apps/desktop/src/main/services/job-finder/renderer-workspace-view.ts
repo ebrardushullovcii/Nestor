@@ -155,8 +155,6 @@ export function toListMatchAssessment(
             role: judgment.role,
             preferences: judgment.preferences,
             locationReach: judgment.locationReach,
-            reasons: judgment.reasons,
-            gaps: judgment.gaps,
             ...(judgment.summary === undefined
               ? {}
               : { summary: judgment.summary }),

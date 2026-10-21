@@ -917,8 +917,12 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
   }
 
   if (!props.workspace || !draft) {
+    // A resume that opens within a blink shows no loading card in between.
     return (
-      <main className="grid min-h-full place-items-center px-6 py-10">
+      <main
+        aria-busy="true"
+        className="delayed-appear grid min-h-full place-items-center px-6 py-10"
+      >
         <EmptyState
           title="Loading Resume Studio"
           description="Loading the saved draft, validation, and version history."
@@ -1158,21 +1162,28 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
             jobCanonicalUrl={job.canonicalUrl}
             jobTitle={job.title}
             onBack={props.onBack}
+            // The language shares the header row; on a row of its own with
+            // a hint beside it, it pushed the preview down by a row.
+            actions={
+              !props.originalResumeRoute ? (
+                <ResumeWorkspaceLanguagePicker
+                  key={props.jobId}
+                  inline
+                  language={
+                    languageRequest
+                      ? languageRequest.language
+                      : (draft.language ?? null)
+                  }
+                  writtenLanguage={draft.writtenLanguage ?? null}
+                  listingLanguage={draft.listingLanguage ?? null}
+                  disabled={
+                    props.isWorkspacePending || backgroundDraft !== null
+                  }
+                  onWrite={writeLanguage}
+                />
+              ) : null
+            }
           />
-          {!props.originalResumeRoute ? (
-            <ResumeWorkspaceLanguagePicker
-              key={props.jobId}
-              language={
-                languageRequest
-                  ? languageRequest.language
-                  : (draft.language ?? null)
-              }
-              writtenLanguage={draft.writtenLanguage ?? null}
-              listingLanguage={draft.listingLanguage ?? null}
-              disabled={props.isWorkspacePending || backgroundDraft !== null}
-              onWrite={writeLanguage}
-            />
-          ) : null}
           {rewriteFailed ? (
             <div
               role="alert"
@@ -1284,6 +1295,27 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
             : { isApplyPending: props.isApplyPending })}
           isWorkspacePending={props.isWorkspacePending}
           mobileStudioTab={mobileStudioTab}
+          {...(props.reviewFlow
+            ? {
+                reviewFlow: {
+                  ...props.reviewFlow,
+                  onApproveAndNext: () => {
+                    const reviewFlow = props.reviewFlow;
+                    if (!reviewFlow) return;
+                    setAsidePendingAssistantProposals();
+                    // A PDF already built from the saved draft is approved as
+                    // it is; edits are saved first and get a fresh one.
+                    const exportId = hasUnsavedChanges
+                      ? undefined
+                      : availableExportToApprove?.id;
+                    runWithSavedDraftAsync(
+                      () => reviewFlow.onApproveAndNext(exportId),
+                      "Saved your edits before approving this resume.",
+                    );
+                  },
+                },
+              }
+            : {})}
           onApproveCurrentPdf={() => {
             setAsidePendingAssistantProposals();
             runWithSavedDraftAsync(

@@ -97,4 +97,21 @@ describe("createLocalKnowledgeIndex", () => {
 
     expect(index.search("design systems")).toEqual([]);
   });
+
+  test("a document added after a search is found by the next search", () => {
+    const index = createLocalKnowledgeIndex();
+    index.addDocument("resume_1", "Built design systems in React.", {
+      tags: ["resume"],
+    });
+    expect(index.search("payments")).toEqual([]);
+
+    index.addDocument("job_1", "Own the payments platform.", {
+      tags: ["job"],
+    });
+
+    expect(index.search("payments").map((result) => result.documentId)).toEqual(
+      ["job_1"],
+    );
+    expect(index.search("design systems")).toHaveLength(1);
+  });
 });

@@ -530,7 +530,7 @@ test.each([
   },
 );
 
-test("keeps a filled form active until its final action passes readiness review", async () => {
+test("records a finished form's final action itself, without another model turn", async () => {
   const source = page({
     actions: [
       { index: 0, label: "Submit application", visible: true, disabled: false },
@@ -576,7 +576,7 @@ test("keeps a filled form active until its final action passes readiness review"
     model,
   );
 
-  expect(prompts[1]).toContain("has not recorded its final action yet");
+  expect(prompts).toHaveLength(1);
   expect(result.outcome).toBe("ready_to_send");
   expect(result.readyToSend).toEqual({
     actionRef: "a0",
@@ -3678,6 +3678,52 @@ describe("fill_fields visible steps", () => {
     },
   );
 
+  test("an answer left for the person does not stop the rest of the batch", async () => {
+    const source = page({
+      controls: [
+        {
+          ...field(0, "I certify that the information is true"),
+          inputType: "checkbox",
+          value: "on",
+        },
+        field(1, "Full name"),
+        field(2, "Email"),
+      ],
+      actions: [
+        { index: 0, label: "Continue", visible: true, disabled: false },
+      ],
+    });
+    const { input, writes } = writable(source);
+    input.sources.profile.email = "robin@example.test";
+    const click = vi.fn(input.hands.clickElement);
+    input.hands.clickElement = click;
+    let report = "";
+    const result = await runApplyAgent(
+      input,
+      modelFor(
+        [
+          { tool: "set_checkbox", ref: "c0", checked: true },
+          { tool: "type", ref: "c1", text: "Robin Ashford" },
+          { tool: "type", ref: "c2", text: "robin@example.test" },
+        ],
+        (messages) => {
+          report =
+            messages.find((message) => message.role === "tool")?.content ?? "";
+        },
+        "a0",
+      ),
+    );
+    // The declaration nobody approved stays unticked; the two answers after
+    // it go in during the same turn, and Continue waits for the model.
+    expect(writes).toEqual(["c1", "c2"]);
+    expect(report).toContain('c1: Filled in "Full name".');
+    expect(report).toContain('c2: Filled in "Email".');
+    expect(report).not.toContain("not attempted");
+    expect(report).toContain("Continue was not pressed");
+    expect(click).not.toHaveBeenCalled();
+    expect(result.timing?.requests[0]).toMatchObject({ fieldsFilled: 2 });
+  });
+
   test.each([
     "refused",
     "person",
@@ -3863,8 +3909,17 @@ describe("fill_fields visible steps", () => {
         expect(mode).toBe("prepare_only");
         expect(report).toContain(separate.reason);
       } else {
+        // The press is the form's finish: the run ends ready for the send
+        // path, with nothing pressed and no further model turn.
         expect(separate.kind).toBe("ready_to_send");
-        expect(report).toContain("Nothing has been sent: call finish now.");
+        expect(result.readyToSend).toEqual({
+          actionRef: "a0",
+          actionLabel:
+            separate.kind === "ready_to_send"
+              ? separate.finalActionLabel
+              : null,
+        });
+        expect(result.timing?.modelTurns).toBe(1);
       }
       expect(result.timing?.requests[0]?.stepsAdvanced).toBe(0);
     },
@@ -4476,6 +4531,149 @@ test("form turns and question reading are apply work; answer checks are fact che
   );
 });
 
+test.each([
+  {
+    label: "Years of professional experience",
+    answer: "8 years",
+    tasks: ["apply"],
+  },
+  {
+    label: "Why this role?",
+    answer: "My platform experience fits this role.",
+    tasks: ["claim_check"],
+  },
+  {
+    label: "Are you legally authorized to work in this country?",
+    answer: "Yes",
+    tasks: ["claim_check"],
+  },
+  {
+    label: "Preferred start date",
+    answer: "2026-11-20",
+    tasks: ["apply"],
+    unread: true,
+  },
+  {
+    label: "Preferred office",
+    answer: "London",
+    tasks: ["apply", "claim_check"],
+    unread: true,
+    flagged: { asksHiringCountry: true },
+  },
+])(
+  "a short value is checked at the form-turn effort, other answers at the fact-check effort: $label",
+  async ({
+    label,
+    answer,
+    tasks,
+    unread,
+    flagged,
+  }: {
+    label: string;
+    answer: string;
+    tasks: string[];
+    unread?: boolean;
+    flagged?: Record<string, unknown>;
+  }) => {
+    const source = page({
+      controls: [{ ...nameControl(), label, value: "" }],
+    });
+    const input = config(source);
+    input.modelQuestionClassification = true;
+    input.hands.fillText = (_ref, value) => {
+      source.controls[0].value = value;
+      return Promise.resolve({ ok: true, observedValue: value });
+    };
+    const checkTasks: Array<string | undefined> = [];
+    let turns = 0;
+    let releaseReading = () => {};
+    const reading = new Promise<void>((resolve) => {
+      releaseReading = resolve;
+    });
+    await runApplyAgent(input, {
+      chatWithTools: async (messages, definitions, options) => {
+        const name = definitions[0]?.function.name;
+        if (name === "report_question_kinds") {
+          // An unread page: the quick check starts before the reading comes
+          // back, and a reading that flags the question redoes it in full.
+          if (unread) await reading;
+          return {
+            toolCalls: [
+              {
+                id: "kinds",
+                type: "function",
+                function: {
+                  name,
+                  arguments: JSON.stringify(
+                    flagged
+                      ? {
+                          plainIndexes: [],
+                          flagged: [
+                            {
+                              index: 0,
+                              eligibilityKind: null,
+                              asksAboutPay: false,
+                              asksCurrentPay: false,
+                              asksHiringCountry: false,
+                              required: true,
+                              declarationKind: null,
+                              ...flagged,
+                            },
+                          ],
+                        }
+                      : { plainIndexes: [0], flagged: [] },
+                  ),
+                },
+              },
+            ],
+          };
+        }
+        if (name === "report_answer_checks") {
+          checkTasks.push(options?.reasoningTask);
+          releaseReading();
+          return (await supportedChecks(messages, definitions))!;
+        }
+        // The page's questions are read while the model decides.
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+        return {
+          toolCalls: [
+            {
+              id: "decision",
+              type: "function",
+              function: {
+                name: ++turns === 1 ? "fill_fields" : "finish",
+                arguments: JSON.stringify(
+                  turns === 1
+                    ? { fields: [{ tool: "type", ref: "c0", text: answer }] }
+                    : { reason: "Done." },
+                ),
+              },
+            },
+          ],
+        };
+      },
+    });
+    expect(checkTasks).toEqual(tasks);
+  },
+);
+
+test("progress names the form's own step on a multi-step form", async () => {
+  const source = page({ stepLabel: "Step 2 of 5" });
+  const notes: string[] = [];
+  await runApplyAgent(
+    config(source, {
+      onProgress: ({ note }) => {
+        notes.push(note);
+      },
+    }),
+    scriptedModel([{ name: "finish", args: { reason: "Done." } }]),
+  );
+  expect(notes).toContain(
+    "form step 2 of 5: asking the assistant what to do next",
+  );
+  expect(notes.join("\n")).not.toContain("Robin");
+});
+
 test.each(["upload", "create_application_document"])(
   "a rejected file letter offers its draft and conflict through %s",
   async (tool) => {
@@ -5030,4 +5228,96 @@ test("a letter that needs review joins the other questions while the run fills t
   expect(questions.map((question) => question.kind)).toEqual(["cover_letter"]);
   expect(questions[0]?.suggestedAnswers?.[0]?.text).toBe(wording);
   expect(result.attachments).toEqual([]);
+});
+
+describe("a model that reports in words instead of calling finish", () => {
+  function wordsModel(
+    turns: Array<{ content?: string; name?: string; args?: object }>,
+  ) {
+    const seen: string[] = [];
+    let turn = 0;
+    const model: LLMClient = {
+      chatWithTools: (messages, definitions) => {
+        const check = supportedChecks(messages, definitions);
+        if (check) return check;
+        seen.push(messages.at(-1)?.content ?? "");
+        const next = turns[Math.min(turn, turns.length - 1)];
+        turn += 1;
+        return Promise.resolve(
+          next.name
+            ? {
+                toolCalls: [
+                  {
+                    id: `call_${turn}`,
+                    type: "function" as const,
+                    function: {
+                      name: next.name,
+                      arguments: JSON.stringify(next.args ?? {}),
+                    },
+                  },
+                ],
+              }
+            : { content: next.content ?? "" },
+        );
+      },
+    };
+    return { model, seen, turns: () => turn };
+  }
+
+  test("a filled form that is ready ends on those words, with no further turn", async () => {
+    const source = page({
+      controls: [{ ...nameControl(), value: "" }],
+    });
+    const input = config(source, {
+      authority: {
+        mode: "confirm_before_submit",
+        submitAuthorized: false,
+        preApprovedAttestationKinds: [],
+        salaryDisclosure: "pause_for_user",
+        allowedOrigins: ["https://apply.example.test"],
+      },
+    });
+    input.hands.fillText = (_ref, value) => {
+      source.controls[0].value = value;
+      return Promise.resolve({ ok: true, observedValue: value });
+    };
+    const { model, turns } = wordsModel([
+      {
+        name: "fill_fields",
+        args: { fields: [{ tool: "type", ref: "c0", text: "Robin Ashford" }] },
+      },
+      { content: "Everything is filled in and ready for review." },
+      { name: "finish", args: { reason: "Should not be needed." } },
+    ]);
+    const result = await runApplyAgent(input, model);
+    expect(turns()).toBe(2);
+    expect(result.outcome).toBe("awaiting_your_review");
+    expect(result.readyToSend).toEqual({
+      actionRef: "a0",
+      actionLabel: "Submit application",
+    });
+  });
+
+  test("words before anything is filled get the usual reminder", async () => {
+    const source = page({
+      controls: [{ ...nameControl(), value: "" }],
+    });
+    const input = config(source);
+    input.hands.fillText = (_ref, value) => {
+      source.controls[0].value = value;
+      return Promise.resolve({ ok: true, observedValue: value });
+    };
+    const { model, seen, turns } = wordsModel([
+      { content: "Let me look at the form first." },
+      {
+        name: "fill_fields",
+        args: { fields: [{ tool: "type", ref: "c0", text: "Robin Ashford" }] },
+      },
+      { name: "finish", args: { reason: "Filled in." } },
+    ]);
+    const result = await runApplyAgent(input, model);
+    expect(turns()).toBe(3);
+    expect(seen[1]).toContain("Answer with one of the tools");
+    expect(result.outcome).toBe("prepared");
+  });
 });

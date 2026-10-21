@@ -32,9 +32,11 @@ NESTOR_AI_SEARCH_REASONING_EFFORT=low
 NESTOR_AI_PAGE_READ_REASONING_EFFORT=low
 # Fit judged in batches during and after a search:
 NESTOR_AI_FIT_REASONING_EFFORT=medium
-# Fact checks of resume lines and of application answers:
+# Fact checks of resume lines and of written application answers:
 NESTOR_AI_CLAIM_CHECK_REASONING_EFFORT=medium
-# Application form turns and reading a form's questions:
+# Application form turns, reading a form's questions, and checking short
+# form values (a date, a number, a chosen option) that are not about
+# eligibility, pay or a declaration:
 NESTOR_AI_APPLY_REASONING_EFFORT=low
 # "Read and assess"; unset means NESTOR_AI_REASONING_EFFORT:
 # NESTOR_AI_LISTING_READ_REASONING_EFFORT=high

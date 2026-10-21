@@ -662,7 +662,7 @@ export function ProfileScreen(props: {
       topContent={
         <>
           <PageHeaderStack
-            title="Your profile"
+            title="Profile"
             description="Everything Job Finder knows about you. Edit any field or ask the assistant."
             statusItems={profileStatusItems}
             actions={

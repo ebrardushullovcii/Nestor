@@ -245,12 +245,13 @@ describe("ApplicationsCrmDetail", () => {
       { container: appRoot },
     );
 
-    expect(document.body.textContent).toContain(
-      "Nothing here contacts the employer or submits an application",
-    );
-    expect(document.body.textContent).toContain(
-      "Exports contain these tracking facts, not submission evidence",
-    );
+    // The page header says the tracker never submits; what an export holds
+    // is the export links' tooltip.
+    expect(
+      screen
+        .getByRole("button", { name: "Export this application (CSV)" })
+        .getAttribute("title"),
+    ).toContain("Exports contain these tracking facts, not submission evidence");
     fireEvent.change(screen.getByLabelText("Stage"), {
       target: { value: "applied" },
     });

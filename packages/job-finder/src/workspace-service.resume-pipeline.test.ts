@@ -116,7 +116,9 @@ test("200 jobs roll from 50 writers into two local processors without workspace 
   ).toBe(true);
   expect(peakModels).toBe(50);
   expect(peakLocal).toBe(2);
-  expect(observedProcessingPeak).toBe(2);
+  // Final fact checks run beside each other; only rendering waits for one
+  // of the two local slots.
+  expect(observedProcessingPeak).toBeGreaterThan(2);
   expect(allAssets).not.toHaveBeenCalled();
   expect(allJobs).not.toHaveBeenCalled();
   expect((await repository.listResumeDrafts()).length).toBe(200);

@@ -387,10 +387,10 @@ describe("ProfileSetupTargetingStep guided source catalog", () => {
     expect(scrollOrder).toBeLessThan(focusOrder);
     expect(listHeading.className).toContain("scroll-mt-4");
     expect(listHeading.className).toContain("sm:scroll-mt-[8.25rem]");
-    // Important on purpose: Tailwind v4 emits arbitrary media variants before
-    // the named breakpoints, so a plain `min-[1440px]` token would lose to the
-    // still-matching `sm:scroll-mt-[8.25rem]` at >=1440px.
-    expect(listHeading.className).toContain("min-[1440px]:!scroll-mt-[4.5rem]");
+    // The one-row header starts at the named `xl` breakpoint, which Tailwind
+    // emits after `sm`, so it wins there; a plain arbitrary `min-[…]` token
+    // would lose to the still-matching `sm:scroll-mt-[8.25rem]`.
+    expect(listHeading.className).toContain("xl:scroll-mt-[4.5rem]");
     expect(listHeading.className).not.toContain(
       "min-[1440px]:scroll-mt-[4.5rem]",
     );

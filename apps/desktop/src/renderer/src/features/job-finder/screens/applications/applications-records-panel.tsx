@@ -251,21 +251,53 @@ export function ApplicationsRecordsPanel({
     },
     [applicationRecords, onSelectRecord],
   );
-  // A single record used to wrap five chips onto two rows in a narrow list
-  // column. "All" and "Waiting on you" always stay (they are the two views a
-  // user switches between), plus any view that actually holds something and
-  // the active view so the current selection can never disappear.
-  const visibleFilters = useMemo(
-    () =>
-      APPLICATION_FILTERS.filter(
-        (filterOption) =>
-          filterOption === "all" ||
-          filterOption === "needs_action" ||
-          filterOption === activeFilter ||
-          filterCounts[filterOption] > 0,
-      ),
-    [activeFilter, filterCounts],
+  // A filter is shown only when choosing it would change the list: a view
+  // that holds some but not all of the applications, plus the active one so
+  // the current choice never disappears. "All 4" beside "Waiting on you 0"
+  // offered two buttons that could not change anything.
+  const nonArchivedRecords = useMemo(
+    () => sourceRecords.filter((record) => !record.crm?.archivedAt),
+    [sourceRecords],
   );
+  // Judged on every unarchived application, not the searched ones, so the
+  // chips do not come and go while the person types.
+  const choiceCounts = Object.fromEntries(
+    APPLICATION_FILTERS.map((filter) => [
+      filter,
+      nonArchivedRecords.filter((record) =>
+        matchesApplicationsFilter(record, filter, stateFor(record)?.kind),
+      ).length,
+    ]),
+  ) as Record<ApplicationsViewFilter, number>;
+  const filterChoices = APPLICATION_FILTERS.filter(
+    (filterOption) =>
+      filterOption !== "all" &&
+      (filterOption === activeFilter ||
+        (choiceCounts[filterOption] > 0 &&
+          choiceCounts[filterOption] < choiceCounts.all)),
+  );
+  const visibleFilters: readonly ApplicationsViewFilter[] =
+    filterChoices.length > 0 || activeFilter !== "all"
+      ? ["all", ...filterChoices]
+      : [];
+  // The stage picker lists only the stages the applications are in, and only
+  // shows when they are in more than one.
+  const presentStages = useMemo(
+    () =>
+      new Set(
+        nonArchivedRecords.map(
+          (record) => applicationCrmDataForView(record).stage,
+        ),
+      ),
+    [nonArchivedRecords],
+  );
+  const stageOptions = APPLICATION_CRM_STAGE_ORDER.filter(
+    (stage) => presentStages.has(stage) || stage === pipelineStage,
+  );
+  const showsStagePicker = presentStages.size > 1 || pipelineStage !== "all";
+  const showsSearch = nonArchivedRecords.length > 1 || query.length > 0;
+  const showsToolbar =
+    showsSearch || showsStagePicker || visibleFilters.length > 0;
   const pagedRecords = useMemo(
     () =>
       applicationRecords.slice(
@@ -288,7 +320,7 @@ export function ApplicationsRecordsPanel({
       {/* One toolbar row. The page title and the "All" chip already say what
           this list is and how many it holds, so the panel repeats neither.
           A narrow column wraps the chips onto a second, shorter line. */}
-      {hasAnyApplications ? (
+      {hasAnyApplications && showsToolbar ? (
         <div
           aria-labelledby={filterGroupId}
           className="flex min-h-12 w-full min-w-0 shrink-0 flex-wrap items-center gap-1.5 border-b border-(--surface-panel-border) px-3 py-2"
@@ -298,31 +330,35 @@ export function ApplicationsRecordsPanel({
           <span className="sr-only" id={filterGroupId}>
             Application filters
           </span>
-          <Input
-            size="toolbar"
-            className="min-w-40 flex-1"
-            aria-label="Search applications"
-            placeholder="Search applications"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <Select value={pipelineStage} onValueChange={setPipelineStage}>
-            <SelectTrigger
-              aria-label="Hiring stage"
+          {showsSearch ? (
+            <Input
               size="toolbar"
-              className="w-36"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All stages</SelectItem>
-              {APPLICATION_CRM_STAGE_ORDER.map((stage) => (
-                <SelectItem key={stage} value={stage}>
-                  {APPLICATION_CRM_STAGE_NAMES[stage]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              className="min-w-40 flex-1"
+              aria-label="Search applications"
+              placeholder="Search applications"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          ) : null}
+          {showsStagePicker ? (
+            <Select value={pipelineStage} onValueChange={setPipelineStage}>
+              <SelectTrigger
+                aria-label="Hiring stage"
+                size="toolbar"
+                className="w-36"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All stages</SelectItem>
+                {stageOptions.map((stage) => (
+                  <SelectItem key={stage} value={stage}>
+                    {APPLICATION_CRM_STAGE_NAMES[stage]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
           {visibleFilters.map((filterOption) => (
             <Button
               aria-label={formatApplicationFilterAccessibleLabel(

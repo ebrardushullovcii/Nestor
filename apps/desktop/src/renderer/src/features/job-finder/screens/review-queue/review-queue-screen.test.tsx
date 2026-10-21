@@ -6,7 +6,6 @@ import {
   fireEvent,
   render,
   screen,
-  within,
 } from "@testing-library/react";
 import { ApplicationRecordSchema } from "@nestor/contracts";
 import type {
@@ -654,8 +653,8 @@ describe("ReviewQueueScreen locked pane scroll regions", () => {
 
     const column = screen.getByTestId("review-queue-workspace-column");
     expect(
-      within(column).getAllByText("Tailored resume v1").length,
-    ).toBeGreaterThan(0);
+      column.querySelector("[data-resume-preview-card]"),
+    ).toBeTruthy();
     expect(
       column.querySelectorAll("[data-locked-pane-scroll-region]"),
     ).toHaveLength(0);

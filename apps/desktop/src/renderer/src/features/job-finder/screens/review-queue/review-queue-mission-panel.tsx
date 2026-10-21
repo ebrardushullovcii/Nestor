@@ -331,119 +331,127 @@ export function ReviewQueueMissionPanel({
       ? null
       : describeUntailorableListing(selectedAsset);
   const untailorableListingReasonId = "resume-choice-untailorable-listing";
-  const resumeChoiceFieldset = selectedItem ? (
-    <div className="grid gap-2">
-      <p className="text-xs text-foreground-muted">
-        {selectedItem.assetStatus === "ready"
-          ? "Choosing another level writes a new draft. Original uses your file unchanged."
-          : "Choose a level, then create the resume."}
-      </p>
-      <div
-        aria-describedby={
-          untailorableListing ? untailorableListingReasonId : undefined
-        }
-        aria-label="Resume level for this job"
-        className="grid gap-2 sm:auto-rows-fr sm:grid-cols-2"
-        onKeyDown={handleResumeChoiceKeyDown}
-        ref={resumeChoiceGroupRef}
-        role="radiogroup"
-      >
-        {RESUME_LEVEL_OPTIONS.map((option) => {
-          const selected = untailorableListing
-            ? option.id === "original"
-            : getSelectedResumeLevel(selectedItem) === option.id;
-          const unavailable =
-            Boolean(untailorableListing) && option.id !== "original";
+  const selectedResumeLevel = selectedItem
+    ? untailorableListing
+      ? "original"
+      : getSelectedResumeLevel(selectedItem)
+    : null;
+  const selectedResumeLevelOption = RESUME_LEVEL_OPTIONS.find(
+    (option) => option.id === selectedResumeLevel,
+  );
+  // The four levels are one segmented row; each level's description is its
+  // tooltip, and only the chosen level's description is spelled out under
+  // the row. Four description cards used to fill half the pane.
+  const resumeChoiceGroup = selectedItem ? (
+    <div
+      aria-describedby={
+        untailorableListing ? untailorableListingReasonId : undefined
+      }
+      aria-label="Resume level for this job"
+      className="inline-flex min-w-0 max-w-full flex-wrap gap-0.5 rounded-(--radius-small) border border-(--control-border) bg-background/30 p-0.5"
+      onKeyDown={handleResumeChoiceKeyDown}
+      ref={resumeChoiceGroupRef}
+      role="radiogroup"
+    >
+      {RESUME_LEVEL_OPTIONS.map((option) => {
+        const selected = selectedResumeLevel === option.id;
+        const unavailable =
+          Boolean(untailorableListing) && option.id !== "original";
 
-          return (
-            <button
-              aria-checked={selected}
-              className={cn(
-                "flex h-full min-h-11 flex-col justify-center gap-0.5 rounded-(--radius-small) border px-3 py-2 text-left text-(length:--text-small) font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                selected
-                  ? "border-primary bg-primary/10 text-(--text-headline) shadow-[inset_2px_0_0_var(--primary)]"
-                  : "border-(--surface-panel-border) bg-background/30 text-foreground-soft hover:border-primary/35",
-                isSelectedJobPending
-                  ? "cursor-not-allowed opacity-60"
-                  : "cursor-pointer",
-              )}
-              data-resume-level={option.id}
-              disabled={isSelectedJobPending || unavailable}
-              key={option.id}
-              onClick={() =>
-                option.id === "original"
-                  ? onSetJobResumeApplicationMode(
-                      selectedItem.jobId,
-                      "original_resume",
-                    )
-                  : onSetJobResumeApplicationMode(
-                      selectedItem.jobId,
-                      "tailored_per_job",
-                      option.tailoringMode,
-                    )
-              }
-              role="radio"
-              tabIndex={0}
-              type="button"
-            >
-              <span className="flex items-center gap-2">
-                {selected ? (
-                  <Check
-                    aria-hidden="true"
-                    className="size-4 shrink-0 text-primary"
-                  />
-                ) : null}
-                {option.label}
-                {unavailable ? (
-                  <span className="ml-auto text-xs font-normal text-foreground-muted">
-                    Not possible for this job
-                  </span>
-                ) : null}
-              </span>
-              <span className="text-xs font-normal leading-4 text-foreground-muted">
-                {option.detail}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-      {untailorableListing ? (
-        <p
-          className="text-(length:--text-small) leading-6 text-foreground-soft"
-          id={untailorableListingReasonId}
-        >
-          {untailorableListing.reason} {untailorableListing.approvalMessage}
-        </p>
-      ) : null}
+        return (
+          <button
+            aria-checked={selected}
+            className={cn(
+              "inline-flex min-h-8 items-center gap-1.5 rounded-[calc(var(--radius-small)-2px)] px-3 text-(length:--text-small) font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              selected
+                ? "bg-primary/12 text-(--text-headline) shadow-[inset_0_0_0_1px_var(--primary)]"
+                : "text-foreground-soft hover:bg-secondary hover:text-foreground",
+              isSelectedJobPending || unavailable
+                ? "cursor-not-allowed opacity-60"
+                : "cursor-pointer",
+            )}
+            data-resume-level={option.id}
+            disabled={isSelectedJobPending || unavailable}
+            key={option.id}
+            onClick={() =>
+              option.id === "original"
+                ? onSetJobResumeApplicationMode(
+                    selectedItem.jobId,
+                    "original_resume",
+                  )
+                : onSetJobResumeApplicationMode(
+                    selectedItem.jobId,
+                    "tailored_per_job",
+                    option.tailoringMode,
+                  )
+            }
+            role="radio"
+            tabIndex={0}
+            title={
+              unavailable
+                ? "Not possible for this job"
+                : selected
+                  ? option.detail
+                  : `${option.detail}${selectedItem.assetStatus === "ready" && option.id !== "original" ? " Writes a new draft." : ""}`
+            }
+            type="button"
+          >
+            {selected ? (
+              <Check
+                aria-hidden="true"
+                className="size-3.5 shrink-0 text-primary"
+              />
+            ) : null}
+            {option.label}
+            <span className="sr-only"> {option.detail}</span>
+          </button>
+        );
+      })}
     </div>
   ) : null;
+  const resumeChoiceNote = selectedItem ? (
+    untailorableListing ? (
+      <p
+        className="text-(length:--text-small) leading-5 text-foreground-soft"
+        id={untailorableListingReasonId}
+      >
+        {untailorableListing.reason} {untailorableListing.approvalMessage}
+      </p>
+    ) : selectedResumeLevelOption ? (
+      <p className="text-xs leading-5 text-foreground-muted">
+        {selectedResumeLevelOption.detail}
+        {selectedItem.assetStatus === "ready"
+          ? " Choosing another level writes a new draft."
+          : ""}
+      </p>
+    ) : null
+  ) : null;
+  const resumeLevelLabel = (
+    <span className="shrink-0 text-xs font-semibold uppercase tracking-(--tracking-heading) text-foreground-soft">
+      Resume level
+    </span>
+  );
 
   if (!selectedItem || !selectedJob) {
     return null;
   }
 
   return (
-    <section className="relative grid min-w-0 content-start gap-4 px-6 pb-5 pt-3">
-      <div className="surface-card-tint grid min-w-0 gap-3 rounded-(--radius-field) border border-(--surface-panel-border) p-4">
-        <span className="text-xs font-semibold uppercase tracking-(--tracking-heading) text-foreground-soft">
-          Resume level
-        </span>
+    <section className="relative grid min-w-0 content-start gap-3 px-6 pb-1 pt-3">
+      <div className="grid min-w-0 gap-1.5">
         {selectedItem.resumeReview.status === "approved" ? (
           // Approved work is destructive to change, so the control is parked
           // behind a deliberate reveal that states the cost first.
-          <details
-            className="group grid min-w-0 gap-3 rounded-(--radius-small) border border-(--control-border) bg-background/30 px-3 py-2"
-            data-resume-choice-disclosure
-          >
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-(length:--text-small) font-semibold text-foreground outline-none marker:hidden focus-visible:ring-[3px] focus-visible:ring-ring/40 [&::-webkit-details-marker]:hidden">
-              {RESUME_LEVEL_OPTIONS.find(
-                (option) => option.id === getSelectedResumeLevel(selectedItem),
-              )?.label ?? "Tailored"}{" "}
-              · change level
-              <ChevronDown
-                aria-hidden="true"
-                className="size-4 shrink-0 transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none"
-              />
+          <details className="group grid min-w-0 gap-2" data-resume-choice-disclosure>
+            <summary className="flex w-fit cursor-pointer list-none items-center gap-3 text-(length:--text-small) font-semibold text-foreground outline-none marker:hidden focus-visible:ring-[3px] focus-visible:ring-ring/40 [&::-webkit-details-marker]:hidden">
+              {resumeLevelLabel}
+              <span className="inline-flex items-center gap-1.5">
+                {selectedResumeLevelOption?.label ?? "Tailored"} · change level
+                <ChevronDown
+                  aria-hidden="true"
+                  className="size-4 shrink-0 transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none"
+                />
+              </span>
             </summary>
             <p
               className="text-(length:--text-small) leading-5 text-foreground-muted"
@@ -452,12 +460,17 @@ export function ReviewQueueMissionPanel({
               This resume is approved. Changing the level writes a new one that
               you approve again.
             </p>
-            {resumeChoiceFieldset}
+            {resumeChoiceGroup}
+            {resumeChoiceNote}
           </details>
         ) : (
-          // The line above the levels already says another level writes a
-          // new draft; a second note under them said it again.
-          resumeChoiceFieldset
+          <>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+              {resumeLevelLabel}
+              {resumeChoiceGroup}
+            </div>
+            {resumeChoiceNote}
+          </>
         )}
         {usesOriginalResume &&
         originalResume &&
@@ -476,13 +489,13 @@ export function ReviewQueueMissionPanel({
         ) : null}
       </div>
 
+      {/* The next step: what state the job is in, one primary button, and
+          the job's two quiet links on the same row. The tinted box says it
+          is the next step; an eyebrow saying so cost a row. */}
       <div
-        className="grid min-w-0 gap-3 rounded-(--radius-field) border border-primary/30 bg-primary/5 p-4"
+        className="grid min-w-0 gap-2.5 rounded-(--radius-field) border border-primary/30 bg-primary/5 px-4 py-3"
         data-testid="apply-copilot-footer"
       >
-        <span className="text-xs font-semibold uppercase tracking-(--tracking-heading) text-foreground-soft">
-          Next step
-        </span>
         {existingApplication ? (
           <p className="text-(length:--text-small) leading-6 text-foreground-soft">
             This job is already in Applications. Open it to see its latest
@@ -529,10 +542,7 @@ export function ReviewQueueMissionPanel({
             </p>
           )
         ) : null}
-        <div
-          className="flex min-w-0 flex-wrap items-center gap-2"
-          data-testid="application-action-row"
-        >
+        <div className="flex min-w-0 flex-wrap items-center gap-2 empty:hidden">
           {selectedJob.matchAssessment.recommendation === "skip" ? (
             <StatusBadge tone={fitRecommendationCopy.skip.tone}>
               {fitRecommendationCopy.skip.label}
@@ -560,7 +570,7 @@ export function ReviewQueueMissionPanel({
           selectedJob.matchAssessment.recommendation !== "skip" &&
           selectedJob.matchAssessment.recommendationRationale ? (
             <p
-              className="basis-full text-(length:--text-small) text-foreground-soft"
+              className="basis-full text-xs leading-5 text-foreground-muted"
               data-testid="queue-full-assessment-reason"
             >
               {joinUniqueSentences([
@@ -568,9 +578,14 @@ export function ReviewQueueMissionPanel({
               ])}
             </p>
           ) : null}
+        </div>
+        <div
+          className="flex min-w-0 flex-wrap items-center gap-2"
+          data-testid="application-action-row"
+        >
           {existingApplication ? (
             <Button
-              className="h-11 w-fit max-w-full justify-start px-5 text-sm font-semibold normal-case tracking-normal"
+              className="h-10 w-fit max-w-full justify-start px-5 text-sm font-semibold normal-case tracking-normal"
               onClick={() => onOpenApplication(existingApplication.id)}
               type="button"
               variant="primary"
@@ -579,7 +594,7 @@ export function ReviewQueueMissionPanel({
             </Button>
           ) : (
             <Button
-              className="h-11 w-fit max-w-full justify-start px-5 text-sm font-semibold normal-case tracking-normal"
+              className="h-10 w-fit max-w-full justify-start px-5 text-sm font-semibold normal-case tracking-normal"
               pending={
                 primaryApplicationAction.kind === "waiting" ||
                 (primaryApplicationAction.kind === "start_apply" &&
@@ -668,7 +683,35 @@ export function ReviewQueueMissionPanel({
               Open the resume
             </Button>
           ) : null}
+          <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1">
+            <Button
+              className={quietActionClassName}
+              onClick={() =>
+                openUrlInJobFinderBrowser(selectedJob.canonicalUrl)
+              }
+              size="compact"
+              type="button"
+              variant="link"
+            >
+              Open the listing
+            </Button>
+            <Button
+              className={quietActionClassName}
+              onClick={() => onRemoveReviewJob(selectedItem.jobId)}
+              size="compact"
+              type="button"
+              variant="link"
+            >
+              Remove from shortlist
+            </Button>
+          </span>
         </div>
+        {isGenerating ? (
+          <p className="text-xs text-foreground-muted">
+            Removing this job stops the draft from being saved. An AI request
+            already running may finish.
+          </p>
+        ) : null}
         {showsApplyOutcome && !existingApplication ? (
           <p
             className="min-w-0 break-words text-(length:--text-small) leading-5 text-foreground-muted"
@@ -711,33 +754,6 @@ export function ReviewQueueMissionPanel({
             {actionMessage}
           </p>
         ) : null}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-1">
-        <Button
-          className={quietActionClassName}
-          onClick={() => openUrlInJobFinderBrowser(selectedJob.canonicalUrl)}
-          size="compact"
-          type="button"
-          variant="link"
-        >
-          Open the listing
-        </Button>
-        {isGenerating ? (
-          <p className="text-xs text-foreground-muted">
-            Removing this job stops the draft from being saved. An AI request
-            already running may finish.
-          </p>
-        ) : null}
-        <Button
-          className={quietActionClassName}
-          onClick={() => onRemoveReviewJob(selectedItem.jobId)}
-          size="compact"
-          type="button"
-          variant="link"
-        >
-          Remove from shortlist
-        </Button>
       </div>
     </section>
   );

@@ -20,6 +20,7 @@ import {
   formatStatusLabel,
 } from "@renderer/features/job-finder/lib/job-finder-utils";
 import { StatusBadge } from "../../components/status-badge";
+import { formatQuestionPrompt } from "./applications-recovery-state";
 import {
   ExternalUrlLink,
   SavedFileLink,
@@ -223,14 +224,16 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
                     className="rounded-(--radius-field) border border-(--surface-panel-border) bg-background/40 px-3 py-3"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <strong>{question.prompt}</strong>
+                      <strong>{formatQuestionPrompt(question.prompt)}</strong>
                       <StatusBadge
                         tone={
                           question.status === "submitted" ||
                           question.status === "answered"
                             ? "positive"
                             : question.status === "skipped"
-                              ? "critical"
+                              ? // A skipped question is a fact about the run,
+                                // not an alarm: amber, as a held step is.
+                                "warning"
                               : "active"
                         }
                       >

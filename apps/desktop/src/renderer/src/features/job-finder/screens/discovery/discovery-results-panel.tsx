@@ -41,7 +41,7 @@ import { jobSourceLabel } from "../../lib/job-source-display-name";
 import {
   applySelectionRange,
   isSelectionClick,
-  ListPageSelectionBar,
+  ListPageCheckbox,
   ListRowSelectionCell,
 } from "../../components/list-selection";
 import { discoverySourceFailureCopy } from "./discovery-source-failure-copy";
@@ -187,6 +187,11 @@ interface DiscoveryResultsPanelProps {
   onSearchAgain?: (() => void) | null;
   onRetrySource?: (sourceId: string) => void;
   onDisplayedSelectedJobIdChange?: (selectedJobId: string | null) => void;
+  /**
+   * The rows in the order the list shows them (search, filters and sort
+   * applied), for a triage pass that moves to the next job.
+   */
+  onOrderedJobIdsChange?: (jobIds: readonly string[]) => void;
   onRecoveryAction?: (() => void) | null;
   onShowAlsoFound?: (() => void) | null;
   onToggleAlsoFound?: (() => void) | null;
@@ -680,6 +685,7 @@ export function DiscoveryResultsPanel({
   onSearchAgain = null,
   onRetrySource,
   onDisplayedSelectedJobIdChange,
+  onOrderedJobIdsChange,
   onRecoveryAction,
   onShowAlsoFound,
   onToggleAlsoFound,
@@ -1094,6 +1100,13 @@ export function DiscoveryResultsPanel({
     reportedDisplayedSelectionRef.current = displayedSelectedJobId;
     onDisplayedSelectedJobIdChange(displayedSelectedJobId);
   }, [displayedSelectedJobId, onDisplayedSelectedJobIdChange]);
+  const orderedJobIdsKey = useMemo(
+    () => orderedJobs.map((job) => job.id),
+    [orderedJobs],
+  );
+  useEffect(() => {
+    onOrderedJobIdsChange?.(orderedJobIdsKey);
+  }, [onOrderedJobIdsChange, orderedJobIdsKey]);
 
   const firstVisibleJobNumber =
     jobCount === 0 ? 0 : currentPage * DISCOVERY_RESULTS_PAGE_SIZE + 1;
@@ -1345,6 +1358,31 @@ export function DiscoveryResultsPanel({
       ) : null}
     </div>
   );
+  // The page checkbox sits at the start of the header row, above the rows'
+  // checkbox column, instead of on a row of its own with a hint line.
+  const pageCheckbox =
+    onShortlistJobs && selectablePageJobIds.length > 0 ? (
+      <span className="flex w-6 shrink-0 justify-center">
+        <ListPageCheckbox
+          noun="jobs"
+          onClearPage={clearPage}
+          onSelectPage={selectPage}
+          pageIds={selectablePageJobIds}
+          selectedIds={bulkSelectedJobIds}
+        />
+      </span>
+    ) : null;
+  const runSummaryLabel = latestRun?.targetExecutions?.length
+    ? latestRun.state === "cancelled" ||
+      getDiscoveryRunPhase(latestRun) === "interrupted"
+      ? "Search stopped"
+      : failedSourceCount > 0
+        ? `${isSearchInProgress ? "Searching" : "Partial results"} · ${failedSourceCount} ${failedSourceCount === 1 ? "source failed" : "sources failed"}${isSearchInProgress ? " so far" : ""}`
+        : "What each source found"
+    : null;
+  const showsResultsStatusLine = Boolean(
+    resultsStatusLine && (jobs.length > 0 || liveStatusLine),
+  );
 
   return (
     <section
@@ -1366,6 +1404,7 @@ export function DiscoveryResultsPanel({
             {/* Kept to one row so ticking a row never moves the list: the
                 title without the plan and count, and short visible labels
                 whose full names are their accessible names. */}
+            {pageCheckbox}
             <h2
               className="text-(--text-headline) @max-[34rem]/results:sr-only"
               id="discovery-job-results-heading"
@@ -1425,7 +1464,12 @@ export function DiscoveryResultsPanel({
             className="border-b-0"
             compact
             hideCompactCount
-            leading={resultsTitle}
+            leading={
+              <>
+                {pageCheckbox}
+                {resultsTitle}
+              </>
+            }
             label="Find a job"
             onQueryChange={(query) => {
               view.setQuery(query);
@@ -1483,29 +1527,67 @@ export function DiscoveryResultsPanel({
             {resultsTitle}
           </div>
         )}
-        {resultsStatusLine && (jobs.length > 0 || liveStatusLine) ? (
-          <p
-            aria-atomic="true"
-            aria-live="polite"
-            className="flex items-start gap-1.5 px-3 pb-2 text-(length:--text-small) leading-5 text-foreground-muted"
-            data-testid="discovery-results-status-line"
-            {...(resultsStatusLine.id ? { id: resultsStatusLine.id } : {})}
-            role="status"
-          >
-            {resultsStatusLine.busy ? (
-              <LoaderCircle
-                aria-hidden="true"
-                className="mt-0.5 size-3.5 shrink-0 animate-spin motion-reduce:animate-none"
-              />
-            ) : null}
-            <span className="min-w-0 break-words">
-              {resultsStatusLine.text}
-            </span>
-          </p>
-        ) : null}
-        {onJudgeUnjudgedJobs || onAssessJobListing ? (
-          <div className="px-3 pb-2">
+        {/* One status row under the toolbar: the search's progress or its
+            per-source summary, jobs hidden by the person, and the fit
+            actions. It disappears when it has nothing to say. */}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 px-3 pb-2 empty:hidden">
+          {showsResultsStatusLine && resultsStatusLine ? (
+            <p
+              aria-atomic="true"
+              aria-live="polite"
+              className="flex min-w-0 items-start gap-1.5 text-(length:--text-small) leading-5 text-foreground-muted"
+              data-testid="discovery-results-status-line"
+              {...(resultsStatusLine.id ? { id: resultsStatusLine.id } : {})}
+              role="status"
+            >
+              {resultsStatusLine.busy ? (
+                <LoaderCircle
+                  aria-hidden="true"
+                  className="mt-0.5 size-3.5 shrink-0 animate-spin motion-reduce:animate-none"
+                />
+              ) : null}
+              <span className="min-w-0 break-words">
+                {resultsStatusLine.text}
+              </span>
+            </p>
+          ) : null}
+          {latestRun && runSummaryLabel ? (
+            // Takes what room the row has left and shortens with an ellipsis,
+            // so Hidden and the fit actions stay on this row at 1440 wide.
+            <details
+              className="min-w-0 flex-1 text-xs text-foreground-soft open:basis-full"
+              data-testid="discovery-source-summaries"
+              open={sourceSummariesOpen}
+            >
+              <summary
+                className="cursor-pointer truncate"
+                title={`${runSummaryLabel}${latestRun.startedAt ? ` · ${formatTimestamp(latestRun.startedAt)}` : ""}`}
+                onClick={(event) => {
+                  event.preventDefault();
+                  setSourceSummariesOpen((open) => !open);
+                }}
+              >
+                {runSummaryLabel}
+                {latestRun.startedAt
+                  ? ` · ${formatTimestamp(latestRun.startedAt)}`
+                  : ""}
+              </summary>
+              {sourceSummariesOpen ? (
+                <div className="max-h-80 overflow-y-auto">
+                  <DiscoverySourceSummaryList
+                    discoveryTargets={discoveryTargets}
+                    isSearchInProgress={isSearchInProgress}
+                    latestRun={latestRun}
+                    onRetrySource={onRetrySource}
+                  />
+                </div>
+              ) : null}
+            </details>
+          ) : null}
+          {hiddenJobsControl}
+          {onJudgeUnjudgedJobs || onAssessJobListing ? (
             <DiscoveryAssessmentContinuation
+              className="ml-auto"
               jobs={jobs}
               preferredJobs={visibleJobs}
               isSearchRunning={isSearchInProgress}
@@ -1515,21 +1597,9 @@ export function DiscoveryResultsPanel({
                 : {})}
               {...(onAssessJobListing ? { onAssess: onAssessJobListing } : {})}
             />
-          </div>
-        ) : null}
-        {hiddenJobsControl ? (
-          <div className="px-3 pb-2">{hiddenJobsControl}</div>
-        ) : null}
+          ) : null}
+        </div>
       </header>
-      {onShortlistJobs && selectablePageJobIds.length > 0 ? (
-        <ListPageSelectionBar
-          noun="jobs"
-          onClearPage={clearPage}
-          onSelectPage={selectPage}
-          pageIds={selectablePageJobIds}
-          selectedIds={bulkSelectedJobIds}
-        />
-      ) : null}
       <div
         aria-busy={isPagePending}
         className="overscroll-contain xl:min-h-[360px] xl:flex-1 xl:overflow-y-auto"
@@ -1553,40 +1623,6 @@ export function DiscoveryResultsPanel({
           }
         }}
       >
-        {latestRun?.targetExecutions?.length ? (
-          <details
-            className="shrink-0 px-5 py-2 text-xs text-foreground-soft"
-            data-testid="discovery-source-summaries"
-            open={sourceSummariesOpen}
-          >
-            <summary
-              className="cursor-pointer"
-              onClick={(event) => {
-                event.preventDefault();
-                setSourceSummariesOpen((open) => !open);
-              }}
-            >
-              {latestRun.state === "cancelled" ||
-              getDiscoveryRunPhase(latestRun) === "interrupted"
-                ? "Search stopped"
-                : failedSourceCount > 0
-                  ? `${isSearchInProgress ? "Searching" : "Partial results"} · ${failedSourceCount} ${failedSourceCount === 1 ? "source failed" : "sources failed"}${isSearchInProgress ? " so far" : ""}`
-                  : "What each source found"}
-              {latestRun.startedAt
-                ? ` · ${formatTimestamp(latestRun.startedAt)}`
-                : ""}
-            </summary>
-            {sourceSummariesOpen ? (
-              <DiscoverySourceSummaryList
-                discoveryTargets={discoveryTargets}
-                isSearchInProgress={isSearchInProgress}
-                latestRun={latestRun}
-                onRetrySource={onRetrySource}
-              />
-            ) : null}
-          </details>
-        ) : null}
-
         {/* What the close actually did to the run, in the run's own frozen
           numbers. It sits above the list because it explains the list. */}
         {!isSearchInProgress &&

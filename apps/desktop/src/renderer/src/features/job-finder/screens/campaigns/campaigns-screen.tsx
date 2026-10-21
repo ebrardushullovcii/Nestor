@@ -2086,10 +2086,18 @@ export function CampaignsScreen(props: {
         />
       ) : (
         <div className="grid gap-3">
-          <p className="text-xs text-foreground-muted">
-            Past activity is shown in {deviceTimeZone()}. Schedule times and
-            pauses use each plan’s saved time zone.
-          </p>
+          {/* Only worth a line when a plan runs on another clock than this
+              device; with every plan on local time it explained nothing. */}
+          {filteredCampaigns.some(
+            (campaign) =>
+              Boolean(campaign.schedule.timeZone?.trim()) &&
+              campaign.schedule.timeZone?.trim() !== deviceTimeZone(),
+          ) ? (
+            <p className="text-xs text-foreground-muted">
+              Past activity is shown in {deviceTimeZone()}. Schedule times and
+              pauses use each plan’s saved time zone.
+            </p>
+          ) : null}
           <div
             className={
               filteredCampaigns.length === 1

@@ -102,8 +102,23 @@ function startOfLocalDay(value: Date): number {
   ).getTime();
 }
 
-function isAtOrAfter(value: string, threshold: number): boolean {
-  return Date.parse(value) >= threshold;
+// A stored job is frozen and reused between refreshes, so when it was last
+// found is worked out once. Every refresh parsed each sighting's date of
+// every job (20,000 jobs, about 25 ms) to count today's finds.
+const latestSightingByJob = new WeakMap<object, number>();
+function latestSightingTime(
+  job: Pick<SavedJob, "provenance">,
+): number {
+  let latest = latestSightingByJob.get(job);
+  if (latest === undefined) {
+    latest = Number.NEGATIVE_INFINITY;
+    for (const entry of job.provenance) {
+      const time = Date.parse(entry.discoveredAt);
+      if (time > latest) latest = time;
+    }
+    if (Object.isFrozen(job)) latestSightingByJob.set(job, latest);
+  }
+  return latest;
 }
 
 const ADOPTION_HISTORY_ID = "campaign_history_default_created";
@@ -588,8 +603,8 @@ export function deriveDashboardSummary(input: {
       sourceAccessPrompts: input.sourceAccessPrompts ?? [],
     }),
   );
-  const jobsFoundToday = input.savedJobs.filter((job) =>
-    job.provenance.some((entry) => isAtOrAfter(entry.discoveredAt, today)),
+  const jobsFoundToday = input.savedJobs.filter(
+    (job) => latestSightingTime(job) >= today,
   ).length;
   const readyForApproval = input.applicationRecords.filter(
     isApplicationAwaitingUserApproval,

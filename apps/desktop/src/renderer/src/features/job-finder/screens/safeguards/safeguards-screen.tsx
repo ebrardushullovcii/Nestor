@@ -350,16 +350,25 @@ export function SafeguardsScreen(props: {
           the blocks below it only. */}
       <div className="grid gap-4">
         {/* An all-clear is a plain line, never a box (ADR 0042). The pause and
-          the daily limit are on the status line above. */}
+          the daily limit are on the status line above. With no event ever
+          recorded it is the only line: an events card holding "0" and an
+          empty state under it said the same thing twice. */}
         {!isPaused && blockedCount === 0 && !dailyCapacityExhausted ? (
           <div
             className="flex flex-wrap items-center gap-2 text-(length:--text-small) text-foreground-soft"
+            {...(isEmpty ? { "data-safeguard-empty": "" } : {})}
             role="status"
+            title={
+              isEmpty
+                ? "Job Finder records an event here only when one of its limits is actually reached: a per-company application limit, a listing that looks closed or suspicious, an unusual run of failures, or a batch waiting for your spot check."
+                : undefined
+            }
           >
             <ShieldCheck aria-hidden="true" className="size-4 text-positive" />
             <span>
               Nothing is being held back right now. Searching and preparing
               applications can both run.
+              {isEmpty ? " No safety events yet." : ""}
             </span>
           </div>
         ) : null}
@@ -373,6 +382,7 @@ export function SafeguardsScreen(props: {
           </p>
         ) : null}
 
+        {isEmpty && !isPaused && blockedCount === 0 && !dailyCapacityExhausted ? null : (
         <details
           className="surface-panel-shell grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) p-4"
           data-safeguard-events
@@ -496,6 +506,7 @@ export function SafeguardsScreen(props: {
             )}
           </div>
         </details>
+        )}
         <SafeguardsApplicationBoundary>
           <div className="grid justify-items-start gap-2">
             <p className="text-sm text-foreground-soft">

@@ -452,14 +452,17 @@ describe("ProfileJobSourcesTab", () => {
     await waitFor(() => expect(screen.getByText("OpenAI")).toBeTruthy());
     expect(screen.getByText("1 of 507 sources")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Enabled" }));
-    await waitFor(() =>
-      expect(
-        container.querySelectorAll("[data-compact-source-id]"),
-      ).toHaveLength(0),
-    );
+    // The one match is off, so neither "Enabled" (nothing) nor "Disabled"
+    // (everything) could change the list: no filter is offered.
+    expect(screen.queryByRole("button", { name: "Enabled" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Disabled" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show all sources" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find a source" }), {
+      target: { value: "" },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Enabled" })).toBeTruthy(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Enabled" }));
     expect(container.querySelectorAll("[data-compact-source-id]")).toHaveLength(
       5,
@@ -650,11 +653,10 @@ describe("ProfileJobSourcesTab", () => {
     ).toBeTruthy();
 
     // Nothing in the list claims attention for a source that just completed
-    // a run; the filter is the only place that count lives now.
-    fireEvent.click(screen.getByRole("button", { name: "Needs attention" }));
-    expect(container.querySelectorAll("[data-compact-source-id]")).toHaveLength(
-      0,
-    );
+    // a run, so the filter that would show none is not offered either.
+    expect(
+      screen.queryByRole("button", { name: "Needs attention" }),
+    ).toBeNull();
   });
 
   it("does not flag a source whose search completed with no jobs", () => {

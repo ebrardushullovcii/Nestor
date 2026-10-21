@@ -10,6 +10,7 @@ import type {
   ResumeTemplateDefinition,
 } from "@nestor/contracts";
 import type { ResumeWorkHistoryDecisionRequest } from "./resume-workspace-work-history-decisions";
+import type { ResumeReviewFlow } from "./resume-review-session";
 
 export interface ResumeWorkspaceScreenProps {
   actionMessage: string | null;
@@ -97,4 +98,6 @@ export interface ResumeWorkspaceScreenProps {
     action: "accept" | "reject",
     patchIds: readonly string[],
   ) => void;
+  /** Set while the open resume is one of those waiting in "To review". */
+  reviewFlow?: ResumeReviewFlow | null;
 }

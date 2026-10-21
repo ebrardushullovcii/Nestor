@@ -451,16 +451,30 @@ export function createSearchPreferencesEditorValues(
   };
 }
 
+// The saved profile and preferences are the same object until the workspace
+// changes them, and fingerprinting about 900 job sources each time a tab
+// mounted its fields cost a Profile tab switch about 0.1 s.
+const savedValueFingerprints = new WeakMap<object, string>();
+function savedValueFingerprint(value: object): string {
+  let fingerprint = savedValueFingerprints.get(value);
+  if (fingerprint === undefined) {
+    fingerprint = buildComparableValueFingerprint(value);
+    savedValueFingerprints.set(value, fingerprint);
+  }
+  return fingerprint;
+}
+
 export function hasProfileDraftChanges(
   profile: CandidateProfile,
   draftProfile: CandidateProfile | undefined,
 ): boolean {
-  if (!draftProfile) {
+  // An untouched form saves the profile it was given.
+  if (!draftProfile || draftProfile === profile) {
     return false;
   }
 
   return (
-    buildComparableValueFingerprint(profile) !==
+    savedValueFingerprint(profile) !==
     buildComparableValueFingerprint(draftProfile)
   );
 }
@@ -469,12 +483,12 @@ export function hasSearchPreferencesDraftChanges(
   searchPreferences: JobSearchPreferences,
   draftSearchPreferences: JobSearchPreferences | undefined,
 ): boolean {
-  if (!draftSearchPreferences) {
+  if (!draftSearchPreferences || draftSearchPreferences === searchPreferences) {
     return false;
   }
 
   return (
-    buildComparableValueFingerprint(searchPreferences) !==
+    savedValueFingerprint(searchPreferences) !==
     buildComparableValueFingerprint(draftSearchPreferences)
   );
 }

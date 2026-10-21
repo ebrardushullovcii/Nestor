@@ -2674,6 +2674,85 @@ describe("repository backend parity", () => {
   );
 
   test.each(backends)(
+    "marks drafts stale in place and leaves the rest of each draft as stored ($label)",
+    async ({ create }) => {
+      const repository = await createBackend(create);
+      const job = createSavedJob({ id: "job_parity_restale" });
+      const other = createSavedJob({ id: "job_parity_untouched" });
+      await repository.commitSavedJobDelta({ upserts: [job, other] });
+      const approved = createParityDraft({
+        id: "draft_parity_restale",
+        jobId: job.id,
+        updatedAt: "2026-07-30T12:00:00.000Z",
+        status: "approved",
+        approvedAt: "2026-07-30T12:00:00.000Z",
+        approvedExportId: "export_parity_restale",
+      });
+      const untouched = createParityDraft({
+        id: "draft_parity_untouched",
+        jobId: other.id,
+        updatedAt: "2026-07-30T11:00:00.000Z",
+        status: "needs_review",
+      });
+      await repository.upsertResumeDraft(approved);
+      await repository.upsertResumeDraft(untouched);
+      await repository.approveResumeExport({
+        draft: approved,
+        exportArtifact: createParityExport({
+          id: "export_parity_restale",
+          draftId: approved.id,
+          jobId: job.id,
+          exportedAt: "2026-07-30T12:00:00.000Z",
+          isApproved: true,
+        }),
+      });
+      await repository.upsertTailoredAsset(
+        createParityTailoredAsset({
+          id: "asset_parity_restale",
+          jobId: job.id,
+          updatedAt: "2026-07-30T12:00:00.000Z",
+        }),
+      );
+      const [before] = (await repository.listResumeDrafts()).filter(
+        (entry) => entry.id === approved.id,
+      );
+
+      await repository.staleResumeDrafts!({
+        draftIds: [approved.id, "draft_missing"],
+        staleReason: "Profile details changed.",
+        updatedAt: "2026-07-31T09:00:00.000Z",
+      });
+
+      const drafts = await repository.listResumeDrafts();
+      expect(drafts.find((entry) => entry.id === approved.id)).toEqual({
+        ...before,
+        status: "stale",
+        staleReason: "Profile details changed.",
+        approvedAt: null,
+        approvedExportId: null,
+        updatedAt: "2026-07-31T09:00:00.000Z",
+      });
+      expect(drafts.find((entry) => entry.id === untouched.id)).toMatchObject({
+        status: "needs_review",
+        updatedAt: "2026-07-30T11:00:00.000Z",
+      });
+      expect(
+        (await repository.listResumeExportArtifacts()).every(
+          (artifact) => artifact.isApproved === false,
+        ),
+      ).toBe(true);
+      expect(
+        (await repository.listTailoredAssets()).find(
+          (asset) => asset.id === "asset_parity_restale",
+        ),
+      ).toMatchObject({
+        storagePath: null,
+        updatedAt: "2026-07-31T09:00:00.000Z",
+      });
+    },
+  );
+
+  test.each(backends)(
     "advances the profile epoch when discovery feedback writes preferences ($label)",
     async ({ create }) => {
       const repository = await createBackend(create);

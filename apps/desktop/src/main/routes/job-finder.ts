@@ -80,7 +80,7 @@ import {
   JobFinderResumeWorkspaceSchema,
   JobFinderResumeSectionActionInputSchema,
   JobFinderExportResumePdfInputSchema,
-  JobFinderResumePdfExportResultSchema,
+  JobFinderResumePdfExportOutcomeSchema,
   JobFinderJobActionInputSchema,
   JobFinderSendPreparedApplicationsInputSchema,
   JobFinderPreparedApplicationPageInputSchema,
@@ -112,6 +112,7 @@ import {
   JobFinderTailoredAssetDetailSchema,
   JobFinderJobDetailSchema,
   JobFinderWorkspaceSyncInputSchema,
+  JobFinderWorkspaceHeldRevisionSchema,
   JobSearchPreferencesSchema,
   NonEmptyStringSchema,
   SaveJobSearchCampaignInputSchema,
@@ -159,6 +160,8 @@ import type {
   JobFinderApplyQueueActionInput,
   JobFinderWorkspaceSnapshot,
   JobFinderRendererWorkspaceSnapshot,
+  JobFinderWorkspaceSyncResult,
+  JobFinderResumePdfExportReply,
 } from "@nestor/contracts";
 import {
   recordApplicationAuthoritySuccessor,
@@ -842,7 +845,7 @@ async function readWorkspaceProjection(
   return service.getWorkspaceProjection();
 }
 
-function workspaceMutationResponse(
+function rendererSnapshotResponse(
   snapshot: JobFinderWorkspaceSnapshot,
 ): JobFinderRendererWorkspaceSnapshot {
   const candidate = snapshot as unknown;
@@ -883,6 +886,20 @@ export function registerJobFinderRouteHandlers(
   >();
   let workspaceRestorePending = false;
   const workspaceDeltaTracker = createJobFinderWorkspaceDeltaTracker();
+  // A change a window asked for is answered with what changed since the
+  // revision that window shows, not the whole workspace.
+  const workspaceMutationResponse = (
+    sender: object | null | undefined,
+    snapshot: JobFinderWorkspaceSnapshot,
+  ): JobFinderWorkspaceSyncResult =>
+    workspaceDeltaTracker.respond(sender, rendererSnapshotResponse(snapshot));
+  ipcMain.handle(
+    "job-finder:note-workspace-revision",
+    (event, payload: unknown) => {
+      const { revision } = JobFinderWorkspaceHeldRevisionSchema.parse(payload);
+      workspaceDeltaTracker.noteHeldRevision(event.sender, revision);
+    },
+  );
   const activeResumePreviewRequests = new WeakMap<
     object,
     {
@@ -1089,37 +1106,37 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:open-browser-session",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = JobFinderOpenBrowserSessionInputSchema.parse(payload ?? {});
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.openBrowserSession(input);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
-  ipcMain.handle("job-finder:check-browser-session", async () => {
+  ipcMain.handle("job-finder:check-browser-session", async (event) => {
     const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
     const snapshot = await jobFinderWorkspaceService.checkBrowserSession();
 
-    return workspaceMutationResponse(snapshot);
+    return workspaceMutationResponse(event.sender, snapshot);
   });
 
   handleJobFinderSaveRoute(
     "job-finder:save-profile",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const profile = CandidateProfileSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot = await jobFinderWorkspaceService.saveProfile(profile);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   handleJobFinderSaveRoute(
     "job-finder:save-workspace-inputs",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { profile, searchPreferences, settings } =
         SaveJobFinderWorkspaceInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -1134,20 +1151,20 @@ export function registerJobFinderRouteHandlers(
 
       const snapshot = await readWorkspaceProjection(jobFinderWorkspaceService);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
-  ipcMain.handle("job-finder:analyze-profile-from-resume", async () => {
+  ipcMain.handle("job-finder:analyze-profile-from-resume", async (event) => {
     const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
     const snapshot = await jobFinderWorkspaceService.analyzeProfileFromResume();
 
-    return workspaceMutationResponse(snapshot);
+    return workspaceMutationResponse(event.sender, snapshot);
   });
 
   handleJobFinderSaveRoute(
     "job-finder:save-search-preferences",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const searchPreferences = JobSearchPreferencesSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
@@ -1155,25 +1172,25 @@ export function registerJobFinderRouteHandlers(
           searchPreferences,
         );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   handleJobFinderSaveRoute(
     "job-finder:save-campaign",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const campaign = SaveJobSearchCampaignInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(await service.saveCampaign(campaign));
+      return workspaceMutationResponse(event.sender, await service.saveCampaign(campaign));
     },
   );
 
   ipcMain.handle(
     "job-finder:select-campaign",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { campaignId } = SelectJobSearchCampaignInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(
+      return workspaceMutationResponse(event.sender, 
         await service.selectCampaign(campaignId),
       );
     },
@@ -1203,7 +1220,7 @@ export function registerJobFinderRouteHandlers(
         const snapshot = await service.runCampaignNow(input, () => {
           publishJobFinderWorkspaceUpdate(event.sender);
         });
-        return workspaceMutationResponse(snapshot);
+        return workspaceMutationResponse(event.sender, snapshot);
       } finally {
         publishJobFinderWorkspaceUpdate(event.sender);
       }
@@ -1212,7 +1229,7 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:mark-campaign-notification-read",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { notificationId } = MarkCampaignNotificationReadInputSchema.omit({
         readAt: true,
       }).parse(payload);
@@ -1222,46 +1239,46 @@ export function registerJobFinderRouteHandlers(
         readAt: new Date().toISOString(),
       });
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:mark-all-campaign-notifications-read",
-    async () => {
+    async (event) => {
       const service = await getJobFinderWorkspaceService();
       const snapshot = await service.markAllCampaignNotificationsRead({
         readAt: new Date().toISOString(),
       });
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:save-campaign-rule",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = SaveCampaignRuleRouteInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(await service.saveCampaignRule(input));
+      return workspaceMutationResponse(event.sender, await service.saveCampaignRule(input));
     },
   );
 
   ipcMain.handle(
     "job-finder:delete-campaign-rule",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = DeleteCampaignRuleInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(await service.deleteCampaignRule(input));
+      return workspaceMutationResponse(event.sender, await service.deleteCampaignRule(input));
     },
   );
 
   ipcMain.handle(
     "job-finder:toggle-campaign-rule",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = ToggleCampaignRuleInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(await service.toggleCampaignRule(input));
+      return workspaceMutationResponse(event.sender, await service.toggleCampaignRule(input));
     },
   );
 
@@ -1278,46 +1295,46 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:set-activity-control",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = SetJobFinderActivityControlInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(await service.setActivityControl(input));
+      return workspaceMutationResponse(event.sender, await service.setActivityControl(input));
     },
   );
 
   ipcMain.handle(
     "job-finder:mutate-rapid-review",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = RapidReviewMutationInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(await service.mutateRapidReview(input));
+      return workspaceMutationResponse(event.sender, await service.mutateRapidReview(input));
     },
   );
 
   ipcMain.handle(
     "job-finder:record-outcome",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = RecordOutcomeInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(await service.recordOutcome(input));
+      return workspaceMutationResponse(event.sender, await service.recordOutcome(input));
     },
   );
 
   ipcMain.handle(
     "job-finder:save-resume-strategy",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = SaveResumeStrategyInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(await service.saveResumeStrategy(input));
+      return workspaceMutationResponse(event.sender, await service.saveResumeStrategy(input));
     },
   );
 
   ipcMain.handle(
     "job-finder:disable-resume-strategy",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const strategyId = NonEmptyStringSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(
+      return workspaceMutationResponse(event.sender, 
         await service.disableResumeStrategy(strategyId),
       );
     },
@@ -1325,10 +1342,10 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:select-resume-strategy",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = SelectResumeStrategyInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(
+      return workspaceMutationResponse(event.sender, 
         await service.selectResumeStrategy(input),
       );
     },
@@ -1347,28 +1364,28 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:set-campaign-resume-strategy-default",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = SetCampaignResumeStrategyDefaultInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(
+      return workspaceMutationResponse(event.sender, 
         await service.setCampaignResumeStrategyDefault(input),
       );
     },
   );
 
-  ipcMain.handle("job-finder:refresh-company-intelligence", async () => {
+  ipcMain.handle("job-finder:refresh-company-intelligence", async (event) => {
     const service = await getJobFinderWorkspaceService();
-    return workspaceMutationResponse(
+    return workspaceMutationResponse(event.sender, 
       await service.refreshCompanyIntelligence(),
     );
   });
 
   ipcMain.handle(
     "job-finder:set-company-preference",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = SetCompanyPreferenceInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(
+      return workspaceMutationResponse(event.sender, 
         await service.setCompanyPreference(input),
       );
     },
@@ -1376,19 +1393,19 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:review-company-merge",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = ReviewCompanyMergeInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(await service.reviewCompanyMerge(input));
+      return workspaceMutationResponse(event.sender, await service.reviewCompanyMerge(input));
     },
   );
 
   ipcMain.handle(
     "job-finder:mutate-company-intelligence",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = CompanyIntelligenceMutationInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(
+      return workspaceMutationResponse(event.sender, 
         await service.mutateCompanyIntelligence(input),
       );
     },
@@ -1396,10 +1413,10 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:set-outcome-suggestion-enabled",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = SetOutcomeSuggestionEnabledInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(
+      return workspaceMutationResponse(event.sender, 
         await service.setOutcomeSuggestionEnabled(input),
       );
     },
@@ -1407,16 +1424,16 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:mutate-safeguards",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = SafeguardMutationInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(await service.mutateSafeguards(input));
+      return workspaceMutationResponse(event.sender, await service.mutateSafeguards(input));
     },
   );
 
   handleJobFinderSaveRoute(
     "job-finder:save-profile-setup-state",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const profileSetupState = ProfileSetupStateSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
@@ -1424,13 +1441,13 @@ export function registerJobFinderRouteHandlers(
           profileSetupState,
         );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:apply-profile-setup-review-action",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { reviewItemId, action, options } =
         JobFinderProfileSetupReviewActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -1441,13 +1458,13 @@ export function registerJobFinderRouteHandlers(
           options,
         );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:apply-resume-timeline-repair-action",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { runId, proposalId, action } =
         JobFinderResumeTimelineRepairActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -1458,7 +1475,7 @@ export function registerJobFinderRouteHandlers(
           action,
         );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -1482,84 +1499,84 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:undo-profile-revision",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { revisionId } =
         JobFinderUndoProfileRevisionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.undoProfileRevision(revisionId);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   handleJobFinderSaveRoute(
     "job-finder:save-settings",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const settings = JobFinderSettingsSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot = await jobFinderWorkspaceService.saveSettings(settings);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   handleJobFinderSaveRoute(
     "job-finder:update-application-defaults",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = UpdateApplicationDefaultsInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.updateApplicationDefaults(input);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   handleJobFinderSaveRoute(
     "job-finder:update-workspace-behavior",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = UpdateWorkspaceBehaviorInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.updateWorkspaceBehavior(input);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   handleJobFinderSaveRoute(
     "job-finder:update-ai-behavior",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = UpdateAiBehaviorInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot = await jobFinderWorkspaceService.updateAiBehavior(input);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   handleJobFinderSaveRoute(
     "job-finder:update-appearance-theme",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const appearanceTheme = AppearanceThemeSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.updateAppearanceTheme(appearanceTheme);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   handleJobFinderSaveRoute(
     "job-finder:update-tracker-crm",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const applicationCrm = ApplicationCrmSettingsSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.updateTrackerCrm(applicationCrm);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -1659,7 +1676,8 @@ export function registerJobFinderRouteHandlers(
           const snapshot = await readWorkspaceProjection(
             jobFinderWorkspaceService,
           );
-          return toRendererWorkspaceSnapshot(
+          return workspaceMutationResponse(
+            event.sender,
             await retryInterruptedResumeImport(
               snapshot.latestResumeImportRun ?? null,
               {
@@ -1689,7 +1707,7 @@ export function registerJobFinderRouteHandlers(
         ) {
           const jobFinderWorkspaceService =
             await getJobFinderWorkspaceService();
-          return workspaceMutationResponse(
+          return workspaceMutationResponse(event.sender, 
             await readWorkspaceProjection(jobFinderWorkspaceService),
           );
         }
@@ -1699,7 +1717,7 @@ export function registerJobFinderRouteHandlers(
         if (!sourcePath) {
           const jobFinderWorkspaceService =
             await getJobFinderWorkspaceService();
-          return workspaceMutationResponse(
+          return workspaceMutationResponse(event.sender, 
             await readWorkspaceProjection(jobFinderWorkspaceService),
           );
         }
@@ -1710,7 +1728,8 @@ export function registerJobFinderRouteHandlers(
           // route-change cancellation race discard real processing.
           request.phase = "processing";
         }
-        return toRendererWorkspaceSnapshot(
+        return workspaceMutationResponse(
+          event.sender,
           await importResumeFromSourcePath(sourcePath, {
             signal: abortController.signal,
             ...(reportProgress ? { onProgress: reportProgress } : {}),
@@ -2059,7 +2078,7 @@ export function registerJobFinderRouteHandlers(
       const snapshot = await withJobFinderWorkspaceUpdates(event.sender, () =>
         jobFinderWorkspaceService.performUserAction(command),
       );
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -2069,14 +2088,14 @@ export function registerJobFinderRouteHandlers(
     const snapshot = await withJobFinderWorkspaceUpdates(event.sender, () =>
       jobFinderWorkspaceService.judgeUnjudgedJobs(),
     );
-    return workspaceMutationResponse(snapshot);
+    return workspaceMutationResponse(event.sender, snapshot);
   });
 
-  ipcMain.handle("job-finder:run-discovery", async () => {
+  ipcMain.handle("job-finder:run-discovery", async (event) => {
     const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
     const snapshot = await jobFinderWorkspaceService.runDiscovery();
 
-    return workspaceMutationResponse(snapshot);
+    return workspaceMutationResponse(event.sender, snapshot);
   });
 
   ipcMain.handle(
@@ -2138,7 +2157,7 @@ export function registerJobFinderRouteHandlers(
       const service = await getJobFinderWorkspaceService();
       const snapshot = await service.cancelDiscoveryRun(input.runId);
       publishJobFinderWorkspaceUpdate(event.sender);
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -2200,18 +2219,18 @@ export function registerJobFinderRouteHandlers(
 
       publishJobFinderWorkspaceUpdate(event.sender);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:cancel-source-debug",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { runId } = JobFinderSourceDebugRunQuerySchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot = await jobFinderWorkspaceService.cancelSourceDebug(runId);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -2240,7 +2259,7 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:save-source-instruction-artifact",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { targetId, artifact } =
         JobFinderSaveSourceInstructionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -2250,7 +2269,7 @@ export function registerJobFinderRouteHandlers(
           artifact,
         );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -2268,7 +2287,7 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:accept-source-instruction-draft",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { targetId, instructionId } =
         JobFinderSourceInstructionActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -2278,7 +2297,7 @@ export function registerJobFinderRouteHandlers(
           instructionId,
         );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -2297,7 +2316,7 @@ export function registerJobFinderRouteHandlers(
 
       publishJobFinderWorkspaceUpdate(event.sender);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -2308,13 +2327,13 @@ export function registerJobFinderRouteHandlers(
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot = await jobFinderWorkspaceService.queueJobForReview(jobId);
       publishJobFinderWorkspaceUpdate(event.sender);
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:set-job-resume-application-mode",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { jobId, resumeApplicationMode, resumeTailoringMode } =
         JobFinderJobResumeApplicationModeInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -2325,19 +2344,19 @@ export function registerJobFinderRouteHandlers(
           resumeTailoringMode,
         );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:remove-job-from-review",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { jobId } = JobFinderJobActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.removeJobFromReview(jobId);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -2354,10 +2373,10 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:remove-employer-exclusion",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = RemoveEmployerExclusionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(
+      return workspaceMutationResponse(event.sender, 
         await jobFinderWorkspaceService.removeEmployerExclusion(input),
       );
     },
@@ -2365,25 +2384,25 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:dismiss-discovery-job",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = JobFinderDismissDiscoveryJobInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.dismissDiscoveryJob(input);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:restore-dismissed-discovery-job",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { jobId } = JobFinderJobActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.restoreDismissedDiscoveryJob(jobId);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -2427,13 +2446,13 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:project-grouped-manual-answer",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const command = ProjectGroupedManualAnswerCommandSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.projectGroupedManualAnswer(command);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -2446,19 +2465,19 @@ export function registerJobFinderRouteHandlers(
         jobFinderWorkspaceService.applyGroupedManualAnswer(input),
       );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:snooze-grouped-decision",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = SnoozeGroupedDecisionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.snoozeGroupedDecision(input);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -2518,31 +2537,31 @@ export function registerJobFinderRouteHandlers(
   );
   ipcMain.handle(
     "job-finder:mutate-application-crm",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = ApplicationCrmMutationInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.mutateApplicationCrm(input);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:mutate-application-crm-bulk-stage",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = ApplicationCrmBulkStageMutationInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.mutateApplicationCrmBulkStage(input);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:run-application-no-response-automation",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const settings = ApplicationCrmSettingsSchema.optional().parse(
         payload ?? undefined,
       );
@@ -2552,7 +2571,7 @@ export function registerJobFinderRouteHandlers(
           settings,
         );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -2886,18 +2905,18 @@ export function registerJobFinderRouteHandlers(
 
   handleJobFinderSaveRoute(
     "job-finder:save-resume-draft",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { draft } = JobFinderSaveResumeDraftInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot = await jobFinderWorkspaceService.saveResumeDraft(draft);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   handleJobFinderSaveRoute(
     "job-finder:restore-resume-draft-revision",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { jobId, revisionId } =
         JobFinderRestoreResumeDraftRevisionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -2907,13 +2926,13 @@ export function registerJobFinderRouteHandlers(
           revisionId,
         );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   handleJobFinderSaveRoute(
     "job-finder:undo-resume-assistant-edit",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { jobId, revisionId } =
         JobFinderRestoreResumeDraftRevisionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -2922,25 +2941,25 @@ export function registerJobFinderRouteHandlers(
         revisionId,
       );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:regenerate-resume-draft",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { jobId } = JobFinderJobActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.regenerateResumeDraft(jobId);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:regenerate-resume-section",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { jobId, sectionId } =
         JobFinderResumeSectionActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -2949,7 +2968,7 @@ export function registerJobFinderRouteHandlers(
         sectionId,
       );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -3002,11 +3021,13 @@ export function registerJobFinderRouteHandlers(
           // A dismissed dialog wrote nothing. Saying so is the difference
           // between "no dialog, no toast, no error and no file" and a person
           // knowing where they stand.
-          return JobFinderResumePdfExportResultSchema.parse({
-            outcome: "cancelled",
-            outputPath: null,
-            snapshot: workspaceMutationResponse(snapshot),
-          });
+          return {
+            ...JobFinderResumePdfExportOutcomeSchema.parse({
+              outcome: "cancelled",
+              outputPath: null,
+            }),
+            workspace: workspaceMutationResponse(event.sender, snapshot),
+          } satisfies JobFinderResumePdfExportReply;
         }
 
         outputPath = saveResult.filePath.toLowerCase().endsWith(".pdf")
@@ -3019,11 +3040,15 @@ export function registerJobFinderRouteHandlers(
         outputPath,
       );
 
-      return JobFinderResumePdfExportResultSchema.parse({
-        outcome: "saved",
-        outputPath,
-        snapshot: workspaceMutationResponse(snapshot),
-      });
+      // The workspace goes as a delta, like every other change; parsing and
+      // sending the whole of it made each approval over a second slower.
+      return {
+        ...JobFinderResumePdfExportOutcomeSchema.parse({
+          outcome: "saved",
+          outputPath,
+        }),
+        workspace: workspaceMutationResponse(event.sender, snapshot),
+      } satisfies JobFinderResumePdfExportReply;
     },
   );
 
@@ -3059,7 +3084,7 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:approve-resume",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { jobId, exportId } =
         JobFinderApproveResumeInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -3068,25 +3093,25 @@ export function registerJobFinderRouteHandlers(
         exportId,
       );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:clear-resume-approval",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { jobId } = JobFinderJobActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.clearResumeApproval(jobId);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:set-work-history-review-acknowledgment",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input =
         JobFinderSetWorkHistoryReviewAcknowledgmentInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -3095,26 +3120,26 @@ export function registerJobFinderRouteHandlers(
           input,
         );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:set-resume-claim-confirmation",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input =
         JobFinderSetResumeClaimConfirmationInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.setResumeClaimConfirmation(input);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   handleJobFinderSaveRoute(
     "job-finder:apply-resume-patch",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { patch, revisionReason } =
         JobFinderApplyResumePatchInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -3123,7 +3148,7 @@ export function registerJobFinderRouteHandlers(
         revisionReason,
       );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -3206,12 +3231,12 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:generate-resume",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { jobId } = JobFinderJobActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot = await jobFinderWorkspaceService.generateResume(jobId);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -3239,7 +3264,7 @@ export function registerJobFinderRouteHandlers(
         ),
       );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -3259,7 +3284,7 @@ export function registerJobFinderRouteHandlers(
         ),
       );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -3278,7 +3303,7 @@ export function registerJobFinderRouteHandlers(
         ? await listJobsNotInProgress(repository, requestedJobIds)
         : requestedJobIds;
       if (pendingJobIds.length === 0) {
-        return workspaceMutationResponse(
+        return workspaceMutationResponse(event.sender, 
           await readWorkspaceProjection(jobFinderWorkspaceService),
         );
       }
@@ -3325,7 +3350,7 @@ export function registerJobFinderRouteHandlers(
         );
       }
 
-      return workspaceMutationResponse(
+      return workspaceMutationResponse(event.sender, 
         await readWorkspaceProjection(jobFinderWorkspaceService),
       );
     },
@@ -3333,7 +3358,7 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:approve-apply-run",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { runId, jobId, applicationRecordId } =
         JobFinderApplyRunActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -3344,13 +3369,13 @@ export function registerJobFinderRouteHandlers(
       );
       const snapshot = await jobFinderWorkspaceService.approveApplyRun(runId);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:cancel-apply-run",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { runId, jobId, applicationRecordId } =
         JobFinderApplyRunActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -3361,13 +3386,13 @@ export function registerJobFinderRouteHandlers(
       );
       const snapshot = await jobFinderWorkspaceService.cancelApplyRun(runId);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:resolve-apply-consent-request",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { requestId, runId, jobId, applicationRecordId, action } =
         JobFinderApplyConsentActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -3415,7 +3440,7 @@ export function registerJobFinderRouteHandlers(
         request.status === "pending" &&
         details.run.mode === "copilot"
       ) {
-        return workspaceMutationResponse(
+        return workspaceMutationResponse(event.sender, 
           await jobFinderWorkspaceService.startApplyCopilotRun(
             jobId,
             undefined,
@@ -3424,13 +3449,13 @@ export function registerJobFinderRouteHandlers(
         );
       }
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:revoke-apply-run-approval",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { runId, jobId, applicationRecordId } =
         JobFinderApplyRunActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -3442,25 +3467,25 @@ export function registerJobFinderRouteHandlers(
       const snapshot =
         await jobFinderWorkspaceService.revokeApplyRunApproval(runId);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:focus-prepared-application-page",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = JobFinderPreparedApplicationPageInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.focusPreparedApplicationPage(input);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:send-prepared-applications",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { jobIds: requestedJobIds } =
         JobFinderSendPreparedApplicationsInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -3501,13 +3526,13 @@ export function registerJobFinderRouteHandlers(
           ? firstError
           : new Error("None of these applications could be sent.");
       }
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:submit-prepared-application",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { jobId } = JobFinderJobActionInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       await scopeSendPermissionToPreparedJobs(jobFinderWorkspaceService, [
@@ -3516,13 +3541,13 @@ export function registerJobFinderRouteHandlers(
       const snapshot =
         await jobFinderWorkspaceService.submitPreparedApplication(jobId);
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
   ipcMain.handle(
     "job-finder:approve-apply",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const { jobId, applicationRecordId, startNewApplication } =
         JobFinderApplicationStartTargetSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -3531,15 +3556,15 @@ export function registerJobFinderRouteHandlers(
         startNewApplication ? null : applicationRecordId,
       );
 
-      return workspaceMutationResponse(snapshot);
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
-  ipcMain.handle("job-finder:reset-browser", async () =>
-    workspaceMutationResponse(await resetJobFinderBrowser()),
+  ipcMain.handle("job-finder:reset-browser", async (event) =>
+    workspaceMutationResponse(event.sender, await resetJobFinderBrowser()),
   );
-  ipcMain.handle("job-finder:reset-workspace", async () => {
-    return workspaceMutationResponse(await resetJobFinderWorkspace());
+  ipcMain.handle("job-finder:reset-workspace", async (event) => {
+    return workspaceMutationResponse(event.sender, await resetJobFinderWorkspace());
   });
 
   ipcMain.handle("job-finder:get-startup-reset-recovery", () =>

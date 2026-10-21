@@ -5,6 +5,7 @@ import {
 } from "@renderer/features/job-finder/lib/job-finder-utils";
 import { APPLICATION_BLOCKER_LABELS } from "../../lib/status-copy";
 import { StatusBadge } from "../../components/status-badge";
+import { formatQuestionPrompt } from "./applications-recovery-state";
 import { cn } from "@renderer/lib/utils";
 import {
   getApplyBlockedAttemptDetail,
@@ -135,7 +136,7 @@ export function ApplicationsDetailPanelAttemptSection(props: {
               className="rounded-(--radius-field) border border-(--surface-panel-border) bg-background/40 px-3 py-3"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <strong>{question.prompt}</strong>
+                <strong>{formatQuestionPrompt(question.prompt)}</strong>
                 <StatusBadge
                   tone={
                     question.status === "submitted" ||

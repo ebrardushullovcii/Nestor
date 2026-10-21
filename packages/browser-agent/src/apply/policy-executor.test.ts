@@ -4307,3 +4307,55 @@ test("keeps a generated numeric suggestion's real source for later review", () =
     ],
   });
 });
+
+describe("an unconfirmed short value is offered back to the person", () => {
+  test.each([
+    {
+      label: "Preferred start date",
+      inputType: "date",
+      value: "2026-11-20",
+      offered: true,
+    },
+    {
+      label: "Why do you want this job?",
+      inputType: "text",
+      value: "I have led three platform migrations at scale.",
+      offered: false,
+    },
+    {
+      label: "Are you legally authorized to work in this country?",
+      inputType: "text",
+      value: "Yes",
+      offered: false,
+    },
+  ])("$label", async ({ label, inputType, value, offered }) => {
+    const page = rawPage({
+      controls: [rawControl({ index: 0, label, inputType, required: true })],
+    });
+    const { config, hands } = configFor(page);
+    const fillText = vi.spyOn(hands, "fillText");
+    const observation = observationOf(page);
+    const outcome = await executeApplyProposal(
+      { tool: "type", ref: "c0", text: value },
+      observation.signature,
+      {
+        config,
+        now,
+        guardState: createApplyGuardState(),
+        checkWrittenAnswer: () =>
+          Promise.resolve({
+            supported: false,
+            reason: "Your facts give a 30-day notice period, not a date.",
+          }),
+      },
+    );
+    expect(fillText).not.toHaveBeenCalled();
+    expect(outcome.kind).toBe("suggestion");
+    if (outcome.kind !== "suggestion") return;
+    const suggested = outcome.question?.suggestedAnswers.map(
+      (answer) => answer.text,
+    );
+    if (offered) expect(suggested).toEqual([value]);
+    else expect(suggested ?? []).not.toContain(value);
+  });
+});

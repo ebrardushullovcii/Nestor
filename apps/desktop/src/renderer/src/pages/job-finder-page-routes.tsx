@@ -8,6 +8,13 @@ import { projectPlanSafeguardPauses } from "@nestor/job-finder/plan-safeguard-pa
 import type { ReactNode } from "react";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
 import { describeSavedResumeLevel } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
+import {
+  describeResumeReviewProgress,
+  listResumesToReview,
+  useResumeReviewSession,
+  type ResumeReviewFlow,
+} from "@renderer/features/job-finder/screens/review-queue/resume-review-session";
+import { prefetchResumeWorkspace } from "@renderer/features/job-finder/lib/resume-workspace-prefetch";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
 import { JobFinderRouteErrorBoundary } from "./job-finder-route-error-boundary";
@@ -418,7 +425,7 @@ export function WorkspaceStateScreen(props: {
       // screens stay centred; in-route states sit near the top of the content.
       className={
         props.fillAvailableViewport
-          ? "grid min-h-[calc(100dvh-7.25rem)] flex-1 place-items-center bg-canvas px-6 py-10 text-center min-[1440px]:min-h-[calc(100dvh-3.5rem)]"
+          ? "grid min-h-[calc(100dvh-7.25rem)] flex-1 place-items-center bg-canvas px-6 py-10 text-center xl:min-h-[calc(100dvh-3.5rem)]"
           : "grid min-h-full flex-1 content-start justify-items-center bg-canvas px-6 pb-10 pt-12 text-center"
       }
       data-workspace-state-viewport-fill={
@@ -1417,6 +1424,9 @@ export function JobFinderDiscoveryRoute() {
         onPreviewEmployerExclusion={context.onPreviewEmployerExclusion}
         onRemoveEmployerExclusion={context.onRemoveEmployerExclusion}
         onRestoreDismissedJob={context.onRestoreDismissedJob}
+        {...(context.onRemoveReviewJobs
+          ? { onRemoveFromShortlist: context.onRemoveReviewJobs }
+          : {})}
         {...(rapidReviewReturnRoute
           ? {
               onBackToRapidReview: () =>
@@ -1727,9 +1737,84 @@ function JobFinderReviewQueueRouteContent() {
   );
 }
 
+/**
+ * The pass through "To review" for the open resume: how far the person is,
+ * which resume comes next, and approvals that failed behind them. Null when
+ * the open resume is not one waiting for review.
+ */
+function useResumeReviewFlow(
+  context: ReturnType<typeof useJobFinderPageContext>,
+  jobId: string | undefined,
+): ResumeReviewFlow | null {
+  const session = useResumeReviewSession();
+  const { workspace } = context;
+  // The same list Shortlisted shows: the active plan's jobs. Collections a
+  // still-hydrating snapshot has not filled yet read as empty.
+  const queue = useMemo(() => {
+    const campaign = workspace.campaigns?.find(
+      (entry) => entry.id === workspace.activeCampaignId,
+    );
+    const jobIds = new Set(campaign?.jobIds ?? []);
+    return (workspace.reviewQueue ?? []).filter((item) =>
+      jobIds.has(item.jobId),
+    );
+  }, [workspace.activeCampaignId, workspace.campaigns, workspace.reviewQueue]);
+  const toReview = useMemo(
+    () =>
+      listResumesToReview({
+        queue,
+        tailoredAssets: workspace.tailoredAssets ?? [],
+        applicationRecords: workspace.applicationRecords ?? [],
+        session,
+      }),
+    [queue, session, workspace.applicationRecords, workspace.tailoredAssets],
+  );
+  const isReviewing =
+    Boolean(jobId) && toReview.some((item) => item.jobId === jobId);
+  const progress = isReviewing
+    ? describeResumeReviewProgress({
+        currentJobId: jobId!,
+        toReview,
+        queue,
+        session,
+      })
+    : null;
+  const next = progress?.next ?? null;
+  const nextJobId = next?.jobId ?? null;
+  // Read the next resume while this one is being read.
+  useEffect(() => {
+    if (!nextJobId || typeof window.nestor?.jobFinder?.getResumeWorkspace !== "function")
+      return;
+    const timer = window.setTimeout(
+      () =>
+        prefetchResumeWorkspace(nextJobId, (id) =>
+          window.nestor.jobFinder.getResumeWorkspace(id),
+        ),
+      400,
+    );
+    return () => window.clearTimeout(timer);
+  }, [nextJobId]);
+  if (!jobId || !progress) return null;
+  return {
+    reviewed: progress.reviewed,
+    total: progress.total,
+    nextTitle: next?.title ?? null,
+    failures: progress.failures.map(({ item, reason }) => ({
+      jobId: item.jobId,
+      title: item.title,
+      reason,
+    })),
+    onApproveAndNext: (exportId) =>
+      context.onApproveResumeAndContinue(jobId, next?.jobId ?? null, exportId),
+    onSkip: next ? () => context.onEditResumeWorkspace(next.jobId) : null,
+    onOpenJob: (id) => context.onEditResumeWorkspace(id),
+  };
+}
+
 export function JobFinderResumeWorkspaceRoute() {
   const context = useJobFinderPageContext();
   const { jobId } = useParams<{ jobId: string }>();
+  const reviewFlow = useResumeReviewFlow(context, jobId);
 
   if (!jobId) {
     return <Navigate replace to="/job-finder/review-queue" />;
@@ -1825,6 +1910,7 @@ export function JobFinderResumeWorkspaceRoute() {
         onSaveDraftAndThen={context.onSaveResumeDraftAndThen}
         onSendAssistantMessage={context.onSendResumeAssistantMessage}
         onResolveAssistantProposal={context.onResolveResumeAssistantProposal}
+        reviewFlow={reviewFlow}
         workspace={context.resumeWorkspace}
       />
     </JobFinderHydrationGate>

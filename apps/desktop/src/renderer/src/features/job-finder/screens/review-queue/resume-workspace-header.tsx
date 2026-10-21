@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { ResumeDraft } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
@@ -14,6 +15,8 @@ interface ResumeWorkspaceHeaderProps {
   jobCanonicalUrl?: string | null;
   jobTitle: string;
   onBack: () => void;
+  /** Controls for this resume that share the row, such as its language. */
+  actions?: ReactNode;
 }
 
 export function ResumeWorkspaceHeader({
@@ -23,6 +26,7 @@ export function ResumeWorkspaceHeader({
   jobCanonicalUrl = null,
   jobTitle,
   onBack,
+  actions,
 }: ResumeWorkspaceHeaderProps) {
   const employerLocation = [
     resolveJobEmployerDisplay({
@@ -90,6 +94,11 @@ export function ResumeWorkspaceHeader({
           ) : null}
         </p>
       </div>
+      {actions ? (
+        <div className="ml-auto flex shrink-0 items-center self-center">
+          {actions}
+        </div>
+      ) : null}
     </section>
   );
 }

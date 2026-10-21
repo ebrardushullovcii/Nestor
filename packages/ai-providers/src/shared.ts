@@ -372,6 +372,7 @@ export const OpenAiCompatibleJobFinderAiClientOptionsSchema = z.object({
       search: z.enum(modelReasoningEfforts).optional(),
       page_read: z.enum(modelReasoningEfforts).optional(),
       fit_batch: z.enum(modelReasoningEfforts).optional(),
+      listing_screen: z.enum(modelReasoningEfforts).optional(),
       claim_check: z.enum(modelReasoningEfforts).optional(),
       apply: z.enum(modelReasoningEfforts).optional(),
     } satisfies Record<ModelReasoningTask, z.ZodTypeAny>)

@@ -1,3 +1,4 @@
+import { buildResumeWorkspaceRoute } from "../../lib/resume-workspace-route";
 import type {
   JobFinderRendererWorkspaceSnapshot,
   ReviewQueueItem,
@@ -2312,12 +2313,50 @@ describe("buildJobSearchHomeModel · applications the person stopped or may have
     );
     expect(model.next).toMatchObject({
       id: "check_closed",
-      title: "Check 1 application whose page closed",
+      title: "Check 1 application whose form closed",
       primary: { action: { kind: "navigate" } },
     });
     expect(model.next.detail).toContain("Prepare again");
     expect(model.stages?.[2]?.detail).toBe("1 needs Prepare again");
 
+  });
+
+  it("leads with the resumes to review and keeps a closed form as a quiet line", () => {
+    const ws = withResult({
+      state: "failed",
+      summary: "The prepared application page is no longer open.",
+      blockerReason: "unexpected_navigation",
+      blockerSummary: "The prepared application page is no longer open.",
+    });
+    ws.reviewQueue = [
+      ...ws.reviewQueue,
+      queueItem("job_1", {
+        assetStatus: "ready",
+        resumeAssetId: "asset-1",
+        resumeTailoringMode: "aggressive",
+        resumeReview: { status: "needs_review" } as ReviewQueueItem["resumeReview"],
+      }),
+      queueItem("job_2", {
+        assetStatus: "ready",
+        resumeAssetId: "asset-2",
+        resumeTailoringMode: "aggressive",
+        resumeReview: { status: "needs_review" } as ReviewQueueItem["resumeReview"],
+      }),
+    ];
+    for (const campaign of ws.campaigns) {
+      campaign.jobIds = [...new Set([...campaign.jobIds, "job_1", "job_2"])];
+    }
+    const model = build(ws);
+    expect(model.next).toMatchObject({
+      id: "review_resumes",
+      title: "Review 2 resumes",
+      primary: {
+        label: "Start reviewing",
+        action: { kind: "navigate", route: buildResumeWorkspaceRoute("job_1") },
+      },
+    });
+    expect(model.next.also?.map((line) => line.id)).toEqual(["check_closed"]);
+    expect(model.next.also?.[0]?.link?.label).toBe("Open Applications");
   });
 });
 it("separates untouched jobs, queued drafts and active writers in a ten-job batch", () => {

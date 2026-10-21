@@ -939,6 +939,8 @@ export interface CreateJobFinderWorkspaceServiceOptions {
   onDetachedApplyRunFinished?: () => void;
   onResumeEvidenceFinished?: () => void;
   onListingAssessmentFinished?: () => void;
+  /** Saved jobs were rescored in the background after a profile or goal save. */
+  onSavedJobsRescored?: () => void;
   /**
    * Called when the person deliberately starts work (Search now, Apply, Run
    * now). The desktop host lifts a browser pause the person caused there

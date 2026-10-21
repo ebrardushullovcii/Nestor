@@ -204,7 +204,8 @@ test("keeps modern accounting labels when unique inspections are unknown", () =>
   const label = formatDiscoveryRunReportLabel(getDiscoveryRunReportCounts(run));
   expect(label).toContain("52 postings seen");
   expect(label).toContain("27 duplicates merged");
-  expect(label).toContain("0 rejected");
+  // A zero is left out of the line rather than printed.
+  expect(label).not.toContain("0 rejected");
   expect(label).not.toContain("already here");
   expect(describePlanRunCounts(getDiscoveryRunReportCounts(run))).toContain(
     "52 postings seen",

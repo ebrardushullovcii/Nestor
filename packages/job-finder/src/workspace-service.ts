@@ -34,8 +34,7 @@ import {
 } from "@nestor/contracts";
 import { mergeSessionStates } from "./internal/workspace-service-helpers";
 import {
-  getActiveDiscoveryTargets,
-  resolveAdapterKind,
+  getPreferredSessionAdapter,
   updateDiscoveryTarget,
 } from "./internal/workspace-helpers";
 import { SOURCE_DEBUG_RECENT_HISTORY_LIMIT } from "./internal/workspace-defaults";
@@ -265,6 +264,7 @@ export function createJobFinderWorkspaceService(
     onDetachedApplyRunFinished,
     onResumeEvidenceFinished,
     onListingAssessmentFinished,
+    onSavedJobsRescored,
     onExplicitUserStart,
   } = options;
   const activeDiscoveryAbortControllerRef = {
@@ -427,6 +427,7 @@ export function createJobFinderWorkspaceService(
       workspaceResetInProgress || shutdownPromiseRef.current !== null,
     fitJudgmentProgressRef,
     ...(onListingAssessmentFinished ? { onListingAssessmentFinished } : {}),
+    ...(onSavedJobsRescored ? { onSavedJobsRescored } : {}),
     activeDiscoveryAbortControllerRef,
     activeDiscoveryRunIdRef,
     activeDiscoveryPromiseRef,
@@ -488,10 +489,14 @@ export function createJobFinderWorkspaceService(
       searchPreferences: JobSearchPreferences,
       knownSessions?: JobFinderDiscoveryState["sessions"],
     ): Promise<JobFinderDiscoveryState["sessions"]> {
-      const targets = getActiveDiscoveryTargets(searchPreferences);
-      const adapterKinds = uniqueStrings(
-        targets.map((target) => resolveAdapterKind(target)),
-      ) as JobSource[];
+      // Every source reads through the same generic adapter (see
+      // resolveAdapterKind), so only whether any source is on matters.
+      // Normalizing all 900 sources of a large workspace to learn that took
+      // about 4 ms of every workspace read.
+      const adapterKinds: JobSource[] =
+        searchPreferences.discovery.targets.some((target) => target.enabled)
+          ? [getPreferredSessionAdapter(searchPreferences)]
+          : [];
       if (adapterKinds.length === 0) {
         return [];
       }
@@ -644,10 +649,14 @@ export function createJobFinderWorkspaceService(
       staleReason: string,
       jobIds?: readonly string[],
     ): Promise<void> {
+      // The cached display rows, when the repository keeps them: every
+      // draft holds whole resumes, and parsing them all again made each
+      // profile save half a second slower. Each write below is a new value.
+      const display = await repository.readDisplayCollections?.();
       const [drafts, tailoredAssets, applicationRecords] = await Promise.all([
-        repository.listResumeDrafts(),
-        repository.listTailoredAssets(),
-        repository.listApplicationRecords(),
+        display?.resumeDrafts ?? repository.listResumeDrafts(),
+        display?.tailoredAssets ?? repository.listTailoredAssets(),
+        display?.applicationRecords ?? repository.listApplicationRecords(),
       ]);
 
       const targetJobIds = jobIds ? new Set(jobIds) : null;
@@ -657,6 +666,10 @@ export function createJobFinderWorkspaceService(
           .filter((record) => record.status === "submitted")
           .map((record) => record.jobId),
       );
+      const toStale: {
+        draft: (typeof drafts)[number];
+        existingAsset: (typeof tailoredAssets)[number] | null;
+      }[] = [];
       for (const draft of drafts) {
         if (submittedJobIds.has(draft.jobId)) continue;
 
@@ -666,6 +679,32 @@ export function createJobFinderWorkspaceService(
 
         const existingAsset =
           tailoredAssets.find((asset) => asset.jobId === draft.jobId) ?? null;
+        // Already stale for this reason, with nothing approved and no file
+        // kept: staling it again would only rewrite it with a new time.
+        if (
+          draft.status === "stale" &&
+          draft.staleReason === staleReason &&
+          draft.approvedAt === null &&
+          draft.approvedExportId === null &&
+          (existingAsset === null || existingAsset.storagePath === null)
+        ) {
+          continue;
+        }
+        toStale.push({ draft, existingAsset });
+      }
+      if (toStale.length === 0) return;
+      // Only the approval fields change, so a repository that can mark them
+      // in place does so in one transaction. Reading, validating and writing
+      // each whole draft again held a profile save for about 1.5 s.
+      if (repository.staleResumeDrafts) {
+        await repository.staleResumeDrafts({
+          draftIds: toStale.map(({ draft }) => draft.id),
+          staleReason,
+          updatedAt: new Date().toISOString(),
+        });
+        return;
+      }
+      for (const { draft, existingAsset } of toStale) {
         const staleDraft = buildStaleResumeDraft(draft, staleReason);
 
         await repository.clearResumeApproval({

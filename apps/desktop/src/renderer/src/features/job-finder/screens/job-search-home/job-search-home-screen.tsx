@@ -434,7 +434,9 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
   return (
     // The header stack owns its 12px seam; the -mb-2 cancels the part of
     // the 20px grid gap that would double it.
-    <section className="grid min-w-0 gap-5 pb-8 [&>[data-page-header-stack]]:-mb-2">
+    // Home is one column: at 1920 its card and tiles ran 1600px wide around
+    // a 68-character sentence. It keeps a readable width instead.
+    <section className="grid min-w-0 max-w-[76rem] gap-5 pb-8 [&>[data-page-header-stack]]:-mb-2">
       <PageHeaderStack
         actions={
           // While paused the next-step card below offers Resume; the header
@@ -693,6 +695,31 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
             </Button>
           ))}
         </div>
+        {model.next.also && model.next.also.length > 0 ? (
+          <ul className="m-0 grid list-none gap-1 p-0" data-home-next-step-also>
+            {model.next.also.map((line) => (
+              <li
+                className="min-w-0 text-(length:--text-small) leading-5 text-foreground-muted"
+                data-home-also={line.id}
+                key={line.id}
+              >
+                {line.text}
+                {line.link ? (
+                  <>
+                    {" "}
+                    <button
+                      className="inline cursor-pointer rounded-sm text-foreground-soft underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => line.link && run(line.link.action)}
+                      type="button"
+                    >
+                      {line.link.label}
+                    </button>
+                  </>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       {model.stages ? (

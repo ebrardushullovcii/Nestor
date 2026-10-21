@@ -691,8 +691,10 @@ export function getAnswerTone(
     case "submitted":
       return "positive" as const;
     case "rejected":
-    case "skipped":
       return "critical" as const;
+    // Skipped is something the run left for later, not a failure.
+    case "skipped":
+      return "warning" as const;
     default:
       return "active" as const;
   }

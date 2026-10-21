@@ -1,4 +1,8 @@
-import { ResumeResearchArtifactSchema, type ResumeResearchArtifact, type SavedJob } from "@nestor/contracts";
+import {
+  ResumeResearchArtifactSchema,
+  type ResumeResearchArtifact,
+  type SavedJob,
+} from "@nestor/contracts";
 import {
   extractReadablePage,
   extractResearchSignals,
@@ -37,12 +41,25 @@ export function createDesktopResumeResearchAdapter(
   return {
     async fetchResearchPages(input) {
       const typedInput: ResumeResearchAdapterInput = input;
-      const candidateUrls = buildCandidateResearchUrls(typedInput.job).slice(0, maxPages);
+      const candidateUrls = buildCandidateResearchUrls(typedInput.job).slice(
+        0,
+        maxPages,
+      );
       const artifacts: ResumeResearchArtifact[] = [];
+      // The pages are fetched together and read in order: one after another,
+      // three slow or missing pages held the resume back up to 18 seconds.
+      const responses = candidateUrls.map((sourceUrl) =>
+        fetchPage(sourceUrl, fetchImpl, timeoutMs, maxBytes).then(
+          (text) => ({ ok: true as const, text }),
+          (error: unknown) => ({ ok: false as const, error }),
+        ),
+      );
 
-      for (const sourceUrl of candidateUrls) {
+      for (const [index, sourceUrl] of candidateUrls.entries()) {
         try {
-          const responseText = await fetchPage(sourceUrl, fetchImpl, timeoutMs, maxBytes);
+          const response = await responses[index]!;
+          if (!response.ok) throw response.error;
+          const responseText = response.text;
           const readable = normalizeReadableResearchPage(
             extractReadablePage({
               url: sourceUrl,
@@ -68,7 +85,7 @@ export function createDesktopResumeResearchAdapter(
         } catch (error) {
           console.warn(
             `[ResumeResearch] Failed to fetch research page for job ${typedInput.job.id} from ${sourceUrl}.`,
-            error instanceof Error ? error.stack ?? error.message : error,
+            error instanceof Error ? (error.stack ?? error.message) : error,
           );
           artifacts.push({
             id: `resume_research_${typedInput.job.id}_${artifacts.length + 1}`,
@@ -170,18 +187,29 @@ function buildCandidateResearchUrls(job: SavedJob): string[] {
     return [];
   }
 
-  return [employerRoot, `${employerRoot}/about`, `${employerRoot}/careers`, `${employerRoot}/company`];
+  return [
+    employerRoot,
+    `${employerRoot}/about`,
+    `${employerRoot}/careers`,
+    `${employerRoot}/company`,
+  ];
 }
 
 function deriveEmployerRoot(job: SavedJob): string | null {
-  const explicitEmployerOrigin = toSafeResearchOrigin(job.employerWebsiteUrl ?? "");
+  const explicitEmployerOrigin = toSafeResearchOrigin(
+    job.employerWebsiteUrl ?? "",
+  );
   if (explicitEmployerOrigin) {
     return explicitEmployerOrigin;
   }
 
   const canonicalOrigin = toSafeResearchOrigin(job.canonicalUrl);
   const canonicalHost = safeHostname(job.canonicalUrl);
-  if (canonicalOrigin && canonicalHost && !isLikelyJobBoardHost(canonicalHost)) {
+  if (
+    canonicalOrigin &&
+    canonicalHost &&
+    !isLikelyJobBoardHost(canonicalHost)
+  ) {
     return canonicalOrigin;
   }
 
@@ -197,7 +225,10 @@ function deriveEmployerRoot(job: SavedJob): string | null {
   return null;
 }
 
-function joinChunks(chunks: readonly Uint8Array[], totalBytes: number): Uint8Array {
+function joinChunks(
+  chunks: readonly Uint8Array[],
+  totalBytes: number,
+): Uint8Array {
   const combined = new Uint8Array(totalBytes);
   let offset = 0;
 
@@ -224,36 +255,50 @@ function isLikelyJobBoardHost(hostname: string): boolean {
 }
 
 function isPrivateOrLoopbackHostname(hostname: string): boolean {
-  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-    return true
+  if (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1"
+  ) {
+    return true;
   }
 
-  if (/^10\./.test(hostname) || /^192\.168\./.test(hostname) || /^169\.254\./.test(hostname)) {
-    return true
+  if (
+    /^10\./.test(hostname) ||
+    /^192\.168\./.test(hostname) ||
+    /^169\.254\./.test(hostname)
+  ) {
+    return true;
   }
 
   if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)) {
-    return true
+    return true;
   }
 
-  return /^f[c-d][0-9a-f:]*$/i.test(hostname) || /^fe[89ab][0-9a-f:]*$/i.test(hostname)
+  return (
+    /^f[c-d][0-9a-f:]*$/i.test(hostname) ||
+    /^fe[89ab][0-9a-f:]*$/i.test(hostname)
+  );
 }
 
 function toSafeResearchOrigin(value: string): string | null {
   try {
-    const parsed = new URL(value)
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      return null
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      return null;
     }
 
-    const hostname = parsed.hostname.toLowerCase()
-    if (isLikelyJobBoardHost(hostname) || isPrivateOrLoopbackHostname(hostname)) {
-      return null
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      isLikelyJobBoardHost(hostname) ||
+      isPrivateOrLoopbackHostname(hostname)
+    ) {
+      return null;
     }
 
-    return parsed.origin
+    return parsed.origin;
   } catch {
-    return null
+    return null;
   }
 }
 

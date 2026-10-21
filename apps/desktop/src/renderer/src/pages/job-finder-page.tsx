@@ -286,11 +286,10 @@ function readInitialDesktopPlatform(): "darwin" | "linux" | "win32" | null {
 /**
  * Loaded routes whose page title differs from the sidebar label. The opening
  * shell paints the loaded title, not the label, so hydration never swaps the
- * h1 text under the reader (Profile → Your profile flickered on every cold
- * open). Keep this in step with each screen's `PageHeader` title.
+ * h1 text under the reader. Keep this in step with each screen's
+ * `PageHeader` title.
  */
 const OPENING_ROUTE_TITLE_OVERRIDES: Readonly<Record<string, string>> = {
-  "/job-finder/profile": "Your profile",
   "/job-finder/review-queue": "Shortlisted",
 };
 
@@ -684,9 +683,11 @@ function JobFinderOpeningShell() {
             // and no overlap left to resolve.
             className={cn(
               "col-span-2 col-start-1 row-start-2 flex min-w-0 items-center justify-center overflow-visible sm:col-span-1 sm:col-start-1 sm:justify-center min-[1440px]:hidden",
+              // One header row from 1280px, as in the loaded shell.
+              "xl:row-start-1 xl:justify-self-center",
               isMac
-                ? "max-[899px]:pr-40 min-[900px]:pr-0"
-                : "max-[899px]:pr-40 min-[900px]:pr-80",
+                ? "max-[899px]:pr-40 min-[900px]:pr-0 xl:ml-56 xl:mr-[17rem]"
+                : "max-[899px]:pr-40 min-[900px]:max-[1279px]:pr-80 xl:ml-40 xl:mr-[25rem]",
             )}
             style={noDragRegionStyle}
           >
@@ -849,7 +850,7 @@ function JobFinderOpeningShell() {
       <div
         aria-hidden="true"
         className={cn(
-          "pointer-events-none fixed inset-x-0 top-[7.25rem] z-30 hidden bg-(--shell-header-bg) sm:block min-[1440px]:top-14 min-[1440px]:left-(--job-finder-side-width)",
+          "pointer-events-none fixed inset-x-0 top-[7.25rem] z-30 hidden bg-(--shell-header-bg) sm:block xl:top-14 min-[1440px]:left-(--job-finder-side-width)",
           SHELL_HEADER_MASK_HEIGHT_CLASS,
         )}
         data-job-finder-shell-header-mask

@@ -407,7 +407,7 @@ describe("progressive public API discovery", () => {
       if (request.freshness === "recent") {
         expect(
           snapshot.recentDiscoveryRuns[0]?.targetExecutions[0]?.warning,
-        ).toContain("Skipped 1 malformed");
+        ).toContain("1 job in this board's list could not be read");
       }
     },
   );
@@ -531,7 +531,7 @@ describe("progressive public API discovery", () => {
       state: "failed",
       jobsPersisted: 0,
     });
-    expect(slowExecution?.warning).toMatch(/returned 503/i);
+    expect(slowExecution?.warning).toMatch(/HTTP 503/i);
     // A failed source is terminal but not completed: the campaign's terminal
     // commit persists the canonical denominator so nothing reports the 503
     // source inside "2 of 2 sources finished".

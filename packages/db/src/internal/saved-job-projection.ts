@@ -1,6 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
 import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
-import { listCollectionValues, listValuesInChunks } from "./state";
+import {
+  createRowValidationMarks,
+  type ParseMarkedRow,
+  type RowValidationStamp,
+} from "./row-validation-marks";
+import { listCollectionValues, parsePersistedRowValue } from "./state";
+
+/** Saved jobs parsed per turn of the event loop on a full projection read. */
+const PROJECTION_PAGE_ROWS = 200;
 
 /** Borrowed projection values cannot become an accidental repository write. */
 export function freezeProjection<T>(value: T): T {
@@ -18,7 +26,7 @@ export function freezeProjection<T>(value: T): T {
  * duplicates were about a seventh of the main process's memory. A projection
  * row is frozen once this returns, so equal values can be one value.
  */
-function shareRepeatedValues(job: SavedJob): SavedJob {
+function shareRepeatedValues(job: SavedJob, share: ShareValue): SavedJob {
   for (const sighting of job.provenance) {
     const facts = sighting.listingFacts;
     if (!facts) continue;
@@ -38,11 +46,45 @@ function shareRepeatedValues(job: SavedJob): SavedJob {
       }
     }
   }
+  // Values many jobs hold alike: what a source is known for (84 distinct
+  // among 6,284 jobs), pay and screening hints, and the parts of a verdict
+  // most rule scores share. One frozen copy serves every job holding it.
+  job.sourceIntelligence = share(job.sourceIntelligence);
+  job.screeningHints = share(job.screeningHints);
+  job.normalizedCompensation = share(job.normalizedCompensation);
+  // A plan's own verdict rarely repeats its dimensions elsewhere, so only
+  // the shared verdict's are worth looking up.
+  job.matchAssessment.dimensions = share(job.matchAssessment.dimensions);
+  for (const assessment of new Set([
+    job.matchAssessment,
+    ...Object.values(plans ?? {}),
+  ])) {
+    if (assessment)
+      assessment.compensationFit = share(assessment.compensationFit);
+  }
   return job;
 }
 
-function toProjectionRow(job: SavedJob): SavedJob {
-  return freezeProjection(shareRepeatedValues(job));
+type ShareValue = <T>(value: T) => T;
+
+/** Distinct values kept for sharing before the table starts over. */
+const SHARED_VALUE_LIMIT = 20_000;
+
+function createValueSharing(): ShareValue {
+  const values = new Map<string, unknown>();
+  return <T>(value: T): T => {
+    if (value === null || typeof value !== "object") return value;
+    const key = JSON.stringify(value);
+    const existing = values.get(key);
+    if (existing !== undefined) return existing as T;
+    if (values.size >= SHARED_VALUE_LIMIT) values.clear();
+    values.set(key, freezeProjection(value));
+    return value;
+  };
+}
+
+function toProjectionRow(job: SavedJob, share: ShareValue): SavedJob {
+  return freezeProjection(shareRepeatedValues(job, share));
 }
 
 /**
@@ -51,7 +93,18 @@ function toProjectionRow(job: SavedJob): SavedJob {
  * transactional reset/import; rollbacks also roll back their change markers.
  * A different connection's commit invalidates the cache through data_version.
  */
-export function createSavedJobProjectionReader(database: DatabaseSync) {
+export function createSavedJobProjectionReader(
+  database: DatabaseSync,
+  options: {
+    /** Who validates rows; rows it already marked skip the schema. */
+    validationStamp?: RowValidationStamp;
+  } = {},
+) {
+  const marks = createRowValidationMarks(
+    database,
+    "saved_jobs",
+    options.validationStamp,
+  );
   database.exec(`
     CREATE TEMP TABLE saved_job_projection_epoch (revision INTEGER NOT NULL);
     INSERT INTO saved_job_projection_epoch VALUES (0);
@@ -76,6 +129,7 @@ export function createSavedJobProjectionReader(database: DatabaseSync) {
       })
       .join("\n")}
   `);
+  const share = createValueSharing();
   let jobsById = new Map<string, SavedJob>();
   let snapshot: readonly SavedJob[] | null = null;
   let externalVersion: number | null = null;
@@ -90,6 +144,49 @@ export function createSavedJobProjectionReader(database: DatabaseSync) {
     "SELECT id FROM saved_job_projection_changes",
   );
 
+  const readPage = database.prepare(
+    `SELECT ${marks?.selectSql ?? "id, value FROM saved_jobs"}
+      WHERE id > ? ORDER BY id LIMIT ?`,
+  );
+
+  /**
+   * Every saved job, a page at a time with a turn of the event loop between
+   * pages. Reading them in one statement held main for about a second with
+   * 20,000 saved jobs (420 MB of rows), and kept every row's text alive until
+   * the last was parsed. A write landing between pages is caught by the
+   * change markers, which this read leaves for the next one.
+   */
+  async function readAllRowsInPages(): Promise<Map<string, SavedJob>> {
+    // Starts reading in this turn when the stamp is known (or absent).
+    if (marks && marks.current() === null) await marks.settled();
+    const jobs = new Map<string, SavedJob>();
+    let after = "";
+    const readPageOfJobs = (parse: ParseMarkedRow | null) => {
+      const rows = readPage.all(after, PROJECTION_PAGE_ROWS);
+      for (const row of rows) {
+        const job = toProjectionRow(
+          parse
+            ? parse(row, SavedJobSchema)
+            : parsePersistedRowValue({
+                tableName: "saved_jobs",
+                rowId: String(row.id),
+                rawValue: String(row.value),
+                schema: SavedJobSchema,
+              }),
+          share,
+        );
+        jobs.set(job.id, job);
+      }
+      return rows;
+    };
+    for (;;) {
+      const rows = marks ? marks.read(readPageOfJobs) : readPageOfJobs(null);
+      if (rows.length < PROJECTION_PAGE_ROWS) return jobs;
+      after = String(rows[rows.length - 1]!.id);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  }
+
   async function read(): Promise<readonly SavedJob[]> {
     const version = Number(readVersion.get()?.data_version);
     const revision = Number(readRevision.get()?.revision);
@@ -102,13 +199,7 @@ export function createSavedJobProjectionReader(database: DatabaseSync) {
       return snapshot;
 
     if (snapshot === null || version !== externalVersion) {
-      // The read captures all rows before yielding to parse them in chunks.
-      const rows = await listValuesInChunks(
-        database,
-        "saved_jobs",
-        SavedJobSchema,
-      );
-      jobsById = new Map(rows.map((job) => [job.id, toProjectionRow(job)]));
+      jobsById = await readAllRowsInPages();
     } else {
       const ids = changes.map((row) => String(row.id));
       const rows = listCollectionValues(
@@ -122,7 +213,7 @@ export function createSavedJobProjectionReader(database: DatabaseSync) {
         },
       );
       for (const id of ids) jobsById.delete(id);
-      for (const job of rows) jobsById.set(job.id, toProjectionRow(job));
+      for (const job of rows) jobsById.set(job.id, toProjectionRow(job, share));
     }
     externalVersion = version;
     // A write arriving during chunked parsing belongs to the next projection.
@@ -166,5 +257,27 @@ export function createSavedJobProjectionReader(database: DatabaseSync) {
     });
     return pending;
   }
-  return readProjection;
+
+  const hasChanges = database.prepare(
+    "SELECT EXISTS (SELECT 1 FROM saved_job_projection_changes) AS changed",
+  );
+  const idsBySnapshot = new WeakMap<readonly SavedJob[], readonly string[]>();
+  /**
+   * Every saved job's id, in id order, when the cached rows are current;
+   * otherwise null and the caller asks the table. Each workspace refresh
+   * listed every id from the table (20 ms with 20,000 jobs) to reconcile plans.
+   */
+  function currentIds(): readonly string[] | null {
+    if (database.isTransaction || pending || snapshot === null) return null;
+    if (Number(readVersion.get()?.data_version) !== externalVersion)
+      return null;
+    if (Number(hasChanges.get()?.changed) !== 0) return null;
+    let ids = idsBySnapshot.get(snapshot);
+    if (!ids) {
+      ids = Object.freeze(snapshot.map((job) => job.id));
+      idsBySnapshot.set(snapshot, ids);
+    }
+    return ids;
+  }
+  return Object.assign(readProjection, { currentIds });
 }

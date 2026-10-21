@@ -1,5 +1,6 @@
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { publishJobFinderWorkspaceUpdate } from "./workspace-updates";
+import { mainBuildDigest } from "./startup-workspace-view";
 import {
   publishOnApplyStandingChanges,
   publishOnUserActionChanges,
@@ -550,6 +551,7 @@ export async function createJobFinderWorkspaceServiceAsync(
       recoveryTelemetry: {
         onRestored: recordRestoredStartupDatabaseRecoveryEvent,
       },
+      rowValidationStamp: mainBuildDigest(),
     });
   } catch (error) {
     if (error instanceof WorkspaceDatabaseRecoveryRequiredError) {
@@ -633,6 +635,7 @@ export async function createJobFinderWorkspaceServiceAsync(
     onDetachedApplyRunFinished: () => publishJobFinderWorkspaceUpdate(),
     onResumeEvidenceFinished: () => publishJobFinderWorkspaceUpdate(),
     onListingAssessmentFinished: () => publishJobFinderWorkspaceUpdate(),
+    onSavedJobsRescored: () => publishJobFinderWorkspaceUpdate(),
     onFitJudgmentProgress: () => publishJobFinderWorkspaceUpdate(),
     // The embedded browser keeps its own pause flag. Every activity-control
     // change (Home's button, or an explicit click resuming paused work) is

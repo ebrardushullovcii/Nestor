@@ -181,3 +181,49 @@ test("another connection's commits invalidate cached rows and ordinary reads sta
     await fixture.cleanup();
   }
 });
+
+test("a full read pages through the jobs, and a write between pages lands on the next read", async () => {
+  const { put, read } = fixture();
+  for (let index = 0; index < 650; index += 1)
+    put(`job-${String(index).padStart(4, "0")}`);
+  const reading = read();
+  // While the first pages are parsed, a job in a later page changes.
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  put("job-0600", "Changed while reading");
+  const first = await reading;
+  expect(first).toHaveLength(650);
+  const next = await read();
+  expect(next.find((job) => job.id === "job-0600")?.title).toBe(
+    "Changed while reading",
+  );
+  expect(next.map((job) => job.id)).toEqual(first.map((job) => job.id));
+});
+
+test("jobs holding alike values share one frozen copy", async () => {
+  const { put, read } = fixture();
+  put("a");
+  put("b");
+  const [a, b] = await read();
+  expect(a!.normalizedCompensation).toEqual(b!.normalizedCompensation);
+  expect(a!.matchAssessment.dimensions).toBe(b!.matchAssessment.dimensions);
+  expect(a!.matchAssessment.compensationFit).toBe(
+    b!.matchAssessment.compensationFit,
+  );
+  expect(Object.isFrozen(a!.matchAssessment.dimensions)).toBe(true);
+});
+
+test("the cached ids answer only while the cached rows are current", async () => {
+  const { db, put, read } = fixture();
+  put("b");
+  put("a");
+  expect(read.currentIds()).toBeNull();
+  await read();
+  expect(read.currentIds()).toEqual(["a", "b"]);
+  put("c");
+  expect(read.currentIds()).toBeNull();
+  await read();
+  expect(read.currentIds()).toEqual(["a", "b", "c"]);
+  db.exec("BEGIN");
+  expect(read.currentIds()).toBeNull();
+  db.exec("ROLLBACK");
+});

@@ -1,4 +1,8 @@
-import { createDiscoverySavedJobWriter } from "./discovery-saved-job-writer";
+import { createConcurrencyLimiter } from "@nestor/core";
+import {
+  createDiscoverySavedJobWriter,
+  markSupersedingDiscoveryUpdate,
+} from "./discovery-saved-job-writer";
 import { buildDiscoveryRunReport } from "./workspace-discovery-run-helpers";
 import {
   withPlanAssessment,
@@ -17,7 +21,6 @@ import {
   SavedJobSchema,
   type CandidateProfile,
   type DiscoveryActivityEvent,
-  type DiscoveryLedgerEntry,
   type DiscoveryRunRecord,
   type DiscoveryRunResult,
   type FitJudgment,
@@ -26,7 +29,6 @@ import {
   type DiscoveryTargetExecution,
   type DiscoverySourceListingCounts,
   type JobDiscoveryTarget,
-  type JobFinderDiscoveryState,
   type JobFinderSearchRequest,
   type AiJobSearchBehavior,
   AiBehaviorPreferenceSchema,
@@ -34,6 +36,7 @@ import {
   type JobPosting,
   type JobSearchPreferences,
   type JobSource,
+  type ListingScreenRecord,
   type ParkedBrowserTabReference,
   type SavedJob,
   type SourceIntelligenceProviderKey,
@@ -90,19 +93,30 @@ import {
   discoveryAdapters,
 } from "./workspace-defaults";
 import {
-  applyInactiveLedgerMarks,
-  createDiscoveryFreshnessDigest,
-  createDiscoveryLedgerIndex,
   createDiscoveryProvenance,
   formatDiscoveryFreshnessDigest,
   mergePendingJobs,
   mergeSavedJobs,
   overlayTouchedPendingJobs,
-  recordDiscoveredPostingInLedger,
   shouldSkipPostingFromLedger,
 } from "./workspace-service-helpers";
+import {
+  createRunDiscoveryLedger,
+  createSyncedJobIdentityIndex,
+} from "./discovery-run-indexes";
+import {
+  buildListingScreenContext,
+  createListingScreenBatcher,
+  listingScreenKey,
+  screenListingsWithModel,
+  type ListingScreenListing,
+} from "./listing-screen";
+import { normalizeJobIdentityUrl } from "./job-identity";
 import { createDiscoveryRefreshDecision } from "./workspace-discovery-refresh-schedule";
-import { createDiscoveryListingFingerprints } from "./workspace-discovery-ledger";
+import {
+  createDiscoveryFreshnessDigestInTurns,
+  createDiscoveryListingFingerprints,
+} from "./workspace-discovery-ledger";
 import { rebaseRunLedgerOntoPersisted } from "./workspace-discovery-state-helpers";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 import type {
@@ -249,11 +263,25 @@ const SEARCH_FIT_JUDGING_CONCURRENCY = 3;
  */
 const SEARCH_FIT_PARTIAL_BATCH_WAIT_MS = 20_000;
 const SEARCH_FIT_MAX_BATCH_WAIT_MS = 90_000;
-const PUBLIC_API_PREFETCH_CONCURRENCY = 8;
 /**
- * How many sources one search works on at the same time. Each gets its own
- * browser tab; the number stays small so a laptop and a site's patience both
- * hold. Override with NESTOR_SEARCH_CONCURRENCY.
+ * Feeds a search holds at once: downloading, waiting for the listing screen,
+ * or ready to merge. Downloads themselves run a few at a time.
+ */
+const PUBLIC_API_PREFETCH_CONCURRENCY = 48;
+const PUBLIC_API_DOWNLOAD_CONCURRENCY = 8;
+/** Feed listings looked up against the run's jobs per event-loop turn. */
+const SCREEN_LOOKUPS_PER_TURN = 40;
+/**
+ * API sources merged at the same time. Merging is main-process work, so more
+ * would only interleave it; more than one keeps a source whose jobs wait on a
+ * fit verdict ("Best matches only") from holding the lane.
+ */
+const PUBLIC_API_PROCESSING_CONCURRENCY = 3;
+/**
+ * How many browser sources one search works on at the same time. Each gets
+ * its own browser tab; the number stays small so a laptop and a site's
+ * patience both hold. API feeds run in their own lane beside them. Override
+ * with NESTOR_SEARCH_CONCURRENCY.
  */
 const DISCOVERY_SOURCE_CONCURRENCY = (() => {
   const configured = Number.parseInt(
@@ -262,9 +290,38 @@ const DISCOVERY_SOURCE_CONCURRENCY = (() => {
   );
   return Number.isFinite(configured) && configured > 0
     ? Math.min(configured, 8)
-    : 3;
+    : 5;
 })();
+/**
+ * The time one browser source may take in a search of several. Sources that
+ * found jobs finished within 15 minutes in the owner's searches; the ones
+ * that ran for hours found nothing and held a tab. A one-source search keeps
+ * the long budget.
+ */
+const MULTI_SOURCE_TARGET_TIME_BUDGET_MS = 20 * 60_000;
 const DISCOVERY_STALL_STEP_WINDOW = MAX_DISCOVERY_AGENT_NO_PROGRESS_STEPS;
+const RESUME_STALENESS_FLUSH_MS = 2 * 60_000;
+const DISCOVERY_SAVE_COALESCE_MS = 250;
+/** Saved jobs a search's setup prepares per event-loop turn. */
+const SETUP_JOBS_PER_TURN = 250;
+/** Postings a source's final pass triages and merges per event-loop turn. */
+const FINAL_PASS_POSTINGS_PER_TURN = 40;
+const yieldToEventLoop = () =>
+  new Promise<void>((resolve) => setImmediate(resolve));
+/** `items.map(map)`, giving the event loop a turn every few dozen items. */
+async function mapInTurns<T, R>(
+  items: readonly T[],
+  map: (item: T) => R,
+  perTurn = FINAL_PASS_POSTINGS_PER_TURN,
+): Promise<R[]> {
+  const mapped: R[] = [];
+  for (const [position, item] of items.entries()) {
+    if (position > 0 && position % perTurn === 0) await yieldToEventLoop();
+    mapped.push(map(item));
+  }
+  return mapped;
+}
+const DISCOVERY_SAVE_COALESCE_MIN_SOURCES = 20;
 
 /**
  * Bounded heartbeat for duplicate-only agent checkpoint sequences.
@@ -337,16 +394,22 @@ type ReadyDiscoveryTarget = {
   prefetchedPublicApiResult: Promise<SettledPublicProviderJobsResult> | null;
 };
 
-async function* iterateDiscoveryTargetsByReadiness(input: {
+/**
+ * The public-API sources of a search, in the order their feeds arrive.
+ *
+ * A small rolling window of feed requests runs ahead of the sources being
+ * processed, so a search never holds more than that many feeds in memory and
+ * the network stays busy while earlier feeds are merged. Browser sources do
+ * not go through here: they run in their own lane beside this one, so an API
+ * source never waits behind a browser source that takes minutes.
+ */
+async function* iteratePublicApiTargetsByReadiness(input: {
   targets: readonly JobDiscoveryTarget[];
-  publicApiTargetIds: ReadonlySet<string>;
   createPublicApiRequest: (
     target: JobDiscoveryTarget,
   ) => Promise<SettledPublicProviderJobsResult>;
   signal: AbortSignal;
 }): AsyncGenerator<ReadyDiscoveryTarget> {
-  const apiTargets: JobDiscoveryTarget[] = [];
-  const serialTargets: JobDiscoveryTarget[] = [];
   const readyApiTargets: Array<{
     target: JobDiscoveryTarget;
     request: Promise<SettledPublicProviderJobsResult>;
@@ -357,21 +420,13 @@ async function* iterateDiscoveryTargetsByReadiness(input: {
   >();
   let notifyReady: (() => void) | null = null;
 
-  for (const target of input.targets) {
-    if (!input.publicApiTargetIds.has(target.id)) {
-      serialTargets.push(target);
-      continue;
-    }
-    apiTargets.push(target);
-  }
-
   let nextApiTargetIndex = 0;
   const startAvailableApiRequests = () => {
     while (
       activeApiRequests.size < PUBLIC_API_PREFETCH_CONCURRENCY &&
-      nextApiTargetIndex < apiTargets.length
+      nextApiTargetIndex < input.targets.length
     ) {
-      const target = apiTargets[nextApiTargetIndex];
+      const target = input.targets[nextApiTargetIndex];
       nextApiTargetIndex += 1;
       if (!target) continue;
       const request = input.createPublicApiRequest(target);
@@ -387,18 +442,10 @@ async function* iterateDiscoveryTargetsByReadiness(input: {
   };
 
   startAvailableApiRequests();
-  let serialTargetIndex = 0;
-  while (
-    activeApiRequests.size > 0 ||
-    serialTargetIndex < serialTargets.length
-  ) {
+  while (activeApiRequests.size > 0) {
     if (input.signal.aborted) {
       throw new DOMException("Aborted", "AbortError");
     }
-
-    // Give already-settled inventory promises a microtask turn to enter the
-    // ready queue before a serial browser target claims the shared session.
-    await Promise.resolve();
 
     const readyApiTarget = readyApiTargets.shift();
     if (readyApiTarget) {
@@ -408,13 +455,6 @@ async function* iterateDiscoveryTargetsByReadiness(input: {
         target: readyApiTarget.target,
         prefetchedPublicApiResult: readyApiTarget.request,
       };
-      continue;
-    }
-
-    const serialTarget = serialTargets[serialTargetIndex];
-    if (serialTarget) {
-      serialTargetIndex += 1;
-      yield { target: serialTarget, prefetchedPublicApiResult: null };
       continue;
     }
 
@@ -1120,6 +1160,10 @@ async function collectTargetJobs(input: {
   sessionOpenings: Map<JobSource, Promise<void>>;
   protectedPages: Map<string, ParkedBrowserTabReference>;
   useAgentRuntime: boolean;
+  /** How long the agent may spend on this source. */
+  timeBudgetMs: number;
+  /** Caps agent runs across the search's lanes. */
+  agentSlots?: { run<T>(operation: () => Promise<T>): Promise<T> };
   prefetchedPublicApiResult?: Promise<SettledPublicProviderJobsResult>;
 }): Promise<{
   result: DiscoveryRunResult;
@@ -1219,7 +1263,8 @@ async function collectTargetJobs(input: {
           warning: apiResult.warning,
           inventoryCompleteness:
             apiResult.warning === null ? "complete" : "partial",
-          jobs: apiResult.jobs.map((posting) =>
+          // A feed of hundreds of jobs is normalized a slice per turn.
+          jobs: await mapInTurns(apiResult.jobs, (posting) =>
             toProviderAwarePosting({
               posting,
               target,
@@ -1295,93 +1340,100 @@ async function collectTargetJobs(input: {
     const resumeCheckpoint = input.activeRun.targetExecutions.find(
       (execution) => execution.targetId === target.id,
     )?.agentCheckpoint;
-    const result = await ctx.browserRuntime.runAgentDiscovery(adapterKind, {
-      // Each source searches in its own tab so several can run at once.
-      dedicatedPage: true,
-      ...(sourceCatalog
-        ? { sourceCatalog, sourceCatalogComplete: catalogWarning === null }
-        : {}),
-      retainAllFound: input.retainAllFound,
-      userProfile: input.profile,
-      searchPreferences: {
-        targetRoles:
-          input.searchPreferences.targetRoles.length > 0
-            ? input.searchPreferences.targetRoles
-            : [DEFAULT_ROLE],
-        locations: input.searchPreferences.locations,
-        workModes: input.searchPreferences.workModes,
-      },
-      searchMode: input.searchMode,
-      ...(input.searchRequest ? { searchRequest: input.searchRequest } : {}),
-      searchGuidance: input.searchGuidance,
-      targetJobCount: input.targetJobCount,
-      maxSteps: input.maxSteps,
-      runControl: {
-        timeBudgetMs: MAX_DISCOVERY_TARGET_TIME_BUDGET_MS,
-        // Steps without a new job before the agent is told it is stalling;
-        // the same window again with nothing new ends the source.
-        noProgressStepLimit: DISCOVERY_STALL_STEP_WINDOW,
-      },
-      ...(resumeCheckpoint ? { resumeCheckpoint } : {}),
-      onCheckpoint: (checkpoint) =>
-        input.onAgentCheckpoint(target.id, checkpoint),
-      startingUrls,
-      protectedPages: [...input.protectedPages.values()],
-      siteLabel: target.label,
-      navigationHostnames: targetUrl ? [targetUrl.hostname] : [],
-      siteInstructions: [...adapter.siteInstructions, ...instructionLines],
-      toolUsageNotes: adapter.toolUsageNotes,
-      relevantUrlSubstrings: adapter.relevantUrlSubstrings,
-      aiClient: ctx.aiClient,
-      ...(input.signal ? { signal: input.signal } : {}),
-      onWaitingForBrowserTab: () => {
-        input.emitActivity(
-          createDiscoveryEvent({
-            runId: input.activeRun.id,
-            timestamp: new Date().toISOString(),
-            kind: "progress",
-            stage: "navigation",
-            targetId: target.id,
-            adapterKind: target.adapterKind,
-            message: `${target.label}: browser tab limit reached. Waiting for a free tab; close finished tabs to continue.`,
-            url: null,
-            jobsFound: null,
-            jobsPersisted: input.activeRun.summary.jobsPersisted,
-            jobsStaged: input.activeRun.summary.jobsStaged,
-            duplicatesMerged: input.activeRun.summary.duplicatesMerged,
-            invalidSkipped: input.activeRun.summary.invalidSkipped,
-          }),
-        );
-      },
-      onProgress: (progress) => {
-        const summary = summarizeProgressAction(
-          progress,
-          target.label,
-          progress.jobsFound,
-        );
-        input.emitActivity(
-          createDiscoveryEvent({
-            runId: input.activeRun.id,
-            timestamp: new Date().toISOString(),
-            kind: "progress",
-            stage: summary.stage,
-            waitReason: summary.waitReason,
-            targetId: target.id,
-            adapterKind: target.adapterKind,
-            resolvedAdapterKind: adapterKind,
-            collectionMethod,
-            sourceIntelligenceProvider,
-            message: summary.message,
-            url: progress.currentUrl,
-            jobsFound: progress.jobsFound,
-            jobsPersisted: input.activeRun.summary.jobsPersisted,
-            jobsStaged: input.activeRun.summary.jobsStaged,
-            duplicatesMerged: input.activeRun.summary.duplicatesMerged,
-            invalidSkipped: input.activeRun.summary.invalidSkipped,
-          }),
-        );
-      },
-    });
+    const runAgentDiscovery = ctx.browserRuntime.runAgentDiscovery.bind(
+      ctx.browserRuntime,
+    );
+    const agentRun = () =>
+      runAgentDiscovery(adapterKind, {
+        // Each source searches in its own tab so several can run at once.
+        dedicatedPage: true,
+        ...(sourceCatalog
+          ? { sourceCatalog, sourceCatalogComplete: catalogWarning === null }
+          : {}),
+        retainAllFound: input.retainAllFound,
+        userProfile: input.profile,
+        searchPreferences: {
+          targetRoles:
+            input.searchPreferences.targetRoles.length > 0
+              ? input.searchPreferences.targetRoles
+              : [DEFAULT_ROLE],
+          locations: input.searchPreferences.locations,
+          workModes: input.searchPreferences.workModes,
+        },
+        searchMode: input.searchMode,
+        ...(input.searchRequest ? { searchRequest: input.searchRequest } : {}),
+        searchGuidance: input.searchGuidance,
+        targetJobCount: input.targetJobCount,
+        maxSteps: input.maxSteps,
+        runControl: {
+          timeBudgetMs: input.timeBudgetMs,
+          // Steps without a new job before the agent is told it is stalling;
+          // the same window again with nothing new ends the source.
+          noProgressStepLimit: DISCOVERY_STALL_STEP_WINDOW,
+        },
+        ...(resumeCheckpoint ? { resumeCheckpoint } : {}),
+        onCheckpoint: (checkpoint) =>
+          input.onAgentCheckpoint(target.id, checkpoint),
+        startingUrls,
+        protectedPages: [...input.protectedPages.values()],
+        siteLabel: target.label,
+        navigationHostnames: targetUrl ? [targetUrl.hostname] : [],
+        siteInstructions: [...adapter.siteInstructions, ...instructionLines],
+        toolUsageNotes: adapter.toolUsageNotes,
+        relevantUrlSubstrings: adapter.relevantUrlSubstrings,
+        aiClient: ctx.aiClient,
+        ...(input.signal ? { signal: input.signal } : {}),
+        onWaitingForBrowserTab: () => {
+          input.emitActivity(
+            createDiscoveryEvent({
+              runId: input.activeRun.id,
+              timestamp: new Date().toISOString(),
+              kind: "progress",
+              stage: "navigation",
+              targetId: target.id,
+              adapterKind: target.adapterKind,
+              message: `${target.label}: browser tab limit reached. Waiting for a free tab; close finished tabs to continue.`,
+              url: null,
+              jobsFound: null,
+              jobsPersisted: input.activeRun.summary.jobsPersisted,
+              jobsStaged: input.activeRun.summary.jobsStaged,
+              duplicatesMerged: input.activeRun.summary.duplicatesMerged,
+              invalidSkipped: input.activeRun.summary.invalidSkipped,
+            }),
+          );
+        },
+        onProgress: (progress) => {
+          const summary = summarizeProgressAction(
+            progress,
+            target.label,
+            progress.jobsFound,
+          );
+          input.emitActivity(
+            createDiscoveryEvent({
+              runId: input.activeRun.id,
+              timestamp: new Date().toISOString(),
+              kind: "progress",
+              stage: summary.stage,
+              waitReason: summary.waitReason,
+              targetId: target.id,
+              adapterKind: target.adapterKind,
+              resolvedAdapterKind: adapterKind,
+              collectionMethod,
+              sourceIntelligenceProvider,
+              message: summary.message,
+              url: progress.currentUrl,
+              jobsFound: progress.jobsFound,
+              jobsPersisted: input.activeRun.summary.jobsPersisted,
+              jobsStaged: input.activeRun.summary.jobsStaged,
+              duplicatesMerged: input.activeRun.summary.duplicatesMerged,
+              invalidSkipped: input.activeRun.summary.invalidSkipped,
+            }),
+          );
+        },
+      });
+    const result = await (input.agentSlots
+      ? input.agentSlots.run(agentRun)
+      : agentRun());
 
     return {
       result: {
@@ -1691,13 +1743,19 @@ export function createWorkspaceDiscoveryMethods(
     // Revalidate the local inventory before consulting the discovery ledger.
     // Exact scorer, profile/preference, and posting fingerprints reuse a
     // persisted assessment; any relevant change misses safely and recomputes.
-    let workingSavedJobs = startingSavedJobs.map((job) => ({
-      ...job,
-      matchAssessment: assessmentSession.assessPersisted(
-        job,
-        readPlanAssessment(job, assessmentPlanId).matchAssessment,
-      ),
-    }));
+    // Thousands of saved jobs are checked a slice per turn: in one go the
+    // search's first seconds froze the window.
+    let workingSavedJobs = await mapInTurns(
+      startingSavedJobs,
+      (job) => ({
+        ...job,
+        matchAssessment: assessmentSession.assessPersisted(
+          job,
+          readPlanAssessment(job, assessmentPlanId).matchAssessment,
+        ),
+      }),
+      SETUP_JOBS_PER_TURN,
+    );
     let workingPendingJobs = startingDiscovery.pendingDiscoveryJobs.map(
       (job) => ({
         ...job,
@@ -1707,18 +1765,85 @@ export function createWorkspaceDiscoveryMethods(
         ),
       }),
     );
-    let workingLedger: DiscoveryLedgerEntry[] = [
-      ...startingDiscovery.discoveryLedger,
-    ];
+    const runLedger = createRunDiscoveryLedger(
+      startingDiscovery.discoveryLedger,
+    );
+    // Each enriched posting's form as it arrived from the source.
+    const postingAsArrived = new WeakMap<JobPosting, JobPosting>();
+    // The feed screen's verdicts this run, by listing address; each lands on
+    // the listing's ledger entry when the source records it.
+    const screenRecords = new Map<string, ListingScreenRecord>();
+    // Kept jobs the screen put away, or brought back after the goals changed.
+    const jobsPutAwayByScreen = new Set<string>();
+    const jobsBroughtBackByScreen = new Set<string>();
+    const recordSighting = (
+      sighting: Parameters<typeof runLedger.record>[0],
+    ) => {
+      const listingScreen = screenRecords.get(
+        normalizeJobIdentityUrl(sighting.posting.canonicalUrl),
+      );
+      return runLedger.record(
+        listingScreen ? { ...sighting, listingScreen } : sighting,
+      );
+    };
+    // One identity index for the whole run, brought in step with whichever
+    // working list a step reads. Working rows are replaced, never edited.
+    const jobIdentity = createSyncedJobIdentityIndex<SavedJob>(
+      toSightingIdentityInput,
+    );
+    const indexOver = (jobs: readonly SavedJob[]) => jobIdentity.sync(jobs);
+    let allJobsMemo: {
+      saved: readonly SavedJob[];
+      pending: readonly SavedJob[];
+      merged: SavedJob[];
+    } | null = null;
+    // Saved and staged jobs together; the same array until either changes.
+    const allJobs = (): readonly SavedJob[] => {
+      if (workingPendingJobs.length === 0) return workingSavedJobs;
+      if (
+        allJobsMemo?.saved !== workingSavedJobs ||
+        allJobsMemo.pending !== workingPendingJobs
+      ) {
+        allJobsMemo = {
+          saved: workingSavedJobs,
+          pending: workingPendingJobs,
+          merged: mergeSavedJobs(workingSavedJobs, workingPendingJobs),
+        };
+      }
+      return allJobsMemo.merged;
+    };
+    let allJobsByIdMemo: {
+      jobs: readonly SavedJob[];
+      byId: ReadonlyMap<string, SavedJob>;
+    } | null = null;
+    const allJobsById = (): ReadonlyMap<string, SavedJob> => {
+      const jobs = allJobs();
+      if (allJobsByIdMemo?.jobs !== jobs) {
+        allJobsByIdMemo = {
+          jobs,
+          byId: new Map(jobs.map((job) => [job.id, job])),
+        };
+      }
+      return allJobsByIdMemo.byId;
+    };
+    // Saved jobs are indexed as themselves, so their identity aliases are
+    // built once and shared with the run's job index; postings inspected
+    // later are added as they come.
     const inspectionIdentityIndex = createJobIdentityIndex<
       JobPosting & { id: string; alternateListingUrls?: string[] }
-    >(
-      [
-        ...startingSavedJobs.map(toSightingIdentityInput),
-        ...startingDiscovery.pendingDiscoveryJobs.map(toSightingIdentityInput),
-      ],
-      (job) => ({ ...job, matchAcrossSources: true }),
+    >([], (value) =>
+      Array.isArray((value as Partial<SavedJob>).provenance)
+        ? toSightingIdentityInput(value as SavedJob)
+        : { ...value, matchAcrossSources: true },
     );
+    for (const [position, job] of [
+      ...startingSavedJobs,
+      ...startingDiscovery.pendingDiscoveryJobs,
+    ].entries()) {
+      if (position > 0 && position % SETUP_JOBS_PER_TURN === 0)
+        await yieldToEventLoop();
+      inspectionIdentityIndex.add(job);
+    }
     const touchedSavedJobIds = new Set<string>();
     // Every posting this run retained (new or re-seen), by saved-job id: the
     // population the listing-detail read stage is allowed to touch.
@@ -1780,6 +1905,12 @@ export function createWorkspaceDiscoveryMethods(
       merge: applySavedJobDelta,
       commit: (input) => ctx.repository.commitSavedJobDelta(input),
       persistDiscovery: (update) => ctx.persistDiscoveryState(update),
+      // A search of many sources saves several times a second; those saves
+      // share a transaction. A small search saves each one at once.
+      coalesceMs:
+        selectedTargets.length >= DISCOVERY_SAVE_COALESCE_MIN_SOURCES
+          ? DISCOVERY_SAVE_COALESCE_MS
+          : 0,
     });
     const touchSavedJob = (job: SavedJob): SavedJob => {
       touchedSavedJobIds.add(job.id);
@@ -1792,6 +1923,26 @@ export function createWorkspaceDiscoveryMethods(
       if (touchedSavedJobIds.has(job.id)) savedJobWriter.stage(job);
     }
     const persistWorkingSavedJobs = savedJobWriter.persist;
+    // Approved resumes whose job details a source changed. Marking them reads
+    // every resume draft (a few hundred ms on a big workspace), so it runs
+    // every couple of minutes and once when the search ends, not per source.
+    const resumeStaleJobIds = new Set<string>();
+    let resumeStalenessFlushedAt = Date.now();
+    const flushResumeStaleness = async (force: boolean): Promise<void> => {
+      if (settings.discoveryOnly || resumeStaleJobIds.size === 0) return;
+      if (
+        !force &&
+        Date.now() - resumeStalenessFlushedAt < RESUME_STALENESS_FLUSH_MS
+      )
+        return;
+      const jobIds = [...resumeStaleJobIds];
+      resumeStaleJobIds.clear();
+      resumeStalenessFlushedAt = Date.now();
+      await ctx.staleApprovedResumeDrafts(
+        "Saved job details changed after approval and the resume needs a fresh review.",
+        jobIds,
+      );
+    };
     const attachedPlanJobIds = new Set(planJobIds);
     const openedSessionSources = new Set<JobSource>();
     const sessionOpenings = new Map<JobSource, Promise<void>>();
@@ -1922,10 +2073,10 @@ export function createWorkspaceDiscoveryMethods(
     });
     const captureWorkingDiscoveryUpdate = () => {
       const run = captureRunForCommit();
-      const ledger = workingLedger;
+      const ledger = runLedger.entries();
       const pendingJobs = workingPendingJobs;
       const pendingIds = new Set(touchedPendingJobIds);
-      return (current: JobFinderDiscoveryState): JobFinderDiscoveryState =>
+      return markSupersedingDiscoveryUpdate((current) =>
         finalizeDiscoveryState(
           {
             ...current,
@@ -1943,7 +2094,8 @@ export function createWorkspaceDiscoveryMethods(
           },
           run,
           enrichedPreferences,
-        );
+        ),
+      );
     };
 
     const recordActivity = (event: DiscoveryActivityEvent) => {
@@ -2008,12 +2160,7 @@ export function createWorkspaceDiscoveryMethods(
     const judgeSearchFitBatch = async (
       jobIds: readonly string[],
     ): Promise<void> => {
-      const byId = new Map(
-        mergeSavedJobs(workingSavedJobs, workingPendingJobs).map((job) => [
-          job.id,
-          job,
-        ]),
-      );
+      const byId = allJobsById();
       const jobs = jobIds.flatMap((jobId) => {
         const job = byId.get(jobId);
         return job && needsSearchFit(job)
@@ -2080,12 +2227,7 @@ export function createWorkspaceDiscoveryMethods(
         (jobId) => !searchFitConsidered.has(jobId),
       );
       if (fresh.length === 0) return;
-      const byId = new Map(
-        mergeSavedJobs(workingSavedJobs, workingPendingJobs).map((job) => [
-          job.id,
-          job,
-        ]),
-      );
+      const byId = allJobsById();
       const toJudge: string[] = [];
       for (const jobId of fresh) {
         const job = byId.get(jobId);
@@ -2138,7 +2280,7 @@ export function createWorkspaceDiscoveryMethods(
         ),
         discoveryLedger: rebaseRunLedgerOntoPersisted({
           baselineLedger,
-          workingLedger,
+          workingLedger: runLedger.entries(),
           persistedLedger: current.discoveryLedger,
         }),
       }))
@@ -2155,23 +2297,181 @@ export function createWorkspaceDiscoveryMethods(
     // Every selected source enters the collection set. Sampling and retained
     // result limits are separate, so a request for fewer jobs than sources
     // still checks every selected source.
-    const publicApiTargetIds = new Set<string>();
+    const apiTargets: JobDiscoveryTarget[] = [];
+    const browserTargets: JobDiscoveryTarget[] = [];
     for (const target of targets) {
       const artifact = resolveActiveSourceInstructionArtifact(
         target,
         sourceInstructionArtifacts,
       );
-      if (selectDiscoveryCollectionMethod(target, artifact) !== "api") {
-        continue;
-      }
-      publicApiTargetIds.add(target.id);
+      if (selectDiscoveryCollectionMethod(target, artifact) === "api")
+        apiTargets.push(target);
+      else browserTargets.push(target);
     }
+    // Agent runs (browser sources, and API catalogs the agent reviews for a
+    // plain-language request) share one cap, whichever lane starts them.
+    const agentSlots = createConcurrencyLimiter(DISCOVERY_SOURCE_CONCURRENCY);
+    // Feed downloads run a few at a time; feeds waiting on the screen below
+    // do not hold a download slot.
+    const feedDownloads = createConcurrencyLimiter(
+      PUBLIC_API_DOWNLOAD_CONCURRENCY,
+    );
+
+    // The model screens each feed's new listings by title, place and work
+    // mode before the search keeps them (ADR 0024, ADR 0041, amended
+    // 2026-10-21). A feed the agent reviews for a plain-language request is
+    // chosen by the agent instead.
+    const feedsGoToAgent =
+      (options.useAgentRuntime ?? false) &&
+      ctx.browserRuntime.runAgentDiscovery !== undefined &&
+      Boolean(
+        options.searchRequest?.intent.trim() ||
+        options.searchRequest?.freshness === "recent",
+      );
+    const screenContext = buildListingScreenContext({
+      searchPreferences: enrichedPreferences,
+      selectivity:
+        options.searchRequest?.breadth === "wide"
+          ? "wide_net"
+          : options.searchRequest?.breadth === "best_only"
+            ? "best_matches"
+            : searchGuidance.selectivity,
+      request: options.searchRequest?.intent,
+    });
+    const screenBatcher = ctx.aiClient.chatWithTools
+      ? createListingScreenBatcher({
+          screen: (listings) =>
+            screenListingsWithModel({
+              aiClient: ctx.aiClient,
+              context: screenContext,
+              listings,
+              signal: executionSignal,
+            }),
+        })
+      : null;
+    const rejectedByScreen = (
+      posting: JobPosting,
+      record: ListingScreenRecord,
+    ): JobPosting => ({
+      ...posting,
+      searchRejection: {
+        category: record.category ?? "role",
+        reason: record.reason ?? "Not the kind of job this search is for.",
+      },
+    });
+    const screenFeed = async (
+      result: PublicProviderJobsResult,
+    ): Promise<PublicProviderJobsResult> => {
+      if (feedsGoToAgent || result.jobs.length === 0) return result;
+      const jobs = [...result.jobs];
+      const jobIndex = indexOver(allJobs());
+      const undecided: Array<{
+        position: number;
+        listing: ListingScreenListing;
+        key: string;
+        urlKey: string;
+        retained: SavedJob | null;
+      }> = [];
+      for (const [position, posting] of jobs.entries()) {
+        if (position > 0 && position % SCREEN_LOOKUPS_PER_TURN === 0) {
+          await yieldToEventLoop();
+          executionSignal.throwIfAborted();
+        }
+        const listing: ListingScreenListing = {
+          title: posting.title,
+          company: posting.company,
+          location: posting.location,
+          workMode: posting.workMode,
+          department: posting.department,
+          team: posting.team,
+        };
+        const key = listingScreenKey(screenContext, listing);
+        const urlKey = normalizeJobIdentityUrl(posting.canonicalUrl);
+        const entry = runLedger.find(posting);
+        const remembered = entry?.listingScreen ?? null;
+        const retained = jobIndex.find({
+          ...posting,
+          matchAcrossSources: true,
+        });
+        if (retained) {
+          // A kept job is screened only when it was kept unscreened and
+          // nobody has touched it since, or the screen put it away under
+          // goals that have changed.
+          const untouched =
+            retained.status === "discovered" &&
+            !retained.discoveryFeedback &&
+            !retained.personSupplied;
+          const putAwayByScreen =
+            retained.status === "archived" &&
+            !retained.discoveryFeedback &&
+            remembered?.verdict === "reject";
+          if (
+            (remembered?.verdict === "pending" && untouched) ||
+            (putAwayByScreen && remembered?.key !== key)
+          )
+            undecided.push({ position, listing, key, urlKey, retained });
+          continue;
+        }
+        // The person already skipped or applied to it.
+        if (
+          entry?.latestStatus === "skipped" ||
+          entry?.latestStatus === "applied"
+        )
+          continue;
+        if (
+          remembered &&
+          remembered.key === key &&
+          remembered.verdict !== "pending"
+        ) {
+          screenRecords.set(urlKey, remembered);
+          if (remembered.verdict === "reject")
+            jobs[position] = rejectedByScreen(posting, remembered);
+          continue;
+        }
+        undecided.push({ position, listing, key, urlKey, retained: null });
+      }
+      if (undecided.length === 0) return { ...result, jobs };
+      const verdicts = screenBatcher
+        ? await screenBatcher.screen(undecided.map((item) => item.listing))
+        : undecided.map(() => null);
+      undecided.forEach((item, index) => {
+        const verdict = verdicts[index];
+        // Not screened (the AI was busy or away): kept as it is, and
+        // screened by the next search.
+        if (!verdict) {
+          screenRecords.set(item.urlKey, {
+            key: null,
+            verdict: "pending",
+            category: null,
+            reason: null,
+          });
+          return;
+        }
+        const record: ListingScreenRecord = verdict.keep
+          ? { key: item.key, verdict: "keep", category: null, reason: null }
+          : {
+              key: item.key,
+              verdict: "reject",
+              category: verdict.category,
+              reason: verdict.reason,
+            };
+        screenRecords.set(item.urlKey, record);
+        const posting = jobs[item.position];
+        if (!verdict.keep && posting)
+          jobs[item.position] = rejectedByScreen(posting, record);
+        if (item.retained) {
+          if (!verdict.keep) jobsPutAwayByScreen.add(item.retained.id);
+          else if (item.retained.status === "archived")
+            jobsBroughtBackByScreen.add(item.retained.id);
+        }
+      });
+      return { ...result, jobs };
+    };
 
     try {
       let executionIndex = 0;
-      const readyTargets = iterateDiscoveryTargetsByReadiness({
-        targets,
-        publicApiTargetIds,
+      const readyApiTargets = iteratePublicApiTargetsByReadiness({
+        targets: apiTargets,
         createPublicApiRequest: (target) => {
           const artifact = resolveActiveSourceInstructionArtifact(
             target,
@@ -2181,21 +2481,26 @@ export function createWorkspaceDiscoveryMethods(
             target,
             currentArtifact: artifact,
           });
-          return collectPublicProviderJobs({
-            target,
-            artifact: { intelligence },
-            source: resolveAdapterKind(target),
-            signal: executionSignal,
-          }).then(
-            (result): SettledPublicProviderJobsResult => ({
-              result,
-              error: null,
-            }),
-            (error: unknown): SettledPublicProviderJobsResult => ({
-              result: null,
-              error,
-            }),
-          );
+          return feedDownloads
+            .run(() =>
+              collectPublicProviderJobs({
+                target,
+                artifact: { intelligence },
+                source: resolveAdapterKind(target),
+                signal: executionSignal,
+              }),
+            )
+            .then(screenFeed)
+            .then(
+              (result): SettledPublicProviderJobsResult => ({
+                result,
+                error: null,
+              }),
+              (error: unknown): SettledPublicProviderJobsResult => ({
+                result: null,
+                error,
+              }),
+            );
         },
         signal: executionSignal,
       })[Symbol.asyncIterator]();
@@ -2289,7 +2594,8 @@ export function createWorkspaceDiscoveryMethods(
         // A failed incremental attempt rolls back to the pre-attempt state and
         // falls back to end-of-source persistence instead of failing the run;
         // AbortError still propagates so cancellation stays immediate.
-        const targetBaselineLedger = [...workingLedger];
+        const targetBaselineLedger = runLedger.entries();
+        const targetBaselineLedgerVersion = runLedger.version;
         // Processed identity keys carry the listing-fingerprint composites of
         // every raw variant already processed for that identity (one identity
         // may legitimately appear with several card/title variants inside one
@@ -2381,11 +2687,9 @@ export function createWorkspaceDiscoveryMethods(
         ): {
           keptPostings: JobPosting[];
           keptUpgradePostings: JobPosting[];
-          knownJobIndex: ReturnType<typeof createDiscoveryLedgerIndex>;
           skippedByLedger: number;
           skippedByTitleTriage: number;
         } => {
-          const knownJobIndex = createDiscoveryLedgerIndex(workingLedger);
           const keptPostings: JobPosting[] = [];
           // Re-observations of identities already processed by an earlier
           // phase whose content changed (richer re-extractions), plus
@@ -2398,11 +2702,8 @@ export function createWorkspaceDiscoveryMethods(
           // staged pending jobs alongside saved jobs in discovery-only mode.
           // Re-observing them can never produce a new distinct job, so they
           // must never compete with fresh candidates for budget.
-          const retainedJobIndex = createJobIdentityIndex(
-            settings.discoveryOnly
-              ? [...workingSavedJobs, ...workingPendingJobs]
-              : workingSavedJobs,
-            toSightingIdentityInput,
+          const retainedJobIndex = indexOver(
+            settings.discoveryOnly ? allJobs() : workingSavedJobs,
           );
           // Repeat identities inside one pass must keep flowing through
           // triage/budget/merge so duplicate merges stay counted exactly like
@@ -2479,9 +2780,7 @@ export function createWorkspaceDiscoveryMethods(
                   reason: triageReason,
                 });
               }
-              workingLedger = recordDiscoveredPostingInLedger({
-                ledger: workingLedger,
-                index: knownJobIndex,
+              recordSighting({
                 posting: triagedPosting,
                 targetId: target.id,
                 seenAt: triagedPosting.discoveredAt,
@@ -2491,7 +2790,7 @@ export function createWorkspaceDiscoveryMethods(
               continue;
             }
 
-            const ledgerEntry = knownJobIndex.find(triagedPosting);
+            const ledgerEntry = runLedger.find(triagedPosting);
             const refreshDecision = createDiscoveryRefreshDecision({
               ledgerEntry,
               posting: triagedPosting,
@@ -2511,9 +2810,7 @@ export function createWorkspaceDiscoveryMethods(
             if (canReuseKnownPosting) {
               sourceCounts.duplicates += 1;
               phaseSkippedByLedger += 1;
-              workingLedger = recordDiscoveredPostingInLedger({
-                ledger: workingLedger,
-                index: knownJobIndex,
+              recordSighting({
                 posting: JobPostingSchema.parse({
                   ...triagedPosting,
                   titleTriageOutcome: ledgerDecision.outcome,
@@ -2526,9 +2823,7 @@ export function createWorkspaceDiscoveryMethods(
               continue;
             }
 
-            workingLedger = recordDiscoveredPostingInLedger({
-              ledger: workingLedger,
-              index: knownJobIndex,
+            recordSighting({
               posting: triagedPosting,
               targetId: target.id,
               seenAt: triagedPosting.discoveredAt,
@@ -2540,6 +2835,7 @@ export function createWorkspaceDiscoveryMethods(
               triagedPosting,
               undefined,
             );
+            postingAsArrived.set(enrichedKept, triagedPosting);
             if (isEarlierPhaseIdentity || retainedJob) {
               // A retained identity with changed content (a richer
               // re-extraction or a provider update) merges over its existing
@@ -2557,7 +2853,6 @@ export function createWorkspaceDiscoveryMethods(
           return {
             keptPostings,
             keptUpgradePostings,
-            knownJobIndex,
             skippedByLedger: phaseSkippedByLedger,
             skippedByTitleTriage: phaseSkippedByTitleTriage,
           };
@@ -2566,7 +2861,6 @@ export function createWorkspaceDiscoveryMethods(
         const mergeAndAccountPostings = (
           newCandidates: readonly JobPosting[],
           upgradeCandidates: readonly JobPosting[],
-          knownJobIndex: ReturnType<typeof createDiscoveryLedgerIndex>,
         ): {
           budgetedPostings: JobPosting[];
           mergeResult: ReturnType<typeof mergeDiscoveredPostings>;
@@ -2609,12 +2903,9 @@ export function createWorkspaceDiscoveryMethods(
           ];
 
           const mergeSeedJobs = settings.discoveryOnly
-            ? mergeSavedJobs(workingSavedJobs, workingPendingJobs)
+            ? allJobs()
             : workingSavedJobs;
-          const mergeIdentityIndex = createJobIdentityIndex(
-            mergeSeedJobs,
-            toSightingIdentityInput,
-          );
+          const mergeIdentityIndex = indexOver(mergeSeedJobs);
           const batchSavedJobIds = new Set<string>();
           const batchSavedJobs = new Map<string, SavedJob>();
           for (const posting of budgetedPostings) {
@@ -2662,11 +2953,9 @@ export function createWorkspaceDiscoveryMethods(
             executionSignal,
             assessDiscoveryPosting,
             batchSavedJobIds,
+            { identityIndex: mergeIdentityIndex, recordRankOnlyAudits: false },
           );
-          const landedIndex = createJobIdentityIndex(
-            mergeResult.mergedJobs,
-            toSightingIdentityInput,
-          );
+          const landedIndex = indexOver(mergeResult.mergedJobs);
           const landed = landedJobIdsFor(target.id);
           const landedJobs = new Map<string, SavedJob>();
           for (const posting of budgetedPostings) {
@@ -2718,10 +3007,13 @@ export function createWorkspaceDiscoveryMethods(
           }
 
           for (const posting of budgetedPostings) {
-            workingLedger = recordDiscoveredPostingInLedger({
-              ledger: workingLedger,
-              index: knownJobIndex,
-              posting,
+            recordSighting({
+              // The ledger fingerprints a listing as it arrives, which is what
+              // the next sighting is compared with. Fingerprinting the
+              // enriched copy (screening hints, keyword signals) made every
+              // kept job read as "changed" when seen again, so each search
+              // merged and rewrote every kept job of every board it read.
+              posting: postingAsArrived.get(posting) ?? posting,
               targetId: resolvePostingProducingTarget(
                 posting,
                 target,
@@ -2927,10 +3219,7 @@ export function createWorkspaceDiscoveryMethods(
               ...entry.encounteredJobIds,
               ...landedJobIdsFor(target.id),
               ...(() => {
-                const index = createJobIdentityIndex(
-                  mergeSavedJobs(workingSavedJobs, workingPendingJobs),
-                  toSightingIdentityInput,
-                );
+                const index = indexOver(allJobs());
                 return checkpoint.collectedJobs.flatMap((posting) => {
                   const stored = index.find({
                     ...posting,
@@ -2991,7 +3280,7 @@ export function createWorkspaceDiscoveryMethods(
           const stateBeforeAttempt = {
             workingSavedJobs,
             workingPendingJobs,
-            workingLedger,
+            ledgerEntries: runLedger.entries(),
             activeRun,
           };
           const totalsBeforeAttempt = {
@@ -3031,7 +3320,6 @@ export function createWorkspaceDiscoveryMethods(
               mergeAndAccountPostings(
                 triageOutcome.keptPostings,
                 triageOutcome.keptUpgradePostings,
-                triageOutcome.knownJobIndex,
               );
 
             // validJobsFound counts only distinct additions retained by this
@@ -3141,7 +3429,7 @@ export function createWorkspaceDiscoveryMethods(
               workingSavedJobs.filter((job) => touchedSavedJobIds.has(job.id)),
             );
             workingPendingJobs = stateBeforeAttempt.workingPendingJobs;
-            workingLedger = stateBeforeAttempt.workingLedger;
+            runLedger.restore(stateBeforeAttempt.ledgerEntries);
             activeRun = stateBeforeAttempt.activeRun;
 
             emitActivity(
@@ -3209,6 +3497,11 @@ export function createWorkspaceDiscoveryMethods(
             sessionOpenings,
             protectedPages,
             useAgentRuntime: options.useAgentRuntime ?? false,
+            timeBudgetMs:
+              targets.length > 1
+                ? MULTI_SOURCE_TARGET_TIME_BUDGET_MS
+                : MAX_DISCOVERY_TARGET_TIME_BUDGET_MS,
+            agentSlots,
             ...(prefetchedPublicApiResult ? { prefetchedPublicApiResult } : {}),
           });
         } catch (error) {
@@ -3280,21 +3573,26 @@ export function createWorkspaceDiscoveryMethods(
         // this target started processing (checkpoint flushes included), so a
         // job kept mid-run still classifies exactly once against the same
         // pre-target baseline.
-        const freshnessDigest = createDiscoveryFreshnessDigest({
+        const freshnessDigest = await createDiscoveryFreshnessDigestInTurns({
           ledger: targetBaselineLedger,
           postings: collectedJobs,
+          // Nothing recorded since this source started: the run's index is
+          // the baseline's index.
+          ...(runLedger.version === targetBaselineLedgerVersion
+            ? { index: runLedger.index() }
+            : {}),
+          perTurn: FINAL_PASS_POSTINGS_PER_TURN,
         });
         const freshnessSummary =
           formatDiscoveryFreshnessDigest(freshnessDigest);
         // Re-seen postings never reach the merge (their content is unchanged),
         // but a card the last search left unread is still a card: it is in
         // this run's retained population for the listing-detail read.
-        const collectedIdentityIndex = createJobIdentityIndex(
-          mergeSavedJobs(workingSavedJobs, workingPendingJobs),
-          toSightingIdentityInput,
-        );
+        const collectedIdentityIndex = indexOver(allJobs());
         const collectedStoredIds: string[] = [];
-        for (const posting of collectedJobs) {
+        for (const [position, posting] of collectedJobs.entries()) {
+          if (position > 0 && position % FINAL_PASS_POSTINGS_PER_TURN === 0)
+            await yieldToEventLoop();
           const stored = collectedIdentityIndex.find({
             ...posting,
             matchAcrossSources: true,
@@ -3374,25 +3672,88 @@ export function createWorkspaceDiscoveryMethods(
         // covers only the remainder (plus any posting whose content was
         // materially upgraded after it was first processed) so no job is
         // merged, ledger-recorded, or counted twice.
-        const remainingRawPostings = collectedJobs.filter(
-          isUnprocessedOrMateriallyChangedPosting,
-        );
+        const remainingRawPostings = (
+          await mapInTurns(collectedJobs, (posting) =>
+            isUnprocessedOrMateriallyChangedPosting(posting) ? posting : null,
+          )
+        ).filter((posting): posting is JobPosting => posting !== null);
         await judgeBeforeKeeping(remainingRawPostings);
-        const triageOutcome =
-          runTriageAndLedgerForPostings(remainingRawPostings);
-        const knownJobIndex = triageOutcome.knownJobIndex;
-        const triagedPostings = [...triageOutcome.keptPostings];
-
-        // No low-yield rescue: a job the triage skipped stays skipped. Under
-        // Best matches only the person asked for exactly that drop, and in the
-        // other two modes the triage skips only blocked companies and excluded
-        // places.
-        const { budgetedPostings, mergeResult, jobsPersisted, jobsStaged } =
-          mergeAndAccountPostings(
-            triagedPostings,
-            triageOutcome.keptUpgradePostings,
-            knownJobIndex,
+        if (jobsPutAwayByScreen.size > 0 || jobsBroughtBackByScreen.size > 0) {
+          // A job kept unscreened earlier that the screen now rejects is put
+          // away like a hidden job; one it put away under goals that have
+          // since changed comes back.
+          workingSavedJobs = workingSavedJobs.map((job) => {
+            if (job.discoveryFeedback) return job;
+            const status =
+              jobsPutAwayByScreen.has(job.id) && job.status === "discovered"
+                ? "archived"
+                : jobsBroughtBackByScreen.has(job.id) &&
+                    job.status === "archived"
+                  ? "discovered"
+                  : null;
+            return status
+              ? touchSavedJob(SavedJobSchema.parse({ ...job, status }))
+              : job;
+          });
+          jobsPutAwayByScreen.clear();
+          jobsBroughtBackByScreen.clear();
+        }
+        // A board of hundreds of new jobs is triaged and merged a slice at a
+        // time, with a turn of the event loop between slices: in one go it
+        // held the main process for seconds, and the provider downloads
+        // running beside it timed out. A result limit chooses among all of
+        // a source's jobs at once, so a limited search keeps one slice.
+        const finalPassSliceSize =
+          runJobBudget == null
+            ? FINAL_PASS_POSTINGS_PER_TURN
+            : Math.max(1, remainingRawPostings.length);
+        const triageOutcome = { skippedByLedger: 0, skippedByTitleTriage: 0 };
+        const triagedPostings: JobPosting[] = [];
+        const budgetedPostings: JobPosting[] = [];
+        const mergeResult = {
+          validatedCount: 0,
+          duplicatesMerged: 0,
+          invalidSkipped: 0,
+        };
+        let jobsPersisted = 0;
+        let jobsStaged = 0;
+        for (
+          let sliceStart = 0;
+          sliceStart === 0 || sliceStart < remainingRawPostings.length;
+          sliceStart += finalPassSliceSize
+        ) {
+          if (sliceStart > 0) {
+            await yieldToEventLoop();
+            if (executionSignal.aborted) {
+              throw new DOMException("Aborted", "AbortError");
+            }
+          }
+          const sliceTriage = runTriageAndLedgerForPostings(
+            remainingRawPostings.slice(
+              sliceStart,
+              sliceStart + finalPassSliceSize,
+            ),
           );
+          triageOutcome.skippedByLedger += sliceTriage.skippedByLedger;
+          triageOutcome.skippedByTitleTriage +=
+            sliceTriage.skippedByTitleTriage;
+          triagedPostings.push(...sliceTriage.keptPostings);
+          // No low-yield rescue: a job the triage skipped stays skipped.
+          // Under Best matches only the person asked for exactly that drop,
+          // and in the other two modes the triage skips only blocked
+          // companies and excluded places.
+          const sliceMerge = mergeAndAccountPostings(
+            sliceTriage.keptPostings,
+            sliceTriage.keptUpgradePostings,
+          );
+          budgetedPostings.push(...sliceMerge.budgetedPostings);
+          mergeResult.validatedCount += sliceMerge.mergeResult.validatedCount;
+          mergeResult.duplicatesMerged +=
+            sliceMerge.mergeResult.duplicatesMerged;
+          mergeResult.invalidSkipped += sliceMerge.mergeResult.invalidSkipped;
+          jobsPersisted += sliceMerge.jobsPersisted;
+          jobsStaged += sliceMerge.jobsStaged;
+        }
         const fairShareSuffix =
           triagedPostings.length > budgetedPostings.length
             ? ` Limited ${triagedPostings.length} qualifying jobs to the ${budgetedPostings.length} strongest matches for this source.`
@@ -3423,17 +3784,7 @@ export function createWorkspaceDiscoveryMethods(
           }),
         );
 
-        const inactiveLedgerEntryIdsBefore = new Set(
-          workingLedger
-            .filter(
-              (entry) =>
-                entry.targetId === target.id &&
-                entry.latestStatus === "inactive",
-            )
-            .map((entry) => entry.id),
-        );
-        workingLedger = applyInactiveLedgerMarks({
-          ledger: workingLedger,
+        const newlyInactiveCount = runLedger.markInactive({
           targetId: target.id,
           seenCanonicalUrls: targetSeenUrls,
           occurredAt: new Date().toISOString(),
@@ -3441,13 +3792,6 @@ export function createWorkspaceDiscoveryMethods(
             (options.allowInactiveMarking ?? options.scope === "run_all") &&
             collectionSupportsInactiveMarking,
         });
-
-        const newlyInactiveCount = workingLedger.filter(
-          (entry) =>
-            entry.targetId === target.id &&
-            entry.latestStatus === "inactive" &&
-            !inactiveLedgerEntryIdsBefore.has(entry.id),
-        ).length;
 
         emitActivity(
           createDiscoveryEvent({
@@ -3640,13 +3984,9 @@ export function createWorkspaceDiscoveryMethods(
         // desktop uses this terminal event as its progressive-refresh signal.
         recordActivity(targetCompletedEvent);
 
-        const changedJobIds = uniqueStrings(resumeAffectingChangedJobIds);
-        if (!settings.discoveryOnly && changedJobIds.length > 0) {
-          await ctx.staleApprovedResumeDrafts(
-            "Saved job details changed after approval and the resume needs a fresh review.",
-            changedJobIds,
-          );
-        }
+        for (const jobId of resumeAffectingChangedJobIds)
+          resumeStaleJobIds.add(jobId);
+        await flushResumeStaleness(false);
         await persistWorkingSavedJobs(captureWorkingDiscoveryUpdate());
         const completedExecution = activeRun.targetExecutions.find(
           (execution) => execution.targetId === target.id,
@@ -3680,22 +4020,40 @@ export function createWorkspaceDiscoveryMethods(
         // so window messages and IPC remain responsive during large catalogs.
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       };
-      const workers = Array.from(
+      // Two lanes run side by side: API feeds, merged a few at a time as they
+      // arrive, and browser sources, a few at a time in their own tabs. One
+      // queue for both let three slow browser sources hold every API source
+      // back for minutes while its feed request timed out.
+      const apiWorkers = Array.from(
         {
-          length: Math.max(
-            1,
-            Math.min(DISCOVERY_SOURCE_CONCURRENCY, targets.length),
+          length: Math.min(
+            PUBLIC_API_PROCESSING_CONCURRENCY,
+            apiTargets.length,
           ),
         },
         async () => {
           for (;;) {
-            const next = await readyTargets.next();
+            const next = await readyApiTargets.next();
             if (next.done) return;
             await runOneTarget(next.value);
           }
         },
       );
-      await Promise.all(workers);
+      let nextBrowserTargetIndex = 0;
+      const browserWorkers = Array.from(
+        {
+          length: Math.min(DISCOVERY_SOURCE_CONCURRENCY, browserTargets.length),
+        },
+        async () => {
+          for (;;) {
+            const target = browserTargets[nextBrowserTargetIndex];
+            if (!target) return;
+            nextBrowserTargetIndex += 1;
+            await runOneTarget({ target, prefetchedPublicApiResult: null });
+          }
+        },
+      );
+      await Promise.all([...apiWorkers, ...browserWorkers]);
       // Stop may arrive while the last source's atomic write is settling.
       // Keep that durable checkpoint, but do not report a completed search
       // merely because no later listing read or fit call checks the signal.
@@ -4278,6 +4636,7 @@ export function createWorkspaceDiscoveryMethods(
     } finally {
       // Verdicts still on their way when a run stops are not saved after it.
       stopSearchFitJudging();
+      screenBatcher?.stop();
       if (!keepSessionAlive) {
         for (const source of openedSessionSources) {
           // `closeRunBrowserSession` closes the shared browser host, not just
@@ -4340,6 +4699,7 @@ export function createWorkspaceDiscoveryMethods(
       new Date().toISOString(),
     );
 
+    await flushResumeStaleness(true).catch(() => undefined);
     await persistWorkingSavedJobs(captureWorkingDiscoveryUpdate());
 
     if (terminalStatus === "failed") {

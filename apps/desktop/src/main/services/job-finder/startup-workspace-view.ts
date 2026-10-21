@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
 import { deserialize, serialize } from "node:v8";
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { readCleanCloseFingerprint } from "@nestor/db";
@@ -84,6 +85,30 @@ function buildContents(): string {
     hash.update(readFileSync(file));
   }
   return hash.digest("hex");
+}
+
+let buildDigest: Promise<string | null> | null = null;
+
+/**
+ * The build by its files' contents, read off the main thread. Null when the
+ * bundle cannot be found (tests run from sources).
+ */
+export function mainBuildDigest(): Promise<string | null> {
+  buildDigest ??= (async () => {
+    try {
+      const files = bundleFiles();
+      if (files.length === 0) return null;
+      const hash = createHash("sha1");
+      for (const file of files) {
+        hash.update(`${path.basename(file)}\n`);
+        hash.update(await readFile(file));
+      }
+      return hash.digest("hex");
+    } catch {
+      return null;
+    }
+  })();
+  return buildDigest;
 }
 
 let startupDatabase: string | null = null;

@@ -1,8 +1,11 @@
-import type { SavedJob } from "@nestor/contracts";
+import type { JobFinderDiscoveryState, SavedJob } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
 import { describe, expect, test, vi } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
-import { createDiscoverySavedJobWriter } from "./discovery-saved-job-writer";
+import {
+  createDiscoverySavedJobWriter,
+  markSupersedingDiscoveryUpdate,
+} from "./discovery-saved-job-writer";
 
 function deferred() {
   let resolve = () => {};
@@ -181,5 +184,45 @@ describe("discovery saved-job checkpoint writer", () => {
     expect(h.upsertIds).toEqual([]);
     expect(h.readIds).toEqual([restored.id]);
     expect(h.toStoredJob).toHaveBeenCalledTimes(1);
+  });
+
+  test("saves asked for together share one write, applying the last whole-state update and what follows it", async () => {
+    const template = createSeed().savedJobs[0]!;
+    const written: SavedJob[][] = [];
+    const applied: string[] = [];
+    const commit = vi.fn<JobFinderRepository["commitSavedJobDelta"]>(
+      (input) => {
+        written.push([...(input.upserts ?? [])]);
+        input.updateDiscoveryState?.({} as JobFinderDiscoveryState);
+        return Promise.resolve();
+      },
+    );
+    const writer = createDiscoverySavedJobWriter({
+      persistedJobs: [],
+      toStoredJob: (job) => job,
+      merge: (current) => current,
+      commit,
+      persistDiscovery: () => Promise.resolve(),
+      coalesceMs: 5,
+    });
+    const step = (name: string) => (state: JobFinderDiscoveryState) => {
+      applied.push(name);
+      return state;
+    };
+    writer.stage({ ...template, id: "first_source_job" });
+    const first = writer.persist(markSupersedingDiscoveryUpdate(step("first")));
+    writer.stage({ ...template, id: "second_source_job" });
+    const second = writer.persist(
+      markSupersedingDiscoveryUpdate(step("second")),
+    );
+    const runOnly = writer.persist(step("run state"));
+    await Promise.all([first, second, runOnly]);
+
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(written[0]?.map((job) => job.id).sort()).toEqual([
+      "first_source_job",
+      "second_source_job",
+    ]);
+    expect(applied).toEqual(["second", "run state"]);
   });
 });

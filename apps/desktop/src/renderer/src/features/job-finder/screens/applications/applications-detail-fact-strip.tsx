@@ -82,6 +82,8 @@ export function ApplicationsDetailFactStrip(props: {
   waitingOnSafetyLimitReview?: boolean;
   /** A job its batch has not started: the facts follow the status block. */
   plannedStanding?: PlannedApplyStanding | null;
+  /** The status badge beside the title, so the strip does not repeat it. */
+  headerStatusLabel?: string | null;
 }) {
   const {
     selectedAttempt,
@@ -230,8 +232,16 @@ export function ApplicationsDetailFactStrip(props: {
         label: "Preparation status",
         muted: true,
       };
+  // "FORM CLOSED" beside the title and "Preparation status: Form closed"
+  // under it said one thing twice.
+  const repeatsHeaderStatus =
+    attemptStateLabel !== null &&
+    attemptStateLabel !== undefined &&
+    props.headerStatusLabel?.trim().toLowerCase() ===
+      attemptStateLabel.trim().toLowerCase();
+  const statusFacts = repeatsHeaderStatus ? [] : [preparationStatusFact];
   const primaryFacts: DetailFact[] = nextStepOwnsPauseCause
-    ? [preparationStatusFact]
+    ? statusFacts
     : [
         // "What stopped progress" is gone: the status block at the top of the
         // panel now carries that sentence, and printing it here as well made
@@ -246,7 +256,7 @@ export function ApplicationsDetailFactStrip(props: {
               },
             ]
           : []),
-        preparationStatusFact,
+        ...statusFacts,
       ];
 
   const formQuestionCount = Math.max(
@@ -337,13 +347,20 @@ export function ApplicationsDetailFactStrip(props: {
   return (
     <section
       aria-label="Application status"
-      className="surface-card-tint grid gap-4 rounded-(--radius-field) border border-(--border-strong) bg-(--surface-overlay-soft) px-5 py-4"
+      className={
+        primaryFacts.length > 0
+          ? "surface-card-tint grid gap-4 rounded-(--radius-field) border border-(--border-strong) bg-(--surface-overlay-soft) px-5 py-4"
+          : // Only the disclosure is left: a link, not a card around a link.
+            "grid gap-4"
+      }
     >
-      <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 @[32rem]/detail:grid-cols-3">
-        {primaryFacts.map((fact) => (
-          <DetailFactCell fact={fact} key={fact.label} />
-        ))}
-      </dl>
+      {primaryFacts.length > 0 ? (
+        <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 @[32rem]/detail:grid-cols-3">
+          {primaryFacts.map((fact) => (
+            <DetailFactCell fact={fact} key={fact.label} />
+          ))}
+        </dl>
+      ) : null}
       <details className="group min-w-0">
         <ApplicationsDisclosureSummary count={detailFacts.length}>
           More about this application

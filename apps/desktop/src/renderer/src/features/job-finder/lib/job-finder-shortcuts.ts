@@ -6,12 +6,24 @@ export type JobFinderShortcutId =
   | "toggle-assistant"
   | "toggle-sidebar";
 
-export type JobFinderShortcutCombo = "/" | "?" | "mod+b" | "mod+i" | "mod+k";
+export type JobFinderShortcutCombo =
+  | "/"
+  | "?"
+  | "mod+b"
+  | "mod+enter"
+  | "mod+i"
+  | "mod+k";
 
 const LITERAL_KEY_COMBOS: readonly JobFinderShortcutCombo[] = ["/", "?"];
 
 function isLiteralKeyCombo(combo: JobFinderShortcutCombo): boolean {
   return LITERAL_KEY_COMBOS.includes(combo);
+}
+
+/** The key after the modifier, as a keycap names it ("K", "Enter"). */
+function modifierComboKeycap(combo: JobFinderShortcutCombo): string {
+  const key = combo.slice(4);
+  return key === "enter" ? "Enter" : key.toUpperCase();
 }
 
 export interface JobFinderShortcutDefinition {
@@ -56,6 +68,13 @@ export const JOB_FINDER_SHORTCUTS: readonly JobFinderShortcutDefinition[] = [
     scope: "Outside text fields, controls, and dialogs",
   },
 ];
+
+/**
+ * Resume Studio's own combo while resumes wait for review: approve the open
+ * one and open the next. It is named on the button that does it rather than
+ * in the app-wide list, which holds no approve, delete or submit shortcut.
+ */
+export const RESUME_REVIEW_APPROVE_AND_NEXT_COMBO = "mod+enter" as const;
 
 export interface JobFinderKeyEventLike {
   altKey: boolean;
@@ -130,7 +149,7 @@ export function getJobFinderShortcutKeycaps(
   if (isLiteralKeyCombo(combo)) {
     return [combo];
   }
-  return [platform === "darwin" ? "⌘" : "Ctrl", combo.slice(4).toUpperCase()];
+  return [platform === "darwin" ? "⌘" : "Ctrl", modifierComboKeycap(combo)];
 }
 
 /** One-line rendering of a combo, for tooltips and title strings. */
@@ -141,7 +160,7 @@ export function formatJobFinderShortcutCombo(
   if (isLiteralKeyCombo(combo)) {
     return combo;
   }
-  const key = combo.slice(4).toUpperCase();
+  const key = modifierComboKeycap(combo);
   return platform === "darwin" ? `⌘${key}` : `Ctrl ${key}`;
 }
 
@@ -149,7 +168,8 @@ export function getJobFinderAriaKeyshortcuts(
   combo: Exclude<JobFinderShortcutCombo, "/">,
   platform: JobFinderPlatform,
 ): string {
-  return `${platform === "darwin" ? "Meta" : "Control"}+${combo.slice(4)}`;
+  const key = combo.slice(4);
+  return `${platform === "darwin" ? "Meta" : "Control"}+${key === "enter" ? "Enter" : key}`;
 }
 
 /** One combo, as the individual keycaps it is pressed with. */

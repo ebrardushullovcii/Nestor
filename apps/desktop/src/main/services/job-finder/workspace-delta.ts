@@ -328,64 +328,100 @@ export function createJobFinderWorkspaceDeltaTracker() {
     JobFinderRendererWorkspaceSnapshot
   >();
   const fromEarlierProcess = new WeakSet<JobFinderRendererWorkspaceSnapshot>();
+  // The revision each window last said it shows, keyed by its WebContents.
+  const heldRevisions = new WeakMap<object, WorkspaceRevision>();
   const remember = (snapshot: JobFinderRendererWorkspaceSnapshot) => {
     baselines.set(currentRevision, snapshot);
     while (baselines.size > 4) baselines.delete(baselines.keys().next().value!);
   };
 
-  return {
-    synchronize(
-      baseRevision: WorkspaceRevision | null,
-      current: JobFinderRendererWorkspaceSnapshot,
-      options: { earlierProcess?: boolean } = {},
-    ): JobFinderWorkspaceSyncResult {
-      if (options.earlierProcess) fromEarlierProcess.add(current);
-      if (baselines.size === 0 || baseRevision === null) {
-        baselines.clear();
-        currentRevision += 1;
-        remember(current);
-        return {
-          kind: "snapshot",
-          currentRevision,
-          reason: "initial",
-          snapshot: current,
-        };
-      }
-
-      const baseline = baselines.get(baseRevision);
-      if (!baseline) {
-        const reason =
-          baseRevision < currentRevision ? "stale_base" : "revision_gap";
-        currentRevision += 1;
-        remember(current);
-        return {
-          kind: "snapshot",
-          currentRevision,
-          reason,
-          snapshot: current,
-        };
-      }
-
-      const nextRevision = currentRevision + 1;
-      const delta = buildJobFinderWorkspaceDelta({
-        baseRevision,
-        currentRevision: nextRevision,
-        previous: baseline,
-        current,
-        previousFromEarlierProcess: fromEarlierProcess.has(baseline),
-      });
-
-      currentRevision = nextRevision;
+  function synchronize(
+    baseRevision: WorkspaceRevision | null,
+    current: JobFinderRendererWorkspaceSnapshot,
+    options: { earlierProcess?: boolean } = {},
+  ): JobFinderWorkspaceSyncResult {
+    if (options.earlierProcess) fromEarlierProcess.add(current);
+    if (baselines.size === 0 || baseRevision === null) {
+      baselines.clear();
+      currentRevision += 1;
       remember(current);
+      return {
+        kind: "snapshot",
+        currentRevision,
+        reason: "initial",
+        snapshot: current,
+      };
+    }
 
-      return delta
-        ? { kind: "delta", delta }
-        : {
-            kind: "snapshot",
-            currentRevision,
-            reason: "unsupported_change",
-            snapshot: current,
-          };
+    const baseline = baselines.get(baseRevision);
+    if (!baseline) {
+      const reason =
+        baseRevision < currentRevision ? "stale_base" : "revision_gap";
+      currentRevision += 1;
+      remember(current);
+      return {
+        kind: "snapshot",
+        currentRevision,
+        reason,
+        snapshot: current,
+      };
+    }
+
+    const nextRevision = currentRevision + 1;
+    const delta = buildJobFinderWorkspaceDelta({
+      baseRevision,
+      currentRevision: nextRevision,
+      previous: baseline,
+      current,
+      previousFromEarlierProcess: fromEarlierProcess.has(baseline),
+    });
+
+    currentRevision = nextRevision;
+    remember(current);
+
+    return delta
+      ? { kind: "delta", delta }
+      : {
+          kind: "snapshot",
+          currentRevision,
+          reason: "unsupported_change",
+          snapshot: current,
+        };
+  }
+
+  /**
+   * The answer to a change a window asked for. Sending the whole workspace
+   * (about 30 MB with 6,000 jobs) cost each settings toggle or stage change
+   * half a second of copying on both sides, and made the window's next
+   * refresh send it all again. A delta from the revision the window holds
+   * replaces both. A window holding nothing main still has gets the whole
+   * view, without clearing the baselines other windows rely on.
+   */
+  function respond(
+    holder: object | null | undefined,
+    current: JobFinderRendererWorkspaceSnapshot,
+  ): JobFinderWorkspaceSyncResult {
+    const held = holder ? heldRevisions.get(holder) : undefined;
+    if (held !== undefined && baselines.has(held)) {
+      return synchronize(held, current);
+    }
+    currentRevision += 1;
+    remember(current);
+    return {
+      kind: "snapshot",
+      currentRevision,
+      reason: "stale_base",
+      snapshot: current,
+    };
+  }
+
+  return {
+    synchronize,
+    respond,
+    /** A window committed `revision`; 0 means it holds none main knows. */
+    noteHeldRevision(holder: object, revision: WorkspaceRevision): void {
+      if (revision === 0) heldRevisions.delete(holder);
+      else heldRevisions.set(holder, revision);
     },
   };
 }

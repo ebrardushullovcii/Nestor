@@ -6,10 +6,11 @@ import type {
   ResumeImportRun,
 } from "@nestor/contracts";
 import { JobFinderIntelligenceStateSchema } from "@nestor/contracts";
-import { describe, expect, test } from "vitest";
+import { describe, expect, it, test } from "vitest";
 import {
   buildJobFinderTaskCenterModel,
   describeTaskCenterCounts,
+  isStaleFinishedTask,
 } from "./job-finder-task-center-model";
 import type { TailoredDraftPreparationViewState } from "../../screens/review-queue/review-queue-status";
 
@@ -1728,4 +1729,48 @@ test("keeps other running batches visible when the newest batch was cancelled", 
       .filter((item) => item.status === "active")
       .map((item) => item.id),
   ).toEqual(["running_a", "running_b"]);
+});
+
+describe("isStaleFinishedTask", () => {
+  const base = {
+    id: "run",
+    kind: "discovery",
+    title: "Job search",
+    stageLabel: "",
+    sourceLabel: "",
+    countLabel: "",
+    historyEstimateLabel: null,
+    canCancel: false,
+    cancelKind: null,
+    resumeRoute: null,
+    resumeActionLabel: null,
+  } as const;
+  const now = Date.parse("2026-10-21T12:00:00.000Z");
+
+  it("retires a run that finished more than a day ago, never one still going", () => {
+    expect(
+      isStaleFinishedTask(
+        { ...base, status: "cancelled", updatedAt: "2026-10-13T04:53:00.000Z" },
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      isStaleFinishedTask(
+        { ...base, status: "failed", updatedAt: "2026-10-21T09:00:00.000Z" },
+        now,
+      ),
+    ).toBe(false);
+    expect(
+      isStaleFinishedTask(
+        { ...base, status: "paused", updatedAt: "2026-10-01T00:00:00.000Z" },
+        now,
+      ),
+    ).toBe(false);
+    expect(
+      isStaleFinishedTask(
+        { ...base, status: "active", updatedAt: "2026-10-01T00:00:00.000Z" },
+        now,
+      ),
+    ).toBe(false);
+  });
 });

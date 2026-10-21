@@ -34,6 +34,7 @@ import {
   createJobIdentityDigest,
   createJobIdentityIndex,
   hasEquivalentListingContentIdentity,
+  type JobIdentityIndex,
 } from "./job-identity";
 import { assessJobPostingDetailQuality } from "./job-posting-detail-quality";
 import {
@@ -1112,12 +1113,25 @@ function assembleMergedDiscoveredJob(input: {
   });
 }
 
+// Ranks of a job list a merge already computed. A search merges source after
+// source into the same working list, and sorting every saved job twice per
+// source was a large share of its main-process time; the list one merge
+// returns is the list the next one starts from.
+const visibleRankCache = new WeakMap<
+  readonly SavedJob[],
+  ReadonlyMap<string, number>
+>();
+
 function buildVisibleDiscoveryRankById(
   jobs: readonly SavedJob[],
 ): ReadonlyMap<string, number> {
-  return new Map(
+  const cached = visibleRankCache.get(jobs);
+  if (cached) return cached;
+  const ranks = new Map(
     orderVisibleDiscoveryJobs(jobs).map((job, index) => [job.id, index + 1]),
   );
+  visibleRankCache.set(jobs, ranks);
+  return ranks;
 }
 
 function selectLatestDiscoveryTimestamp(
@@ -1149,18 +1163,31 @@ export function mergeDiscoveredPostings(
   signal?: AbortSignal,
   assessPosting?: (posting: JobPosting) => MatchAssessment,
   auditJobIds?: ReadonlySet<string>,
+  options?: {
+    /**
+     * An index over exactly `savedJobs` (by `toSightingIdentityInput`) that
+     * the caller keeps between merges. The merge adds and replaces rows in it,
+     * so afterwards it covers the merged jobs before their audit update.
+     */
+    identityIndex?: JobIdentityIndex<SavedJob>;
+    /**
+     * False when only a changed assessment should be audited. A search
+     * re-reads thousands of known jobs; ranking every saved job for each
+     * slice of a board, to record that a job's place in the queue moved
+     * while its assessment did not, cost seconds per board.
+     */
+    recordRankOnlyAudits?: boolean;
+  },
 ): MergeDiscoveryResult {
   // Check if already aborted
   if (signal?.aborted) {
     throw new DOMException("Aborted", "AbortError");
   }
 
-  const identityIndex = createJobIdentityIndex(
-    savedJobs,
-    toSightingIdentityInput,
-  );
+  const identityIndex =
+    options?.identityIndex ??
+    createJobIdentityIndex(savedJobs, toSightingIdentityInput);
   const previousJobsById = new Map(savedJobs.map((job) => [job.id, job]));
-  const previousRankById = buildVisibleDiscoveryRankById(savedJobs);
   const newJobIds = new Set<string>();
   let validatedCount = 0;
   let duplicatesMerged = 0;
@@ -1273,29 +1300,56 @@ export function mergeDiscoveredPostings(
   }
 
   const jobsBeforeAudit = [...nextJobsById.values()];
-  const currentRankById = buildVisibleDiscoveryRankById(jobsBeforeAudit);
+  const isAudited = (jobId: string) =>
+    previousJobsById.has(jobId) && (!auditJobIds || auditJobIds.has(jobId));
+  // Ranks are only read for audited jobs; a batch of only new jobs, or an
+  // audit list naming no saved job, sorts nothing.
+  const auditsAny =
+    (auditJobIds
+      ? [...auditJobIds].some(isAudited)
+      : previousJobsById.size > 0) &&
+    (options?.recordRankOnlyAudits !== false ||
+      jobsBeforeAudit.some((job) => {
+        if (!isAudited(job.id)) return false;
+        const previous = previousJobsById.get(job.id)?.matchAssessment;
+        return (
+          previous !== job.matchAssessment &&
+          JSON.stringify(previous) !== JSON.stringify(job.matchAssessment)
+        );
+      }));
+  const previousRankById = auditsAny
+    ? buildVisibleDiscoveryRankById(savedJobs)
+    : null;
+  const currentRankById = auditsAny
+    ? buildVisibleDiscoveryRankById(jobsBeforeAudit)
+    : null;
   const auditRecordedAt = selectLatestDiscoveryTimestamp(discoveredPostings);
-  const mergedJobs = jobsBeforeAudit.map((job) => {
-    const previousJob = previousJobsById.get(job.id);
-    if (!previousJob || (auditJobIds && !auditJobIds.has(job.id))) {
-      return job;
-    }
+  const mergedJobs = !auditsAny
+    ? jobsBeforeAudit
+    : jobsBeforeAudit.map((job) => {
+        const previousJob = previousJobsById.get(job.id);
+        if (!previousJob || !isAudited(job.id)) {
+          return job;
+        }
 
-    const audit = createMatchAssessmentChangeAudit({
-      previous: previousJob.matchAssessment,
-      current: job.matchAssessment,
-      previousRank: previousRankById.get(job.id) ?? null,
-      currentRank: currentRankById.get(job.id) ?? null,
-      recordedAt: auditRecordedAt,
-    });
+        const audit = createMatchAssessmentChangeAudit({
+          previous: previousJob.matchAssessment,
+          current: job.matchAssessment,
+          previousRank: previousRankById?.get(job.id) ?? null,
+          currentRank: currentRankById?.get(job.id) ?? null,
+          recordedAt: auditRecordedAt,
+        });
 
-    return SavedJobSchema.parse({
-      ...job,
-      latestMatchAssessmentAudit: hasMeaningfulMatchAssessmentChange(audit)
-        ? audit
-        : previousJob.latestMatchAssessmentAudit,
-    });
-  });
+        return SavedJobSchema.parse({
+          ...job,
+          latestMatchAssessmentAudit: hasMeaningfulMatchAssessmentChange(audit)
+            ? audit
+            : previousJob.latestMatchAssessmentAudit,
+        });
+      });
+  // An audit never moves a job in the order, so the merged list ranks as
+  // the list before it; the next merge starts from this list.
+  if (currentRankById) visibleRankCache.set(mergedJobs, currentRankById);
 
   return {
     mergedJobs,

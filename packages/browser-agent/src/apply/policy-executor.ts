@@ -23,6 +23,7 @@ import {
 import { attemptKey, judgeBlockedAttempt } from "./blocked-attempts";
 import { isSecurityChallengeControl } from "./blockers";
 import { runSubmitPreflight } from "./submit-preflight";
+import { isShortValueAnswer } from "./written-answer-grounding";
 import type {
   ApplyAgentConfig,
   ApplyAnswer,
@@ -466,6 +467,28 @@ function savedSuggestion(
 }
 
 /**
+ * A short value the fact check could not confirm (a start date worked out
+ * from a notice period, a phone code from a number) is offered back to the
+ * person to accept or change with one press, beside the check's reason. It
+ * is not entered. Prose, eligibility, pay and declarations get no such offer.
+ */
+function proposedValueSuggestion(
+  control: ApplyFormControl,
+  value: string,
+): ApplyAnswer | null {
+  return control.attestationKind === null && isShortValueAnswer(control, value)
+    ? {
+        value: value.trim(),
+        kind: control.questionKind,
+        sourceKind: "generated",
+        sourceId: `proposed.${control.ref}`,
+        provenanceLabel: "Job Finder's proposal for you to confirm",
+        groundedIn: [],
+      }
+    : null;
+}
+
+/**
  * Whether the model's answer about the person goes in (ADR 0041, ADR 0021).
  *
  * The model read the question and the person's facts and chose the answer.
@@ -614,7 +637,8 @@ async function decideAnswer(input: {
             provenanceLabel: "proposed wording for your review",
             groundedIn: [],
           }
-        : savedSuggestion(control, config),
+        : (savedSuggestion(control, config) ??
+          proposedValueSuggestion(control, value)),
       permission: false,
     };
   }

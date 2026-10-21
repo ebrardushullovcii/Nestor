@@ -144,6 +144,16 @@ function selectBlockedStartupDatabaseRecovery(
     : null;
 }
 
+/** Changes answer with a sync result; test and demo routes still send a bare snapshot. */
+function isWorkspaceSyncResult(
+  response: JobFinderRendererWorkspaceSnapshot | JobFinderWorkspaceSyncResult,
+): response is JobFinderWorkspaceSyncResult {
+  return (
+    "kind" in response &&
+    (response.kind === "delta" || response.kind === "snapshot")
+  );
+}
+
 export function useJobFinderWorkspace(): JobFinderWorkspaceState {
   const [workspaceState, setWorkspaceState] = useState<JobFinderWorkspaceState>(
     { status: "loading" },
@@ -211,6 +221,10 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       }
       workspaceCommitVersionRef.current += 1;
       workspaceRef.current = workspace;
+      // Main answers this window's next change relative to what it shows.
+      // Test hosts and an older preload may not offer the notice.
+      const noteRevision = window.nestor.jobFinder.noteWorkspaceRevision;
+      if (typeof noteRevision === "function") noteRevision(revision);
       setWorkspaceState((currentState) =>
         currentState.status === "ready"
           ? { ...currentState, workspace }
@@ -276,85 +290,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     void recoverFullWorkspaceOnce().catch(() => undefined);
   }, [recoverFullWorkspaceOnce]);
 
-  const runWorkspaceAction = useCallback(
-    async (
-      action: () => Promise<JobFinderRendererWorkspaceSnapshot>,
-      options?: { allowDuringBootstrap?: boolean },
-    ) => {
-      if (!options?.allowDuringBootstrap) {
-        assertWorkspaceHydrated();
-      }
-      const sequence = beginWorkspaceRequest();
-      let workspace: JobFinderRendererWorkspaceSnapshot;
-      try {
-        workspace = await action();
-      } catch (error) {
-        // Main often records the failure before it throws (a resume run that
-        // failed saves a failed asset with its cause). Without a re-sync the
-        // screen kept its pre-action state, "No resume yet" with "Create the
-        // resume", until the window was reloaded.
-        scheduleConvergenceFetch();
-        throw error;
-      }
-      if (!isCurrentWorkspaceRequest(sequence)) {
-        scheduleConvergenceFetch();
-        return workspaceRef.current ?? workspace;
-      }
-
-      // A bare snapshot response carries no revision, so the delta baseline
-      // must be surrendered here. `0` means "this workspace corresponds to no
-      // revision main knows about", which forces the next sync to ask for a
-      // full snapshot and re-baseline both sides together.
-      //
-      // Do NOT "optimise" this into keeping the previous revision: main's
-      // tracker baseline would still be the pre-mutation snapshot while the
-      // committed workspace is the post-mutation one, so the next delta would
-      // be computed against a state the renderer no longer holds. An entity
-      // created by this mutation and removed before the next sync would then
-      // survive forever in the UI, because it is absent from both the baseline
-      // and the current snapshot and therefore never appears in `removedIds`.
-      // The revision can only be carried forward once the mutation response
-      // itself carries it (see `runWorkspaceEntityMutation`, which does exactly
-      // that through the typed sync envelope).
-      commitWorkspace(workspace);
-      return workspace;
-    },
-    [
-      assertWorkspaceHydrated,
-      beginWorkspaceRequest,
-      commitWorkspace,
-      isCurrentWorkspaceRequest,
-      scheduleConvergenceFetch,
-    ],
-  );
-
-  // Same request fencing and snapshot commit as runWorkspaceAction, but the
-  // typed envelope around the snapshot survives so callers can classify the
-  // terminal outcome (completed vs user-cancelled) without re-deriving it
-  // from a later refresh.
-  const runWorkspaceResultAction = useCallback(
-    async <T extends { snapshot: JobFinderRendererWorkspaceSnapshot }>(
-      action: () => Promise<T>,
-    ): Promise<T> => {
-      assertWorkspaceHydrated();
-      const sequence = beginWorkspaceRequest();
-      const result = await action();
-      if (!isCurrentWorkspaceRequest(sequence)) {
-        return { ...result, snapshot: workspaceRef.current ?? result.snapshot };
-      }
-
-      commitWorkspace(result.snapshot);
-      return result;
-    },
-    [
-      assertWorkspaceHydrated,
-      beginWorkspaceRequest,
-      commitWorkspace,
-      isCurrentWorkspaceRequest,
-      scheduleConvergenceFetch,
-    ],
-  );
-
   const commitWorkspaceSyncResult = useCallback(
     (
       result: JobFinderWorkspaceSyncResult,
@@ -386,6 +321,99 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       return applied.workspace;
     },
     [applyWorkspaceDelta, commitWorkspace, isCurrentWorkspaceRequest],
+  );
+
+  const runWorkspaceAction = useCallback(
+    async (
+      action: () => Promise<
+        JobFinderRendererWorkspaceSnapshot | JobFinderWorkspaceSyncResult
+      >,
+      options?: { allowDuringBootstrap?: boolean },
+    ): Promise<JobFinderRendererWorkspaceSnapshot> => {
+      if (!options?.allowDuringBootstrap) {
+        assertWorkspaceHydrated();
+      }
+      const sequence = beginWorkspaceRequest();
+      let response: JobFinderRendererWorkspaceSnapshot | JobFinderWorkspaceSyncResult;
+      try {
+        response = await action();
+      } catch (error) {
+        // Main often records the failure before it throws (a resume run that
+        // failed saves a failed asset with its cause). Without a re-sync the
+        // screen kept its pre-action state, "No resume yet" with "Create the
+        // resume", until the window was reloaded.
+        scheduleConvergenceFetch();
+        throw error;
+      }
+      if (isWorkspaceSyncResult(response)) {
+        // Same convergence contract as runWorkspaceEntityMutation: main
+        // answered relative to the revision this window holds.
+        if (!isCurrentWorkspaceRequest(sequence)) scheduleConvergenceFetch();
+        return (
+          commitWorkspaceSyncResult(response, sequence) ??
+          (await recoverFullWorkspaceOnce(sequence))
+        );
+      }
+      const workspace = response;
+      if (!isCurrentWorkspaceRequest(sequence)) {
+        scheduleConvergenceFetch();
+        return workspaceRef.current ?? workspace;
+      }
+
+      // A bare snapshot response carries no revision, so the delta baseline
+      // must be surrendered here. `0` means "this workspace corresponds to no
+      // revision main knows about", which forces the next sync to ask for a
+      // full snapshot and re-baseline both sides together.
+      //
+      // Do NOT "optimise" this into keeping the previous revision: main's
+      // tracker baseline would still be the pre-mutation snapshot while the
+      // committed workspace is the post-mutation one, so the next delta would
+      // be computed against a state the renderer no longer holds. An entity
+      // created by this mutation and removed before the next sync would then
+      // survive forever in the UI, because it is absent from both the baseline
+      // and the current snapshot and therefore never appears in `removedIds`.
+      // The revision can only be carried forward once the mutation response
+      // itself carries it (see `runWorkspaceEntityMutation`, which does exactly
+      // that through the typed sync envelope).
+      commitWorkspace(workspace);
+      return workspace;
+    },
+    [
+      assertWorkspaceHydrated,
+      beginWorkspaceRequest,
+      commitWorkspace,
+      commitWorkspaceSyncResult,
+      isCurrentWorkspaceRequest,
+      recoverFullWorkspaceOnce,
+      scheduleConvergenceFetch,
+    ],
+  );
+
+  // Same request fencing and snapshot commit as runWorkspaceAction, but the
+  // typed envelope around the snapshot survives so callers can classify the
+  // terminal outcome (completed vs user-cancelled) without re-deriving it
+  // from a later refresh.
+  const runWorkspaceResultAction = useCallback(
+    async <T extends { snapshot: JobFinderRendererWorkspaceSnapshot }>(
+      action: () => Promise<T>,
+    ): Promise<T> => {
+      assertWorkspaceHydrated();
+      const sequence = beginWorkspaceRequest();
+      const result = await action();
+      if (!isCurrentWorkspaceRequest(sequence)) {
+        return { ...result, snapshot: workspaceRef.current ?? result.snapshot };
+      }
+
+      commitWorkspace(result.snapshot);
+      return result;
+    },
+    [
+      assertWorkspaceHydrated,
+      beginWorkspaceRequest,
+      commitWorkspace,
+      isCurrentWorkspaceRequest,
+      scheduleConvergenceFetch,
+    ],
   );
 
   const syncWorkspace = useCallback(async () => {
@@ -649,13 +677,22 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         runWorkspaceAction(() =>
           window.nestor.jobFinder.undoResumeAssistantEdit(jobId, revisionId),
         ),
-      exportResumePdf: (
+      exportResumePdf: async (
         jobId: string,
         intent: ResumePdfExportIntent = "download",
-      ) =>
-        runWorkspaceResultAction(() =>
-          window.nestor.jobFinder.exportResumePdf(jobId, intent),
-        ),
+      ) => {
+        assertWorkspaceHydrated();
+        const sequence = beginWorkspaceRequest();
+        const { workspace, ...outcome } =
+          await window.nestor.jobFinder.exportResumePdf(jobId, intent);
+        // The workspace comes as a delta from the revision this window
+        // holds, like every other change's answer.
+        if (!isCurrentWorkspaceRequest(sequence)) scheduleConvergenceFetch();
+        const snapshot =
+          commitWorkspaceSyncResult(workspace, sequence) ??
+          (await recoverFullWorkspaceOnce(sequence));
+        return { ...outcome, snapshot };
+      },
       // Reveal is not a workspace mutation: it selects the written file in the
       // OS file manager and returns what happened, so it never refreshes.
       revealSavedFile: (path: string) =>

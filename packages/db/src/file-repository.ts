@@ -59,6 +59,7 @@ import {
   createFileRepositoryContext,
   INDEXED_COLLECTION_CONFIGS,
   runImmediateTransaction,
+  scheduleWalCheckpoints,
   syncApprovedResumeExportsForJob,
 } from "./file-repository-support";
 import {
@@ -342,6 +343,7 @@ export async function createFileJobFinderRepository(
   }
 
   const database = await openWorkspaceDatabaseWithRecovery();
+  const stopWalCheckpoints = scheduleWalCheckpoints(database, options.filePath);
 
   // Everything below runs on the open connection. If any step fails, the
   // connection is closed before the error leaves: an orphaned handle keeps the
@@ -401,9 +403,13 @@ export async function createFileJobFinderRepository(
       database,
       normalizedSeed.discovery,
     );
-    readSavedJobsProjection = createSavedJobProjectionReader(database);
+    readSavedJobsProjection = createSavedJobProjectionReader(database, {
+      validationStamp: options.rowValidationStamp ?? null,
+    });
     readIntelligenceProjection = createIntelligenceProjectionReader(database);
-    readDisplayCollections = createDisplayCollectionsReader(database);
+    readDisplayCollections = createDisplayCollectionsReader(database, {
+      validationStamp: options.rowValidationStamp ?? null,
+    });
     readDiscoveryDisplayProjection = createDiscoveryDisplayProjectionReader(
       database,
       normalizedSeed.discovery,
@@ -859,6 +865,7 @@ export async function createFileJobFinderRepository(
           );
         }
       }
+      await stopWalCheckpoints();
       database.close();
       writeCleanCloseMarker(options.filePath);
     },
@@ -1179,6 +1186,8 @@ export async function createFileJobFinderRepository(
     },
     readSavedJobsProjection,
     listSavedJobIds() {
+      const current = readSavedJobsProjection.currentIds();
+      if (current) return Promise.resolve([...current]);
       return Promise.resolve(
         database
           .prepare(`SELECT id FROM ${stateTableNames.saved_jobs} ORDER BY id`)
@@ -1422,11 +1431,21 @@ export async function createFileJobFinderRepository(
             intelligenceState: cloneValue(intelligenceState),
             discoveryState,
           });
-          const nextSearchPreferences = JobSearchPreferencesSchema.parse(
-            cloneValue(next.searchPreferences),
-          );
+          // Most feedback (hiding a job) leaves the preferences and plans as
+          // they were. Validating and rewriting both (about 1 MB with 900
+          // sources) on every hide was most of its cost, so an unchanged
+          // value is left alone; only the profile epoch is ever compared.
+          const searchPreferencesTouched =
+            JSON.stringify(next.searchPreferences) !==
+            JSON.stringify(searchPreferences);
+          const nextSearchPreferences = searchPreferencesTouched
+            ? JobSearchPreferencesSchema.parse(
+                cloneValue(next.searchPreferences),
+              )
+            : null;
           const nextCampaignState =
-            next.campaignState === null
+            next.campaignState === null ||
+            JSON.stringify(next.campaignState) === JSON.stringify(campaignState)
               ? null
               : JobSearchCampaignCollectionSchema.parse(
                   cloneValue(next.campaignState),
@@ -1438,21 +1457,23 @@ export async function createFileJobFinderRepository(
           if (nextSavedJob) {
             context.writePersistedValue("saved_jobs", nextSavedJob);
           }
-          saveSingletonValue(
-            database,
-            "search_preferences",
-            nextSearchPreferences,
-          );
-          // A changed preference advances the shared profile epoch so a
-          // copilot commit that captured the older preferences fails closed
-          // as stale instead of reverting this feedback. Most discovery
-          // feedback leaves preferences untouched; those rewrites must not
-          // invalidate unrelated in-flight profile work.
-          if (
-            JSON.stringify(nextSearchPreferences) !==
-            JSON.stringify(searchPreferences)
-          ) {
-            incrementSingletonRevision(database, "profile");
+          if (nextSearchPreferences) {
+            saveSingletonValue(
+              database,
+              "search_preferences",
+              nextSearchPreferences,
+            );
+            // A changed preference advances the shared profile epoch so a
+            // copilot commit that captured the older preferences fails
+            // closed as stale instead of reverting this feedback. Most
+            // discovery feedback leaves preferences untouched; those must
+            // not invalidate unrelated in-flight profile work.
+            if (
+              JSON.stringify(nextSearchPreferences) !==
+              JSON.stringify(searchPreferences)
+            ) {
+              incrementSingletonRevision(database, "profile");
+            }
           }
           if (nextCampaignState !== null) {
             saveSingletonValue(database, "campaign_state", nextCampaignState);

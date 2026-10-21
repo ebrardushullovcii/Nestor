@@ -700,9 +700,12 @@ export function ReviewQueueScreen(props: {
                       </p>
                     ) : (
                       <p className="text-(length:--text-small) leading-6 text-foreground-soft">
-                        {selectedDetail.loading
-                          ? "Loading job details…"
-                          : (selectedDetail.error ??
+                        {selectedDetail.loading ? (
+                          // Shown only if the read takes longer than a blink.
+                          <span className="delayed-appear">
+                            Loading job details…
+                          </span>
+                        ) : (selectedDetail.error ??
                             "The listing text was not captured. Open the full job details to read it.")}
                         {selectedDetail.error ? (
                           <Button onClick={selectedDetail.retry}>Retry</Button>

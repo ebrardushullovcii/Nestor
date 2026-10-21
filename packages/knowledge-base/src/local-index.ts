@@ -67,6 +67,10 @@ export function createLocalKnowledgeIndex(
   const storedDocuments = new Map<string, StoredDocument>();
   let indexedChunks = new Map<string, IndexedChunk>();
   let miniSearch = createMiniSearch();
+  // Built at the first search after documents change. Rebuilding on every
+  // added document made collecting a resume's evidence quadratic (about a
+  // quarter second per resume on a long profile).
+  let stale = false;
 
   function rebuildIndex(): void {
     miniSearch = createMiniSearch();
@@ -100,13 +104,17 @@ export function createLocalKnowledgeIndex(
         text,
         metadata: normalizeMetadata(metadata),
       });
-      rebuildIndex();
+      stale = true;
     },
     search(query, searchOptions = {}) {
       const normalizedQuery = query.trim();
 
       if (normalizedQuery.length === 0) {
         return [];
+      }
+      if (stale) {
+        rebuildIndex();
+        stale = false;
       }
 
       const tagFilter = searchOptions.tags
@@ -177,6 +185,7 @@ export function createLocalKnowledgeIndex(
     },
     clear() {
       storedDocuments.clear();
+      stale = false;
       indexedChunks = new Map<string, IndexedChunk>();
       miniSearch = createMiniSearch();
     },

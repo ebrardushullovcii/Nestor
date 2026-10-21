@@ -659,6 +659,64 @@ describe("runAgentLoop", () => {
     expect(result.ending).toBe("finished");
     expect(result.steps).toBe(2);
   });
+
+  test("the host can take a reply in words as the finish, without another turn", async () => {
+    const model: AgentLoopModel & { calls: number } = {
+      calls: 0,
+      chatWithTools: () => {
+        model.calls += 1;
+        return Promise.resolve({ content: "The form is filled in." });
+      },
+    };
+    const replies: string[] = [];
+    const result = await runAgentLoop({
+      messages: opening,
+      model,
+      tools: [finishTool],
+      subjectLabel: "the site",
+      onReplyWithoutTool: (content) => {
+        replies.push(content);
+        return Promise.resolve({
+          kind: "finish",
+          finish: {
+            reason: content,
+            stuck: false,
+            needsPerson: false,
+            data: {},
+          },
+        });
+      },
+    });
+    expect(replies).toEqual(["The form is filled in."]);
+    expect(model.calls).toBe(1);
+    expect(result.ending).toBe("finished");
+    expect(result.finish?.reason).toBe("The form is filled in.");
+  });
+
+  test("a host that declines a reply in words leaves the usual reminder", async () => {
+    const seen: string[] = [];
+    const model: AgentLoopModel & { calls: number } = {
+      calls: 0,
+      chatWithTools: (messages) => {
+        model.calls += 1;
+        seen.push(messages.at(-1)?.content ?? "");
+        return Promise.resolve(
+          model.calls === 1
+            ? { content: "I will look at the page first." }
+            : { content: "", toolCalls: [call("finish", { reason: "Done" })] },
+        );
+      },
+    };
+    const result = await runAgentLoop({
+      messages: opening,
+      model,
+      tools: [finishTool],
+      subjectLabel: "the site",
+      onReplyWithoutTool: () => Promise.resolve(null),
+    });
+    expect(result.ending).toBe("finished");
+    expect(seen[1]).toContain("Answer with one of the tools");
+  });
 });
 
 test("a batch barrier skips later calls, pairs every result and observes once", async () => {

@@ -70,7 +70,7 @@ describe("JobFinderOpeningShell platform geometry", () => {
     );
 
     expect(header?.className).toContain("fixed");
-    expect(header?.className).toContain("min-[1440px]:h-14");
+    expect(header?.className).toContain("xl:h-14");
     const actions = document.querySelector("[data-job-finder-opening-actions]");
     expect(actions?.className).toContain("min-[1440px]:col-start-3");
     expect(actions?.className).toContain("min-[1440px]:col-span-1");
@@ -81,7 +81,7 @@ describe("JobFinderOpeningShell platform geometry", () => {
     // still matches at >=1440px and Tailwind emits it after arbitrary
     // variants. The opening frame has to carry the same importance or the
     // wide layout keeps the compact 116px reserve for one frame.
-    expect(content?.className).toContain("min-[1440px]:!pt-14");
+    expect(content?.className).toContain("xl:pt-14");
     expect(content?.className).toContain(
       "min-[1440px]:pl-(--job-finder-side-width)",
     );
@@ -726,9 +726,9 @@ describe("JobFinderOpeningShell parity with the loaded shell", () => {
     // still being free to drift away from the layout that owns the rule.
     expect(topContent).not.toBeNull();
     expect(topContent?.className).toContain("pt-3");
-    // The loaded Profile h1 reads "Your profile", not the sidebar label, so the
-    // opening shell paints the same text and hydration never swaps it.
-    expect(topContent?.querySelector("h1")?.textContent).toBe("Your profile");
+    // The loaded Profile h1 is the sidebar label, so the opening shell paints
+    // the same text and hydration never swaps it.
+    expect(topContent?.querySelector("h1")?.textContent).toBe("Profile");
     expect(
       opening.querySelector("[data-locked-screen-scroll-area]"),
     ).not.toBeNull();

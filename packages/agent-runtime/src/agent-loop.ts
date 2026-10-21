@@ -176,6 +176,14 @@ export interface AgentLoopOptions {
   parallelToolCalls?: boolean;
   /** Host supplies a fresh observation after a response batch, if needed. */
   afterToolBatch?: () => Promise<string | null>;
+  /**
+   * A reply with words and no tool call. The host may take it as a step of
+   * its own (most often the model reporting that it is done) instead of the
+   * loop spending a turn asking for a tool. Null keeps the default reminder.
+   */
+  onReplyWithoutTool?: (
+    content: string,
+  ) => Promise<AgentLoopToolOutcome | null>;
   onHistoryCompacted?: () => string | null;
   /** Called for every attempted tool, including failures. */
   onToolTiming?: (step: { toolName: string; durationMs: number }) => void;
@@ -572,6 +580,32 @@ export async function runAgentLoop(
     const toolCalls = response.toolCalls ?? [];
     if (toolCalls.length === 0) {
       messages.push({ role: "assistant", content: response.content ?? "" });
+      const hosted = (response.content ?? "").trim()
+        ? await options.onReplyWithoutTool?.(response.content ?? "")
+        : null;
+      if (hosted?.kind === "finish") {
+        await note(
+          `finished in words${hosted.finish.stuck ? " as stuck" : ""}${hosted.finish.needsPerson ? " (needs the person)" : ""}: ${hosted.finish.reason}`,
+        );
+        return result("finished", endSentence(hosted.finish.reason), {
+          finish: hosted.finish,
+        });
+      }
+      if (hosted?.kind === "stop") {
+        await note(`stopped: ${hosted.reason}`);
+        return result("stopped", endSentence(hosted.reason), {
+          stop: {
+            reason: hosted.reason,
+            ...(hosted.data !== undefined ? { data: hosted.data } : {}),
+          },
+        });
+      }
+      if (hosted?.kind === "ok") {
+        if (hosted.progress) markProgress();
+        messages.push({ role: "user", content: hosted.content });
+        await note("answered without a tool; the host replied");
+        continue;
+      }
       messages.push({
         role: "user",
         content:

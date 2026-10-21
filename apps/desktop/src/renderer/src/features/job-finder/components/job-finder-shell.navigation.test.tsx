@@ -386,7 +386,7 @@ describe("JobFinderShell section navigation", () => {
     expect(notificationGroup.className).toContain("min-[1440px]:col-start-3");
     expect(notificationGroup.className).toContain("min-[1440px]:col-span-1");
     expect(notificationGroup.className).toContain("min-[1440px]:row-start-1");
-    expect(notificationGroup.className).toContain("min-[1440px]:mr-36");
+    expect(notificationGroup.className).toContain("xl:mr-36");
     const needsYouButton = within(notificationGroup).getByRole("button", {
       name: "Needs you: 0 unresolved",
     });
@@ -533,7 +533,7 @@ describe("JobFinderShell section navigation", () => {
     }
 
     const header = document.querySelector("[data-job-finder-shell-header]");
-    expect(header?.className).toContain("min-[1440px]:h-14");
+    expect(header?.className).toContain("xl:h-14");
   });
 
   it("gives both module names the menu's full width instead of shortening one", () => {
@@ -1319,8 +1319,10 @@ describe("JobFinderShell section navigation", () => {
       "[data-job-finder-shell]",
     );
 
-    expect(header?.className).toContain("min-[1440px]:h-14");
-    expect(shellGrid?.className).toContain("min-[1440px]:!grid-rows-[3.5rem]");
+    expect(header?.className).toContain("xl:h-14");
+    // One 56px row from 1280px: the named `xl` breakpoint is emitted after
+    // `sm:`, so it beats `sm:grid-rows-[3.5rem_3.75rem]` without `!`.
+    expect(shellGrid?.className).toContain("xl:grid-rows-[3.5rem]");
     expect(shellGrid?.className).not.toContain("min-[1440px]:grid-rows");
     expect(header?.className).toContain("z-50");
     expect(sidebar.className).toContain("top-14");
@@ -1600,7 +1602,7 @@ describe("JobFinderShell section navigation", () => {
     expect(header?.className).toContain("shrink-0");
     expect(shellContent?.className).not.toContain("pt-[18.75rem]");
     expect(shellContent?.className).toContain("sm:pt-[7.25rem]");
-    expect(shellContent?.className).toContain("min-[1440px]:!pt-14");
+    expect(shellContent?.className).toContain("xl:pt-14");
     expect(navigation.className).toContain("col-span-2");
     expect(navigation.className).not.toContain("overflow-hidden");
     expect(actions.className).toContain("col-span-2");
@@ -3664,7 +3666,7 @@ describe("compact navigation shares the header switcher's axis", () => {
     },
   );
 
-  it.each([1024, 1152, 1200, 1280])(
+  it.each([1024, 1152, 1200])(
     "keeps the one-sided reserve at %ipx off macOS, where the pills stay in this row",
     (width) => {
       const navigation = renderShellFor("win32");
@@ -3674,6 +3676,18 @@ describe("compact navigation shares the header switcher's axis", () => {
       );
     },
   );
+
+  // From 1280px the header is one row: the card sits on the brand row between
+  // the brand and the icon-only actions, held there by margins, not padding.
+  it("drops the reserve at 1280px off macOS, where the card moves up to the brand row", () => {
+    const navigation = renderShellFor("win32");
+
+    expect(resolveWinningPaddingRight(navigation.className, 1280)).toBe(
+      "pr-0",
+    );
+    expect(navigation.className).toContain("xl:row-start-1");
+    expect(navigation.className).toContain("xl:mr-[25rem]");
+  });
 
   it("paints the header mask opaquely across the scrolling gutter and nowhere else", () => {
     // Between the fixed header's bottom edge and the first row of a scrolling

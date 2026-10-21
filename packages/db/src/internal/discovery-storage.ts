@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import {
   BrowserAgentRunCheckpointSchema,
   DiscoveryActivityEventSchema,
@@ -30,6 +30,32 @@ const TARGET_METADATA = DiscoveryTargetExecutionSchema.omit({
 
 type TargetMetadata = ReturnType<typeof TARGET_METADATA.parse>;
 type Target = DiscoveryRunRecord["targetExecutions"][number];
+
+// Compiled statements per connection. A search saves several times a second
+// and each save writes many rows; compiling the same INSERT for every row
+// was a visible share of the main process.
+const statementCache = new WeakMap<DatabaseSync, Map<string, StatementSync>>();
+
+function statement(database: DatabaseSync, sql: string): StatementSync {
+  let statements = statementCache.get(database);
+  if (!statements) {
+    statements = new Map();
+    statementCache.set(database, statements);
+  }
+  let prepared = statements.get(sql);
+  if (!prepared) {
+    prepared = database.prepare(sql);
+    statements.set(sql, prepared);
+  }
+  return prepared;
+}
+
+/**
+ * Row positions of the run activity and ledger tables, as this connection
+ * last committed them, by table and run. Reading every position back before
+ * each save (thousands of ledger rows) is skipped while nothing else wrote.
+ */
+type PositionCache = Map<string, Map<string, number>>;
 
 function frozen<T>(value: T): T {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -64,7 +90,7 @@ function replaceRow(database: DatabaseSync, table: string, keys: readonly (strin
     : table === "discovery_run_targets" || table === "discovery_run_activity"
       ? "run_id, id, position, value" : "run_id, id, value";
   const parameters = [...keys, JSON.stringify(value)];
-  database.prepare(`INSERT OR REPLACE INTO ${table} (${columns}) VALUES (${parameters.map(() => "?").join(", ")})`).run(...parameters);
+  statement(database, `INSERT OR REPLACE INTO ${table} (${columns}) VALUES (${parameters.map(() => "?").join(", ")})`).run(...parameters);
 }
 
 function clearRows(database: DatabaseSync): void {
@@ -272,28 +298,59 @@ export function readDiscoveryStorage(database: DatabaseSync, fallback: JobFinder
   });
 }
 
+/**
+ * Row keys of a stored list, by list. The rows' own ids when they are unique
+ * (always, in practice); `keyedRows` otherwise. A save that changes one
+ * ledger entry among 30,000 used to rebuild these for both lists.
+ */
+const rowKeyLists = new WeakMap<readonly object[], readonly string[]>();
+
+function rowKeys<T extends { id: string }>(rows: readonly T[]): readonly string[] {
+  let keys = rowKeyLists.get(rows);
+  if (!keys) {
+    const ids = rows.map((row) => row.id);
+    keys = new Set(ids).size === ids.length ? ids : keyedRows(rows).map(({ key }) => key);
+    rowKeyLists.set(rows, keys);
+  }
+  return keys;
+}
+
+const rowsByKeyLists = new WeakMap<readonly object[], ReadonlyMap<string, object>>();
+
+function rowsByKey<T extends { id: string }>(rows: readonly T[]): ReadonlyMap<string, T> {
+  let byKey = rowsByKeyLists.get(rows) as ReadonlyMap<string, T> | undefined;
+  if (!byKey) {
+    const keys = rowKeys(rows);
+    byKey = new Map(rows.map((row, index) => [keys[index]!, row]));
+    rowsByKeyLists.set(rows, byKey);
+  }
+  return byKey;
+}
+
 /** Keep the largest already-ordered subsequence at its persisted ranks. */
 function orderedRanks(keys: readonly string[], previous: Map<string, number>): number[] {
+  const known = keys.map((key) => previous.get(key));
   const tails: number[] = [];
-  const links = new Map<number, number>();
-  for (const [index, key] of keys.entries()) {
-    const rank = previous.get(key);
+  // Each index's predecessor in the subsequence (-1: none), and the anchors.
+  const links = new Int32Array(keys.length).fill(-1);
+  for (const [index, rank] of known.entries()) {
     if (rank === undefined) continue;
     let low = 0;
     let high = tails.length;
     while (low < high) {
       const middle = (low + high) >>> 1;
-      if (previous.get(keys[tails[middle]!]!)! < rank) low = middle + 1;
+      if (known[tails[middle]!]! < rank) low = middle + 1;
       else high = middle;
     }
-    if (low > 0) links.set(index, tails[low - 1]!);
+    if (low > 0) links[index] = tails[low - 1]!;
     tails[low] = index;
   }
-  const anchors = new Set<number>();
-  let cursor = tails.at(-1);
-  while (cursor !== undefined) {
-    anchors.add(cursor);
-    cursor = links.get(cursor);
+  const anchorFlags = new Uint8Array(keys.length);
+  const anchors = { has: (index: number) => anchorFlags[index] === 1 };
+  let cursor = tails.at(-1) ?? -1;
+  while (cursor >= 0) {
+    anchorFlags[cursor] = 1;
+    cursor = links[cursor]!;
   }
   const ranks: number[] = [];
   let maximum = -1;
@@ -301,7 +358,7 @@ function orderedRanks(keys: readonly string[], previous: Map<string, number>): n
   let start = 0;
   for (let end = 0; end <= keys.length; end += 1) {
     if (end < keys.length && !anchors.has(end)) continue;
-    const right = end < keys.length ? previous.get(keys[end]!)! : undefined;
+    const right = end < keys.length ? known[end]! : undefined;
     const left = start > 0 ? ranks[start - 1]! : undefined;
     const count = end - start;
     for (let offset = 0; offset < count; offset += 1) {
@@ -323,34 +380,46 @@ function orderedRanks(keys: readonly string[], previous: Map<string, number>): n
   return ranks;
 }
 
-function writeChangedRows<T extends { id: string }>(database: DatabaseSync, table: string, before: readonly T[], after: readonly T[], parser: { parse(value: unknown): T }, aliases: WeakMap<object, object>, runId?: string): T[] {
+function writeChangedRows<T extends { id: string }>(database: DatabaseSync, table: string, before: readonly T[], after: readonly T[], parser: { parse(value: unknown): T }, aliases: WeakMap<object, object>, runId?: string, positionCache?: PositionCache): T[] {
   if (before === after) return before as T[];
-  const positions = new Map(database.prepare(`SELECT id, position FROM ${table}${runId ? " WHERE run_id = ?" : ""}`).all(...(runId ? [runId] : []))
-    .map((row) => [String(row.id), Number(row.position)]));
-  const nextRows = keyedRows(after);
-  const ranks = orderedRanks(nextRows.map(({ key }) => key), positions);
-  const previous = new Map(keyedRows(before).map(({ key, row }) => [key, { row, position: positions.get(key) }]));
-  const seen = new Set<string>();
+  const cacheKey = `${table}\u0000${runId ?? ""}`;
+  let positions = positionCache?.get(cacheKey);
+  if (!positions) {
+    positions = new Map(statement(database, `SELECT id, position FROM ${table}${runId ? " WHERE run_id = ?" : ""}`).all(...(runId ? [runId] : []))
+      .map((row) => [String(row.id), Number(row.position)]));
+    positionCache?.set(cacheKey, positions);
+  }
+  const nextKeys = rowKeys(after);
+  const ranks = orderedRanks(nextKeys, positions);
+  const previous = rowsByKey(before);
+  const nextKeySet = new Set(nextKeys);
   const result: T[] = [];
-  nextRows.forEach(({ key, row }, index) => {
+  const resultByKey = new Map<string, T>();
+  after.forEach((row, index) => {
+    const key = nextKeys[index]!;
     const position = ranks[index]!;
-    seen.add(key);
-    const previousEntry = previous.get(key);
-    const old = previousEntry?.row;
+    const old = previous.get(key);
+    // Read before this row's own write below changes it.
+    const previousPosition = old ? positions.get(key) : undefined;
     // Unchanged rows retain their validated, frozen identity. Updaters must
     // build a new row when changing a value.
     if (old === row || (old && aliases.get(row) === old)) {
-      if (previousEntry?.position !== position)
-        database.prepare(`UPDATE ${table} SET position = ? WHERE ${runId ? "run_id = ? AND " : ""}id = ?`).run(...(runId ? [position, runId, key] : [position, key]));
+      if (previousPosition !== position) {
+        statement(database, `UPDATE ${table} SET position = ? WHERE ${runId ? "run_id = ? AND " : ""}id = ?`).run(...(runId ? [position, runId, key] : [position, key]));
+        positions.set(key, position);
+      }
       result.push(old);
+      resultByKey.set(key, old);
       return;
     }
     const parsed = frozen(parser.parse(row));
     const same = old && JSON.stringify(old) === JSON.stringify(parsed);
     if (!same) {
       replaceRow(database, table, runId ? [runId, key, position] : [key, position], parsed);
-    } else if (previousEntry?.position !== position) {
-      database.prepare(`UPDATE ${table} SET position = ? WHERE ${runId ? "run_id = ? AND " : ""}id = ?`).run(...(runId ? [position, runId, key] : [position, key]));
+      positions.set(key, position);
+    } else if (previousPosition !== position) {
+      statement(database, `UPDATE ${table} SET position = ? WHERE ${runId ? "run_id = ? AND " : ""}id = ?`).run(...(runId ? [position, runId, key] : [position, key]));
+      positions.set(key, position);
     }
     const stored = same && old ? old : parsed;
     // The service may reuse its original row on later checkpoints. Freeze it
@@ -358,18 +427,32 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
     frozen(row);
     aliases.set(row, stored);
     result.push(stored);
+    resultByKey.set(key, stored);
   });
-  for (const key of previous.keys()) if (!seen.has(key)) database.prepare(`DELETE FROM ${table} WHERE ${runId ? "run_id = ? AND " : ""}id = ?`).run(...(runId ? [runId, key] : [key]));
+  for (const key of previous.keys()) if (!nextKeySet.has(key)) {
+    statement(database, `DELETE FROM ${table} WHERE ${runId ? "run_id = ? AND " : ""}id = ?`).run(...(runId ? [runId, key] : [key]));
+    positions.delete(key);
+  }
+  // The stored list is the next save's "before": it has the same keys.
+  rowKeyLists.set(result, nextKeys);
+  rowsByKeyLists.set(result, resultByKey);
   return result;
 }
 
-function writeRun(database: DatabaseSync, before: DiscoveryRunRecord | null, next: DiscoveryRunRecord, key: string, position: number, active: boolean, aliases: WeakMap<object, object>): DiscoveryRunRecord {
+// The run metadata text a stored run was written with, so the next save
+// compares against it without validating the stored run again.
+const storedRunMetadataText = new WeakMap<object, string>();
+
+function writeRun(database: DatabaseSync, before: DiscoveryRunRecord | null, next: DiscoveryRunRecord, key: string, position: number, active: boolean, aliases: WeakMap<object, object>, positionCache?: PositionCache): DiscoveryRunRecord {
   const metadata = frozen(RUN_METADATA.parse(next));
-  const oldMetadata = before && RUN_METADATA.parse(before);
-  if (!oldMetadata || JSON.stringify(oldMetadata) !== JSON.stringify(metadata)) {
+  const metadataText = JSON.stringify(metadata);
+  const oldMetadataText = before
+    ? (storedRunMetadataText.get(before) ?? JSON.stringify(RUN_METADATA.parse(before)))
+    : null;
+  if (oldMetadataText === null || oldMetadataText !== metadataText) {
     replaceRow(database, "discovery_runs", [key, position, active ? 1 : 0], metadata);
   } else {
-    database.prepare("UPDATE discovery_runs SET position = ?, active = ? WHERE id = ? AND (position <> ? OR active <> ?)").run(position, active ? 1 : 0, key, position, active ? 1 : 0);
+    statement(database, "UPDATE discovery_runs SET position = ?, active = ? WHERE id = ? AND (position <> ? OR active <> ?)").run(position, active ? 1 : 0, key, position, active ? 1 : 0);
   }
   const oldTargets = before?.targetExecutions ?? [];
   const oldById = new Map(keyedRows(oldTargets.map((target) => ({ id: target.targetId, target }))).map(({ key: targetKey, row: { target } }, index) => [targetKey, { target, index }]));
@@ -381,22 +464,29 @@ function writeRun(database: DatabaseSync, before: DiscoveryRunRecord | null, nex
     const old = previousTarget?.target;
     if (old === target || (old && aliases.get(target) === old)) {
       if (previousTarget?.index !== index)
-        database.prepare("UPDATE discovery_run_targets SET position = ? WHERE run_id = ? AND id = ?").run(index, key, targetKey);
+        statement(database, "UPDATE discovery_run_targets SET position = ? WHERE run_id = ? AND id = ?").run(index, key, targetKey);
       targets.push(old);
       return;
     }
     const parsedMetadata: TargetMetadata = TARGET_METADATA.parse(target);
-    const oldParsedMetadata = old && TARGET_METADATA.parse(old);
+    // A stored target is its validated metadata plus its checkpoint.
+    const oldParsedMetadata: TargetMetadata | undefined = old
+      ? (() => {
+          const stored: Partial<Target> = { ...old };
+          delete stored.agentCheckpoint;
+          return stored as TargetMetadata;
+        })()
+      : undefined;
     if (!oldParsedMetadata || JSON.stringify(oldParsedMetadata) !== JSON.stringify(parsedMetadata))
       replaceRow(database, "discovery_run_targets", [key, targetKey, index], parsedMetadata);
     else if (previousTarget?.index !== index)
-      database.prepare("UPDATE discovery_run_targets SET position = ? WHERE run_id = ? AND id = ?").run(index, key, targetKey);
+      statement(database, "UPDATE discovery_run_targets SET position = ? WHERE run_id = ? AND id = ?").run(index, key, targetKey);
     const checkpoint = target.agentCheckpoint;
     const oldCheckpoint = old?.agentCheckpoint;
     let storedCheckpoint = oldCheckpoint;
     if (checkpoint !== oldCheckpoint) {
       if (!checkpoint) {
-        if (oldCheckpoint) database.prepare("DELETE FROM discovery_run_checkpoints WHERE run_id = ? AND id = ?").run(key, targetKey);
+        if (oldCheckpoint) statement(database, "DELETE FROM discovery_run_checkpoints WHERE run_id = ? AND id = ?").run(key, targetKey);
         storedCheckpoint = null;
       } else if (!oldCheckpoint || checkpoint.revision !== oldCheckpoint.revision || checkpoint.savedAt !== oldCheckpoint.savedAt || JSON.stringify(checkpoint) !== JSON.stringify(oldCheckpoint)) {
         storedCheckpoint = frozen(BrowserAgentRunCheckpointSchema.parse(checkpoint));
@@ -412,17 +502,19 @@ function writeRun(database: DatabaseSync, before: DiscoveryRunRecord | null, nex
     database.prepare("DELETE FROM discovery_run_targets WHERE run_id = ? AND id = ?").run(key, targetKey);
     database.prepare("DELETE FROM discovery_run_checkpoints WHERE run_id = ? AND id = ?").run(key, targetKey);
   }
-  const activity = writeChangedRows(database, "discovery_run_activity", before?.activity ?? [], next.activity, DiscoveryActivityEventSchema, aliases, key);
-  return frozen({ ...metadata, targetExecutions: targets, activity });
+  const activity = writeChangedRows(database, "discovery_run_activity", before?.activity ?? [], next.activity, DiscoveryActivityEventSchema, aliases, key, positionCache);
+  const stored = frozen({ ...metadata, targetExecutions: targets, activity });
+  storedRunMetadataText.set(stored, metadataText);
+  return stored;
 }
 
-export function updateDiscoveryStorage(database: DatabaseSync, before: JobFinderDiscoveryState, proposed: JobFinderDiscoveryState, aliases: WeakMap<object, object>): JobFinderDiscoveryState {
+export function updateDiscoveryStorage(database: DatabaseSync, before: JobFinderDiscoveryState, proposed: JobFinderDiscoveryState, aliases: WeakMap<object, object>, positionCache?: PositionCache): JobFinderDiscoveryState {
   const small = smallValue(proposed);
   const oldSmall = smallValue(before);
   if (JSON.stringify(small) !== JSON.stringify(oldSmall)) writeSmall(database, proposed);
   else {
     // Every applied commit remains a visible revision, including a no-op.
-    database.prepare("UPDATE singleton_state SET revision = revision + 1 WHERE key = 'discovery_state'").run();
+    statement(database, "UPDATE singleton_state SET revision = revision + 1 WHERE key = 'discovery_state'").run();
   }
   const beforeRuns = new Map(keyedRows([before.activeRun, ...before.recentRuns].filter((run): run is DiscoveryRunRecord => run !== null)).map(({ key, row }, index) => [key, { row, index, active: index === 0 && before.activeRun !== null }]));
   const afterRuns = keyedRows([proposed.activeRun, ...proposed.recentRuns].filter((run): run is DiscoveryRunRecord => run !== null));
@@ -430,15 +522,15 @@ export function updateDiscoveryStorage(database: DatabaseSync, before: JobFinder
     const old = beforeRuns.get(key);
     const active = index === 0 && proposed.activeRun !== null;
     if (old?.row === row && old.index === index && old.active === active) return old.row;
-    return writeRun(database, old?.row ?? null, row, key, index, active, aliases);
+    return writeRun(database, old?.row ?? null, row, key, index, active, aliases, positionCache);
   });
   const afterKeys = new Set(afterRuns.map(({ key }) => key));
   for (const id of beforeRuns.keys()) if (!afterKeys.has(id)) {
     for (const table of ["discovery_run_checkpoints", "discovery_run_activity", "discovery_run_targets"]) database.prepare(`DELETE FROM ${table} WHERE run_id = ?`).run(id);
     database.prepare("DELETE FROM discovery_runs WHERE id = ?").run(id);
   }
-  const ledger = writeChangedRows(database, "discovery_ledger", before.discoveryLedger, proposed.discoveryLedger, DiscoveryLedgerEntrySchema, aliases);
-  const pending = writeChangedRows(database, "discovery_pending_jobs", before.pendingDiscoveryJobs, proposed.pendingDiscoveryJobs, SavedJobSchema, aliases);
+  const ledger = writeChangedRows(database, "discovery_ledger", before.discoveryLedger, proposed.discoveryLedger, DiscoveryLedgerEntrySchema, aliases, undefined, positionCache);
+  const pending = writeChangedRows(database, "discovery_pending_jobs", before.pendingDiscoveryJobs, proposed.pendingDiscoveryJobs, SavedJobSchema, aliases, undefined, positionCache);
   return frozen({ ...small, activeRun: proposed.activeRun ? storedRuns[0] ?? null : null, recentRuns: proposed.activeRun ? storedRuns.slice(1) : storedRuns, discoveryLedger: ledger, pendingDiscoveryJobs: pending });
 }
 
@@ -464,6 +556,12 @@ export function createDiscoveryStorage(database: DatabaseSync, fallback: JobFind
     }
   }
   const aliases = new WeakMap<object, object>();
+  // Trusted only while this connection was the last to change the tables:
+  // confirmed after a commit, dropped by any other change or a rollback.
+  let positions: PositionCache | null = null;
+  let positionsEpoch = -1;
+  let positionsVersion = -1;
+  let unconfirmedPositions: PositionCache | null = null;
   let cached: JobFinderDiscoveryState | null = null;
   let cachedEpoch = -1;
   let cachedVersion = -1;
@@ -486,7 +584,11 @@ export function createDiscoveryStorage(database: DatabaseSync, fallback: JobFind
       return state;
     },
     update(proposed: JobFinderDiscoveryState, before: JobFinderDiscoveryState): JobFinderDiscoveryState {
-      return updateDiscoveryStorage(database, before, proposed, aliases);
+      const positionCache: PositionCache =
+        positions && epoch() === positionsEpoch && version() === positionsVersion ? positions : new Map<string, Map<string, number>>();
+      positions = null;
+      unconfirmedPositions = positionCache;
+      return updateDiscoveryStorage(database, before, proposed, aliases, positionCache);
     },
     /**
      * Browser session states live in the small singleton row. Writing them
@@ -526,6 +628,12 @@ export function createDiscoveryStorage(database: DatabaseSync, fallback: JobFind
       cached = state;
       cachedEpoch = epoch();
       cachedVersion = version();
+      if (unconfirmedPositions) {
+        positions = unconfirmedPositions;
+        positionsEpoch = cachedEpoch;
+        positionsVersion = cachedVersion;
+        unconfirmedPositions = null;
+      }
     },
   };
 }

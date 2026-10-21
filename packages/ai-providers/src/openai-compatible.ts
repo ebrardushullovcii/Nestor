@@ -751,8 +751,14 @@ export function createOpenAiCompatibleJobFinderAiClient(
         );
       }
 
+      // A writer turn is a whole resume: it gets the draft budget, which also
+      // covers one stalled stream (two minutes of silence) and its retry.
+      // Under the agent-turn limit, one stall plus a slow retry failed it.
       const timeoutMs =
-        validatedOptions.requestTimeoutMs ?? DEFAULT_AGENT_TURN_TIMEOUT_MS;
+        validatedOptions.requestTimeoutMs ??
+        (options?.reasoningTask === "resume_writer"
+          ? DEFAULT_RESUME_DRAFT_TIMEOUT_MS
+          : DEFAULT_AGENT_TURN_TIMEOUT_MS);
 
       if (options?.signal?.aborted) {
         throw new DOMException("Aborted", "AbortError");

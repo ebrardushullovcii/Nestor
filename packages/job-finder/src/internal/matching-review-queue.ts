@@ -176,16 +176,14 @@ export function isLikelyEmptyNonDetailPosting(
   }
 
   const company = job.company.trim();
-  const body = job.description.trim();
   const hasEmployer =
     company.length > 0 && !ABSENT_EMPLOYER_PATTERN.test(company);
+  if (hasEmployer) return false;
+  // Only now: lowercasing every listing's text took most of a first refresh.
+  const body = job.description.trim();
   const hasBody =
     body.length > 0 && body.toLocaleLowerCase() !== title.toLocaleLowerCase();
-  return (
-    !hasEmployer &&
-    !hasBody &&
-    !hasLikelyDetailPageShape(job.canonicalUrl, title)
-  );
+  return !hasBody && !hasLikelyDetailPageShape(job.canonicalUrl, title);
 }
 
 const EMPLOYER_ABSENCE_LABEL_PATTERN = /^employer not stated$/i;
@@ -744,6 +742,35 @@ function isCachedUtilityShortlistJob(job: SavedJob): boolean {
   return verdict;
 }
 
+/**
+ * Works out the utility-page verdict of saved jobs not checked yet, a slice
+ * at a time with a turn of the event loop between slices, so the list that
+ * follows finds every verdict ready. At start all 20,000 rows of a large
+ * workspace are new, and checking them inside one refresh held main 0.35 s.
+ */
+export async function warmDiscoveryJobChecks(
+  jobs: readonly SavedJob[],
+  view: { key: string | null; of: (job: SavedJob) => SavedJob } = {
+    key: null,
+    of: (job) => job,
+  },
+): Promise<void> {
+  let checked = 0;
+  for (const raw of jobs) {
+    if (!isDiscoveryIntakeCandidate(raw) || !Object.isFrozen(raw)) continue;
+    // A refresh after one hide sees 6,000 rows it already warmed.
+    if (warmedRows.get(raw) === view.key) continue;
+    isCachedUtilityShortlistJob(view.of(raw));
+    warmedRows.set(raw, view.key);
+    checked += 1;
+    if (checked % UTILITY_CHECKS_PER_TURN === 0)
+      await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+const UTILITY_CHECKS_PER_TURN = 1_000;
+/** Which view (plan) each frozen row was last warmed for. */
+const warmedRows = new WeakMap<SavedJob, string | null>();
+
 // Frozen jobs never change, so an unchanged refresh reuses the last
 // filtered, ordered list instead of re-sorting every saved job.
 const orderFrozenDiscoveryJobs = memoizeBySameElements(
@@ -757,13 +784,26 @@ export function buildDiscoveryJobs(savedJobs: readonly SavedJob[]): SavedJob[] {
     : orderDiscoveryJobs(savedJobs);
 }
 
+function isVisibleDiscoveryJob(job: SavedJob): boolean {
+  return (
+    discoveryVisibleStatuses.has(job.status) &&
+    (!isDiscoveryIntakeCandidate(job) || !isCachedUtilityShortlistJob(job))
+  );
+}
+
+/**
+ * The saved jobs Find jobs lists, unordered and unchanged. For a caller that
+ * ranks its own views of them (the workspace read does).
+ */
+export function selectVisibleDiscoveryJobs(
+  savedJobs: readonly SavedJob[],
+): SavedJob[] {
+  return savedJobs.filter(isVisibleDiscoveryJob);
+}
+
 function orderDiscoveryJobs(savedJobs: readonly SavedJob[]): SavedJob[] {
-  return [...savedJobs]
-    .filter((job) => discoveryVisibleStatuses.has(job.status))
-    .filter(
-      (job) =>
-        !isDiscoveryIntakeCandidate(job) || !isCachedUtilityShortlistJob(job),
-    )
+  return savedJobs
+    .filter(isVisibleDiscoveryJob)
     .map((job) => {
       const company = resolveSavedJobCompany(job);
       const location = resolveSavedJobLocation(job);

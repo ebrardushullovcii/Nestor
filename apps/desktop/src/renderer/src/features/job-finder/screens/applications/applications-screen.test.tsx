@@ -2039,9 +2039,12 @@ describe("ApplicationsScreen", () => {
       </MemoryRouter>,
     );
 
+    // One application, so the list has no filter chips to count it.
     expect(
-      screen.getByRole("button", { name: "All: 1 application" }),
-    ).toBeTruthy();
+      within(screen.getByRole("list", { name: "Applications" })).getAllByRole(
+        "listitem",
+      ),
+    ).toHaveLength(1);
     // Association is proven by the run entry itself; the recovery section no
     // longer repeats a saved-run count above its one action.
     expect(screen.getAllByTitle("apply_run_legacy").length).toBeGreaterThan(0);
@@ -2169,8 +2172,10 @@ describe("ApplicationsScreen", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: "All: 2 applications" }),
-    ).toBeTruthy();
+      within(screen.getByRole("list", { name: "Applications" })).getAllByRole(
+        "listitem",
+      ),
+    ).toHaveLength(2);
     expect(screen.queryByText(/runs? saved/i)).toBeNull();
     expect(screen.queryByTitle("apply_run_shared")).toBeNull();
     expect(

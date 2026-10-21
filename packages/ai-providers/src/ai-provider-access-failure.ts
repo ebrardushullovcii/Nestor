@@ -1,4 +1,7 @@
-import { ModelRequestHttpError } from "./model-request-transport";
+import {
+  ModelRequestHttpError,
+  ModelRequestTimeoutError,
+} from "./model-request-transport";
 
 export interface AiProviderAccessFailure {
   readonly reason: "funding" | "authentication" | "permission";
@@ -85,12 +88,29 @@ export function isAiProviderRateLimited(error: unknown): boolean {
 
 /**
  * The AI service turned the request away for load or its own fault (429 or
- * 5xx) even after the transport's retries. Nothing is wrong with the request:
- * the same work can run later, so it is put off rather than failed.
+ * 5xx), or never finished answering, even after the transport's retries.
+ * Nothing is wrong with the request: the same work can run later, so it is
+ * put off rather than failed.
  */
 export function isAiServiceBusy(error: unknown): boolean {
-  return hasModelRequestStatus(
-    error,
-    (status) => status === 429 || status >= 500,
+  return (
+    hasModelRequestStatus(error, (status) => status === 429 || status >= 500) ||
+    hasCause(error, (cause) => cause instanceof ModelRequestTimeoutError)
   );
+}
+
+function hasCause(error: unknown, matches: (cause: Error) => boolean): boolean {
+  const visited = new Set<Error>();
+  let current = error;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth += 1) {
+    if (!(current instanceof Error) || visited.has(current)) return false;
+    visited.add(current);
+    try {
+      if (matches(current)) return true;
+      current = current.cause;
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }

@@ -494,6 +494,7 @@ export const modelReasoningTasks = [
   "search",
   "page_read",
   "fit_batch",
+  "listing_screen",
   "claim_check",
   "apply",
 ] as const;
@@ -518,6 +519,11 @@ const TASK_REASONING_EFFORT_SETTINGS: Record<
   search: { env: "NESTOR_AI_SEARCH_REASONING_EFFORT", fallback: "low" },
   page_read: { env: "NESTOR_AI_PAGE_READ_REASONING_EFFORT", fallback: "low" },
   fit_batch: { env: "NESTOR_AI_FIT_REASONING_EFFORT", fallback: "medium" },
+  // Which job-board listings are worth keeping, from title and place only.
+  listing_screen: {
+    env: "NESTOR_AI_LISTING_SCREEN_REASONING_EFFORT",
+    fallback: "low",
+  },
   claim_check: {
     env: "NESTOR_AI_CLAIM_CHECK_REASONING_EFFORT",
     fallback: "medium",

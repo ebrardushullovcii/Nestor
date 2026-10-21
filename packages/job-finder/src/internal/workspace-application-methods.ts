@@ -2404,16 +2404,20 @@ export function createWorkspaceApplicationMethods(
   async function clearStaleMissingResumeBlockerForJob(
     jobId: string,
   ): Promise<void> {
+    // The cached display rows, as the workspace read uses for the same check:
+    // parsing every stored draft (each most of a megabyte) for one job held
+    // each approval for close to a second.
+    const display = await ctx.repository.readDisplayCollections?.();
     const [
       applicationRecords,
       resumeDrafts,
       resumeExportArtifacts,
       tailoredAssets,
     ] = await Promise.all([
-      ctx.repository.listApplicationRecords(),
-      ctx.repository.listResumeDrafts(),
+      display?.applicationRecords ?? ctx.repository.listApplicationRecords(),
+      display?.resumeDrafts ?? ctx.repository.listResumeDrafts(),
       ctx.repository.listResumeExportArtifacts({ jobId }),
-      ctx.repository.listTailoredAssets(),
+      display?.tailoredAssets ?? ctx.repository.listTailoredAssets(),
     ]);
     const now = new Date().toISOString();
 
@@ -4607,9 +4611,10 @@ export function createWorkspaceApplicationMethods(
         const resumeDraft = draft.languagePresentation
           ? applyResumeLanguage(languageDraft, draft.languagePresentation)
           : languageDraft;
-        releaseProcessor = await resumeProcessors.acquire();
-        if (!current()) return { jobId, outcome: "cancelled" };
         reportResumeStage(options, "processing");
+        // The final fact check is a model call: it runs before taking one of
+        // the two local slots, which are for rendering. Holding a slot through
+        // it queued a batch of ten behind two checks at a time.
         const sanitizedResumeDraft = await sanitizeAndCheckResumeDraft(
           ctx,
           {
@@ -4620,6 +4625,9 @@ export function createWorkspaceApplicationMethods(
           },
           { fixGeneratedLines: true },
         );
+        if (!current()) return { jobId, outcome: "cancelled" };
+        releaseProcessor = await resumeProcessors.acquire();
+        if (!current()) return { jobId, outcome: "cancelled" };
         const previewSections = buildTailoredAssetBridge({
           draft: sanitizedResumeDraft,
           job,

@@ -129,6 +129,18 @@ interface HomeNextStep {
   detailLink?: HomeButton;
   primary: HomeButton;
   secondary: readonly HomeButton[];
+  /**
+   * Other things worth knowing that are not the next step, as quiet lines
+   * under the buttons: "4 applications have a closed form · Open
+   * Applications". One line each, at most one link.
+   */
+  also?: readonly HomeAlsoLine[];
+}
+
+export interface HomeAlsoLine {
+  id: string;
+  text: string;
+  link?: HomeButton;
 }
 
 interface HomeNowItem {
@@ -1600,6 +1612,112 @@ export function buildJobSearchHomeModel(
             },
             secondary: nextInPlaceAction ? [nextInPlaceAction] : [],
           };
+  } else if (shortlist.reviewResumes > 0) {
+    // Reading the resumes is what lets the person apply, so with resumes
+    // waiting it is the next step; a failed batch to retry and forms that
+    // closed are one press or one quiet line beside it. "Check 4 applications
+    // whose form closed" used to lead while 196 resumes waited.
+    const n = shortlist.reviewResumes;
+    const only = n === 1 ? shortlist.reviewJobs[0] : undefined;
+    const first = shortlist.reviewJobs[0];
+    const withLines = shortlist.reviewJobs.filter(
+      (job) => job.linesToDecide > 0,
+    );
+    const why =
+      withLines.length === 0
+        ? only
+          ? "Aggressive resumes stretch toward the posting, so each one is read and approved before it is used."
+          : "Aggressive resumes stretch toward the posting, so each one is read and approved before it is used. Approve one and the next opens."
+        : only
+          ? `${only.linesToDecide === 1 ? "A line" : `${only.linesToDecide} lines`} in the resume for ${only.title} at ${only.company} ${only.linesToDecide === 1 ? "is" : "are"} waiting for your decision. Keep or change ${only.linesToDecide === 1 ? "it" : "each one"}, and the job can be applied to.`
+          : withLines.length === n
+            ? "Some resumes have lines waiting for your decision. Keep or change each one, and those jobs can be applied to."
+            : "Some resumes have lines waiting for your decision, and Aggressive resumes stretch toward the posting. Approve one and the next opens.";
+    // The ready jobs do not wait on this review; say which ones do.
+    const pressCount =
+      applyNext?.primary.action.kind === "apply_all"
+        ? applyNext.primary.action.jobIds.length
+        : 0;
+    const heldBack =
+      applyNext?.id === "apply" && shortlist.readyToApply > 0
+        ? only
+          ? ` "${describeSecondaryPress(applyNext, shortlist.readyToApply)}" starts ${pressCount < shortlist.readyToApply ? `${pressCount} of the ${shortlist.readyToApply} ready jobs` : pressCount === 1 ? "the ready one" : "the others"}; ${only.title} waits for this.${pressCount < shortlist.readyToApply ? ` ${describePartialPress(pressCount, shortlist.readyToApply, "Shortlisted") ?? ""}`.trimEnd() : ""}`
+          : ` The ready jobs can start now; these ${n} wait for their review.`
+        : "";
+    const closedCount = applyRunning
+      ? 0
+      : applications.pageClosedJobIds.length;
+    next = {
+      id: "review_resumes",
+      title: only ? "Review the resume" : `Review ${plural(n, "resume")}`,
+      detail: `${why}${heldBack}`,
+      // Lands on the first resume waiting, in the studio's review pass.
+      primary: only
+        ? {
+            label: "Review the resume",
+            action: {
+              kind: "navigate",
+              route: buildResumeWorkspaceRoute(only.jobId),
+            },
+          }
+        : first
+          ? {
+              label: "Start reviewing",
+              action: {
+                kind: "navigate",
+                route: buildResumeWorkspaceRoute(first.jobId),
+              },
+            }
+          : {
+              label: "Open Shortlisted",
+              action: { kind: "navigate", route: reviewQueueRoute },
+            },
+      // Work that does not wait on this review keeps moving in one press
+      // here: failed applications to retry, missing resumes to write, and
+      // ready jobs to apply to. (Search again is added below, as for every
+      // step of the loop.)
+      secondary: [
+        ...(retryNext && retryNext.id === "retry"
+          ? [
+              {
+                ...retryNext.primary,
+                label: describeSecondaryPress(
+                  retryNext,
+                  applications.retryJobIds.length,
+                ),
+              },
+            ]
+          : []),
+        ...(createNext ? [createNext.primary] : []),
+        ...(applyNext && applyNext.id === "apply" && !resumesWriting
+          ? [
+              {
+                ...applyNext.primary,
+                label: describeSecondaryPress(
+                  applyNext,
+                  shortlist.readyToApply,
+                ),
+              },
+            ]
+          : []),
+      ],
+      also:
+        closedCount > 0
+          ? [
+              {
+                id: "check_closed",
+                text:
+                  closedCount === 1
+                    ? "1 application's form closed before it was sent: check it, then mark it Applied or prepare it again."
+                    : `${closedCount} applications' forms closed before they were sent: check them, then mark each Applied or prepare it again.`,
+                link: {
+                  label: "Open Applications",
+                  action: { kind: "navigate", route: applicationsRoute },
+                },
+              },
+            ]
+          : [],
+    };
   } else if (retryNext) {
     next = retryNext;
   } else if (applications.pageClosedJobIds.length > 0 && !applyRunning) {
@@ -1609,11 +1727,12 @@ export function buildJobSearchHomeModel(
     const n = applications.pageClosedJobIds.length;
     next = {
       id: "check_closed",
-      title: `Check ${plural(n, "application")} whose page closed`,
+      // "Form closed" is what the rows and the detail badge say.
+      title: `Check ${plural(n, "application")} whose form closed`,
       detail:
         n === 1
-          ? "Job Finder filled this one in, but its page closed before Job Finder saw it sent. If you sent it yourself, set its tracker stage to Applied. If not, choose Prepare again on it in Applications."
-          : "Job Finder filled these in, but their pages closed before Job Finder saw them sent. If you sent any yourself, set its tracker stage to Applied. Choose Prepare again on the others in Applications.",
+          ? "Job Finder filled this one in, but its form closed before Job Finder saw it sent. If you sent it yourself, set its tracker stage to Applied. If not, choose Prepare again on it in Applications."
+          : "Job Finder filled these in, but their forms closed before Job Finder saw them sent. If you sent any yourself, set its tracker stage to Applied. Choose Prepare again on the others in Applications.",
       primary: {
         label: "Open Applications",
         action: { kind: "navigate", route: applicationsRoute },
@@ -1636,55 +1755,6 @@ export function buildJobSearchHomeModel(
         action: { kind: "navigate", route: applicationsRoute },
       },
       secondary: [],
-    };
-  } else if (shortlist.reviewResumes > 0) {
-    const n = shortlist.reviewResumes;
-    const only = n === 1 ? shortlist.reviewJobs[0] : undefined;
-    const withLines = shortlist.reviewJobs.filter(
-      (job) => job.linesToDecide > 0,
-    );
-    const why =
-      withLines.length === 0
-        ? "Aggressive resumes stretch toward the posting. Confirm or remove each stretched line before applying."
-        : only
-          ? `${only.linesToDecide === 1 ? "A line" : `${only.linesToDecide} lines`} in the resume for ${only.title} at ${only.company} ${only.linesToDecide === 1 ? "is" : "are"} waiting for your decision. Keep or change ${only.linesToDecide === 1 ? "it" : "each one"}, and the job can be applied to.`
-          : withLines.length === n
-            ? "Some resumes have lines waiting for your decision. Keep or change each one, and those jobs can be applied to."
-            : "Some resumes have lines waiting for your decision, and Aggressive resumes stretch toward the posting. Decide each flagged line before applying.";
-    // The ready jobs do not wait on this review; say which ones do.
-    const pressCount =
-      applyNext?.primary.action.kind === "apply_all"
-        ? applyNext.primary.action.jobIds.length
-        : 0;
-    const heldBack =
-      applyNext?.id === "apply" && shortlist.readyToApply > 0
-        ? only
-          ? ` "${describeSecondaryPress(applyNext, shortlist.readyToApply)}" starts ${pressCount < shortlist.readyToApply ? `${pressCount} of the ${shortlist.readyToApply} ready jobs` : pressCount === 1 ? "the ready one" : "the others"}; ${only.title} waits for this.${pressCount < shortlist.readyToApply ? ` ${describePartialPress(pressCount, shortlist.readyToApply, "Shortlisted") ?? ""}`.trimEnd() : ""}`
-          : ` The ready jobs can start now; these ${n} wait for their review.`
-        : "";
-    next = {
-      id: "review_resumes",
-      title: only ? "Review the resume" : `Review ${plural(n, "resume")}`,
-      detail: `${why}${heldBack}`,
-      primary: only
-        ? {
-            label: "Review the resume",
-            action: {
-              kind: "navigate",
-              route: buildResumeWorkspaceRoute(only.jobId),
-            },
-          }
-        : {
-            label: "Open Shortlisted",
-            action: { kind: "navigate", route: reviewQueueRoute },
-          },
-      // Jobs that do not wait on this review keep moving in one press here.
-      secondary: [
-        ...(createNext ? [createNext.primary] : []),
-        ...(nextInPlaceAction && nextInPlaceStep !== createNext
-          ? [nextInPlaceAction]
-          : []),
-      ],
     };
   } else if (
     applyNext &&

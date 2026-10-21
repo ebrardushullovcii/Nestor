@@ -113,6 +113,12 @@ import {
 } from "@renderer/features/job-finder/lib/job-finder-error-message";
 import { buildJobFinderContextRoute } from "../features/job-finder/lib/job-finder-context-navigation";
 import { buildResumeWorkspaceRoute } from "@renderer/features/job-finder/lib/resume-workspace-route";
+import {
+  enqueueResumeApproval,
+  markResumeReviewApproved,
+  markResumeReviewApproving,
+  markResumeReviewFailed,
+} from "@renderer/features/job-finder/screens/review-queue/resume-review-session";
 import { buildSourceDebugOutcomeMessage } from "./job-finder-page-route-utils";
 import {
   createSaveDedupeKey,
@@ -1043,6 +1049,27 @@ export function createPrimaryPageActions(
   // runner: the write belongs to the route where its handler started, so a
   // completion that lands after an unrelated sibling-route change stays hidden
   // on its owning route instead of leaking onto the new one.
+  // The newest PDF built from the job's saved draft, approved. The export
+  // just ran, so its artifact is the one to freeze.
+  const approveLatestResumeExport = async (jobId: string) => {
+    const workspace = await actions.getResumeWorkspace(jobId);
+    const exportToApprove = workspace.exports
+      .filter(
+        (artifact) =>
+          artifact.jobId === jobId && artifact.draftId === workspace.draft.id,
+      )
+      .sort(
+        (left, right) =>
+          new Date(right.exportedAt).getTime() -
+          new Date(left.exportedAt).getTime(),
+      )[0];
+    if (!exportToApprove) {
+      throw new Error(
+        "Job Finder could not create the application PDF for this resume.",
+      );
+    }
+    return actions.approveResume(jobId, exportToApprove.id);
+  };
   const applyRouteScopedMessage = (
     next: ActionState,
     ownerStartRoute: string | null = jobFinderStatusRoute,
@@ -1632,15 +1659,20 @@ export function createPrimaryPageActions(
             totalCount: result.totalCount,
           };
           setTailoredDraftPreparation(finalState);
-          applyRouteScopedMessage(
-            {
-              // The durable dismissible batch notice owns provider-outage copy.
-              message: batch.providerBlock
-                ? null
-                : getTailoredDraftPreparationResultMessage(finalState),
-            },
-            ownerStartRoute,
-          );
+          // On Shortlisted the result is a note under the batch control, where
+          // it can be dismissed. As a route message it also landed in the Next
+          // step card of whatever job was open, and stayed there.
+          if (!ownerStartRoute?.startsWith("/job-finder/review-queue")) {
+            applyRouteScopedMessage(
+              {
+                // The durable dismissible batch notice owns provider-outage copy.
+                message: batch.providerBlock
+                  ? null
+                  : getTailoredDraftPreparationResultMessage(finalState),
+              },
+              ownerStartRoute,
+            );
+          }
         })
         .catch(() => {
           if (tailoredDraftPreparationDisposedRef.current) return;
@@ -1959,6 +1991,7 @@ export function createPrimaryPageActions(
       reasons: readonly DiscoveryFeedbackReason[],
       action: "hide_job" | "hide_and_exclude_employer" = "hide_job",
       expectedNormalizedCompanyName: string | null = null,
+      options?: { quiet?: boolean },
     ) => {
       await runAction(
         () =>
@@ -1969,9 +2002,11 @@ export function createPrimaryPageActions(
             expectedNormalizedCompanyName,
           ),
         () => undefined,
-        action === "hide_and_exclude_employer"
-          ? "Job hidden and the exact employer name excluded from future searches. Fit scoring is unchanged."
-          : "Job hidden. Your reasons stay local and do not change fit scoring.",
+        options?.quiet
+          ? null
+          : action === "hide_and_exclude_employer"
+            ? "Job hidden and the exact employer name excluded from future searches. Fit scoring is unchanged."
+            : "Job hidden. Your reasons stay local and do not change fit scoring.",
         {
           rethrowError: true,
           scope: jobFinderPendingActions.discoveryJob(jobId),
@@ -1987,11 +2022,11 @@ export function createPrimaryPageActions(
         "Employer allowed in future searches. The hidden job was not restored.",
         { scope: jobFinderPendingActions.discoveryJob(input.jobId) },
       ),
-    onRestoreDismissedJob: (jobId: string) =>
+    onRestoreDismissedJob: (jobId: string, options?: { quiet?: boolean }) =>
       void runAction(
         () => actions.restoreDismissedDiscoveryJob(jobId),
         () => undefined,
-        "Job restored and feedback reset.",
+        options?.quiet ? null : "Job restored and feedback reset.",
         { scope: jobFinderPendingActions.discoveryJob(jobId) },
       ),
     onEditResumeWorkspace: (jobId: string) => {
@@ -2034,7 +2069,10 @@ export function createPrimaryPageActions(
       ),
     ...(actions.removeJobsFromReview
       ? {
-          onRemoveReviewJobs: async (jobIds: readonly string[]) => {
+          onRemoveReviewJobs: async (
+            jobIds: readonly string[],
+            options?: { quiet?: boolean },
+          ) => {
             const ids = [...new Set(jobIds)];
             if (ids.length === 0) return;
             const mayLeave = await confirmLeaveDirtyResumeWorkspace(
@@ -2044,7 +2082,9 @@ export function createPrimaryPageActions(
             await runAction(
               () => actions.removeJobsFromReview!(ids),
               () => undefined,
-              `${ids.length} ${ids.length === 1 ? "job" : "jobs"} moved back to Find jobs.`,
+              options?.quiet
+                ? null
+                : `${ids.length} ${ids.length === 1 ? "job" : "jobs"} moved back to Find jobs.`,
               {
                 rethrowError: true,
                 scope: jobFinderPendingActions.resumeJob("bulk-remove"),
@@ -2090,26 +2130,7 @@ export function createPrimaryPageActions(
             await refreshResumeWorkspace(jobId).catch(() => false);
             throw error;
           }
-          const workspace = await actions.getResumeWorkspace(jobId);
-          const exportToApprove = workspace.exports
-            .filter(
-              (artifact) =>
-                artifact.jobId === jobId &&
-                artifact.draftId === workspace.draft.id,
-            )
-            .sort(
-              (left, right) =>
-                new Date(right.exportedAt).getTime() -
-                new Date(left.exportedAt).getTime(),
-            )[0];
-
-          if (!exportToApprove) {
-            throw new Error(
-              "Job Finder could not create the application PDF for this resume.",
-            );
-          }
-
-          return actions.approveResume(jobId, exportToApprove.id);
+          return approveLatestResumeExport(jobId);
         },
         async () => {
           await refreshResumeWorkspace(jobId);
@@ -2117,6 +2138,44 @@ export function createPrimaryPageActions(
         "Resume approved and ready for application preparation.",
         { scope: jobFinderPendingActions.resumeExport(jobId) },
       ),
+    onApproveResumeAndContinue: (
+      jobId: string,
+      nextJobId: string | null,
+      exportId?: string,
+    ) => {
+      // Building and checking the application PDF takes seconds. The person
+      // has read this resume and approved it, so the next one opens now and
+      // the approval finishes behind it, one at a time. A failure keeps the
+      // job in "To review" and is named on the review line in the studio.
+      markResumeReviewApproving(jobId);
+      enqueueResumeApproval(async () => {
+        try {
+          await withPendingScope(
+            jobFinderPendingActions.resumeExport(jobId),
+            async () => {
+              if (exportId) {
+                await actions.approveResume(jobId, exportId);
+                return;
+              }
+              await actions.exportResumePdf(jobId, "approval");
+              await approveLatestResumeExport(jobId);
+            },
+          );
+          markResumeReviewApproved(jobId);
+        } catch (error) {
+          markResumeReviewFailed(
+            jobId,
+            getJobFinderErrorMessage(error, "The resume could not be approved."),
+          );
+        }
+      });
+      setSelectedReviewJobId(nextJobId ?? jobId);
+      navigate(
+        nextJobId
+          ? buildResumeWorkspaceRoute(nextJobId)
+          : "/job-finder/review-queue",
+      );
+    },
     onApproveResumeAndApply: (jobId: string) => {
       const capacityRefusal = getDailyCapacityRefusalMessage();
       if (capacityRefusal) {
@@ -2430,7 +2489,10 @@ export function createPrimaryPageActions(
           },
         }
       : {}),
-    onQueueJob: async (jobId: string): Promise<JobFinderQueuedJobOutcome> => {
+    onQueueJob: async (
+      jobId: string,
+      options?: { quiet?: boolean },
+    ): Promise<JobFinderQueuedJobOutcome> => {
       // Request-local shortlist outcome: the awaited result belongs to this
       // exact click, so overlapping shortlists resolving out of order can
       // never label another row and shared route messages cannot steal
@@ -2447,17 +2509,20 @@ export function createPrimaryPageActions(
         // review collections. Retain the exact clicked id so the refreshed
         // Shortlisted surface cannot silently fall back to another row.
         setSelectedReviewJobId(jobId);
-        applyRouteScopedMessage(
-          {
-            message: successMessage,
-            tone: "success",
-            actionLink: {
-              label: "Open Shortlisted",
-              route: "/job-finder/review-queue",
+        // A triage pass says each decision on its own bar with Undo; a
+        // toast for every one of a hundred shortlists would only stack up.
+        if (!options?.quiet)
+          applyRouteScopedMessage(
+            {
+              message: successMessage,
+              tone: "success",
+              actionLink: {
+                label: "Open Shortlisted",
+                route: "/job-finder/review-queue",
+              },
             },
-          },
-          ownerStartRoute,
-        );
+            ownerStartRoute,
+          );
         return { status: "success", message: successMessage };
       } catch (error) {
         if (isHandledRefreshError(error)) {

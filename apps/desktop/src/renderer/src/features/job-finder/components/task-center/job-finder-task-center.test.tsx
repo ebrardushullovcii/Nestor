@@ -13,9 +13,22 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { JobFinderTaskCenter } from "./job-finder-task-center";
 import type { TailoredDraftPreparationViewState } from "../../screens/review-queue/review-queue-status";
+
+
+// The fixtures' runs end on 31 July; Activity shows a finished run for a day.
+beforeEach(() => {
+  vi.useFakeTimers({
+    toFake: ["Date"],
+    now: new Date("2026-07-31T12:00:00.000Z"),
+  });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 
 function createWorkspace(): JobFinderRendererWorkspaceSnapshot {
   const discoveryRun = {
@@ -183,9 +196,11 @@ describe("JobFinderTaskCenter", () => {
       ).disabled,
     ).toBe(true);
     expect(discoveryTask?.getAttribute("data-task-status")).toBe("stopping");
+    // The badge says "Stopping"; a "Stage: Stopping" line under it would
+    // only say it again.
     expect(
       within(discoveryTask as HTMLElement).getAllByText("Stopping"),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     expect(
       within(applyTask as HTMLElement).getByRole<HTMLButtonElement>("button")
         .disabled,
