@@ -903,7 +903,7 @@ export async function runResumeGenerationAgentTask(input: {
     initialDraft: {} as Record<string, unknown>,
     model: createModelAdapter(
       input.client,
-      modelConversationKeys.resumeForJob(input.request.job),
+      modelConversationKeys.resumeWriting(input.request.profile),
       {
         preventRuntimeRetries: true,
         reasoningTask: "resume_writer",

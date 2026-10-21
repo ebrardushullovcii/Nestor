@@ -58,6 +58,7 @@ import {
   describeSavedResumeLevel,
   getTailoredDraftPreparationCandidates,
   getTailoredDraftPreparationResultMessage,
+  isTailoredDraftPreparationEligible,
   prepareTailoredDraftBatch,
   shouldRewriteResumeAfterLevelChange,
   type ResumeRunStage,
@@ -1376,10 +1377,21 @@ export function createPrimaryPageActions(
         !preparedJobIds.has(item.jobId) &&
         (!selectedJobIds || selectedJobIds.has(item.jobId)),
     );
+    // A job the old batch finished is skipped only while it still has that
+    // resume: one it wrote with the person's original wording, or one that
+    // failed since, still needs one. Skipping those made "Create 10 resumes"
+    // on such jobs do nothing at all.
     const candidates = continuing
-      ? queue.filter((item) => !checkpoint.completedJobIds.includes(item.jobId))
+      ? queue.filter(
+          (item) =>
+            !checkpoint.completedJobIds.includes(item.jobId) ||
+            isTailoredDraftPreparationEligible(item, preparedJobIds),
+        )
       : getTailoredDraftPreparationCandidates(queue);
     if (candidates.length === 0) {
+      applyRouteScopedMessage({
+        message: "These jobs already have their resumes.",
+      });
       return;
     }
 

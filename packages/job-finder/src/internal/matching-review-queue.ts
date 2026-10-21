@@ -453,6 +453,9 @@ function isDiscoveryIntakeCandidate(job: Pick<SavedJob, "status">): boolean {
   return job.status === "discovered";
 }
 
+/** How long a resume written without its listing waits before a retry. */
+const LISTING_RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
+
 const assetStatusPriority: Record<AssetStatus, number> = {
   ready: 0,
   generating: 1,
@@ -703,10 +706,14 @@ export function buildReviewQueue(
         ...(draft && (linesToDecideByDraftId?.get(draft.id) ?? 0) > 0
           ? { resumeLinesToDecide: linesToDecideByDraftId!.get(draft.id)! }
           : {}),
+        // Written without the listing counts as still needing a resume, so a
+        // batch tries the listing again; not within a day of the last try,
+        // when the page would only fail the same way and take a batch slot.
         ...(asset?.status === "ready" &&
         asset.generationMethod === "deterministic" &&
         (asset.generationReason === "listing_text_missing" ||
-          asset.generationReason === "listing_text_not_distinguishing")
+          asset.generationReason === "listing_text_not_distinguishing") &&
+        !(Date.now() - Date.parse(asset.updatedAt) < LISTING_RETRY_AFTER_MS)
           ? { resumeWrittenWithoutListing: true }
           : {}),
         updatedAt: updatedAtCandidates.sort().at(-1) ?? job.discoveredAt,

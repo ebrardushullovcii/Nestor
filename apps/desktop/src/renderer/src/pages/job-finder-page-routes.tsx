@@ -1,5 +1,8 @@
 import { inferProfileTimeZone } from "@renderer/features/job-finder/lib/job-finder-timestamp-format";
-import { SearchPlanScope } from "@renderer/features/job-finder/screens/campaigns/search-plan-scope";
+import {
+  hasSearchPlanChoice,
+  SearchPlanScope,
+} from "@renderer/features/job-finder/screens/campaigns/search-plan-scope";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { projectPlanSafeguardPauses } from "@nestor/job-finder/plan-safeguard-pauses";
 import type { ReactNode } from "react";
@@ -1625,24 +1628,28 @@ function JobFinderReviewQueueRouteContent() {
       workspace={context.workspace}
     >
       <ReviewQueueScreen
+        // One plan has nothing to choose between; a picker with one entry
+        // was just another row above the list.
         scopeControl={
-          <SearchPlanScope
-            campaigns={context.workspace.campaigns}
-            activeCampaignId={scopedPlanId}
-            countsByCampaignId={Object.fromEntries(
-              context.workspace.campaigns.map((plan) => [
-                plan.id,
-                context.workspace.reviewQueue.filter((item) =>
-                  plan.jobIds.includes(item.jobId),
-                ).length,
-              ]),
-            )}
-            collection="Shortlisted"
-            onSelect={(campaignId) => {
-              setSearchParams({ plan: campaignId }, { replace: true });
-              return Promise.resolve(true);
-            }}
-          />
+          hasSearchPlanChoice(context.workspace.campaigns) ? (
+            <SearchPlanScope
+              campaigns={context.workspace.campaigns}
+              activeCampaignId={scopedPlanId}
+              countsByCampaignId={Object.fromEntries(
+                context.workspace.campaigns.map((plan) => [
+                  plan.id,
+                  context.workspace.reviewQueue.filter((item) =>
+                    plan.jobIds.includes(item.jobId),
+                  ).length,
+                ]),
+              )}
+              collection="Shortlisted"
+              onSelect={(campaignId) => {
+                setSearchParams({ plan: campaignId }, { replace: true });
+                return Promise.resolve(true);
+              }}
+            />
+          ) : null
         }
         actionState={context.actionState}
         applicationAutomationMode={
@@ -2347,26 +2354,30 @@ export function JobFinderApplicationsRoute() {
         homeTimeZone={
           inferProfileTimeZone(context.workspace.profile ?? {}).timeZone
         }
+        // One plan has nothing to choose between; a picker with one entry
+        // was just another row above the list.
         scopeControl={
-          <SearchPlanScope
-            campaigns={context.workspace.campaigns}
-            activeCampaignId={scopedPlanId}
-            countsByCampaignId={Object.fromEntries(
-              context.workspace.campaigns.map((plan) => [
-                plan.id,
-                selectCampaignApplicationsScope(
-                  context.workspace,
-                  false,
+          hasSearchPlanChoice(context.workspace.campaigns) ? (
+            <SearchPlanScope
+              campaigns={context.workspace.campaigns}
+              activeCampaignId={scopedPlanId}
+              countsByCampaignId={Object.fromEntries(
+                context.workspace.campaigns.map((plan) => [
                   plan.id,
-                ).applicationRecords.length,
-              ]),
-            )}
-            collection="Applications"
-            onSelect={(campaignId) => {
-              setSearchParams({ plan: campaignId }, { replace: true });
-              return Promise.resolve(true);
-            }}
-          />
+                  selectCampaignApplicationsScope(
+                    context.workspace,
+                    false,
+                    plan.id,
+                  ).applicationRecords.length,
+                ]),
+              )}
+              collection="Applications"
+              onSelect={(campaignId) => {
+                setSearchParams({ plan: campaignId }, { replace: true });
+                return Promise.resolve(true);
+              }}
+            />
+          ) : null
         }
         activityControl={context.workspace.activityControl}
         userActionRequests={context.workspace.userActionRequests}

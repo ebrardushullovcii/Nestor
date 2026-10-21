@@ -527,7 +527,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
           timeoutMs:
             validatedOptions?.requestTimeoutMs ??
             DEFAULT_RESUME_DRAFT_TIMEOUT_MS,
-          conversationKey: modelConversationKeys.resumeForJob(input.job),
+          conversationKey: modelConversationKeys.resumeWriting(input.profile),
         },
       );
       return completeTailoredResumeDraft(payload, input);
@@ -612,7 +612,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
         "tailorResume",
         buildResumeRewriteProposalPrompt(input.searchPreferences.tailoringMode),
         buildGroundedResumeRewriteModelPayload(input),
-        { conversationKey: modelConversationKeys.resumeForJob(input.job) },
+        { conversationKey: modelConversationKeys.resumeWriting(input.profile) },
       );
       return completeTailoredResumeDraft(payload, {
         profile: input.profile,
@@ -638,7 +638,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
         ].join(" "),
         buildJobFitAssessmentPayload(assessmentInput),
         {
-          conversationKey: modelConversationKeys.jobFit(input.job),
+          conversationKey: modelConversationKeys.listingReading(input.profile),
           ...(signal ? { signal } : {}),
           reasoningEffort: reasoningEffortFor(
             background ? "fit_batch" : "listing_read",

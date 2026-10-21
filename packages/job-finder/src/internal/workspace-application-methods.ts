@@ -1069,6 +1069,10 @@ export function createWorkspaceApplicationMethods(
             }
           : {}),
         assess: async (posting) => {
+          // The writer needs the listing's text, not a fresh verdict: the
+          // job keeps its verdict and the next judging pass refreshes it.
+          // Asking here added a minute and 9K tokens to every such resume.
+          if (options.resumeWriterOwnsSlot) return session.assess(posting);
           try {
             const assessed = await createMatchAssessmentAsync(
               ctx.aiClient,

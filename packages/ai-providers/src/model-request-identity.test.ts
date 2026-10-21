@@ -183,7 +183,7 @@ describe("OpenCode-compatible client requests", () => {
     );
     expect(sessionIds.size).toBe(1);
     expect([...sessionIds][0]).toBe(
-      buildModelSessionId(modelConversationKeys.resumeForJob(job)),
+      buildModelSessionId(modelConversationKeys.resumeWriting(input.profile)),
     );
     for (const headers of seen) {
       expect(headers["User-Agent"]).toBe(JOB_FINDER_MODEL_CLIENT_USER_AGENT);

@@ -231,7 +231,7 @@ test("reset aborts the writer request and frees capacity for the restored worksp
   await workspaceService.shutdown();
 });
 
-test("resume listing model checks share the 50-writer capacity instead of the background two-job queue", async () => {
+test("resume listing reads share the 50-writer capacity and ask for no fit verdict", async () => {
   const seed = fixture(60);
   seed.savedJobs = seed.savedJobs.map((job) => ({
     ...job,
@@ -243,17 +243,6 @@ test("resume listing model checks share the 50-writer capacity instead of the ba
     },
   }));
   const aiClient = createAiClient();
-  aiClient.extractJobsFromPage = (input) =>
-    Promise.resolve([
-      {
-        ...seed.savedJobs[0]!,
-        canonicalUrl: input.pageUrl,
-        description:
-          seed.savedJobs[0]!.description +
-          " Additional accessible product interface and state management responsibilities.",
-        detailQuality: "detail_enriched",
-      },
-    ]);
   let release!: () => void;
   const wait = new Promise<void>((resolve) => {
     release = resolve;
@@ -261,33 +250,29 @@ test("resume listing model checks share the 50-writer capacity instead of the ba
   let active = 0,
     peak = 0,
     started = 0;
-  aiClient.assessJobFit = async () => {
+  aiClient.extractJobsFromPage = async (input) => {
     started++;
     active++;
     peak = Math.max(peak, active);
     try {
       await wait;
-      return {
-        score: 80,
-        reasons: ["Synthetic matching skill"],
-        gaps: [],
-        requirements: [
-          {
-            id: "synthetic_react",
-            category: "skill",
-            label: "React",
-            importance: "required",
-            status: "supported",
-            jobEvidence: "Build React interfaces",
-            resumeEvidence: [],
-            explanation: "Synthetic fit assessment",
-          },
-        ],
-      };
+      return [
+        {
+          ...seed.savedJobs[0]!,
+          canonicalUrl: input.pageUrl,
+          description:
+            seed.savedJobs[0]!.description +
+            " Additional accessible product interface and state management responsibilities.",
+          detailQuality: "detail_enriched",
+        },
+      ];
     } finally {
       active--;
     }
   };
+  // The writer needs the listing's text, not a fresh verdict.
+  const assess = vi.fn(aiClient.assessJobFit.bind(aiClient));
+  aiClient.assessJobFit = assess;
   const { workspaceService } = createWorkspaceServiceHarness({
     seed,
     aiClient,
@@ -317,6 +302,7 @@ test("resume listing model checks share the 50-writer capacity instead of the ba
     ),
   ).toBe(true);
   expect(peak).toBe(50);
+  expect(assess).not.toHaveBeenCalled();
   await workspaceService.shutdown();
 }, 30_000);
 

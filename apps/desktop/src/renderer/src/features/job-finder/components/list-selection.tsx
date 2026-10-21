@@ -97,6 +97,43 @@ export function ListRowSelectionCell({
   );
 }
 
+/** The page checkbox on its own, for a list whose toolbar holds it. */
+export function ListPageCheckbox({
+  pageIds,
+  selectedIds,
+  onSelectPage,
+  onClearPage,
+  noun,
+}: {
+  pageIds: readonly string[];
+  selectedIds: ReadonlySet<string>;
+  onSelectPage: () => void;
+  onClearPage: () => void;
+  /** Plural noun for the rows, such as "jobs". */
+  noun: string;
+}) {
+  const selectedOnPage = pageIds.filter((id) => selectedIds.has(id)).length;
+  const state: boolean | "indeterminate" =
+    pageIds.length > 0 && selectedOnPage === pageIds.length
+      ? true
+      : selectedOnPage > 0
+        ? "indeterminate"
+        : false;
+  return (
+    <Checkbox
+      aria-label={
+        state === true
+          ? `Clear the ${pageIds.length} ${noun} on this page`
+          : `Select the ${pageIds.length} ${noun} on this page`
+      }
+      checked={state}
+      disabled={pageIds.length === 0}
+      onCheckedChange={() => (state === true ? onClearPage() : onSelectPage())}
+      title={`Select ${noun} on this page · Shift+click for a range`}
+    />
+  );
+}
+
 /**
  * The page checkbox above the rows, with the selection count beside it and
  * room for page-level controls on the right.
@@ -141,15 +178,20 @@ export function ListPageSelectionBar({
           onCheckedChange={() =>
             state === true ? onClearPage() : onSelectPage()
           }
+          title={`Select ${noun} on this page · Shift+click for a range`}
         />
       </div>
-      <span className="min-w-0 truncate text-(length:--text-small) text-foreground-muted">
-        {selectedOnPage > 0
-          ? `${selectedOnPage} of ${pageIds.length} on this page`
-          : `Select ${noun} on this page · Shift+click for a range`}
-      </span>
+      {/* With the list's own actions on this row, the hint moves to the
+          checkbox's tooltip so the row stays one line. */}
+      {selectedOnPage > 0 || !children ? (
+        <span className="min-w-0 truncate text-(length:--text-small) text-foreground-muted">
+          {selectedOnPage > 0
+            ? `${selectedOnPage} of ${pageIds.length} on this page`
+            : `Select ${noun} on this page · Shift+click for a range`}
+        </span>
+      ) : null}
       {children ? (
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        <div className="ml-auto flex min-w-0 items-center justify-end gap-2">
           {children}
         </div>
       ) : null}
