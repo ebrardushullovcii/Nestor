@@ -13,7 +13,7 @@ import {
   type ApplicationAttemptQuestion,
 } from "@nestor/contracts";
 
-import type { LLMClient } from "../agent/contracts";
+import { withReasoningTask, type LLMClient } from "../agent/contracts";
 import { createPageTools } from "../page-tools";
 import {
   createApplySystemPrompt,
@@ -253,7 +253,8 @@ export async function runApplyAgent(
   try {
     return await runMeasuredApplyAgent(
       { ...config, hands: timing.hands(config.hands) },
-      timing.model(llmClient),
+      // Form turns are short; answer checks name their own task.
+      timing.model(withReasoningTask(llmClient, "apply")),
       timing,
     );
   } finally {

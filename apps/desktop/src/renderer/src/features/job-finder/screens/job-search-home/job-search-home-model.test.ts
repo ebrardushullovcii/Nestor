@@ -580,7 +580,7 @@ describe("buildJobSearchHomeModel · after a search", () => {
     });
     expect(model.next.secondary[0]?.label).toBe("Search again");
     expect(model.statusLine).toBe(
-      "Last search finished 2 hours ago · 10 found · 10 new.",
+      "Last search finished 2 hours ago · 10 new jobs.",
     );
     expect(model.stages?.map((stage) => stage.count)).toEqual([10, 0, 0]);
   });
@@ -605,7 +605,7 @@ describe("buildJobSearchHomeModel · after a search", () => {
     ] as unknown as JobFinderRendererWorkspaceSnapshot["recentDiscoveryRuns"];
     const model = build(ws);
     expect(model.statusLine).toBe(
-      "Last search of Sign-in board finished 2 hours ago · 10 found · 10 new.",
+      "Last search of Sign-in board finished 2 hours ago · 10 new jobs.",
     );
   });
 
@@ -615,7 +615,7 @@ describe("buildJobSearchHomeModel · after a search", () => {
     expect(model.stages?.[0]).toMatchObject({
       label: "Find jobs",
       count: 9,
-      detail: "1 weaker match hidden",
+      detail: "+ 1 weaker",
     });
     expect(model.next.title).toBe("Look through 9 jobs");
   });
@@ -699,18 +699,58 @@ describe("buildJobSearchHomeModel · after a search", () => {
     ];
     const model = build(ws);
     expect(model.problems).toHaveLength(1);
+    // A quiet line hidden for good until the set of sources changes, not a
+    // red alarm (issue #50). Its words and count are the Job sources filter's,
+    // and its button opens that filter.
     expect(model.problems[0]).toMatchObject({
       id: "failing-sources",
-      tone: "critical",
-      button: { label: "Fix in Job sources" },
+      tone: null,
+      text: "1 job source needs attention.",
+      button: {
+        label: "Open job sources",
+        action: {
+          kind: "navigate",
+          route:
+            "/job-finder/profile?section=sources&focus=job-sources&show=needs_attention#profile-job-sources",
+        },
+      },
+      dismissKey: ws.searchPreferences.discovery.targets[0]!.id,
     });
-    expect(model.problems[0]?.text).toContain("Replica board");
     // A broken source is a warning, not the next step, while work remains.
     expect(model.next.id).toBe("look_through");
   });
 });
 
 describe("buildJobSearchHomeModel · shortlist and applications", () => {
+  it("counts each shortlisted job once, the way Shortlisted's tabs do", () => {
+    // A failed Aggressive resume keeps its old asset id: it needs a resume,
+    // not a review. The tile used to say "2 need a resume · 2 to review" for
+    // three jobs beside a "To review 1" tab.
+    const failed = (id: string) =>
+      queueItem(id, {
+        assetStatus: "failed",
+        resumeAssetId: `asset-${id}`,
+        resumeTailoringMode: "aggressive",
+      });
+    const toReview = queueItem("job_review", {
+      assetStatus: "ready",
+      resumeAssetId: "asset-job_review",
+      resumeTailoringMode: "aggressive",
+      resumeReview: {
+        status: "needs_review",
+      } as ReviewQueueItem["resumeReview"],
+    });
+    const ws = withShortlist(withJobs(workspace(), 5), [
+      failed("job_0"),
+      failed("job_1"),
+      toReview,
+    ]);
+    expect(build(ws).stages?.[1]).toMatchObject({
+      count: 3,
+      detail: "2 need a resume · 1 to review",
+    });
+  });
+
   it("offers to create the missing resumes in place", () => {
     const ws = withShortlist(withJobs(workspace(), 5), [
       queueItem("job_0"),
@@ -1790,7 +1830,7 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
       id: "look_through",
       title: "Look through 3 weaker matches",
     });
-    expect(model.stages?.[0]?.detail).toBe("3 weaker matches hidden");
+    expect(model.stages?.[0]?.detail).toBe("+ 3 weaker");
   });
 
   it("sends a non-review safeguard to the Safeguards list, not the Reviews tab", () => {

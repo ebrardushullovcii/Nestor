@@ -292,7 +292,7 @@ describe("one Job Finder list treatment", () => {
     }
   });
 
-  it("lets a badge-heavy row wrap its badges instead of crushing the title", () => {
+  it("keeps a badge-heavy row to one verdict and says the rest on the meta line", () => {
     const job = createBadgeHeavyJob();
     const { container } = render(
       <DiscoveryResultsPanel
@@ -318,9 +318,17 @@ describe("one Job Finder list treatment", () => {
       throw new Error("Expected the row to render the shared badge slot.");
     }
 
-    // Non-vacuous: this really is the crowded case the slot has to survive.
-    expect(badgeSlot.childElementCount).toBeGreaterThanOrEqual(3);
+    // The slot holds the fit and its one verdict badge. Shortlisted, the
+    // posting date and a listing that went quiet are plain facts on the meta
+    // line, so a row is no longer three stacked uppercase badges tall.
+    expect(badgeSlot.childElementCount).toBe(2);
     expect(badgeSlot.textContent).toContain("Strong fit");
+    expect(badgeSlot.textContent).not.toContain("Shortlisted");
+    expect(
+      firstRow(container).querySelector(
+        `[data-testid="discovery-result-pipeline-${job.id}"]`,
+      )?.textContent,
+    ).toContain("Shortlisted");
 
     const slotClasses = (badgeSlot.getAttribute("class") ?? "").split(" ");
     // jsdom performs no layout, so the invariant is asserted on the box

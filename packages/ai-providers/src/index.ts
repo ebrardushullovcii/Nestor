@@ -12,11 +12,15 @@ export * from "./deterministic";
 export * from "./openai-compatible";
 export * from "./agent-capabilities";
 export { completeTailoredResumeDraft } from "./openai-compatible-shared";
-export { JOB_FIT_JUDGING_BATCH_SIZE } from "./openai-compatible-fit";
+export {
+  buildFitVerdictContext,
+  JOB_FIT_JUDGING_BATCH_SIZE,
+} from "./openai-compatible-fit";
 export { RESUME_CLAIM_CHECK_BATCH_SIZE } from "./openai-compatible-resume-claims";
 
 export const aiProvidersPackageReady = true;
 export * from "./assistant-model";
 export type { ModelStreamEvent } from "./model-request-transport";
+export type { ModelReasoningTask } from "./openai-compatible-transport";
 
 export { buildResumeSkillContextFilter } from "./resume-skill-context";

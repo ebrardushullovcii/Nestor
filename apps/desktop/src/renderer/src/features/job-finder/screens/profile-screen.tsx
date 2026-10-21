@@ -679,6 +679,7 @@ export function ProfileScreen(props: {
 
           {profileSetupState.status === "completed" ? (
             <ProfileReadyBanner
+              completedAt={profileSetupState.completedAt}
               completionIdentity={`${profile.id}:${profileSetupState.completedAt ?? "completed"}`}
             />
           ) : null}
@@ -869,6 +870,7 @@ export function ProfileScreen(props: {
                   <ProfileActiveSectionContent
                     activeSection={activeSection}
                     requestedFileKind={searchParams.get("kind")}
+                    requestedSourceFilter={searchParams.get("show")}
                     activeDiscoveryRun={activeDiscoveryRun}
                     onSaveNow={handleSaveAll}
                     backgroundArrays={backgroundArrays}

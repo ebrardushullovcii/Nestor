@@ -51,6 +51,16 @@ function getTargetLabels(
   return targetLabels;
 }
 
+// The same ordering as `localeCompare(right, "en", { sensitivity: "base" })`,
+// built once: that call builds a collator every time it runs.
+const sourceLabelCollator = new Intl.Collator("en", {
+  sensitivity: "base",
+});
+
+export function compareSourceLabels(left: string, right: string): number {
+  return sourceLabelCollator.compare(left, right);
+}
+
 export function getDiscoverySourceLabels(
   provenance: readonly SavedJobDiscoveryProvenance[],
   discoveryTargets: readonly JobDiscoveryTarget[],
@@ -69,7 +79,5 @@ export function getDiscoverySourceLabels(
     );
   });
 
-  return [...new Set(labels)].sort((left, right) =>
-    left.localeCompare(right, "en", { sensitivity: "base" }),
-  );
+  return [...new Set(labels)].sort(compareSourceLabels);
 }

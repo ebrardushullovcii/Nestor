@@ -235,6 +235,27 @@ describe("job search agent", () => {
     });
   });
 
+  test("marks every search turn as search work so the provider picks its effort", async () => {
+    const model = scripted([
+      { name: "extract_jobs" },
+      { name: "finish", args: { reason: "Read the jobs." } },
+    ]);
+    const tasks: Array<string | undefined> = [];
+    await runJobSearchAgent({
+      hands: hands({ current: rawPage() }),
+      config: config(),
+      llmClient: {
+        chatWithTools: (messages, tools, options) => {
+          tasks.push(options?.reasoningTask);
+          return model.chatWithTools(messages, tools, options);
+        },
+      },
+      jobExtractor: extractor,
+    });
+    expect(tasks.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(tasks)).toEqual(new Set(["search"]));
+  });
+
   test("allows a transient challenge to clear after waiting", async () => {
     const pages = {
       current: rawPage({
@@ -366,7 +387,7 @@ describe("job search agent", () => {
     );
   });
 
-  test("uses the person's exact goal, freshness choice, and full profile", () => {
+  test("uses the person's exact goal, freshness choice, and profile outline", () => {
     const prompts = createJobSearchPrompts(
       config({
         promptContext: {
@@ -389,11 +410,16 @@ describe("job search agent", () => {
       "Freshness: prefer postings marked as recent",
     );
     expect(prompts.system).toContain("Builds dependable internal tools");
-    expect(prompts.system).toContain("Platform Engineer · at Northwind");
+    expect(prompts.system).toContain(
+      "Platform Engineer · at Northwind · 2020 to present",
+    );
     expect(prompts.system).toContain(
       "BSc · Computer Science · Example University",
     );
-    expect(prompts.system).toContain("8 years of platform engineering");
+    // Fit is judged afterwards from the full profile; every search turn
+    // would otherwise resend the resume and each role's write-up.
+    expect(prompts.system).not.toContain("8 years of platform engineering");
+    expect(prompts.system).not.toContain("Built reliable developer tooling");
   });
 
   test("saves what it reads, tells the model what was already saved, and finishes in its own words", async () => {

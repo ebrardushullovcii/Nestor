@@ -35,6 +35,7 @@ import {
   describeAiUnavailableResume,
   describeUntailorableListing,
 } from "./resume-workspace-utils";
+import type { ResumeRunStage } from "./review-queue-status";
 
 const dailyCapacityLimitDescriptionId =
   "employer-application-daily-capacity-limit";
@@ -80,6 +81,8 @@ interface ReviewQueueMissionPanelProps {
   selectedJob: JobListRow | null;
   /** The written preference verdict, read with the job detail. */
   preferenceExplanation?: string | null;
+  /** Where this job's running resume is, when the run reports it. */
+  resumeRunStage?: ResumeRunStage | null;
 }
 
 /** The four resume levels a job can be sent with, in order of how far they go. */
@@ -167,11 +170,13 @@ export function ReviewQueueMissionPanel({
   selectedItem,
   selectedJob,
   preferenceExplanation = null,
+  resumeRunStage = null,
 }: ReviewQueueMissionPanelProps) {
   const {
     isGenerating,
     isPrimaryApplyPending,
     isSelectedJobPending,
+    needsTailoredResume,
     primaryApplicationAction,
     readinessDescription,
     usesOriginalResume,
@@ -194,6 +199,7 @@ export function ReviewQueueMissionPanel({
     selectedAsset,
     selectedItem,
     selectedJob,
+    resumeRunStage,
   });
   const existingApplication = selectedItem
     ? (applicationRecords
@@ -207,7 +213,9 @@ export function ReviewQueueMissionPanel({
 
   // A resume the built-in generator wrote because AI was unavailable is
   // usable, but the person should know and be able to retry in one press.
-  const aiUnavailableLine =
+  // When the next step is reading it (Aggressive), the line says so instead
+  // of "apply it as it is" above a "Review the resume" button.
+  const aiUnavailableResume =
     selectedItem &&
     !existingApplication &&
     !usesOriginalResume &&
@@ -215,6 +223,10 @@ export function ReviewQueueMissionPanel({
     selectedItem.resumeReview.status !== "approved"
       ? describeAiUnavailableResume(selectedAsset)
       : null;
+  const aiUnavailableLine =
+    aiUnavailableResume && primaryApplicationAction.kind === "approve_resume"
+      ? "AI could not write this resume, so it keeps your saved wording. Try again, or review it and use it as it is."
+      : aiUnavailableResume;
 
   const runPrimaryRecovery = () => {
     if (!selectedItem || !primaryApplicationAction.recovery) {
@@ -222,6 +234,13 @@ export function ReviewQueueMissionPanel({
     }
 
     switch (primaryApplicationAction.recovery.kind) {
+      case "approve_and_apply":
+        if (onApproveResumeAndApply) {
+          onApproveResumeAndApply(selectedItem.jobId);
+        } else {
+          onEditResumeWorkspace(selectedItem.jobId);
+        }
+        return;
       case "open_browser":
         onOpenBrowserSession();
         return;
@@ -251,9 +270,12 @@ export function ReviewQueueMissionPanel({
   // An Original job has no draft, but its studio is where the person turns
   // the original into an editable one (one press there). Without this the
   // studio was reachable only by a deep link.
+  // A job that still needs its resume already has two actions here; the
+  // resume below keeps its own Edit link.
   const showEditResume =
     (hasDraftToEdit ||
       (selectedItem !== null && usesOriginalResume && !isGenerating)) &&
+    !needsTailoredResume &&
     primaryApplicationAction.kind !== "approve_resume" &&
     primaryApplicationAction.recovery?.kind !== "open_resume_workspace";
   const dailyCapacityExhausted =
@@ -299,10 +321,13 @@ export function ReviewQueueMissionPanel({
     [],
   );
   // A draft that kept the original wording because the listing body was never
-  // captured is presented as the original-resume path, whatever the job's
-  // saved choice says.
+  // captured is presented as the original-resume path once it is approved.
+  // Until then the job still needs its resume, so its level stays choosable
+  // and the next step writes it at that level.
   const untailorableListing =
-    selectedItem?.resumeApplicationMode === "original_resume"
+    selectedItem?.resumeApplicationMode === "original_resume" ||
+    needsTailoredResume ||
+    isGenerating
       ? null
       : describeUntailorableListing(selectedAsset);
   const untailorableListingReasonId = "resume-choice-untailorable-listing";
@@ -430,17 +455,9 @@ export function ReviewQueueMissionPanel({
             {resumeChoiceFieldset}
           </details>
         ) : (
-          <>
-            {resumeChoiceFieldset}
-            {hasDraftToEdit ? (
-              <p
-                className="text-(length:--text-small) leading-5 text-foreground-muted"
-                role="note"
-              >
-                Picking another level rewrites this resume at that level.
-              </p>
-            ) : null}
-          </>
+          // The line above the levels already says another level writes a
+          // new draft; a second note under them said it again.
+          resumeChoiceFieldset
         )}
         {usesOriginalResume &&
         originalResume &&

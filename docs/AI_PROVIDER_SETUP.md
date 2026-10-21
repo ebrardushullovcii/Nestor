@@ -23,13 +23,29 @@ NESTOR_AI_BASE_URL=https://opencode.ai/zen/go/v1
 NESTOR_AI_MODEL=muse-spark-1.3-contributor
 NESTOR_AI_API_MODE=responses
 NESTOR_AI_REASONING_EFFORT=xhigh
-# Browser agents (search, source checks, applying) and page reads take many
-# short turns; they think briefly. Resume writing keeps the effort above.
+# Resume writing and "Read and assess" (a full listing read) use the effort
+# above. Work that runs many times per search or form thinks less; each has
+# its own variable (code defaults shown).
+# Search and source-check turns:
+NESTOR_AI_SEARCH_REASONING_EFFORT=low
+# Reading the jobs on a page:
+NESTOR_AI_PAGE_READ_REASONING_EFFORT=low
+# Fit judged in batches during and after a search:
+NESTOR_AI_FIT_REASONING_EFFORT=medium
+# Fact checks of resume lines and of application answers:
+NESTOR_AI_CLAIM_CHECK_REASONING_EFFORT=medium
+# Application form turns and reading a form's questions:
+NESTOR_AI_APPLY_REASONING_EFFORT=low
+# "Read and assess"; unset means NESTOR_AI_REASONING_EFFORT:
+# NESTOR_AI_LISTING_READ_REASONING_EFFORT=high
+# Other tool-calling work (resume import sections, the profile and resume
+# assistants, letters). It does not change the tasks above.
 NESTOR_AI_AGENT_REASONING_EFFORT=low
 
 # Aggressive resume tailoring runs on its own dedicated route so the whole
 # aggressive lifecycle (draft, re-tailor, and model-backed review/regenerate)
-# stays on one provider. Reasoning effort is read from its own env var.
+# stays on one provider. Reasoning effort is read from its own env var and
+# covers all of that route's work, its fact checks included.
 NESTOR_AI_AGGRESSIVE_MODEL=deepseek-v4.1-flash
 NESTOR_AI_AGGRESSIVE_API_MODE=chat_completions
 NESTOR_AI_AGGRESSIVE_REASONING_EFFORT=high

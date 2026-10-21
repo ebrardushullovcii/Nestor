@@ -18,6 +18,7 @@ import {
   normalizeAnswerQuestion,
 } from "./workspace-answer-memory";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
+import { readSavedJob } from "./read-saved-job";
 
 function getLatestQuestionAnswer(
   details: ApplyRunDetails,
@@ -133,9 +134,7 @@ async function saveReusableAnswer(input: {
     );
   }
 
-  const job = (await input.ctx.repository.listSavedJobs()).find(
-    (entry) => entry.id === input.command.jobId,
-  );
+  const job = await readSavedJob(input.ctx.repository, input.command.jobId);
   const applicationScope = eligibilityAnswerScope({
     kind: input.questionKind,
     resultId: input.command.resultId,

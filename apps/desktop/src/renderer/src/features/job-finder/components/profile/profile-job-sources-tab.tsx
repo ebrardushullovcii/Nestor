@@ -1,4 +1,4 @@
-import { useDeferredValue, useId, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useId, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type {
   DiscoveryRunRecord,
@@ -24,9 +24,13 @@ import {
   deriveSourceHealthSignals,
   describeEnabledSourceHealth,
   describeLatestSourceCheck,
-  isEnabledSourceNeedingAttention,
   type SourceRuntimeSignals,
 } from "@nestor/job-finder/source-health";
+import {
+  isSourceNeedingAttention,
+  SOURCES_NEEDING_ATTENTION_FILTER,
+  SOURCES_NEEDING_ATTENTION_LABEL,
+} from "../../lib/source-attention";
 import type { SearchPreferencesEditorValues } from "../../lib/profile-editor";
 import { PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES } from "./profile-deep-link-focus";
 import { ProfileDiscoveryTargetRow } from "./profile-discovery-target-row";
@@ -49,8 +53,12 @@ const sourceFilterOptions: ReadonlyArray<{
   { id: "all", label: "All" },
   { id: "enabled", label: "Enabled" },
   { id: "disabled", label: "Disabled" },
-  { id: "needs_attention", label: "Needs attention" },
+  { id: SOURCES_NEEDING_ATTENTION_FILTER, label: SOURCES_NEEDING_ATTENTION_LABEL },
 ];
+
+function parseSourceFilter(value: string | null | undefined): SourceFilter {
+  return sourceFilterOptions.find((option) => option.id === value)?.id ?? "all";
+}
 
 function getSourceHost(startingUrl: string): string {
   return deriveJobSourceLabel(startingUrl);
@@ -160,15 +168,15 @@ export function filterJobSources(
       normalizedQuery.length === 0 ||
       target.label.toLocaleLowerCase().includes(normalizedQuery) ||
       target.startingUrl.toLocaleLowerCase().includes(normalizedQuery);
-    // Same shared interpretation as the Home source-health badge: attention
-    // is scoped to enabled sources so disabled entries never inflate active
-    // health counts.
+    // The same definition Home counts in its "need attention" line:
+    // attention is scoped to enabled sources so disabled entries never
+    // inflate active health counts.
     const matchesFilter =
       filter === "all" ||
       (filter === "enabled" && target.enabled) ||
       (filter === "disabled" && !target.enabled) ||
       (filter === "needs_attention" &&
-        isEnabledSourceNeedingAttention(target, signals));
+        isSourceNeedingAttention(target, signals));
 
     return matchesQuery && matchesFilter ? [{ index, target }] : [];
   });
@@ -218,6 +226,11 @@ function SourcePager(props: SourcePagerProps) {
 }
 
 interface ProfileJobSourcesTabProps {
+  /**
+   * The filter the link asked for (`show=needs_attention` from Home's line),
+   * so the count the person just read is the list they land on.
+   */
+  requestedFilter?: string | null;
   isBrowserSessionPending: (targetId: string) => boolean;
   isSourceDebugPending: (targetId: string) => boolean;
   isSourceInstructionPending: (targetId: string) => boolean;
@@ -252,7 +265,12 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
   const searchInputId = useId();
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
-  const [filter, setFilter] = useState<SourceFilter>("all");
+  const [filter, setFilter] = useState<SourceFilter>(() =>
+    parseSourceFilter(props.requestedFilter),
+  );
+  useEffect(() => {
+    if (props.requestedFilter) setFilter(parseSourceFilter(props.requestedFilter));
+  }, [props.requestedFilter]);
   const [page, setPage] = useState(0);
   const [expandedTargetId, setExpandedTargetId] = useState<string | null>(null);
   const [sourceUrlDraft, setSourceUrlDraft] = useState("");
@@ -435,7 +453,7 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
             {isAddOpen ? "Close" : "Add sources"}
           </Button>
         }
-        description="Manage every public careers page or job board Job Finder can check. A site you add is turned on for search straight away; turn one off in its row to leave it out."
+        description="The careers pages and job boards Job Finder searches. Turn one off in its row to leave it out."
         eyebrow="Discovery library"
         headingId="profile-job-sources-heading"
         title="Job sources"

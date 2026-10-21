@@ -18,7 +18,10 @@ import {
   stripPictographGlyphs,
   type ExtractedListingDetail,
 } from "./listing-detail-extraction";
-import { getAiProviderAccessFailure } from "@nestor/ai-providers";
+import {
+  getAiProviderAccessFailure,
+  isAiServiceBusy,
+} from "@nestor/ai-providers";
 import { collapseRepeatedLocationTokens } from "./listing-field-shapes";
 import { enrichDiscoveredPosting } from "./matching";
 import { listUnreadSightings } from "./listing-sightings";
@@ -136,10 +139,10 @@ export interface EnrichSavedJobListingDetailsResult {
   changedJobIds: string[];
   summary: ListingDetailEnrichmentSummary;
   /**
-   * The first read the AI service itself refused (no funds, no access). The
-   * job records a failed read either way; a caller that needs the body, such
-   * as the resume writer, rethrows this so the work pauses instead of going
-   * ahead without the listing.
+   * The first read the AI service itself refused (no funds, no access) or
+   * turned away for load. The job records a failed read either way; a caller
+   * that needs the body, such as the resume writer, rethrows this so the work
+   * pauses instead of going ahead without the listing.
    */
   providerAccessError?: unknown;
 }
@@ -993,7 +996,7 @@ export async function enrichSavedJobListingDetails(
         summary.failed += 1;
         if (
           providerAccessError === undefined &&
-          getAiProviderAccessFailure(error)
+          (getAiProviderAccessFailure(error) || isAiServiceBusy(error))
         )
           providerAccessError = error;
         updated.set(

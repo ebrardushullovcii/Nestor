@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SlidersHorizontal, X } from "lucide-react";
+import { ListFilter, X } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
 import { Popover } from "@renderer/components/ui/popover";
@@ -97,17 +97,23 @@ export function DiscoveryResultFilters({
         if (target) close(false);
       }}
     >
+      {/* An icon with its name for screen readers and on hover: the word
+          pushed the Results toolbar onto a second line at 1280 px. */}
       <Button
         aria-expanded={open}
         aria-haspopup="dialog"
+        className={
+          activeCount > 0 ? "has-[>svg]:px-2" : "w-8 has-[>svg]:px-0"
+        }
         onClick={() => setOpen((current) => !current)}
         ref={anchorRef}
         size="toolbar"
+        title="Filters"
         type="button"
         variant="outline"
       >
-        <SlidersHorizontal aria-hidden="true" className="size-3" />
-        Filters
+        <ListFilter aria-hidden="true" className="size-3.5" />
+        <span className="sr-only">Filters</span>
         {activeCount > 0 ? (
           <span
             aria-label={`${activeCount} active ${activeCount === 1 ? "filter" : "filters"}`}

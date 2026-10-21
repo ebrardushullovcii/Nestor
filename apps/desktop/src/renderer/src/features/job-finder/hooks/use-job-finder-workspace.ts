@@ -76,6 +76,12 @@ import {
 
 /** How long update-driven syncs rest, as a multiple of the last sync. */
 const UPDATE_SYNC_REST_FACTOR = 2;
+/**
+ * At least this long between update-driven syncs. A search publishes several
+ * updates a second and each sync costs main tens of milliseconds; more than
+ * two refreshes a second shows nothing new and slows every click.
+ */
+const MIN_UPDATE_SYNC_REST_MS = 400;
 /** A stalled sync never leaves the workspace stale for longer than this. */
 const MAX_UPDATE_SYNC_REST_MS = 8_000;
 const MAX_WORKSPACE_BASELINES = 4;
@@ -465,7 +471,10 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           finishedAt +
           Math.min(
             MAX_UPDATE_SYNC_REST_MS,
-            UPDATE_SYNC_REST_FACTOR * (finishedAt - startedAt),
+            Math.max(
+              MIN_UPDATE_SYNC_REST_MS,
+              UPDATE_SYNC_REST_FACTOR * (finishedAt - startedAt),
+            ),
           );
         if (queued) {
           queued = false;

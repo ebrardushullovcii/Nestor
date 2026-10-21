@@ -42,6 +42,7 @@ import type {
   WorkspaceServiceContext,
 } from "./workspace-service-context";
 import type { JobFinderWorkspaceService } from "./workspace-service-contracts";
+import { readSavedJob } from "./read-saved-job";
 import {
   getUserActionVerificationFlightKey,
   isSourceAccessUserAction,
@@ -610,9 +611,7 @@ async function persistOneManualAnswer(input: {
 
   if (input.command.saveForFuture) {
     const profile = await input.ctx.repository.getProfile();
-    const job = (await input.ctx.repository.listSavedJobs()).find(
-      (entry) => entry.id === question.jobId,
-    );
+    const job = await readSavedJob(input.ctx.repository, question.jobId);
     const applicationScope = eligibilityAnswerScope({
       kind: question.kind,
       resultId: question.resultId,
@@ -679,12 +678,11 @@ async function persistOneManualAnswer(input: {
       !input.ctx.documentManager.saveApprovedApplicationLetter
     )
       return;
-    const [profile, savedJobs, applicationRecords] = await Promise.all([
+    const [profile, job, applicationRecords] = await Promise.all([
       input.ctx.repository.getProfile(),
-      input.ctx.repository.listSavedJobs(),
+      readSavedJob(input.ctx.repository, question.jobId),
       input.ctx.repository.listApplicationRecords(),
     ]);
-    const job = savedJobs.find((entry) => entry.id === question.jobId);
     const applicationRecord = applicationRecords.find(
       (entry) => entry.id === scope.applicationRecordId,
     );

@@ -12,7 +12,7 @@ import {
   getProfileSetupReadinessBlockers,
   PREPARED_PAGE_CLOSED_SUMMARY,
 } from "@nestor/contracts";
-import { listSourceAttentionReasons } from "@nestor/job-finder/source-health";
+import { deriveSourceHealthSignals } from "@nestor/job-finder/source-health";
 import {
   AUTOMATIC_APPLICATION_FAILURE_PAUSE_ID,
   projectPlanSafeguardPauses,
@@ -31,13 +31,15 @@ import {
 } from "../../lib/destination-counts";
 import { listApplyRunsStoppedBySafeguard } from "../../lib/apply-run-pause-state";
 import {
-  formatDiscoveryRunCountLabel,
-  formatDiscoveryRunReportLabel,
   getDiscoveryRunCountEvidence,
   getDiscoveryRunReportCounts,
-  hasDiscoveryRunReportCounts,
 } from "../../lib/discovery-run-count-label";
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
+import {
+  describeSourcesNeedingAttention,
+  listSourcesNeedingAttention,
+  SOURCES_NEEDING_ATTENTION_FILTER,
+} from "../../lib/source-attention";
 import { getProfileSetupReadinessBlockerLabel } from "../../components/profile/setup/profile-setup-screen-helpers";
 import {
   WAITING_FOR_BROWSER_TAB_SUMMARY,
@@ -54,6 +56,7 @@ import {
   countResumeLinesToDecide,
   countTailoredDraftPreparationEligible,
   isQueueStageReady,
+  isTailoredDraftPreparationEligible,
   type TailoredDraftPreparationViewState,
   needsPersonResumeReview,
 } from "../review-queue/review-queue-status";
@@ -138,9 +141,15 @@ interface HomeNowItem {
 
 interface HomeProblem {
   id: string;
-  tone: "critical" | "warning";
+  /** No tone is a quiet line: a fact the app cannot fix, with no dot. */
+  tone: "critical" | "warning" | null;
   text: string;
   button: HomeButton | null;
+  /**
+   * When set, hiding the line keeps it hidden until this key changes (for
+   * example a different set of failing sources), not just for the visit.
+   */
+  dismissKey?: string;
 }
 
 interface HomeStage {
@@ -184,6 +193,7 @@ const applyingSettingsRoute = `${JOB_FINDER_ROUTE_PATHS.settings}#settings-appli
 const needsYouRoute = "/job-finder/actions";
 const profileSetupRoute = "/job-finder/profile/setup";
 const profileSourcesRoute = `${JOB_FINDER_ROUTE_PATHS.profileSources}#profile-job-sources`;
+const profileSourcesNeedingAttentionRoute = `${JOB_FINDER_ROUTE_PATHS.profileSources}&show=${SOURCES_NEEDING_ATTENTION_FILTER}#profile-job-sources`;
 
 function plural(count: number, singular: string, pluralForm?: string): string {
   return `${count} ${count === 1 ? singular : (pluralForm ?? `${singular}s`)}`;
@@ -239,20 +249,16 @@ export function buildInterruptedSearchRetryRequest(
 }
 
 /** "10 found · 10 new", or null when the run recorded nothing. */
+/**
+ * The one number Home's status line needs from the last search. Its full
+ * report (postings seen, duplicates merged, rejected...) belongs with the
+ * search on Find jobs; on one line here it read as a wall of jargon.
+ */
 function formatRunCounts(run: DiscoveryRunRecord | null): string | null {
-  if (!run) return null;
-  const report = getDiscoveryRunReportCounts(run);
-  if (hasDiscoveryRunReportCounts(report)) {
-    // "0 found · 0 new" is not a count worth a clause; the next step says
-    // the search found nothing in words.
-    return (report.found ?? 0) === 0 && (report.new ?? 0) === 0
-      ? null
-      : formatDiscoveryRunReportLabel(report);
-  }
-  const evidence = getDiscoveryRunCountEvidence(run, null);
-  return evidence.distinctJobsRetained > 0 || evidence.duplicatesMerged > 0
-    ? formatDiscoveryRunCountLabel(evidence)
-    : null;
+  const fresh = runNewCount(run);
+  // "0 new" is not a count worth a clause; the next step says the search
+  // found nothing in words.
+  return fresh > 0 ? plural(fresh, "new job") : null;
 }
 
 function runNewCount(run: DiscoveryRunRecord | null): number {
@@ -674,6 +680,12 @@ function countShortlist(
       inApplications += 1;
       continue;
     }
+    // A job that can have its resume written counts once, as needing a
+    // resume, the way Shortlisted's "Needs a resume" tab counts it. A failed
+    // or untailored resume also looked like one to review, so the tile said
+    // "186 need a resume · 183 to review" for 200 jobs beside a tab saying
+    // "To review 10".
+    if (isTailoredDraftPreparationEligible(item, prepared)) continue;
     if (item.assetStatus === "generating" || item.assetStatus === "queued") {
       writing += 1;
     } else if (
@@ -901,8 +913,16 @@ export function buildJobSearchHomeModel(
   );
   const savedSourceCount = targets.length;
   const enabledSourceCount = enabledTargets.length;
-  const failingSources = enabledTargets.filter((target) =>
-    listSourceAttentionReasons(target).includes("failing"),
+  // The same sources, signals and words as the Job sources filter "Needs
+  // attention": the library that screen lists, judged with the search
+  // history. Home counted six "not working" while that filter showed 687.
+  const sourcesNeedingAttention = listSourcesNeedingAttention(
+    workspace.searchPreferences.discovery.targets,
+    deriveSourceHealthSignals({
+      activeRun: workspace.activeDiscoveryRun,
+      recentRuns: workspace.recentDiscoveryRuns,
+      sourceAccessPrompts: workspace.sourceAccessPrompts,
+    }),
   );
 
   const newestRun = newestDiscoveryRun(workspace);
@@ -1079,16 +1099,26 @@ export function buildJobSearchHomeModel(
 
   // Problems: things that are wrong, each with the one place to fix it.
   const problems: HomeProblem[] = [];
-  if (!setupIncomplete && failingSources.length > 0) {
-    const names = failingSources.map((target) => target.label).join(", ");
+  if (!setupIncomplete && sourcesNeedingAttention.length > 0) {
+    // Searches carry on with the other sources and the app cannot fix a
+    // site, so this is a quiet line the person can hide for good (ADR 0051,
+    // issue #50), not a red alarm listing every name. The button opens Job
+    // sources on the filter with the same name and the same count.
     problems.push({
       id: "failing-sources",
-      tone: "critical",
-      text: `${plural(failingSources.length, "job source is", "job sources are")} failing: ${names}. Searches skip ${failingSources.length === 1 ? "it" : "them"} until it is fixed.`,
+      tone: null,
+      text: describeSourcesNeedingAttention(sourcesNeedingAttention.length),
       button: {
-        label: "Fix in Job sources",
-        action: { kind: "navigate", route: profileSourcesRoute },
+        label: "Open job sources",
+        action: {
+          kind: "navigate",
+          route: profileSourcesNeedingAttentionRoute,
+        },
       },
+      dismissKey: sourcesNeedingAttention
+        .map((target) => target.id)
+        .sort()
+        .join(","),
     });
   } else if (!setupIncomplete && !searchRunning) {
     const newestSettledRun = selectNewestSettledDiscoveryRun(
@@ -1993,10 +2023,9 @@ export function buildJobSearchHomeModel(
             id: "discovery",
             label: "Find jobs",
             count: visibleJobs,
-            detail:
-              hiddenWeaker > 0
-                ? `${plural(hiddenWeaker, "weaker match", "weaker matches")} hidden`
-                : null,
+            // The Find jobs header's own words: the weaker ones may be
+            // shown or hidden there, so the tile does not say which.
+            detail: hiddenWeaker > 0 ? `+ ${hiddenWeaker} weaker` : null,
             route: discoveryRoute,
           },
           {

@@ -70,6 +70,7 @@ import type { CSSProperties, ReactNode } from "react";
 import type { DesktopWindowControlsState } from "@nestor/contracts";
 import { createPortal } from "react-dom";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useDismissToastsOnScreenChange } from "@renderer/components/ui/toast";
 import { buildJobFinderStartupDatabaseRecoveryBlockedDetail } from "../../../shared/job-finder-startup-db-recovery";
 import { WorkspaceStateScreen } from "./job-finder-page-routes";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
@@ -1166,6 +1167,10 @@ const jobFinderPageOutlet = <JobFinderPageOutlet />;
 
 export function JobFinderPage() {
   const location = useLocation();
+  // A toast is news about the screen it was raised on (ADR 0042); it does
+  // not follow the person to the next one. It lives here, above the shell's
+  // route container, which remounts its content for every screen.
+  useDismissToastsOnScreenChange(location.pathname);
   const shellMarkedRef = useRef(false);
   const {
     appearanceTheme,

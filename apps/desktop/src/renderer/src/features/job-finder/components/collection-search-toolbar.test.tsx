@@ -254,7 +254,7 @@ describe("CollectionSearchToolbar", () => {
     // The compact row is the 48px list toolbar: a 32px field with a width
     // floor that still shrinks, next to the shared ellipsis classes.
     expect(compactInput.className).toContain("h-8");
-    expect(compactInput.className).toContain("min-w-32");
+    expect(compactInput.className).toContain("min-w-24");
     expect(compactInput.className).toContain("flex-1");
     expect(screen.getByLabelText("Find a shortlisted job")).toBe(compactInput);
   });

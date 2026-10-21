@@ -32,6 +32,10 @@ import {
   ProfileJobSourcesTab,
 } from "./profile-job-sources-tab";
 import { resetSourceCheckQueueForTests } from "../../lib/source-check-queue";
+import {
+  describeSourcesNeedingAttention,
+  listSourcesNeedingAttention,
+} from "../../lib/source-attention";
 import { SourceCheckQueueRunner } from "../../lib/source-check-queue-runner";
 
 type DiscoveryTarget =
@@ -77,6 +81,7 @@ function JobSourcesHarness(props: {
   discoveryRuns?: readonly DiscoveryRunRecord[];
   isSourceDebugPending?: (targetId: string) => boolean;
   onRunSourceDebug?: (targetId: string) => void;
+  requestedFilter?: string | null;
   targets?: DiscoveryTarget[];
 }) {
   const preferences = JobSearchPreferencesSchema.parse({
@@ -101,6 +106,7 @@ function JobSourcesHarness(props: {
         recentSourceDebugRuns={[]}
       />
       <ProfileJobSourcesTab
+        requestedFilter={props.requestedFilter ?? null}
         activeDiscoveryRun={props.activeDiscoveryRun ?? null}
         discoveryRuns={props.discoveryRuns ?? []}
         isBrowserSessionPending={() => false}
@@ -128,6 +134,35 @@ function JobSourcesHarness(props: {
 }
 
 describe("ProfileJobSourcesTab", () => {
+  it("opens on Needs attention from Home's line, with Home's count", () => {
+    const targets = [
+      createTarget(1, { id: "target_failing", staleReason: "HTTP 404" }),
+      createTarget(2, { id: "target_fine" }),
+      createTarget(3, {
+        id: "target_off",
+        enabled: false,
+        staleReason: "HTTP 404",
+      }),
+    ];
+    render(
+      <JobSourcesHarness requestedFilter="needs_attention" targets={targets} />,
+    );
+
+    const homeCount = listSourcesNeedingAttention(
+      targets,
+      deriveSourceHealthSignals({}),
+    ).length;
+    expect(describeSourcesNeedingAttention(homeCount)).toBe(
+      "1 job source needs attention.",
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "Needs attention" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByText(`${homeCount} of 3 sources`)).toBeTruthy();
+  });
+
   it("normalizes newline and comma separated source URLs", () => {
     expect(
       parseJobSourceUrls(

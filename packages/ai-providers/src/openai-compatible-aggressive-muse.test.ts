@@ -8,7 +8,7 @@ import {
   createSettings,
 } from "./test-fixtures";
 
-test("Aggressive Muse writing and claim checks use Responses at xhigh throughout", async () => {
+test("Aggressive Muse writing and claim checks use Responses; the writer at xhigh, the check at the check effort", async () => {
   const requests: Array<{
     url: string;
     body: {
@@ -123,10 +123,13 @@ test("Aggressive Muse writing and claim checks use Responses at xhigh throughout
     for (const request of requests) {
       expect(request.url).toBe("https://example.com/v1/responses");
       expect(request.body.model).toBe("muse-spark-1.3-contributor");
-      expect(request.body.reasoning?.effort).toBe("xhigh");
       expect(request.body.input).toBeDefined();
       expect(request.body.messages).toBeUndefined();
     }
+    expect(requests.map((request) => request.body.reasoning?.effort)).toEqual([
+      "xhigh",
+      "medium",
+    ]);
   } finally {
     fetchMock.mockRestore();
   }

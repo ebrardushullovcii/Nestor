@@ -19,7 +19,11 @@ import {
 import type { APIResponse, Page } from "playwright";
 
 import { isAllowedUrl } from "../allowlist";
-import type { JobExtractor, LLMClient } from "../agent/contracts";
+import {
+  withReasoningTask,
+  type JobExtractor,
+  type LLMClient,
+} from "../agent/contracts";
 import type { ApplyFormObservation, ApplyPageHands } from "../apply/types";
 import { describeObservation } from "../apply/apply-prompts";
 import { createPageTools } from "../page-tools";
@@ -94,6 +98,42 @@ export function describeNonPosting(
     }
   }
   return null;
+}
+
+/**
+ * What a page read needs to decide which postings to keep: the request, the
+ * saved goals, work eligibility and source notes. Fit is judged afterwards
+ * from the full profile, so the resume, contact details, saved answers and
+ * work history stay out of every page read.
+ */
+export function buildExtractionSelectionContext(
+  config: AgentConfig,
+  pageDecisions: ReadonlyArray<{
+    url: string;
+    category: string;
+    reason: string;
+  }>,
+): string {
+  const profile = config.userProfile;
+  return JSON.stringify({
+    person: {
+      headline: profile.headline,
+      currentLocation: profile.currentLocation,
+      currentCountry: profile.currentCountry,
+      yearsExperience: profile.yearsExperience,
+      workEligibility: profile.workEligibility,
+      workAuthorization: profile.answerBank.workAuthorization,
+      visaSponsorship: profile.answerBank.visaSponsorship,
+      availability: profile.answerBank.availability,
+    },
+    targetRoles: config.searchPreferences.targetRoles,
+    locations: config.searchPreferences.locations,
+    workModes: config.searchPreferences.workModes,
+    request: config.promptContext.searchRequest,
+    searchGuidance: config.promptContext.searchGuidance,
+    sourceInstructions: config.promptContext.siteInstructions ?? [],
+    pageDecisions,
+  });
 }
 
 // Runaway protection only: productive searches routinely need hundreds of turns.
@@ -228,6 +268,8 @@ export async function runJobSearchAgent(
   const now = input.now ?? (() => new Date());
   const isSourceCheck = Boolean(config.promptContext.taskPacket);
   const siteLabel = config.promptContext.siteLabel;
+  // Search and source-check turns are short navigation decisions.
+  const llmClient = withReasoningTask(input.llmClient, "search");
 
   input.signal?.throwIfAborted();
   const reused = input.resultCache?.read(config);
@@ -306,7 +348,7 @@ export async function runJobSearchAgent(
 
   const notes: string[] = [];
   const reviewMove = createMoveReviewer({
-    llmClient: input.llmClient,
+    llmClient,
     goal: describeSearchGoal(config),
     homeLabel: siteLabel,
     homeHosts: config.navigationPolicy.allowedHostnames,
@@ -603,19 +645,13 @@ export async function runJobSearchAgent(
         maxJobs,
         ...(!isSourceCheck
           ? {
-              selectionContext: JSON.stringify({
-                person: config.userProfile,
-                targetRoles: config.searchPreferences.targetRoles,
-                locations: config.searchPreferences.locations,
-                workModes: config.searchPreferences.workModes,
-                request: config.promptContext.searchRequest,
-                searchGuidance: config.promptContext.searchGuidance,
-                sourceInstructions: config.promptContext.siteInstructions ?? [],
-                pageDecisions: [...rejections].map(([url, rejection]) => ({
+              selectionContext: buildExtractionSelectionContext(
+                config,
+                [...rejections].map(([url, rejection]) => ({
                   url,
                   ...rejection,
                 })),
-              }),
+              ),
             }
           : {}),
         ...(context.signal ? { signal: context.signal } : {}),
@@ -1083,7 +1119,7 @@ export async function runJobSearchAgent(
   ]);
   const loop = await runAgentLoop({
     messages,
-    model: input.llmClient,
+    model: llmClient,
     tools: isSourceCheck
       ? tools
       : tools.map(

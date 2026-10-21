@@ -1,6 +1,5 @@
 import { cn } from "@renderer/lib/cn";
 import { LIST_DETAIL_COLUMNS_CLASS } from "../../components/list-detail-columns";
-import { InterruptedResumeBatchNotice } from "./interrupted-resume-batch-notice";
 import { useJobDetail } from "../../hooks/use-job-detail";
 import {
   type ReactNode,
@@ -28,13 +27,15 @@ import type {
 import {
   APPLICATION_PREPARATION_BATCH_LIMIT,
   collectInProgressApplicationJobIds,
+  getResumeRunState,
   getReviewQueueWorkflowStatus,
-  hasResumeGenerationFailure,
   isQueueStageReady,
-  isResumeGenerationInProgress,
 } from "./review-queue-status";
 import { LockedScreenLayout } from "../../components/locked-screen-layout";
-import { PageHeaderStack } from "../../components/page-header";
+import {
+  PageHeaderStack,
+  type PageStatusItem,
+} from "../../components/page-header";
 import { Button } from "@renderer/components/ui/button";
 import { EmptyState } from "../../components/empty-state";
 import { StatusBadge } from "../../components/status-badge";
@@ -62,6 +63,35 @@ import { ReviewQueuePreviewPanel } from "./review-queue-preview-panel";
 import type { TailoredDraftPreparationViewState } from "./review-queue-status";
 
 const workspacePanelId = "review-queue-workspace-panel";
+
+const DISMISSED_RESUME_BATCH_NOTICES_KEY =
+  "nestor.resume-batch.dismissed-notices";
+
+function readDismissedResumeBatchNotices(): string[] {
+  try {
+    const value: unknown = JSON.parse(
+      window.localStorage.getItem(DISMISSED_RESUME_BATCH_NOTICES_KEY) ?? "[]",
+    );
+    return Array.isArray(value)
+      ? value.filter((id): id is string => typeof id === "string").slice(-100)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberDismissedResumeBatchNotice(noticeId: string): string[] {
+  const next = [...readDismissedResumeBatchNotices(), noticeId].slice(-100);
+  try {
+    window.localStorage.setItem(
+      DISMISSED_RESUME_BATCH_NOTICES_KEY,
+      JSON.stringify(next),
+    );
+  } catch {
+    // The current visit can still hide it.
+  }
+  return next;
+}
 
 export function ReviewQueueScreen(props: {
   scopeControl?: ReactNode;
@@ -203,9 +233,12 @@ export function ReviewQueueScreen(props: {
   const selectedJobId = selectedItem?.jobId ?? null;
   const [selectedJobPendingTooLong, setSelectedJobPendingTooLong] =
     useState(false);
-  const isSelectedJobPreparing =
-    !hasResumeGenerationFailure(selectedItem, selectedAsset) &&
-    (selectedJobPending || isResumeGenerationInProgress(selectedItem));
+  // Same order as the row: a rewrite after a failure runs the clock too.
+  const isSelectedJobPreparing = getResumeRunState(
+    selectedItem,
+    selectedAsset,
+    selectedJobPending,
+  ).isWriting;
   const [pendingElapsedSeconds, setPendingElapsedSeconds] = useState(0);
   const actionMessageScopeRef = useRef<{
     jobId: string | null;
@@ -421,15 +454,54 @@ export function ReviewQueueScreen(props: {
   );
   // When every unfinished job still needs a resume, Create missing resumes
   // already picks them up; a second button for the same work only confused.
-  // A batch the AI service paused keeps its notice, which says why, and so
-  // does one that carries per-job choices (a level or a language).
+  // A job of the batch that has its resume by now is not unfinished work
+  // either: the owner's 183 "unfinished resumes" box counted ten jobs whose
+  // resumes were ready to review. A batch the AI service paused keeps its
+  // line, which says why, and so does one that carries per-job choices (a
+  // level or a language).
   const interruptedNoticeAddsNothing =
     !props.resumeBatchCheckpoint?.providerBlock &&
     !props.resumeBatchCheckpoint?.requests?.length &&
     interruptedJobs.length === interruptedJobIds.length &&
-    interruptedJobs.every((item) =>
-      isTailoredDraftPreparationEligible(item, preparedJobIds),
+    interruptedJobs.every(
+      (item) =>
+        isTailoredDraftPreparationEligible(item, preparedJobIds) ||
+        item.assetStatus === "ready",
     );
+  const [dismissedBatchNotices, setDismissedBatchNotices] = useState(
+    readDismissedResumeBatchNotices,
+  );
+  const batchNoticeId = props.resumeBatchCheckpoint
+    ? `${props.resumeBatchCheckpoint.id}|${props.resumeBatchCheckpoint.completedJobIds.length}|${props.resumeBatchCheckpoint.stopRequested}`
+    : null;
+  // A batch that did not finish is a quiet line under the title with one
+  // Continue button, not a box above the list (issue #50, ADR 0044). Hiding
+  // it keeps it hidden for this batch.
+  const interruptedBatchStatusItem: PageStatusItem | null =
+    interruptedJobIds.length > 0 &&
+    props.resumeBatchCheckpoint &&
+    batchNoticeId &&
+    !interruptedNoticeAddsNothing &&
+    !dismissedBatchNotices.includes(batchNoticeId)
+      ? {
+          id: "interrupted-resume-batch",
+          ...(props.resumeBatchCheckpoint.providerBlock
+            ? { tone: "info" as const }
+            : {}),
+          text: props.resumeBatchCheckpoint.providerBlock
+            ? `The resume batch is paused. ${props.resumeBatchCheckpoint.providerBlock.message}`
+            : `The last resume batch ${props.resumeBatchCheckpoint.stopRequested ? "was stopped" : "did not finish"}: ${interruptedJobIds.length === 1 ? "1 resume" : `${interruptedJobIds.length} resumes`} not written yet.`,
+          action: {
+            kind: "button",
+            label: "Continue batch",
+            onClick: () => onPrepareTailoredDrafts(interruptedJobIds),
+          },
+          onHide: () =>
+            setDismissedBatchNotices(
+              rememberDismissedResumeBatchNotice(batchNoticeId),
+            ),
+        }
+      : null;
   // Below the `xl` two-pane breakpoint the job column stacks under the list,
   // so selecting a job moved the one next action below the fold with nothing
   // saying so. Find jobs and Applications both reveal their stacked detail
@@ -461,25 +533,14 @@ export function ReviewQueueScreen(props: {
         <PageHeaderStack
           title="Shortlisted"
           subnav={props.scopeControl}
-          description="The jobs you want: pick a resume level, get the resume ready, then press Apply."
+          description="Pick a resume level, get the resume ready, then apply."
+          statusItems={
+            interruptedBatchStatusItem ? [interruptedBatchStatusItem] : []
+          }
         />
       }
     >
       {batchStopError ? <p role="alert">{batchStopError}</p> : null}
-      {interruptedJobIds.length > 0 &&
-      props.resumeBatchCheckpoint &&
-      !interruptedNoticeAddsNothing ? (
-        <InterruptedResumeBatchNotice
-          noticeId={`${props.resumeBatchCheckpoint.id}|${props.resumeBatchCheckpoint.completedJobIds.length}|${props.resumeBatchCheckpoint.stopRequested}`}
-          stopped={props.resumeBatchCheckpoint.stopRequested}
-          {...(props.resumeBatchCheckpoint.providerBlock
-            ? { providerBlock: props.resumeBatchCheckpoint.providerBlock }
-            : {})}
-          jobIds={interruptedJobIds}
-          jobs={interruptedJobs}
-          onContinue={() => onPrepareTailoredDrafts(interruptedJobIds)}
-        />
-      ) : null}
       <div
         className={cn(
           "grid min-w-0 items-stretch gap-4 xl:flex-1 xl:min-h-0 xl:overflow-hidden",
@@ -500,6 +561,7 @@ export function ReviewQueueScreen(props: {
           {...(onOpenSafeguards ? { onOpenSafeguards } : {})}
           safeguardBlocker={safeguardBlocker ?? null}
           onSelectItem={selectItemAndRevealWorkspace}
+          onShowItem={onSelectItem}
           onStopTailoredDraftPreparation={stopVisibleBatch}
           preparedJobIds={preparedJobIds}
           applicationPreparingJobIds={applicationPreparingJobIds}
@@ -511,8 +573,11 @@ export function ReviewQueueScreen(props: {
           {/* Pinned: reading a long resume or job description must not scroll
               away the job title or its state. */}
           <header className="sticky top-0 z-10 grid shrink-0 gap-1 border-b border-(--surface-panel-border) bg-(--surface-panel) px-5 pb-3 pt-4 xl:static">
-            <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
+            {/* Title and place on the left, the status on the right: the
+                same header Applications uses. With wrapping on, a long title
+                pushed the badge under the employer line. */}
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
                 <h2 className="truncate text-(--text-headline)">
                   {selectedJob?.title ?? "Job"}
                 </h2>
@@ -529,8 +594,14 @@ export function ReviewQueueScreen(props: {
                 )}
               </div>
               {selectedItem ? (
-                <StatusBadge tone={selectedWorkflowStatus.tone}>
-                  {selectedWorkflowStatus.label}
+                <StatusBadge
+                  className="shrink-0 whitespace-nowrap"
+                  tone={selectedWorkflowStatus.tone}
+                >
+                  {/* The same words as the job's row in the list. */}
+                  {selectedItem.listingAssessmentPending
+                    ? "Assessing listing"
+                    : selectedWorkflowStatus.label}
                 </StatusBadge>
               ) : null}
             </div>
@@ -582,6 +653,10 @@ export function ReviewQueueScreen(props: {
                 preferenceExplanation={
                   selectedDetail.job?.matchAssessment.dimensions
                     ?.preferenceAlignment.explanation ?? null
+                }
+                resumeRunStage={
+                  visibleDraftPreparation.stageByJobId?.[selectedItem.jobId] ??
+                  null
                 }
               />
             ) : null}

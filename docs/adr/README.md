@@ -59,6 +59,7 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0050](0050-one-selection-model-for-job-lists.md) | accepted | Find jobs and Shortlisted share checkboxes, a page select-all, ranges and one action bar; list screens share one column split |
 | [0051](0051-the-app-fixes-what-it-can-and-does-not-ask.md) | accepted | The app fixes what it can and does not ask the person to manage its rules; the resume writer decides what each resume shows |
 | [0052](0052-nestor-rebrand.md) | accepted | Nordri becomes Nestor; the newest old workspace, browser sign-ins and preferences move once |
+| [0053](0053-the-window-opens-on-the-last-clean-view.md) | accepted | A clean quit saves the window's view; the next start shows it at once and converges by delta, and skips the integrity check on an untouched file |
 
 ## Policy
 

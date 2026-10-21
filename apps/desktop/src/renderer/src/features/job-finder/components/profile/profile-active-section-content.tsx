@@ -28,6 +28,8 @@ interface ProfileActiveSectionContentProps {
   activeSection: ProfileSection;
   /** Profile › Files preselects this kind (`?kind=` from a file card). */
   requestedFileKind?: string | null;
+  /** The Job sources filter a link asked for (`show=` in the route). */
+  requestedSourceFilter?: string | null;
   backgroundArrays: ProfileBackgroundArrays;
   /** Discovery runs used to classify source health exactly like Home does. */
   activeDiscoveryRun?: DiscoveryRunRecord | null;
@@ -86,6 +88,7 @@ export function ProfileActiveSectionContent({
   profileForm,
   recentSourceDebugRuns,
   requestedFileKind = null,
+  requestedSourceFilter = null,
   sourceAccessPrompts,
   sourceInstructionArtifacts,
 }: ProfileActiveSectionContentProps) {
@@ -114,6 +117,7 @@ export function ProfileActiveSectionContent({
     files: <ProfileFilesTab requestedKind={requestedFileKind ?? null} />,
     sources: (
       <ProfileJobSourcesTab
+        requestedFilter={requestedSourceFilter}
         activeDiscoveryRun={activeDiscoveryRun}
         discoveryRuns={discoveryRuns}
         isBrowserSessionPending={isBrowserSessionPending}

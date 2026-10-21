@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   TailoredAssetSummarySchema,
   ApplyJobResultListRowSchema,
@@ -71,7 +71,7 @@ export function toRendererJob(job: DiscoveryJobView): JobListRow {
     resumeApplicationMode: job.resumeApplicationMode,
     resumeTailoringMode: job.resumeTailoringMode ?? null,
     listingActivity: job.listingActivity,
-    detailRevision: jobDetailRevision(job),
+    detailRevision: reusable ? frozenRowRevision(job) : jobDetailRevision(job),
     rescoredAfterListingRead: Boolean(
       job.latestMatchAssessmentAudit?.inputChanges.some(
         (change) => change.code === "listing_evidence_changed",
@@ -164,6 +164,26 @@ export function toListMatchAssessment(
           },
         }),
   };
+}
+
+/**
+ * A frozen repository row cannot change, and the repository hands out a new
+ * row whenever a stored job changes, so the row's identity is its revision.
+ * The epoch keeps a number from an earlier run of the app from matching a
+ * different row now. Hashing every job's detail instead cost about 0.7 s of
+ * each start on 6,284 jobs.
+ */
+const rowRevisionEpoch = randomUUID().slice(0, 8);
+let nextRowRevision = 0;
+const rowRevisions = new WeakMap<object, string>();
+function frozenRowRevision(job: DiscoveryJobView): string {
+  let revision = rowRevisions.get(job);
+  if (!revision) {
+    nextRowRevision += 1;
+    revision = `${rowRevisionEpoch}-${nextRowRevision}`;
+    rowRevisions.set(job, revision);
+  }
+  return revision;
 }
 
 /** Detail-only revision, cached with the job, independent of delta comparisons. */

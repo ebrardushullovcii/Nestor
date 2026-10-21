@@ -571,6 +571,12 @@ export async function createJobFinderWorkspaceServiceAsync(
   // over a shorter list. Recording the interruption here, before anything
   // reads the workspace, lets every screen say what the run actually kept.
   await recoverInterruptedDiscoveryRuns(jobFinderRepository);
+  // The first hide or shortlist reads the whole canonical discovery state
+  // (about 0.4 s with a large search history). Read it once the app has
+  // settled, not on the way to the first screen.
+  setTimeout(() => {
+    void jobFinderRepository.warmDiscoveryState?.().catch(() => undefined);
+  }, 4_000).unref?.();
   await recoverPendingJobFinderWorkspaceReset(jobFinderRepository);
   await migrateLegacyResumeSource({
     documentsDirectory: getJobFinderDocumentsDirectory(),

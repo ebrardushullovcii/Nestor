@@ -669,6 +669,32 @@ describe("a source that returned nothing", () => {
  * Profile › Job sources.
  */
 describe("deriveRepeatedlyFailingTargetIds", () => {
+  test("failures of this computer's connection or a busy search never mark a source", () => {
+    const failed = (warning: string) => ({
+      targetExecutions: [
+        {
+          targetId: "api",
+          state: "failed" as const,
+          startedAt: null,
+          completedAt: null,
+          warning,
+        },
+      ],
+    });
+    const runs = [
+      failed("Public provider API collection failed: Greenhouse API request timed out."),
+      failed("Public provider API collection failed: fetch failed"),
+      failed("Public provider API collection failed: fetch failed"),
+    ];
+    expect([...deriveRepeatedlyFailingTargetIds(runs)]).toEqual([]);
+    expect(
+      isEnabledSourceNeedingAttention(
+        source({ id: "api" }),
+        deriveSourceHealthSignals({ recentRuns: runs }),
+      ),
+    ).toBe(false);
+  });
+
   test("two failed runs in a row mark that source, and that source only", () => {
     const repeatedly = deriveRepeatedlyFailingTargetIds([
       run([

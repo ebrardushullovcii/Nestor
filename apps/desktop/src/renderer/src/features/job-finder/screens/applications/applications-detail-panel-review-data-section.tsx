@@ -72,12 +72,6 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
   );
   const resultVisualCheckpointCount =
     selectedApplyRunDetails?.result?.visualCheckpoints.length ?? 0;
-  const retainedVisualEvidenceCount = selectedApplyRunDetails
-    ? selectedApplyRunDetails.checkpoints.reduce(
-        (count, checkpoint) => count + checkpoint.visualEvidence.length,
-        0,
-      )
-    : 0;
   // Every replay checkpoint is also mirrored into the artifact refs with the
   // same label, so the disclosure printed the identical two entries twice
   // with the same URL under two different headings.
@@ -85,17 +79,19 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
     selectedApplyRunDetails?.artifactRefs ?? []
   ).filter((artifact) => artifact.kind !== "checkpoint");
 
+  // Counts the person can open below, in words: recorded steps and visual
+  // evidence are internal bookkeeping and read as "1 STEPS RECORDED".
   const recordedMetrics = (
     [
       {
-        label: "Questions",
+        label: ["question", "questions"],
         value: Math.max(
           selectedApplyRunDetails?.questionRecords.length ?? 0,
           selectedApplyRunDetails?.reviewCard?.answers.length ?? 0,
         ),
       },
       {
-        label: "Answers filled in",
+        label: ["answer filled in", "answers filled in"],
         value: Math.max(
           selectedApplyRunDetails?.answerRecords.filter(
             (answer) => answer.status === "filled",
@@ -105,15 +101,18 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           ).length ?? 0,
         ),
       },
-      { label: "Artifacts", value: retainedArtifacts.length },
+      { label: ["file", "files"], value: retainedArtifacts.length },
       {
-        label: "Steps recorded",
-        value: selectedApplyRunDetails?.checkpoints.length ?? 0,
+        label: ["screenshot", "screenshots"],
+        value: resultVisualCheckpointCount,
       },
-      { label: "Screenshots", value: resultVisualCheckpointCount },
-      { label: "Visual evidence", value: retainedVisualEvidenceCount },
     ] as const
-  ).filter((metric) => metric.value > 0);
+  )
+    .filter((metric) => metric.value > 0)
+    .map((metric) => ({
+      label: metric.value === 1 ? metric.label[0] : metric.label[1],
+      value: metric.value,
+    }));
 
   if (!visibleApplyResult) {
     return null;
@@ -1042,7 +1041,9 @@ function MetricCard(props: { label: string; value: number }) {
       <strong className="text-(length:--text-field) font-semibold text-foreground">
         {value}
       </strong>
-      <span className="label-mono-xs">{label}</span>
+      <span className="text-(length:--text-small) text-foreground-soft">
+        {label}
+      </span>
     </div>
   );
 }

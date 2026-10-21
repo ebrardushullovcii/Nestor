@@ -91,7 +91,11 @@ export async function judgeUnjudgedPlanJobs(input: {
     .filter(
       (job) =>
         job.matchAssessment.judgment?.source !== "full" &&
-        jobNeedsFitJudgment(job, session.contextFingerprint),
+        jobNeedsFitJudgment(
+          job,
+          session.verdictFingerprint,
+          session.contextFingerprint,
+        ),
     )
     // The person's own picks first, then the likeliest fits, so stopping
     // part way leaves the calls spent where they mattered most.
@@ -122,7 +126,7 @@ export async function judgeUnjudgedPlanJobs(input: {
       profile,
       searchPreferences: preferences,
       jobs: round,
-      contextFingerprint: session.contextFingerprint,
+      contextFingerprint: session.verdictFingerprint,
       ...(input.signal ? { signal: input.signal } : {}),
       concurrency: 3,
       onProgress: (completed) => {

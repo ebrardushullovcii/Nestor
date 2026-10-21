@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AgentTaskNonRetryableProviderError } from "@nestor/agent-runtime";
 import {
   getAiProviderAccessFailure,
@@ -7,7 +7,12 @@ import {
 import {
   ModelRequestHttpError,
   ModelRequestTimeoutError,
+  resetModelCredentialRejections,
 } from "./model-request-transport";
+
+beforeEach(() => {
+  resetModelCredentialRejections();
+});
 import { createJobFinderAiClientFromEnvironment } from "./openai-compatible";
 import {
   createEnvironment,

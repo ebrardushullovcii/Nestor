@@ -330,7 +330,8 @@ export async function commitCampaignRunTerminal(input: {
       applicationAttempts,
     ] = await Promise.all([
       input.ctx.repository.getCampaignState(),
-      input.ctx.repository.listSavedJobs(),
+      // Read-only below; the cached display rows spare a full parse.
+      input.ctx.repository.readSavedJobsProjection(),
       input.ctx.repository.getDiscoveryState(),
       input.ctx.repository.listResumeDrafts(),
       input.ctx.repository.listTailoredAssets(),
@@ -465,9 +466,20 @@ export async function commitCampaignRunTerminal(input: {
     // Do not make another model request while plan edits are waiting for it.
     const candidateJobs = candidates.map((job) => {
       // A verdict from another plan cannot say this job fits the current one.
-      const assessment = !jobNeedsFitJudgment(job, session.contextFingerprint)
-        ? job.matchAssessment
-        : session.assess({ ...job, matchAssessment: null });
+      // This plan's own verdict stands even when the profile or goals changed
+      // since: it is the best answer until the job is judged again (ADR 0041).
+      // Dropping it made one search after a profile edit wipe every verdict
+      // of the plan (6,200 on the owner's data), each then bought again.
+      const ownVerdict = job.planAssessments?.[campaign.id]?.judgment;
+      const assessment =
+        ownVerdict ||
+        !jobNeedsFitJudgment(
+          job,
+          session.verdictFingerprint,
+          session.contextFingerprint,
+        )
+          ? job.matchAssessment
+          : session.assess({ ...job, matchAssessment: null });
       return readPlanAssessment(
         withPlanAssessment(job, campaign.id, assessment),
         campaign.id,
@@ -982,9 +994,10 @@ async function executeCampaignRun(input: {
   onActivity?: (event: DiscoveryActivityEvent) => void;
   trigger: "manual" | "scheduled";
 }): Promise<void> {
+  // Only fingerprinted below; the cached display rows serve that.
   const [beforeSavedJobs, beforeDiscovery] = await Promise.all([
-    input.ctx.repository.listSavedJobs(),
-    input.ctx.repository.getDiscoveryState(),
+    input.ctx.repository.readSavedJobsProjection(),
+    input.ctx.repository.readDiscoveryDisplayProjection(),
   ]);
   const beforeJobProvenanceFingerprints = new Map(
     [...beforeSavedJobs, ...beforeDiscovery.pendingDiscoveryJobs].map((job) => [
@@ -1758,7 +1771,7 @@ export function createWorkspaceCampaignMethods(input: {
       const request = ProjectCampaignRuleFunnelInputSchema.parse(rawInput);
       const [state, savedJobs] = await Promise.all([
         input.ctx.repository.getCampaignState(),
-        input.ctx.repository.listSavedJobs(),
+        input.ctx.repository.readSavedJobsProjection(),
       ]);
       const campaign = state?.campaigns.find(
         (candidate) => candidate.id === request.campaignId,

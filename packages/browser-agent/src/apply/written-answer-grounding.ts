@@ -121,6 +121,7 @@ export async function checkWrittenApplicationAnswers(input: {
         [...tools],
         {
           signal,
+          reasoningTask: "claim_check",
           maxOutputTokens: Math.min(
             16_000,
             (4_000 +

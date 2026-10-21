@@ -80,6 +80,28 @@ function newerActivity(
     : current;
 }
 
+/**
+ * A frozen saved job never changes, so its own activity facts are computed
+ * once; every refresh used to redo them for all the person's jobs.
+ */
+const ownCandidates = new WeakMap<
+  SavedJob,
+  {
+    active: ActivityCandidate | undefined;
+    closed: ActivityCandidate | undefined;
+  }
+>();
+function ownActivityCandidates(job: SavedJob) {
+  const cached = ownCandidates.get(job);
+  if (cached) return cached;
+  const candidates = {
+    active: activeCandidate(job),
+    closed: closedByOwnTextCandidate(job),
+  };
+  if (Object.isFrozen(job)) ownCandidates.set(job, candidates);
+  return candidates;
+}
+
 function activeCandidate(job: SavedJob): ActivityCandidate | undefined {
   if (
     job.lastVerifiedActiveAt &&
@@ -126,12 +148,11 @@ export function projectDiscoveryJobViews(input: {
   const uniqueJobById = new Map<string, SavedJob | null>();
 
   for (const job of input.jobs) {
-    const active = activeCandidate(job);
+    const { active, closed: closedByOwnText } = ownActivityCandidates(job);
     if (active) candidateByJob.set(job, active);
     // A listing that says it is closed is closed, whatever the last sighting
     // claimed. This used to leave such a posting labelled Active and free to
     // rank first.
-    const closedByOwnText = closedByOwnTextCandidate(job);
     if (closedByOwnText) {
       candidateByJob.set(
         job,

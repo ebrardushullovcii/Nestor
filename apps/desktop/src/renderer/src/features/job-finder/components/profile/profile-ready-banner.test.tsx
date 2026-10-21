@@ -5,16 +5,26 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ToastProvider } from "@renderer/components/ui/toast";
-import { ProfileReadyBanner } from "./profile-ready-banner";
+import {
+  isProfileReadyNews,
+  PROFILE_READY_NEWS_WINDOW_MS,
+  ProfileReadyBanner,
+} from "./profile-ready-banner";
 
-function readyBanner(completionIdentity: string) {
+function readyBanner(
+  completionIdentity: string,
+  completedAt: string | null = new Date().toISOString(),
+) {
   return (
     <ToastProvider>
       <MemoryRouter initialEntries={["/job-finder/profile"]}>
         <Routes>
           <Route
             element={
-              <ProfileReadyBanner completionIdentity={completionIdentity} />
+              <ProfileReadyBanner
+                completedAt={completedAt}
+                completionIdentity={completionIdentity}
+              />
             }
             path="/job-finder/profile"
           />
@@ -73,5 +83,27 @@ describe("ProfileReadyBanner", () => {
     view.rerender(readyBanner("candidate_2:completion_2"));
 
     expect(toastText()).toContain("Core setup is ready");
+  });
+
+  it("does not replay a setup that finished before this visit", () => {
+    // Issue #50: the toast appeared after every launch, on every page.
+    render(readyBanner("candidate_1:old", "2026-01-01T00:00:00.000Z"));
+    expect(toastText()).toBeNull();
+
+    cleanup();
+    render(readyBanner("candidate_1:unknown", null));
+    expect(toastText()).toBeNull();
+  });
+
+  it("treats only a completion inside the news window as news", () => {
+    const now = Date.parse("2026-10-21T12:00:00.000Z");
+    expect(isProfileReadyNews("2026-10-21T11:59:00.000Z", now)).toBe(true);
+    expect(
+      isProfileReadyNews(
+        new Date(now - PROFILE_READY_NEWS_WINDOW_MS - 1).toISOString(),
+        now,
+      ),
+    ).toBe(false);
+    expect(isProfileReadyNews("not a date", now)).toBe(false);
   });
 });

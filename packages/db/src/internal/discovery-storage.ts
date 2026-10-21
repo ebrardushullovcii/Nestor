@@ -143,8 +143,17 @@ export function migrateDiscoveryStorage(database: DatabaseSync): void {
 }
 
 export interface DiscoveryDisplayRowCache {
-  scopes: Map<string, { runId: string; values: Map<string, unknown> }>;
+  scopes: Map<
+    string,
+    {
+      runId: string;
+      values: Map<string, unknown>;
+      ordered?: Array<{ key: string; value: unknown }>;
+    }
+  >;
   dirty: Map<string, Set<string>>;
+  /** Display runs by id, with the stored metadata text they were read from. */
+  runs?: Map<string, { raw: string; run: DiscoveryRunRecord }>;
 }
 
 export function discoveryRowScope(table: string, runId = ""): string {
@@ -155,6 +164,12 @@ function readKeyedRows<T>(database: DatabaseSync, table: string, parser: { parse
   const runId = params[0] ?? "";
   const scope = discoveryRowScope(table, runId);
   const cached = cache?.scopes.get(scope);
+  // Every write to these tables is recorded as a change to its scope, so a
+  // scope with none since the last read is that read, order included. A
+  // finished search's thousands of log rows are not scanned again for an edit
+  // somewhere else.
+  if (cached?.ordered && !cache?.dirty.has(scope))
+    return cached.ordered as Array<{ key: string; value: T }>;
   const cold = !cached;
   const rows = database.prepare(`SELECT id${cold ? ", value" : ""} FROM ${table} ${where} ORDER BY position`).all(...params);
   const valuesById = cached?.values ?? new Map<string, unknown>();
@@ -178,26 +193,50 @@ function readKeyedRows<T>(database: DatabaseSync, table: string, parser: { parse
     return { key: id, value: parsed };
   });
   if (cache) {
-    cache.scopes.set(scope, { runId, values: valuesById });
+    cache.scopes.set(scope, { runId, values: valuesById, ordered: values });
     const present = new Set(rows.map((row) => String(row.id)));
     for (const id of valuesById.keys()) if (!present.has(id)) valuesById.delete(id);
   }
   return values;
 }
 
+const rowValueLists = new WeakMap<object, unknown[]>();
+
 function readRows<T>(database: DatabaseSync, table: string, parser: { parse(value: unknown): T }, where = "", params: string[] = [], cache?: DiscoveryDisplayRowCache): T[] {
-  return readKeyedRows(database, table, parser, where, params, cache).map(({ value }) => value);
+  const keyed = readKeyedRows(database, table, parser, where, params, cache);
+  // An unchanged scope returns the same keyed list; keep its value list too.
+  let values = rowValueLists.get(keyed) as T[] | undefined;
+  if (!values) {
+    values = keyed.map(({ value }) => value);
+    if (cache) rowValueLists.set(keyed, values);
+  }
+  return values;
 }
 
 function readRun(database: DatabaseSync, row: { id: unknown; value: unknown }, includeCheckpoints: boolean, cache?: DiscoveryDisplayRowCache): DiscoveryRunRecord {
   const id = String(row.id);
+  // A display run whose own row, sources and log are unchanged is the run
+  // read last time: same object, so later identity checks stay cheap.
+  const raw = String(row.value);
+  const previous = !includeCheckpoints ? cache?.runs?.get(id) : undefined;
+  if (
+    previous &&
+    previous.raw === raw &&
+    !cache?.dirty.has(discoveryRowScope("discovery_run_targets", id)) &&
+    !cache?.dirty.has(discoveryRowScope("discovery_run_activity", id)) &&
+    cache?.scopes.get(discoveryRowScope("discovery_run_targets", id))?.ordered &&
+    cache?.scopes.get(discoveryRowScope("discovery_run_activity", id))?.ordered
+  )
+    return previous.run;
   const metadata = parseRow("discovery_runs", id, row.value, RUN_METADATA);
   const targets = readKeyedRows(database, "discovery_run_targets", TARGET_METADATA, "WHERE run_id = ?", [id], cache);
   const checkpointRows = includeCheckpoints ? database.prepare("SELECT id, value FROM discovery_run_checkpoints WHERE run_id = ?").all(id) : [];
   const checkpoints = new Map(checkpointRows.map((checkpoint) => [String(checkpoint.id), frozen(parseRow("discovery_run_checkpoints", `${id}/${String(checkpoint.id)}`, checkpoint.value, BrowserAgentRunCheckpointSchema))]));
   const executions = targets.map(({ key, value }) => frozen({ ...value, agentCheckpoint: checkpoints.get(key) ?? null }));
   const activity = readRows(database, "discovery_run_activity", DiscoveryActivityEventSchema, "WHERE run_id = ?", [id], cache);
-  return frozen({ ...metadata, targetExecutions: executions, activity });
+  const run = frozen({ ...metadata, targetExecutions: executions, activity });
+  if (cache && !includeCheckpoints) (cache.runs ??= new Map()).set(id, { raw, run });
+  return run;
 }
 
 export function readDiscoveryStorage(database: DatabaseSync, fallback: JobFinderDiscoveryState, includeCheckpoints = true, cache?: DiscoveryDisplayRowCache): JobFinderDiscoveryState {
@@ -205,6 +244,7 @@ export function readDiscoveryStorage(database: DatabaseSync, fallback: JobFinder
   if (!row) {
     cache?.scopes.clear();
     cache?.dirty.clear();
+    cache?.runs?.clear();
     return frozen(JobFinderDiscoveryStateSchema.parse(fallback));
   }
   const small = parseRow("singleton_state", "discovery_state", row.value, SMALL_STATE);
@@ -216,6 +256,9 @@ export function readDiscoveryStorage(database: DatabaseSync, fallback: JobFinder
         cache.scopes.delete(scope);
         cache.dirty.delete(scope);
       }
+    }
+    for (const runId of cache.runs?.keys() ?? []) {
+      if (!presentRuns.has(runId)) cache.runs?.delete(runId);
     }
   }
   const active = runs.find((run) => Number(run.active) === 1);
@@ -424,6 +467,7 @@ export function createDiscoveryStorage(database: DatabaseSync, fallback: JobFind
   let cached: JobFinderDiscoveryState | null = null;
   let cachedEpoch = -1;
   let cachedVersion = -1;
+  let pendingSessionCache: JobFinderDiscoveryState | null = null;
   const epoch = () => Number(database.prepare("SELECT revision FROM discovery_canonical_epoch").get()?.revision ?? 0);
   const version = () => Number(database.prepare("PRAGMA data_version").get()?.data_version ?? 0);
   return {
@@ -444,8 +488,41 @@ export function createDiscoveryStorage(database: DatabaseSync, fallback: JobFind
     update(proposed: JobFinderDiscoveryState, before: JobFinderDiscoveryState): JobFinderDiscoveryState {
       return updateDiscoveryStorage(database, before, proposed, aliases);
     },
+    /**
+     * Browser session states live in the small singleton row. Writing them
+     * through `update` read every run, log and checkpoint first: about 0.4 s
+     * of the main process on each start with a large search history. Caller
+     * owns the transaction; a current cached state stays current.
+     */
+    updateSessions(
+      change: (sessions: JobFinderDiscoveryState["sessions"]) => JobFinderDiscoveryState["sessions"],
+    ): JobFinderDiscoveryState["sessions"] {
+      pendingSessionCache = null;
+      const cacheWasCurrent = cached !== null && epoch() === cachedEpoch && version() === cachedVersion;
+      const row = database.prepare("SELECT value FROM singleton_state WHERE key = 'discovery_state'").get();
+      const small = row
+        ? parseRow("singleton_state", "discovery_state", row.value, SMALL_STATE)
+        : smallValue(JobFinderDiscoveryStateSchema.parse(fallback));
+      const sessions = frozen(SMALL_STATE.shape.sessions.parse(change(small.sessions)));
+      writeSmall(database, { ...small, sessions } as JobFinderDiscoveryState);
+      if (cacheWasCurrent && cached) {
+        pendingSessionCache = frozen({ ...cached, sessions });
+      }
+      return sessions;
+    },
+    /** After the sessions commit: keep the cache current without a re-read. */
+    publishSessions(): void {
+      if (database.isTransaction) throw new Error("Discovery snapshots can only be published after commit.");
+      if (pendingSessionCache) {
+        cached = pendingSessionCache;
+        cachedEpoch = epoch();
+        cachedVersion = version();
+      }
+      pendingSessionCache = null;
+    },
     publish(state: JobFinderDiscoveryState): void {
       if (database.isTransaction) throw new Error("Discovery snapshots can only be published after commit.");
+      pendingSessionCache = null;
       cached = state;
       cachedEpoch = epoch();
       cachedVersion = version();

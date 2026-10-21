@@ -366,7 +366,7 @@ describe("ReviewQueuePreviewPanel locked pane scroll regions", () => {
       />,
     );
 
-    expect(screen.getByText("Your original resume")).toBeTruthy();
+    expect(screen.getByText("Your original wording")).toBeTruthy();
     expect(screen.queryByText("Tailored resume v1")).toBeNull();
   });
 
@@ -426,9 +426,9 @@ describe("ReviewQueuePreviewPanel locked pane scroll regions", () => {
       );
 
       expect(screen.getByText("Tailored resume v1")).toBeTruthy();
-      expect(screen.queryByText("Your original resume")).toBeNull();
+      expect(screen.queryByText("Your original wording")).toBeNull();
       const reviewCopy =
-        "Review this resume, decide any flagged lines, then approve it before applying.";
+        "Read this resume through, then approve it before applying.";
       const applyCopy =
         "This is the resume as it stands. Edit it if you like; Apply approves it.";
       expect(

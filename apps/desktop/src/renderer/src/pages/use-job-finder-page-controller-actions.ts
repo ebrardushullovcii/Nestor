@@ -60,6 +60,7 @@ import {
   getTailoredDraftPreparationResultMessage,
   prepareTailoredDraftBatch,
   shouldRewriteResumeAfterLevelChange,
+  type ResumeRunStage,
   type TailoredDraftPreparationViewState,
 } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
 import {
@@ -1416,12 +1417,20 @@ export function createPrimaryPageActions(
         if (progress.stage === "finished") stages.delete(progress.jobId);
         else stages.set(progress.jobId, progress.stage);
         const counts = { writingCount: 0, processingCount: 0, waitingCount: 0 };
-        for (const stage of stages.values()) {
+        const stageByJobId: Record<string, ResumeRunStage> = {};
+        for (const [jobId, stage] of stages) {
+          if (stage === "finished") continue;
+          stageByJobId[jobId] = stage;
           if (stage === "writing") counts.writingCount += 1;
           else if (stage === "processing") counts.processingCount += 1;
           else counts.waitingCount += 1;
         }
-        setTailoredDraftPreparation((current) => ({ ...current, ...counts }));
+        // Each job's own stage lets its Next step say what is happening.
+        setTailoredDraftPreparation((current) => ({
+          ...current,
+          ...counts,
+          stageByJobId,
+        }));
       },
     );
     uiResumeBatch = batch;
@@ -2372,7 +2381,10 @@ export function createPrimaryPageActions(
                 jobFinderPendingActions.discoveryJob("bulk-shortlist"),
                 () => actions.queueJobsForReview!(ids),
               );
-              setSelectedReviewJobId(ids[0]!);
+              // Shortlisted keeps its own selection: the new jobs join the end
+              // of the list, so selecting one there opened Shortlisted on its
+              // last page the next time the person went to it. The toast's
+              // link opens the first new job instead.
               const message = `${ids.length} ${ids.length === 1 ? "job added" : "jobs added"} to Shortlisted.`;
               applyRouteScopedMessage(
                 {
@@ -2380,7 +2392,10 @@ export function createPrimaryPageActions(
                   tone: "success",
                   actionLink: {
                     label: "Open Shortlisted",
-                    route: "/job-finder/review-queue",
+                    route: buildJobFinderContextRoute(
+                      "/job-finder/review-queue",
+                      { jobId: ids[0]! },
+                    ),
                   },
                 },
                 ownerRoute,

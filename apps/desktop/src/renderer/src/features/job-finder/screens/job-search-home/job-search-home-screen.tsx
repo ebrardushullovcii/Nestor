@@ -166,16 +166,78 @@ export function listCurrentUnreadNotifications(
         notification.kind === "blocked_work" &&
         ((notification.jobId && sentJobIds.has(notification.jobId)) ||
           supersededByNewerAttempt(notification) ||
-          sourceBlockResolved(notification))
+          sourceBlockResolved(notification) ||
+          isRetiredGateNotification(notification))
       ),
   );
+}
+
+/**
+ * Blocks that no longer exist. ADR 0051 removed the hold on roles the resume
+ * writer left off, but notifications saved while it existed still said the
+ * resume "leaves out 2 roles that Job Finder wants you to confirm first", a
+ * step the app no longer asks for and nothing on screen can do.
+ */
+const RETIRED_GATE_NOTICE_PATTERNS: readonly RegExp[] = [
+  /wants you to confirm first/iu,
+  /confirm the hidden roles? (?:is|are) intentional/iu,
+];
+
+export function isRetiredGateNotification(
+  notification: Pick<CampaignNotification, "body" | "title">,
+): boolean {
+  const text = `${notification.title} ${notification.body ?? ""}`;
+  return RETIRED_GATE_NOTICE_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 const PANEL_CLASS =
   "surface-panel-shell grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) p-5";
 
+const DISMISSED_HOME_PROBLEMS_KEY = "nestor.home.dismissed-problems-v1";
+
+type DismissedHomeProblems = Readonly<Record<string, string>>;
+
+function readDismissedHomeProblems(): DismissedHomeProblems {
+  try {
+    const value: unknown = JSON.parse(
+      window.localStorage.getItem(DISMISSED_HOME_PROBLEMS_KEY) ?? "{}",
+    );
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Remembers that the person hid a quiet Home line for its current cause, so
+ * it stays hidden until the cause changes (ADR 0051: a fact the app cannot
+ * fix gets at most a notice dismissed for good).
+ */
+export function rememberDismissedHomeProblem(
+  problemId: string,
+  dismissKey: string,
+): DismissedHomeProblems {
+  const next = { ...readDismissedHomeProblems(), [problemId]: dismissKey };
+  try {
+    window.localStorage.setItem(
+      DISMISSED_HOME_PROBLEMS_KEY,
+      JSON.stringify(next),
+    );
+  } catch {
+    // This visit still hides it.
+  }
+  return next;
+}
+
 export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
   const [now, setNow] = useState(Date.now);
+  const [dismissedProblemKeys, setDismissedProblemKeys] =
+    useState<DismissedHomeProblems>(readDismissedHomeProblems);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -407,12 +469,26 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
         }
         description="Your search, shortlisted jobs, and applications."
         statusItems={[
-          ...model.problems.map((problem): PageStatusItem => {
+          ...model.problems.flatMap((problem): PageStatusItem[] => {
             const button = problem.button;
-            return {
+            const dismissKey = problem.dismissKey;
+            if (
+              dismissKey !== undefined &&
+              dismissedProblemKeys[problem.id] === dismissKey
+            )
+              return [];
+            const item: PageStatusItem = {
               id: problem.id,
-              tone: problem.tone === "critical" ? "critical" : "warning",
+              ...(problem.tone ? { tone: problem.tone } : {}),
               text: problem.text,
+              ...(dismissKey !== undefined
+                ? {
+                    onHide: () =>
+                      setDismissedProblemKeys(
+                        rememberDismissedHomeProblem(problem.id, dismissKey),
+                      ),
+                  }
+                : {}),
               ...(button
                 ? {
                     // Going to the screen that owns the problem is a link;
@@ -432,6 +508,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
                   }
                 : {}),
             };
+            return [item];
           }),
           { id: "run-summary", text: model.statusLine },
         ]}

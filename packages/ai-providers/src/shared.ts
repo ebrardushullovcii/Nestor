@@ -54,6 +54,7 @@ import { z } from "zod";
 import {
   modelApiModes,
   modelReasoningEfforts,
+  type ModelReasoningTask,
 } from "./openai-compatible-transport";
 import type { ModelStreamEvent } from "./model-request-transport";
 import type {
@@ -354,12 +355,27 @@ export const OpenAiCompatibleJobFinderAiClientOptionsSchema = z.object({
   apiMode: z.enum(modelApiModes).optional(),
   reasoningEffort: z.enum(modelReasoningEfforts).optional(),
   /**
-   * Effort for the many short turns of a browser agent (search, source
-   * check, apply) and for reading a page's job list. These are "what do I
-   * press next" decisions; deep reasoning on each one made a search take
-   * minutes per page. Resume writing keeps `reasoningEffort`.
+   * Effort for tool-calling work that names no task (resume import
+   * sections, the profile and resume assistants, letters). Resume writing
+   * keeps `reasoningEffort`.
    */
   agentReasoningEffort: z.enum(modelReasoningEfforts).optional(),
+  /**
+   * Effort per task (see `modelReasoningTasks`). A task without an entry
+   * uses `agentReasoningEffort`; the writer and a full listing read use
+   * `reasoningEffort`.
+   */
+  taskReasoningEfforts: z
+    .object({
+      resume_writer: z.enum(modelReasoningEfforts).optional(),
+      listing_read: z.enum(modelReasoningEfforts).optional(),
+      search: z.enum(modelReasoningEfforts).optional(),
+      page_read: z.enum(modelReasoningEfforts).optional(),
+      fit_batch: z.enum(modelReasoningEfforts).optional(),
+      claim_check: z.enum(modelReasoningEfforts).optional(),
+      apply: z.enum(modelReasoningEfforts).optional(),
+    } satisfies Record<ModelReasoningTask, z.ZodTypeAny>)
+    .optional(),
   contextWindowTokens: z.number().int().min(1_000).optional(),
   requestTimeoutMs: z.number().int().min(1_000).optional(),
   resumeExtractionTimeoutMs: z.number().int().min(1_000).optional(),
@@ -631,6 +647,12 @@ export const PROFILE_RESUME_APPROACH_VOCABULARY = [
 
 export interface AssessJobFitInput {
   signal?: AbortSignal;
+  /**
+   * A re-read nobody is waiting on (a search refreshing an older full read)
+   * runs at the fit-check effort; one the person asked for keeps the main
+   * effort.
+   */
+  background?: boolean;
   assessmentDate?: string;
   profile: CandidateProfile;
   searchPreferences: JobSearchPreferences;
@@ -795,6 +817,8 @@ export interface ChatWithToolsOptions {
   conversationKey?: string;
   /** Normalized deltas while the answer streams (assistant sidebar). */
   onStreamEvent?: (event: ModelStreamEvent) => void;
+  /** Which work this turn belongs to; picks its reasoning effort. */
+  reasoningTask?: ModelReasoningTask;
 }
 
 export interface ChatWithToolsResult {

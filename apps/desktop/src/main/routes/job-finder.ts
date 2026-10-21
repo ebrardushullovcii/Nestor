@@ -174,6 +174,7 @@ import {
 import { collectJobFinderPerformanceSnapshot } from "../services/job-finder/collect-performance-snapshot";
 import { createJobFinderWorkspaceDeltaTracker } from "../services/job-finder/workspace-delta";
 import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-workspace-view";
+import { takeStartupSnapshot } from "../services/job-finder/startup-workspace-view";
 import {
   publishJobFinderWorkspaceUpdate,
   scheduleAnswerDraftWorkspaceUpdate,
@@ -958,8 +959,26 @@ export function registerJobFinderRouteHandlers(
 
   ipcMain.handle(
     "job-finder:sync-workspace",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = JobFinderWorkspaceSyncInputSchema.parse(payload);
+      const startupSnapshot =
+        input.baseRevision === null ? takeStartupSnapshot() : null;
+      if (startupSnapshot) {
+        // The view saved at the last clean close stands in until the real
+        // workspace has loaded; then the window converges by delta. If the
+        // workspace cannot load, the window reloads into the ordinary path,
+        // which reports the failure.
+        void getJobFinderWorkspaceService().then(
+          // A later turn, so the notice never overtakes this reply.
+          () => setTimeout(() => publishJobFinderWorkspaceUpdate(event.sender)),
+          () => {
+            if (!event.sender.isDestroyed()) event.sender.reload();
+          },
+        );
+        return workspaceDeltaTracker.synchronize(null, startupSnapshot, {
+          earlierProcess: true,
+        });
+      }
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot = await readWorkspaceProjection(jobFinderWorkspaceService);
 

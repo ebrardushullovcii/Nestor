@@ -135,6 +135,11 @@ export async function withResumeClaimChecks(input: {
   now?: () => string;
   signal?: AbortSignal;
   getRemainingBudgetMs?: () => number;
+  /**
+   * False reuses the verdicts already known and asks the model nothing; the
+   * rest stay unchecked until the draft is saved (the live preview).
+   */
+  askModel?: boolean;
 }): Promise<ResumeDraft> {
   input.signal?.throwIfAborted();
   const { draft, profile } = input;
@@ -172,34 +177,61 @@ export async function withResumeClaimChecks(input: {
     text: entry.text,
   }));
   const tailoringStrength = input.tailoringStrength ?? "balanced";
-  // What the verdicts depend on: the evidence and how far the person let the
-  // resume stretch. A change to either has the lines checked again.
+  const jobContext = [
+    input.job.title,
+    input.job.company,
+    input.job.description,
+    [
+      ...input.job.responsibilities,
+      ...input.job.minimumQualifications,
+      ...input.job.preferredQualifications,
+    ],
+  ];
+  const evidenceTexts = evidence.map((entry) => entry.text);
+  const importedResume = profile?.baseResume.textContent ?? "";
+  // What a line's verdict depends on: the line itself (its content hash),
+  // the evidence, the job and how far the person let the resume stretch.
+  // Editing one line has only that line checked again.
   const evidenceKey = fnv1a32(
     JSON.stringify([
+      "resume-fact-check-2026-10-21-per-line-v4",
+      jobContext,
+      evidenceTexts,
+      importedResume,
+      tailoringStrength,
+    ]),
+  );
+  // Verdicts stored before v4 were also keyed on every visible line. One
+  // stored for this very draft is current and is re-keyed, not re-checked.
+  const legacyEvidenceKey = fnv1a32(
+    JSON.stringify([
       "resume-fact-check-2026-10-14-context-v3",
-      [
-        input.job.title,
-        input.job.company,
-        input.job.description,
-        [
-          ...input.job.responsibilities,
-          ...input.job.minimumQualifications,
-          ...input.job.preferredQualifications,
-        ],
-      ],
+      jobContext,
       resumeLines.map((line) => [
         line.section,
         resumeClaimContentHash(line.text),
       ]),
-      evidence.map((entry) => entry.text),
-      profile?.baseResume.textContent ?? "",
+      evidenceTexts,
+      importedResume,
       tailoringStrength,
     ]),
   );
   const stored = new Map(
     (draft.claimChecks ?? [])
-      .filter((check) => check.evidenceKey === evidenceKey)
-      .map((check) => [check.contentHash, check] as const),
+      .filter(
+        (check) =>
+          check.evidenceKey === evidenceKey ||
+          check.evidenceKey === legacyEvidenceKey,
+      )
+      .map(
+        (check) =>
+          [
+            check.contentHash,
+            check.evidenceKey === evidenceKey
+              ? check
+              : { ...check, evidenceKey },
+          ] as const,
+      ),
   );
   const kept = new Map<string, ResumeClaimCheck>();
   const pending = new Map<string, (typeof claims)[number]>();
@@ -212,9 +244,10 @@ export async function withResumeClaimChecks(input: {
     else if (!kept.has(contentHash)) pending.set(contentHash, claim);
   }
 
-  const checkResumeClaims = input.aiClient.checkResumeClaims?.bind(
-    input.aiClient,
-  );
+  const checkResumeClaims =
+    input.askModel === false
+      ? undefined
+      : input.aiClient.checkResumeClaims?.bind(input.aiClient);
   if (checkResumeClaims && pending.size > 0) {
     const now = input.now ?? (() => new Date().toISOString());
     const entries = [...pending.entries()];
@@ -242,7 +275,9 @@ export async function withResumeClaimChecks(input: {
         },
         evidence,
         resumeLines,
-        resumeText: profile?.baseResume.textContent ?? null,
+        // The imported resume is already in the evidence, line by line with
+        // ids the verdict can cite; sending it whole as well doubled it.
+        resumeText: null,
         claims: batch.map(([, claim], index) => ({
           id: `line_${index + 1}`,
           section:

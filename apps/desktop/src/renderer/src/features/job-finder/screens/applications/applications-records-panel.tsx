@@ -445,7 +445,9 @@ export function ApplicationsRecordsPanel({
                         ? ("positive" as const)
                         : applyState.cancelledByPerson
                           ? ("muted" as const)
-                          : applyState.kind === "could_not_apply"
+                          : applyState.formClosed
+                            ? ("warning" as const)
+                            : applyState.kind === "could_not_apply"
                             ? ("critical" as const)
                             : applyState.kind === "needs_you"
                               ? ("warning" as const)
@@ -483,8 +485,10 @@ export function ApplicationsRecordsPanel({
               isApplicationWithdrawnByPerson(record.crm)
                 ? nextTrackerStepLabel(record)
                 : preparationNextStep;
+            // A form that closed before a send was seen is not a failed
+            // application, whatever stage the run left on the tracker.
             const rowStageLabel =
-              applyState?.kind === "applied"
+              applyState?.kind === "applied" || applyState?.formClosed
                 ? stage.label
                 : applicationCrmStageLabelForView(record, customStages);
             const recordStateDescriptionId = `applications-record-${record.id}-state-description`;

@@ -4,6 +4,7 @@ import {
 } from "@nestor/browser-agent";
 import { ApplicationLetterGroundingError } from "./application-letter-provider";
 import { buildApplyLetterDependencies } from "./agent-application-preparation";
+import { readSavedJob } from "./read-saved-job";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 
 /**
@@ -22,13 +23,12 @@ export async function writeApplicationDocumentText(
     priorText: string | null;
   },
 ): Promise<string | null> {
-  const [savedJobs, profile, settings, searchPreferences] = await Promise.all([
-    ctx.repository.listSavedJobs(),
+  const [job, profile, settings, searchPreferences] = await Promise.all([
+    readSavedJob(ctx.repository, input.jobId),
     ctx.repository.getProfile(),
     ctx.repository.getSettings(),
     ctx.repository.getSearchPreferences(),
   ]);
-  const job = savedJobs.find((entry) => entry.id === input.jobId);
   if (!job) {
     return null;
   }

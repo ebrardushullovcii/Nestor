@@ -394,7 +394,9 @@ export function ApplicationsDetailPanel({
             ? ("positive" as const)
             : selectedApplyState.cancelledByPerson
               ? ("muted" as const)
-              : selectedApplyState.kind === "could_not_apply"
+              : selectedApplyState.formClosed
+                ? ("warning" as const)
+                : selectedApplyState.kind === "could_not_apply"
                 ? ("critical" as const)
                 : selectedApplyState.kind === "needs_you"
                   ? ("warning" as const)

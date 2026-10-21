@@ -13,7 +13,7 @@ import {
   type Session,
   type BrowserWindowConstructorOptions,
 } from "electron";
-import { chromium, type Browser } from "playwright";
+import type { Browser } from "playwright";
 import {
   DesktopBrowserStateSchema,
   resolveBrowserAddress,
@@ -1586,6 +1586,8 @@ export class EmbeddedBrowser {
       });
       this.bridge = bridge;
       const transport = await bridge.start();
+      // Playwright loads here, on the first automation, not with the app.
+      const { chromium } = await import("playwright");
       const browser = await chromium.connectOverCDP(transport.endpoint, {
         headers: transport.headers,
         noDefaults: true,

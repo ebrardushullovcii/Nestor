@@ -30,8 +30,8 @@ import type { BadgeTone } from "../../lib/job-finder-types";
  * values, so React's shallow prop check is enough to skip the rows the step
  * did not touch. Nothing here is recomputed from the queue.
  *
- * Every prop is a string, a boolean, or a handler the panel keeps stable
- * across renders. Adding an object or an inline function to this list
+ * Every prop is a string, a boolean, null, or a handler the panel keeps
+ * stable across renders. Adding an object or an inline function to this list
  * silently un-memoises every row, so derive it in the panel instead.
  */
 export interface ReviewQueueRowProps {
@@ -41,6 +41,8 @@ export interface ReviewQueueRowProps {
   selectionDisabled: boolean;
   onToggleSelection: (jobId: string, shiftKey: boolean) => void;
   employerLocationLine: string | null;
+  /** The resume level the job uses, when the row can know it. */
+  levelLabel: string | null;
   /** Another shortlisted job has the same title, employer and place. */
   possibleDuplicate: boolean;
   jobId: string;
@@ -49,7 +51,11 @@ export interface ReviewQueueRowProps {
     event: KeyboardEvent<HTMLButtonElement>,
     jobId: string,
   ) => void;
-  resumePolicyCaption: string;
+  /**
+   * What the badge cannot say about the resume (kept wording, a kept
+   * previous resume, lines to decide), or null when it would only repeat it.
+   */
+  resumePolicyCaption: string | null;
   selected: boolean;
   showProgress: boolean;
   statusLabel: string;
@@ -57,11 +63,15 @@ export interface ReviewQueueRowProps {
   title: string;
 }
 
+const POSSIBLE_DUPLICATE_DETAIL =
+  "Another shortlisted job has the same title, employer and place.";
+
 function ReviewQueueRowComponent({
   checked,
   selectionDisabled,
   onToggleSelection,
   employerLocationLine,
+  levelLabel,
   possibleDuplicate,
   jobId,
   onSelect,
@@ -73,6 +83,9 @@ function ReviewQueueRowComponent({
   statusTone,
   title,
 }: ReviewQueueRowProps) {
+  const metaParts = [employerLocationLine, levelLabel].filter(
+    (part): part is string => Boolean(part),
+  );
   return (
     // Selection is a tint plus an inset accent bar owned by the shared
     // primitive. The row's padding, margin and border-width are identical in
@@ -128,33 +141,34 @@ function ReviewQueueRowComponent({
               </SelectableRowLine>
             </div>
           </div>
-          {employerLocationLine ? (
+          {metaParts.length > 0 || possibleDuplicate ? (
             <span className={jobFinderListRowMetaClassName}>
-              {employerLocationLine}
+              {metaParts.join(" · ")}
+              {/* A quiet fact, not a warning: removing one of the two is the
+                person's call and nothing is blocked meanwhile (issue #50). */}
+              {possibleDuplicate ? (
+                <span
+                  className="text-foreground-muted"
+                  data-testid="review-queue-possible-duplicate"
+                  title={POSSIBLE_DUPLICATE_DETAIL}
+                >
+                  {metaParts.length > 0 ? " · " : ""}
+                  Possible duplicate
+                  <span className="sr-only">. {POSSIBLE_DUPLICATE_DETAIL}</span>
+                </span>
+              ) : null}
             </span>
           ) : null}
-          {possibleDuplicate ? (
-            <span
+          {resumePolicyCaption ? (
+            <SelectableRowLine
               className={cn(
-                jobFinderListRowMetaClassName,
-                "text-(--warning-text)",
+                jobFinderListRowStatusClassName,
+                "text-foreground-soft",
               )}
-              data-testid="review-queue-possible-duplicate"
             >
-              Possibly saved twice: another shortlisted job has the same title,
-              employer and place.
-            </span>
+              {resumePolicyCaption}
+            </SelectableRowLine>
           ) : null}
-          {/* The resume-state caption renders on every row too, so a selected
-            row keeps the same shape as its neighbours. */}
-          <SelectableRowLine
-            className={cn(
-              jobFinderListRowStatusClassName,
-              "font-medium text-foreground-soft",
-            )}
-          >
-            {resumePolicyCaption}
-          </SelectableRowLine>
           {showProgress ? (
             <div className="grid min-w-0 w-full gap-1.5">
               {/* Row-level progress had no real percentage behind it either; it

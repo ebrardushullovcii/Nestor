@@ -194,6 +194,7 @@ export type {
   ResumeRenderSection,
   ResumeRenderSectionEntry,
 } from "./internal/resume-workspace-structure";
+import { readSavedJob } from "./internal/read-saved-job";
 
 export {
   MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
@@ -531,12 +532,17 @@ export function createJobFinderWorkspaceService(
         return knownSessions;
       }
 
+      const merge = (current: JobFinderDiscoveryState["sessions"]) =>
+        observedSessions.reduce(
+          (sessions, observation) => mergeSessionStates(sessions, observation),
+          current,
+        );
+      if (repository.commitDiscoverySessions) {
+        return repository.commitDiscoverySessions(merge);
+      }
       const next = await context.persistDiscoveryState((current) => ({
         ...current,
-        sessions: observedSessions.reduce(
-          (sessions, observation) => mergeSessionStates(sessions, observation),
-          current.sessions,
-        ),
+        sessions: merge(current.sessions),
       }));
       return next.sessions;
     },
@@ -857,9 +863,7 @@ export function createJobFinderWorkspaceService(
           action: "hide_job",
         }),
       restore: async (jobId) => {
-        const job = (await repository.listSavedJobs()).find(
-          (candidate) => candidate.id === jobId,
-        );
+        const job = await readSavedJob(repository, jobId);
         if (job?.status === "archived") {
           await applicationMethods.restoreDismissedDiscoveryJob(jobId);
         } else if (job && job.status !== "discovered") {
@@ -934,10 +938,13 @@ export function createJobFinderWorkspaceService(
     options: { nestedUserActionRecovery?: boolean } = {},
   ) {
     await requireDiscoverySafeguardClearance();
+    // Only read here, to fingerprint each job's sightings before the run:
+    // the cached display rows serve that without parsing and copying every
+    // job and run again (seconds of the main process at the press of Search).
     let [campaignState, savedJobs, discoveryState] = await Promise.all([
       repository.getCampaignState(),
-      repository.listSavedJobs(),
-      repository.getDiscoveryState(),
+      repository.readSavedJobsProjection(),
+      repository.readDiscoveryDisplayProjection(),
     ]);
     if (!campaignState && requestedCampaignId) {
       throw new Error("This search plan was removed; run the plan again");
@@ -956,8 +963,8 @@ export function createJobFinderWorkspaceService(
         });
       });
       [savedJobs, discoveryState] = await Promise.all([
-        repository.listSavedJobs(),
-        repository.getDiscoveryState(),
+        repository.readSavedJobsProjection(),
+        repository.readDiscoveryDisplayProjection(),
       ]);
     }
     const campaignId = requestedCampaignId ?? campaignState.activeCampaignId;

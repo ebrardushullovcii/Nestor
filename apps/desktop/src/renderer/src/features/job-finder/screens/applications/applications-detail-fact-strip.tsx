@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import {
   isApplicationTrackedAsSentByPerson,
   isApplicationWithdrawnByPerson,
+  PREPARED_PAGE_CLOSED_SUMMARY,
 } from "@nestor/contracts";
 import {
   formatStatusLabel,
@@ -139,8 +140,12 @@ export function ApplicationsDetailFactStrip(props: {
                     ? "Submitted"
                     : visibleApplyResult?.state === "cancelled"
                       ? "Cancelled by you"
-                      : visibleApplyResult?.state === "failed"
-                        ? "Could not apply"
+                      : visibleApplyResult?.state === "failed" &&
+                          visibleApplyResult.summary ===
+                            PREPARED_PAGE_CLOSED_SUMMARY
+                        ? "Form closed"
+                        : visibleApplyResult?.state === "failed"
+                          ? "Could not apply"
                         : visibleRunIsActive &&
                             !selectedAttemptBelongsToVisibleRun
                           ? "In progress"

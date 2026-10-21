@@ -12,6 +12,13 @@ import {
 } from "./resume-workspace-helpers";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 
+// Kept from load time: a yield is a real turn of the event loop even where
+// a test has replaced the timers.
+const realSetImmediate = globalThis.setImmediate;
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => realSetImmediate(resolve));
+}
+
 /**
  * Drafts written before ADR 0051 can still hold generated lines their fact
  * check called unsupported, each waiting for the person. This settles them
@@ -40,13 +47,22 @@ export async function settleStoredResumeDrafts(
       ))
     ).map((validation) => [validation.draftId, validation]),
   );
-  const pending = drafts.filter((draft) =>
-    validations
-      .get(draft.id)
-      ?.claimAssessments.some((assessment) =>
-        isBlockingResumeClaimAssessment({ assessment, draft }),
-      ),
-  );
+  // Checking a draft's claims is string-heavy work. It runs as the app
+  // opens, so it lets the window's own requests in between drafts instead of
+  // holding the main process for a third of a second.
+  const pending: typeof drafts = [];
+  for (const draft of drafts) {
+    await yieldToEventLoop();
+    if (
+      validations
+        .get(draft.id)
+        ?.claimAssessments.some((assessment) =>
+          isBlockingResumeClaimAssessment({ assessment, draft }),
+        )
+    ) {
+      pending.push(draft);
+    }
+  }
   if (pending.length === 0) return 0;
 
   const [jobs, assets, profile, searchPreferences] = await Promise.all([
@@ -61,6 +77,7 @@ export async function settleStoredResumeDrafts(
   let settledCount = 0;
 
   for (const draft of pending) {
+    await yieldToEventLoop();
     const job = jobsById.get(draft.jobId);
     if (!job) continue;
     const tailoringMode =

@@ -529,7 +529,11 @@ export function DiscoveryDetailPanel({
   selectedJobCompanyId,
 }: DiscoveryDetailPanelProps) {
   const detailScrollAreaRef = useRef<HTMLDivElement>(null);
-  const previousSelectedJobIdRef = useRef<string | null>(null);
+  // Starts at the mounted job: a new panel has nothing to reset, and resetting
+  // its scroll position forced a full page layout on every visit.
+  const previousSelectedJobIdRef = useRef<string | null>(
+    selectedJob?.id ?? null,
+  );
   const selectedJobIdRef = useRef<string | null>(selectedJob?.id ?? null);
   const employerExclusionPreviewRequestRef = useRef(0);
   const dismissRequestRef = useRef(0);
@@ -871,32 +875,27 @@ export function DiscoveryDetailPanel({
       className={`surface-panel-shell relative flex min-h-0 min-w-0 flex-col overflow-visible rounded-(--radius-panel) border border-(--surface-panel-border) ${JOB_FINDER_REVEAL_SCROLL_MARGIN_CLASSES.base} ${JOB_FINDER_REVEAL_SCROLL_MARGIN_CLASSES.fixedHeader} ${JOB_FINDER_REVEAL_SCROLL_MARGIN_CLASSES.wideFixedHeader} xl:h-full xl:min-h-0 xl:overflow-hidden`}
       id={DISCOVERY_DETAIL_REGION_ID}
     >
-      <div className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-(--surface-panel-border) px-4 py-3">
-        <p className="text-(length:--text-heading-3) font-semibold text-(--text-headline)">
-          Job details
-        </p>
-        {onBackToResults ? (
-          <Button
-            className="xl:hidden"
-            onClick={onBackToResults}
-            size="sm"
-            variant="ghost"
-          >
-            Back to results
-          </Button>
-        ) : null}
-        {/* "Discovered" is the state of every row on this page; the badge
-            only earns its place once the job has moved on to Shortlisted. */}
-        {selectedJob &&
-        readinessStatus &&
-        ["drafting", "ready_for_review", "approved", "submitted"].includes(
-          selectedJob.status,
-        ) ? (
-          <StatusBadge tone={readinessStatus.tone}>
-            {readinessStatus.label}
-          </StatusBadge>
-        ) : null}
-      </div>
+      {/* With a job open its own title heads the pane, the same header
+          Shortlisted and Applications use; a "Job details" bar above it only
+          repeated the pane's name and cost a row. The bar stays for the
+          empty pane, where it is the only heading. */}
+      {selectedJob ? null : (
+        <div className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-(--surface-panel-border) px-4 py-3">
+          <p className="text-(length:--text-heading-3) font-semibold text-(--text-headline)">
+            Job details
+          </p>
+          {onBackToResults ? (
+            <Button
+              className="xl:hidden"
+              onClick={onBackToResults}
+              size="sm"
+              variant="ghost"
+            >
+              Back to results
+            </Button>
+          ) : null}
+        </div>
+      )}
 
       {selectedJob ? (
         <>
@@ -910,7 +909,7 @@ export function DiscoveryDetailPanel({
               however far the user reads. */}
           <div
             aria-label="Selected job summary"
-            className="sticky top-0 z-20 grid shrink-0 gap-3 border-b border-(--surface-panel-border) bg-(--surface-panel) px-6 pb-4 pt-2 xl:static"
+            className="sticky top-0 z-20 grid shrink-0 gap-3 border-b border-(--surface-panel-border) bg-(--surface-panel) px-6 pb-4 pt-4 xl:static"
             data-testid="discovery-detail-primary-action"
             role="group"
           >
@@ -934,19 +933,50 @@ export function DiscoveryDetailPanel({
               )}
               data-testid="discovery-detail-pinned-summary-mask"
             />
-            <div className="grid min-w-0 gap-2">
-              <h2
-                className={`min-w-0 break-words rounded-sm text-(length:--text-section-title) font-semibold tracking-[-0.03em] text-(--text-headline) outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 ${JOB_FINDER_REVEAL_SCROLL_MARGIN_CLASSES.base} ${JOB_FINDER_REVEAL_SCROLL_MARGIN_CLASSES.fixedHeader} ${JOB_FINDER_REVEAL_SCROLL_MARGIN_CLASSES.wideFixedHeader}`}
-                id={DISCOVERY_DETAIL_HEADING_ID}
-                tabIndex={-1}
-              >
-                {selectedJob.title}
-              </h2>
-              {employerLocationLine ? (
-                <p className="text-(length:--text-description) text-foreground-soft">
-                  {employerLocationLine}
-                </p>
-              ) : null}
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <div className="grid min-w-0 flex-1 gap-1">
+                <h2
+                  className={`min-w-0 break-words rounded-sm text-(length:--text-section-title) font-semibold tracking-[-0.03em] text-(--text-headline) outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 ${JOB_FINDER_REVEAL_SCROLL_MARGIN_CLASSES.base} ${JOB_FINDER_REVEAL_SCROLL_MARGIN_CLASSES.fixedHeader} ${JOB_FINDER_REVEAL_SCROLL_MARGIN_CLASSES.wideFixedHeader}`}
+                  id={DISCOVERY_DETAIL_HEADING_ID}
+                  tabIndex={-1}
+                >
+                  {selectedJob.title}
+                </h2>
+                {employerLocationLine ? (
+                  <p className="text-(length:--text-description) text-foreground-soft">
+                    {employerLocationLine}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {onBackToResults ? (
+                  <Button
+                    className="xl:hidden"
+                    onClick={onBackToResults}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    Back to results
+                  </Button>
+                ) : null}
+                {/* "Discovered" is the state of every row on this page; the
+                    badge only earns its place once the job has moved on to
+                    Shortlisted. */}
+                {readinessStatus &&
+                [
+                  "drafting",
+                  "ready_for_review",
+                  "approved",
+                  "submitted",
+                ].includes(selectedJob.status) ? (
+                  <StatusBadge
+                    className="shrink-0 whitespace-nowrap"
+                    tone={readinessStatus.tone}
+                  >
+                    {readinessStatus.label}
+                  </StatusBadge>
+                ) : null}
+              </div>
             </div>
             {existingNeedsYouApplication ? (
               <Button

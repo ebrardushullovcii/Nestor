@@ -588,4 +588,64 @@ describe("Job Finder workspace delta tracker", () => {
     }
     expect(fallbackDurationMs).toBeLessThan(SCALE_OPERATION_BUDGET_MS);
   });
+
+  it("sends only real changes after a view saved by an earlier run of the app", () => {
+    const tracker = createJobFinderWorkspaceDeltaTracker();
+    const saved = createWorkspace({
+      generatedAt: "2026-08-09T10:00:00.000Z",
+      jobIds: [],
+      selectedJobId: null,
+      discoveryJobs: [
+        { id: "job-1", title: "Engineer", detailRevision: "old-1" },
+        { id: "job-2", title: "Designer", detailRevision: "old-2" },
+      ],
+    });
+    const loaded = createWorkspace({
+      generatedAt: "2026-08-09T10:00:05.000Z",
+      jobIds: [],
+      selectedJobId: null,
+      discoveryJobs: [
+        { id: "job-1", title: "Engineer", detailRevision: "new-7" },
+        { id: "job-2", title: "Senior designer", detailRevision: "new-8" },
+      ],
+    });
+
+    tracker.synchronize(null, saved, { earlierProcess: true });
+    const result = tracker.synchronize(1, loaded);
+
+    // Only the job whose content changed travels; a new detail revision on
+    // an unchanged row does not make it a change.
+    expect(result).toMatchObject({
+      kind: "delta",
+      delta: {
+        discoveryJobs: {
+          upserts: [{ id: "job-2", title: "Senior designer" }],
+          removedIds: [],
+        },
+      },
+    });
+  });
+
+  it("still treats a new detail revision as a change within one run", () => {
+    const tracker = createJobFinderWorkspaceDeltaTracker();
+    const first = createWorkspace({
+      generatedAt: "2026-08-09T10:00:00.000Z",
+      jobIds: [],
+      selectedJobId: null,
+      discoveryJobs: [{ id: "job-1", detailRevision: "r1" }],
+    });
+    const second = createWorkspace({
+      generatedAt: "2026-08-09T10:00:01.000Z",
+      jobIds: [],
+      selectedJobId: null,
+      discoveryJobs: [{ id: "job-1", detailRevision: "r2" }],
+    });
+
+    tracker.synchronize(null, first);
+
+    expect(tracker.synchronize(1, second)).toMatchObject({
+      kind: "delta",
+      delta: { discoveryJobs: { upserts: [{ id: "job-1" }] } },
+    });
+  });
 });

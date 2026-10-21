@@ -53,6 +53,9 @@ export function createJobSearchPrompts(config: AgentConfig): {
     promptContext.searchRequest?.freshness === "recent"
       ? "Freshness: prefer postings marked as recent. Do not guess dates, and do not discard an otherwise suitable posting when the site gives no trustworthy date."
       : null;
+  // Roles without their write-ups: the search casts the net and every kept
+  // job is judged afterwards against the full profile, so the resume text
+  // and role summaries would only be resent on every turn.
   const experienceLines = config.userProfile.experiences
     .filter((experience) => !experience.isDraft)
     .map((experience) =>
@@ -65,7 +68,6 @@ export function createJobSearchPrompts(config: AgentConfig): {
         ]
           .filter(Boolean)
           .join(" to ") || null,
-        experience.summary,
       ]
         .filter(Boolean)
         .join(" · "),
@@ -79,14 +81,12 @@ export function createJobSearchPrompts(config: AgentConfig): {
         .join(" · "),
     )
     .filter(Boolean);
-  const boundedResumeText = config.userProfile.baseResume.textContent
-    ?.trim()
-    .slice(0, 6_000);
-
+  // Everything before "This site" is the same for every source of one
+  // search, so a provider's prompt cache can carry it from site to site; the
+  // site's name, the goal there and what was learned there come last.
   const system = [
-    `You are working in this person's browser on ${promptContext.siteLabel}, with the ordinary powers a person has: look at the page, read it, go to addresses, follow links, press anything, type, choose, scroll, wait, go back.`,
+    "You are working in this person's browser on a job site, with the ordinary powers a person has: look at the page, read it, go to addresses, follow links, press anything, type, choose, scroll, wait, go back. The site and the goal there are at the end of these instructions.",
     "",
-    goal,
     "When reading a listing or search-results page without extract_jobs, use observe or read_text with pageType search_results or job_detail. This records pages you inspected even when all jobs are already known or ruled out. Include numbered pages and keyword-search results. Use other for sign-in, help and other non-listing pages. extract_jobs records its own page automatically.",
     packet ? null : searchFocus,
     packet ? null : remoteHandling,
@@ -117,7 +117,6 @@ export function createJobSearchPrompts(config: AgentConfig): {
     educationLines.length > 0
       ? `- Education:\n${educationLines.map((line) => `  - ${line}`).join("\n")}`
       : null,
-    boundedResumeText ? `- Resume text (bounded):\n${boundedResumeText}` : null,
     "",
     "How to work:",
     "- Read each supplied starting URL. When one is an exact vacancy page, consider and extract that vacancy before exploring other employer pages; do not substitute senior vacancies for a supplied graduate role. Check country/location variants separately rather than assuming a US-only card describes a Canada variant. If a supplied vacancy is excluded, name it and the specific reason in your finish report.",
@@ -131,13 +130,16 @@ export function createJobSearchPrompts(config: AgentConfig): {
     "- When the site exposes a task-relevant JSON or text endpoint and the visible page is incomplete, read_page_api can retrieve it with this browser session. It is GET-only. Use an endpoint the page reveals; do not guess unrelated APIs.",
     "- Jobs can be in any language; a non-English posting that fits is a fit.",
     "- Close a cookie banner or chat bubble yourself. If a page is still loading, wait and look again. If a link is the wrong way, go back.",
-    `- This run lives on ${promptContext.siteLabel}. You may leave it when the way to a posting or its details is on another site (an employer's own page, an applicant-tracking system, a careers hub it points at): pass a reason with navigate, follow_link, or click that says exactly what you saw and what you expect to find there. A separate review reads that reason against the goal and allows or refuses the move; a refused move tells you why. Do not leave for anything else.`,
+    "- This run lives on the site named at the end. You may leave it when the way to a posting or its details is on another site (an employer's own page, an applicant-tracking system, a careers hub it points at): pass a reason with navigate, follow_link, or click that says exactly what you saw and what you expect to find there. A separate review reads that reason against the goal and allows or refuses the move; a refused move tells you why. Do not leave for anything else.",
     "- Never sign in, create an account, type a password, or work around a security check or a code sent to the person. If the site needs one of those, finish with needsPerson and say what it asks for.",
     "- When a step fails in the browser you are told what happened in plain words and shown the page again. Look, and try another way. If it keeps failing, report exactly what blocked you.",
     "",
     "Pacing: there is no step quota and Job Finder does not stop you for pacing. A thin site is done in a few steps; a deep one takes many, and that is fine. Finish when you have what was asked for, when the site has no more relevant results, when only the person can go further, or when you are genuinely stuck. When the person wants many jobs or a wide search, go through every page of results until the list ends: a page with nothing that fits is a reason to go to the next page, not to stop.",
     "",
     "Your finish reason is what the person reads. Use ordinary language and source names; leave out tool names and internal identifiers. Explain matches and exclusions without claiming saved or new result counts: the app calculates those after duplicate checks. Never state how many jobs the site has unless the page itself showed that number, and never call every result a strong fit. Say how far you got (for example, pages 1 to 13 of 24) and whether results were left unvisited, which pages you were on, what you tried, what the site did, and what they would have to do themselves. 'The listings load, but every posting opens a sign-in page before the details' is a report; 'could not complete' is not.",
+    "",
+    `This site: ${promptContext.siteLabel}.`,
+    goal,
     learned.length > 0
       ? `\nWhat earlier runs learned about this site (check it against the live page before relying on it):\n${learned.map((line) => `- ${line}`).join("\n")}`
       : null,

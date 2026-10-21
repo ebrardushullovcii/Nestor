@@ -98,10 +98,33 @@ function sameValue(left: unknown, right: unknown): boolean {
   return true;
 }
 
+/**
+ * Job rows from a view an earlier run of the app saved carry that run's
+ * detail revisions, which name row identities and never match this run's.
+ * The rest of the row says whether it changed; the receiver keeps its old
+ * revision until the row really changes and arrives with a new one.
+ */
+function sameRowAcrossProcesses(left: unknown, right: unknown): boolean {
+  if (!isRecord(left) || !isRecord(right)) return sameValue(left, right);
+  const keys = Object.keys(left).filter((key) => key !== "detailRevision");
+  if (
+    keys.length !==
+    Object.keys(right).filter((key) => key !== "detailRevision").length
+  ) {
+    return false;
+  }
+  return keys.every(
+    (key) =>
+      Object.prototype.hasOwnProperty.call(right, key) &&
+      sameValue(left[key], right[key]),
+  );
+}
+
 function buildEntitySlice<T>(
   previous: readonly T[],
   current: readonly T[],
   getId: (value: T) => string,
+  same: (left: T, right: T) => boolean = sameValue,
 ): EntitySlice<T> {
   const previousById = new Map<string, T>();
   for (const value of previous) {
@@ -114,7 +137,7 @@ function buildEntitySlice<T>(
     const id = getId(value);
     currentIds.add(id);
     const previousValue = previousById.get(id);
-    if (!previousValue || !sameValue(previousValue, value)) {
+    if (!previousValue || !same(previousValue, value)) {
       upserts.push(value);
     }
   }
@@ -199,7 +222,12 @@ export function buildJobFinderWorkspaceDelta(input: {
   currentRevision: WorkspaceRevision;
   previous: JobFinderRendererWorkspaceSnapshot;
   current: JobFinderRendererWorkspaceSnapshot;
+  /** The previous view was saved by an earlier run of the app. */
+  previousFromEarlierProcess?: boolean;
 }): JobFinderWorkspaceDelta | null {
+  const sameJob = input.previousFromEarlierProcess
+    ? sameRowAcrossProcesses
+    : sameValue;
   const replaced = changedUntrackedValues(input.previous, input.current);
   const activeRun = activeRunForDelta(
     input.previous.activeDiscoveryRun,
@@ -234,16 +262,19 @@ export function buildJobFinderWorkspaceDelta(input: {
       input.previous.discoveryJobs,
       input.current.discoveryJobs,
       (value) => value.id,
+      sameJob,
     ),
     dismissedDiscoveryJobs: buildEntitySlice(
       input.previous.dismissedDiscoveryJobs,
       input.current.dismissedDiscoveryJobs,
       (value) => value.id,
+      sameJob,
     ),
     companyJobs: buildEntitySlice(
       input.previous.companyJobs,
       input.current.companyJobs,
       (value) => value.id,
+      sameJob,
     ),
     recentDiscoveryRuns: buildEntitySlice(
       input.previous.recentDiscoveryRuns,
@@ -296,6 +327,7 @@ export function createJobFinderWorkspaceDeltaTracker() {
     WorkspaceRevision,
     JobFinderRendererWorkspaceSnapshot
   >();
+  const fromEarlierProcess = new WeakSet<JobFinderRendererWorkspaceSnapshot>();
   const remember = (snapshot: JobFinderRendererWorkspaceSnapshot) => {
     baselines.set(currentRevision, snapshot);
     while (baselines.size > 4) baselines.delete(baselines.keys().next().value!);
@@ -305,7 +337,9 @@ export function createJobFinderWorkspaceDeltaTracker() {
     synchronize(
       baseRevision: WorkspaceRevision | null,
       current: JobFinderRendererWorkspaceSnapshot,
+      options: { earlierProcess?: boolean } = {},
     ): JobFinderWorkspaceSyncResult {
+      if (options.earlierProcess) fromEarlierProcess.add(current);
       if (baselines.size === 0 || baseRevision === null) {
         baselines.clear();
         currentRevision += 1;
@@ -338,6 +372,7 @@ export function createJobFinderWorkspaceDeltaTracker() {
         currentRevision: nextRevision,
         previous: baseline,
         current,
+        previousFromEarlierProcess: fromEarlierProcess.has(baseline),
       });
 
       currentRevision = nextRevision;

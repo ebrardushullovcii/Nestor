@@ -8,6 +8,7 @@ import {
   isDiscoveryWorthOpeningResult,
   type DiscoveryResultGroupId,
 } from "@nestor/job-finder/discovery-result-bands";
+import { createPerObjectCache } from "../../lib/identity-memo";
 
 /**
  * Banding rules moved to `@nestor/job-finder/discovery-result-bands` so a
@@ -25,6 +26,15 @@ export {
   type DiscoveryResultGroupId,
 };
 
+/**
+ * A row's band, read once per row object. The band is a pure function of the
+ * row, and grouping, counting and dividing the list asked for it several times
+ * per job on every render.
+ */
+const getRowResultGroup = createPerObjectCache((job: JobListRow) =>
+  getDiscoveryResultGroup(job),
+);
+
 export interface DiscoveryResultGroupHeading {
   count: number;
   description: string;
@@ -38,7 +48,7 @@ export interface DiscoveryResultGroupHeading {
  * against — but they are never counted as recommended results.
  */
 export function isDiscoveryUncheckedResult(job: JobListRow): boolean {
-  return getDiscoveryResultGroup(job) === "unchecked";
+  return getRowResultGroup(job) === "unchecked";
 }
 
 /**
@@ -48,7 +58,7 @@ export function isDiscoveryUncheckedResult(job: JobListRow): boolean {
  * behind "also found" is a judgement and no judgement was made.
  */
 export function isDiscoveryAlsoFoundResult(job: JobListRow): boolean {
-  const group = getDiscoveryResultGroup(job);
+  const group = getRowResultGroup(job);
   return group === "weaker" || group === "mismatches";
 }
 
@@ -104,8 +114,8 @@ export function orderDiscoveryResultsByGroup(
     .map((job, sourceIndex) => ({ job, sourceIndex }))
     .sort((left, right) => {
       const groupOrder =
-        DISCOVERY_RESULT_GROUP_ORDER[getDiscoveryResultGroup(left.job)] -
-        DISCOVERY_RESULT_GROUP_ORDER[getDiscoveryResultGroup(right.job)];
+        DISCOVERY_RESULT_GROUP_ORDER[getRowResultGroup(left.job)] -
+        DISCOVERY_RESULT_GROUP_ORDER[getRowResultGroup(right.job)];
       return groupOrder || left.sourceIndex - right.sourceIndex;
     })
     .map(({ job }) => job);
@@ -255,7 +265,7 @@ function forEachHeadedDiscoveryResultRun(
 
   const windowStart = Math.max(0, options.window?.start ?? 0);
   const windowEnd = Math.min(jobs.length, options.window?.end ?? jobs.length);
-  const groups = jobs.map((job) => getDiscoveryResultGroup(job));
+  const groups = jobs.map(getRowResultGroup);
   let start = 0;
   while (start < jobs.length) {
     const group = groups[start]!;

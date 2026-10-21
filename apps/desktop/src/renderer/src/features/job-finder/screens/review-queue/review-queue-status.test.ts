@@ -10,15 +10,19 @@ import {
   collectPreparedApplicationJobIds,
   countQueueStageReady,
   describeTailoredDraftPreparationBlocker,
+  describeResumeRunStage,
   getApplyReadinessStatus,
+  getResumeRunState,
   getReviewQueueResumePolicyCaption,
   getReviewQueueWorkflowStatus,
+  getShortlistStatusFilter,
   getTailoredDraftPreparationCandidates,
   getTailoredDraftPreparationResultMessage,
   hasResumeGenerationFailure,
   isQueueStageReady,
   isTailoredDraftPreparationEligible,
   needsPersonResumeReview,
+  needsTailoredResume,
   prepareTailoredDraftBatch,
   type TailoredDraftPreparationViewState,
 } from "./review-queue-status";
@@ -101,6 +105,79 @@ it("asks for no flagged-line review when the listing text was never read", () =>
   expect(needsPersonResumeReview(draft, asset)).toBe(false);
 });
 
+it("says a resume written without the listing needs a resume, as its status tab does", () => {
+  const draft = createItem("aggressive_untailored", {
+    assetStatus: "ready",
+    resumeAssetId: "resume_untailored",
+    resumeTailoringMode: "aggressive",
+    resumeReview: { status: "needs_review" },
+    resumeWrittenWithoutListing: true,
+  });
+  const asset = {
+    id: "resume_untailored",
+    jobId: "aggressive_untailored",
+    status: "ready",
+    generationMethod: "deterministic",
+    generationReason: "listing_text_missing",
+    failureMessage: null,
+    failedAt: null,
+  } as unknown as TailoredAsset;
+
+  expect(needsTailoredResume(draft)).toBe(true);
+  const status = getReviewQueueWorkflowStatus(draft, asset);
+  expect(status).toEqual({ label: "Needs a resume", tone: "muted" });
+  expect(
+    getShortlistStatusFilter(
+      status.label,
+      isTailoredDraftPreparationEligible(draft),
+    ),
+  ).toBe("needs_resume");
+  // Not counted by "Apply to all ready jobs" while its tab says it needs one.
+  expect(isQueueStageReady(draft)).toBe(false);
+  expect(getReviewQueueResumePolicyCaption(draft, asset)).toBe(
+    "Original wording — the listing text was not captured",
+  );
+
+  // Approving it as it is is the person's choice to keep their wording.
+  const approved = {
+    ...draft,
+    resumeReview: { status: "approved" },
+  } as ReviewQueueItem;
+  expect(needsTailoredResume(approved)).toBe(false);
+  expect(getReviewQueueWorkflowStatus(approved, asset).label).not.toBe(
+    "Needs a resume",
+  );
+});
+
+it("puts a rewrite in progress ahead of the last attempt's failure", () => {
+  const failed = createItem("failed", {
+    assetStatus: "failed",
+    resumeAssetId: "resume_failed",
+    resumeReview: { status: "not_started" },
+  });
+  const asset = {
+    id: "resume_failed",
+    jobId: "failed",
+    status: "failed",
+    failureMessage: "The AI could not write this resume, so nothing was changed.",
+    failedAt: "2026-10-20T10:00:00.000Z",
+  } as unknown as TailoredAsset;
+
+  expect(getResumeRunState(failed, asset, false)).toEqual({
+    hasFailure: true,
+    isWriting: false,
+  });
+  expect(getResumeRunState(failed, asset, true)).toEqual({
+    hasFailure: false,
+    isWriting: true,
+  });
+  expect(describeResumeRunStage(null)).toBe("Writing the resume…");
+  expect(describeResumeRunStage("writing")).toBe("Writing the resume…");
+  expect(describeResumeRunStage("processing")).toBe(
+    "Checking it against your profile…",
+  );
+});
+
 it("does not describe an Aggressive resume as ready before a draft exists", () => {
   const draft = createItem("aggressive_missing", {
     assetStatus: "not_started",
@@ -111,7 +188,7 @@ it("does not describe an Aggressive resume as ready before a draft exists", () =
 
   expect(needsPersonResumeReview(draft)).toBe(false);
   expect(getReviewQueueWorkflowStatus(draft)).toEqual({
-    label: "No resume yet",
+    label: "Needs a resume",
     tone: "muted",
   });
   expect(getReviewQueueResumePolicyCaption(draft)).toBe("No resume yet");

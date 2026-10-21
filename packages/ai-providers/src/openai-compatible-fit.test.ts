@@ -417,8 +417,16 @@ test("the full listing judge gets plain preferences and keeps all listing and pr
     sourceIntelligence: job.sourceIntelligence,
     listingDetailFetch: job.listingDetailFetch,
   }).toEqual(job);
-  expect(payload.profile.experiences).toBe(profile.experiences);
-  expect(payload.profile.baseResume).toBe(profile.baseResume);
+  const kept = profile.experiences.filter((experience) => !experience.isDraft);
+  expect(payload.profile.experiences).toHaveLength(kept.length);
+  for (const [index, experience] of kept.entries())
+    expect(payload.profile.experiences[index]).toMatchObject({
+      id: experience.id,
+      title: experience.title,
+      achievements: experience.achievements,
+      skills: experience.skills,
+    });
+  expect(payload.profile.resumeText).toBe(profile.baseResume.textContent);
   expect(JSON.stringify(payload)).not.toMatch(
     /willingToRelocate|requiresFutureSponsorship|remoteCountsAsAnyLocation/,
   );
@@ -506,12 +514,12 @@ test("a full fit request keeps current evidence and goals while excluding saved 
     const payload = JSON.parse(
       body.messages.find((message) => message.role === "user")!.content,
     ) as {
-      profile: typeof profile;
+      profile: { summary: string; resumeText: string | null };
       job: typeof job;
       searchPreferences: Record<string, unknown>;
     };
     expect(payload.profile.summary).toBe(profile.summary);
-    expect(payload.profile.baseResume).toEqual(profile.baseResume);
+    expect(payload.profile.resumeText).toBe(profile.baseResume.textContent);
     expect(payload.job.description).toBe(job.description);
     expect(payload.job.minimumQualifications).toEqual(
       job.minimumQualifications,

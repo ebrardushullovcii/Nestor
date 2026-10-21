@@ -8,6 +8,13 @@ export type AgentExtractorPageType = 'search_results' | 'job_detail'
 // they are declared as function-typed properties rather than methods. The
 // shapes are identical; the difference is that a caller may hold the function
 // on its own — which every test double and every assertion about one does.
+/**
+ * Which work a model turn belongs to, so the provider can pick how hard it
+ * thinks: search and source-check turns, form-filling turns, and fact checks
+ * of written answers.
+ */
+export type BrowserAgentReasoningTask = 'search' | 'apply' | 'claim_check'
+
 export interface LLMClient {
   chatWithTools: (
     messages: AgentMessage[],
@@ -16,12 +23,30 @@ export interface LLMClient {
       signal?: AbortSignal
       parallelToolCalls?: boolean
       maxOutputTokens?: number
+      reasoningTask?: BrowserAgentReasoningTask
     }
   ) => Promise<{
     content?: string
     toolCalls?: ToolCall[]
     reasoning?: string
   }>
+}
+
+/**
+ * The same client with turns marked as belonging to `reasoningTask`, unless
+ * the turn names its own (an answer check inside an application run).
+ */
+export function withReasoningTask(
+  client: LLMClient,
+  reasoningTask: BrowserAgentReasoningTask
+): LLMClient {
+  return {
+    chatWithTools: (messages, tools, options) =>
+      client.chatWithTools(messages, tools, {
+        ...options,
+        reasoningTask: options?.reasoningTask ?? reasoningTask,
+      }),
+  }
 }
 
 export interface JobExtractor {

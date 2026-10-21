@@ -4,6 +4,7 @@ import {
   withPlanAssessment,
   readPlanAssessment,
   personPickedJob,
+  personSuppliedJob,
 } from "./plan-assessment";
 import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import {
@@ -127,6 +128,8 @@ import { createUniqueId, normalizeText, uniqueStrings } from "./shared";
 import { createJobIdentityIndex } from "./job-identity";
 import { assessJobPostingDetailQuality } from "./job-posting-detail-quality";
 import { JOB_FIT_JUDGING_BATCH_SIZE } from "@nestor/ai-providers";
+import { createSearchFitBatcher } from "./search-fit-batcher";
+import { selectSourcesFinishedBeforeRestart } from "./discovery-restart";
 import {
   fitPostingFingerprint,
   compareFitJudgingPromise,
@@ -234,10 +237,18 @@ const DISCOVERY_ACTIVITY_SAMPLE_LIMIT = 3;
  * up to this many per search: five calls of twenty.
  */
 const OLDER_JOB_FIT_JUDGMENTS_PER_RUN = 100;
+/** The older-job share each searched source brings, up to the caps. */
+const OLDER_JOB_FIT_JUDGMENTS_PER_SOURCE = 10;
+const OLDER_LISTING_READS_PER_SOURCE = 6;
 /** Fit calls a running search keeps open beside its source agents. */
 const SEARCH_FIT_JUDGING_CONCURRENCY = 3;
-/** How long a kept job waits for a full batch before a smaller one goes. */
+/**
+ * How long a kept job waits for a full batch of twenty: the run's first
+ * batch and a batch at least half full go after the first wait, any batch
+ * after the second, so scores still show while a slow search runs.
+ */
 const SEARCH_FIT_PARTIAL_BATCH_WAIT_MS = 20_000;
+const SEARCH_FIT_MAX_BATCH_WAIT_MS = 90_000;
 const PUBLIC_API_PREFETCH_CONCURRENCY = 8;
 /**
  * How many sources one search works on at the same time. Each gets its own
@@ -1814,13 +1825,34 @@ export function createWorkspaceDiscoveryMethods(
         clearActiveController();
         throw error;
       });
+    // The same search started again after it stopped goes on with the
+    // sources it had not finished (when it had finished them all, it runs
+    // again in full).
+    const finishedBeforeRestart =
+      options.scope === "run_all"
+        ? selectSourcesFinishedBeforeRestart({
+            activeRun: startingDiscovery.activeRun,
+            previousRuns: startingDiscovery.recentRuns,
+            campaignId:
+              effectiveCampaign?.campaignId ??
+              (await ctx.getActiveCampaignId()),
+            searchRequest: options.searchRequest,
+            now: new Date(),
+          })
+        : new Set<string>();
+    const unfinishedTargets = selectedTargets.filter(
+      (target) => !finishedBeforeRestart.has(target.id),
+    );
+    const skippedFinishedTargets =
+      unfinishedTargets.length > 0
+        ? selectedTargets.length - unfinishedTargets.length
+        : 0;
+    const runTargets =
+      skippedFinishedTargets > 0 ? unfinishedTargets : selectedTargets;
     const targets =
       options.scope === "run_all"
-        ? prioritizeDiscoveryTargets(
-            selectedTargets,
-            sourceInstructionArtifacts,
-          )
-        : selectedTargets;
+        ? prioritizeDiscoveryTargets(runTargets, sourceInstructionArtifacts)
+        : runTargets;
     const runId = createUniqueId("discovery_run");
     // Budgets are allocated once, up front, over the stable configuration
     // order so readiness or completion order can never shift them. Invalid
@@ -1859,6 +1891,26 @@ export function createWorkspaceDiscoveryMethods(
         ? { searchRequest: options.searchRequest }
         : {}),
     });
+    if (skippedFinishedTargets > 0) {
+      activeRun = appendDiscoveryEvent(
+        activeRun,
+        createDiscoveryEvent({
+          runId,
+          timestamp: new Date().toISOString(),
+          kind: "info",
+          stage: "run",
+          targetId: null,
+          adapterKind: null,
+          message: `Continuing the search that stopped: ${skippedFinishedTargets} ${skippedFinishedTargets === 1 ? "source it already finished is" : "sources it already finished are"} not searched again.`,
+          url: null,
+          jobsFound: null,
+          jobsPersisted: null,
+          jobsStaged: null,
+          duplicatesMerged: null,
+          invalidSkipped: null,
+        }),
+      );
+    }
 
     // Capture the run, ledger and pending references alongside the saved-job
     // delta. A queued commit must not publish a later source's counters before
@@ -1935,13 +1987,24 @@ export function createWorkspaceDiscoveryMethods(
     // Fit is judged while the search runs (ADR 0041): the jobs each source
     // keeps go to the model in batches as they land, so a long search shows
     // scores as it goes rather than after its last source.
-    const searchFitQueue: string[] = [];
     const searchFitConsidered = new Set<string>();
-    const searchFitBatches = new Set<Promise<void>>();
-    let searchFitTimer: ReturnType<typeof setTimeout> | null = null;
-    let searchFitFlushing = false;
     let searchFitClosed = false;
     let searchFitJudged = 0;
+    // Whether a kept job still needs a verdict: a job found again with a
+    // current verdict, or already judged in this run, does not take a seat
+    // in a batch (those seats used to go out nearly empty).
+    const needsSearchFit = (job: SavedJob): boolean => {
+      if (runJudgments.has(job.id)) return false;
+      const assessed = readPlanAssessment(storedJob(job), assessmentPlanId);
+      return (
+        assessed.matchAssessment.judgment?.source !== "full" &&
+        jobNeedsFitJudgment(
+          assessed,
+          assessmentSession.verdictFingerprint,
+          assessmentSession.contextFingerprint,
+        )
+      );
+    };
     const judgeSearchFitBatch = async (
       jobIds: readonly string[],
     ): Promise<void> => {
@@ -1953,11 +2016,8 @@ export function createWorkspaceDiscoveryMethods(
       );
       const jobs = jobIds.flatMap((jobId) => {
         const job = byId.get(jobId);
-        if (!job || runJudgments.has(jobId)) return [];
-        const assessed = readPlanAssessment(storedJob(job), assessmentPlanId);
-        return assessed.matchAssessment.judgment?.source !== "full" &&
-          jobNeedsFitJudgment(assessed, assessmentSession.contextFingerprint)
-          ? [assessed]
+        return job && needsSearchFit(job)
+          ? [readPlanAssessment(storedJob(job), assessmentPlanId)]
           : [];
       });
       if (jobs.length === 0) return;
@@ -1969,7 +2029,7 @@ export function createWorkspaceDiscoveryMethods(
         profile,
         searchPreferences: enrichedPreferences,
         jobs,
-        contextFingerprint: assessmentSession.contextFingerprint,
+        contextFingerprint: assessmentSession.verdictFingerprint,
         signal: executionSignal,
         concurrency: 1,
       });
@@ -1999,39 +2059,15 @@ export function createWorkspaceDiscoveryMethods(
         }),
       );
     };
-    const startSearchFitBatches = (): void => {
-      while (
-        !searchFitClosed &&
-        searchFitBatches.size < SEARCH_FIT_JUDGING_CONCURRENCY &&
-        (searchFitQueue.length >= JOB_FIT_JUDGING_BATCH_SIZE ||
-          (searchFitFlushing && searchFitQueue.length > 0))
-      ) {
-        const batch: Promise<void> = judgeSearchFitBatch(
-          searchFitQueue.splice(0, JOB_FIT_JUDGING_BATCH_SIZE),
-        )
-          // A batch the model or the save failed leaves its jobs unjudged;
-          // the end of the run asks again if their listing changed.
-          .catch(() => undefined)
-          .finally(() => {
-            searchFitBatches.delete(batch);
-            startSearchFitBatches();
-          });
-        searchFitBatches.add(batch);
-      }
-      if (searchFitClosed || searchFitQueue.length === 0) {
-        if (searchFitTimer) clearTimeout(searchFitTimer);
-        searchFitTimer = null;
-      } else if (!searchFitTimer && !searchFitFlushing) {
-        // A smaller batch goes once the first waiting job has waited a while.
-        searchFitTimer = setTimeout(() => {
-          searchFitTimer = null;
-          if (searchFitFlushing) return;
-          searchFitFlushing = true;
-          startSearchFitBatches();
-          searchFitFlushing = false;
-        }, SEARCH_FIT_PARTIAL_BATCH_WAIT_MS);
-      }
-    };
+    const searchFitBatcher = createSearchFitBatcher({
+      batchSize: JOB_FIT_JUDGING_BATCH_SIZE,
+      concurrency: SEARCH_FIT_JUDGING_CONCURRENCY,
+      partialWaitMs: SEARCH_FIT_PARTIAL_BATCH_WAIT_MS,
+      maxWaitMs: SEARCH_FIT_MAX_BATCH_WAIT_MS,
+      // A batch the model or the save failed leaves its jobs unjudged; the
+      // end of the run asks again if their listing changed.
+      judge: judgeSearchFitBatch,
+    });
     const queueKeptJobsForFit = (): void => {
       if (
         searchFitClosed ||
@@ -2040,27 +2076,30 @@ export function createWorkspaceDiscoveryMethods(
       ) {
         return;
       }
-      for (const jobId of runRetainedJobIds) {
-        if (searchFitConsidered.has(jobId) || runJudgments.has(jobId)) continue;
+      const fresh = [...runRetainedJobIds].filter(
+        (jobId) => !searchFitConsidered.has(jobId),
+      );
+      if (fresh.length === 0) return;
+      const byId = new Map(
+        mergeSavedJobs(workingSavedJobs, workingPendingJobs).map((job) => [
+          job.id,
+          job,
+        ]),
+      );
+      const toJudge: string[] = [];
+      for (const jobId of fresh) {
+        const job = byId.get(jobId);
+        if (!job) continue;
         searchFitConsidered.add(jobId);
-        searchFitQueue.push(jobId);
+        if (needsSearchFit(job)) toJudge.push(jobId);
       }
-      startSearchFitBatches();
+      searchFitBatcher.enqueue(toJudge);
     };
-    const finishSearchFitJudging = async (): Promise<void> => {
-      searchFitFlushing = true;
-      if (searchFitTimer) clearTimeout(searchFitTimer);
-      searchFitTimer = null;
-      startSearchFitBatches();
-      while (searchFitBatches.size > 0) {
-        await Promise.all([...searchFitBatches]);
-      }
-    };
+    const finishSearchFitJudging = (): Promise<void> =>
+      searchFitBatcher.finish();
     const stopSearchFitJudging = (): void => {
       searchFitClosed = true;
-      searchFitQueue.length = 0;
-      if (searchFitTimer) clearTimeout(searchFitTimer);
-      searchFitTimer = null;
+      searchFitBatcher.stop();
     };
 
     const planningEvent = createDiscoveryEvent({
@@ -2784,7 +2823,7 @@ export function createWorkspaceDiscoveryMethods(
               searchPreferences: enrichedPreferences,
               jobs: unjudged,
               onProgress: fitProgress,
-              contextFingerprint: assessmentSession.contextFingerprint,
+              contextFingerprint: assessmentSession.verdictFingerprint,
               signal: executionSignal,
             });
             for (const [jobId, judgment] of judgments) {
@@ -3702,6 +3741,20 @@ export function createWorkspaceDiscoveryMethods(
       // scored, not that a list of titles arrived. Bounded (per-job time,
       // concurrency) and never fatal: a page that will not read stays a
       // title match with the attempt recorded on the job.
+      // The older queue rides along in proportion to the search: a search of
+      // one source reads a few older listings, a search of every source the
+      // full allowance. A one-source search used to read up to 60 older
+      // listings and judge up to 100 older jobs, as costly as a full search.
+      // Shortlisted and other picked jobs go first in that queue but share
+      // its allowance; only jobs the person brought in themselves are read
+      // and judged whatever the size of the search. Exempting every picked
+      // job made a one-source search re-read dozens of listings and re-judge
+      // two hundred shortlisted jobs, about a million tokens.
+      const runSourceCount = Math.max(1, activeRun.targetIds.length);
+      let olderListingReadsLeft = Math.min(
+        LISTING_DETAIL_READS_PER_RUN,
+        OLDER_LISTING_READS_PER_SOURCE * runSourceCount,
+      );
       const enrichmentCandidates = mergeSavedJobs(
         workingSavedJobs,
         workingPendingJobs,
@@ -3726,6 +3779,12 @@ export function createWorkspaceDiscoveryMethods(
               right.matchAssessment,
             ) ||
             compareMatchScores(left.matchAssessment, right.matchAssessment),
+        )
+        .filter(
+          (job) =>
+            personSuppliedJob(job) ||
+            runRetainedJobIds.has(job.id) ||
+            olderListingReadsLeft-- > 0,
         );
       const readEvent = (
         message: string,
@@ -3959,17 +4018,25 @@ export function createWorkspaceDiscoveryMethods(
       // per call, only those never judged or judged before the profile, the
       // goals or the listing changed. Most of this run's jobs were judged
       // while it searched; what is left here is a listing read in full since,
-      // a verdict that did not come, the jobs the person picked, and older
-      // jobs of the plan, those last ones capped per search. A job it does
-      // not answer for stays unjudged until the next search.
+      // a verdict that did not come, the jobs the person brought in, and
+      // older jobs of the plan (picked ones first), those last ones capped
+      // per search. A job it does not answer for stays unjudged until the
+      // next search.
       if (!executionSignal.aborted && ctx.aiClient.judgeJobFits) {
-        let olderJobsLeft = OLDER_JOB_FIT_JUDGMENTS_PER_RUN;
+        let olderJobsLeft = Math.min(
+          OLDER_JOB_FIT_JUDGMENTS_PER_RUN,
+          OLDER_JOB_FIT_JUDGMENTS_PER_SOURCE * runSourceCount,
+        );
         const toJudge = mergeSavedJobs(workingSavedJobs, workingPendingJobs)
           .filter(belongsToSearchPlan)
           .map((job) => readPlanAssessment(storedJob(job), assessmentPlanId))
           .filter(
             (job) =>
-              jobNeedsFitJudgment(job, assessmentSession.contextFingerprint) &&
+              jobNeedsFitJudgment(
+                job,
+                assessmentSession.verdictFingerprint,
+                assessmentSession.contextFingerprint,
+              ) &&
               fitAskedFingerprints.get(job.id) !== fitPostingFingerprint(job),
           )
           // The capped older jobs are the likeliest fits, not whichever
@@ -3983,7 +4050,7 @@ export function createWorkspaceDiscoveryMethods(
           )
           .filter(
             (job) =>
-              personPickedJob(job) ||
+              personSuppliedJob(job) ||
               runRetainedJobIds.has(job.id) ||
               olderJobsLeft-- > 0,
           );
@@ -4009,7 +4076,7 @@ export function createWorkspaceDiscoveryMethods(
               jobs: toJudge.filter(
                 (job) => job.matchAssessment.judgment?.source !== "full",
               ),
-              contextFingerprint: assessmentSession.contextFingerprint,
+              contextFingerprint: assessmentSession.verdictFingerprint,
               signal: executionSignal,
               onProgress: (completed) => {
                 fitCompleted = completed;
@@ -4037,6 +4104,7 @@ export function createWorkspaceDiscoveryMethods(
                       enrichedPreferences,
                       job,
                       executionSignal,
+                      { background: true },
                     );
                     fullAssessments.set(
                       job.id,

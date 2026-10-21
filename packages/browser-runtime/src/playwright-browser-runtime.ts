@@ -29,7 +29,10 @@ import {
   type JobSource,
 } from "@nestor/contracts";
 import type { ApplyRawPageHands } from "@nestor/contracts";
-import type { JobFinderAiClient } from "@nestor/ai-providers";
+import {
+  getAiProviderAccessFailure,
+  type JobFinderAiClient,
+} from "@nestor/ai-providers";
 import {
   createApplyPageHands,
   createSearchResultCache,
@@ -3335,6 +3338,9 @@ export function createBrowserAgentRuntime(
           error instanceof Error
             ? error.message
             : "Unknown error during agent discovery";
+        // The AI service refusing the request is an outage to the person,
+        // never the service's own words about keys or accounts.
+        const accessFailure = getAiProviderAccessFailure(error);
 
         return DiscoveryRunResultSchema.parse({
           source,
@@ -3345,9 +3351,11 @@ export function createBrowserAgentRuntime(
             agentOptions.searchPreferences.locations,
             agentOptions.siteLabel,
           ),
-          warning: /Close a browser tab before opening another/i.test(detail)
-            ? "The browser tab limit is reached. Close finished tabs, then run this search again."
-            : `Agent discovery failed: ${detail}`,
+          warning: accessFailure
+            ? accessFailure.message
+            : /Close a browser tab before opening another/i.test(detail)
+              ? "The browser tab limit is reached. Close finished tabs, then run this search again."
+              : `Agent discovery failed: ${detail}`,
           inventoryCompleteness: "unknown",
           jobs: [],
           agentMetadata: null,

@@ -41,9 +41,13 @@ export function readPlanAssessment<T extends SavedJob>(
   return { ...job, matchAssessment: assessment };
 }
 export function personPickedJob(job: SavedJob): boolean {
+  return personSuppliedJob(job) || job.status !== "discovered";
+}
+
+/** A job the person brought in themselves: a pasted link or a page they read. */
+export function personSuppliedJob(job: SavedJob): boolean {
   return (
     job.personSupplied === true ||
-    job.status !== "discovered" ||
     job.provenance.some((source) => source.targetId === "assistant_page")
   );
 }

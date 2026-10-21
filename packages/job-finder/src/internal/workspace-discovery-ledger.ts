@@ -259,11 +259,27 @@ export function formatDiscoveryFreshnessDigest(
 }
 
 
+const frozenLedgerIndexes = new WeakMap<
+  readonly DiscoveryLedgerEntry[],
+  DiscoveryLedgerIndex
+>();
+
 export function findDiscoveryLedgerEntry(
   ledger: readonly DiscoveryLedgerEntry[],
   posting: DiscoveryLedgerIdentity,
 ): DiscoveryLedgerEntry | null {
-  return createDiscoveryLedgerIndex(ledger).find(posting);
+  // A stored ledger is frozen, so one index serves every lookup into it.
+  // Building it per lookup cost about 150 ms on 7,000 entries, twice for
+  // each job the person hid or shortlisted.
+  if (!Object.isFrozen(ledger)) {
+    return createDiscoveryLedgerIndex(ledger).find(posting);
+  }
+  let index = frozenLedgerIndexes.get(ledger);
+  if (!index) {
+    index = createDiscoveryLedgerIndex(ledger);
+    frozenLedgerIndexes.set(ledger, index);
+  }
+  return index.find(posting);
 }
 
 function upsertLedgerEntry(

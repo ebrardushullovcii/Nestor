@@ -335,7 +335,7 @@ export function createWorkspaceSafeguardMethods(input: {
       ctx.repository.getIntelligenceState(),
       scopedSavedJobs
         ? Promise.resolve(scopedSavedJobs)
-        : ctx.repository.listSavedJobs(),
+        : ctx.repository.readSavedJobsProjection(),
       ctx.repository.listApplicationRecords(),
     ]);
 

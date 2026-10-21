@@ -697,12 +697,85 @@ function describeError(error: unknown): string {
 }
 
 /**
+ * A rejected key, or an account out of funds, does not start working
+ * mid-session. After a 401 or 402 the same endpoint and credentials are not
+ * asked again for a while; every request
+ * in that time fails at once with the same error. An expired key otherwise
+ * met 140 requests from one small search (each listing read, fit batch and
+ * full read failing in turn), and retried them on the next search.
+ */
+export const MODEL_AUTH_FAILURE_PAUSE_MS = 5 * 60_000;
+type CredentialRejections = Map<
+  string,
+  { until: number; error: ModelRequestHttpError }
+>;
+// Per fetch implementation: the app has one; a test's own fetch mock starts
+// with nothing remembered.
+let rejectedCredentials = new WeakMap<typeof fetch, CredentialRejections>();
+function rejectionsFor(fetchImpl: typeof fetch): CredentialRejections {
+  let rejections = rejectedCredentials.get(fetchImpl);
+  if (!rejections) {
+    rejections = new Map();
+    rejectedCredentials.set(fetchImpl, rejections);
+  }
+  return rejections;
+}
+
+function credentialKey(url: string, headers: Record<string, string>): string {
+  let origin = url;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    // An unparsable URL keys on itself.
+  }
+  const authorization = Object.entries(headers)
+    .filter(([name]) => /^(authorization|x-api-key|api-key)$/i.test(name))
+    .map(([, value]) => value)
+    .join("|");
+  return `${origin}|${authorization}`;
+}
+
+/** Test seam: forget remembered rejections. */
+export function resetModelCredentialRejections(): void {
+  rejectedCredentials = new WeakMap();
+}
+
+/**
  * Performs one logical model request with streaming liveness, idle and
  * total deadlines, and bounded retries. Resolves with the normalized
  * Chat Completions payload; rejects with the last error, a
  * `ModelRequestTimeoutError`, or an `AbortError` when the caller cancelled.
  */
 export async function performModelRequest(
+  input: PerformModelRequestInput,
+): Promise<ChatCompletionsPayload> {
+  const rejections = rejectionsFor(input.fetchImpl ?? fetch);
+  const credentials = credentialKey(input.url, input.headers);
+  const rejection = rejections.get(credentials);
+  if (rejection && rejection.until > Date.now()) {
+    throw new ModelRequestHttpError(
+      rejection.error.message,
+      rejection.error.status,
+      null,
+    );
+  }
+  try {
+    return await performModelRequestAttempts(input);
+  } catch (error) {
+    if (
+      error instanceof ModelRequestHttpError &&
+      (error.status === 401 || error.status === 402)
+    ) {
+      rejections.set(credentials, {
+        until: Date.now() + MODEL_AUTH_FAILURE_PAUSE_MS,
+        error,
+      });
+    }
+    throw error;
+  }
+}
+
+async function performModelRequestAttempts(
   input: PerformModelRequestInput,
 ): Promise<ChatCompletionsPayload> {
   const fetchImpl = input.fetchImpl ?? fetch;

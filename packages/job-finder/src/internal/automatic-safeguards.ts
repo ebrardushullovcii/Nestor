@@ -987,7 +987,8 @@ async function persistApplicationCompanyCaps(input: {
   await input.ctx.withIntelligenceTransition(async () => {
     const [state, savedJobs, records] = await Promise.all([
       input.ctx.repository.getIntelligenceState(),
-      input.ctx.repository.listSavedJobs(),
+      // Read-only lookups; the cached display rows spare a full parse.
+      input.ctx.repository.readSavedJobsProjection(),
       input.ctx.repository.listApplicationRecords(),
     ]);
     const jobsById = new Map(savedJobs.map((job) => [job.id, job]));
@@ -1125,7 +1126,7 @@ async function persistAutomaticSimultaneousConflicts(input: {
     nextSafeguards = groupCompanyConflicts(
       { ...current, safeguards: nextSafeguards },
       records,
-      await input.ctx.repository.listSavedJobs(),
+      await input.ctx.repository.readSavedJobsProjection(),
     ).safeguards;
     if (JSON.stringify(nextSafeguards) === JSON.stringify(current.safeguards)) {
       return;

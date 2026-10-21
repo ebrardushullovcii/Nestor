@@ -129,6 +129,7 @@ import {
 } from "./application-preparation-capacity";
 import { memoizeBySameElements } from "./same-elements-memo";
 import { settleStoredResumeDrafts } from "./resume-settle-stored-drafts";
+import { rebindLegacyFitVerdicts } from "./legacy-fit-fingerprints";
 
 // Each list keeps its own last ordering: a refresh that changed no job reuses
 // it instead of sorting thousands of jobs again. The result is frozen so
@@ -458,6 +459,9 @@ export function createWorkspaceSnapshotProfileMethods(
   // Once per service: drafts written before ADR 0051 get their unbacked
   // generated lines settled, so nothing on Shortlisted waits on the person.
   let storedResumeDraftSettlement: Promise<unknown> | null = null;
+  // Once per service, in the background: fit verdicts stored with the old
+  // whole-profile fingerprint are re-bound before any edit can strand them.
+  let legacyFitFingerprintRebinding: Promise<unknown> | null = null;
   let lastNoResponseAutomationRunAt: number | null = null;
   const normalizedDraftRows = new WeakMap<
     object,
@@ -1198,6 +1202,13 @@ export function createWorkspaceSnapshotProfileMethods(
         ? ctx.repository.readIntelligenceProjection()
         : ctx.repository.getIntelligenceState(),
     ]);
+    // From the jobs this read already loaded, so it costs no second read.
+    legacyFitFingerprintRebinding ??= rebindLegacyFitVerdicts(ctx, {
+      savedJobs: rawSavedJobs,
+      pendingDiscoveryJobs: discovery.pendingDiscoveryJobs,
+    }).catch((error: unknown) => {
+      console.warn("[Job Finder] Re-binding stored fit verdicts failed", error);
+    });
 
     let intelligence = groupCompanyConflicts(
       rawIntelligence,

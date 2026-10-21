@@ -94,6 +94,7 @@ import type {
 } from "@renderer/features/job-finder/lib/job-finder-types";
 import { cn } from "@renderer/lib/cn";
 import { useAssistantContextSource } from "../../assistant/assistant-provider";
+import { createIdentityMemo } from "../../lib/identity-memo";
 
 export function getDiscoveryConfiguredFilters(
   searchPreferences: JobSearchPreferences,
@@ -327,6 +328,70 @@ export function getDiscoveryInspectedJob(
 }
 
 /**
+ * The search preferences as the active plan runs them: the workspace sources,
+ * switched on or off by the plan. One object per workspace preferences and
+ * plan, so the source list keeps its identity between renders and visits and
+ * every per-source lookup built from it is reused instead of rebuilt.
+ */
+const resolvePlanSearchPreferences = createIdentityMemo(
+  (
+    workspaceSearchPreferences: JobSearchPreferences,
+    selectedCampaign: JobSearchCampaign | undefined,
+  ): JobSearchPreferences => {
+    if (!selectedCampaign) return workspaceSearchPreferences;
+    const effectiveSourceIds = new Set(
+      resolveCampaignSourceTargetIds({
+        ...selectedCampaign,
+        searchPreferences: {
+          ...selectedCampaign.searchPreferences,
+          discovery: workspaceSearchPreferences.discovery,
+        },
+      }),
+    );
+    return {
+      ...workspaceSearchPreferences,
+      discovery: {
+        ...workspaceSearchPreferences.discovery,
+        targets: workspaceSearchPreferences.discovery.targets.map(
+          (target) => ({
+            ...target,
+            enabled: effectiveSourceIds.has(target.id),
+          }),
+        ),
+      },
+    };
+  },
+);
+
+/**
+ * The visible list for one collection, kept across selections and visits.
+ * Selecting a row only changes which row is selected, so the list is not
+ * filtered and sorted again for it; only a held deep-linked row takes part.
+ */
+const getMemoizedResultVisibility = createIdentityMemo(
+  (
+    jobs: readonly JobListRow[],
+    showAlsoFound: boolean,
+    preservedSelectedJob: JobListRow | null,
+    stableOrderIds: readonly string[] | undefined,
+  ) =>
+    getDiscoveryResultVisibility(
+      jobs,
+      preservedSelectedJob,
+      showAlsoFound,
+      preservedSelectedJob !== null,
+      stableOrderIds,
+    ),
+);
+
+const getHiddenAlsoFoundJobs = createIdentityMemo(
+  (visibleJobs: readonly JobListRow[], allJobs: readonly JobListRow[]) => {
+    const visibleIds = new Set(visibleJobs.map((job) => job.id));
+    return allJobs.filter((job) => !visibleIds.has(job.id));
+  },
+);
+
+/**
  * The person's own Show/Hide weaker matches choice per plan and opening rule,
  * kept for this app session. Without it every visit to Find jobs reset the
  * list, so the total jumped between the strong matches and all jobs.
@@ -463,31 +528,10 @@ export function DiscoveryScreen(props: {
   const selectedCampaign = campaigns?.find(
     (plan) => plan.id === activeCampaignId,
   );
-  const effectiveSourceIds = selectedCampaign
-    ? new Set(
-        resolveCampaignSourceTargetIds({
-          ...selectedCampaign,
-          searchPreferences: {
-            ...selectedCampaign.searchPreferences,
-            discovery: workspaceSearchPreferences.discovery,
-          },
-        }),
-      )
-    : null;
-  const searchPreferences = effectiveSourceIds
-    ? {
-        ...workspaceSearchPreferences,
-        discovery: {
-          ...workspaceSearchPreferences.discovery,
-          targets: workspaceSearchPreferences.discovery.targets.map(
-            (target) => ({
-              ...target,
-              enabled: effectiveSourceIds.has(target.id),
-            }),
-          ),
-        },
-      }
-    : workspaceSearchPreferences;
+  const searchPreferences = resolvePlanSearchPreferences(
+    workspaceSearchPreferences,
+    selectedCampaign,
+  );
   const activeCampaignMode =
     campaigns?.find((campaign) => campaign.id === activeCampaignId)?.mode ??
     "precision";
@@ -970,28 +1014,36 @@ export function DiscoveryScreen(props: {
   const stableSelectedJob = selectedJob
     ? (stableJobs.find((job) => job.id === selectedJob.id) ?? selectedJob)
     : null;
-  const resultVisibility = useMemo(
-    () =>
-      getDiscoveryResultVisibility(
-        stableJobs,
-        stableSelectedJob,
-        showAlsoFound,
-        preserveSelectedJob,
-        stableReadStage.snapshot?.jobIds,
-      ),
-    [
-      activeRun?.id,
-      activeRun?.state,
-      stableJobs,
-      stableSelectedJob,
-      showAlsoFound,
-      preserveSelectedJob,
-    ],
+  const listVisibility = getMemoizedResultVisibility(
+    stableJobs,
+    showAlsoFound,
+    preserveSelectedJob ? stableSelectedJob : null,
+    stableReadStage.snapshot?.jobIds,
   );
-  const hiddenAlsoFoundJobs = useMemo(() => {
-    const visibleIds = new Set(resultVisibility.jobs.map((job) => job.id));
-    return stableJobs.filter((job) => !visibleIds.has(job.id));
-  }, [resultVisibility.jobs, stableJobs]);
+  const resultVisibility = useMemo(
+    () => ({
+      ...listVisibility,
+      selectedJob:
+        stableSelectedJob &&
+        listVisibility.jobs.some((job) => job.id === stableSelectedJob.id)
+          ? stableSelectedJob
+          : (listVisibility.jobs[0] ?? null),
+    }),
+    [listVisibility, stableSelectedJob],
+  );
+  const hiddenAlsoFoundJobs = getHiddenAlsoFoundJobs(
+    resultVisibility.jobs,
+    stableJobs,
+  );
+  const [inAreaJobCount, pendingLocationJobCount] = useMemo(() => {
+    let inArea = 0;
+    let pending = 0;
+    for (const job of stableJobs) {
+      if (!job.matchAssessment.judgment) pending += 1;
+      else if (job.matchAssessment.locationReach === "in_area") inArea += 1;
+    }
+    return [inArea, pending];
+  }, [stableJobs]);
   const inspectedJob = getDiscoveryInspectedJob(
     resultVisibility.jobs,
     selectedJob?.id ?? null,
@@ -1434,9 +1486,12 @@ export function DiscoveryScreen(props: {
               ? props.fitJudgmentProgress
               : null
           }
+          // With one plan its name says nothing; it only took toolbar room.
           planName={
-            campaigns?.find((plan) => plan.id === activeCampaignId)?.name ??
-            null
+            (campaigns?.length ?? 0) > 1
+              ? (campaigns?.find((plan) => plan.id === activeCampaignId)
+                  ?.name ?? null)
+              : null
           }
           alsoFoundCount={resultVisibility.alsoFoundCount}
           areAlsoFoundShown={showAlsoFound}
@@ -1455,13 +1510,7 @@ export function DiscoveryScreen(props: {
           liveStatusLine={liveStatusLine}
           hiddenAlsoFoundCount={hiddenJobCount}
           hiddenAlsoFoundJobs={hiddenAlsoFoundJobs}
-          inAreaJobCount={
-            stableJobs.filter(
-              (job) =>
-                Boolean(job.matchAssessment.judgment) &&
-                job.matchAssessment.locationReach === "in_area",
-            ).length
-          }
+          inAreaJobCount={inAreaJobCount}
           jobs={resultVisibility.jobs}
           latestRun={
             activeRun?.state === "running" &&
@@ -1477,9 +1526,7 @@ export function DiscoveryScreen(props: {
           preferredLocations={searchPreferences.locations}
           remoteIncluded={searchPreferences.workModes.includes("remote")}
           totalLocationJobCount={stableJobs.length}
-          pendingLocationJobCount={
-            stableJobs.filter((job) => !job.matchAssessment.judgment).length
-          }
+          pendingLocationJobCount={pendingLocationJobCount}
           editPlanHref={
             activeCampaignId
               ? campaignPlanEditorHref(activeCampaignId)

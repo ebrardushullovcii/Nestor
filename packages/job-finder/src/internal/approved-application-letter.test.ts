@@ -103,7 +103,8 @@ function setup(held = true) {
   const ctx = {
     repository: {
       listApplyJobResults: () => Promise.resolve([result]),
-      listSavedJobs: () => Promise.resolve([job]),
+      listSavedJobsByIds: (ids: readonly string[]) =>
+        Promise.resolve(ids.includes(job.id) ? [job] : []),
       upsertApplyJobResult: (entry: typeof result) => {
         result = entry;
 

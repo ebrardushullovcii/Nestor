@@ -73,6 +73,10 @@ import {
   runMigrations,
 } from "./internal/migrations";
 import {
+  consumeCleanCloseMarker,
+  writeCleanCloseMarker,
+} from "./internal/clean-close-marker";
+import {
   createWorkspaceCloseDatabaseBackup,
   createWorkspaceResetDatabaseBackup,
   getWorkspaceDatabaseBackupPaths,
@@ -199,6 +203,11 @@ export async function createFileJobFinderRepository(
       };
     }
 
+    // A full integrity check reads every page: about 0.3 s of each start on
+    // a 200 MB workspace. A file left exactly as a clean close left it has
+    // nothing new to check; a crash or outside edit still gets the check.
+    const closedCleanly = consumeCleanCloseMarker(options.filePath);
+
     let database: DatabaseSync;
     try {
       database = openDatabaseFile(options.filePath);
@@ -208,7 +217,7 @@ export async function createFileJobFinderRepository(
 
     try {
       runMigrations(database);
-      if (!passesStartupIntegrityCheck(database)) {
+      if (!closedCleanly && !passesStartupIntegrityCheck(database)) {
         throw new Error(
           "Workspace database failed the startup integrity check.",
         );
@@ -851,6 +860,7 @@ export async function createFileJobFinderRepository(
         }
       }
       database.close();
+      writeCleanCloseMarker(options.filePath);
     },
     async reset(nextSeed) {
       const nextState = JobFinderRepositoryStateSchema.parse(
@@ -877,12 +887,12 @@ export async function createFileJobFinderRepository(
       await removeWorkspaceDatabaseBackups(options.filePath);
       await removeWorkspaceRecoveryArtifacts(options.filePath);
     },
+    // Singleton reads return their own copy already; only the shared seed
+    // needs copying. Copying twice cost about 10 ms of every refresh.
     getProfile() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(database, "profile", CandidateProfileSchema) ??
-            normalizedSeed.profile,
-        ),
+        getSingletonValue(database, "profile", CandidateProfileSchema) ??
+          cloneValue(normalizedSeed.profile),
       );
     },
     getProfileWithRevision() {
@@ -953,24 +963,20 @@ export async function createFileJobFinderRepository(
     },
     getSearchPreferences() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(
-            database,
-            "search_preferences",
-            JobSearchPreferencesSchema,
-          ) ?? normalizedSeed.searchPreferences,
-        ),
+        getSingletonValue(
+          database,
+          "search_preferences",
+          JobSearchPreferencesSchema,
+        ) ?? cloneValue(normalizedSeed.searchPreferences),
       );
     },
     getProfileSetupState() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(
-            database,
-            "profile_setup_state",
-            ProfileSetupStateSchema,
-          ) ?? normalizedSeed.profileSetupState,
-        ),
+        getSingletonValue(
+          database,
+          "profile_setup_state",
+          ProfileSetupStateSchema,
+        ) ?? cloneValue(normalizedSeed.profileSetupState),
       );
     },
     saveSearchPreferences(searchPreferences) {
@@ -2213,10 +2219,8 @@ export async function createFileJobFinderRepository(
     },
     getSettings() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(database, "settings", JobFinderSettingsSchema) ??
-            normalizedSeed.settings,
-        ),
+        getSingletonValue(database, "settings", JobFinderSettingsSchema) ??
+          cloneValue(normalizedSeed.settings),
       );
     },
     saveSettings(settings) {
@@ -2254,6 +2258,29 @@ export async function createFileJobFinderRepository(
     getDiscoveryState() {
       return Promise.resolve(cloneValue(discoveryStorage.read()));
     },
+    warmDiscoveryState() {
+      try {
+        if (!database.isTransaction) discoveryStorage.read();
+        return Promise.resolve();
+      } catch (error) {
+        return Promise.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    },
+    commitDiscoverySessions(update) {
+      try {
+        const sessions = runImmediateTransaction(database, () =>
+          discoveryStorage.updateSessions(update),
+        );
+        discoveryStorage.publishSessions();
+        return secureDatabaseFile(options.filePath).then(() => [...sessions]);
+      } catch (error) {
+        return Promise.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    },
     commitDiscoveryStateUpdate(update) {
       try {
         const nextDiscoveryState = runImmediateTransaction(database, () => {
@@ -2278,12 +2305,10 @@ export async function createFileJobFinderRepository(
     },
     getCampaignState() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(
-            database,
-            "campaign_state",
-            JobSearchCampaignCollectionSchema,
-          ),
+        getSingletonValue(
+          database,
+          "campaign_state",
+          JobSearchCampaignCollectionSchema,
         ),
       );
     },
@@ -2368,13 +2393,11 @@ export async function createFileJobFinderRepository(
     readIntelligenceProjection,
     getIntelligenceState() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(
-            database,
-            "intelligence_state",
-            JobFinderIntelligenceStateSchema,
-          ) ?? JobFinderIntelligenceStateSchema.parse({}),
-        ),
+        getSingletonValue(
+          database,
+          "intelligence_state",
+          JobFinderIntelligenceStateSchema,
+        ) ?? JobFinderIntelligenceStateSchema.parse({}),
       );
     },
     saveIntelligenceState(intelligenceState) {
@@ -2439,13 +2462,11 @@ export async function createFileJobFinderRepository(
     },
     getActivityControl() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(
-            database,
-            "activity_control",
-            JobFinderActivityControlSchema,
-          ) ?? JobFinderActivityControlSchema.parse({}),
-        ),
+        getSingletonValue(
+          database,
+          "activity_control",
+          JobFinderActivityControlSchema,
+        ) ?? JobFinderActivityControlSchema.parse({}),
       );
     },
     saveActivityControl(activityControl) {

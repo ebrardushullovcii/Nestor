@@ -3,6 +3,7 @@ import {
   type BrowserSessionState,
   type JobSearchPreferences,
 } from "@nestor/contracts";
+import { createPerObjectCache } from "../../lib/identity-memo";
 
 /**
  * Copy shared by the route header and search controls when Job Finder cannot
@@ -87,6 +88,14 @@ export interface DiscoverySearchReadiness {
 export const DISCOVERY_PAUSED_SEARCH_REASON =
   "Search is paused, so new searches stay unavailable.";
 
+// Each check parses the source's address; a workspace with hundreds of
+// sources paid for that on every render of every search control. The list is
+// immutable, so its count is kept per list.
+const countRunnableTargets = createPerObjectCache(
+  (targets: JobSearchPreferences["discovery"]["targets"]) =>
+    targets.filter(isRunnableJobDiscoveryTarget).length,
+);
+
 export function getDiscoverySearchReadiness(
   searchPreferences: JobSearchPreferences,
   session?: Pick<BrowserSessionState, "driver" | "status">,
@@ -94,9 +103,9 @@ export function getDiscoverySearchReadiness(
   const hasSearchRoles =
     searchPreferences.targetRoles.length > 0 ||
     searchPreferences.jobFamilies.length > 0;
-  const enabledSourceCount = searchPreferences.discovery.targets.filter(
-    isRunnableJobDiscoveryTarget,
-  ).length;
+  const enabledSourceCount = countRunnableTargets(
+    searchPreferences.discovery.targets,
+  );
   // Saved roles refine a search; the profile also guides a run without them.
   const setupReady = enabledSourceCount > 0;
   const runtime = session ? getDiscoveryRuntimeProjection(session) : null;

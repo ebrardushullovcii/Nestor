@@ -4406,6 +4406,76 @@ test("batch classification, answer checks and safety page read overlap before an
   expect(events.filter((event) => event === "answers")).toHaveLength(1);
 });
 
+test("form turns and question reading are apply work; answer checks are fact checks", async () => {
+  const source = page({
+    controls: [{ ...nameControl(), label: "Why this role?", value: "" }],
+  });
+  const input = config(source);
+  input.modelQuestionClassification = true;
+  input.hands.fillText = (_ref, value) => {
+    source.controls[0].value = value;
+    return Promise.resolve({ ok: true, observedValue: value });
+  };
+  const tasks: Array<[string, string | undefined]> = [];
+  let turns = 0;
+  await runApplyAgent(input, {
+    chatWithTools: async (messages, definitions, options) => {
+      const name = definitions[0]?.function.name;
+      if (name === "report_question_kinds") {
+        tasks.push(["questions", options?.reasoningTask]);
+        return {
+          toolCalls: [
+            {
+              id: "kinds",
+              type: "function",
+              function: {
+                name,
+                arguments: JSON.stringify({
+                  questions: [
+                    { index: 0, asksAboutPay: false, declarationKind: null },
+                  ],
+                }),
+              },
+            },
+          ],
+        };
+      }
+      if (name === "report_answer_checks") {
+        tasks.push(["answers", options?.reasoningTask]);
+        return (await supportedChecks(messages, definitions))!;
+      }
+      tasks.push(["turn", options?.reasoningTask]);
+      return {
+        toolCalls: [
+          {
+            id: "decision",
+            type: "function",
+            function: {
+              name: ++turns === 1 ? "fill_fields" : "finish",
+              arguments: JSON.stringify(
+                turns === 1
+                  ? {
+                      fields: [
+                        {
+                          tool: "type",
+                          ref: "c0",
+                          text: "My platform experience fits this role.",
+                        },
+                      ],
+                    }
+                  : { reason: "Done." },
+              ),
+            },
+          },
+        ],
+      };
+    },
+  });
+  expect(new Set(tasks.map((entry) => entry.join(":")))).toEqual(
+    new Set(["turn:apply", "questions:apply", "answers:claim_check"]),
+  );
+});
+
 test.each(["upload", "create_application_document"])(
   "a rejected file letter offers its draft and conflict through %s",
   async (tool) => {

@@ -657,6 +657,20 @@ export interface JobFinderRepository
   commitDiscoveryStateUpdate(
     update: (current: BorrowedDiscoveryState) => CanonicalDiscoveryWrite,
   ): Promise<JobFinderDiscoveryState>;
+  /**
+   * Reads the canonical discovery state into its cache without copying it,
+   * so the first discovery commit after start does not pay for the read.
+   */
+  warmDiscoveryState?(): Promise<void>;
+  /**
+   * Atomically changes only the stored browser session states, without
+   * reading discovery runs, logs or checkpoints.
+   */
+  commitDiscoverySessions?(
+    update: (
+      sessions: JobFinderDiscoveryState["sessions"],
+    ) => JobFinderDiscoveryState["sessions"],
+  ): Promise<JobFinderDiscoveryState["sessions"]>;
   getCampaignState(): Promise<JobSearchCampaignCollection | null>;
   saveCampaignState(campaignState: JobSearchCampaignCollection): Promise<void>;
   /**

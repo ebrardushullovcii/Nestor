@@ -16,9 +16,8 @@ import {
   RESUME_DRAFT_EXPECTED_WAIT_LABEL,
 } from "./review-queue-progress";
 import {
+  getResumeRunState,
   getReviewQueueWorkflowStatus,
-  hasResumeGenerationFailure,
-  isResumeGenerationInProgress,
   needsPersonResumeReview,
   needsResumeGeneration,
 } from "./review-queue-status";
@@ -72,14 +71,9 @@ export function ReviewQueuePreviewPanel({
   selectedJob,
 }: ReviewQueuePreviewPanelProps) {
   const needsGeneration = needsResumeGeneration(selectedItem);
-  const hasGenerationFailure = hasResumeGenerationFailure(
-    selectedItem,
-    selectedAsset,
-  );
-  const isGenerating =
-    selectedItem?.resumeApplicationMode !== "original_resume" &&
-    !hasGenerationFailure &&
-    (isResumeGenerationInProgress(selectedItem) || isSelectedJobPending);
+  // A rewrite in progress outranks the last attempt's failure.
+  const { hasFailure: hasGenerationFailure, isWriting: isGenerating } =
+    getResumeRunState(selectedItem, selectedAsset, isSelectedJobPending);
   const showGenerationState =
     needsGeneration || isGenerating || hasGenerationFailure;
   const preview = useTailoredAssetDetail(
@@ -100,13 +94,13 @@ export function ReviewQueuePreviewPanel({
   const previewLabel =
     previewState === "missing" ? "Resume issue" : workflowStatus.label;
   // When the listing text was never captured, nothing could be tailored and
-  // the document is the person's own resume. The stored asset label still says
-  // "Tailored Resume", which contradicts the explanation on this same screen,
-  // so the document is named for what it actually is.
+  // the document keeps the person's own wording. The stored asset label still
+  // says "Tailored Resume", which contradicts the explanation on this same
+  // screen, so the document is named for what it is, in the row's words. It
+  // is not "your original resume": that is the imported file Original sends.
   const documentLabel = selectedAsset
-    ? describeUntailorableListing(selectedAsset)
-      ? "Your original resume"
-      : selectedAsset.label
+    ? (describeUntailorableListing(selectedAsset)?.badgeLabel ??
+      selectedAsset.label)
     : null;
 
   return (
@@ -420,7 +414,8 @@ export function ReviewQueuePreviewPanel({
             {selectedItem.resumeReview.status === "needs_review" ? (
               <p className="text-(length:--text-small) text-foreground-soft">
                 {needsPersonResumeReview(selectedItem, selectedAsset)
-                  ? "Review this resume, decide any flagged lines, then approve it before applying."
+                  ? // ADR 0051: no line-by-line decisions for stretches.
+                    "Read this resume through, then approve it before applying."
                   : "This is the resume as it stands. Edit it if you like; Apply approves it."}
               </p>
             ) : null}

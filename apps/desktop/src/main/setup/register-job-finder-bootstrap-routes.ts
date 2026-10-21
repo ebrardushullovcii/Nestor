@@ -2,10 +2,17 @@ import { JobFinderWorkspaceSnapshotSchema } from "@nestor/contracts";
 import type { IpcMain } from "electron";
 import {
   getDesktopTestDelayMs,
-  getJobFinderWorkspaceService,
   isDesktopTestApiEnabled,
-} from "../services/job-finder";
+} from "../services/job-finder/test-api";
 import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-workspace-view";
+import { takeStartupBootstrap } from "../services/job-finder/startup-workspace-view";
+
+// The workspace services are a large module graph. Loading them only when a
+// handler needs them lets a saved startup view answer the window at once.
+async function getJobFinderWorkspaceService() {
+  const services = await import("../services/job-finder");
+  return services.getJobFinderWorkspaceService();
+}
 
 export const TEST_WORKSPACE_OPENING_HOLD_ENV =
   "NESTOR_TEST_WORKSPACE_OPENING_HOLD_MS";
@@ -54,6 +61,8 @@ export function registerJobFinderBootstrapDesktopRoutes(ipcMain: IpcMain) {
 
   ipcMain.handle("job-finder:get-workspace-bootstrap", async () => {
     await waitForOpeningHold();
+    const startupBootstrap = takeStartupBootstrap();
+    if (startupBootstrap) return startupBootstrap;
     const workspaceService = await getJobFinderWorkspaceService();
     return toRendererWorkspaceSnapshot(
       JobFinderWorkspaceSnapshotSchema.parse(

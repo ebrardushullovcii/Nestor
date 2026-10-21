@@ -22,7 +22,7 @@ import type { MatchAssessmentPostingInput } from "./match-assessment-posting-inp
 import { createMatchAssessmentChangeAudit } from "./match-assessment-change-audit";
 import {
   MATCH_ASSESSMENT_SCORER_VERSION,
-  createMatchAssessmentContextFingerprint,
+  createFitVerdictFingerprint,
   createMatchAssessmentPostingFingerprint,
 } from "./match-assessment-session";
 import { createMatchAssessmentPostingInput } from "./match-assessment-posting-input";
@@ -981,10 +981,12 @@ export async function createMatchAssessmentAsync(
   searchPreferences: JobSearchPreferences,
   posting: JobPosting & { matchAssessment?: MatchAssessment | null },
   signal?: AbortSignal,
+  options: { background?: boolean } = {},
 ): Promise<MatchAssessment> {
   signal?.throwIfAborted();
   const assistedAssessment = await aiClient.assessJobFit({
     ...(signal ? { signal } : {}),
+    ...(options.background ? { background: true } : {}),
     assessmentDate: new Date().toISOString().slice(0, 10),
     profile,
     searchPreferences,
@@ -1026,7 +1028,7 @@ export async function createMatchAssessmentAsync(
     {
       source: "full",
       judgedAt: new Date().toISOString(),
-      contextFingerprint: createMatchAssessmentContextFingerprint(
+      contextFingerprint: createFitVerdictFingerprint(
         profile,
         searchPreferences,
       ),

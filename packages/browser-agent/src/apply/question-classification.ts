@@ -122,6 +122,7 @@ export async function classifyApplicationQuestions(input: {
     : AbortSignal.timeout(60_000);
   const response = await input.client.chatWithTools([...messages], tools, {
     signal,
+    reasoningTask: "apply",
     // A full page can have dozens of questions; truncation used to leave
     // later questions unclassified and trigger another call on each write.
     maxOutputTokens: Math.max(

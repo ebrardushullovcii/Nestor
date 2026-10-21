@@ -72,6 +72,7 @@ import {
   resolveResumeWorkspaceRouteState,
 } from "@renderer/features/job-finder/lib/resume-workspace-route-state";
 import { applicationSignInContinuesOnItsOwn } from "@renderer/features/job-finder/lib/application-sign-in-handoff";
+import { createIdentityMemo } from "@renderer/features/job-finder/lib/identity-memo";
 
 // The canonical workflow surfaces (Profile, Find jobs, Shortlisted,
 // Applications) are part of the initial-route bundle so their real headings
@@ -147,6 +148,16 @@ const loadSafeguardsScreen = createSharedRouteLoader(async () => ({
     await import("@renderer/features/job-finder/screens/safeguards/safeguards-screen")
   ).SafeguardsScreen,
 }));
+
+// The app opens on Home, so its screen is fetched while the workspace loads
+// rather than after it; by the time the workspace is ready the screen is too.
+if (
+  import.meta.env.MODE !== "test" &&
+  typeof window !== "undefined" &&
+  /^(#\/?(job-finder(\/home)?\/?)?)?$/.test(window.location.hash)
+) {
+  void loadJobSearchHomeScreen().catch(() => undefined);
+}
 
 const ProfileSetupScreen = lazy(loadProfileSetupScreen);
 const CampaignsScreen = lazy(loadCampaignsScreen);
@@ -1120,6 +1131,22 @@ export function JobFinderProfileSetupRoute() {
   );
 }
 
+const selectPlanDiscoveryJobs = createIdentityMemo(
+  (
+    discoveryJobs: readonly JobListRow[],
+    dismissedDiscoveryJobs: readonly JobListRow[],
+    activeCampaignJobIds: readonly string[] | undefined,
+  ) => {
+    const campaignJobIds = new Set(activeCampaignJobIds ?? []);
+    return {
+      jobs: discoveryJobs.filter((job) => campaignJobIds.has(job.id)),
+      dismissedJobs: dismissedDiscoveryJobs.filter((job) =>
+        campaignJobIds.has(job.id),
+      ),
+    };
+  },
+);
+
 export function JobFinderDiscoveryRoute() {
   const context = useJobFinderPageContext();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1156,16 +1183,14 @@ export function JobFinderDiscoveryRoute() {
   // A search re-renders this route several times a second; a new list on
   // every render made the results re-filter and re-sort every job each time.
   const activeCampaignJobIds = activeCampaign?.jobIds;
+  // Kept across visits too, so an unchanged plan hands Find jobs the same
+  // list and everything it derives from that list is reused.
   const { discoveryJobs, dismissedDiscoveryJobs } = context.workspace;
-  const { jobs, dismissedJobs } = useMemo(() => {
-    const campaignJobIds = new Set(activeCampaignJobIds ?? []);
-    return {
-      jobs: discoveryJobs.filter((job) => campaignJobIds.has(job.id)),
-      dismissedJobs: dismissedDiscoveryJobs.filter((job) =>
-        campaignJobIds.has(job.id),
-      ),
-    };
-  }, [activeCampaignJobIds, discoveryJobs, dismissedDiscoveryJobs]);
+  const { jobs, dismissedJobs } = selectPlanDiscoveryJobs(
+    discoveryJobs,
+    dismissedDiscoveryJobs,
+    activeCampaignJobIds,
+  );
   const requestedJob = navigationContext.jobId
     ? (jobs.find((job) => job.id === navigationContext.jobId) ?? null)
     : null;
@@ -1528,6 +1553,13 @@ function JobFinderReviewQueueRouteContent() {
     requestedItem,
   ]);
 
+  // One identity while nothing starts or finishes, so the list's per-job
+  // statuses are not worked out again on every render.
+  const isReviewJobPending = useCallback(
+    (jobId: string) =>
+      context.isPending(jobFinderPendingActions.resumeJob(jobId)),
+    [context.isPending],
+  );
   const handleSelectItem = useCallback(
     (jobId: string) => {
       context.onSelectReviewItem(jobId);
@@ -1630,9 +1662,7 @@ function JobFinderReviewQueueRouteContent() {
         }
         applyJobResults={context.workspace.applyJobResults}
         isApplyPending={context.isPending(jobFinderPendingActions.apply())}
-        isJobPending={(jobId) =>
-          context.isPending(jobFinderPendingActions.resumeJob(jobId))
-        }
+        isJobPending={isReviewJobPending}
         onPrepareTailoredDrafts={context.onPrepareTailoredDrafts}
         onStopTailoredDraftPreparation={context.onStopTailoredDraftPreparation}
         onStartAutoApplyQueue={context.onStartAutoApplyQueue}

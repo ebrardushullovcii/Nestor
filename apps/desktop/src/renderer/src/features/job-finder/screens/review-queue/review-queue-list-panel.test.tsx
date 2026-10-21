@@ -94,11 +94,13 @@ describe("ReviewQueueListPanel", () => {
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Select Role ready" }),
     );
+    // No dead "Create 0 resumes" control; the line says why there is none.
     expect(
-      screen
-        .getByRole("button", { name: "Create 0 resumes" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
+      screen.queryByRole("button", { name: /^Create \d+ resumes?$/ }),
+    ).toBe(null);
+    expect(
+      screen.getByText("The selected job already has a resume."),
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Role two" }));
     expect(screen.getByText("2 selected")).toBeTruthy();
     expect(
@@ -245,7 +247,7 @@ describe("ReviewQueueListPanel", () => {
     // The caption below the title says the same words; the badge is the one
     // in the title line's badge slot.
     const status = screen
-      .getAllByText("No resume yet")
+      .getAllByText("Needs a resume")
       .find((element) => element.className.includes("shrink-0"))!;
     // One line, never wrapped mid-label: the badge keeps its width and the
     // title yields instead.
@@ -263,7 +265,9 @@ describe("ReviewQueueListPanel", () => {
       queue: [item],
     });
 
-    expect(screen.getByText("Writing the resume…")).toBeTruthy();
+    // The status is said once, by the badge.
+    expect(screen.getByText("Writing resume")).toBeTruthy();
+    expect(screen.queryByText("Writing the resume…")).toBeNull();
     expect(screen.queryByText("Resume ready — Apply approves it")).toBeNull();
   });
 
@@ -310,7 +314,12 @@ describe("ReviewQueueListPanel", () => {
       within(row).getByRole("button", { name: "Apply to the 1 ready job" }),
     );
     expect(onApplyToAllReady).toHaveBeenCalledWith(1);
-    expect(within(row).getByText(/finished resumes are kept/)).toBeTruthy();
+    // The reassurance is the button's tooltip, not a paragraph under it.
+    expect(
+      within(row)
+        .getByRole("button", { name: "Create 2 missing resumes" })
+        .getAttribute("title"),
+    ).toContain("finished resumes are kept");
     expect(within(row).queryByText(/AI writers/)).toBeNull();
     // Nothing is ticked until the person ticks it; no per-batch mode choice.
     expect(screen.queryByText(/\d+ selected$/)).toBeNull();
@@ -449,9 +458,37 @@ describe("ReviewQueueListPanel", () => {
       queue: [createEligibleItem("job_not_started"), createReadyItem("job_ok")],
     });
 
-    expect(screen.getAllByText("No resume yet").length).toBeGreaterThan(0);
-    expect(screen.getByText("Resume approved")).toBeTruthy();
+    // Each row says its status once: the badge. A caption that only
+    // repeated it ("No resume yet" under "Needs a resume", "Resume
+    // approved" under "Ready to apply") is gone. The badge uses the status
+    // tab's own words.
+    expect(screen.queryByText("No resume yet")).toBeNull();
+    expect(
+      screen
+        .getAllByText("Needs a resume")
+        .filter((element) => element.className.includes("shrink-0")),
+    ).toHaveLength(1);
+    expect(screen.getByText("Ready to apply")).toBeTruthy();
+    expect(screen.queryByText("Resume approved")).toBeNull();
     expect(screen.queryByText("Job-specific tailored resume")).toBeNull();
+  });
+
+  it("keeps a caption the badge cannot say and names a duplicate quietly", () => {
+    const kept = {
+      ...createReadyItem("job_kept"),
+      resumeApplicationMode: "original_resume",
+      resumeReview: { status: "original_resume" },
+    } as unknown as ReviewQueueItem;
+    const twin = { ...createEligibleItem("job_twin"), title: "Same role" };
+    renderPanel({
+      queue: [kept, twin, { ...twin, jobId: "job_twin_2" }],
+    });
+
+    expect(screen.getByText("Original resume, unchanged")).toBeTruthy();
+    const duplicates = screen.getAllByTestId("review-queue-possible-duplicate");
+    expect(duplicates).toHaveLength(2);
+    expect(duplicates[0]!.textContent).toContain("Possible duplicate");
+    expect(screen.queryByText(/Possibly saved twice/)).toBeNull();
   });
 
   it("reads legacy restored rows and real failures identically in row badges and status detail", () => {
@@ -616,9 +653,66 @@ it("states that bulk actions include jobs hidden by a shortlist filter", () => {
     onPrepareTailoredDrafts: vi.fn(),
   });
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: "one" } });
+  expect(screen.getByTestId("shortlist-bulk-filter-scope").textContent).toBe(
+    "This button acts on all shortlisted jobs, not just the ones shown.",
+  );
+});
+
+it("counts a job whose resume is being written under Writing, as its row says", () => {
+  renderPanel({
+    isJobPending: (jobId) => jobId === "two",
+    queue: [
+      createEligibleItem("one"),
+      createEligibleItem("two"),
+      createReadyItem("ready"),
+    ],
+    onPrepareTailoredDrafts: vi.fn(),
+  });
+  expect(screen.getByRole("button", { name: "Needs a resume: 1 jobs" }))
+    .toBeTruthy();
+  expect(screen.getByRole("button", { name: "Writing: 1 jobs" })).toBeTruthy();
   expect(
-    screen.getByTestId("shortlist-bulk-filter-scope").textContent,
-  ).toContain("including 1 the filter hides");
+    screen.getByRole("button", { name: "Create the missing resume" }),
+  ).toBeTruthy();
+});
+
+it("says nothing about the filter when every job the button covers is shown", () => {
+  const ready = createReadyItem("ready");
+  renderPanel({
+    queue: [createEligibleItem("one"), createEligibleItem("two"), ready],
+    onPrepareTailoredDrafts: vi.fn(),
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Needs a resume: 2/ }));
+  expect(screen.getByRole("button", { name: "Create 2 missing resumes" }))
+    .toBeTruthy();
+  expect(screen.queryByTestId("shortlist-bulk-filter-scope")).toBeNull();
+});
+
+it("opens the first job of a status tab when the open job is not in it, and keeps one that is", () => {
+  const onSelectItem = vi.fn();
+  const onShowItem = vi.fn();
+  const ready = createReadyItem("ready");
+  const first = createEligibleItem("first");
+  const second = createEligibleItem("second");
+  const view = renderPanel({
+    queue: [ready, first, second],
+    onSelectItem,
+    onShowItem,
+    selectedItem: ready,
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Needs a resume: 2/ }));
+  expect(onShowItem).toHaveBeenCalledExactlyOnceWith("first");
+  expect(onSelectItem).not.toHaveBeenCalled();
+  view.unmount();
+
+  onShowItem.mockClear();
+  renderPanel({
+    queue: [ready, first, second],
+    onShowItem,
+    selectedItem: second,
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Needs a resume: 2/ }));
+  expect(onShowItem).not.toHaveBeenCalled();
 });
 
 it("explains the next ten out of 53 ready applications before starting", () => {

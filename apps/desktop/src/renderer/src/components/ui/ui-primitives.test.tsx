@@ -305,6 +305,24 @@ describe("Count", () => {
     expect(marker.getAttribute("data-variant")).toBe("rail-marker");
     expect(marker.className).toContain("rounded-full");
   });
+
+  it("caps the rail marker at 99+ and keeps the full number readable", () => {
+    const { container, rerender } = render(
+      <Count value={678} variant="rail-marker" />,
+    );
+    const marker = container.querySelector(
+      "[data-slot='count']",
+    ) as HTMLElement;
+    expect(marker.textContent).toContain("99+");
+    expect(screen.getByText("678").className).toContain("sr-only");
+
+    // The other variants keep the whole figure.
+    rerender(<Count value={678} variant="pill" />);
+    expect(
+      (container.querySelector("[data-slot='count']") as HTMLElement)
+        .textContent,
+    ).toBe("678");
+  });
 });
 
 describe("Eyebrow", () => {

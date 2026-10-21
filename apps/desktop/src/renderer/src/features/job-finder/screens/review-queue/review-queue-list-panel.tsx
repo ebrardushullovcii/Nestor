@@ -41,13 +41,15 @@ import { Link } from "react-router-dom";
 import { buildJobFinderContextRoute } from "../../lib/job-finder-context-navigation";
 import {
   APPLICATION_PREPARATION_BATCH_LIMIT,
-  countQueueStageReady,
+  describeQueueItemResumeLevel,
   describeTailoredDraftPreparationBlocker,
   getReviewQueueResumePolicyCaption,
+  getReviewQueueRowCaption,
   getReviewQueueWorkflowStatus,
   findPossibleDuplicateJobIds,
   getShortlistStatusFilter,
   getTailoredDraftPreparationResultMessage,
+  isQueueStageReady,
   isTailoredDraftPreparationEligible,
   SHORTLIST_STATUS_FILTER_LABELS,
   type ShortlistStatusFilter,
@@ -70,6 +72,11 @@ interface ReviewQueueListPanelProps {
   /** A safeguard holding every application start back, in plain words. */
   safeguardBlocker?: string | null;
   onSelectItem: (jobId: string) => void;
+  /**
+   * Opens a job without scrolling to it, for when a status tab or the search
+   * leaves the open job out of the list. Defaults to `onSelectItem`.
+   */
+  onShowItem?: (jobId: string) => void;
   /** Moves the given jobs back to Find jobs. */
   onRemoveJobs?: (jobIds: readonly string[]) => Promise<void>;
   onStopTailoredDraftPreparation?: () => void;
@@ -104,6 +111,7 @@ export function ReviewQueueListPanel({
   onOpenSafeguards,
   safeguardBlocker = null,
   onSelectItem,
+  onShowItem = onSelectItem,
   onRemoveJobs,
   onStopTailoredDraftPreparation = () => undefined,
   preparedJobIds,
@@ -136,7 +144,9 @@ export function ReviewQueueListPanel({
     () => findPossibleDuplicateJobIds(queue),
     [queue],
   );
-  // Each job's row status and filter, worked out once per queue change.
+  // Each job's row status and filter, worked out once per queue change. The
+  // running state counts too: a job being rewritten used to read "Writing
+  // resume" on its row while its tab still counted it as needing one.
   const statusByJobId = useMemo(
     () =>
       new Map(
@@ -144,7 +154,7 @@ export function ReviewQueueListPanel({
           const label = getReviewQueueWorkflowStatus(
             item,
             assetsByJobId.get(item.jobId),
-            false,
+            isJobPending(item.jobId),
             preparedJobIds,
             applicationPreparingJobIds,
           ).label;
@@ -166,6 +176,7 @@ export function ReviewQueueListPanel({
     [
       applicationPreparingJobIds,
       assetsByJobId,
+      isJobPending,
       preparedJobIds,
       queue,
       unavailableApplicationJobIds,
@@ -246,6 +257,19 @@ export function ReviewQueueListPanel({
     if (selectedQueueIndex < 0) return;
     setQueuePage(Math.floor(selectedQueueIndex / JOB_LIST_PAGE_SIZE) + 1);
   }, [selectedQueueIndex]);
+  // Choosing a status tab or searching opens the first job of the new list
+  // when the open job is not in it: "Needs a resume" used to keep a "To
+  // review" job in the detail. Only a change the person makes moves the
+  // selection; a job leaving the tab because its resume started stays open.
+  const listViewKey = `${statusFilter}|${deferredQuery}`;
+  const lastListViewKeyRef = useRef(listViewKey);
+  useEffect(() => {
+    if (lastListViewKeyRef.current === listViewKey) return;
+    lastListViewKeyRef.current = listViewKey;
+    const firstJobId = visibleQueue[0]?.jobId;
+    if (!firstJobId || selectedQueueIndex >= 0) return;
+    onShowItem(firstJobId);
+  }, [listViewKey, onShowItem, selectedQueueIndex, visibleQueue]);
   useEffect(() => {
     if (!pendingFocusId) return;
     // Scoped to this panel's scroll region so the deferred frame can never
@@ -347,14 +371,21 @@ export function ReviewQueueListPanel({
     }
   };
   const isSelecting = selectedJobIds.size > 0;
-  const totalReadyToApplyCount = useMemo(
-    () =>
-      countQueueStageReady(
-        queue.filter((item) => !isJobPending(item.jobId)),
-        unavailableApplicationJobIds,
+  const readyToApplyJobIds = useMemo(
+    () => [
+      ...new Set(
+        queue
+          .filter(
+            (item) =>
+              !isJobPending(item.jobId) &&
+              isQueueStageReady(item, unavailableApplicationJobIds),
+          )
+          .map((item) => item.jobId),
       ),
+    ],
     [isJobPending, queue, unavailableApplicationJobIds],
   );
+  const totalReadyToApplyCount = readyToApplyJobIds.length;
   const readyToApplyCount = Math.min(
     totalReadyToApplyCount,
     applicationBatchLimit,
@@ -375,6 +406,18 @@ export function ReviewQueueListPanel({
     ? null
     : getTailoredDraftPreparationResultMessage(draftPreparation);
   const draftRunCount = draftEligibleCount;
+  // The bulk buttons act on every shortlisted job. Say so only when some of
+  // the jobs they would touch are not in the list on screen.
+  const visibleJobIds = new Set(filteredJobIds);
+  const showsApplyAllButton =
+    readyToApplyCount > 0 &&
+    Boolean(onApplyToAllReady) &&
+    !safeguardBlockerSentence;
+  const bulkActionsReachHiddenJobs =
+    (draftEligibleCount > 0 &&
+      [...eligibleResumeIds].some((id) => !visibleJobIds.has(id))) ||
+    (showsApplyAllButton &&
+      readyToApplyJobIds.some((id) => !visibleJobIds.has(id)));
   // The three row handlers keep one identity for the life of the panel. Each
   // closes over the queue, so a `useCallback` on it would be rebuilt whenever
   // any job changed and every row would re-render with it — which is exactly
@@ -402,6 +445,7 @@ export function ReviewQueueListPanel({
   });
   // The "for all jobs" row appears only when it can do something: two or
   // more jobs, and at least one of them needs a resume or is ready to apply.
+  const showsStatusTabs = queue.length > 1 && statusFilterOptions.length > 2;
   const showsAllJobsRow =
     (queue.length > 1 || isSelecting || isDraftPreparationRunning) &&
     (isSelecting ||
@@ -420,6 +464,9 @@ export function ReviewQueueListPanel({
       {queue.length > 1 ? (
         <CollectionSearchToolbar
           compact
+          // The status tabs below already count the jobs ("All 200"); a
+          // second "200 results" beside the search said it again.
+          hideCompactCount={showsStatusTabs}
           placement="panel"
           label="Find a shortlisted job"
           onQueryChange={view.setQuery}
@@ -429,206 +476,225 @@ export function ReviewQueueListPanel({
           visibleCount={visibleQueue.length}
         />
       ) : null}
-      {queue.length > 1 && statusFilterOptions.length > 2 ? (
-        <div className="mx-5 overflow-x-auto pb-2">
-          <SegmentedControl
-            label="Show shortlisted jobs by status"
-            onValueChange={setStatusFilter}
-            options={statusFilterOptions}
-            value={statusFilter}
-          />
-        </div>
-      ) : null}
-      {showsAllJobsRow ? (
+      {/* One row for the list's views and its bulk actions, so the jobs
+          start right under it instead of under three stacked bands. */}
+      {showsStatusTabs || showsAllJobsRow ? (
         <div
-          className="mx-5 grid gap-2 border-b border-(--surface-panel-border) py-3"
-          data-testid="shortlisted-all-jobs"
+          className="grid gap-1.5 border-b border-(--surface-panel-border) px-3 py-2"
+          {...(showsAllJobsRow
+            ? { "data-testid": "shortlisted-all-jobs" }
+            : {})}
         >
-          <div className="flex flex-wrap items-center gap-2">
-            {isDraftPreparationRunning ? (
-              <>
-                <p
-                  aria-live="polite"
-                  className="m-0 text-sm text-primary"
-                  role="status"
-                >
-                  {draftPreparation.stopRequested
-                    ? "Stopping · finishing the resumes already started · "
-                    : "Writing resumes · "}
-                  {draftPreparation.completedCount +
-                    draftPreparation.failedCount}{" "}
-                  of {draftPreparation.totalCount} finished
-                  {(() => {
-                    const minutes = estimateResumeBatchMinutesLeft(
-                      draftPreparation.durationsMs ?? [],
-                      draftPreparation.totalCount -
-                        draftPreparation.completedCount -
-                        draftPreparation.failedCount,
-                      draftPreparation.elapsedMs === undefined
-                        ? undefined
-                        : {
-                            elapsedMs: draftPreparation.elapsedMs,
-                            completedCount:
-                              draftPreparation.completedCount +
-                              draftPreparation.failedCount,
-                          },
-                    );
-                    return !draftPreparation.stopRequested && minutes !== null
-                      ? ` · about ${minutes} min left`
-                      : "";
-                  })()}
-                </p>
-                {draftPreparation.stopRequested ? null : (
-                  <Button
-                    className="h-8 px-2.5 text-xs font-medium tracking-normal normal-case"
-                    onClick={onStopTailoredDraftPreparation}
-                    size="compact"
-                    type="button"
-                    variant="ghost"
-                  >
-                    Stop new resumes
-                  </Button>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+            {showsStatusTabs ? (
+              <div className="min-w-0 max-w-full overflow-x-auto">
+                <SegmentedControl
+                  label="Show shortlisted jobs by status"
+                  onValueChange={setStatusFilter}
+                  options={statusFilterOptions}
+                  value={statusFilter}
+                />
+              </div>
+            ) : null}
+            {showsAllJobsRow ? (
+              <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+                {isDraftPreparationRunning ? (
+                  <>
+                    <p
+                      aria-live="polite"
+                      className="m-0 text-(length:--text-small) text-primary"
+                      role="status"
+                    >
+                      {draftPreparation.stopRequested
+                        ? "Stopping · finishing the resumes already started · "
+                        : "Writing resumes · "}
+                      {draftPreparation.completedCount +
+                        draftPreparation.failedCount}{" "}
+                      of {draftPreparation.totalCount} finished
+                      {(() => {
+                        const minutes = estimateResumeBatchMinutesLeft(
+                          draftPreparation.durationsMs ?? [],
+                          draftPreparation.totalCount -
+                            draftPreparation.completedCount -
+                            draftPreparation.failedCount,
+                          draftPreparation.elapsedMs === undefined
+                            ? undefined
+                            : {
+                                elapsedMs: draftPreparation.elapsedMs,
+                                completedCount:
+                                  draftPreparation.completedCount +
+                                  draftPreparation.failedCount,
+                              },
+                        );
+                        return !draftPreparation.stopRequested &&
+                          minutes !== null
+                          ? ` · about ${minutes} min left`
+                          : "";
+                      })()}
+                    </p>
+                    {draftPreparation.stopRequested ? null : (
+                      <Button
+                        onClick={onStopTailoredDraftPreparation}
+                        size="toolbar"
+                        title="Resumes already started still finish."
+                        type="button"
+                        variant="ghost"
+                      >
+                        Stop new resumes
+                      </Button>
+                    )}
+                  </>
+                ) : isSelecting ? (
+                  <>
+                    <span className="text-(length:--text-small) font-medium text-foreground">
+                      {selectedJobIds.size} selected
+                    </span>
+                    {/* A "Create 0 resumes" button that can never be pressed
+                        is a dead end; the note below says why there is none. */}
+                    {selectedEligibleIds.length > 0 ? (
+                      <Button
+                        onClick={() => {
+                          onPrepareTailoredDrafts(selectedEligibleIds);
+                          clearSelection();
+                        }}
+                        size="toolbar"
+                        type="button"
+                        variant="secondary"
+                      >
+                        {selectedEligibleIds.length === 1
+                          ? "Create 1 resume"
+                          : `Create ${selectedEligibleIds.length} resumes`}
+                      </Button>
+                    ) : null}
+                    {onRemoveJobs ? (
+                      <Button
+                        disabled={isRemovingSelection}
+                        onClick={() => void removeSelection()}
+                        pending={isRemovingSelection}
+                        size="toolbar"
+                        type="button"
+                        variant="outline"
+                      >
+                        Remove from shortlist
+                      </Button>
+                    ) : null}
+                    {filteredJobIds.some((id) => !selectedJobIds.has(id)) ? (
+                      <Button
+                        onClick={() =>
+                          setSelectedJobIds([
+                            ...selectedJobIds,
+                            ...filteredJobIds,
+                          ])
+                        }
+                        size="toolbar"
+                        type="button"
+                        variant="ghost"
+                      >
+                        Select all {filteredJobIds.length}
+                      </Button>
+                    ) : null}
+                    {/* Same words as the Find jobs bar: "Clear". */}
+                    <Button
+                      aria-label="Clear selection"
+                      onClick={clearSelection}
+                      size="toolbar"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Clear
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    {draftEligibleCount > 0 ? (
+                      <Button
+                        data-testid="create-missing-resumes"
+                        disabled={draftPreparationBlocker !== null}
+                        onClick={() =>
+                          onPrepareTailoredDrafts([...eligibleResumeIds])
+                        }
+                        size="toolbar"
+                        title={`${queuePageCount > 1 ? "Covers every page. " : ""}Stop any time; finished resumes are kept. Tick jobs to act on only some.`}
+                        type="button"
+                        variant="secondary"
+                      >
+                        {draftRunCount === 1
+                          ? "Create the missing resume"
+                          : `Create ${draftRunCount} missing resumes`}
+                      </Button>
+                    ) : null}
+                    {readyToApplyCount > 0 && onApplyToAllReady ? (
+                      safeguardBlockerSentence ? (
+                        <Button
+                          data-testid="apply-all-safeguards"
+                          onClick={() => onOpenSafeguards?.()}
+                          size="toolbar"
+                          type="button"
+                          variant="secondary"
+                        >
+                          Open Safeguards
+                        </Button>
+                      ) : (
+                        <Button
+                          data-testid="apply-all-ready"
+                          disabled={isApplyToAllPending}
+                          onClick={() => onApplyToAllReady(readyToApplyCount)}
+                          pending={isApplyToAllPending}
+                          size="toolbar"
+                          type="button"
+                          variant="secondary"
+                        >
+                          {readyToApplyCount === 1
+                            ? "Apply to the 1 ready job"
+                            : totalReadyToApplyCount > readyToApplyCount
+                              ? `Apply to next ${readyToApplyCount} ready jobs`
+                              : `Apply to all ${readyToApplyCount} ready jobs`}
+                        </Button>
+                      )
+                    ) : null}
+                  </>
                 )}
-              </>
-            ) : isSelecting ? (
-              <>
-                <span className="text-sm font-medium text-foreground">
-                  {selectedJobIds.size} selected
-                </span>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={selectedEligibleIds.length === 0}
-                  onClick={() => {
-                    onPrepareTailoredDrafts(selectedEligibleIds);
-                    clearSelection();
-                  }}
-                >
-                  {selectedEligibleIds.length === 1
-                    ? "Create 1 resume"
-                    : `Create ${selectedEligibleIds.length} resumes`}
-                </Button>
-                {onRemoveJobs ? (
-                  <Button
-                    disabled={isRemovingSelection}
-                    onClick={() => void removeSelection()}
-                    pending={isRemovingSelection}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Remove from shortlist
-                  </Button>
-                ) : null}
-                {filteredJobIds.some((id) => !selectedJobIds.has(id)) ? (
-                  <Button
-                    onClick={() =>
-                      setSelectedJobIds([...selectedJobIds, ...filteredJobIds])
-                    }
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    Select all {filteredJobIds.length}
-                  </Button>
-                ) : null}
-                <Button
-                  onClick={clearSelection}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Clear selection
-                </Button>
-              </>
-            ) : (
-              <>
-                {visibleQueue.length < queue.length ? (
-                  <p
-                    className="text-xs text-foreground-muted"
-                    data-testid="shortlist-bulk-filter-scope"
-                  >
-                    These actions cover all {queue.length} shortlisted jobs,
-                    including {queue.length - visibleQueue.length} the filter
-                    hides.
-                  </p>
-                ) : null}
-                {draftEligibleCount > 0 ? (
-                  <Button
-                    className="whitespace-normal text-sm font-medium normal-case tracking-normal"
-                    data-testid="create-missing-resumes"
-                    disabled={draftPreparationBlocker !== null}
-                    onClick={() =>
-                      onPrepareTailoredDrafts([...eligibleResumeIds])
-                    }
-                    size="sm"
-                    type="button"
-                    variant="secondary"
-                  >
-                    {draftRunCount === 1
-                      ? "Create the missing resume"
-                      : `Create ${draftRunCount} missing resumes`}
-                  </Button>
-                ) : null}
-                {totalReadyToApplyCount > readyToApplyCount ? (
-                  <p className="text-sm text-foreground-soft">
-                    {totalReadyToApplyCount} ready jobs. {readyToApplyCount}{" "}
-                    start now; {totalReadyToApplyCount - readyToApplyCount}{" "}
-                    remain after this batch.
-                  </p>
-                ) : null}
-                {readyToApplyCount > 0 && onApplyToAllReady ? (
-                  safeguardBlockerSentence ? (
-                    <Button
-                      className="whitespace-normal text-sm font-medium normal-case tracking-normal"
-                      data-testid="apply-all-safeguards"
-                      onClick={() => onOpenSafeguards?.()}
-                      size="sm"
-                      type="button"
-                      variant="secondary"
-                    >
-                      Open Safeguards
-                    </Button>
-                  ) : (
-                    <Button
-                      className="whitespace-normal text-sm font-medium normal-case tracking-normal"
-                      data-testid="apply-all-ready"
-                      disabled={isApplyToAllPending}
-                      onClick={() => onApplyToAllReady(readyToApplyCount)}
-                      pending={isApplyToAllPending}
-                      size="sm"
-                      type="button"
-                      variant="secondary"
-                    >
-                      {readyToApplyCount === 1
-                        ? "Apply to the 1 ready job"
-                        : totalReadyToApplyCount > readyToApplyCount
-                          ? `Apply to next ${readyToApplyCount} ready jobs`
-                          : `Apply to all ${readyToApplyCount} ready jobs`}
-                    </Button>
-                  )
-                ) : null}
-              </>
-            )}
+              </div>
+            ) : null}
           </div>
-          {isDraftPreparationRunning ? (
+          {/* Quiet notes under the row, only when they add something the
+              buttons do not say. */}
+          {isDraftPreparationRunning &&
+          draftPreparation.writingCount !== undefined ? (
             <p className="m-0 text-xs text-foreground-muted">
-              {draftPreparation.writingCount !== undefined
-                ? `${draftPreparation.writingCount} writing · ${draftPreparation.processingCount ?? 0} finishing · ${draftPreparation.waitingCount ?? 0} waiting. `
-                : ""}
-              Stopping lets the resumes already started finish.
+              {`${draftPreparation.writingCount} writing · ${draftPreparation.processingCount ?? 0} finishing · ${draftPreparation.waitingCount ?? 0} waiting`}
             </p>
-          ) : isSelecting ? (
+          ) : null}
+          {isSelecting && selectedEligibleIds.length < selectedJobIds.size ? (
             <p className="m-0 text-xs text-foreground-muted">
-              {selectedEligibleIds.length < selectedJobIds.size
-                ? `${selectedEligibleIds.length} of the selected jobs need a resume; the others keep theirs. `
-                : ""}
-              Ticks stay when you change pages or filters.
+              {selectedEligibleIds.length === 0
+                ? selectedJobIds.size === 1
+                  ? "The selected job already has a resume."
+                  : "The selected jobs already have resumes."
+                : `${selectedEligibleIds.length} of the selected jobs need a resume; the others keep theirs.`}
             </p>
-          ) : draftEligibleCount > 0 ? (
+          ) : null}
+          {showsAllJobsRow &&
+          !isDraftPreparationRunning &&
+          !isSelecting &&
+          bulkActionsReachHiddenJobs ? (
+            <p
+              className="m-0 text-xs text-foreground-muted"
+              data-testid="shortlist-bulk-filter-scope"
+            >
+              {draftEligibleCount > 0 && showsApplyAllButton
+                ? "These buttons act on all shortlisted jobs, not just the ones shown."
+                : "This button acts on all shortlisted jobs, not just the ones shown."}
+            </p>
+          ) : null}
+          {showsAllJobsRow &&
+          !isDraftPreparationRunning &&
+          !isSelecting &&
+          totalReadyToApplyCount > readyToApplyCount ? (
             <p className="m-0 text-xs text-foreground-muted">
-              {queuePageCount > 1 ? "Covers every page. " : ""}Stop any time;
-              finished resumes are kept. Tick jobs to act on only some.
+              {totalReadyToApplyCount} ready jobs. {readyToApplyCount} start
+              now; {totalReadyToApplyCount - readyToApplyCount} remain after
+              this batch.
             </p>
           ) : null}
           {!isDraftPreparationRunning &&
@@ -738,6 +804,9 @@ export function ReviewQueueListPanel({
                 preparedJobIds,
                 applicationPreparingJobIds,
               );
+              const statusLabel = item.listingAssessmentPending
+                ? "Assessing listing"
+                : workflowStatus.label;
 
               return (
                 <ReviewQueueRow
@@ -747,6 +816,7 @@ export function ReviewQueueListPanel({
                     separator: " • ",
                   })}
                   checked={selectedJobIds.has(item.jobId)}
+                  levelLabel={describeQueueItemResumeLevel(item)}
                   possibleDuplicate={possibleDuplicateJobIds.has(item.jobId)}
                   selectionDisabled={isDraftPreparationRunning}
                   onToggleSelection={toggleSelection}
@@ -754,7 +824,8 @@ export function ReviewQueueListPanel({
                   key={item.jobId}
                   onSelect={selectItem}
                   onSelectionKeyDown={handleListKeyDown}
-                  resumePolicyCaption={
+                  resumePolicyCaption={getReviewQueueRowCaption(
+                    statusLabel,
                     // While this job's resume is being (re)written the row's
                     // status already says so; the caption must not still read
                     // "Resume ready — Apply approves it" for the old text.
@@ -763,15 +834,11 @@ export function ReviewQueueListPanel({
                       : getReviewQueueResumePolicyCaption(
                           item,
                           assetsByJobId.get(item.jobId),
-                        )
-                  }
+                        ),
+                  )}
                   selected={selectedItem?.jobId === item.jobId}
                   showProgress={workflowStatus.label === "Writing resume"}
-                  statusLabel={
-                    item.listingAssessmentPending
-                      ? "Assessing listing"
-                      : workflowStatus.label
-                  }
+                  statusLabel={statusLabel}
                   statusTone={workflowStatus.tone}
                   title={item.title}
                 />

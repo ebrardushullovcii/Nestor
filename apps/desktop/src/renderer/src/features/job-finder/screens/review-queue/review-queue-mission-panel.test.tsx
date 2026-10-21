@@ -263,6 +263,60 @@ describe("ReviewQueueMissionPanel", () => {
     expect(props.onGenerateResume).toHaveBeenCalledWith("job_1");
   });
 
+  it("names the review step, not Apply, when an Aggressive built-in resume must be read", () => {
+    renderPanel({
+      selectedAsset: createReadyAsset({
+        storagePath: null,
+        generationMethod: "deterministic",
+        generationReason: "provider_failed",
+      }),
+      selectedItem: createItem({
+        assetStatus: "ready",
+        resumeAssetId: "asset_1",
+        resumeTailoringMode: "aggressive",
+        resumeReview: { status: "needs_review" },
+      }),
+    });
+
+    expect(screen.getByTestId("shortlisted-state-line").textContent).toBe(
+      "AI could not write this resume, so it keeps your saved wording. Try again, or review it and use it as it is.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Review the resume" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+  });
+
+  it("offers to write the resume for a job whose resume kept the original wording", () => {
+    const onApproveResumeAndApply = vi.fn();
+    const props = renderPanel({
+      onApproveResumeAndApply,
+      selectedAsset: createReadyAsset({
+        storagePath: null,
+        generationMethod: "deterministic",
+        generationReason: "listing_text_missing",
+      }),
+      selectedItem: createItem({
+        assetStatus: "ready",
+        resumeAssetId: "asset_1",
+        resumeTailoringMode: "aggressive",
+        resumeReview: { status: "needs_review" },
+        resumeWrittenWithoutListing: true,
+      }),
+    });
+
+    // The job's own level stays chosen and choosable: writing uses it.
+    const aggressive = screen.getByRole("radio", { name: /Aggressive/ });
+    expect(aggressive.getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByText("Not possible for this job")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create the resume" }));
+    expect(props.onGenerateResume).toHaveBeenCalledWith("job_1");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Apply with your original wording" }),
+    );
+    expect(onApproveResumeAndApply).toHaveBeenCalledWith("job_1");
+  });
+
   it("does not offer an AI retry once the built-in resume is approved", () => {
     renderPanel({
       selectedAsset: createReadyAsset({
@@ -293,8 +347,12 @@ describe("ReviewQueueMissionPanel", () => {
     // The primary already opens the resume, so it is not offered twice.
     expect(screen.queryByRole("button", { name: "Edit resume" })).toBeNull();
     expect(screen.getByTestId("shortlisted-state-line").textContent).toContain(
-      "keep or remove the flagged lines",
+      "Read it through, then approve it.",
     );
+    // ADR 0051: no line-by-line chore for Aggressive stretches.
+    expect(
+      screen.getByTestId("shortlisted-state-line").textContent,
+    ).not.toMatch(/flagged lines/);
   });
 
   it("shows a moving clock while the resume is written", () => {
