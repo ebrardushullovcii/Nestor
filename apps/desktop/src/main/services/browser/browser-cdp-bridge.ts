@@ -560,8 +560,32 @@ export class BrowserCdpBridge {
       request.method === "Browser.setDownloadBehavior"
     )
       return {};
-    // Profile cookies/storage are intentionally not exposed through automation.
-    // Website requests still use the persistent Electron session normally.
+    if (
+      request.method === "Storage.getCookies" ||
+      request.method === "Storage.setCookies"
+    ) {
+      if (
+        p.browserContextId !== undefined &&
+        p.browserContextId !== this.contextId
+      )
+        throw new Error("Unknown browser context.");
+      const target = [...this.targets.values()].find(
+        (candidate) => !candidate.page.contents.isDestroyed(),
+      );
+      if (!target)
+        throw new Error("A browser page is required for session cookies.");
+      // Playwright's APIRequestContext syncs cookies using browser-level Storage
+      // commands. Native Storage defaults to Electron's app session, so use an
+      // owned page's Network domain to keep reads and writes in its partition.
+      return this.forward(
+        { target },
+        request.method === "Storage.getCookies"
+          ? "Network.getAllCookies"
+          : "Network.setCookies",
+        request.method === "Storage.getCookies" ? {} : { cookies: p.cookies },
+      );
+    }
+    // Other profile storage and browser-wide commands remain unavailable.
     if (
       request.method.startsWith("Browser.") ||
       request.method.startsWith("Storage.")
