@@ -8,6 +8,31 @@ import {
 
 afterEach(() => vi.useRealTimers());
 
+test("native text writes read acceptance immediately without a per-field wait", async () => {
+  vi.useFakeTimers();
+  let value = "";
+  const fill = vi.fn((answer: string) => {
+    value = answer;
+    return Promise.resolve();
+  });
+  const waitForTimeout = vi.fn(() => Promise.resolve());
+  const page = {
+    locator: () => ({
+      nth: () => ({ fill, inputValue: () => Promise.resolve(value) }),
+    }),
+    waitForTimeout,
+  } as unknown as Page;
+  const started = Date.now();
+  const mechanics = createPlaywrightApplyPageMechanics(page);
+  for (let index = 0; index < 12; index++)
+    await expect(
+      mechanics.fillText(`c${index}`, "Robin Ashford"),
+    ).resolves.toEqual({ ok: true, observedValue: "Robin Ashford" });
+  expect(fill).toHaveBeenCalledTimes(12);
+  expect(waitForTimeout).not.toHaveBeenCalled();
+  expect(Date.now() - started).toBe(0);
+});
+
 test("apply and search page reads do not wait for an absent progress marker", async () => {
   vi.useFakeTimers();
   const evaluateAll = vi.fn((read: (elements: Element[]) => unknown) =>

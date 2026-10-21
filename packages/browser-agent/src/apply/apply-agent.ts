@@ -1,4 +1,5 @@
 import { createApplyTiming } from "./apply-timing";
+import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import { resumeFormFileNames } from "@nestor/contracts";
 import {
   parseToolArguments,
@@ -34,6 +35,7 @@ import {
   approvedApplicationLetter,
   createApplyGuardState,
   executeApplyProposal,
+  guardStop,
   fileFieldHoldsOtherFile,
   questionPrompt,
   type ApplyExecutionOutcome,
@@ -1245,6 +1247,7 @@ async function runMeasuredApplyAgent(
       question: string,
       answer: string,
     ) => Promise<WrittenAnswerCheck>,
+    deferTextCommit?: (commit: () => void) => void,
   ): Promise<ApplyExecutionOutcome> => {
     const writeKey = controlWriteKey(proposal);
     if (proposal.tool !== "finish") observationNeeded = true;
@@ -1262,6 +1265,7 @@ async function runMeasuredApplyAgent(
         config: runConfig,
         now,
         guardState,
+        deferTextRetention: deferTextCommit !== undefined,
         ...(classifyQuestions ? { classifyQuestions } : {}),
         checkWrittenAnswer,
         onAnswerSource: (source) => {
@@ -1270,10 +1274,24 @@ async function runMeasuredApplyAgent(
         },
       },
     );
-    if (isField && outcome.kind === "filled") {
-      timingRecord.onFieldFilled();
-      if (fromStoredFact) timingRecord.onStoredFactFilled();
-    }
+    const commitField = () => {
+      if (isField && outcome.kind === "filled") {
+        timingRecord.onFieldFilled();
+        if (fromStoredFact) timingRecord.onStoredFactFilled();
+      }
+      if (
+        writeKey &&
+        (outcome.kind === "filled" || outcome.kind === "attached")
+      )
+        completedControlWrites.add(writeKey);
+    };
+    if (
+      proposal.tool === "type" &&
+      outcome.kind === "filled" &&
+      deferTextCommit
+    )
+      deferTextCommit(commitField);
+    else commitField();
     if (proposal.tool === "upload" && outcome.kind === "attached")
       timingRecord.onUploadAttached();
     if (
@@ -1286,12 +1304,6 @@ async function runMeasuredApplyAgent(
       formStepIdentity(before) !== formStepIdentity(outcome.observation)
     ) {
       timingRecord.onStepAdvanced();
-    }
-    if (
-      writeKey &&
-      (outcome.kind === "filled" || outcome.kind === "attached")
-    ) {
-      completedControlWrites.add(writeKey);
     }
     return outcome;
   };
@@ -1478,7 +1490,80 @@ async function runMeasuredApplyAgent(
       // Continue waits for the model to see what was left for the person.
       let leftAnswerForPerson = false;
       let stopOutcome: AgentLoopToolOutcome | null = null;
+      const pendingFields: {
+        outcome: Extract<ApplyExecutionOutcome, { kind: "filled" }>;
+        before: ApplyFormObservation;
+        line: number;
+        commit: () => void;
+        typed: boolean;
+      }[] = [];
+      let lastTypedAt: number | null = null;
+      const settleText = async () => {
+        if (pendingFields.length === 0) return;
+        // Reads, fact checks and other value writes already used part of this
+        // window. Only wait out what remains after the last typed answer.
+        const remaining =
+          lastTypedAt === null
+            ? 0
+            : TEXT_RETENTION_MS - (performance.now() - lastTypedAt);
+        if (remaining > 0) await config.hands.wait(remaining);
+        const beforeSettle = pageTools.state.observation;
+        const after = await pageTools.observe();
+        syncObservation(after);
+        // Input handlers can attempt a send during the shared settle window.
+        // Run the same post-write guard again before accepting these writes.
+        const guardPause = await guardStop(
+          { config: runConfig, now, guardState },
+          after.url,
+        );
+        if (guardPause) {
+          stopped = true;
+          stopOutcome = await outcomeToLoop({
+            kind: "paused",
+            pause: guardPause,
+          });
+        }
+        if (applyStepShape(beforeSettle) !== applyStepShape(after))
+          stopped = true;
+        for (const pending of pendingFields.splice(0)) {
+          const { outcome, before, line, commit, typed } = pending;
+          const control = before.controls.find(
+            (entry) => entry.ref === outcome.filled.ref,
+          )!;
+          const error = typed
+            ? textRetentionError(
+                before,
+                after,
+                control,
+                outcome.filled.answer.value,
+              )
+            : null;
+          if (error || guardPause) {
+            lines[line] =
+              `${outcome.filled.ref}: "${outcome.filled.label}": ${error ?? guardPause!.summary}`;
+            stopped = true;
+          } else {
+            commit();
+            const reported = await outcomeToLoop({
+              ...outcome,
+              observation: after,
+            });
+            lines[line] =
+              `${outcome.filled.ref}: ${reported.kind === "ok" ? reported.content : "Stopped."}`;
+            wrote = true;
+          }
+        }
+        lastTypedAt = null;
+      };
       for (const [index, step] of steps.entries()) {
+        // A click/upload can replace this step's controls. Repeated writes
+        // must also finish checking the previous answer before replacing it.
+        if (
+          step.tool === "click" ||
+          step.tool === "upload" ||
+          pendingFields.some((entry) => entry.outcome.filled.ref === step.ref)
+        )
+          await settleText();
         if (stopped) {
           lines.push(`${step.ref}: not attempted (batch stopped).`);
           continue;
@@ -1490,6 +1575,7 @@ async function runMeasuredApplyAgent(
         const currentControl = pageTools.state.observation?.controls.find(
           (control) => control.ref === step.ref,
         );
+        let commitText = () => {};
         const outcome: ApplyExecutionOutcome =
           writeKey &&
           currentControl?.answered &&
@@ -1501,12 +1587,38 @@ async function runMeasuredApplyAgent(
                   "That exact field was already completed on this page. Use the latest observation.",
                 observation: pageTools.state.observation!,
               }
-            : await runProposal(step, checkFromBatch);
-        if (outcome.kind === "filled" || outcome.kind === "attached")
-          wrote = true;
-        const reported = await outcomeToLoop(outcome, { withPage: false });
+            : await runProposal(
+                step,
+                checkFromBatch,
+                step.tool === "type"
+                  ? (commit) => {
+                      commitText = commit;
+                    }
+                  : undefined,
+              );
+        const provisionalText =
+          step.tool === "type" && outcome.kind === "filled";
+        const provisionalField = outcome.kind === "filled";
+        if (provisionalField) {
+          if (provisionalText) lastTypedAt = performance.now();
+          pendingFields.push({
+            outcome,
+            before: beforePage,
+            line: lines.length,
+            commit: commitText,
+            typed: provisionalText,
+          });
+        }
+        if (outcome.kind === "attached") wrote = true;
+        const reported: AgentLoopToolOutcome = provisionalField
+          ? {
+              kind: "ok",
+              content: "Checking whether the field kept the answer.",
+            }
+          : await outcomeToLoop(outcome, { withPage: false });
+        if (provisionalField) syncObservation(outcome.observation);
         lines.push(
-          `${step.ref}: ${reported.kind === "ok" ? reported.content : reported.kind === "stop" ? reported.reason : "Stopped."}`,
+          `${step.ref}: ${step.tool === "type" && outcome.kind === "refused" && currentControl ? `"${questionPrompt(currentControl)}": ` : ""}${reported.kind === "ok" ? reported.content : reported.kind === "stop" ? reported.reason : "Stopped."}`,
         );
         if (reported.kind !== "ok") stopOutcome = reported;
         const afterPage = pageTools.state.observation!;
@@ -1603,6 +1715,7 @@ async function runMeasuredApplyAgent(
         )
           stopped = true;
       }
+      await settleText();
       if (parsed.thenContinue) {
         const current = pageTools.state.observation!;
         const unresolved = unresolvedRequiredControls(current);

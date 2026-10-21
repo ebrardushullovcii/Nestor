@@ -1,4 +1,5 @@
 import { questionClassificationKey } from "./question-classification";
+import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import {
   resumeFormFileNames,
   type ApplicationAttemptQuestion,
@@ -111,6 +112,8 @@ export type ApplyExecutionOutcome =
     };
 
 export interface ApplyExecutorDeps {
+  /** fill_fields verifies all provisional text writes before recording them. */
+  deferTextRetention?: boolean;
   config: ApplyAgentConfig;
   now: () => Date;
   guardState: ApplyGuardState;
@@ -987,7 +990,7 @@ interface GuardReview {
 }
 
 /** Whether the guard stopped something worth ending the run over. */
-async function guardStop(
+export async function guardStop(
   deps: ApplyExecutorDeps,
   pageUrl: string | null,
 ): Promise<ApplyPause | null> {
@@ -1559,6 +1562,20 @@ export async function executeApplyProposal(
         if (!typed.ok) {
           return { kind: "refused", reason: typed.error, observation };
         }
+        let retainedPage: ApplyFormObservation | null = null;
+        if (!deps.deferTextRetention) {
+          await config.hands.wait(TEXT_RETENTION_MS);
+          const after = await config.hands.observe();
+          retainedPage = after;
+          const error = textRetentionError(
+            observation,
+            after,
+            control,
+            letter.letter.text,
+          );
+          if (error)
+            return { kind: "refused", reason: error, observation: after };
+        }
         afterWrite(deps, questionPrompt(control));
         const letterStop = await guardStop(deps, observation.url);
         if (letterStop) {
@@ -1588,7 +1605,7 @@ export async function executeApplyProposal(
             },
             at,
           },
-          observation: await config.hands.observe(),
+          observation: retainedPage ?? (await config.hands.observe()),
         };
       }
 
@@ -1613,6 +1630,20 @@ export async function executeApplyProposal(
       if (!write.ok) {
         return { kind: "refused", reason: write.error, observation };
       }
+      let retainedPage: ApplyFormObservation | null = null;
+      if (!deps.deferTextRetention) {
+        await config.hands.wait(TEXT_RETENTION_MS);
+        const after = await config.hands.observe();
+        retainedPage = after;
+        const error = textRetentionError(
+          observation,
+          after,
+          control,
+          answer.value,
+        );
+        if (error)
+          return { kind: "refused", reason: error, observation: after };
+      }
       afterWrite(deps, questionPrompt(control));
       const stop = await guardStop(deps, observation.url);
       if (stop) {
@@ -1627,7 +1658,7 @@ export async function executeApplyProposal(
           answer,
           at,
         },
-        observation: await config.hands.observe(),
+        observation: retainedPage ?? (await config.hands.observe()),
       };
     }
 

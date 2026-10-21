@@ -1375,11 +1375,8 @@ export function createPlaywrightApplyPageMechanics(
       }
       try {
         await locator.fill(value, { timeout: 5_000 });
-        // Some controlled inputs accept the synthetic input event and then
-        // immediately clear themselves because the site did not accept the
-        // value. Recording that as a successful write makes the agent revisit
-        // the same empty field indefinitely.
-        await page.waitForTimeout(300);
+        // Check immediate acceptance here. The apply workflow checks retention
+        // after 300 ms, sharing that window across a batch of typed answers.
         const observedValue = await locator.inputValue({ timeout: 2_000 });
         if (value.trim().length > 0 && observedValue.trim().length === 0) {
           return {

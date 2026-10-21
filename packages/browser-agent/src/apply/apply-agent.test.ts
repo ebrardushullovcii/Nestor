@@ -103,8 +103,13 @@ function hands(source: RawApplyPage): ApplyPageHands {
     goBack: () =>
       Promise.resolve({ ok: true, url: "https://apply.example.test/form" }),
     readText: () => Promise.resolve("Apply for the role"),
-    fillText: (_ref, value) =>
-      Promise.resolve({ ok: true, observedValue: value }),
+    fillText: (ref, value) => {
+      const control = source.controls.find(
+        (entry) => (entry.ref ?? `c${entry.index}`) === ref,
+      );
+      if (control) control.value = value;
+      return Promise.resolve({ ok: true, observedValue: value });
+    },
     chooseOption: (_ref, option) =>
       Promise.resolve({ ok: true, observedValue: option }),
     setToggle: () => Promise.resolve({ ok: true, observedValue: "checked" }),
@@ -1010,15 +1015,18 @@ describe("apply agent run endings", () => {
 
   test("does not trust a write receipt when the live required field stayed empty", async () => {
     const source = page({ controls: [{ ...nameControl(), value: "" }] });
+    const input = config(source);
+    input.hands.fillText = (_ref, value) =>
+      Promise.resolve({ ok: true, observedValue: value });
     const result = await runApplyAgent(
-      config(source),
+      input,
       scriptedModel([
         { name: "type", args: { ref: "c0", text: "Robin Ashford" } },
         { name: "finish", args: { reason: "The form is ready" } },
       ]),
     );
 
-    expect(result.filled).toHaveLength(1);
+    expect(result.filled).toHaveLength(0);
     // The field the site cleared is not called done: it goes to the person.
     expect(result.outcome).toBe("paused");
   });
@@ -3052,6 +3060,227 @@ describe("fill_fields visible steps", () => {
     } satisfies LLMClient;
   }
 
+  test.each([false, true])(
+    "text batches settle once and retain only kept answers (clearing=%s)",
+    async (clearing) => {
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "Date", "performance"],
+      });
+      try {
+        const source = page({
+          controls: Array.from({ length: 6 }, (_, index) =>
+            field(index, `Answer ${index}`),
+          ),
+          actions: [
+            { index: 0, label: "Continue", visible: true, disabled: false },
+          ],
+        });
+        const { input } = writable(source);
+        const write = input.hands.fillText;
+        input.hands.fillText = async (ref, value) => {
+          const result = await write(ref, value);
+          if (clearing && (ref === "c0" || ref === "c3"))
+            setTimeout(
+              () => {
+                source.controls[Number(ref.slice(1))].value = "";
+              },
+              ref === "c0" ? 100 : 250,
+            );
+          return result;
+        };
+        const wait = vi.fn(
+          (ms: number) =>
+            new Promise<void>((resolve) => setTimeout(resolve, ms)),
+        );
+        input.hands.wait = wait;
+        const click = vi.fn(input.hands.clickElement);
+        input.hands.clickElement = click;
+        let report = "";
+        const started = performance.now();
+        const run = runApplyAgent(
+          input,
+          modelFor(
+            source.controls.map((control) => ({
+              tool: "type",
+              ref: `c${control.index}`,
+              text: "Robin Ashford",
+            })),
+            (messages) => {
+              report = messages
+                .filter((message) => message.role === "tool")
+                .map((message) => message.content)
+                .join("\n");
+            },
+            clearing ? "a0" : undefined,
+          ),
+        );
+        await vi.runAllTimersAsync();
+        const result = await run;
+        expect(performance.now() - started).toBe(300);
+        expect(wait).toHaveBeenCalledTimes(1);
+        expect(wait).toHaveBeenCalledWith(300);
+        expect(result.timing?.requests[0]?.fieldsFilled).toBe(clearing ? 4 : 6);
+        expect(result.reviewFilled?.map((entry) => entry.ref).sort()).toEqual(
+          clearing
+            ? ["c1", "c2", "c4", "c5"]
+            : ["c0", "c1", "c2", "c3", "c4", "c5"],
+        );
+        expect(result.filled.map((entry) => entry.ref).sort()).toEqual(
+          clearing
+            ? ["c1", "c2", "c4", "c5"]
+            : ["c0", "c1", "c2", "c3", "c4", "c5"],
+        );
+        if (clearing) {
+          expect(report).toContain('c0: "Answer 0": The field cleared');
+          expect(report).toContain('c3: "Answer 3": The field cleared');
+          expect(report).not.toContain('Filled in "Answer 0"');
+          expect(report).not.toContain('Filled in "Answer 3"');
+          expect(report).toContain("Continue was not pressed");
+          expect(click).not.toHaveBeenCalled();
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  test("single-field type still waits and rejects a delayed clear", async () => {
+    vi.useFakeTimers();
+    try {
+      const source = page({ controls: [field(0, "Full name")] });
+      const { input } = writable(source);
+      const write = input.hands.fillText;
+      input.hands.fillText = async (ref, value) => {
+        const result = await write(ref, value);
+        setTimeout(() => {
+          source.controls[0].value = "";
+        }, 250);
+        return result;
+      };
+      input.hands.wait = vi.fn(
+        (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+      );
+      const run = runApplyAgent(
+        input,
+        scriptedModel([
+          { name: "type", args: { ref: "c0", text: "Robin Ashford" } },
+          {
+            name: "finish",
+            args: { reason: "The field needs a person.", needsPerson: true },
+          },
+        ]),
+      );
+      await vi.runAllTimersAsync();
+      const result = await run;
+      expect(input.hands.wait).toHaveBeenCalledExactlyOnceWith(300);
+      expect(result.filled).toHaveLength(0);
+      expect(result.timing?.requests[0]?.fieldsFilled).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("batch retention overlaps other value writes", async () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "Date", "performance"],
+    });
+    try {
+      const source = page({
+        controls: [
+          field(0, "Full name"),
+          {
+            ...field(1, "Country"),
+            tagName: "select",
+            options: ["United Kingdom"],
+          },
+        ],
+      });
+      const { input } = writable(source);
+      const select = input.hands.chooseOption;
+      input.hands.chooseOption = async (ref, value) => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 200));
+        return select(ref, value);
+      };
+      input.hands.wait = vi.fn(
+        (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+      );
+      const run = runApplyAgent(
+        input,
+        modelFor([
+          { tool: "type", ref: "c0", text: "Robin Ashford" },
+          { tool: "select", ref: "c1", option: "United Kingdom" },
+        ]),
+      );
+      await vi.runAllTimersAsync();
+      expect((await run).filled).toHaveLength(2);
+      expect(input.hands.wait).toHaveBeenCalledExactlyOnceWith(100);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a send attempted during batch settling still triggers the existing guard before Continue", async () => {
+    vi.useFakeTimers();
+    try {
+      const source = page({
+        controls: [field(0, "Full name"), field(1, "Email")],
+        actions: [
+          { index: 0, label: "Continue", visible: true, disabled: false },
+        ],
+      });
+      const { input } = writable(source);
+      const write = input.hands.fillText;
+      let attempted = false;
+      input.hands.fillText = async (ref, value) => {
+        const result = await write(ref, value);
+        setTimeout(() => {
+          attempted = true;
+        }, 100);
+        return result;
+      };
+      input.hands.wait = (ms) =>
+        new Promise<void>((resolve) => setTimeout(resolve, ms));
+      input.safety = {
+        readBlockedAttempt: () =>
+          Promise.resolve(
+            attempted
+              ? {
+                  kind: "dom_submit",
+                  method: "POST",
+                  url: source.url,
+                  at: "2026-10-21T10:00:00.000Z",
+                }
+              : null,
+          ),
+        registerPreparedValue: () => Promise.resolve(),
+        openIntermediateWriteWindow: () => Promise.resolve(),
+        closeIntermediateWriteWindow: () => Promise.resolve(),
+        checkServiceWorker: () => Promise.resolve(null),
+      };
+      const click = vi.fn(input.hands.clickElement);
+      input.hands.clickElement = click;
+      const run = runApplyAgent(
+        input,
+        modelFor(
+          [
+            { tool: "type", ref: "c0", text: "Robin Ashford" },
+            { tool: "type", ref: "c1", text: "Robin Ashford" },
+          ],
+          undefined,
+          "a0",
+        ),
+      );
+      await vi.runAllTimersAsync();
+      const result = await run;
+      expect(result.pauses[0]?.code).toBe("site_tried_to_send");
+      expect(click).not.toHaveBeenCalled();
+      expect(result.filled).toHaveLength(0);
+      expect(result.timing?.requests[0]?.fieldsFilled).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("six answerable steps including a first-step resume take six fill decisions and a finish", async () => {
     const source = page();
     let step = 1;
@@ -4003,7 +4232,7 @@ describe("fill_fields visible steps", () => {
     expect(result.notes.at(-1)).toContain(
       "fields_per_turn(filled/attempted)=[5/5,0/0]",
     );
-    expect(result.timing?.pageReads).toBe(13); // safety reads retained per field
+    expect(result.timing?.pageReads).toBe(14); // safety reads plus the shared retention read
   });
 
   test("a refusal in the middle names both attempted and unattempted fields", async () => {
@@ -4034,7 +4263,7 @@ describe("fill_fields visible steps", () => {
     );
     expect(writes).toEqual(["c0"]);
     expect(report).toContain('c0: Filled in "Full name".');
-    expect(report).toContain("c1: The field refused the write.");
+    expect(report).toContain('c1: "Email": The field refused the write.');
     expect(report).toContain("c2: not attempted (batch stopped).");
     expect(result.timing?.requests[0]).toMatchObject({
       fieldsAttempted: 2,
@@ -4079,7 +4308,7 @@ describe("fill_fields visible steps", () => {
       expect(report).toContain("c1: not attempted (batch stopped).");
       expect(result.timing?.requests[0]).toMatchObject({
         fieldsAttempted: 1,
-        fieldsFilled: 1,
+        fieldsFilled: change === "new field" ? 1 : 0,
       });
     },
   );

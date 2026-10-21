@@ -122,8 +122,13 @@ function configFor(
     goBack: () =>
       Promise.resolve({ ok: true, url: "https://apply.example.test/form" }),
     readText: () => Promise.resolve("Apply for the role"),
-    fillText: (_ref, value) =>
-      Promise.resolve({ ok: true, observedValue: value }),
+    fillText: (ref, value) => {
+      const control = page.controls.find(
+        (entry) => (entry.ref ?? `c${entry.index}`) === ref,
+      );
+      if (control) control.value = value;
+      return Promise.resolve({ ok: true, observedValue: value });
+    },
     chooseOption: (_ref, option) =>
       Promise.resolve({ ok: true, observedValue: option }),
     setToggle: (_ref, checked) =>
@@ -228,12 +233,13 @@ describe("apply policy executor", () => {
         rawControl({ index: 0, tagName: "textarea", label: "Why this role?" }),
       ],
     });
-    const fillText = vi.fn((_ref: string, value: string) =>
-      Promise.resolve({
+    const fillText = vi.fn((_ref: string, value: string) => {
+      source.controls[0].value = value;
+      return Promise.resolve({
         ok: true as const,
         observedValue: value,
-      }),
-    );
+      });
+    });
     const { config } = configFor(source, { hands: { fillText } });
     const result = await executeApplyProposal(
       {
@@ -576,7 +582,7 @@ describe("apply policy executor", () => {
     // is never typed; it is left for them.
     const other = await executeApplyProposal(
       { tool: "type", ref: "c0", text: "someone.else@example.test" },
-      observation.signature,
+      observationOf(page).signature,
       { config, now, guardState: createApplyGuardState() },
     );
     expect(other.kind).toBe("suggestion");
@@ -2898,9 +2904,10 @@ describe("the model's answers stand when the person's facts support them (ADR 00
         }),
       ],
     });
-    const fillText = vi.fn((_ref: string, value: string) =>
-      Promise.resolve({ ok: true as const, observedValue: value }),
-    );
+    const fillText = vi.fn((_ref: string, value: string) => {
+      page.controls[0].value = value;
+      return Promise.resolve({ ok: true as const, observedValue: value });
+    });
     const { config } = configFor(page, { hands: { fillText } });
     config.sources.reusableAnswers = [];
     const { deps: run, checkWrittenAnswer } = deps(config, true);

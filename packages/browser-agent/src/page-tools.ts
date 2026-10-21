@@ -6,6 +6,7 @@ import {
 import { describeBrowserError } from "@nestor/contracts";
 
 import { describeObservation } from "./apply/apply-prompts";
+import { TEXT_RETENTION_MS, textRetentionError } from "./apply/text-retention";
 import type { ApplyFormObservation, ApplyPageHands } from "./apply/types";
 
 /**
@@ -465,8 +466,16 @@ export function createPageTools(
         if (!written.ok) {
           return ok(`The field would not take that: ${written.error}`);
         }
+        const before = state.observation!;
+        await hands.wait(TEXT_RETENTION_MS);
+        const after = await observe();
+        const control = before.controls.find((entry) => entry.ref === ref);
+        const error = control
+          ? textRetentionError(before, after, control, text)
+          : "The field is no longer on this page.";
+        if (error) return ok(`The field would not take that: ${error}`);
         return ok(
-          `Typed into ${ref}. The page now:\n\n${describe(await observe())}`,
+          `Typed into ${ref}. The page now:\n\n${describe(after)}`,
           true,
         );
       },
