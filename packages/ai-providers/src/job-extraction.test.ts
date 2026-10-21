@@ -657,7 +657,7 @@ describe("job extraction with openai-compatible client", () => {
       const messages = capturedBody.messages ?? [];
       expect(messages[0]?.content).toContain("Return at most 12 jobs.");
       expect(messages[0]?.content).toContain(
-        "If only a short search-results snippet is visible",
+        "shortest verbatim role snippet on the card",
       );
       const parsedUserPayload = JSON.parse(
         messages[1]?.content ?? "{}",
