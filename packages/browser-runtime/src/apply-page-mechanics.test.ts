@@ -372,13 +372,13 @@ describe("reading the choices of lists the page draws itself", () => {
     await page.close();
   });
 
-  test("does not report success when a controlled input clears the value", async () => {
+  test("does not report immediate success when a controlled input clears the value", async () => {
     const page = await browser.newPage();
     await page.setContent(`
       <label>Current location <input id="location" /></label>
       <script>
         document.getElementById("location").addEventListener("input", (event) => {
-          setTimeout(() => { event.target.value = ""; }, 10);
+          event.target.value = "";
         });
       </script>
     `);

@@ -252,3 +252,133 @@ test("reads only the new question when a conditional field appears and keeps ear
   await classify(first, "step1");
   expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });
+
+function clientReplyingSparse(args: unknown): LLMClient {
+  return {
+    chatWithTools: vi.fn(() =>
+      Promise.resolve({
+        content: "",
+        toolCalls: [
+          {
+            id: "call_1",
+            type: "function" as const,
+            function: {
+              name: "report_question_kinds",
+              arguments: JSON.stringify(args),
+            },
+          },
+        ],
+      }),
+    ),
+  } as unknown as LLMClient;
+}
+
+test("plain questions are named by index and only flagged ones are spelled out", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [0, 2],
+    flagged: [
+      {
+        index: 1,
+        eligibilityKind: null,
+        asksAboutPay: true,
+        asksCurrentPay: false,
+        asksHiringCountry: false,
+        required: true,
+        declarationKind: null,
+      },
+    ],
+  });
+  const result = await classifyApplicationQuestions({
+    client,
+    questions: [
+      { prompt: "Full name", kind: "text", options: [] },
+      { prompt: "Gehaltsvorstellung", kind: "text", options: [] },
+      { prompt: "Portfolio link", kind: "text", options: [] },
+    ],
+  });
+  expect(result.get("Full name")).toEqual({
+    asksAboutPay: false,
+    asksCurrentPay: false,
+    asksHiringCountry: false,
+    declarationKind: null,
+  });
+  expect(result.get("Gehaltsvorstellung")).toMatchObject({
+    asksAboutPay: true,
+    required: true,
+  });
+  expect(result.get("Portfolio link")?.declarationKind).toBeNull();
+  const tool = vi.mocked(client.chatWithTools).mock.calls[0]?.[1]?.[0];
+  expect(tool?.function.parameters.required).toEqual([
+    "plainIndexes",
+    "flagged",
+  ]);
+});
+
+test("a question listed as plain and flagged keeps its flagged reading", async () => {
+  const result = await classifyApplicationQuestions({
+    client: clientReplyingSparse({
+      plainIndexes: [0],
+      flagged: [
+        {
+          index: 0,
+          eligibilityKind: null,
+          asksAboutPay: false,
+          asksCurrentPay: false,
+          asksHiringCountry: false,
+          required: false,
+          declarationKind: "terms_acceptance",
+        },
+      ],
+    }),
+    questions: [
+      { prompt: "I accept the terms", kind: "checkbox", options: [] },
+    ],
+  });
+  expect(result.get("I accept the terms")?.declarationKind).toBe(
+    "terms_acceptance",
+  );
+});
+
+test("a question left out of both lists is not taken as plain", async () => {
+  const classify = createQuestionClassifier({
+    client: clientReplyingSparse({ plainIndexes: [], flagged: [] }),
+  });
+  await expect(classify(controls())).rejects.toThrow("every question");
+});
+
+test("settled readings are offered only once every question has come back", async () => {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const client = {
+    chatWithTools: vi.fn(async () => {
+      await gate;
+      return {
+        content: "",
+        toolCalls: [
+          {
+            id: "call_1",
+            type: "function" as const,
+            function: {
+              name: "report_question_kinds",
+              arguments: JSON.stringify({ plainIndexes: [0], flagged: [] }),
+            },
+          },
+        ],
+      };
+    }),
+  } as unknown as LLMClient;
+  const classify = createQuestionClassifier({ client });
+  const pending = classify(controls());
+  expect(classify.settled(controls())).toBeUndefined();
+  release();
+  await pending;
+  expect(classify.settled(controls())?.get("Pay")).toEqual({
+    asksAboutPay: false,
+    asksCurrentPay: false,
+    asksHiringCountry: false,
+    declarationKind: null,
+  });
+  expect(classify.settled(controls("Rate"))).toBeUndefined();
+});

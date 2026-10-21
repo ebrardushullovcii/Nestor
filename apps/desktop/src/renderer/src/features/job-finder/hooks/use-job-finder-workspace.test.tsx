@@ -682,6 +682,127 @@ describe("useJobFinderWorkspace revision window", () => {
     expect(syncWorkspace.mock.calls).toEqual([[null], [null], [null]]);
     expect(getWorkspace).not.toHaveBeenCalled();
   });
+
+  it("applies a change answered as a delta and tells main which revision it holds", async () => {
+    const initial = createWorkspace("initial-job");
+    const noteWorkspaceRevision = vi.fn<(revision: number) => void>();
+    const deltaAction = vi.fn<() => Promise<JobFinderWorkspaceSyncResult>>();
+    Object.assign(window.nestor.jobFinder as object, {
+      noteWorkspaceRevision,
+      checkBrowserSession: deltaAction,
+    });
+    syncWorkspace.mockResolvedValueOnce(snapshotResult(initial, 1));
+    deltaAction.mockResolvedValueOnce({
+      kind: "delta",
+      delta: createJobReplacementDelta({
+        baseRevision: 1,
+        currentRevision: 2,
+        previousJobId: "initial-job",
+        currentJobId: "next-job",
+      }),
+    });
+    const { result } = renderHook(() => useJobFinderWorkspace());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await requireReadyWorkspace(result.current).actions.checkBrowserSession();
+    });
+
+    expect(
+      requireReadyWorkspace(result.current).workspace.selectedDiscoveryJobId,
+    ).toBe("next-job");
+    expect(noteWorkspaceRevision.mock.calls).toEqual([[1], [2]]);
+    // The next refresh builds on the revision the change produced.
+    syncWorkspace.mockResolvedValueOnce({
+      kind: "delta",
+      delta: createJobReplacementDelta({
+        baseRevision: 2,
+        currentRevision: 3,
+        previousJobId: "next-job",
+        currentJobId: "later-job",
+      }),
+    });
+    await act(async () => {
+      await requireReadyWorkspace(result.current).actions.refreshWorkspace();
+    });
+    expect(syncWorkspace.mock.calls).toEqual([[null], [2]]);
+    expect(getWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("applies a finished search answered as a delta and keeps its revision", async () => {
+    const initial = createWorkspace("initial-job");
+    const noteWorkspaceRevision = vi.fn<(revision: number) => void>();
+    Object.assign(window.nestor.jobFinder as object, {
+      noteWorkspaceRevision,
+      runAgentDiscovery: () =>
+        Promise.resolve({
+          outcome: "cancelled",
+          sync: {
+            kind: "delta",
+            delta: createJobReplacementDelta({
+              baseRevision: 1,
+              currentRevision: 2,
+              previousJobId: "initial-job",
+              currentJobId: "found-job",
+            }),
+          },
+        }),
+    });
+    syncWorkspace.mockResolvedValueOnce(snapshotResult(initial, 1));
+    const { result } = renderHook(() => useJobFinderWorkspace());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let reply: Awaited<
+      ReturnType<
+        ReturnType<typeof requireReadyWorkspace>["actions"]["runAgentDiscovery"]
+      >
+    > | null = null;
+    await act(async () => {
+      reply = await requireReadyWorkspace(
+        result.current,
+      ).actions.runAgentDiscovery();
+    });
+
+    expect(reply).toMatchObject({
+      outcome: "cancelled",
+      snapshot: { selectedDiscoveryJobId: "found-job" },
+    });
+    expect(
+      requireReadyWorkspace(result.current).workspace.selectedDiscoveryJobId,
+    ).toBe("found-job");
+    expect(noteWorkspaceRevision.mock.calls).toEqual([[1], [2]]);
+    expect(getWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("recovers the whole view when a delta answer starts from a revision it no longer holds", async () => {
+    const initial = createWorkspace("initial-job");
+    const recovered = createWorkspace("recovered-job");
+    const deltaAction = vi.fn<() => Promise<JobFinderWorkspaceSyncResult>>();
+    Object.assign(window.nestor.jobFinder as object, {
+      checkBrowserSession: deltaAction,
+    });
+    syncWorkspace
+      .mockResolvedValueOnce(snapshotResult(initial, 1))
+      .mockResolvedValueOnce(snapshotResult(recovered, 5));
+    deltaAction.mockResolvedValueOnce({
+      kind: "delta",
+      delta: createJobReplacementDelta({
+        baseRevision: 3,
+        currentRevision: 4,
+        previousJobId: "initial-job",
+        currentJobId: "gap-job",
+      }),
+    });
+    const { result } = renderHook(() => useJobFinderWorkspace());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await requireReadyWorkspace(result.current).actions.checkBrowserSession();
+    });
+
+    expect(requireReadyWorkspace(result.current).workspace).toBe(recovered);
+    expect(syncWorkspace.mock.calls).toEqual([[null], [null]]);
+  });
 });
 
 describe("useJobFinderWorkspace entity mutations", () => {

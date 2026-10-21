@@ -53,18 +53,23 @@ export function toFitJudgment(
 
 /**
  * Whether the model should judge this job (again): never judged, or judged
- * before the profile, the goals or the listing changed.
+ * before the profile facts, the goals or the listing it was given changed.
+ * A verdict an earlier build stamped with the whole-input fingerprint of the
+ * same inputs (`legacyVerdictFingerprint`) is current too.
  */
 export function jobNeedsFitJudgment(
   job: JobPosting & { matchAssessment: MatchAssessment },
-  contextFingerprint: string,
+  verdictFingerprint: string,
+  legacyVerdictFingerprint?: string,
 ): boolean {
   const judgment = job.matchAssessment.judgment;
   if (!judgment) {
     return true;
   }
   return (
-    judgment.contextFingerprint !== contextFingerprint ||
+    (judgment.contextFingerprint !== verdictFingerprint &&
+      (legacyVerdictFingerprint === undefined ||
+        judgment.contextFingerprint !== legacyVerdictFingerprint)) ||
     judgment.postingFingerprint !== fitPostingFingerprint(job)
   );
 }
@@ -107,14 +112,14 @@ export function fitPostingFingerprint(job: JobPosting): string {
 
 /** Batches sent to the model at once; the work happens on its servers. */
 const JUDGING_CONCURRENCY = 5;
-/** One pause before asking a failed batch again (an overloaded provider). */
-const JUDGING_RETRY_DELAY_MS = 3_000;
 
 /**
  * Asks the model to judge jobs, a batch per call, several batches at once.
- * A batch that fails is asked once more after a short pause. Returns the
- * verdicts it gave; a job missing from the result stays as it was and is
- * asked about on the next pass. A failed batch does not stop the others.
+ * Returns the verdicts it gave; a job missing from the result stays as it
+ * was and is asked about on the next pass. A failed batch does not stop the
+ * others, and is not asked again here: the request layer already retried it
+ * for passing failures (ADR 0020), so another round would only repeat paid
+ * attempts.
  */
 export async function judgeJobFitsInBatches<
   TJob extends JobPosting & { id: string },
@@ -128,7 +133,6 @@ export async function judgeJobFitsInBatches<
   signal?: AbortSignal;
   batchSize?: number;
   concurrency?: number;
-  retryDelayMs?: number;
   onProgress?: (completed: number, total: number) => void;
   onBatchJudged?: (
     judgments: ReadonlyMap<string, FitJudgment>,
@@ -141,34 +145,24 @@ export async function judgeJobFitsInBatches<
   }
   const now = input.now ?? (() => new Date().toISOString());
   const batchSize = Math.max(1, input.batchSize ?? JOB_FIT_JUDGING_BATCH_SIZE);
-  const retryDelayMs = input.retryDelayMs ?? JUDGING_RETRY_DELAY_MS;
   const batches: TJob[][] = [];
   for (let start = 0; start < input.jobs.length; start += batchSize) {
     batches.push(input.jobs.slice(start, start + batchSize));
   }
 
   const judgeBatch = async (batch: readonly TJob[]): Promise<void> => {
-    const ask = () =>
-      judgeJobFits({
+    let results: JobFitJudgmentResult[];
+    try {
+      results = await judgeJobFits({
         ...(input.signal ? { signal: input.signal } : {}),
         assessmentDate: now().slice(0, 10),
         profile: input.profile,
         searchPreferences: input.searchPreferences,
         jobs: batch.map((job) => ({ jobId: job.id, posting: job })),
       });
-    let results: JobFitJudgmentResult[];
-    try {
-      results = await ask();
     } catch (error) {
       if (input.signal?.aborted) throw error;
-      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
-      input.signal?.throwIfAborted();
-      try {
-        results = await ask();
-      } catch (retryError) {
-        if (input.signal?.aborted) throw retryError;
-        return;
-      }
+      return;
     }
     const byId = new Map(batch.map((job) => [job.id, job]));
     const judgedAt = now();

@@ -171,11 +171,24 @@ export interface AgentLoopOptions {
    * it can always look at the page anew. Null keeps every answer whole.
    */
   staleToolResultChars?: number | null;
+  /**
+   * How many of the newest tool answers stay whole. Defaults to four; a host
+   * whose answers are long page views can keep fewer.
+   */
+  staleToolResultKeepRecent?: number;
   /** Output cap for one model turn. Omit to use the provider default. */
   modelMaxOutputTokens?: number;
   parallelToolCalls?: boolean;
   /** Host supplies a fresh observation after a response batch, if needed. */
   afterToolBatch?: () => Promise<string | null>;
+  /**
+   * A reply with words and no tool call. The host may take it as a step of
+   * its own (most often the model reporting that it is done) instead of the
+   * loop spending a turn asking for a tool. Null keeps the default reminder.
+   */
+  onReplyWithoutTool?: (
+    content: string,
+  ) => Promise<AgentLoopToolOutcome | null>;
   onHistoryCompacted?: () => string | null;
   /** Called for every attempted tool, including failures. */
   onToolTiming?: (step: { toolName: string; durationMs: number }) => void;
@@ -322,6 +335,7 @@ function shortenStaleToolResults(
   messages: AgentLoopMessage[],
   openingCount: number,
   maxChars: number,
+  keepRecent: number,
 ): AgentLoopMessage[] {
   const stale: number[] = [];
   let seen = 0;
@@ -330,7 +344,7 @@ function shortenStaleToolResults(
     if (message?.role !== "tool") continue;
     seen += 1;
     if (
-      seen > STALE_TOOL_RESULT_KEEP_RECENT &&
+      seen > keepRecent &&
       message.content.length > maxChars + STALE_TOOL_RESULT_NOTE.length + 2
     ) {
       stale.push(index);
@@ -390,6 +404,12 @@ export async function runAgentLoop(
     options.staleToolResultChars === undefined
       ? DEFAULT_STALE_TOOL_RESULT_CHARS
       : options.staleToolResultChars;
+  const staleToolResultKeepRecent = Math.max(
+    1,
+    Math.floor(
+      options.staleToolResultKeepRecent ?? STALE_TOOL_RESULT_KEEP_RECENT,
+    ),
+  );
 
   let messages: AgentLoopMessage[] = [...options.messages];
   const openingCount = messages.length;
@@ -572,6 +592,32 @@ export async function runAgentLoop(
     const toolCalls = response.toolCalls ?? [];
     if (toolCalls.length === 0) {
       messages.push({ role: "assistant", content: response.content ?? "" });
+      const hosted = (response.content ?? "").trim()
+        ? await options.onReplyWithoutTool?.(response.content ?? "")
+        : null;
+      if (hosted?.kind === "finish") {
+        await note(
+          `finished in words${hosted.finish.stuck ? " as stuck" : ""}${hosted.finish.needsPerson ? " (needs the person)" : ""}: ${hosted.finish.reason}`,
+        );
+        return result("finished", endSentence(hosted.finish.reason), {
+          finish: hosted.finish,
+        });
+      }
+      if (hosted?.kind === "stop") {
+        await note(`stopped: ${hosted.reason}`);
+        return result("stopped", endSentence(hosted.reason), {
+          stop: {
+            reason: hosted.reason,
+            ...(hosted.data !== undefined ? { data: hosted.data } : {}),
+          },
+        });
+      }
+      if (hosted?.kind === "ok") {
+        if (hosted.progress) markProgress();
+        messages.push({ role: "user", content: hosted.content });
+        await note("answered without a tool; the host replied");
+        continue;
+      }
       messages.push({
         role: "user",
         content:
@@ -826,6 +872,7 @@ export async function runAgentLoop(
         messages,
         openingCount,
         staleToolResultChars,
+        staleToolResultKeepRecent,
       );
     }
     const beforeCompaction = messages;

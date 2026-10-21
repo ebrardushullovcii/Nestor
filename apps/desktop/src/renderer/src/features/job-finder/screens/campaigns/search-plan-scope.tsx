@@ -9,6 +9,13 @@ import {
   SelectValue,
 } from "@renderer/components/ui/select";
 
+/** Whether there is more than one plan to choose between. */
+export function hasSearchPlanChoice(
+  campaigns: readonly Pick<JobSearchCampaign, "status">[],
+): boolean {
+  return campaigns.filter((plan) => plan.status !== "archived").length > 1;
+}
+
 export function SearchPlanScope(props: {
   campaigns: readonly JobSearchCampaign[];
   activeCampaignId: string;

@@ -59,6 +59,7 @@ import {
   createFileRepositoryContext,
   INDEXED_COLLECTION_CONFIGS,
   runImmediateTransaction,
+  scheduleWalCheckpoints,
   syncApprovedResumeExportsForJob,
 } from "./file-repository-support";
 import {
@@ -72,6 +73,10 @@ import {
   secureDatabaseFile,
   runMigrations,
 } from "./internal/migrations";
+import {
+  consumeCleanCloseMarker,
+  writeCleanCloseMarker,
+} from "./internal/clean-close-marker";
 import {
   createWorkspaceCloseDatabaseBackup,
   createWorkspaceResetDatabaseBackup,
@@ -199,6 +204,11 @@ export async function createFileJobFinderRepository(
       };
     }
 
+    // A full integrity check reads every page: about 0.3 s of each start on
+    // a 200 MB workspace. A file left exactly as a clean close left it has
+    // nothing new to check; a crash or outside edit still gets the check.
+    const closedCleanly = consumeCleanCloseMarker(options.filePath);
+
     let database: DatabaseSync;
     try {
       database = openDatabaseFile(options.filePath);
@@ -208,7 +218,7 @@ export async function createFileJobFinderRepository(
 
     try {
       runMigrations(database);
-      if (!passesStartupIntegrityCheck(database)) {
+      if (!closedCleanly && !passesStartupIntegrityCheck(database)) {
         throw new Error(
           "Workspace database failed the startup integrity check.",
         );
@@ -333,6 +343,7 @@ export async function createFileJobFinderRepository(
   }
 
   const database = await openWorkspaceDatabaseWithRecovery();
+  const stopWalCheckpoints = scheduleWalCheckpoints(database, options.filePath);
 
   // Everything below runs on the open connection. If any step fails, the
   // connection is closed before the error leaves: an orphaned handle keeps the
@@ -392,9 +403,13 @@ export async function createFileJobFinderRepository(
       database,
       normalizedSeed.discovery,
     );
-    readSavedJobsProjection = createSavedJobProjectionReader(database);
+    readSavedJobsProjection = createSavedJobProjectionReader(database, {
+      validationStamp: options.rowValidationStamp ?? null,
+    });
     readIntelligenceProjection = createIntelligenceProjectionReader(database);
-    readDisplayCollections = createDisplayCollectionsReader(database);
+    readDisplayCollections = createDisplayCollectionsReader(database, {
+      validationStamp: options.rowValidationStamp ?? null,
+    });
     readDiscoveryDisplayProjection = createDiscoveryDisplayProjectionReader(
       database,
       normalizedSeed.discovery,
@@ -850,7 +865,9 @@ export async function createFileJobFinderRepository(
           );
         }
       }
+      await stopWalCheckpoints();
       database.close();
+      writeCleanCloseMarker(options.filePath);
     },
     async reset(nextSeed) {
       const nextState = JobFinderRepositoryStateSchema.parse(
@@ -877,12 +894,12 @@ export async function createFileJobFinderRepository(
       await removeWorkspaceDatabaseBackups(options.filePath);
       await removeWorkspaceRecoveryArtifacts(options.filePath);
     },
+    // Singleton reads return their own copy already; only the shared seed
+    // needs copying. Copying twice cost about 10 ms of every refresh.
     getProfile() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(database, "profile", CandidateProfileSchema) ??
-            normalizedSeed.profile,
-        ),
+        getSingletonValue(database, "profile", CandidateProfileSchema) ??
+          cloneValue(normalizedSeed.profile),
       );
     },
     getProfileWithRevision() {
@@ -953,24 +970,20 @@ export async function createFileJobFinderRepository(
     },
     getSearchPreferences() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(
-            database,
-            "search_preferences",
-            JobSearchPreferencesSchema,
-          ) ?? normalizedSeed.searchPreferences,
-        ),
+        getSingletonValue(
+          database,
+          "search_preferences",
+          JobSearchPreferencesSchema,
+        ) ?? cloneValue(normalizedSeed.searchPreferences),
       );
     },
     getProfileSetupState() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(
-            database,
-            "profile_setup_state",
-            ProfileSetupStateSchema,
-          ) ?? normalizedSeed.profileSetupState,
-        ),
+        getSingletonValue(
+          database,
+          "profile_setup_state",
+          ProfileSetupStateSchema,
+        ) ?? cloneValue(normalizedSeed.profileSetupState),
       );
     },
     saveSearchPreferences(searchPreferences) {
@@ -1173,6 +1186,8 @@ export async function createFileJobFinderRepository(
     },
     readSavedJobsProjection,
     listSavedJobIds() {
+      const current = readSavedJobsProjection.currentIds();
+      if (current) return Promise.resolve([...current]);
       return Promise.resolve(
         database
           .prepare(`SELECT id FROM ${stateTableNames.saved_jobs} ORDER BY id`)
@@ -1416,11 +1431,21 @@ export async function createFileJobFinderRepository(
             intelligenceState: cloneValue(intelligenceState),
             discoveryState,
           });
-          const nextSearchPreferences = JobSearchPreferencesSchema.parse(
-            cloneValue(next.searchPreferences),
-          );
+          // Most feedback (hiding a job) leaves the preferences and plans as
+          // they were. Validating and rewriting both (about 1 MB with 900
+          // sources) on every hide was most of its cost, so an unchanged
+          // value is left alone; only the profile epoch is ever compared.
+          const searchPreferencesTouched =
+            JSON.stringify(next.searchPreferences) !==
+            JSON.stringify(searchPreferences);
+          const nextSearchPreferences = searchPreferencesTouched
+            ? JobSearchPreferencesSchema.parse(
+                cloneValue(next.searchPreferences),
+              )
+            : null;
           const nextCampaignState =
-            next.campaignState === null
+            next.campaignState === null ||
+            JSON.stringify(next.campaignState) === JSON.stringify(campaignState)
               ? null
               : JobSearchCampaignCollectionSchema.parse(
                   cloneValue(next.campaignState),
@@ -1432,21 +1457,23 @@ export async function createFileJobFinderRepository(
           if (nextSavedJob) {
             context.writePersistedValue("saved_jobs", nextSavedJob);
           }
-          saveSingletonValue(
-            database,
-            "search_preferences",
-            nextSearchPreferences,
-          );
-          // A changed preference advances the shared profile epoch so a
-          // copilot commit that captured the older preferences fails closed
-          // as stale instead of reverting this feedback. Most discovery
-          // feedback leaves preferences untouched; those rewrites must not
-          // invalidate unrelated in-flight profile work.
-          if (
-            JSON.stringify(nextSearchPreferences) !==
-            JSON.stringify(searchPreferences)
-          ) {
-            incrementSingletonRevision(database, "profile");
+          if (nextSearchPreferences) {
+            saveSingletonValue(
+              database,
+              "search_preferences",
+              nextSearchPreferences,
+            );
+            // A changed preference advances the shared profile epoch so a
+            // copilot commit that captured the older preferences fails
+            // closed as stale instead of reverting this feedback. Most
+            // discovery feedback leaves preferences untouched; those must
+            // not invalidate unrelated in-flight profile work.
+            if (
+              JSON.stringify(nextSearchPreferences) !==
+              JSON.stringify(searchPreferences)
+            ) {
+              incrementSingletonRevision(database, "profile");
+            }
           }
           if (nextCampaignState !== null) {
             saveSingletonValue(database, "campaign_state", nextCampaignState);
@@ -2213,10 +2240,8 @@ export async function createFileJobFinderRepository(
     },
     getSettings() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(database, "settings", JobFinderSettingsSchema) ??
-            normalizedSeed.settings,
-        ),
+        getSingletonValue(database, "settings", JobFinderSettingsSchema) ??
+          cloneValue(normalizedSeed.settings),
       );
     },
     saveSettings(settings) {
@@ -2254,6 +2279,29 @@ export async function createFileJobFinderRepository(
     getDiscoveryState() {
       return Promise.resolve(cloneValue(discoveryStorage.read()));
     },
+    warmDiscoveryState() {
+      try {
+        if (!database.isTransaction) discoveryStorage.read();
+        return Promise.resolve();
+      } catch (error) {
+        return Promise.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    },
+    commitDiscoverySessions(update) {
+      try {
+        const sessions = runImmediateTransaction(database, () =>
+          discoveryStorage.updateSessions(update),
+        );
+        discoveryStorage.publishSessions();
+        return secureDatabaseFile(options.filePath).then(() => [...sessions]);
+      } catch (error) {
+        return Promise.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    },
     commitDiscoveryStateUpdate(update) {
       try {
         const nextDiscoveryState = runImmediateTransaction(database, () => {
@@ -2278,12 +2326,10 @@ export async function createFileJobFinderRepository(
     },
     getCampaignState() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(
-            database,
-            "campaign_state",
-            JobSearchCampaignCollectionSchema,
-          ),
+        getSingletonValue(
+          database,
+          "campaign_state",
+          JobSearchCampaignCollectionSchema,
         ),
       );
     },
@@ -2368,13 +2414,11 @@ export async function createFileJobFinderRepository(
     readIntelligenceProjection,
     getIntelligenceState() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(
-            database,
-            "intelligence_state",
-            JobFinderIntelligenceStateSchema,
-          ) ?? JobFinderIntelligenceStateSchema.parse({}),
-        ),
+        getSingletonValue(
+          database,
+          "intelligence_state",
+          JobFinderIntelligenceStateSchema,
+        ) ?? JobFinderIntelligenceStateSchema.parse({}),
       );
     },
     saveIntelligenceState(intelligenceState) {
@@ -2439,13 +2483,11 @@ export async function createFileJobFinderRepository(
     },
     getActivityControl() {
       return Promise.resolve(
-        cloneValue(
-          getSingletonValue(
-            database,
-            "activity_control",
-            JobFinderActivityControlSchema,
-          ) ?? JobFinderActivityControlSchema.parse({}),
-        ),
+        getSingletonValue(
+          database,
+          "activity_control",
+          JobFinderActivityControlSchema,
+        ) ?? JobFinderActivityControlSchema.parse({}),
       );
     },
     saveActivityControl(activityControl) {

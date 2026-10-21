@@ -94,3 +94,14 @@ test("provider blocks are typed receipts and survive checkpoint serialization", 
     AssistantResumeBatchStateSchema.parse(JSON.parse(JSON.stringify(batch))),
   ).toEqual(batch);
 });
+
+test("resumes written side by side are estimated in waves, not one after another", () => {
+  // Ten in flight, about four minutes each: the batch ends in about four.
+  expect(
+    estimateResumeBatchMinutesLeft([240_000, 240_000], 10, undefined, 10),
+  ).toBe(4);
+  // Twenty left with ten at a time: two waves.
+  expect(
+    estimateResumeBatchMinutesLeft([240_000, 240_000], 20, undefined, 10),
+  ).toBe(8);
+});

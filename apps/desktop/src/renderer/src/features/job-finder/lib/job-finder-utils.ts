@@ -20,21 +20,47 @@ import type {
   ProjectFormEntry,
 } from "./job-finder-types";
 
+// Building an Intl formatter costs far more than using one: a fresh one per
+// call made every list row and every search keystroke pay for it thousands
+// of times. Each is built once and rebuilt only when the device's time zone
+// changes, which a formatter fixes when it is built.
+function readTimeZoneKey(): string {
+  return `${new Date(0).getTimezoneOffset()}|${new Date(962409600000).getTimezoneOffset()}`;
+}
+
+function createCachedDateTimeFormat(options: Intl.DateTimeFormatOptions) {
+  let cached: { formatter: Intl.DateTimeFormat; timeZoneKey: string } | null =
+    null;
+  return (): Intl.DateTimeFormat => {
+    const timeZoneKey = readTimeZoneKey();
+    if (cached?.timeZoneKey !== timeZoneKey) {
+      cached = {
+        formatter: new Intl.DateTimeFormat("en-GB", options),
+        timeZoneKey,
+      };
+    }
+    return cached.formatter;
+  };
+}
+
+const getTimestampFormatter = createCachedDateTimeFormat({
+  day: "2-digit",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+const getDateOnlyFormatter = createCachedDateTimeFormat({
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+});
+
 export function formatTimestamp(timestamp: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(timestamp));
+  return getTimestampFormatter().format(new Date(timestamp));
 }
 
 export function formatDateOnly(timestamp: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(timestamp));
+  return getDateOnlyFormatter().format(new Date(timestamp));
 }
 
 export function formatOptionalDateOnly(

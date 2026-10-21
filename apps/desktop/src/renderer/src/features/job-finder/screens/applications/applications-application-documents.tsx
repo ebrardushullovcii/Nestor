@@ -1,3 +1,4 @@
+import { ApplicationsDisclosureSummary } from "./applications-disclosure-summary";
 import { getJobFinderErrorDetail } from "../../lib/describe-failure";
 import { useEffect, useMemo, useState } from "react";
 import type {
@@ -288,23 +289,10 @@ export function ApplicationsApplicationDocuments(props: {
   }
 
   const isWorking = status === "loading" || status === "working";
+  // Optional work is one quiet disclosure line, like "Run details and
+  // history", not a card whose heading and sentence look like a step.
   const header = demoteAsSecondary ? (
-    <summary className="cursor-pointer list-none outline-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-ring">
-      {/* "Optional:" in the heading already demotes this disclosure; a
-          "Secondary" badge beside it only repeats that in badge form. */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>
-            Optional: cover letter
-          </h3>
-          <p className="mt-1 text-(length:--text-small) leading-6 text-foreground-soft">
-            {/* Nothing on this page is called a "recovery step", and the
-                no-submit contract is already stated in the page banner. */}
-            Read, edit and approve documents for this application.
-          </p>
-        </div>
-      </div>
-    </summary>
+    <ApplicationsDisclosureSummary>Cover letter (optional)</ApplicationsDisclosureSummary>
   ) : (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div>
@@ -545,11 +533,22 @@ export function ApplicationsApplicationDocuments(props: {
   );
 
   return (
-    <section className="surface-card-tint grid gap-4 rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-4">
+    <section
+      className={
+        demoteAsSecondary
+          ? "grid min-w-0"
+          : "surface-card-tint grid gap-4 rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-4"
+      }
+    >
       {demoteAsSecondary ? (
-        <details className="grid gap-4">
+        <details className="group grid gap-4">
           {header}
-          {body}
+          <div className="mt-3 grid gap-4 rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-4">
+            <p className="text-(length:--text-small) leading-6 text-foreground-soft">
+              Read, edit and approve documents for this application.
+            </p>
+            {body}
+          </div>
         </details>
       ) : (
         <>

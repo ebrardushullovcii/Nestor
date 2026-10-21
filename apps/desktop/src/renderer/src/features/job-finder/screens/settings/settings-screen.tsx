@@ -499,7 +499,7 @@ export function SettingsScreen(props: {
               <a
                 aria-current={isActive ? "location" : undefined}
                 className={cn(
-                  "relative inline-flex min-h-10 min-w-10 flex-none items-center justify-center gap-2 rounded-t-(--radius-small) px-3.5 py-2.5 text-(length:--text-body) font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 [&_svg]:size-4 [&_svg]:shrink-0",
+                  "relative inline-flex min-h-10 min-w-10 flex-none items-center justify-center gap-1.5 rounded-t-(--radius-small) px-2.5 py-2.5 text-(length:--text-body) font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 [&_svg]:size-4 [&_svg]:shrink-0",
                   // The current-section underline, drawn like the line tabs'.
                   "after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:opacity-0 after:transition-opacity",
                   isActive &&

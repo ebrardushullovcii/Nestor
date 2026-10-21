@@ -37,3 +37,7 @@ Rejected alternatives: keeping four tiles including Needs you (it is the header 
 The sample-review gate is removed. Automatic batches no longer create sample reviews. Pending automatic reviews are retired without recording them as reviewed; completed ones and reviews the person started stay. Sample reviews no longer block work. The Find jobs sample-review banner is gone.
 
 The owner wants permissions, not prohibitions: the person already chose to run automatic batches. They can review prepared applications in Applications when they want. Stall and safety guards remain, including final submission authority under ADR 0012 and ADR 0024.
+
+## Update (2026-10-21)
+
+Resumes to review now come before applications to try again and filled-in forms that closed. With 196 Aggressive resumes waiting, "Check 4 applications whose form closed" led Home, although reading the resumes is what lets the person apply. The review step's button opens the first resume in Resume Studio's review pass; a failed batch to retry stays one press beside it, and closed forms are a quiet line under the buttons.

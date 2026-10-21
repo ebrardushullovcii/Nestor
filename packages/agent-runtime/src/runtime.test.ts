@@ -68,6 +68,72 @@ describe("agent task runtime", () => {
     expect(result.receipt.stopReason).toBe("completed");
     expect(JSON.stringify(result)).not.toContain(continuation.text);
   });
+  test("with the draft shown in the context, an earlier draft write is replayed as a note", async () => {
+    const marker = "SYNTHETIC_DRAFT_BODY";
+    const seen: string[] = [];
+    let turns = 0;
+    await runAgentTask({
+      taskId: "draft_once",
+      capability: "resume_generation",
+      systemPrompt: "Use the tools.",
+      state: {},
+      initialDraft: { text: "" },
+      model: {
+        chat(input) {
+          seen.push(JSON.stringify(input.messages));
+          turns += 1;
+          return Promise.resolve({
+            toolCalls: [
+              turns === 1
+                ? {
+                    id: "write",
+                    type: "function" as const,
+                    function: {
+                      name: "write",
+                      arguments: JSON.stringify({ text: marker }),
+                    },
+                  }
+                : {
+                    id: "finish",
+                    type: "function" as const,
+                    function: { name: "finish_task", arguments: "{}" },
+                  },
+            ],
+          });
+        },
+      },
+      tools: [
+        {
+          name: "write",
+          description: "Write the draft",
+          inputSchema: z.object({ text: z.string() }),
+          parameters: { type: "object", properties: {} },
+          permission: "draft_write",
+          execute: (input) => ({
+            summary: "Written",
+            draft: { text: (input as { text: string }).text },
+            progressMade: true,
+          }),
+        },
+        {
+          name: "finish_task",
+          description: "Finish",
+          inputSchema: z.object({}),
+          parameters: { type: "object", properties: {} },
+          permission: "read",
+          execute: () => ({ summary: "Finished", finish: true }),
+        },
+      ],
+      validate: () => [],
+      buildContext: ({ draft }) => ({ draft }),
+      draftShownInContext: true,
+    });
+    expect(turns).toBe(2);
+    // Once, in the task state; the replayed call carries a note instead.
+    expect(seen[1]!.split(marker)).toHaveLength(2);
+    expect(seen[1]).toContain("applied to the task draft");
+  });
+
   test("repairs a rejected tool call and finishes a valid draft", async () => {
     let call = 0;
     const result = await runAgentTask({

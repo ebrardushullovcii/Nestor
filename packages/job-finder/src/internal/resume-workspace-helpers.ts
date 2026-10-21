@@ -635,28 +635,29 @@ function isGeneratedResumeClaimOrigin(
   return isGeneratedResumeClaimOriginContract(origin);
 }
 
+function normalizeComparable(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 /**
  * Mirrors the canonical classifier's own exact definition: the trimmed claim
- * appears verbatim at word boundaries inside the normalized support text.
- * Only used when the classifier declines to grade grounding because of
- * style-only gaps, so grounded atomic content (single-skill bullets) keeps
- * its legacy `exact` assessment instead of degrading to review.
+ * appears verbatim at word boundaries inside a normalized support text. The
+ * supports are normalized once: normalizing the imported resume and every
+ * saved record again for each line cost about 0.1 s per resume.
  */
-function claimTextIsVerbatimInSupport(
-  claimText: string,
-  supportText: string,
-): boolean {
-  const normalizeComparable = (value: string) =>
-    value
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, " ")
-      .trim();
-  const normalizedClaim = normalizeComparable(claimText.trim());
-
-  return (
-    normalizedClaim.length > 0 &&
-    ` ${normalizeComparable(supportText)} `.includes(` ${normalizedClaim} `)
-  );
+function createVerbatimSupportCheck(
+  supportTexts: readonly string[],
+): (claimText: string) => boolean {
+  const supports = supportTexts.map((text) => ` ${normalizeComparable(text)} `);
+  return (claimText) => {
+    const normalizedClaim = normalizeComparable(claimText.trim());
+    if (normalizedClaim.length === 0) return false;
+    const needle = ` ${normalizedClaim} `;
+    return supports.some((support) => support.includes(needle));
+  };
 }
 
 /**
@@ -676,11 +677,10 @@ export function buildPersonsOwnResumeClaimMatcher(input: {
     (entry) => entry.text,
   );
   const skillBank = buildCandidateSkillBank(input.profile);
-  const isVerbatim = (text: string) =>
-    claimTextIsVerbatimInSupport(text, importedResumeText) ||
-    evidenceTexts.some((support) =>
-      claimTextIsVerbatimInSupport(text, support),
-    );
+  const isVerbatim = createVerbatimSupportCheck([
+    importedResumeText,
+    ...evidenceTexts,
+  ]);
   return (claim) => {
     if (!isGeneratedResumeClaimOrigin(claim.origin)) return true;
     // Long enough that a single shared word cannot pass as the whole line.

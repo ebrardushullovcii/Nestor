@@ -2104,6 +2104,35 @@ export function createInMemoryJobFinderRepository(
       state.tailoredAssets = nextTailoredAssets;
       return Promise.resolve();
     },
+    staleResumeDrafts({ draftIds, staleReason, updatedAt }) {
+      for (const draftId of new Set(draftIds)) {
+        const draft = state.resumeDrafts.find((entry) => entry.id === draftId);
+        if (!draft) continue;
+        state.resumeExportArtifacts = clearApprovedResumeExportsForJob(
+          state.resumeExportArtifacts,
+          draft.jobId,
+        );
+        state.resumeDrafts = upsertById(state.resumeDrafts, {
+          ...draft,
+          status: "stale",
+          staleReason,
+          approvedAt: null,
+          approvedExportId: null,
+          updatedAt,
+        });
+        const asset = state.tailoredAssets.find(
+          (entry) => entry.jobId === draft.jobId,
+        );
+        if (asset) {
+          state.tailoredAssets = upsertById(state.tailoredAssets, {
+            ...asset,
+            storagePath: null,
+            updatedAt,
+          });
+        }
+      }
+      return Promise.resolve();
+    },
     listApplicationRecords() {
       return Promise.resolve(cloneValue(state.applicationRecords));
     },

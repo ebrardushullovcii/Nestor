@@ -1,4 +1,7 @@
-import { createOpenAiCompatibleJobFinderAiClient } from "@nestor/ai-providers";
+import {
+  createJobFinderAiClientFromEnvironment,
+  createOpenAiCompatibleJobFinderAiClient,
+} from "@nestor/ai-providers";
 import { ResumeDraftSchema } from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 
@@ -111,7 +114,7 @@ test("final generation reuses the matching preview's checks after more than 4000
   }
 });
 
-test("a changed final draft still rechecks its wording and retained lines against the changed whole-resume context", async () => {
+test("a changed final draft rechecks only its changed wording; a retained line keeps its verdict", async () => {
   const seed = createSeed();
   seed.tailoredAssets = [];
   seed.resumeDrafts = [];
@@ -156,13 +159,18 @@ test("a changed final draft still rechecks its wording and retained lines agains
     const checkedTexts = check.mock.calls.map(([input]) =>
       input.claims.map((claim) => claim.text),
     );
-    expect(checkedTexts).toEqual([
+    expect(checkedTexts).toHaveLength(2);
+    expect(checkedTexts[0]).toEqual(
       expect.arrayContaining([previewSummary, retainedLine]),
-      expect.arrayContaining([finalSummary, retainedLine]),
-    ]);
+    );
+    expect(checkedTexts[1]).toContain(finalSummary);
+    expect(checkedTexts[1]).not.toContain(retainedLine);
     const saved = (await repository.getResumeDraftByJobId("job_ready"))!;
-    expect(saved.claimChecks?.map((claim) => claim.contentHash)).toContain(
-      resumeClaimContentHash(finalSummary),
+    expect(saved.claimChecks?.map((claim) => claim.contentHash)).toEqual(
+      expect.arrayContaining([
+        resumeClaimContentHash(finalSummary),
+        resumeClaimContentHash(retainedLine),
+      ]),
     );
     expect(saved.claimChecks?.map((claim) => claim.contentHash)).not.toContain(
       resumeClaimContentHash(previewSummary),
@@ -277,10 +285,61 @@ test("a funding error inside preview stops queued writers and survives a flatten
     expect(render).not.toHaveBeenCalled();
     expect(await repository.getResumeDraftByJobId("job_ready")).toBeNull();
     const failed = await repository.getTailoredAssetByJobId("job_ready");
-    expect(failed?.failureMessage).toContain("insufficient funds");
-    expect(failed?.failureMessage).not.toMatch(
-      /SYNTHETIC_PRIVATE_BODY|permanent_failure/,
+    // An outage in the person's words: the AI is bundled, so its account
+    // details are never theirs to read.
+    expect(failed?.failureMessage).toContain(
+      "The AI service is unavailable right now",
     );
+    expect(failed?.failureMessage).not.toMatch(
+      /SYNTHETIC_PRIVATE_BODY|permanent_failure|insufficient funds|provider/,
+    );
+  } finally {
+    fetchMock.mockRestore();
+    await workspaceService.shutdown();
+  }
+});
+
+test("a batch resume the AI service turns away for load is put off, not failed", async () => {
+  const seed = createSeed();
+  seed.tailoredAssets = [];
+  seed.resumeDrafts = [];
+  // A listing with enough to tailor toward, so the writer asks the model.
+  seed.savedJobs = seed.savedJobs.map((job) =>
+    job.id === "job_ready"
+      ? {
+          ...job,
+          description:
+            "Synthetic platform team building a TypeScript and React design system, GraphQL gateways, Playwright test suites, Kubernetes deployments, PostgreSQL schema migrations, observability with OpenTelemetry, accessibility audits and Storybook documentation for a payments product used by clinics across Europe.",
+        }
+      : job,
+  );
+  const aiClient = createJobFinderAiClientFromEnvironment({
+    NESTOR_AI_API_KEY: "synthetic",
+    NESTOR_AI_BASE_URL: "https://synthetic.example.test/v1",
+    NESTOR_AI_MAX_ATTEMPTS: "1",
+  });
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ error: { message: "SYNTHETIC_BUSY" } }), {
+      status: 429,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  const { repository, workspaceService } = createWorkspaceServiceHarness({
+    seed,
+    aiClient,
+  });
+  try {
+    const receipt = await workspaceService.generateResumeForBatch("job_ready", {
+      shouldStop: () => false,
+    });
+    expect(receipt).toEqual({ jobId: "job_ready", outcome: "not_started" });
+    expect(fetchMock).toHaveBeenCalled();
+    // Nothing is saved as a failed resume: the job still needs one.
+    expect(
+      (await repository.getTailoredAssetByJobId("job_ready"))?.failureMessage ??
+        null,
+    ).toBeNull();
+    expect(await repository.getResumeDraftByJobId("job_ready")).toBeNull();
   } finally {
     fetchMock.mockRestore();
     await workspaceService.shutdown();

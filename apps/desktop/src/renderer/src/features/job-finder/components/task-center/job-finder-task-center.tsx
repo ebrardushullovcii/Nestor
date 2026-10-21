@@ -14,6 +14,7 @@ import {
   buildJobFinderTaskCenterModel,
   describeTaskCenterCounts,
   type JobFinderTaskCenterItem,
+  isStaleFinishedTask,
 } from "./job-finder-task-center-model";
 
 interface JobFinderTaskCenterProps {
@@ -68,8 +69,10 @@ function taskTone(status: JobFinderTaskCenterItem["status"]) {
   if (status === "completed") {
     return "positive" as const;
   }
+  // A run that failed or was cut short can be run again; amber says "look
+  // at this" without the alarm red reserves for something at risk.
   if (status === "failed" || status === "interrupted") {
-    return "critical" as const;
+    return "warning" as const;
   }
   return "muted" as const;
 }
@@ -273,7 +276,9 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
 
   const taskCountsLabel = describeTaskCenterCounts(model);
   const visibleItems = model.items.filter(
-    (item) => !isFinishedActivity(item) || !clearedActivityIds.has(item.id),
+    (item) =>
+      !isFinishedActivity(item) ||
+      (!clearedActivityIds.has(item.id) && !isStaleFinishedTask(item, Date.now())),
   );
   const finishedItems = visibleItems.filter(isFinishedActivity);
 
@@ -325,7 +330,7 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
         {/* One name at every width. "Tasks" read as a to-do list for the
             person, which is what Needs you is; this panel is what Job Finder
             itself is doing, so it is named for that. */}
-        <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden">
+        <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden xl:max-[1439px]:!hidden">
           Activity
         </span>
         {/* One zero rule for every count in the shell: a badge never renders
@@ -355,32 +360,32 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
           <div className="grid gap-1">
             <h2 className="font-display text-(--text-headline)">Activity</h2>
             <p className="text-(length:--text-small) leading-5 text-foreground-soft">
-              What Job Finder is doing now, and how its latest runs ended. Steps
-              only you can do are in Needs you.
+              What Job Finder is doing now and how its last runs ended.
             </p>
           </div>
-          <Button
-            aria-label="Close Activity"
-            className="shrink-0"
-            onClick={() => closePanel(true)}
-            size="icon"
-            type="button"
-            variant="ghost"
-          >
-            <X aria-hidden="true" className="size-4" />
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            {finishedItems.length > 0 ? (
+              <Button
+                onClick={clearFinishedActivity}
+                size="compact"
+                type="button"
+                variant="ghost"
+              >
+                Clear finished
+              </Button>
+            ) : null}
+            <Button
+              aria-label="Close Activity"
+              className="shrink-0"
+              onClick={() => closePanel(true)}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <X aria-hidden="true" className="size-4" />
+            </Button>
+          </div>
         </div>
-
-        {finishedItems.length > 0 ? (
-          <Button
-            onClick={clearFinishedActivity}
-            size="compact"
-            type="button"
-            variant="ghost"
-          >
-            Clear finished
-          </Button>
-        ) : null}
 
         {visibleItems.length === 0 ? (
           <p className="rounded-(--radius-field) border border-(--surface-panel-border) bg-background/40 px-3 py-3 text-(length:--text-small) text-foreground-soft">
@@ -417,12 +422,16 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
                   </div>
 
                   <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-(length:--text-small) leading-5">
-                    <dt className="text-foreground-muted">Stage</dt>
-                    <dd className="text-foreground">
-                      {visibleStatus === "stopping"
-                        ? "Stopping"
-                        : item.stageLabel}
-                    </dd>
+                    {/* "STOPPED" on the badge and "Stage: Stopped" under it
+                        said one thing twice. */}
+                    {visibleStatus === "stopping" ||
+                    item.stageLabel.trim().toLowerCase() ===
+                      statusLabel(visibleStatus).toLowerCase() ? null : (
+                      <>
+                        <dt className="text-foreground-muted">Stage</dt>
+                        <dd className="text-foreground">{item.stageLabel}</dd>
+                      </>
+                    )}
                     <dt className="text-foreground-muted">Progress</dt>
                     <dd className="text-foreground">{item.countLabel}</dd>
                     {item.historyEstimateLabel ? (

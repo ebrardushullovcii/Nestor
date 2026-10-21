@@ -30,6 +30,7 @@ import { withPlanAssessment } from "./plan-assessment";
 import {
   getAiProviderAccessFailure,
   isAiProviderRateLimited,
+  isAiServiceBusy,
   completeTailoredResumeDraft,
 } from "@nestor/ai-providers";
 import {
@@ -275,6 +276,7 @@ import { createMatchAssessmentSession } from "./match-assessment-session";
 import { withSavedJobSearchBehavior } from "./job-search-behavior";
 import { enrichSearchPreferencesFromProfile } from "./workspace-helpers";
 import { createMatchAssessment, createMatchAssessmentAsync } from "./matching";
+import { readSavedJob } from "./read-saved-job";
 
 function buildRecoveryInstructions(input: {
   blockerSummary: string | null;
@@ -1003,7 +1005,11 @@ export function createWorkspaceApplicationMethods(
       if (
         alreadyRead &&
         !options.throwOnFailure &&
-        !jobNeedsFitJudgment(job, session.contextFingerprint) &&
+        !jobNeedsFitJudgment(
+          job,
+          session.verdictFingerprint,
+          session.contextFingerprint,
+        ) &&
         session.assessPersisted(job, job.matchAssessment).requirementsSource ===
           "model"
       )
@@ -1018,6 +1024,8 @@ export function createWorkspaceApplicationMethods(
           ),
           job,
           signal,
+          // Shortlisting asked for the job, not for this read.
+          { background: true },
         );
         const matchAssessment = session.remember(job, assessed);
         if (!listingReadCurrent(generation)) return;
@@ -1061,6 +1069,10 @@ export function createWorkspaceApplicationMethods(
             }
           : {}),
         assess: async (posting) => {
+          // The writer needs the listing's text, not a fresh verdict: the
+          // job keeps its verdict and the next judging pass refreshes it.
+          // Asking here added a minute and 9K tokens to every such resume.
+          if (options.resumeWriterOwnsSlot) return session.assess(posting);
           try {
             const assessed = await createMatchAssessmentAsync(
               ctx.aiClient,
@@ -1071,6 +1083,8 @@ export function createWorkspaceApplicationMethods(
               ),
               posting,
               signal,
+              // Only "Read and assess listing" waits on this read.
+              { background: !options.throwOnFailure },
             );
             return session.remember(posting, assessed);
           } catch (error) {
@@ -1152,7 +1166,17 @@ export function createWorkspaceApplicationMethods(
       }
     } catch (error) {
       // A resume is written toward the listing: when the AI service refused
-      // the read, the writer pauses the batch rather than writing without it.
+      // the read or was too busy for it, the writer stops rather than saving
+      // the person's original wording as if the listing had no text.
+      if (
+        options.resumeWriterOwnsSlot &&
+        !getAiProviderAccessFailure(error) &&
+        isAiServiceBusy(error)
+      )
+        throw new Error(
+          "The AI service is busy right now, so this resume was not written. Nothing was changed. Try again in a few minutes.",
+          { cause: error },
+        );
       if (
         options.throwOnFailure ||
         (options.resumeWriterOwnsSlot && getAiProviderAccessFailure(error))
@@ -1655,6 +1679,11 @@ export function createWorkspaceApplicationMethods(
     shouldStop?: () => boolean;
     onStage?: (stage: ResumeBatchGenerationProgress["stage"]) => void;
     onProviderBlocked?: (block: ResumeBatchProviderBlock) => void;
+    /**
+     * A batch job the AI service turns away for load keeps what it had and
+     * stays in line, instead of being marked as a failed resume.
+     */
+    deferWhenAiBusy?: boolean;
   };
 
   function reportResumeStage(
@@ -2089,7 +2118,7 @@ export function createWorkspaceApplicationMethods(
     ] = await Promise.all([
       scopedSavedJobs
         ? Promise.resolve(scopedSavedJobs)
-        : ctx.repository.listSavedJobs(),
+        : ctx.repository.listSavedJobsByIds([jobId]),
       scope?.tailoredAssets
         ? Promise.resolve(scope.tailoredAssets)
         : ctx.repository.listTailoredAssets(),
@@ -2276,8 +2305,7 @@ export function createWorkspaceApplicationMethods(
     automationMode?: ApplicationAutomationMode;
     updatedAt: string;
   }) {
-    const savedJobs = await ctx.repository.listSavedJobs();
-    const job = savedJobs.find((entry) => entry.id === input.jobId) ?? null;
+    const job = await readSavedJob(ctx.repository, input.jobId);
 
     if (!job) {
       return;
@@ -2376,16 +2404,20 @@ export function createWorkspaceApplicationMethods(
   async function clearStaleMissingResumeBlockerForJob(
     jobId: string,
   ): Promise<void> {
+    // The cached display rows, as the workspace read uses for the same check:
+    // parsing every stored draft (each most of a megabyte) for one job held
+    // each approval for close to a second.
+    const display = await ctx.repository.readDisplayCollections?.();
     const [
       applicationRecords,
       resumeDrafts,
       resumeExportArtifacts,
       tailoredAssets,
     ] = await Promise.all([
-      ctx.repository.listApplicationRecords(),
-      ctx.repository.listResumeDrafts(),
+      display?.applicationRecords ?? ctx.repository.listApplicationRecords(),
+      display?.resumeDrafts ?? ctx.repository.listResumeDrafts(),
       ctx.repository.listResumeExportArtifacts({ jobId }),
-      ctx.repository.listTailoredAssets(),
+      display?.tailoredAssets ?? ctx.repository.listTailoredAssets(),
     ]);
     const now = new Date().toISOString();
 
@@ -2579,7 +2611,6 @@ export function createWorkspaceApplicationMethods(
       checkpoints,
       consentRequests,
       campaignState,
-      savedJobs,
     ] = await Promise.all([
       ctx.repository.getSearchPreferences(),
       ctx.repository.getSettings(),
@@ -2594,9 +2625,11 @@ export function createWorkspaceApplicationMethods(
       ctx.repository.listApplicationReplayCheckpoints(),
       ctx.repository.listApplicationConsentRequests(),
       ctx.repository.getCampaignState(),
-      ctx.repository.listSavedJobs(),
     ]);
     const run = runs.find((entry) => entry.id === input.runId) ?? null;
+    const savedJobs = run
+      ? await ctx.repository.listSavedJobsByIds(run.jobIds)
+      : [];
     const savedJobsById = new Map(savedJobs.map((job) => [job.id, job]));
 
     if (!run) {
@@ -4578,9 +4611,10 @@ export function createWorkspaceApplicationMethods(
         const resumeDraft = draft.languagePresentation
           ? applyResumeLanguage(languageDraft, draft.languagePresentation)
           : languageDraft;
-        releaseProcessor = await resumeProcessors.acquire();
-        if (!current()) return { jobId, outcome: "cancelled" };
         reportResumeStage(options, "processing");
+        // The final fact check is a model call: it runs before taking one of
+        // the two local slots, which are for rendering. Holding a slot through
+        // it queued a batch of ten behind two checks at a time.
         const sanitizedResumeDraft = await sanitizeAndCheckResumeDraft(
           ctx,
           {
@@ -4591,6 +4625,9 @@ export function createWorkspaceApplicationMethods(
           },
           { fixGeneratedLines: true },
         );
+        if (!current()) return { jobId, outcome: "cancelled" };
+        releaseProcessor = await resumeProcessors.acquire();
+        if (!current()) return { jobId, outcome: "cancelled" };
         const previewSections = buildTailoredAssetBridge({
           draft: sanitizedResumeDraft,
           job,
@@ -4811,6 +4848,15 @@ export function createWorkspaceApplicationMethods(
         // Stop waiting writers before any asynchronous failure persistence.
         reportProviderBlock(error);
         const generationError = providerBlockError ?? error;
+        // Busy is not a failure: on October 13 one overloaded stretch marked
+        // 173 batch resumes as failed. The job keeps what it had and the
+        // batch leaves it for its next pass.
+        if (
+          options?.deferWhenAiBusy &&
+          !providerBlockError &&
+          isAiServiceBusy(error)
+        )
+          throw generationError;
         // A failed run changes nothing (ADR 0041): a job that already had a
         // resume keeps it as it was, ready or approved, and the error tells the
         // person. The failure notice is saved beside the retained file, or on a
@@ -5380,8 +5426,7 @@ export function createWorkspaceApplicationMethods(
               : `Live Assistant session ${input.sessionId} was reviewed and linked to this application record.`;
 
           if (shouldMarkInterview) {
-            const savedJobs = await ctx.repository.listSavedJobs();
-            if (savedJobs.some((job) => job.id === existingRecord.jobId)) {
+            if (await readSavedJob(ctx.repository, existingRecord.jobId)) {
               await ctx.updateJob(existingRecord.jobId, (job) =>
                 SavedJobSchema.parse({
                   ...job,
@@ -5691,11 +5736,16 @@ export function createWorkspaceApplicationMethods(
     },
     async generateResumeForBatch(jobId, options) {
       try {
-        return await startResumeGeneration(jobId, options, options.regenerate);
+        return await startResumeGeneration(
+          jobId,
+          { ...options, deferWhenAiBusy: true },
+          options.regenerate,
+        );
       } catch (error) {
         const providerBlock = getAiProviderAccessFailure(error);
-        if (!providerBlock) throw error;
-        return { jobId, outcome: "blocked", providerBlock };
+        if (providerBlock) return { jobId, outcome: "blocked", providerBlock };
+        if (isAiServiceBusy(error)) return { jobId, outcome: "not_started" };
+        throw error;
       }
     },
     async getResumeWorkspace(jobId) {
@@ -7281,9 +7331,7 @@ export function createWorkspaceApplicationMethods(
       applicationRecordId?: string | null,
       capacityToken?: ApplicationPreparationCapacityToken,
     ) {
-      const preflightJob = (await ctx.repository.listSavedJobs()).find(
-        (entry) => entry.id === jobId,
-      );
+      const preflightJob = await readSavedJob(ctx.repository, jobId);
       if (!preflightJob) {
         throw new Error(
           `Unable to approve apply flow for unknown job '${jobId}'.`,
@@ -7303,17 +7351,16 @@ export function createWorkspaceApplicationMethods(
         const [
           searchPreferences,
           settings,
-          savedJobs,
+          job,
           sourceInstructionArtifacts,
           sourceDebugAttempts,
         ] = await Promise.all([
           ctx.repository.getSearchPreferences(),
           ctx.repository.getSettings(),
-          ctx.repository.listSavedJobs(),
+          readSavedJob(ctx.repository, jobId),
           ctx.repository.listSourceInstructionArtifacts(),
           ctx.repository.listSourceDebugAttempts(),
         ]);
-        const job = savedJobs.find((entry) => entry.id === jobId);
 
         if (!job) {
           throw new Error(
@@ -7720,9 +7767,7 @@ export function createWorkspaceApplicationMethods(
       applicationRecordId?: string | null,
       capacityToken?: ApplicationPreparationCapacityToken,
     ) {
-      const preflightJob = (await ctx.repository.listSavedJobs()).find(
-        (entry) => entry.id === jobId,
-      );
+      const preflightJob = await readSavedJob(ctx.repository, jobId);
       if (!preflightJob) {
         throw new Error(
           `Unable to start apply copilot for unknown job '${jobId}'.`,
@@ -7743,7 +7788,7 @@ export function createWorkspaceApplicationMethods(
           profileState,
           searchPreferences,
           settings,
-          savedJobs,
+          job,
           tailoredAssets,
           sourceInstructionArtifacts,
           sourceDebugAttempts,
@@ -7754,7 +7799,7 @@ export function createWorkspaceApplicationMethods(
           ctx.repository.getProfileWithRevision(),
           ctx.repository.getSearchPreferences(),
           ctx.repository.getSettings(),
-          ctx.repository.listSavedJobs(),
+          readSavedJob(ctx.repository, jobId),
           ctx.repository.listTailoredAssets(),
           ctx.repository.listSourceInstructionArtifacts(),
           ctx.repository.listSourceDebugAttempts(),
@@ -7764,7 +7809,6 @@ export function createWorkspaceApplicationMethods(
         ]);
         const profile = profileState.profile;
         const capturedCampaignId = await ctx.getActiveCampaignId();
-        const job = savedJobs.find((entry) => entry.id === jobId) ?? null;
 
         if (!job) {
           throw new Error(
@@ -8546,7 +8590,7 @@ export function createWorkspaceApplicationMethods(
         scopedProfileState,
         scopedSettings,
       ] = await Promise.all([
-        ctx.repository.listSavedJobs(),
+        ctx.repository.listSavedJobsByIds(uniqueJobIds),
         ctx.repository.listTailoredAssets(),
         ctx.repository.getProfileWithRevision(),
         ctx.repository.getSettings(),
@@ -9002,7 +9046,9 @@ export function createWorkspaceApplicationMethods(
       }
 
       await retireCancelledApplicationUserActions(ctx.repository, runId);
-      const jobs = await ctx.repository.listSavedJobs();
+      const jobs = await ctx.repository.listSavedJobsByIds(
+        results.map((result) => result.jobId),
+      );
       for (const result of results) {
         if (result.state === "awaiting_review" || result.state === "submitted")
           continue;
@@ -9552,13 +9598,12 @@ export function createWorkspaceApplicationMethods(
       });
     },
     async inspectPreparedApplicationPage(input) {
-      const [jobs, runs, results, records] = await Promise.all([
-        ctx.repository.listSavedJobs(),
+      const [job, runs, results, records] = await Promise.all([
+        readSavedJob(ctx.repository, input.jobId),
         ctx.repository.listApplyRuns(),
         ctx.repository.listApplyJobResults({ runId: input.runId }),
         ctx.repository.listApplicationRecords(),
       ]);
-      const job = jobs.find((entry) => entry.id === input.jobId) ?? null;
       const run = runs.find((entry) => entry.id === input.runId) ?? null;
       const result =
         results.find(
@@ -9611,13 +9656,12 @@ export function createWorkspaceApplicationMethods(
       );
     },
     async focusPreparedApplicationPage(input) {
-      const [jobs, runs, results, records] = await Promise.all([
-        ctx.repository.listSavedJobs(),
+      const [job, runs, results, records] = await Promise.all([
+        readSavedJob(ctx.repository, input.jobId),
         ctx.repository.listApplyRuns(),
         ctx.repository.listApplyJobResults({ runId: input.runId }),
         ctx.repository.listApplicationRecords(),
       ]);
-      const job = jobs.find((entry) => entry.id === input.jobId) ?? null;
       const run = runs.find((entry) => entry.id === input.runId) ?? null;
       const result =
         results.find(

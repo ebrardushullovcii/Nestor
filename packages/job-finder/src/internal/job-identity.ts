@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { normalizeText } from "./shared";
 
 const TRACKING_QUERY_PARAMETERS = new Set([
@@ -159,6 +161,14 @@ function normalizePostedDate(input: JobIdentityInput): string | null {
 
 const MIN_EXACT_CONTENT_IDENTITY_CHARACTERS = 200;
 const MIN_EXACT_CONTENT_IDENTITY_WORDS = 40;
+/**
+ * Normalized descriptions by description text. Every identity lookup builds
+ * the content alias of the job it looks for, and a search looks each posting
+ * up several times (ledger, saved jobs, merge, landing); normalizing a whole
+ * description each time was most of a big board's main-process time.
+ */
+const listingContentIdentityMemo = new Map<string, string | null>();
+const LISTING_CONTENT_IDENTITY_MEMO_LIMIT = 500;
 
 function normalizeListingContentIdentity(
   description: string | null | undefined,
@@ -166,6 +176,20 @@ function normalizeListingContentIdentity(
   if (!description) {
     return null;
   }
+  const remembered = listingContentIdentityMemo.get(description);
+  if (remembered !== undefined) return remembered;
+  const normalized = computeListingContentIdentity(description);
+  if (listingContentIdentityMemo.size >= LISTING_CONTENT_IDENTITY_MEMO_LIMIT)
+    listingContentIdentityMemo.clear();
+  listingContentIdentityMemo.set(description, normalized);
+  return normalized;
+}
+
+function digestListingContent(content: string): string {
+  return createHash("sha256").update(content).digest("base64url");
+}
+
+function computeListingContentIdentity(description: string): string | null {
   const normalized = normalizeText(description)
     // A source may label the same final link "Apply" or "Apply now". That
     // call to action is page chrome, not listing identity.
@@ -357,7 +381,11 @@ export function buildJobIdentityAliases(
   const contentLocation = input.location ? normalizeText(input.location) : "";
   if (exactContent && contentCompany && contentLocation) {
     aliases.push({
-      key: `content:${contentCompany}\u0000${contentLocation}\u0000${exactContent}`,
+      // A digest, not the text: aliases stay cached with every indexed job,
+      // and a key holding the whole normalized description kept a second
+      // copy of every listing in memory. Every match on this alias is
+      // confirmed by comparing the full content (the index's resolve).
+      key: `content:${contentCompany}\u0000${contentLocation}\u0000${digestListingContent(exactContent)}`,
       kind: "exact_listing_content",
       confidence: "strong",
       priority: 50,
@@ -616,7 +644,11 @@ export function createJobIdentityIndex<T extends object>(
   };
 
   const resolve = (identity: JobIdentityInput): JobIdentityResolution<T> => {
-    const aliases = buildJobIdentityAliases(identity);
+    // A frozen identity (a stored ledger row) is resolved again on every
+    // workspace refresh; its aliases are built once.
+    const aliases = Object.isFrozen(identity)
+      ? readIndexedAliases(identity, identity)
+      : buildJobIdentityAliases(identity);
     // A URL still matches when corrected card facts have no indexed alias.
     // Check every known alias before selecting it: an alias naming another
     // posting must not attach that posting's history or activity to this one.

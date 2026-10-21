@@ -59,10 +59,13 @@ import type { JobFinderRepositorySeed } from "@nestor/db";
 import { runApplicationNoResponseAutomation } from "./application-crm";
 import {
   buildApplicationRecords,
-  buildDiscoveryJobs,
   buildReviewQueue,
   compareDiscoveryJobs,
 } from "./matching";
+import {
+  selectVisibleDiscoveryJobs,
+  warmDiscoveryJobChecks,
+} from "./matching-review-queue";
 import {
   deriveAndPersistProfileSetupState,
   landProfileSetupAfterImport,
@@ -123,25 +126,114 @@ import {
   ensureCampaignState,
 } from "./campaign-dashboard";
 import { projectDiscoveryJobViews } from "./listing-activity";
+import { createSyncedJobIdentityIndex } from "./discovery-run-indexes";
 import {
   deriveGlobalDailyApplicationPreparationCapacity,
   MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
 } from "./application-preparation-capacity";
-import { memoizeBySameElements } from "./same-elements-memo";
+import { memoizeSortedBySameElements } from "./same-elements-memo";
 import { settleStoredResumeDrafts } from "./resume-settle-stored-drafts";
+import { rebindLegacyFitVerdicts } from "./legacy-fit-fingerprints";
 
 // Each list keeps its own last ordering: a refresh that changed no job reuses
-// it instead of sorting thousands of jobs again. The result is frozen so
-// later display projections can reuse their own work for it too.
+// it, and one that changed a few merges them in instead of sorting thousands
+// of jobs again. The result is frozen so later display projections can reuse
+// their own work for it too.
 function rankBySameElements<T extends SavedJob>() {
-  return memoizeBySameElements(
-    (jobs: readonly T[]) =>
-      Object.freeze([...jobs].sort(compareDiscoveryJobs)) as T[],
-  );
+  return memoizeSortedBySameElements<T>(compareDiscoveryJobs);
 }
 const rankDiscoveryJobs = rankBySameElements<DiscoveryJobView>();
 const rankDismissedJobs = rankBySameElements<DiscoveryJobView>();
 const rankCompanyJobs = rankBySameElements<SavedJob>();
+
+type JobViewInput = {
+  rawSavedJobs: readonly SavedJob[];
+  planId: string | null;
+  pendingDiscoveryJobs: readonly SavedJob[];
+  discoveryLedger: Parameters<
+    typeof projectDiscoveryJobViews
+  >[0]["discoveryLedger"];
+  listingSignals: Parameters<typeof projectDiscoveryJobViews>[0]["listingSignals"];
+  applicationAttempts: NonNullable<
+    Parameters<typeof projectDiscoveryJobViews>[0]["applicationAttempts"]
+  >;
+  companies: readonly { canonicalName: string; jobIds: readonly string[] }[];
+};
+
+type JobViewIdentityIndex = NonNullable<
+  Parameters<typeof projectDiscoveryJobViews>[0]["identityIndex"]
+>;
+
+/** The workspace's job lists, from its saved and staged jobs. */
+function buildJobViews(
+  input: JobViewInput,
+  identityIndex?: JobViewIdentityIndex,
+) {
+  const savedJobs = input.rawSavedJobs.map((job) =>
+    readPlanAssessment(job, input.planId),
+  );
+  // Ranked below with the rest of the list; ordering them here as well
+  // sorted every saved job twice on each refresh.
+  const persistedDiscoveryJobs = selectVisibleDiscoveryJobs(savedJobs);
+  const savedJobIds = new Set(savedJobs.map((job) => job.id));
+  const mergedPendingJobs = input.pendingDiscoveryJobs
+    .filter((job) => !savedJobIds.has(job.id))
+    .map((job) => readPlanAssessment(job, input.planId));
+  // Listing activity is projected before anything is ranked: a listing whose
+  // own text says it is closed must already be marked closed when the
+  // ordering decides what comes first.
+  const projectedJobs = projectDiscoveryJobViews({
+    jobs: [...savedJobs, ...mergedPendingJobs],
+    discoveryLedger: input.discoveryLedger,
+    listingSignals: input.listingSignals,
+    applicationAttempts: input.applicationAttempts,
+    ...(identityIndex ? { identityIndex } : {}),
+  });
+  const projectedJobById = new Map(
+    projectedJobs.map((job) => [job.id, job] as const),
+  );
+  const project = (jobs: readonly SavedJob[]) =>
+    jobs.flatMap((job) => {
+      const projected = projectedJobById.get(job.id);
+      return projected ? [projected] : [];
+    });
+  const discoveryJobs = rankDiscoveryJobs(
+    project([...persistedDiscoveryJobs, ...mergedPendingJobs]),
+  );
+  const projectedDismissedDiscoveryJobs = rankDismissedJobs(
+    project(
+      savedJobs.filter(
+        (job) => job.status === "archived" && job.discoveryFeedback !== null,
+      ),
+    ),
+  );
+  const companyJobIds = new Set(
+    input.companies
+      .filter((company) => isListableCompanyName(company.canonicalName))
+      .flatMap((company) => company.jobIds),
+  );
+  const companyJobById = new Map<string, SavedJob>();
+  for (const job of savedJobs) {
+    if (companyJobIds.has(job.id) && !companyJobById.has(job.id)) {
+      companyJobById.set(job.id, job);
+    }
+  }
+  const companyJobs = rankCompanyJobs([...companyJobById.values()]).flatMap(
+    (job) => {
+      const projected = projectedJobById.get(job.id);
+      return projected ? [projected] : [];
+    },
+  );
+  // Kept between refreshes, so never edited after this.
+  Object.freeze(savedJobs);
+  Object.freeze(companyJobs);
+  return {
+    savedJobs,
+    discoveryJobs,
+    projectedDismissedDiscoveryJobs,
+    companyJobs,
+  };
+}
 
 // What a display read still validates once the collections it borrows are
 // left out. Search preferences and plans were validated when they were
@@ -458,6 +550,9 @@ export function createWorkspaceSnapshotProfileMethods(
   // Once per service: drafts written before ADR 0051 get their unbacked
   // generated lines settled, so nothing on Shortlisted waits on the person.
   let storedResumeDraftSettlement: Promise<unknown> | null = null;
+  // Once per service, in the background: fit verdicts stored with the old
+  // whole-profile fingerprint are re-bound before any edit can strand them.
+  let legacyFitFingerprintRebinding: Promise<unknown> | null = null;
   let lastNoResponseAutomationRunAt: number | null = null;
   const normalizedDraftRows = new WeakMap<
     object,
@@ -475,6 +570,75 @@ export function createWorkspaceSnapshotProfileMethods(
     readonly ApplicationRecord[],
     ApplicationRecord[]
   >();
+
+  // Rescoring every saved job against an edited profile or goals took
+  // seconds on a large workspace and held the save (and the app) until it
+  // finished. A save now answers at once; the rescoring runs after it, one
+  // pass at a time, and the window refreshes when scores changed.
+  let savedJobRescoring: Promise<void> | null = null;
+  let rescoreAgain = false;
+  function rescoreSavedJobsInBackground(): void {
+    if (savedJobRescoring) {
+      rescoreAgain = true;
+      return;
+    }
+    rescoreAgain = false;
+    savedJobRescoring = reassessSavedJobs(ctx)
+      .then((changed) => {
+        if (changed) ctx.onSavedJobsRescored?.();
+      })
+      .catch((error: unknown) => {
+        console.warn("[Job Finder] Rescoring saved jobs failed", error);
+      })
+      .finally(() => {
+        savedJobRescoring = null;
+        if (rescoreAgain && !ctx.isWorkspaceClosing?.())
+          rescoreSavedJobsInBackground();
+      });
+  }
+  /** A canonical read reflects the rescoring the latest save started. */
+  async function settleSavedJobRescoring(): Promise<void> {
+    while (savedJobRescoring) await savedJobRescoring;
+  }
+
+  // Display reads hand back the same frozen collections while nothing in
+  // them changed, so the job lists built from them are kept with them. On
+  // 20,000 jobs, rebuilding them on a refresh that changed nothing was about
+  // half of every refresh. A change to any input rebuilds them (each row's
+  // own work stays cached with the row).
+  let lastJobViews: {
+    input: JobViewInput;
+    views: ReturnType<typeof buildJobViews>;
+  } | null = null;
+  // Kept in step with the listed jobs from one refresh to the next, so a
+  // refresh indexes only the jobs that changed since the last one.
+  const jobViewIdentityIndex = createSyncedJobIdentityIndex<SavedJob>(
+    (job) => job,
+  );
+  function deriveJobViews(input: JobViewInput) {
+    const last = lastJobViews;
+    if (
+      last &&
+      last.input.planId === input.planId &&
+      last.input.rawSavedJobs === input.rawSavedJobs &&
+      last.input.pendingDiscoveryJobs === input.pendingDiscoveryJobs &&
+      last.input.discoveryLedger === input.discoveryLedger &&
+      last.input.listingSignals === input.listingSignals &&
+      last.input.applicationAttempts === input.applicationAttempts &&
+      last.input.companies === input.companies
+    ) {
+      return last.views;
+    }
+    // Only the borrowed display rows keep their identity between refreshes.
+    const views = buildJobViews(
+      input,
+      Object.isFrozen(input.rawSavedJobs) ? jobViewIdentityIndex : undefined,
+    );
+    lastJobViews = Object.isFrozen(input.rawSavedJobs)
+      ? { input, views }
+      : null;
+    return views;
+  }
 
   async function runNoResponseAutomationIfDue(options?: {
     settings?: ApplicationCrmSettings;
@@ -1079,6 +1243,9 @@ export function createWorkspaceSnapshotProfileMethods(
   async function getWorkspaceSnapshot(
     borrowValidatedJobs = false,
   ): Promise<JobFinderWorkspaceSnapshot> {
+    // Display reads show the scores as they stand and refresh when the
+    // rescoring lands; a canonical read waits for it.
+    if (!borrowValidatedJobs) await settleSavedJobRescoring();
     await runNoResponseAutomationIfDue();
 
     storedResumeDraftSettlement ??= settleStoredResumeDrafts(ctx).catch(
@@ -1198,6 +1365,13 @@ export function createWorkspaceSnapshotProfileMethods(
         ? ctx.repository.readIntelligenceProjection()
         : ctx.repository.getIntelligenceState(),
     ]);
+    // From the jobs this read already loaded, so it costs no second read.
+    legacyFitFingerprintRebinding ??= rebindLegacyFitVerdicts(ctx, {
+      savedJobs: rawSavedJobs,
+      pendingDiscoveryJobs: discovery.pendingDiscoveryJobs,
+    }).catch((error: unknown) => {
+      console.warn("[Job Finder] Re-binding stored fit verdicts failed", error);
+    });
 
     let intelligence = groupCompanyConflicts(
       rawIntelligence,
@@ -1304,58 +1478,28 @@ export function createWorkspaceSnapshotProfileMethods(
       }),
     );
     const snapshotPlanId = campaignState.activeCampaignId;
-    const savedJobs = rawSavedJobs.map((job) =>
-      readPlanAssessment(job, snapshotPlanId),
-    );
-    const persistedDiscoveryJobs = buildDiscoveryJobs(savedJobs);
-    const savedJobIds = new Set(savedJobs.map((job) => job.id));
-    const mergedPendingJobs = discovery.pendingDiscoveryJobs
-      .filter((job) => !savedJobIds.has(job.id))
-      .map((job) => readPlanAssessment(job, snapshotPlanId));
-    // Listing activity is projected before anything is ranked: a listing whose
-    // own text says it is closed must already be marked closed when the
-    // ordering decides what comes first.
-    const projectedJobs = projectDiscoveryJobViews({
-      jobs: [...savedJobs, ...mergedPendingJobs],
+    if (
+      lastJobViews?.input.rawSavedJobs !== rawSavedJobs ||
+      lastJobViews.input.planId !== snapshotPlanId
+    )
+      await warmDiscoveryJobChecks(rawSavedJobs, {
+        key: snapshotPlanId,
+        of: (job) => readPlanAssessment(job, snapshotPlanId),
+      });
+    const {
+      savedJobs,
+      discoveryJobs,
+      projectedDismissedDiscoveryJobs,
+      companyJobs,
+    } = deriveJobViews({
+      rawSavedJobs,
+      planId: snapshotPlanId,
+      pendingDiscoveryJobs: discovery.pendingDiscoveryJobs,
       discoveryLedger: discovery.discoveryLedger,
       listingSignals: intelligence.safeguards.listingSignals,
       applicationAttempts,
+      companies: intelligence.companies,
     });
-    const projectedJobById = new Map(
-      projectedJobs.map((job) => [job.id, job] as const),
-    );
-    const project = (jobs: readonly SavedJob[]) =>
-      jobs.flatMap((job) => {
-        const projected = projectedJobById.get(job.id);
-        return projected ? [projected] : [];
-      });
-    const discoveryJobs = rankDiscoveryJobs(
-      project([...persistedDiscoveryJobs, ...mergedPendingJobs]),
-    );
-    const projectedDismissedDiscoveryJobs = rankDismissedJobs(
-      project(
-        savedJobs.filter(
-          (job) => job.status === "archived" && job.discoveryFeedback !== null,
-        ),
-      ),
-    );
-    const companyJobIds = new Set(
-      intelligence.companies
-        .filter((company) => isListableCompanyName(company.canonicalName))
-        .flatMap((company) => company.jobIds),
-    );
-    const companyJobById = new Map<string, SavedJob>();
-    for (const job of savedJobs) {
-      if (companyJobIds.has(job.id) && !companyJobById.has(job.id)) {
-        companyJobById.set(job.id, job);
-      }
-    }
-    const companyJobs = rankCompanyJobs([...companyJobById.values()]).flatMap(
-      (job) => {
-        const projected = projectedJobById.get(job.id);
-        return projected ? [projected] : [];
-      },
-    );
     // A draft not yet approved can hold lines the export gate refuses until
     // the person decides them (a stretched line, or an Assistant edit kept
     // with "Accept anyway"). The queue has to know, or it calls the resume
@@ -1943,7 +2087,7 @@ export function createWorkspaceSnapshotProfileMethods(
       latestResumeImportRunId:
         (await ctx.repository.getLatestResumeImportRun())?.id ?? null,
     });
-    await reassessSavedJobs(ctx);
+    rescoreSavedJobsInBackground();
     return getWorkspaceSnapshot(true);
   }
 
@@ -2112,7 +2256,7 @@ export function createWorkspaceSnapshotProfileMethods(
         latestResumeImportRunId:
           (await ctx.repository.getLatestResumeImportRun())?.id ?? null,
       });
-      await reassessSavedJobs(ctx);
+      rescoreSavedJobsInBackground();
       return getWorkspaceSnapshot(true);
     },
     async saveProfileAndSearchPreferences(
@@ -2176,7 +2320,7 @@ export function createWorkspaceSnapshotProfileMethods(
         latestResumeImportRunId:
           (await ctx.repository.getLatestResumeImportRun())?.id ?? null,
       });
-      await reassessSavedJobs(ctx);
+      rescoreSavedJobsInBackground();
 
       return getWorkspaceSnapshot(true);
     },

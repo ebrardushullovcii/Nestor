@@ -166,16 +166,78 @@ export function listCurrentUnreadNotifications(
         notification.kind === "blocked_work" &&
         ((notification.jobId && sentJobIds.has(notification.jobId)) ||
           supersededByNewerAttempt(notification) ||
-          sourceBlockResolved(notification))
+          sourceBlockResolved(notification) ||
+          isRetiredGateNotification(notification))
       ),
   );
+}
+
+/**
+ * Blocks that no longer exist. ADR 0051 removed the hold on roles the resume
+ * writer left off, but notifications saved while it existed still said the
+ * resume "leaves out 2 roles that Job Finder wants you to confirm first", a
+ * step the app no longer asks for and nothing on screen can do.
+ */
+const RETIRED_GATE_NOTICE_PATTERNS: readonly RegExp[] = [
+  /wants you to confirm first/iu,
+  /confirm the hidden roles? (?:is|are) intentional/iu,
+];
+
+export function isRetiredGateNotification(
+  notification: Pick<CampaignNotification, "body" | "title">,
+): boolean {
+  const text = `${notification.title} ${notification.body ?? ""}`;
+  return RETIRED_GATE_NOTICE_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 const PANEL_CLASS =
   "surface-panel-shell grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) p-5";
 
+const DISMISSED_HOME_PROBLEMS_KEY = "nestor.home.dismissed-problems-v1";
+
+type DismissedHomeProblems = Readonly<Record<string, string>>;
+
+function readDismissedHomeProblems(): DismissedHomeProblems {
+  try {
+    const value: unknown = JSON.parse(
+      window.localStorage.getItem(DISMISSED_HOME_PROBLEMS_KEY) ?? "{}",
+    );
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Remembers that the person hid a quiet Home line for its current cause, so
+ * it stays hidden until the cause changes (ADR 0051: a fact the app cannot
+ * fix gets at most a notice dismissed for good).
+ */
+export function rememberDismissedHomeProblem(
+  problemId: string,
+  dismissKey: string,
+): DismissedHomeProblems {
+  const next = { ...readDismissedHomeProblems(), [problemId]: dismissKey };
+  try {
+    window.localStorage.setItem(
+      DISMISSED_HOME_PROBLEMS_KEY,
+      JSON.stringify(next),
+    );
+  } catch {
+    // This visit still hides it.
+  }
+  return next;
+}
+
 export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
   const [now, setNow] = useState(Date.now);
+  const [dismissedProblemKeys, setDismissedProblemKeys] =
+    useState<DismissedHomeProblems>(readDismissedHomeProblems);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -372,7 +434,9 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
   return (
     // The header stack owns its 12px seam; the -mb-2 cancels the part of
     // the 20px grid gap that would double it.
-    <section className="grid min-w-0 gap-5 pb-8 [&>[data-page-header-stack]]:-mb-2">
+    // Home is one column: at 1920 its card and tiles ran 1600px wide around
+    // a 68-character sentence. It keeps a readable width instead.
+    <section className="grid min-w-0 max-w-[76rem] gap-5 pb-8 [&>[data-page-header-stack]]:-mb-2">
       <PageHeaderStack
         actions={
           // While paused the next-step card below offers Resume; the header
@@ -407,12 +471,26 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
         }
         description="Your search, shortlisted jobs, and applications."
         statusItems={[
-          ...model.problems.map((problem): PageStatusItem => {
+          ...model.problems.flatMap((problem): PageStatusItem[] => {
             const button = problem.button;
-            return {
+            const dismissKey = problem.dismissKey;
+            if (
+              dismissKey !== undefined &&
+              dismissedProblemKeys[problem.id] === dismissKey
+            )
+              return [];
+            const item: PageStatusItem = {
               id: problem.id,
-              tone: problem.tone === "critical" ? "critical" : "warning",
+              ...(problem.tone ? { tone: problem.tone } : {}),
               text: problem.text,
+              ...(dismissKey !== undefined
+                ? {
+                    onHide: () =>
+                      setDismissedProblemKeys(
+                        rememberDismissedHomeProblem(problem.id, dismissKey),
+                      ),
+                  }
+                : {}),
               ...(button
                 ? {
                     // Going to the screen that owns the problem is a link;
@@ -432,6 +510,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
                   }
                 : {}),
             };
+            return [item];
           }),
           { id: "run-summary", text: model.statusLine },
         ]}
@@ -616,6 +695,31 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
             </Button>
           ))}
         </div>
+        {model.next.also && model.next.also.length > 0 ? (
+          <ul className="m-0 grid list-none gap-1 p-0" data-home-next-step-also>
+            {model.next.also.map((line) => (
+              <li
+                className="min-w-0 text-(length:--text-small) leading-5 text-foreground-muted"
+                data-home-also={line.id}
+                key={line.id}
+              >
+                {line.text}
+                {line.link ? (
+                  <>
+                    {" "}
+                    <button
+                      className="inline cursor-pointer rounded-sm text-foreground-soft underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => line.link && run(line.link.action)}
+                      type="button"
+                    >
+                      {line.link.label}
+                    </button>
+                  </>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       {model.stages ? (

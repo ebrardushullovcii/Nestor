@@ -796,6 +796,8 @@ export const JobListMatchAssessmentSchema = MatchAssessmentSchema.extend({
     roleExplanation: true,
     preferencesExplanation: true,
     listingClosedEvidence: true,
+    reasons: true,
+    gaps: true,
   })
     .nullable()
     .optional(),
@@ -1525,6 +1527,21 @@ export type DiscoveryListingFingerprints = z.infer<
   typeof DiscoveryListingFingerprintsSchema
 >;
 
+/**
+ * The model's screen of a job-board feed listing (title, place, work mode)
+ * against the person's goals, remembered so a board fetched again is not
+ * screened again. `key` hashes the goals and the listing facts it read; a
+ * change to either asks again. `pending` means the screen could not run and
+ * the listing was kept unscreened; the next search screens it.
+ */
+export const ListingScreenRecordSchema = z.object({
+  key: NonEmptyStringSchema.nullable().default(null),
+  verdict: z.enum(["keep", "reject", "pending"]),
+  category: ListingRejectionCategorySchema.nullable().default(null),
+  reason: NonEmptyStringSchema.nullable().default(null),
+});
+export type ListingScreenRecord = z.infer<typeof ListingScreenRecordSchema>;
+
 export const DiscoveryLedgerEntrySchema = z.object({
   id: NonEmptyStringSchema,
   canonicalUrl: UrlStringSchema,
@@ -1553,6 +1570,7 @@ export const DiscoveryLedgerEntrySchema = z.object({
   latestStatus: DiscoveryLedgerEntryStatusSchema.default("seen"),
   titleTriageOutcome: DiscoveryTitleTriageOutcomeSchema.default("pass"),
   skipReason: NonEmptyStringSchema.nullable().default(null),
+  listingScreen: ListingScreenRecordSchema.nullable().optional(),
 });
 export type DiscoveryLedgerEntry = z.infer<typeof DiscoveryLedgerEntrySchema>;
 

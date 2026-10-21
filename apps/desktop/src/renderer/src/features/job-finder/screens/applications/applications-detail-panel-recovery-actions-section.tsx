@@ -478,8 +478,15 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
             with the reason three disclosures down in Run details is the
             complaint this block answers. */}
         <div className="grid min-w-0 max-w-prose gap-1.5">
+          {/* "Prepare again" over a "Prepare again" button said it twice;
+              the heading stays for screen readers only then. */}
           <h3
-            className="text-(length:--text-body) font-semibold text-(--text-headline)"
+            className={
+              presentation.statusLine.trim().toLowerCase() ===
+              browserActionLabel?.trim().toLowerCase()
+                ? "sr-only"
+                : "text-(length:--text-body) font-semibold text-(--text-headline)"
+            }
             data-testid="applications-recovery-status-line"
           >
             {presentation.statusLine}

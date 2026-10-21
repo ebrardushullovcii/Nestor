@@ -20,6 +20,7 @@ import type { AssessJobFitInput, JobFitJudgmentResult } from "./shared";
  */
 
 export const JOB_FIT_JUDGING_BATCH_SIZE = 20;
+
 /** Shared by preliminary and full reads so a rescore keeps the same constraints. */
 export function buildFitEvidenceInstructions(): string {
   return [
@@ -43,6 +44,7 @@ export function buildJobFitJudgingPrompt(): string {
     buildFitEvidenceInstructions(),
     "These batch inputs are bounded excerpts and saved facts, without the raw imported resume. An evidenceOmitted flag or excerpt marker means some listing text was omitted: say that in the summary, treat requirements as provisional and request a full read for decisive unknowns. Missing wording in an excerpt is not proof of missing candidate ability.",
     "You judge how well each job fits one person who is looking for work.",
+    "Input jobs are row arrays: jobColumns names each field in order. Each row contains the same listing evidence as an object with those field names.",
     'Return JSON {"judgments": [...]} with one entry per job, each with the jobId exactly as given.',
     'role: "exact" when the job is the kind of work the person is looking for, in any wording or language; "adjacent" when it is related work they could credibly do; "conflict" when it is a different occupation, or a level far from theirs; "unknown" when the listing says too little.',
     'preferences: compare the job\'s place, work mode, level, employment type and pay with the person\'s goals: "aligned", "mixed", "conflict" when it contradicts a goal the person set, "unknown" when the listing is silent, "not_configured" when the person set no goals.',
@@ -192,22 +194,126 @@ function compactGoals(preferences: JobSearchPreferences) {
   };
 }
 
+/**
+ * The person as a full listing read sees them: every fact a requirement can
+ * be checked against, with ids to cite, and the imported resume. Contact
+ * details, links, saved application answers and file metadata are left out:
+ * no requirement is checked against them.
+ */
+export function buildFullFitPerson(profile: CandidateProfile) {
+  return {
+    headline: profile.headline,
+    summary: profile.summary,
+    currentLocation: profile.currentLocation,
+    currentCity: profile.currentCity,
+    currentRegion: profile.currentRegion,
+    currentCountry: profile.currentCountry,
+    yearsExperience: profile.yearsExperience,
+    workEligibility: plainEligibility(profile),
+    savedEligibilityAnswers: {
+      workAuthorization: profile.answerBank.workAuthorization,
+      visaSponsorship: profile.answerBank.visaSponsorship,
+      relocation: profile.answerBank.relocation,
+      travel: profile.answerBank.travel,
+      noticePeriod: profile.answerBank.noticePeriod,
+      availability: profile.answerBank.availability,
+    },
+    narrative: profile.narrative,
+    professionalSummary: profile.professionalSummary,
+    skills: profile.skills,
+    skillGroups: profile.skillGroups,
+    experiences: profile.experiences
+      .filter((experience) => !experience.isDraft)
+      .map((experience) => ({
+        id: experience.id,
+        title: experience.title,
+        companyName: experience.companyName,
+        employmentType: experience.employmentType,
+        location: experience.location,
+        workMode: experience.workMode,
+        startDate: experience.startDate,
+        endDate: experience.isCurrent ? "present" : experience.endDate,
+        summary: experience.summary,
+        achievements: experience.achievements,
+        skills: experience.skills,
+        domainTags: experience.domainTags,
+        peopleManagementScope: experience.peopleManagementScope,
+        ownershipScope: experience.ownershipScope,
+      })),
+    education: profile.education
+      .filter((education) => !education.isDraft)
+      .map((education) => ({
+        id: education.id,
+        degree: education.degree,
+        fieldOfStudy: education.fieldOfStudy,
+        schoolName: education.schoolName,
+        location: education.location,
+        startDate: education.startDate,
+        endDate: education.endDate,
+        summary: education.summary,
+      })),
+    certifications: profile.certifications
+      .filter((certification) => !certification.isDraft)
+      .map((certification) => ({
+        id: certification.id,
+        name: certification.name,
+        issuer: certification.issuer,
+        issueDate: certification.issueDate,
+        expiryDate: certification.expiryDate,
+      })),
+    projects: profile.projects.map((project) => ({
+      id: project.id,
+      name: project.name,
+      projectType: project.projectType,
+      role: project.role,
+      summary: project.summary,
+      outcome: project.outcome,
+      skills: project.skills,
+    })),
+    proofBank: profile.proofBank.map((proof) => ({
+      id: proof.id,
+      title: proof.title,
+      claim: proof.claim,
+      heroMetric: proof.heroMetric,
+      supportingContext: proof.supportingContext,
+    })),
+    spokenLanguages: profile.spokenLanguages,
+    resumeText: profile.baseResume.textContent,
+  };
+}
+
+/**
+ * Everything about the person and their goals that a fit verdict is given,
+ * by a batch or a full read (the batch's excerpts are cut from these same
+ * fields). A verdict goes stale when this changes, and only then: a new
+ * phone number or saved answer does not ask the model again.
+ */
+export function buildFitVerdictContext(
+  profile: CandidateProfile,
+  preferences: JobSearchPreferences,
+) {
+  return {
+    person: buildFullFitPerson(profile),
+    goals: compactGoals(preferences),
+  };
+}
+
 export function buildJobFitAssessmentPayload(
   input: Omit<AssessJobFitInput, "signal">,
 ) {
+  const { job, profile, searchPreferences, ...rest } = input;
+  // The person and their goals lead and the listing comes last, so reads of
+  // different listings share a prefix the AI service can reuse.
   return {
-    ...input,
+    profile: buildFullFitPerson(profile),
+    searchPreferences: compactGoals(searchPreferences),
+    ...rest,
     // SavedJob callers also carry prior sightings and assessment history.
     // The full fit read needs the current listing, not discovery diagnostics.
     job: JobPostingSchema.omit({
       sourceIntelligence: true,
       listingDetailFetch: true,
-    }).parse(input.job),
-    profile: {
-      ...input.profile,
-      workEligibility: plainEligibility(input.profile),
-    },
-    searchPreferences: compactGoals(input.searchPreferences),
+    }).parse(job),
   };
 }
 
@@ -247,10 +353,25 @@ export function buildJobFitJudgingPayload(input: {
   jobs: ReadonlyArray<{ jobId: string; posting: JobPosting }>;
 }) {
   return {
-    assessmentDate: input.assessmentDate,
     person: compactPerson(input.profile),
     goals: compactGoals(input.searchPreferences),
+    assessmentDate: input.assessmentDate,
     jobs: input.jobs.map((job) => compactJob(job.jobId, job.posting)),
+  };
+}
+
+/** Lossless wire representation: repeated field names travel once per batch. */
+export function buildJobFitJudgingRequest(
+  input: Parameters<typeof buildJobFitJudgingPayload>[0],
+) {
+  const { jobs, ...context } = buildJobFitJudgingPayload(input);
+  const jobColumns = Object.keys(jobs[0] ?? {}) as Array<
+    keyof (typeof jobs)[number]
+  >;
+  return {
+    ...context,
+    jobColumns,
+    jobs: jobs.map((job) => jobColumns.map((column) => job[column])),
   };
 }
 

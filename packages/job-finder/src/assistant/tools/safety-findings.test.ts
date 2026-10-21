@@ -152,6 +152,8 @@ function lease(raw = page()): AssistantBrowserLease {
     hands: {
       readPage: () => Promise.resolve(raw),
       navigate: vi.fn(),
+      // Typing now waits once to check the field kept its answer.
+      wait: () => Promise.resolve(),
     } as unknown as AssistantBrowserLease["hands"],
   };
 }

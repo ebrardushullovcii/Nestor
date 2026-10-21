@@ -113,7 +113,11 @@ describe("recorded synthetic writer and checker responses", () => {
         ...base,
         draft: generated(record.bad, record.kind),
       });
-      expect(checker.mock.calls[0]![0].resumeText).toBe(record.original);
+      // The imported resume reaches the checker once, as cited evidence.
+      expect(checker.mock.calls[0]![0].resumeText).toBeNull();
+      expect(
+        checker.mock.calls[0]![0].evidence.map((entry) => entry.text),
+      ).toContain(record.original);
       const fixed = await withResumeClaimFixes({
         ...base,
         draft: checked,

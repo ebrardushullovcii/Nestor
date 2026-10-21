@@ -24,25 +24,55 @@ export interface ToastInput {
   readonly action?: { readonly label: string; readonly onClick: () => void };
   /** Milliseconds before it leaves on its own. */
   readonly duration?: number;
+  /**
+   * A toast is news about the screen it was raised on, so by default it
+   * leaves when the person moves to another screen; "3 jobs added to
+   * Shortlisted" used to follow them onto Shortlisted itself. "app" keeps it
+   * across screens for news that is not about the screen.
+   */
+  readonly scope?: "screen" | "app";
 }
 
 interface ToastEntry extends ToastInput {
   readonly key: string;
+  readonly createdAt: number;
 }
 
 interface ToastContextValue {
   showToast: (toast: ToastInput) => void;
   dismissToast: (id: string) => void;
+  /** Called when the person moves to another screen. */
+  dismissScreenToasts: () => void;
 }
 
 const DEFAULT_DURATION_MS = 6000;
 const MAX_VISIBLE = 3;
+/**
+ * A toast raised by the press that also changes screen (an action that
+ * navigates once it finishes) belongs to the screen it lands on.
+ */
+const SCREEN_CHANGE_GRACE_MS = 750;
 
 const noop = () => undefined;
 const ToastContext = React.createContext<ToastContextValue>({
   showToast: noop,
   dismissToast: noop,
+  dismissScreenToasts: noop,
 });
+
+/**
+ * Drops screen-scoped toasts when `screenKey` changes. The first value is the
+ * screen the person arrived on, so nothing is dismissed on mount.
+ */
+export function useDismissToastsOnScreenChange(screenKey: string): void {
+  const { dismissScreenToasts } = useToast();
+  const previousKeyRef = React.useRef(screenKey);
+  React.useEffect(() => {
+    if (previousKeyRef.current === screenKey) return;
+    previousKeyRef.current = screenKey;
+    dismissScreenToasts();
+  }, [dismissScreenToasts, screenKey]);
+}
 
 /** No-op outside a provider, so a screen rendered on its own still works. */
 export function useToast(): ToastContextValue {
@@ -302,17 +332,28 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const showToast = React.useCallback((toast: ToastInput) => {
     toastSequence += 1;
     const key = `toast-${toastSequence}`;
+    const createdAt = Date.now();
     setToasts((current) =>
       [
-        { ...toast, key },
+        { ...toast, key, createdAt },
         ...current.filter((entry) => !toast.id || entry.id !== toast.id),
       ].slice(0, MAX_VISIBLE),
     );
   }, []);
 
+  const dismissScreenToasts = React.useCallback(() => {
+    const cutoff = Date.now() - SCREEN_CHANGE_GRACE_MS;
+    setToasts((current) => {
+      const kept = current.filter(
+        (toast) => toast.scope === "app" || toast.createdAt > cutoff,
+      );
+      return kept.length === current.length ? current : kept;
+    });
+  }, []);
+
   const value = React.useMemo(
-    () => ({ showToast, dismissToast }),
-    [showToast, dismissToast],
+    () => ({ showToast, dismissToast, dismissScreenToasts }),
+    [showToast, dismissToast, dismissScreenToasts],
   );
 
   return (

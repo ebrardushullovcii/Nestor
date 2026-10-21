@@ -43,7 +43,7 @@ function sendInput(
         getIntelligenceState: () =>
           Promise.resolve(JobFinderIntelligenceStateSchema.parse({})),
         listApplicationRecords: () => Promise.resolve([]),
-        listSavedJobs: () => Promise.resolve([]),
+        readSavedJobsProjection: () => Promise.resolve([]),
         listApplyJobResults: () => Promise.resolve([]),
         listApplyRuns: () => Promise.resolve([]),
         getSettings: () => Promise.resolve({ applicationAutomationMode: mode }),

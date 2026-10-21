@@ -69,6 +69,10 @@ function applicationCrmEventCopyForView(
   };
 }
 
+/** What an export holds, as the export links' tooltip. */
+const EXPORT_SCOPE_NOTE =
+  "Local notes and stages only. Exports contain these tracking facts, not submission evidence.";
+
 export function ApplicationsCrmDetail(props: {
   record: ApplicationRecord;
   homeTimeZone?: string;
@@ -294,6 +298,8 @@ export function ApplicationsCrmDetail(props: {
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
+          {/* The page header already says the tracker never submits; the
+              paragraph that said it again here is gone. */}
           <p className="label-mono-xs">Application tracker</p>
           <h3
             className="mt-1 font-semibold text-foreground"
@@ -306,11 +312,6 @@ export function ApplicationsCrmDetail(props: {
               ? `${props.record.title} · ${employerLine}`
               : props.record.title}
           </p>
-          <p className="mt-1 text-sm leading-6 text-foreground-soft">
-            These are local, user-recorded notes and stages. Nothing here
-            contacts the employer or submits an application. Exports contain
-            these tracking facts, not submission evidence.
-          </p>
         </div>
         {/* These two were the same colour as the paragraph directly above
             them, with no underline, box or chevron — nothing said they were
@@ -321,6 +322,7 @@ export function ApplicationsCrmDetail(props: {
             disabled={pending}
             onClick={() => void props.onExport("csv", props.record.id)}
             size="sm"
+            title={EXPORT_SCOPE_NOTE}
             type="button"
             variant="link"
           >
@@ -331,6 +333,7 @@ export function ApplicationsCrmDetail(props: {
             disabled={pending}
             onClick={() => void props.onExport("json", props.record.id)}
             size="sm"
+            title={EXPORT_SCOPE_NOTE}
             type="button"
             variant="link"
           >

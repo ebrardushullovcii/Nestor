@@ -122,8 +122,13 @@ function configFor(
     goBack: () =>
       Promise.resolve({ ok: true, url: "https://apply.example.test/form" }),
     readText: () => Promise.resolve("Apply for the role"),
-    fillText: (_ref, value) =>
-      Promise.resolve({ ok: true, observedValue: value }),
+    fillText: (ref, value) => {
+      const control = page.controls.find(
+        (entry) => (entry.ref ?? `c${entry.index}`) === ref,
+      );
+      if (control) control.value = value;
+      return Promise.resolve({ ok: true, observedValue: value });
+    },
     chooseOption: (_ref, option) =>
       Promise.resolve({ ok: true, observedValue: option }),
     setToggle: (_ref, checked) =>
@@ -228,12 +233,13 @@ describe("apply policy executor", () => {
         rawControl({ index: 0, tagName: "textarea", label: "Why this role?" }),
       ],
     });
-    const fillText = vi.fn((_ref: string, value: string) =>
-      Promise.resolve({
+    const fillText = vi.fn((_ref: string, value: string) => {
+      source.controls[0].value = value;
+      return Promise.resolve({
         ok: true as const,
         observedValue: value,
-      }),
-    );
+      });
+    });
     const { config } = configFor(source, { hands: { fillText } });
     const result = await executeApplyProposal(
       {
@@ -576,7 +582,7 @@ describe("apply policy executor", () => {
     // is never typed; it is left for them.
     const other = await executeApplyProposal(
       { tool: "type", ref: "c0", text: "someone.else@example.test" },
-      observation.signature,
+      observationOf(page).signature,
       { config, now, guardState: createApplyGuardState() },
     );
     expect(other.kind).toBe("suggestion");
@@ -2898,9 +2904,10 @@ describe("the model's answers stand when the person's facts support them (ADR 00
         }),
       ],
     });
-    const fillText = vi.fn((_ref: string, value: string) =>
-      Promise.resolve({ ok: true as const, observedValue: value }),
-    );
+    const fillText = vi.fn((_ref: string, value: string) => {
+      page.controls[0].value = value;
+      return Promise.resolve({ ok: true as const, observedValue: value });
+    });
     const { config } = configFor(page, { hands: { fillText } });
     config.sources.reusableAnswers = [];
     const { deps: run, checkWrittenAnswer } = deps(config, true);
@@ -4305,5 +4312,57 @@ test("keeps a generated numeric suggestion's real source for later review", () =
         sourceKind: "prior_answer",
       },
     ],
+  });
+});
+
+describe("an unconfirmed short value is offered back to the person", () => {
+  test.each([
+    {
+      label: "Preferred start date",
+      inputType: "date",
+      value: "2026-11-20",
+      offered: true,
+    },
+    {
+      label: "Why do you want this job?",
+      inputType: "text",
+      value: "I have led three platform migrations at scale.",
+      offered: false,
+    },
+    {
+      label: "Are you legally authorized to work in this country?",
+      inputType: "text",
+      value: "Yes",
+      offered: false,
+    },
+  ])("$label", async ({ label, inputType, value, offered }) => {
+    const page = rawPage({
+      controls: [rawControl({ index: 0, label, inputType, required: true })],
+    });
+    const { config, hands } = configFor(page);
+    const fillText = vi.spyOn(hands, "fillText");
+    const observation = observationOf(page);
+    const outcome = await executeApplyProposal(
+      { tool: "type", ref: "c0", text: value },
+      observation.signature,
+      {
+        config,
+        now,
+        guardState: createApplyGuardState(),
+        checkWrittenAnswer: () =>
+          Promise.resolve({
+            supported: false,
+            reason: "Your facts give a 30-day notice period, not a date.",
+          }),
+      },
+    );
+    expect(fillText).not.toHaveBeenCalled();
+    expect(outcome.kind).toBe("suggestion");
+    if (outcome.kind !== "suggestion") return;
+    const suggested = outcome.question?.suggestedAnswers.map(
+      (answer) => answer.text,
+    );
+    if (offered) expect(suggested).toEqual([value]);
+    else expect(suggested ?? []).not.toContain(value);
   });
 });

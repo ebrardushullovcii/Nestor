@@ -141,10 +141,10 @@ test("jobs the model could not judge say so and are asked about next time", asyn
     ),
   ).toBe(true);
 
-  // The first search asked twice (one retry after the failure); the second
-  // search asks again for the jobs still unjudged.
+  // The first search asked once (the request layer does the retrying); the
+  // second search asks again for the jobs still unjudged.
   await workspaceService.runAgentDiscovery();
-  expect(judgeJobFits).toHaveBeenCalledTimes(3);
+  expect(judgeJobFits).toHaveBeenCalledTimes(2);
 }, 30_000);
 
 test("with a result limit, the model's best fits are kept rather than the newest jobs", async () => {

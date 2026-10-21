@@ -13,7 +13,7 @@ import {
   type Session,
   type BrowserWindowConstructorOptions,
 } from "electron";
-import { chromium, type Browser } from "playwright";
+import type { Browser } from "playwright";
 import {
   DesktopBrowserStateSchema,
   resolveBrowserAddress,
@@ -888,10 +888,24 @@ export class EmbeddedBrowser {
   private memoryCleanup: Promise<void> | null = null;
   private lastMemoryCleanupAt = 0;
 
+  /**
+   * A retained application form: its answers and files are never reloaded
+   * or discarded, so it has its own memory budget. A search page parked for
+   * the person (a sign-in or a site check) is not a form; counting two such
+   * pages (530 and 600 MB on a check page) filled the budget and held every
+   * other source of a search at "Waiting for a free tab" (ADR 0051).
+   */
+  private isWaitingFormTab(id: string): boolean {
+    return (
+      [...this.ownedTabs.values()].some((tabs) => tabs.has(id)) &&
+      ![...this.operationClaims.values()].some((claim) => claim.tabs.has(id))
+    );
+  }
+
   /** Read native process metrics; no page content or answer leaves its renderer. */
   getWaitingFormMemory(): WaitingFormMemory {
     const tabs = [...this.pageMap.values()].filter(
-      (page) => !page.contents.isDestroyed() && this.isWaitingTab(page.id),
+      (page) => !page.contents.isDestroyed() && this.isWaitingFormTab(page.id),
     );
     return measureWaitingFormMemory({
       recordedAt: new Date().toISOString(),
@@ -1586,6 +1600,8 @@ export class EmbeddedBrowser {
       });
       this.bridge = bridge;
       const transport = await bridge.start();
+      // Playwright loads here, on the first automation, not with the app.
+      const { chromium } = await import("playwright");
       const browser = await chromium.connectOverCDP(transport.endpoint, {
         headers: transport.headers,
         noDefaults: true,

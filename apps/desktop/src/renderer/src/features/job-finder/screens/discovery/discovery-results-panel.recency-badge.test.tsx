@@ -246,7 +246,7 @@ describe("getDiscoveryListingDateBadge", () => {
   });
 });
 
-it("keeps the beginning of a long posting chip readable when the row is narrow", () => {
+it("says the posting date as plain text on the meta line, not as a badge", () => {
   render(
     <DiscoveryResultsPanel
       browserSession={browserSession}
@@ -255,7 +255,7 @@ it("keeps the beginning of a long posting chip readable when the row is narrow",
       selectedJob={null}
     />,
   );
-  const chip = screen.getByText("Posted 2 days ago");
-  expect(chip.className).toContain("justify-start");
-  expect(chip.className).not.toContain("justify-center");
+  const date = screen.getByText("Posted 2 days ago");
+  expect(date.closest('[data-slot="badge"]')).toBeNull();
+  expect(date.getAttribute("data-testid")).toBe("discovery-result-date-one");
 });

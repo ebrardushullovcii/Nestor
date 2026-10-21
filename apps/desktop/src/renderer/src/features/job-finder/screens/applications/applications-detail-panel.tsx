@@ -394,7 +394,9 @@ export function ApplicationsDetailPanel({
             ? ("positive" as const)
             : selectedApplyState.cancelledByPerson
               ? ("muted" as const)
-              : selectedApplyState.kind === "could_not_apply"
+              : selectedApplyState.formClosed
+                ? ("warning" as const)
+                : selectedApplyState.kind === "could_not_apply"
                 ? ("critical" as const)
                 : selectedApplyState.kind === "needs_you"
                   ? ("warning" as const)
@@ -584,6 +586,16 @@ export function ApplicationsDetailPanel({
     </>
   ) : null;
 
+  const headerStatusLabel = showNotSubmittedPill
+    ? "Not sent"
+    : selectedRecord
+      ? (selectedHiringStage?.label ??
+        (visibleApplyResult
+          ? selectedApplyStage?.label
+          : applicationCrmStageLabelForView(selectedRecord, customStages)) ??
+        null)
+      : "Nothing selected";
+
   return (
     <section
       className="@container/detail surface-panel-shell relative flex min-w-0 flex-col gap-6 overflow-hidden rounded-(--radius-field) border border-(--surface-panel-border) px-8 py-5 xl:h-full xl:min-h-0"
@@ -622,15 +634,7 @@ export function ApplicationsDetailPanel({
           ) : null}
           {!showNotSubmittedPill ? (
             <StatusBadge tone={selectedStage ? selectedStage.tone : "muted"}>
-              {selectedRecord
-                ? (selectedHiringStage?.label ??
-                  (visibleApplyResult
-                    ? selectedApplyStage?.label
-                    : applicationCrmStageLabelForView(
-                        selectedRecord,
-                        customStages,
-                      )))
-                : "Nothing selected"}
+              {headerStatusLabel ?? ""}
             </StatusBadge>
           ) : null}
         </div>
@@ -657,6 +661,7 @@ export function ApplicationsDetailPanel({
             visibleApplyRunId={visibleApplyRunId}
             plannedStanding={selectedApplyState?.plannedStanding ?? null}
             showFactStrip={!needsPrimaryRecovery}
+            headerStatusLabel={headerStatusLabel}
             waitingOnSafetyLimitReview={
               selectedRun?.state === "paused_for_user_review" &&
               visibleApplyResult?.state === "planned"
@@ -690,6 +695,7 @@ export function ApplicationsDetailPanel({
               visibleApplyResult={visibleApplyResult}
               visibleApplyRunId={visibleApplyRunId}
               plannedStanding={selectedApplyState?.plannedStanding ?? null}
+              headerStatusLabel={headerStatusLabel}
               waitingOnSafetyLimitReview={
                 selectedRun?.state === "paused_for_user_review" &&
                 visibleApplyResult?.state === "planned"

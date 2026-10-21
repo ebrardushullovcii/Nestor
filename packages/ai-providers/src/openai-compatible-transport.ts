@@ -483,6 +483,72 @@ export function parseModelReasoningEffort(
   return modelReasoningEfforts.find((effort) => effort === normalized);
 }
 
+/**
+ * Work whose reasoning effort is chosen on its own. The resume writer keeps
+ * the client's main effort; the rest run many times per search or form and
+ * think less. A request without a task uses the client's agent effort.
+ */
+export const modelReasoningTasks = [
+  "resume_writer",
+  "listing_read",
+  "search",
+  "page_read",
+  "fit_batch",
+  "listing_screen",
+  "claim_check",
+  "apply",
+] as const;
+export type ModelReasoningTask = (typeof modelReasoningTasks)[number];
+
+/**
+ * Product defaults and env overrides per task. Search turns, page reads and
+ * form turns are short "what next / what is on this page" decisions: low.
+ * Fit batches and fact checks are verdicts that stand without a rule
+ * recomputing them (ADR 0041): medium. A full listing read keeps the main
+ * effort unless its own variable says otherwise. The writer has no variable
+ * of its own: it is `NESTOR_AI_REASONING_EFFORT`.
+ */
+const TASK_REASONING_EFFORT_SETTINGS: Record<
+  Exclude<ModelReasoningTask, "resume_writer">,
+  { env: string; fallback: ModelReasoningEffort | null }
+> = {
+  listing_read: {
+    env: "NESTOR_AI_LISTING_READ_REASONING_EFFORT",
+    fallback: null,
+  },
+  search: { env: "NESTOR_AI_SEARCH_REASONING_EFFORT", fallback: "low" },
+  page_read: { env: "NESTOR_AI_PAGE_READ_REASONING_EFFORT", fallback: "low" },
+  fit_batch: { env: "NESTOR_AI_FIT_REASONING_EFFORT", fallback: "medium" },
+  // Which job-board listings are worth keeping, from title and place only.
+  listing_screen: {
+    env: "NESTOR_AI_LISTING_SCREEN_REASONING_EFFORT",
+    fallback: "low",
+  },
+  claim_check: {
+    env: "NESTOR_AI_CLAIM_CHECK_REASONING_EFFORT",
+    fallback: "medium",
+  },
+  apply: { env: "NESTOR_AI_APPLY_REASONING_EFFORT", fallback: "low" },
+};
+
+export function resolveTaskReasoningEffortsFromEnvironment(
+  env: Record<string, string | undefined>,
+): Partial<Record<ModelReasoningTask, ModelReasoningEffort>> {
+  const efforts: Partial<Record<ModelReasoningTask, ModelReasoningEffort>> =
+    {};
+  for (const [task, setting] of Object.entries(
+    TASK_REASONING_EFFORT_SETTINGS,
+  ) as [
+    Exclude<ModelReasoningTask, "resume_writer">,
+    { env: string; fallback: ModelReasoningEffort | null },
+  ][]) {
+    const effort =
+      parseModelReasoningEffort(env[setting.env]) ?? setting.fallback;
+    if (effort) efforts[task] = effort;
+  }
+  return efforts;
+}
+
 export function buildModelUrl(baseUrl: string, apiMode: ModelApiMode): string {
   const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   return new URL(

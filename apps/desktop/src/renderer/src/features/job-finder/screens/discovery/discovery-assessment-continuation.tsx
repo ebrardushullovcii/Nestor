@@ -2,9 +2,11 @@ import { describeListingReadFailure } from "../../lib/describe-failure";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { JobListRow, FitJudgmentProgress } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
+import { cn } from "@renderer/lib/cn";
 import { isDiscoveryUncheckedResult } from "./discovery-result-groups";
 
 export function DiscoveryAssessmentContinuation(props: {
+  className?: string;
   jobs: readonly JobListRow[];
   preferredJobs?: readonly JobListRow[];
   isSearchRunning: boolean;
@@ -113,7 +115,10 @@ export function DiscoveryAssessmentContinuation(props: {
     return null;
   return (
     <div
-      className="flex flex-wrap items-center gap-2 text-xs text-foreground-soft"
+      className={cn(
+        "flex flex-wrap items-center gap-2 text-xs text-foreground-soft",
+        props.className,
+      )}
       role="status"
     >
       {judging && fitProgress ? (
@@ -139,18 +144,24 @@ export function DiscoveryAssessmentContinuation(props: {
       ) : !props.isSearchRunning && unread.length > 0 ? (
         <>
           {props.onJudgeAll ? (
-            <Button size="sm" onClick={() => void judgeAll()}>
+            <Button
+              size="toolbar"
+              title="Scores every job that has no fit score yet. It carries on if you leave this page."
+              variant="secondary"
+              onClick={() => void judgeAll()}
+            >
               Judge fit for all {unread.length}
             </Button>
           ) : null}
           {props.onAssess ? (
             <Button
-              size="sm"
-              variant="secondary"
+              aria-label={`Assess next ${Math.min(20, unread.length)} ${unread.length === 1 ? "listing" : "listings"}`}
+              size="toolbar"
+              title="Reads the full listing of the next jobs on this page and scores each one."
+              variant="ghost"
               onClick={() => void assessMore()}
             >
-              Assess next {Math.min(20, unread.length)}{" "}
-              {unread.length === 1 ? "listing" : "listings"}
+              Assess next {Math.min(20, unread.length)}
             </Button>
           ) : null}
         </>

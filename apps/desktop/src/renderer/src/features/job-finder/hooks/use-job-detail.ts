@@ -66,6 +66,31 @@ export function clearJobDetailCache() {
   detailCache.clear();
 }
 
+/**
+ * Reads a job's details into the cache ahead of time, so opening it next
+ * (the next job in a triage pass) shows at once. A failed read is dropped;
+ * opening the job reads it again.
+ */
+export function prefetchJobDetail(row: JobListRow, planId: string | null) {
+  const key = JSON.stringify([
+    detailCache.generation(),
+    planId,
+    row.id,
+    row.detailRevision,
+  ]);
+  if (detailCache.peek(key)) return;
+  void detailCache
+    .load(key, async () => {
+      const detail = await window.nestor.jobFinder.getJobDetail(row.id, planId);
+      if (detail.job.id !== row.id || detail.planId !== planId)
+        throw new DetailReadError(
+          "The loaded details do not belong to this job and search plan.",
+        );
+      return detail;
+    })
+    .catch(() => undefined);
+}
+
 /** Selection, plan, detail revision and reset all fence asynchronous reads. */
 export function useJobDetail(row: JobListRow | null, planId: string | null) {
   const generation = useSyncExternalStore(

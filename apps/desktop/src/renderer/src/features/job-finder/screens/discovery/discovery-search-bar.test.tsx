@@ -430,6 +430,30 @@ it("labels an explicit plan source that is off in Profile without turning it off
   expect(onRunAgentDiscovery).toHaveBeenCalled();
 });
 
+it("searches one source out of many without unticking the rest", () => {
+  const targets = Array.from({ length: 12 }, (_, index) =>
+    target({ id: `source_${index}`, label: `Board ${index}` }),
+  );
+  const { onRunAgentDiscovery } = renderBar({
+    searchPreferences: preferences({
+      discovery: { historyLimit: 5, targets },
+    }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: /All .*sources/i }));
+  fireEvent.click(screen.getByRole("button", { name: "No sources" }));
+  fireEvent.change(screen.getByRole("searchbox", { name: "Find a source" }), {
+    target: { value: "board 7" },
+  });
+  const boxes = screen.getAllByRole("checkbox");
+  expect(boxes).toHaveLength(1);
+  fireEvent.click(boxes[0]!);
+  expect(screen.getByText("1 of 12 selected")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Search now" }));
+  expect(onRunAgentDiscovery).toHaveBeenCalledWith(
+    expect.objectContaining({ sourceIds: ["source_7"] }),
+  );
+});
+
 it("refreshes the selected sources when the plan adds a source without leaving Find jobs", () => {
   const first = target();
   const second = target({ id: "second", label: "Second source" });

@@ -524,7 +524,9 @@ describe("discovery result bands", () => {
     expect(
       screen.getByRole("button", { name: "Hide weaker matches (1)" }),
     ).toBeTruthy();
-    expect(screen.getByText("2 jobs")).toBeTruthy();
+    // The matches keep the number the sidebar shows; the revealed pool is
+    // named beside it rather than folded into a third total.
+    expect(screen.getByText("1 match + 1 weaker")).toBeTruthy();
     expect(
       screen.getByTestId("discovery-results-group-mismatches").textContent,
     ).toContain("Clear mismatches (1)");
@@ -555,7 +557,7 @@ describe("discovery result bands", () => {
     );
 
     expect(screen.getByTestId("discovery-result-count").textContent).toContain(
-      "3 jobs",
+      "1 match + 2 weaker",
     );
     expect(
       screen.getByRole("button", { name: "Hide weaker matches (2)" }),

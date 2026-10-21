@@ -1,7 +1,10 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { WebContents } from "electron";
-import { WebSocket, WebSocketServer } from "ws";
+import type { WebSocket, WebSocketServer } from "ws";
+
+/** `WebSocket.OPEN`, without loading ws before the bridge starts. */
+const SOCKET_OPEN = 1;
 
 type Params = Record<string, unknown>;
 interface Request {
@@ -146,6 +149,8 @@ export class BrowserCdpBridge {
     endpoint: string;
     headers: Record<string, string>;
   }> {
+    // Before the guard: the guard and the claim below must run in one turn.
+    const { WebSocketServer } = await import("ws");
     if (this.server || this.disposed)
       throw new Error("Browser connection is not available.");
     const server = createServer((_request, response) => {
@@ -256,7 +261,7 @@ export class BrowserCdpBridge {
   }
 
   private send(message: Params): void {
-    if (this.socket?.readyState === WebSocket.OPEN)
+    if (this.socket?.readyState === SOCKET_OPEN)
       this.socket.send(JSON.stringify(message));
   }
   private emit(method: string, params: Params, sessionId?: string): void {
@@ -555,8 +560,32 @@ export class BrowserCdpBridge {
       request.method === "Browser.setDownloadBehavior"
     )
       return {};
-    // Profile cookies/storage are intentionally not exposed through automation.
-    // Website requests still use the persistent Electron session normally.
+    if (
+      request.method === "Storage.getCookies" ||
+      request.method === "Storage.setCookies"
+    ) {
+      if (
+        p.browserContextId !== undefined &&
+        p.browserContextId !== this.contextId
+      )
+        throw new Error("Unknown browser context.");
+      const target = [...this.targets.values()].find(
+        (candidate) => !candidate.page.contents.isDestroyed(),
+      );
+      if (!target)
+        throw new Error("A browser page is required for session cookies.");
+      // Playwright's APIRequestContext syncs cookies using browser-level Storage
+      // commands. Native Storage defaults to Electron's app session, so use an
+      // owned page's Network domain to keep reads and writes in its partition.
+      return this.forward(
+        { target },
+        request.method === "Storage.getCookies"
+          ? "Network.getAllCookies"
+          : "Network.setCookies",
+        request.method === "Storage.getCookies" ? {} : { cookies: p.cookies },
+      );
+    }
+    // Other profile storage and browser-wide commands remain unavailable.
     if (
       request.method.startsWith("Browser.") ||
       request.method.startsWith("Storage.")

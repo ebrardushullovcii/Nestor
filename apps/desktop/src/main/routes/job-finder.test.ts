@@ -18,6 +18,7 @@ import {
   DiscoveryRunRecordSchema,
   DiscoveryJobViewSchema,
   JobFinderWorkspaceSyncResultSchema,
+  JobFinderAgentDiscoveryReplySchema,
   type JobFinderWorkspaceEntityMutationInput,
   JobFinderProfileCopilotPatchGroupActionInputSchema,
   JobFinderResumePreviewSchema,
@@ -39,6 +40,26 @@ import {
 } from "@nestor/contracts";
 import { createEmptyJobFinderRepositoryState } from "../adapters/job-finder-initial-state";
 import { createResumeWorkspaceDemoState } from "../adapters/job-finder-demo-state";
+
+/**
+ * A change route answers with a sync result. A window that never said which
+ * revision it shows (every test sender) gets the whole view in it.
+ */
+function answeredView(result: unknown): unknown {
+  const answer = result as { kind?: unknown; snapshot?: unknown };
+  if (answer.kind !== "snapshot")
+    throw new Error(`Expected a whole-view answer, got ${String(answer.kind)}.`);
+  return answer.snapshot;
+}
+
+function wholeViewAnswer(snapshot: unknown) {
+  return {
+    kind: "snapshot",
+    currentRevision: expect.any(Number) as unknown,
+    reason: "stale_base",
+    snapshot,
+  };
+}
 
 type RegisteredHandler = (
   event: { sender: object },
@@ -434,7 +455,7 @@ describe("interactive routes use main workspace projections", () => {
       fixture.snapshot.searchPreferences,
     );
     expect(saveSettings).toHaveBeenCalledWith(fixture.snapshot.settings);
-    expect(result).toMatchObject({
+    expect(answeredView(result)).toMatchObject({
       profile: fixture.snapshot.profile,
       settings: fixture.snapshot.settings,
       selectedDiscoveryJobId: fixture.job.id,
@@ -471,7 +492,10 @@ describe("interactive routes use main workspace projections", () => {
     ).resolves.toMatchObject({
       outcome: "cancelled",
       outputPath: null,
-      snapshot: { selectedDiscoveryJobId: fixture.job.id },
+      workspace: {
+        kind: "snapshot",
+        snapshot: { selectedDiscoveryJobId: fixture.job.id },
+      },
     });
     expect(exportResumePdf).not.toHaveBeenCalled();
     expect(fixture.getWorkspaceProjection).toHaveBeenCalledTimes(1);
@@ -503,7 +527,7 @@ describe("interactive routes use main workspace projections", () => {
         { sender: {} },
         { jobIds: [fixture.job.id] },
       ),
-    ).resolves.toMatchObject({ applyRuns: [run], selectedApplyRunId: run.id });
+    ).resolves.toMatchObject({ kind: "snapshot", snapshot: { applyRuns: [run], selectedApplyRunId: run.id } });
     expect(startAutoApplyQueueRun).not.toHaveBeenCalled();
     expect(fixture.getWorkspaceProjection).toHaveBeenCalledTimes(1);
     expect(fixture.getWorkspaceSnapshot).not.toHaveBeenCalled();
@@ -571,7 +595,7 @@ describe("job-finder profile copilot patch-group routes", () => {
       "job-finder:undo-profile-revision",
     )({ sender: {} }, undoInput);
     expect(mockUndoProfileRevision).toHaveBeenCalledWith("profile_revision_3");
-    expect(undoResult).toEqual(snapshot);
+    expect(answeredView(undoResult)).toEqual(snapshot);
   });
 
   it("parses strict input schemas before touching the service", async () => {
@@ -625,8 +649,8 @@ describe("job-finder profile copilot patch-group routes", () => {
       "job-finder:undo-profile-revision",
     )({ sender: {} }, { revisionId: "profile_revision_9" });
 
-    expect(result).toEqual(snapshot);
-    expect((result as typeof snapshot).profile).toBe(snapshot.profile);
+    expect(answeredView(result)).toEqual(snapshot);
+    expect((answeredView(result) as typeof snapshot).profile).toBe(snapshot.profile);
     expect(parseSpy).not.toHaveBeenCalled();
     parseSpy.mockRestore();
   });
@@ -975,7 +999,7 @@ describe("job-finder resume import picker route", () => {
       | undefined;
     expect(importCall?.[0]).toBe("/tmp/resume.pdf");
     expect(typeof importCall?.[1].onProgress).toBe("function");
-    expect(result).toEqual(snapshot);
+    expect(answeredView(result)).toEqual(snapshot);
   });
 
   it("parses the request with its contract: a retry reads the stopped run, with no picker", async () => {
@@ -995,7 +1019,7 @@ describe("job-finder resume import picker route", () => {
         { sender },
         { requestId: "resume_import_retry", retryInterrupted: true },
       ),
-    ).resolves.toEqual(snapshot);
+    ).resolves.toEqual(wholeViewAnswer(snapshot));
     expect(mockRetryInterruptedResumeImport).toHaveBeenCalledWith(
       latestResumeImportRun,
       expect.objectContaining({ onProgress: expect.any(Function) as unknown }),
@@ -1044,7 +1068,7 @@ describe("job-finder resume import picker route", () => {
         { sender },
         { requestId: "resume_import_destroyed" },
       ),
-    ).resolves.toEqual(snapshot);
+    ).resolves.toEqual(wholeViewAnswer(snapshot));
 
     expect(sender.send).not.toHaveBeenCalled();
     expect(mockImportResumeFromSourcePath).toHaveBeenCalledOnce();
@@ -1086,7 +1110,7 @@ describe("job-finder resume import picker route", () => {
       { requestId: "processing_import", stopProcessing: true },
     );
     expect(captured.signal?.aborted).toBe(true);
-    await expect(result).resolves.toEqual(snapshot);
+    await expect(result).resolves.toEqual(wholeViewAnswer(snapshot));
   });
 
   it("discards a late file choice after the renderer cancels the picker", async () => {
@@ -1118,7 +1142,7 @@ describe("job-finder resume import picker route", () => {
     cancelImportResume?.({ sender }, { requestId: "resume_import_cancelled" });
     resolvePicker({ canceled: false, filePaths: ["/tmp/late-resume.pdf"] });
 
-    await expect(importPromise).resolves.toEqual(snapshot);
+    await expect(importPromise).resolves.toEqual(wholeViewAnswer(snapshot));
     expect(mockImportResumeFromSourcePath).not.toHaveBeenCalled();
   });
 });
@@ -2505,7 +2529,7 @@ describe("job-finder work-history review acknowledgment route", () => {
 
     expect(mockSetWorkHistoryReviewAcknowledgment).toHaveBeenCalledOnce();
     expect(mockSetWorkHistoryReviewAcknowledgment).toHaveBeenCalledWith(input);
-    expect(result).toEqual(snapshot);
+    expect(answeredView(result)).toEqual(snapshot);
   });
 
   it("forwards remove commands by acknowledgment id", async () => {
@@ -2526,7 +2550,7 @@ describe("job-finder work-history review acknowledgment route", () => {
     const result = await registerAndFindHandler()({ sender: {} }, input);
 
     expect(mockSetWorkHistoryReviewAcknowledgment).toHaveBeenCalledWith(input);
-    expect(result).toEqual(snapshot);
+    expect(answeredView(result)).toEqual(snapshot);
   });
 
   it("rejects payloads that violate the strict discriminated schema before touching the service", async () => {
@@ -2615,7 +2639,7 @@ describe("job-finder resume claim confirmation route", () => {
 
     expect(mockSetResumeClaimConfirmation).toHaveBeenCalledOnce();
     expect(mockSetResumeClaimConfirmation).toHaveBeenCalledWith(input);
-    expect(result).toEqual(snapshot);
+    expect(answeredView(result)).toEqual(snapshot);
   });
 
   it("forwards remove commands by confirmation id", async () => {
@@ -2635,7 +2659,7 @@ describe("job-finder resume claim confirmation route", () => {
     const result = await registerAndFindHandler()({ sender: {} }, input);
 
     expect(mockSetResumeClaimConfirmation).toHaveBeenCalledWith(input);
-    expect(result).toEqual(snapshot);
+    expect(answeredView(result)).toEqual(snapshot);
   });
 
   it("rejects payloads that violate the strict discriminated schema before touching the service", async () => {
@@ -2702,7 +2726,7 @@ describe("job-finder scoped settings routes", () => {
 
     expect(mockUpdateApplicationDefaults).toHaveBeenCalledOnce();
     expect(mockUpdateApplicationDefaults).toHaveBeenCalledWith(input);
-    expect(result).toEqual(snapshot);
+    expect(answeredView(result)).toEqual(snapshot);
   });
 
   it("routes tracker CRM payloads to updateTrackerCrm and never through saveSettings", async () => {
@@ -2721,7 +2745,7 @@ describe("job-finder scoped settings routes", () => {
 
     expect(mockUpdateTrackerCrm).toHaveBeenCalledOnce();
     expect(mockUpdateTrackerCrm).toHaveBeenCalledWith(input);
-    expect(result).toEqual(snapshot);
+    expect(answeredView(result)).toEqual(snapshot);
   });
 
   it("routes workspace-behavior payloads to updateWorkspaceBehavior", async () => {
@@ -2740,7 +2764,7 @@ describe("job-finder scoped settings routes", () => {
     )({ sender: {} }, input);
 
     expect(mockUpdateWorkspaceBehavior).toHaveBeenCalledWith(input);
-    expect(result).toEqual(snapshot);
+    expect(answeredView(result)).toEqual(snapshot);
   });
 
   it("routes AI-behavior payloads to updateAiBehavior", async () => {
@@ -2766,7 +2790,7 @@ describe("job-finder scoped settings routes", () => {
     )({ sender: {} }, input);
 
     expect(mockUpdateAiBehavior).toHaveBeenCalledWith(input);
-    expect(result).toEqual(snapshot);
+    expect(answeredView(result)).toEqual(snapshot);
   });
 
   it("routes appearance-theme payloads to updateAppearanceTheme with the parsed theme", async () => {
@@ -2782,7 +2806,7 @@ describe("job-finder scoped settings routes", () => {
     )({ sender: {} }, theme);
 
     expect(mockUpdateAppearanceTheme).toHaveBeenCalledWith("dark");
-    expect(result).toEqual(snapshot);
+    expect(answeredView(result)).toEqual(snapshot);
   });
 
   it("rejects a malformed application-defaults payload before touching the service", async () => {
@@ -2930,7 +2954,7 @@ describe("job-finder campaign run and notification read routes", () => {
       { campaignId: "campaign-1" },
       expect.any(Function),
     );
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("treats omitted or null campaign ids as the active campaign", async () => {
@@ -2981,7 +3005,7 @@ describe("job-finder campaign run and notification read routes", () => {
     expect(input.notificationId).toBe("notification-1");
     expect(typeof input.readAt).toBe("string");
     expect(new Date(input.readAt).toISOString()).toBe(input.readAt);
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("rejects a mark-read payload without a notification id", async () => {
@@ -3002,7 +3026,7 @@ describe("job-finder campaign run and notification read routes", () => {
       mockMarkAllCampaignNotificationsRead.mock.calls.at(-1)?.[0];
     const input = MarkAllCampaignNotificationsReadInputSchema.parse(rawInput);
     expect(new Date(input.readAt).toISOString()).toBe(input.readAt);
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 });
 
@@ -3099,7 +3123,7 @@ describe("job-finder campaign rule mutation and funnel routes", () => {
     expect(input.rule.id).toBeNull();
     expect(input.rule.enabled).toBe(true);
     expect(input.rule.effect.sampleSize).toBe(0);
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("rejects a save-campaign-rule payload without a campaign id", async () => {
@@ -3118,7 +3142,7 @@ describe("job-finder campaign rule mutation and funnel routes", () => {
       campaignId: "campaign-1",
       ruleId: "rule_1",
     });
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("rejects a delete-campaign-rule payload without a rule id", async () => {
@@ -3138,7 +3162,7 @@ describe("job-finder campaign rule mutation and funnel routes", () => {
       ruleId: "rule_1",
       enabled: false,
     });
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("rejects a toggle-campaign-rule payload with a non-boolean enabled flag", async () => {
@@ -3228,7 +3252,7 @@ describe("job-finder grouped manual-answer routes", () => {
       answer: { type: "text", value: "5 years" },
       saveScope: "reusable_profile",
     });
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("rejects a project command whose answer is not reusable text", async () => {
@@ -3263,7 +3287,7 @@ describe("job-finder grouped manual-answer routes", () => {
       expectedRequestRevisions: { request_a: 1, request_b: 1 },
       answer: { type: "text", value: "5 years" },
     });
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("rejects an apply input whose revisions do not cover every request id", async () => {
@@ -3297,7 +3321,7 @@ describe("job-finder grouped manual-answer routes", () => {
       until: "2026-08-17T10:00:00.000Z",
       reason: null,
     });
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("rejects a snooze payload without a decision id", async () => {
@@ -3366,7 +3390,7 @@ describe("job-finder outcome analytics routes", () => {
       resumeStrategyId: "strategy-1",
       note: "Recruiter call went well",
     });
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("defaults optional facts to null on a record-outcome payload", async () => {
@@ -3381,7 +3405,7 @@ describe("job-finder outcome analytics routes", () => {
       resumeStrategyId: null,
       note: null,
     });
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("rejects a record-outcome payload with an unknown outcome", async () => {
@@ -3406,7 +3430,7 @@ describe("job-finder outcome analytics routes", () => {
       enabled: false,
       reset: false,
     });
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("parses a suggestion reset payload with the reset flag", async () => {
@@ -3421,7 +3445,7 @@ describe("job-finder outcome analytics routes", () => {
       enabled: true,
       reset: true,
     });
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("rejects a suggestion payload without a key", async () => {
@@ -3534,7 +3558,7 @@ describe("job-finder resume strategy routes", () => {
       campaignId: "campaign-test",
       strategyId: "strategy-1",
     });
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("rejects a campaign default payload missing the strategy id field", async () => {
@@ -3686,7 +3710,7 @@ describe("job-finder company intelligence routes", () => {
         },
       },
     });
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("rejects a company mutation without the compare-and-swap timestamp", async () => {
@@ -3740,7 +3764,7 @@ describe("job-finder company intelligence routes", () => {
   it("refreshes company intelligence and returns the parsed snapshot", async () => {
     const result = await refreshHandler({ sender: {} }, undefined);
     expect(mockRefreshCompanyIntelligence).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 });
 
@@ -3799,7 +3823,7 @@ describe("job-finder safeguards route", () => {
       explanation: "Provider reported the listing state.",
       recoveryGuidance: "Re-verify the listing.",
     });
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 
   it("rejects a safeguard mutation that attempts to carry submit authority", async () => {
@@ -3880,7 +3904,7 @@ describe("job-finder application CRM bulk stage route", () => {
       customStageId: null,
       note: null,
     });
-    expect(result).toMatchObject({ module: "job-finder" });
+    expect(answeredView(result)).toMatchObject({ module: "job-finder" });
   });
 });
 
@@ -3949,7 +3973,10 @@ describe("job-finder agent discovery outcome routes", () => {
       { requestId: "agent_discovery_partial", targetId: null },
     );
 
-    expect(result).toEqual({ outcome: "cancelled", snapshot });
+    expect(result).toMatchObject({
+      outcome: "cancelled",
+      sync: { kind: "snapshot", snapshot },
+    });
     // Derivation came from the returned run state; the abort fallback never
     // ran.
     expect(mockGetWorkspaceProjection).not.toHaveBeenCalled();
@@ -3971,7 +3998,10 @@ describe("job-finder agent discovery outcome routes", () => {
       { requestId: "agent_discovery_abort", targetId: null },
     );
 
-    expect(result).toEqual({ outcome: "cancelled", snapshot: freshSnapshot });
+    expect(result).toMatchObject({
+      outcome: "cancelled",
+      sync: { kind: "snapshot", snapshot: freshSnapshot },
+    });
     expect(mockGetWorkspaceProjection).toHaveBeenCalledTimes(1);
   });
 
@@ -3992,8 +4022,67 @@ describe("job-finder agent discovery outcome routes", () => {
       { requestId: "agent_discovery_done", targetId: null },
     );
 
-    expect(result).toEqual({ outcome: "completed", snapshot });
+    expect(result).toMatchObject({
+      outcome: "completed",
+      sync: { kind: "snapshot", snapshot },
+    });
     expect(mockGetWorkspaceProjection).not.toHaveBeenCalled();
+  });
+
+  it("answers a window that holds a revision with only what the search changed", async () => {
+    const before = workspaceWithRunState(
+      "2026-08-26T10:07:00.000Z",
+      "completed",
+      0,
+    );
+    const after = workspaceWithRunState(
+      "2026-08-26T10:08:00.000Z",
+      "completed",
+      12,
+    );
+    mockRunAgentDiscovery.mockResolvedValue(after);
+    mockGetWorkspaceProjection.mockResolvedValue(before);
+    mockGetJobFinderWorkspaceService.mockResolvedValue({
+      runAgentDiscovery: mockRunAgentDiscovery,
+      getWorkspaceProjection: mockGetWorkspaceProjection,
+    });
+    const handlers = new Map<string, RegisteredHandler>();
+    registerJobFinderRouteHandlers(
+      {
+        handle: (channel: string, handler: RegisteredHandler) => {
+          handlers.set(channel, handler);
+        },
+      } as unknown as IpcMain,
+      { includeBootstrapRoutes: false },
+    );
+    const window = { id: 8, send: vi.fn() };
+    const baseline = JobFinderWorkspaceSyncResultSchema.parse(
+      await handlers.get("job-finder:sync-workspace")!(
+        { sender: window },
+        { baseRevision: null },
+      ),
+    );
+    if (baseline.kind !== "snapshot")
+      throw new Error("Expected an initial snapshot");
+    await handlers.get("job-finder:note-workspace-revision")!(
+      { sender: window },
+      { revision: baseline.currentRevision },
+    );
+
+    const reply = JobFinderAgentDiscoveryReplySchema.parse(
+      await handlers.get("job-finder:run-agent-discovery")!(
+        { sender: window },
+        { requestId: "agent_discovery_delta", targetId: null },
+      ),
+    );
+
+    expect(reply.outcome).toBe("completed");
+    expect(reply.sync.kind).toBe("delta");
+    if (reply.sync.kind !== "delta") throw new Error("Expected a delta");
+    expect(reply.sync.delta.baseRevision).toBe(baseline.currentRevision);
+    expect(reply.sync.delta.recentDiscoveryRuns.upserts).toEqual(
+      after.recentDiscoveryRuns,
+    );
   });
 
   it("passes the person's search request to the discovery service", async () => {
@@ -4135,7 +4224,7 @@ describe("job-finder synthetic save failure route", () => {
       /could not write the campaign change/,
     );
     expect(saveCampaign).not.toHaveBeenCalled();
-    await expect(save({ sender: {} }, campaign)).resolves.toEqual(snapshot);
+    await expect(save({ sender: {} }, campaign)).resolves.toEqual(wholeViewAnswer(snapshot));
     expect(saveCampaign).toHaveBeenCalledTimes(1);
   });
 
@@ -4164,7 +4253,7 @@ describe("job-finder synthetic save failure route", () => {
         { sender: {} },
         AppearanceThemeSchema.parse("dark"),
       ),
-    ).resolves.toEqual(snapshot);
+    ).resolves.toEqual(wholeViewAnswer(snapshot));
     expect(updateAppearanceTheme).toHaveBeenCalledTimes(1);
 
     const profile = createEmptyJobFinderRepositoryState().profile;
@@ -4182,7 +4271,7 @@ describe("job-finder synthetic save failure route", () => {
         { sender: {} },
         profile,
       ),
-    ).resolves.toEqual(snapshot);
+    ).resolves.toEqual(wholeViewAnswer(snapshot));
     expect(saveProfile).toHaveBeenCalledTimes(1);
   });
 });

@@ -9,16 +9,19 @@ import type {
 import { JOB_FINDER_BROWSER_NAME } from "../../lib/job-finder-browser-handoff-copy";
 import {
   AI_UNAVAILABLE_RESUME_RESULT_MESSAGE,
+  describeResumeRunStage,
   getApplyReadinessStatus,
-  hasResumeGenerationFailure,
-  isResumeGenerationInProgress,
+  getResumeRunState,
   countResumeLinesToDecide,
   needsPersonResumeReview,
   needsResumeGeneration,
+  needsTailoredResume,
   type ApplySupportState,
+  type ResumeRunStage,
 } from "./review-queue-status";
 
 export type PrimaryApplicationRecoveryKind =
+  | "approve_and_apply"
   | "open_browser"
   | "open_job_details"
   | "open_profile"
@@ -155,6 +158,11 @@ export function getPrimaryApplicationAction(input: {
    * Apply is their approval.
    */
   draftNeedsPersonReview?: boolean;
+  /**
+   * The saved resume kept the person's wording because the listing was not
+   * read; the job still needs its resume (see `needsTailoredResume`).
+   */
+  needsTailoredResume?: boolean;
 }): PrimaryApplicationAction {
   const {
     applySupportState,
@@ -206,6 +214,21 @@ export function getPrimaryApplicationAction(input: {
       kind: "generate_resume",
       label: "Create the resume",
       recovery: null,
+    };
+  }
+
+  // The status tab and the row say this job needs a resume, so the next step
+  // writes it. Applying with the person's own wording stays one press away.
+  if (input.needsTailoredResume) {
+    return {
+      blocker: null,
+      enabled: !isSelectedJobPending,
+      kind: "generate_resume",
+      label: "Create the resume",
+      recovery: {
+        kind: "approve_and_apply",
+        label: "Apply with your original wording",
+      },
     };
   }
 
@@ -344,7 +367,10 @@ export function getReadinessDescription(input: {
   applySupportState: ApplySupportState;
   browserActionMessage: string | null;
   draftNeedsPersonReview?: boolean;
+  needsTailoredResume?: boolean;
   isSelectedJobPendingTooLong?: boolean;
+  /** Where the running resume is, when the run reports it. */
+  resumeRunStage?: ResumeRunStage | null;
 }): string | null {
   const {
     selectedItem,
@@ -358,24 +384,29 @@ export function getReadinessDescription(input: {
     browserActionMessage,
     draftNeedsPersonReview = false,
     isSelectedJobPendingTooLong = false,
+    resumeRunStage = null,
   } = input;
 
   if (!selectedItem || !selectedJob) {
     return null;
   }
 
+  if (isGenerating) {
+    return isSelectedJobPendingTooLong
+      ? "This is taking longer than usual. It is still running and will update here when ready. You can leave this page."
+      : `${describeResumeRunStage(resumeRunStage)} You can leave this page; it finishes on its own.`;
+  }
+
   if (hasGenerationFailure) {
     return "The resume could not be written. Try again, or open it to see what happened.";
   }
 
-  if (isGenerating) {
-    return isSelectedJobPendingTooLong
-      ? "This is taking longer than usual. It is still running and will update here when ready. You can leave this page."
-      : "Writing the resume for this job. You can leave this page; it finishes on its own.";
-  }
-
   if (needsGeneration) {
     return null;
+  }
+
+  if (input.needsTailoredResume) {
+    return "The listing text was not captured, so this resume keeps your original wording. Creating the resume reads the listing again and tailors it.";
   }
 
   if (!hasReadyApprovedAsset) {
@@ -392,7 +423,9 @@ export function getReadinessDescription(input: {
         : `${linesToDecide} lines in this resume are waiting for your decision. Open the resume, keep or change each one, and Apply can go ahead.`;
     }
     if (draftNeedsPersonReview) {
-      return "Aggressive resumes stretch a little past your saved evidence. Read it, keep or remove the flagged lines, then approve it.";
+      // ADR 0051: stretches are not confirmed line by line any more, so the
+      // step is a read-through, not a line-by-line chore.
+      return "Aggressive resumes stretch a little past your saved evidence. Read it through, then approve it.";
     }
     return "The resume is ready. Apply approves it and starts the application.";
   }
@@ -419,6 +452,8 @@ export function buildMissionPanelState(input: {
   safeguardBlocker?: string | null;
   /** The still-running apply result for the selected job, when there is one. */
   selectedApplyResult?: { startedAt?: string | null } | null;
+  /** Where the selected job's running resume is, when the run reports it. */
+  resumeRunStage?: ResumeRunStage | null;
 }) {
   const {
     browserSession,
@@ -430,19 +465,17 @@ export function buildMissionPanelState(input: {
     safeguardBlocker = null,
     selectedApplyResult = null,
     isSelectedJobPendingTooLong = false,
+    resumeRunStage = null,
   } = input;
   const needsGeneration = needsResumeGeneration(selectedItem);
-  const hasGenerationFailure = hasResumeGenerationFailure(
-    selectedItem,
-    selectedAsset,
-  );
   const isSelectedJobPending = selectedItem
     ? isJobPending(selectedItem.jobId)
     : false;
-  const isGenerating =
-    selectedItem?.resumeApplicationMode !== "original_resume" &&
-    !hasGenerationFailure &&
-    (isResumeGenerationInProgress(selectedItem) || isSelectedJobPending);
+  // A rewrite in progress outranks the last attempt's failure, as on the
+  // row: the old red box stayed up for the whole run after Try again.
+  const { hasFailure: hasGenerationFailure, isWriting: isGenerating } =
+    getResumeRunState(selectedItem, selectedAsset, isSelectedJobPending);
+  const untailoredResume = !isGenerating && needsTailoredResume(selectedItem);
   const applySupportState = getApplySupportState(selectedJob);
   const resumeReviewStatus = selectedItem?.resumeReview.status ?? "not_started";
   const usesOriginalResume =
@@ -478,6 +511,7 @@ export function buildMissionPanelState(input: {
     safeguardBlocker,
     usesOriginalResume,
     draftNeedsPersonReview,
+    needsTailoredResume: untailoredResume,
   });
   const canApproveApply =
     primaryApplicationAction.kind === "start_apply" &&
@@ -515,9 +549,12 @@ export function buildMissionPanelState(input: {
             applySupportState,
             browserActionMessage,
             draftNeedsPersonReview,
+            needsTailoredResume: untailoredResume,
             isSelectedJobPendingTooLong,
+            resumeRunStage,
           });
-  const isGenerationAction = needsGeneration || hasGenerationFailure;
+  const isGenerationAction =
+    needsGeneration || hasGenerationFailure || untailoredResume;
   const isPrimaryApplyPending = isApplyPending && !isGenerationAction;
 
   return {
@@ -530,6 +567,7 @@ export function buildMissionPanelState(input: {
     isPrimaryApplyPending,
     isSelectedJobPending,
     needsGeneration,
+    needsTailoredResume: untailoredResume,
     primaryApplicationAction,
     readinessDescription,
     usesOriginalResume,

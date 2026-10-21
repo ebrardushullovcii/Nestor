@@ -29,7 +29,10 @@ import {
   type JobSource,
 } from "@nestor/contracts";
 import type { ApplyRawPageHands } from "@nestor/contracts";
-import type { JobFinderAiClient } from "@nestor/ai-providers";
+import {
+  getAiProviderAccessFailure,
+  type JobFinderAiClient,
+} from "@nestor/ai-providers";
 import {
   createApplyPageHands,
   createSearchResultCache,
@@ -101,6 +104,11 @@ export interface JobPageExtractionInput {
   pageUrl: string;
   pageType: "search_results" | "job_detail";
   maxJobs: number;
+  /**
+   * The person's goals for this page read, so the reader can say which
+   * listings do not fit (opaque to the runtime; built by the search agent).
+   */
+  selectionContext?: string;
   signal?: AbortSignal;
 }
 
@@ -3268,6 +3276,7 @@ export function createBrowserAgentRuntime(
               pageUrl: string;
               pageType: AgentExtractorPageType;
               maxJobs: number;
+              selectionContext?: string;
               signal?: AbortSignal;
             }) => {
               const extractionInput: JobPageExtractionInput = {
@@ -3275,6 +3284,9 @@ export function createBrowserAgentRuntime(
                 pageUrl: input.pageUrl,
                 pageType: input.pageType,
                 maxJobs: input.maxJobs,
+                ...(input.selectionContext
+                  ? { selectionContext: input.selectionContext }
+                  : {}),
               };
               if (input.signal) {
                 extractionInput.signal = input.signal;
@@ -3312,6 +3324,9 @@ export function createBrowserAgentRuntime(
                 employerWebsiteUrl: job.employerWebsiteUrl,
                 employerDomain: job.employerDomain,
                 benefits: job.benefits,
+                ...(job.searchRejection
+                  ? { searchRejection: job.searchRejection }
+                  : {}),
               }));
             },
           },
@@ -3335,6 +3350,9 @@ export function createBrowserAgentRuntime(
           error instanceof Error
             ? error.message
             : "Unknown error during agent discovery";
+        // The AI service refusing the request is an outage to the person,
+        // never the service's own words about keys or accounts.
+        const accessFailure = getAiProviderAccessFailure(error);
 
         return DiscoveryRunResultSchema.parse({
           source,
@@ -3345,9 +3363,11 @@ export function createBrowserAgentRuntime(
             agentOptions.searchPreferences.locations,
             agentOptions.siteLabel,
           ),
-          warning: /Close a browser tab before opening another/i.test(detail)
-            ? "The browser tab limit is reached. Close finished tabs, then run this search again."
-            : `Agent discovery failed: ${detail}`,
+          warning: accessFailure
+            ? accessFailure.message
+            : /Close a browser tab before opening another/i.test(detail)
+              ? "The browser tab limit is reached. Close finished tabs, then run this search again."
+              : `Agent discovery failed: ${detail}`,
           inventoryCompleteness: "unknown",
           jobs: [],
           agentMetadata: null,

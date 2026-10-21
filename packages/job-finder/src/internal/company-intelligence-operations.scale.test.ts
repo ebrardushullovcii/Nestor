@@ -59,7 +59,8 @@ describe("company reconciliation evidence at scale", () => {
         expect(cold.companies).toHaveLength(input.companyCount);
         expect(cold.summary.createdMergeCandidates).toEqual([]);
         expect(companyParse).toHaveBeenCalledTimes(input.companyCount);
-        expect(jobParse).toHaveBeenCalledTimes(input.jobCount);
+        // Frozen jobs are repository display rows, validated when read.
+        expect(jobParse).not.toHaveBeenCalled();
         expect(recordParse).toHaveBeenCalledTimes(
           fixture.applicationRecords.length,
         );

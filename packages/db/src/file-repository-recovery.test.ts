@@ -621,6 +621,9 @@ describe("workspace database corruption recovery core", () => {
       `${DATABASE_FILE_NAME}-shm`,
       `${DATABASE_FILE_NAME}-wal`,
       `${DATABASE_FILE_NAME}.backup`,
+      // From the fixture's clean close; the leftover log makes the next open
+      // ignore and remove it.
+      `${DATABASE_FILE_NAME}.clean-close`,
     ]);
   });
 

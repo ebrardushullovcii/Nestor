@@ -153,6 +153,7 @@ type DiscoveryLedgerIdentity = JobIdentityInput & {
 export type DiscoveryLedgerIndex = {
   find(posting: DiscoveryLedgerIdentity): DiscoveryLedgerEntry | null;
   add(entry: DiscoveryLedgerEntry): void;
+  remove(entry: DiscoveryLedgerEntry): void;
   replace(
     previous: DiscoveryLedgerEntry,
     next: DiscoveryLedgerEntry,
@@ -170,6 +171,9 @@ export function createDiscoveryLedgerIndex(
     },
     add(entry) {
       identityIndex.add(entry);
+    },
+    remove(entry) {
+      identityIndex.remove(entry);
     },
     replace(previous, next) {
       identityIndex.replace(previous, next);
@@ -206,18 +210,28 @@ export function classifyDiscoveryPostingFreshness(input: {
     incomingFingerprints,
   };
 }
-export function createDiscoveryFreshnessDigest(input: {
+type FreshnessDigestInput = {
   ledger: readonly DiscoveryLedgerEntry[];
   postings: readonly (DiscoveryFingerprintPosting & DiscoveryLedgerIdentity)[];
-}): DiscoveryFreshnessDigest {
-  const ledgerIndex = createDiscoveryLedgerIndex(input.ledger);
+  /** An index already built over exactly `ledger`, to skip building one. */
+  index?: Pick<DiscoveryLedgerIndex, "find">;
+};
+
+function startFreshnessDigest(input: FreshnessDigestInput) {
+  const ledgerIndex =
+    input.index ??
+    (input.postings.length > 0
+      ? createDiscoveryLedgerIndex(input.ledger)
+      : { find: () => null });
   const counts: Record<DiscoveryFreshnessClassification, number> = {
     new: 0,
     unchanged: 0,
     changed: 0,
     reactivated: 0,
   };
-  const classifiedPostings = input.postings.map((posting) => {
+  const classify = (
+    posting: DiscoveryFingerprintPosting & DiscoveryLedgerIdentity,
+  ) => {
     const existingEntry = ledgerIndex.find(posting);
     const { classification, incomingFingerprints } =
       classifyDiscoveryPostingFreshness({
@@ -234,8 +248,44 @@ export function createDiscoveryFreshnessDigest(input: {
           ? incomingFingerprints.card
           : incomingFingerprints.material,
     };
-  });
+  };
+  return { counts, classify };
+}
 
+export function createDiscoveryFreshnessDigest(
+  input: FreshnessDigestInput,
+): DiscoveryFreshnessDigest {
+  const { counts, classify } = startFreshnessDigest(input);
+  return finishFreshnessDigest(
+    input.postings.length,
+    counts,
+    input.postings.map(classify),
+  );
+}
+
+/** The same digest, giving the event loop a turn every `perTurn` postings. */
+export async function createDiscoveryFreshnessDigestInTurns(
+  input: FreshnessDigestInput & { perTurn: number },
+): Promise<DiscoveryFreshnessDigest> {
+  const { counts, classify } = startFreshnessDigest(input);
+  const classified: ReturnType<typeof classify>[] = [];
+  for (const [position, posting] of input.postings.entries()) {
+    if (position > 0 && position % input.perTurn === 0)
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    classified.push(classify(posting));
+  }
+  return finishFreshnessDigest(input.postings.length, counts, classified);
+}
+
+function finishFreshnessDigest(
+  total: number,
+  counts: Record<DiscoveryFreshnessClassification, number>,
+  classifiedPostings: Array<{
+    classification: DiscoveryFreshnessClassification;
+    identity: string;
+    fingerprint: string;
+  }>,
+): DiscoveryFreshnessDigest {
   classifiedPostings.sort((left, right) => {
     const leftKey = `${left.identity}\u0000${left.classification}\u0000${left.fingerprint}`;
     const rightKey = `${right.identity}\u0000${right.classification}\u0000${right.fingerprint}`;
@@ -243,7 +293,7 @@ export function createDiscoveryFreshnessDigest(input: {
   });
 
   return {
-    total: input.postings.length,
+    total,
     counts,
     digest: createVersionOneFingerprint({
       counts,
@@ -259,11 +309,63 @@ export function formatDiscoveryFreshnessDigest(
 }
 
 
+const frozenLedgerIndexes = new WeakMap<
+  readonly DiscoveryLedgerEntry[],
+  DiscoveryLedgerIndex
+>();
+let lastIndexedLedger: {
+  ledger: readonly DiscoveryLedgerEntry[];
+  index: DiscoveryLedgerIndex;
+} | null = null;
+/** More changed entries than this rebuild the index instead. */
+const MAX_CARRIED_LEDGER_CHANGES = 64;
+
+/**
+ * The last ledger's index, moved to `ledger` when the two share all but a
+ * few entries. Storage keeps every unchanged entry as the same frozen value,
+ * so hiding one job leaves 6,999 of 7,000 entries in place; re-indexing them
+ * all cost each hide about 100 ms. The earlier ledger gives up its index and
+ * builds a fresh one if it is ever looked up again.
+ */
+function carryLedgerIndex(
+  ledger: readonly DiscoveryLedgerEntry[],
+): DiscoveryLedgerIndex | null {
+  const last = lastIndexedLedger;
+  if (
+    !last ||
+    Math.abs(last.ledger.length - ledger.length) > MAX_CARRIED_LEDGER_CHANGES
+  )
+    return null;
+  const current = new Set(ledger);
+  const previous = new Set(last.ledger);
+  if (current.size !== ledger.length || previous.size !== last.ledger.length)
+    return null;
+  const removed = last.ledger.filter((entry) => !current.has(entry));
+  const added = ledger.filter((entry) => !previous.has(entry));
+  if (removed.length + added.length > MAX_CARRIED_LEDGER_CHANGES) return null;
+  frozenLedgerIndexes.delete(last.ledger);
+  for (const entry of removed) last.index.remove(entry);
+  for (const entry of added) last.index.add(entry);
+  return last.index;
+}
+
 export function findDiscoveryLedgerEntry(
   ledger: readonly DiscoveryLedgerEntry[],
   posting: DiscoveryLedgerIdentity,
 ): DiscoveryLedgerEntry | null {
-  return createDiscoveryLedgerIndex(ledger).find(posting);
+  // A stored ledger is frozen, so one index serves every lookup into it.
+  // Building it per lookup cost about 150 ms on 7,000 entries, twice for
+  // each job the person hid or shortlisted.
+  if (!Object.isFrozen(ledger)) {
+    return createDiscoveryLedgerIndex(ledger).find(posting);
+  }
+  let index = frozenLedgerIndexes.get(ledger);
+  if (!index) {
+    index = carryLedgerIndex(ledger) ?? createDiscoveryLedgerIndex(ledger);
+    frozenLedgerIndexes.set(ledger, index);
+    lastIndexedLedger = { ledger, index };
+  }
+  return index.find(posting);
 }
 
 function upsertLedgerEntry(
@@ -278,9 +380,7 @@ function upsertLedgerEntry(
   return [...nextLedger, nextEntry];
 }
 
-export function recordDiscoveredPostingInLedger(input: {
-  ledger: readonly DiscoveryLedgerEntry[];
-  index?: DiscoveryLedgerIndex;
+export type DiscoveryLedgerSighting = {
   posting: DiscoveryFingerprintPosting &
     Pick<
       JobPosting,
@@ -297,10 +397,37 @@ export function recordDiscoveredPostingInLedger(input: {
   seenAt: string;
   status: DiscoveryLedgerEntry["latestStatus"];
   skipReason?: string | null;
-}): DiscoveryLedgerEntry[] {
+  /** The feed screen's verdict for this sighting; absent keeps the last one. */
+  listingScreen?: DiscoveryLedgerEntry["listingScreen"];
+};
+
+export function recordDiscoveredPostingInLedger(
+  input: DiscoveryLedgerSighting & {
+    ledger: readonly DiscoveryLedgerEntry[];
+    index?: DiscoveryLedgerIndex;
+  },
+): DiscoveryLedgerEntry[] {
   const existingEntry = input.index
     ? input.index.find(input.posting)
     : findDiscoveryLedgerEntry(input.ledger, input.posting);
+  const nextEntry = buildDiscoveryLedgerEntry(input, existingEntry);
+
+  if (input.index) {
+    if (existingEntry) {
+      input.index.replace(existingEntry, nextEntry);
+    } else {
+      input.index.add(nextEntry);
+    }
+  }
+
+  return upsertLedgerEntry(input.ledger, existingEntry, nextEntry);
+}
+
+/** The entry one sighting leaves in the ledger, given the entry it had. */
+export function buildDiscoveryLedgerEntry(
+  input: DiscoveryLedgerSighting,
+  existingEntry: DiscoveryLedgerEntry | null,
+): DiscoveryLedgerEntry {
   const incomingFingerprints = createDiscoveryListingFingerprints(
     input.posting,
   );
@@ -334,7 +461,7 @@ export function recordDiscoveredPostingInLedger(input: {
       ? (existingEntry?.fingerprints ?? incomingFingerprints)
       : incomingFingerprints;
 
-  const nextEntry = DiscoveryLedgerEntrySchema.parse({
+  return DiscoveryLedgerEntrySchema.parse({
     id: existingEntry?.id ?? createUniqueId("discovery_ledger"),
     canonicalUrl: normalizeLedgerUrl(input.posting.canonicalUrl),
     applicationUrl:
@@ -374,17 +501,11 @@ export function recordDiscoveredPostingInLedger(input: {
       input.status === "applied"
         ? null
         : (input.skipReason ?? existingEntry?.skipReason ?? null),
+    listingScreen:
+      input.listingScreen !== undefined
+        ? input.listingScreen
+        : (existingEntry?.listingScreen ?? null),
   });
-
-  if (input.index) {
-    if (existingEntry) {
-      input.index.replace(existingEntry, nextEntry);
-    } else {
-      input.index.add(nextEntry);
-    }
-  }
-
-  return upsertLedgerEntry(input.ledger, existingEntry, nextEntry);
 }
 
 export function markSavedJobStatusInLedger(input: {

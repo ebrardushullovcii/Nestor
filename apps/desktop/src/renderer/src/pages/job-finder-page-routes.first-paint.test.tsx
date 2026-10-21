@@ -458,7 +458,7 @@ describe("canonical route first paint", () => {
     );
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "Your profile" }),
+      screen.getByRole("heading", { level: 1, name: "Profile" }),
     ).toBeTruthy();
     expect(screen.queryByText("Loading screen")).toBeNull();
     expect(surfaceTimerCalls(setTimeoutSpy.mock.calls)).toEqual([]);

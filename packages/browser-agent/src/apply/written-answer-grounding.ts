@@ -2,12 +2,50 @@ import { parseToolArguments } from "@nestor/agent-runtime";
 import type { AgentLoopToolDefinition } from "@nestor/agent-runtime";
 import type { LLMClient } from "../agent/contracts";
 import { applicationFacts, plainAnswerCheckFacts } from "./application-facts";
-import type { ApplyAnswerSources } from "./types";
+import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 
 export interface WrittenAnswerCheck {
   supported: boolean;
   reason: string;
   reviewWording?: string;
+}
+
+/** Longest chosen option that still counts as a value. */
+const SHORT_CHOICE_CHARS = 80;
+/** A typed value: a date, a number, a code, a name of a few words. */
+const SHORT_TYPED_CHARS = 40;
+const SHORT_TYPED_WORDS = 5;
+
+/**
+ * A short value (a date, a number, a country, an option) to a question that
+ * is not, on its face, about work eligibility, the hiring country or pay.
+ * Checking it against the facts is a lookup; prose keeps the fact check's
+ * own effort.
+ */
+export function isShortValueAnswer(
+  control: ApplyFormControl,
+  proposed: string,
+): boolean {
+  const answer = proposed.trim();
+  const choice =
+    control.kind === "select" ||
+    control.kind === "combobox" ||
+    control.kind === "radio" ||
+    control.kind === "checkbox";
+  const value = choice
+    ? answer.length <= SHORT_CHOICE_CHARS
+    : answer.length <= SHORT_TYPED_CHARS &&
+      answer.split(/\s+/u).length <= SHORT_TYPED_WORDS &&
+      !/[.!?]$/u.test(answer);
+  return (
+    value &&
+    !answer.includes("\n") &&
+    control.kind !== "long_text" &&
+    control.questionKind !== "work_authorization" &&
+    control.questionKind !== "visa_sponsorship" &&
+    control.questionKind !== "salary_expectation" &&
+    control.asksHiringCountry !== true
+  );
 }
 
 export class WrittenAnswerCheckUnavailableError extends Error {
@@ -35,6 +73,12 @@ export async function checkWrittenApplicationAnswers(input: {
       }
     | undefined;
   answers: ReadonlyArray<{ question: string; answer: string }>;
+  /**
+   * Every answer is a short value (a date, a number, an option) to a question
+   * the form reading found is not about eligibility: a lookup against the
+   * facts, checked at the form-turn effort instead of the fact-check effort.
+   */
+  shortValues?: boolean | undefined;
   signal?: AbortSignal | undefined;
 }): Promise<WrittenAnswerCheck[]> {
   if (input.answers.length === 0) return [];
@@ -121,6 +165,7 @@ export async function checkWrittenApplicationAnswers(input: {
         [...tools],
         {
           signal,
+          reasoningTask: input.shortValues === true ? "apply" : "claim_check",
           maxOutputTokens: Math.min(
             16_000,
             (4_000 +

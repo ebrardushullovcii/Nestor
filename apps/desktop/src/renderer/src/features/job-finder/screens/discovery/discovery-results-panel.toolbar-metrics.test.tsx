@@ -168,7 +168,7 @@ describe("DiscoveryResultsPanel toolbar control metrics", () => {
     ).toEqual([
       ["fit", "Best match"],
       ["recent", "Newest first"],
-      ["company", "Company A to Z"],
+      ["company", "Company A–Z"],
     ]);
     expect(select.value).toBe("fit");
     // Each option carries its own direction, so there is no flip control.

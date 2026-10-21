@@ -188,7 +188,7 @@ export function CollectionSearchToolbar(props: {
         <Input
           autoComplete="off"
           className={cn(
-            "min-w-32 flex-1 text-(length:--text-small)",
+            "min-w-24 flex-1 text-(length:--text-small)",
             collectionSearchFieldClass,
           )}
           id={inputId}

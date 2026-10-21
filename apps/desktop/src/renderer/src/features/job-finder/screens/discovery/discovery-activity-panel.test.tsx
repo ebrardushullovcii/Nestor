@@ -147,7 +147,7 @@ describe("DiscoveryHistoryModal", () => {
       recentRuns={[run]} targets={targets} />);
     expect(
       screen.getByText(
-        "inspected not recorded · 3 saved · rejected not recorded · 0 duplicates · deferred not recorded · pages covered not recorded.",
+        "inspected not recorded · 3 saved · rejected not recorded · deferred not recorded · pages covered not recorded.",
       ),
     ).toBeTruthy();
     expect(screen.queryByText(/By source:/)).toBeNull();
@@ -289,7 +289,7 @@ describe("DiscoveryHistoryModal", () => {
 
     expect(
       screen.getByText(
-        "inspected not recorded · 0 saved · rejected not recorded · 0 duplicates · deferred not recorded · pages covered not recorded.",
+        "inspected not recorded · rejected not recorded · deferred not recorded · pages covered not recorded.",
       ),
     ).toBeTruthy();
     expect(screen.getByText(/^Finished( · .*)?$/u)).toBeTruthy();
@@ -347,7 +347,7 @@ describe("DiscoveryHistoryModal", () => {
 
     expect(
       screen.getByText(
-        "inspected not recorded · 0 saved · rejected not recorded · 10 duplicates · deferred not recorded · pages covered not recorded.",
+        "inspected not recorded · rejected not recorded · 10 duplicates · deferred not recorded · pages covered not recorded.",
       ),
     ).toBeTruthy();
     expect(screen.queryByText(/No jobs matched this plan/u)).toBeNull();
@@ -572,7 +572,7 @@ it("uses the report for headline, duplicate tile and source counts without repea
   expect(screen.queryByText("3 duplicates merged")).toBeNull();
   expect(
     screen.getByText(
-      "52 inspected · 25 saved · 0 rejected · 27 duplicates · 0 deferred · 7 pages covered.",
+      "52 inspected · 25 saved · 27 duplicates · 7 pages covered.",
     ),
   ).toBeTruthy();
   expect(screen.queryByText(/Found on Example board:/)).toBeNull();
@@ -626,6 +626,8 @@ it("a source note labels the persisted saved count once without a contradictory 
       targets={targets}
     />,
   );
-  const sourceCard = screen.getByText(/0 saved/).closest("article")!;
+  // A zero is left out of the accounting line, so the card is found by it.
+  const sourceCard = screen.getByText(/inspected/).closest("article")!;
+  expect(sourceCard.textContent).not.toContain("0 saved");
   expect(within(sourceCard).queryByText("Saved 2 fits")).toBeNull();
 });

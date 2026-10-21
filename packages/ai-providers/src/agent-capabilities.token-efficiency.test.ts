@@ -1,12 +1,16 @@
 import { expect, test } from "vitest";
 
-import { runResumeGenerationAgentTask } from "./agent-capabilities";
+import {
+  buildWriterProfileOutline,
+  runResumeGenerationAgentTask,
+} from "./agent-capabilities";
 import { createDeterministicJobFinderAiClient } from "./deterministic";
 import { buildResumeGenerationEvidenceCatalog } from "./resume-generation-grounding";
 import type {
   AgentCapableJobFinderAiClient,
   CreateResumeDraftInput,
 } from "./shared";
+import { ResumeProposalValidationError } from "./shared";
 import {
   createJobPosting,
   createPreferences,
@@ -162,7 +166,11 @@ test("a strategy-selected resume retains its own evidence while a distinct profi
   const request = requestWithResume(profileText, selectedText);
   const { payloads } = await captureGeneration(request);
   for (const payload of payloads) {
-    expect(payload.candidateProfile).toEqual(request.profile);
+    expect(payload.candidateProfile).toEqual(
+      buildWriterProfileOutline(request.profile, {
+        textContent: profileText,
+      }),
+    );
     expect(payload.groundingEvidence.items).toEqual(
       buildResumeGenerationEvidenceCatalog(request),
     );
@@ -176,44 +184,48 @@ test("a strategy-selected resume retains its own evidence while a distinct profi
   }
 });
 
-test("a check result returns repairs and artifact metadata, never the resume body", async () => {
+test("a rendered check ends the writer; a refused proposal's result names the issues, never the resume body", async () => {
   let renders = 0;
   const request: CreateResumeDraftInput = {
     ...requestWithResume("Maintained a synthetic migration ledger."),
-    renderPreview: () =>
-      Promise.resolve({
+    renderPreview: () => {
+      if (++renders === 1)
+        throw new ResumeProposalValidationError(
+          "The synthetic render refused this proposal.",
+          [
+            {
+              code: "synthetic_refusal",
+              message: "Synthetic refusal.",
+              path: ["proposal", "summary"],
+            },
+          ],
+        );
+      return Promise.resolve({
         templateId: "classic_ats",
         pageCount: 2,
         warnings: ["Synthetic renderer warning"],
         fileName: "synthetic-preview.pdf",
-        requiredModelRepairs:
-          ++renders === 1
-            ? [
-                {
-                  id: "issue_claim_grounding_summary",
-                  severity: "error" as const,
-                  category: "unsupported_claim" as const,
-                  sectionId: "summary",
-                  entryId: null,
-                  bulletId: null,
-                  message: "Saved evidence does not back this wording.",
-                },
-              ]
-            : [],
+        requiredModelRepairs: [
+          {
+            id: "issue_claim_grounding_summary",
+            severity: "error" as const,
+            category: "unsupported_claim" as const,
+            sectionId: "summary",
+            entryId: null,
+            bulletId: null,
+            message: "Saved evidence does not back this wording.",
+          },
+        ],
         personConfirmationCount: 2,
-      }),
+      });
+    },
   };
   const { payloads, toolValues, draft } = await captureGeneration(request);
+  // The refusal costs one more call; the flagged render after it does not.
   expect(payloads).toHaveLength(2);
   const check = toolValues.get("compose_1")!;
   expect(check).toMatchObject({
-    selectedTemplateId: "classic_ats",
-    pageCount: 2,
-    warnings: ["Synthetic renderer warning"],
-    requiredModelRepairs: [
-      expect.objectContaining({ id: "issue_claim_grounding_summary" }),
-    ],
-    personConfirmationCount: 2,
+    validationIssues: [expect.objectContaining({ code: "synthetic_refusal" })],
   });
   for (const field of [
     "fullText",

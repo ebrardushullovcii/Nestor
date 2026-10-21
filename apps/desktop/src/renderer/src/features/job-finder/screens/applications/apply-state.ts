@@ -71,6 +71,12 @@ export interface ApplyStatePresentation {
   plannedStanding?: PlannedApplyStanding | null;
   /** The person stopped it: a neutral state, not an error. */
   cancelledByPerson?: true;
+  /**
+   * The filled-in form closed (the app or its tab closed) before a send was
+   * seen. Nothing failed: the person says whether they sent it, or prepares
+   * it again.
+   */
+  formClosed?: true;
   /** The person marked it withdrawn in their tracker. */
   withdrawnByPerson?: true;
 }
@@ -317,12 +323,13 @@ export function resolveApplyStatePresentation(input: {
   ) {
     return {
       kind: "could_not_apply",
-      title: "Could not apply",
+      title: "Form closed",
       sentence:
-        "The prepared form is no longer open. Prepare it again using your saved answers and files.",
+        "The filled-in form closed before Job Finder saw it sent. If you sent it yourself, set the stage to Applied; otherwise prepare it again with your saved answers and files.",
       action: "try_again",
       actionLabel: "Prepare again",
       questionsLeftLabel: null,
+      formClosed: true,
     };
   }
 

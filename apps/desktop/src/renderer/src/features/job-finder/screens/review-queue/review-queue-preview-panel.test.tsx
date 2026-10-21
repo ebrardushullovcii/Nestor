@@ -305,9 +305,9 @@ describe("ReviewQueuePreviewPanel locked pane scroll regions", () => {
 
     const regions = expectLeafRegions(container);
     expect(regions).toHaveLength(1);
-    const previewScroller = screen
-      .getByText("Tailored resume v1")
-      .closest<HTMLElement>("[data-locked-pane-scroll-region]");
+    const previewScroller = container
+      .querySelector("[data-resume-preview-card]")
+      ?.closest<HTMLElement>("[data-locked-pane-scroll-region]");
     expect(previewScroller).toBeTruthy();
     expect(previewScroller?.className).toContain(
       "px-5 pb-5 min-h-0 flex-1 overflow-y-auto",
@@ -366,12 +366,12 @@ describe("ReviewQueuePreviewPanel locked pane scroll regions", () => {
       />,
     );
 
-    expect(screen.getByText("Your original resume")).toBeTruthy();
+    expect(screen.getByText("Your original wording")).toBeTruthy();
     expect(screen.queryByText("Tailored resume v1")).toBeNull();
   });
 
   it.each(["conservative", "balanced", "aggressive"] as const)(
-    "keeps the tailored label and explains approval for %s",
+    "leaves the label and the approval step to the rows above for %s",
     (resumeTailoringMode) => {
       const selectedItem = {
         jobId: "job_tailored",
@@ -425,22 +425,24 @@ describe("ReviewQueuePreviewPanel locked pane scroll regions", () => {
         />,
       );
 
-      expect(screen.getByText("Tailored resume v1")).toBeTruthy();
-      expect(screen.queryByText("Your original resume")).toBeNull();
-      const reviewCopy =
-        "Review this resume, decide any flagged lines, then approve it before applying.";
-      const applyCopy =
-        "This is the resume as it stands. Edit it if you like; Apply approves it.";
-      expect(
-        screen.getByText(
-          resumeTailoringMode === "aggressive" ? reviewCopy : applyCopy,
-        ),
-      ).toBeTruthy();
+      // The pane header names the job and the level row names the resume;
+      // what to do with it is the Next step box's line. The card opens on
+      // the resume itself.
+      expect(screen.queryByText("Tailored resume v1")).toBeNull();
+      expect(screen.queryByText("Your original wording")).toBeNull();
       expect(
         screen.queryByText(
-          resumeTailoringMode === "aggressive" ? applyCopy : reviewCopy,
+          "Read this resume through, then approve it before applying.",
         ),
       ).toBeNull();
+      expect(
+        screen.queryByText(
+          "This is the resume as it stands. Edit it if you like; Apply approves it.",
+        ),
+      ).toBeNull();
+      expect(
+        document.querySelector("[data-resume-preview-card]"),
+      ).toBeTruthy();
     },
   );
 

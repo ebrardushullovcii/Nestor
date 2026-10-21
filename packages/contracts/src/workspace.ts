@@ -1816,6 +1816,39 @@ export type JobFinderWorkspaceSyncInput = z.infer<
   typeof JobFinderWorkspaceSyncInputSchema
 >;
 
+export const JobFinderResumePdfExportOutcomeSchema = z
+  .object({
+    outcome: z.enum(["saved", "cancelled"]),
+    outputPath: NonEmptyStringSchema.nullable().default(null),
+  })
+  .strict();
+
+/**
+ * What the PDF export route sends: its outcome and the workspace as a sync
+ * result. The window turns it back into a JobFinderResumePdfExportResult.
+ * Sending (and validating) the whole workspace with every export cost an
+ * approval over a second.
+ */
+export type JobFinderResumePdfExportReply = z.infer<
+  typeof JobFinderResumePdfExportOutcomeSchema
+> & {
+  workspace: JobFinderWorkspaceSyncResult;
+};
+
+/**
+ * The revision a window now shows, sent each time it commits one. Main
+ * answers that window's next change with a delta from it instead of the
+ * whole workspace. 0 means the window holds no revision main knows.
+ */
+export const JobFinderWorkspaceHeldRevisionSchema = z
+  .object({
+    revision: WorkspaceRevisionSchema,
+  })
+  .strict();
+export type JobFinderWorkspaceHeldRevision = z.infer<
+  typeof JobFinderWorkspaceHeldRevisionSchema
+>;
+
 type JobFinderWorkspaceSyncResultValue =
   | {
       kind: "delta";
@@ -1852,6 +1885,23 @@ export const JobFinderWorkspaceSyncResultSchema = z.discriminatedUnion("kind", [
 export type JobFinderWorkspaceSyncResult = z.infer<
   typeof JobFinderWorkspaceSyncResultSchema
 >;
+
+/**
+ * What the agent-discovery IPC route answers: the terminal outcome and what
+ * changed relative to the revision the window holds. A finished search used
+ * to answer with the whole workspace (tens of megabytes with thousands of
+ * jobs), which also made the window's next refresh send it all again.
+ */
+export type JobFinderAgentDiscoveryReply = {
+  outcome: JobFinderAgentDiscoveryOutcome;
+  sync: JobFinderWorkspaceSyncResult;
+};
+export const JobFinderAgentDiscoveryReplySchema = z
+  .object({
+    outcome: JobFinderAgentDiscoveryOutcomeSchema,
+    sync: JobFinderWorkspaceSyncResultSchema,
+  })
+  .strict() as z.ZodType<JobFinderAgentDiscoveryReply>;
 
 export const SaveCandidateProfileInputSchema = CandidateProfileSchema;
 export type SaveCandidateProfileInput = z.infer<

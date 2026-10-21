@@ -252,6 +252,7 @@ describe("renderer workspace list projection", () => {
           score: 80,
           recommendation: "strong_fit",
           roleExplanation: explained,
+          reasons: ["Synthetic judged reason."],
           summary: "Synthetic one-line summary.",
         },
       },
@@ -259,6 +260,7 @@ describe("renderer workspace list projection", () => {
     const row = toRendererJob(full);
     expect(JobListRowSchema.parse(row)).toEqual(row);
     expect(JSON.stringify(row)).not.toContain(explained);
+    expect(JSON.stringify(row)).not.toContain("Synthetic judged reason.");
     expect(row.matchAssessment).toMatchObject({
       score: 80,
       contextFingerprint: "context",

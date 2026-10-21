@@ -235,6 +235,27 @@ describe("job search agent", () => {
     });
   });
 
+  test("marks every search turn as search work so the provider picks its effort", async () => {
+    const model = scripted([
+      { name: "extract_jobs" },
+      { name: "finish", args: { reason: "Read the jobs." } },
+    ]);
+    const tasks: Array<string | undefined> = [];
+    await runJobSearchAgent({
+      hands: hands({ current: rawPage() }),
+      config: config(),
+      llmClient: {
+        chatWithTools: (messages, tools, options) => {
+          tasks.push(options?.reasoningTask);
+          return model.chatWithTools(messages, tools, options);
+        },
+      },
+      jobExtractor: extractor,
+    });
+    expect(tasks.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(tasks)).toEqual(new Set(["search"]));
+  });
+
   test("allows a transient challenge to clear after waiting", async () => {
     const pages = {
       current: rawPage({
@@ -366,7 +387,7 @@ describe("job search agent", () => {
     );
   });
 
-  test("uses the person's exact goal, freshness choice, and full profile", () => {
+  test("uses the person's exact goal, freshness choice, and profile outline", () => {
     const prompts = createJobSearchPrompts(
       config({
         promptContext: {
@@ -389,11 +410,16 @@ describe("job search agent", () => {
       "Freshness: prefer postings marked as recent",
     );
     expect(prompts.system).toContain("Builds dependable internal tools");
-    expect(prompts.system).toContain("Platform Engineer · at Northwind");
+    expect(prompts.system).toContain(
+      "Platform Engineer · at Northwind · 2020 to present",
+    );
     expect(prompts.system).toContain(
       "BSc · Computer Science · Example University",
     );
-    expect(prompts.system).toContain("8 years of platform engineering");
+    // Fit is judged afterwards from the full profile; every search turn
+    // would otherwise resend the resume and each role's write-up.
+    expect(prompts.system).not.toContain("8 years of platform engineering");
+    expect(prompts.system).not.toContain("Built reliable developer tooling");
   });
 
   test("saves what it reads, tells the model what was already saved, and finishes in its own words", async () => {
@@ -2141,4 +2167,238 @@ test("counts only the pages this search loaded, one per page however its address
     jobExtractor: { extractJobsFromPage: () => Promise.resolve([]) },
   });
   expect(result.pagesCovered).toBe(2);
+});
+
+describe("reading pages for less", () => {
+  function longBoard(count: number): RawApplyPage {
+    return rawPage({
+      bodyText: [
+        "Jobs",
+        ...Array.from({ length: count }, (_, index) =>
+          [
+            `Platform Engineer ${index}`,
+            `Employer ${index}`,
+            "Manchester, United Kingdom",
+            "Back end, Cloud, Developer tools",
+          ].join("\n"),
+        ),
+      ].join("\n"),
+      links: Array.from({ length: count }, (_, index) => ({
+        index,
+        label: `Platform Engineer ${index}`,
+        href: `https://jobs.example.test/jobs/${index}`,
+        target: "",
+        visible: true,
+        topOffset: index * 40,
+      })),
+    });
+  }
+
+  /** A page reader that returns the postings whose links it was handed, a dozen at most. */
+  function linkReader() {
+    return vi.fn<JobExtractor["extractJobsFromPage"]>((input) => {
+      const ids = [
+        ...input.pageText.matchAll(/→ https:\/\/jobs\.example\.test\/jobs\/(\d+)/gu),
+      ].map((match) => match[1] ?? "");
+      return Promise.resolve(
+        ids
+          .slice(0, Math.min(12, input.maxJobs))
+          .map((id) => posting(`Platform Engineer ${id}`, `Employer ${id}`, id)),
+      );
+    });
+  }
+
+  test("a long results page is read in parts, so listings past the first dozen are read", async () => {
+    const reader = linkReader();
+    const result = await runJobSearchAgent({
+      hands: hands({ current: longBoard(45) }),
+      config: config({ retainAllFound: true }),
+      llmClient: scripted([
+        { name: "extract_jobs", args: { pageType: "search_results" } },
+        { name: "finish", args: { reason: "Read the board." } },
+      ]),
+      jobExtractor: { extractJobsFromPage: reader },
+    });
+    expect(result.jobs).toHaveLength(45);
+    expect(reader.mock.calls.length).toBeGreaterThan(3);
+    expect(reader.mock.calls.length).toBeLessThan(15);
+    for (const [call] of reader.mock.calls) {
+      expect(call.pageText.length).toBeLessThan(8_000);
+      expect(call.maxJobs).toBe(12);
+    }
+  });
+
+  test("reading an unchanged page again costs no page read and says so", async () => {
+    const reader = linkReader();
+    const answers: string[] = [];
+    let turn = 0;
+    const turns = [
+      { name: "extract_jobs", args: { pageType: "search_results" } },
+      { name: "extract_jobs", args: { pageType: "search_results" } },
+      { name: "finish", args: { reason: "Done." } },
+    ];
+    await runJobSearchAgent({
+      hands: hands({ current: longBoard(20) }),
+      config: config(),
+      llmClient: {
+        chatWithTools: (messages) => {
+          const last = messages.at(-1);
+          if (last?.role === "tool") answers.push(last.content);
+          const next = turns[Math.min(turn, turns.length - 1)];
+          turn += 1;
+          return Promise.resolve({
+            toolCalls: [
+              {
+                id: `call_${turn}`,
+                type: "function" as const,
+                function: { name: next.name, arguments: JSON.stringify(next.args) },
+              },
+            ],
+          });
+        },
+      },
+      jobExtractor: { extractJobsFromPage: reader },
+    });
+    const firstReads = reader.mock.calls.length;
+    expect(firstReads).toBeGreaterThan(0);
+    expect(answers[1]).toContain("20 on this page were already saved");
+    expect(answers[1]).toContain("have not changed");
+    // No extra reads were made for the second, identical page.
+    expect(reader.mock.calls.length).toBe(firstReads);
+  });
+
+  test("a repeated or malformed rejection is set aside, not a refused page read", async () => {
+    const reader = linkReader();
+    const result = await runJobSearchAgent({
+      hands: hands({ current: longBoard(3) }),
+      config: config(),
+      llmClient: scripted([
+        {
+          name: "extract_jobs",
+          args: {
+            pageType: "search_results",
+            rejected: [
+              { url: "https://jobs.example.test/jobs/0", category: "place", reason: "On-site elsewhere." },
+              { url: "https://jobs.example.test/jobs/0", category: "place", reason: "On-site elsewhere." },
+              { url: "https://jobs.example.test/jobs/1", category: "nonsense", reason: "?" },
+            ],
+          },
+        },
+        { name: "finish", args: { reason: "Done." } },
+      ]),
+      jobExtractor: { extractJobsFromPage: reader },
+    });
+    expect(reader).toHaveBeenCalled();
+    expect(result.jobs).toHaveLength(3);
+    expect(result.jobs.find((job) => job.sourceJobId === "0")?.searchRejection?.category).toBe("place");
+    expect(result.jobs.find((job) => job.sourceJobId === "1")?.searchRejection).toBeFalsy();
+  });
+
+  test("the page reader gets the goals and its rejections are kept unless the model decided", async () => {
+    const reader = vi.fn<JobExtractor["extractJobsFromPage"]>((input) => {
+      expect(JSON.parse(input.selectionContext ?? "{}")).toMatchObject({
+        targetRoles: ["Platform Engineer"],
+      });
+      return Promise.resolve([
+        {
+          ...posting("Platform Engineer 0", "Employer 0", "0"),
+          searchRejection: { category: "place" as const, reason: "US only." },
+        },
+        {
+          ...posting("Platform Engineer 1", "Employer 1", "1"),
+          searchRejection: { category: "role" as const, reason: "Sales role." },
+        },
+        posting("Platform Engineer 2", "Employer 2", "2"),
+      ]);
+    });
+    const result = await runJobSearchAgent({
+      hands: hands({ current: longBoard(3) }),
+      config: config(),
+      llmClient: scripted([
+        {
+          name: "extract_jobs",
+          args: {
+            pageType: "search_results",
+            rejected: [
+              { url: "https://jobs.example.test/jobs/1", category: "place", reason: "Office in Leeds." },
+            ],
+          },
+        },
+        { name: "finish", args: { reason: "Done." } },
+      ]),
+      jobExtractor: { extractJobsFromPage: reader },
+    });
+    const byId = new Map(result.jobs.map((job) => [job.sourceJobId, job]));
+    expect(byId.get("0")?.searchRejection).toEqual({ category: "place", reason: "US only." });
+    expect(byId.get("1")?.searchRejection).toEqual({ category: "place", reason: "Office in Leeds." });
+    expect(byId.get("2")?.searchRejection).toBeFalsy();
+  });
+
+  test("a page that has not drawn yet is looked at again before the model sees it", async () => {
+    const pages = { current: rawPage({ bodyText: "", actions: [] }) };
+    const liveHands = hands(pages);
+    let waits = 0;
+    liveHands.wait = () => {
+      waits += 1;
+      if (waits === 2) pages.current = longBoard(2);
+      return Promise.resolve();
+    };
+    let opening = "";
+    await runJobSearchAgent({
+      hands: liveHands,
+      config: config(),
+      llmClient: {
+        chatWithTools: (messages) => {
+          opening ||= messages.map((message) => message.content).join("\n");
+          return Promise.resolve({
+            toolCalls: [
+              {
+                id: "call_finish",
+                type: "function" as const,
+                function: { name: "finish", arguments: JSON.stringify({ reason: "Done." }) },
+              },
+            ],
+          });
+        },
+      },
+      jobExtractor: extractor,
+    });
+    expect(waits).toBe(2);
+    expect(opening).toContain("Platform Engineer 1 → https://jobs.example.test/jobs/1");
+    expect(opening).toContain("The page you landed on is shown below; work from it.");
+    expect(opening).not.toContain("Begin by looking at the page.");
+  });
+
+  test("a scroll that changes nothing is answered without the page again", async () => {
+    const answers: string[] = [];
+    let turn = 0;
+    await runJobSearchAgent({
+      hands: hands({ current: longBoard(5) }),
+      config: config(),
+      llmClient: {
+        chatWithTools: (messages) => {
+          const last = messages.at(-1);
+          if (last?.role === "tool") answers.push(last.content);
+          turn += 1;
+          const name = turn <= 2 ? "scroll" : "finish";
+          return Promise.resolve({
+            toolCalls: [
+              {
+                id: `call_${turn}`,
+                type: "function" as const,
+                function: {
+                  name,
+                  arguments: JSON.stringify(name === "scroll" ? { direction: "down" } : { reason: "Done." }),
+                },
+              },
+            ],
+          });
+        },
+      },
+      jobExtractor: extractor,
+    });
+    expect(answers[0]).toContain("Scrolled down.");
+    expect(answers[0]).toContain("same address, links and text");
+    expect(answers[0]).not.toContain("Links:");
+  });
 });

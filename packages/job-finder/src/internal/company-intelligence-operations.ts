@@ -262,9 +262,16 @@ function readCompanyJobEvidence(
   | { ok: false; error: ZodErrorLike } {
   const cached = immutableJobEvidence.get(job);
   if (cached) return { ok: true, evidence: cached };
-  const parsed = SavedJobSchema.safeParse(job);
-  if (!parsed.success) return { ok: false, error: parsed.error };
-  const value = parsed.data;
+  // A deeply frozen job is a repository display row, validated when it was
+  // read. Parsing it again cost about a second after each search, when the
+  // search had replaced thousands of rows.
+  const frozenRow = deeplyFrozen(job);
+  let value: SavedJob = job;
+  if (!frozenRow) {
+    const parsed = SavedJobSchema.safeParse(job);
+    if (!parsed.success) return { ok: false, error: parsed.error };
+    value = parsed.data;
+  }
   const hosts = new Set<string>();
   const addHost = (url: string | null | undefined): void => {
     const host = listingHost(url);
@@ -289,7 +296,7 @@ function readCompanyJobEvidence(
     discoveredAt: value.discoveredAt,
     listingHosts: [...hosts],
   };
-  if (deeplyFrozen(job)) immutableJobEvidence.set(job, evidence);
+  if (frozenRow) immutableJobEvidence.set(job, evidence);
   return { ok: true, evidence };
 }
 

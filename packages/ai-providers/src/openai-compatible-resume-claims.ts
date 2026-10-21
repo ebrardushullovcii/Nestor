@@ -29,7 +29,11 @@ export function buildResumeClaimCheckPrompt(): string {
 }
 
 export function buildResumeClaimCheckPayload(input: ResumeClaimCheckInput) {
+  // The candidate's evidence is the same for every job, so it leads: checks
+  // across a batch share that prefix, which the AI service can reuse.
   return {
+    evidence: input.evidence,
+    ...(input.resumeText ? { importedResume: input.resumeText } : {}),
     tailoringStrength: input.tailoringStrength,
     job: {
       title: input.job.title,
@@ -39,8 +43,6 @@ export function buildResumeClaimCheckPayload(input: ResumeClaimCheckInput) {
         .slice(0, 30)
         .map((line) => line.slice(0, 240)),
     },
-    evidence: input.evidence,
-    importedResume: input.resumeText,
     resumeLines:
       input.resumeLines ??
       input.claims.map(({ section, text }) => ({ section, text })),

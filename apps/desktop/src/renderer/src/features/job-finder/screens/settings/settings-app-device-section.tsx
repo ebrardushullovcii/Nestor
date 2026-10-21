@@ -173,8 +173,7 @@ export function SettingsAppDeviceSection({
             Appearance
           </h3>
           <p className="text-(length:--text-description) leading-5 text-foreground-soft">
-            Use system if you want Job Finder to follow the OS, or pin a theme
-            when you want a stable visual working environment.
+            Follow your system's light or dark mode, or pick one.
           </p>
         </div>
         <SettingsSectionSaveControl
@@ -217,9 +216,7 @@ export function SettingsAppDeviceSection({
       <div className="grid gap-1">
         <h4 className="font-medium">Text size</h4>
         <p className="text-sm text-foreground-soft">
-          Use View → Zoom In to make text bigger, Zoom Out to make it smaller,
-          or Actual Size to reset it. Your chosen size is remembered when you
-          reopen Nestor.
+          View → Zoom In or Zoom Out. Nestor keeps the size you pick.
         </p>
       </div>
       {onUpdateWorkspaceBehavior ? (
@@ -227,11 +224,9 @@ export function SettingsAppDeviceSection({
           checked={draftCollapseSideMenu}
           className="max-w-xl"
           description="Fold the side menu to icons when the assistant opens beside the page, and open it again when the assistant closes."
-          hint={
-            sideMenuSaveFailed
-              ? "That change was not saved. Try the switch again."
-              : "Saved as soon as you flip it. Folding or opening the menu yourself always wins."
-          }
+          {...(sideMenuSaveFailed
+            ? { hint: "That change was not saved. Try the switch again." }
+            : {})}
           label="Collapse the side menu while the assistant is open"
           onCheckedChange={updateCollapseSideMenu}
         />

@@ -346,7 +346,7 @@
   --tracking-caps: 0.18em;
   --tracking-badge: 0.14em;
   --tracking-mono: 0.16em;
-  --tracking-normal: 0.08em;
+  --tracking-chip: 0.08em;
   --tracking-page-eyebrow: 0.22em;
   --tracking-page-title: -0.055em;
   --tracking-page-title-compact: -0.05em;
@@ -977,6 +977,24 @@
 
 .job-finder-shell-grid {
   grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/* A loading line that would show for a blink is not shown at all: it stays
+   invisible for 300ms and appears only for a slow read, so a screen that
+   fills in quickly never flashes "Loading…" it immediately takes back. No
+   timer is involved, so first paint stays timer-free. */
+@keyframes delayed-appear {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.delayed-appear {
+  animation: delayed-appear 1ms linear 300ms both;
 }
 
 @keyframes button-pending-rail-slide {

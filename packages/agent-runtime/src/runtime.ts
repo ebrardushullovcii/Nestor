@@ -106,7 +106,18 @@ export interface AgentTaskRunOptions<TState, TDraft> {
   readonly emergencyCeiling?: number;
   readonly checkpointStore?: AgentTaskCheckpointStore;
   readonly onProgress?: (progress: AgentTaskProgress) => void;
+  /**
+   * The context from `buildContext` already carries the draft. Earlier
+   * `draft_write` calls are then replayed with a note in place of their
+   * arguments, so the model is not sent the same draft twice per turn.
+   */
+  readonly draftShownInContext?: boolean;
 }
+
+const DRAFT_WRITE_REPLAY_NOTE = JSON.stringify({
+  replayed:
+    "These arguments were applied to the task draft; the task state above shows that draft.",
+});
 
 export interface AgentTaskRunResult<TDraft> {
   readonly draft: TDraft;
@@ -301,13 +312,34 @@ export async function runAgentTask<TState, TDraft>(
             instruction:
               "Use the available tools to update the task draft. Validate it, repair any reported issues, then call finish_task. The typed task state below is authoritative; chat history is not.",
           };
+    const recentTail = takeProtocolSafeRecentMessages(recentMessages, 8);
     const messages: AgentTaskMessage[] = [
       { role: "system", content: options.systemPrompt },
       {
         role: "user",
         content: JSON.stringify(taskPayload),
       },
-      ...takeProtocolSafeRecentMessages(recentMessages, 8),
+      ...(options.draftShownInContext
+        ? recentTail.map((message) =>
+            message.role === "assistant" && message.toolCalls?.length
+              ? {
+                  ...message,
+                  toolCalls: message.toolCalls.map((call) =>
+                    toolsByName.get(call.function.name)?.permission ===
+                    "draft_write"
+                      ? {
+                          ...call,
+                          function: {
+                            ...call.function,
+                            arguments: DRAFT_WRITE_REPLAY_NOTE,
+                          },
+                        }
+                      : call,
+                  ),
+                }
+              : message,
+          )
+        : recentTail),
     ];
 
     emitProgress("thinking", "Working on the next useful change");

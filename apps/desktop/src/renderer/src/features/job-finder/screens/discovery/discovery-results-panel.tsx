@@ -41,12 +41,11 @@ import { jobSourceLabel } from "../../lib/job-source-display-name";
 import {
   applySelectionRange,
   isSelectionClick,
-  ListPageSelectionBar,
+  ListPageCheckbox,
   ListRowSelectionCell,
 } from "../../components/list-selection";
 import { discoverySourceFailureCopy } from "./discovery-source-failure-copy";
 import { ChevronDown, LoaderCircle } from "lucide-react";
-import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { SelectableRow } from "@renderer/components/ui";
 import { EmptyState } from "@renderer/features/job-finder/components/empty-state";
@@ -63,7 +62,7 @@ import {
 import {
   CollectionNoMatches,
   CollectionSearchToolbar,
-  matchesCollectionSearch,
+  normalizeCollectionSearch,
 } from "@renderer/features/job-finder/components/collection-search-toolbar";
 import { StatusBadge } from "@renderer/features/job-finder/components/status-badge";
 import { usePersistedCollectionView } from "@renderer/features/job-finder/hooks/use-persisted-collection-view";
@@ -82,7 +81,6 @@ import {
   formatTimestamp,
   formatStatusLabel,
   formatWorkModeLabel,
-  getApplicationTone,
   getPostedDateLabel,
 } from "@renderer/features/job-finder/lib/job-finder-utils";
 import {
@@ -102,18 +100,26 @@ import {
 import {
   buildDiscoveryHeadedGroupByJobId,
   buildDiscoveryResultGroupHeadings,
-  orderDiscoveryResultsByGroup,
 } from "./discovery-result-groups";
 // One name for that window, from the one module that owns it.
 import { JOB_FINDER_BROWSER_NAME } from "@renderer/features/job-finder/lib/job-finder-browser-handoff-copy";
 import {
-  compareDiscoveryResults,
   type DiscoveryResultsSortField,
   useDiscoveryResultsSort,
 } from "./discovery-results-sort";
+import {
+  getDiscoveryResultFacets,
+  matchesDiscoveryJobSearch,
+  SOURCE_UNAVAILABLE_FILTER,
+  sortDiscoveryResults,
+  WORK_MODE_UNSPECIFIED_FILTER,
+} from "./discovery-results-view";
+import {
+  createIdentityMemo,
+  createPerObjectCache,
+} from "../../lib/identity-memo";
 import { getDiscoveryListingRecencyKey } from "@nestor/job-finder/discovery-ordering";
 import type { DiscoveryLatestRunVerdict } from "./discovery-run-feedback";
-import { getDiscoverySourceLabels } from "./discovery-source-attribution";
 import { useAssistantContextSource } from "../../assistant/assistant-provider";
 import { buildListContext } from "../../assistant/assistant-context-capture";
 import {
@@ -181,6 +187,11 @@ interface DiscoveryResultsPanelProps {
   onSearchAgain?: (() => void) | null;
   onRetrySource?: (sourceId: string) => void;
   onDisplayedSelectedJobIdChange?: (selectedJobId: string | null) => void;
+  /**
+   * The rows in the order the list shows them (search, filters and sort
+   * applied), for a triage pass that moves to the next job.
+   */
+  onOrderedJobIdsChange?: (jobIds: readonly string[]) => void;
   onRecoveryAction?: (() => void) | null;
   onShowAlsoFound?: (() => void) | null;
   onToggleAlsoFound?: (() => void) | null;
@@ -209,13 +220,13 @@ export const DISCOVERY_OFFLINE_CATALOG_NOTICE_ID =
 export const DISCOVERY_SEARCH_SETUP_BLOCKER_ID =
   "discovery-search-setup-blocker";
 
-// Each option carries its own direction ("Newest first", "A to Z"), so the
+// Each option carries its own direction ("Newest first", "A–Z"), so the
 // separate flip control that used to sit beside the select is gone: "Best
 // match, lowest first" was never a view anyone wanted.
 const DISCOVERY_RESULTS_SORT_OPTIONS = [
   { field: "fit", label: "Best match" },
   { field: "recent", label: "Newest first" },
-  { field: "company", label: "Company A to Z" },
+  { field: "company", label: "Company A–Z" },
 ] as const satisfies readonly {
   readonly field: DiscoveryResultsSortField;
   readonly label: string;
@@ -232,9 +243,6 @@ const DISCOVERY_RESULTS_SORT_OPTIONS = [
  */
 export const DISCOVERY_RESULTS_TOOLBAR_CONTROL_CLASS =
   "h-8 rounded-(--radius-button) text-xs font-medium";
-
-const SOURCE_UNAVAILABLE_FILTER = "Source unavailable";
-const WORK_MODE_UNSPECIFIED_FILTER = "Not specified";
 
 // Facet selections survive route remounts per active search plan in one
 // bounded, versioned local snapshot following the results-sort persistence
@@ -624,6 +632,31 @@ export function ResultsEmptyState(props: {
   );
 }
 
+// The tied percentages of one ordered list, kept across visits (see
+// `tiedScores` in the panel).
+const getTiedScores = createIdentityMemo(
+  (orderedJobs: readonly JobListRow[]): ReadonlySet<number> => {
+    const countsByScore = new Map<number, number>();
+    for (const job of orderedJobs) {
+      if (isRowScoreWithheld(job)) {
+        continue;
+      }
+      const score = job.matchAssessment.score;
+      countsByScore.set(score, (countsByScore.get(score) ?? 0) + 1);
+    }
+    const shared = new Set<number>();
+    for (const [score, count] of countsByScore) {
+      if (count > 1) {
+        shared.add(score);
+      }
+    }
+    return shared;
+  },
+);
+const isRowScoreWithheld = createPerObjectCache(
+  (job: JobListRow) => getMatchAssessmentPresentation(job).isScoreWithheld,
+);
+
 export function DiscoveryResultsPanel({
   hiddenJobsControl,
   planName = null,
@@ -652,6 +685,7 @@ export function DiscoveryResultsPanel({
   onSearchAgain = null,
   onRetrySource,
   onDisplayedSelectedJobIdChange,
+  onOrderedJobIdsChange,
   onRecoveryAction,
   onShowAlsoFound,
   onToggleAlsoFound,
@@ -694,76 +728,18 @@ export function DiscoveryResultsPanel({
   const [activityFilters, setActivityFilters] = useState<ReadonlySet<string>>(
     () => new Set(persistedFacetFilters.activity),
   );
-  const sourceLabelsByJobId = useMemo(
-    () =>
-      new Map(
-        jobs.map((job) => {
-          const labels = getDiscoverySourceLabels(
-            job.provenance ?? [],
-            discoveryTargets,
-          );
-          return [
-            job.id,
-            labels.length > 0 ? labels : [SOURCE_UNAVAILABLE_FILTER],
-          ] as const;
-        }),
-      ),
-    [discoveryTargets, jobs],
-  );
-  const indistinguishableJobIds = useMemo(() => {
-    const groups = new Map<string, string[]>();
-    for (const job of jobs) {
-      const key = [
-        job.title,
-        job.company,
-        job.location,
-        sourceLabelsByJobId.get(job.id),
-      ].join("\u0000");
-      const ids = groups.get(key) ?? [];
-      ids.push(job.id);
-      groups.set(key, ids);
-    }
-    return new Set([...groups.values()].filter((ids) => ids.length > 1).flat());
-  }, [jobs, sourceLabelsByJobId]);
-  const recommendationOptions = useMemo(
-    () =>
-      fitRecommendationValues.filter((value) =>
-        jobs.some(
-          (job) =>
-            (job.matchAssessment.recommendation ?? "review_before_applying") ===
-            value,
-        ),
-      ),
-    [jobs],
-  );
-  const sourceOptions = useMemo(
-    () =>
-      [...new Set([...sourceLabelsByJobId.values()].flat())].sort(
-        (left, right) =>
-          left.localeCompare(right, "en", { sensitivity: "base" }),
-      ),
-    [sourceLabelsByJobId],
-  );
-  const workModeOptions = useMemo(
-    () => [
-      ...workModeValues.filter((value) =>
-        jobs.some((job) => job.workMode.includes(value)),
-      ),
-      ...(jobs.some((job) => job.workMode.length === 0)
-        ? [WORK_MODE_UNSPECIFIED_FILTER]
-        : []),
-    ],
-    [jobs],
-  );
-  // Like every other facet, only the statuses the current results carry:
-  // five checkboxes for a list where every row is "Unknown" filter nothing.
-  const activityOptions = useMemo(
-    () =>
-      listingActivityStatuses.filter((status) =>
-        jobs.some((job) => getListingActivity(job).status === status),
-      ),
-    [jobs],
-  );
+  // Source labels and the facet options are derived once per collection and
+  // kept across visits (see discovery-results-view). Like every other facet,
+  // the listing statuses are only the ones the current results carry: five
+  // checkboxes for a list where every row is "Unknown" filter nothing.
+  const {
+    activityOptions,
+    indistinguishableJobIds,
+    recommendationOptions,
+    sourceLabelsByJobId,
+    sourceOptions,
+    workModeOptions,
+  } = getDiscoveryResultFacets(jobs, discoveryTargets);
   // A facet with one value cannot narrow anything, so it is not offered.
   const filterGroups = {
     activity: activityOptions.length > 1,
@@ -831,18 +807,27 @@ export function DiscoveryResultsPanel({
     sourceFilters.size +
     workModeFilters.size +
     activityFilters.size;
+  const resultsSort = useDiscoveryResultsSort();
+  const sortDirection = resultsSort.sort.direction;
+  const sortField = resultsSort.sort.field;
+  // Keep the shared fit order and result bands, including when this panel is
+  // supplied with a refreshed or independently filtered result collection.
+  // The collection is sorted once per order; search and filters only narrow
+  // the sorted list, which keeps its order.
+  const sortedJobs = sortDiscoveryResults(jobs, sortField, sortDirection);
+  const normalizedQuery = normalizeCollectionSearch(deferredQuery);
   const filteredJobs = useMemo(() => {
     if (
-      deferredQuery.trim() === "" &&
+      normalizedQuery === "" &&
       recommendationFilters.size === 0 &&
       sourceFilters.size === 0 &&
       workModeFilters.size === 0 &&
       activityFilters.size === 0
     ) {
-      return jobs;
+      return sortedJobs;
     }
 
-    return jobs.filter((job) => {
+    return sortedJobs.filter((job) => {
       const recommendation =
         job.matchAssessment.recommendation ?? "review_before_applying";
       const sourceLabels = sourceLabelsByJobId.get(job.id) ?? [
@@ -860,78 +845,26 @@ export function DiscoveryResultsPanel({
         (workModeFilters.size === 0 ||
           workModes.some((workMode) => workModeFilters.has(workMode))) &&
         (activityFilters.size === 0 || activityFilters.has(activity.status)) &&
-        matchesCollectionSearch(deferredQuery, [
-          job.title,
-          job.company,
-          job.location,
-          job.salaryText,
-          job.status,
-          job.applyPath,
-          ...job.workMode,
-          fitRecommendationCopy[recommendation].label,
-          presentListingActivity(activity).label,
-        ])
+        matchesDiscoveryJobSearch(job, normalizedQuery)
       );
     });
   }, [
     activityFilters,
-    deferredQuery,
-    jobs,
+    normalizedQuery,
     recommendationFilters,
+    sortedJobs,
     sourceFilters,
     sourceLabelsByJobId,
     workModeFilters,
   ]);
-  const resultsSort = useDiscoveryResultsSort();
-  const sortDirection = resultsSort.sort.direction;
-  const sortField = resultsSort.sort.field;
-  // Keep the shared fit order and result bands, including when this panel is
-  // supplied with a refreshed or independently filtered result collection.
-  const orderedJobs = useMemo(() => {
-    if (sortDirection === "desc" && sortField === "fit") {
-      return orderDiscoveryResultsByGroup(
-        [...filteredJobs].sort((left, right) =>
-          compareDiscoveryResults(left, right, resultsSort.sort, 0, 0),
-        ),
-      );
-    }
-    return filteredJobs
-      .map((job, sourceIndex) => ({ job, sourceIndex }))
-      .sort((left, right) =>
-        compareDiscoveryResults(
-          left.job,
-          right.job,
-          resultsSort.sort,
-          left.sourceIndex,
-          right.sourceIndex,
-        ),
-      )
-      .map((entry) => entry.job);
-  }, [filteredJobs, resultsSort.sort, sortDirection, sortField]);
+  const orderedJobs = filteredJobs;
   /**
    * Printed percentages that more than one row carries. A tie is the one case
    * where the number alone cannot explain the order, so those rows have to
    * say what separates them. Withheld scores are excluded: they print no
    * percentage, so they cannot tie on one.
    */
-  const tiedScores = useMemo(() => {
-    const countsByScore = new Map<number, number>();
-    for (const job of orderedJobs) {
-      const presentation = getMatchAssessmentPresentation(job);
-      if (presentation.isScoreWithheld) {
-        continue;
-      }
-      const score = job.matchAssessment.score;
-      countsByScore.set(score, (countsByScore.get(score) ?? 0) + 1);
-    }
-    const shared = new Set<number>();
-    for (const [score, count] of countsByScore) {
-      if (count > 1) {
-        shared.add(score);
-      }
-    }
-    return shared;
-  }, [orderedJobs]);
+  const tiedScores = getTiedScores(orderedJobs);
   const failedSourceCount =
     latestRun?.targetExecutions?.filter((source) => source.state === "failed")
       .length ?? 0;
@@ -1167,6 +1100,13 @@ export function DiscoveryResultsPanel({
     reportedDisplayedSelectionRef.current = displayedSelectedJobId;
     onDisplayedSelectedJobIdChange(displayedSelectedJobId);
   }, [displayedSelectedJobId, onDisplayedSelectedJobIdChange]);
+  const orderedJobIdsKey = useMemo(
+    () => orderedJobs.map((job) => job.id),
+    [orderedJobs],
+  );
+  useEffect(() => {
+    onOrderedJobIdsChange?.(orderedJobIdsKey);
+  }, [onOrderedJobIdsChange, orderedJobIdsKey]);
 
   const firstVisibleJobNumber =
     jobCount === 0 ? 0 : currentPage * DISCOVERY_RESULTS_PAGE_SIZE + 1;
@@ -1274,21 +1214,19 @@ export function DiscoveryResultsPanel({
     moveToPage(0);
   }, [facetScopeKey, moveToPage]);
 
-  const hiddenTextMatches = hiddenAlsoFoundJobs.filter((job) =>
-    matchesCollectionSearch(deferredQuery, [
-      job.title,
-      job.company,
-      job.location,
-      job.salaryText,
-      job.status,
-      job.applyPath,
-      ...job.workMode,
-      fitRecommendationCopy[
-        job.matchAssessment.recommendation ?? "review_before_applying"
-      ].label,
-      presentListingActivity(getListingActivity(job)).label,
-    ]),
-  ).length;
+  // Counted only while the no-matches note that prints it is on screen; it
+  // used to run over every hidden job on every render.
+  const showsTextNoMatches =
+    jobs.length > 0 && filteredJobs.length === 0 && activeFilterCount === 0;
+  const hiddenTextMatches = useMemo(
+    () =>
+      showsTextNoMatches
+        ? hiddenAlsoFoundJobs.filter((job) =>
+            matchesDiscoveryJobSearch(job, normalizedQuery),
+          ).length
+        : 0,
+    [hiddenAlsoFoundJobs, normalizedQuery, showsTextNoMatches],
+  );
   const sessionNeedsAttention =
     !isOfflineRuntime &&
     (browserSession.status === "login_required" ||
@@ -1334,9 +1272,18 @@ export function DiscoveryResultsPanel({
   const isCountFiltered =
     deferredQuery.trim().length > 0 || activeFilterCount > 0;
   const jobNoun = jobs.length === 1 ? "job" : "jobs";
+  // With weaker matches shown the list holds both pools. The sidebar and
+  // Home count only the matches, so the header names the two parts instead
+  // of a third number ("Find jobs 678" beside "6284 jobs").
+  const weakerShownCount = areAlsoFoundShown
+    ? Math.min(alsoFoundCount, jobs.length)
+    : 0;
+  const matchCount = jobs.length - weakerShownCount;
   const resultCountLabel = isCountFiltered
     ? `${filteredJobs.length} of ${jobs.length} ${jobNoun}`
-    : `${jobs.length} ${jobNoun}`;
+    : weakerShownCount > 0
+      ? `${matchCount} ${matchCount === 1 ? "match" : "matches"} + ${weakerShownCount} weaker`
+      : `${jobs.length} ${jobNoun}`;
   // Terminal empty-state truth: prefer the explicit newest-run verdict; when a
   // caller does not provide one, fall back to the legacy completed-search flag
   // so existing behavior is unchanged.
@@ -1378,12 +1325,23 @@ export function DiscoveryResultsPanel({
   );
 
   const resultsTitle = (
-    <div className="flex min-w-0 shrink-0 items-baseline gap-x-2">
-      <h2 className="text-(--text-headline)" id="discovery-job-results-heading">
+    <div className="flex min-w-0 shrink-0 items-baseline gap-x-2 whitespace-nowrap">
+      {/* In a narrow column the count already says what the list is, so the
+          word gives its room to the search field and the row stays one line;
+          screen readers keep the name. */}
+      <h2
+        className="text-(--text-headline) @max-[34rem]/results:sr-only"
+        id="discovery-job-results-heading"
+      >
         Results
       </h2>
       {planName ? (
-        <span className="text-xs text-foreground-muted">{planName}</span>
+        <span
+          className="max-w-28 truncate text-xs text-foreground-muted"
+          title={planName}
+        >
+          {planName}
+        </span>
       ) : null}
       {/* An empty list explains itself below; "0 jobs" beside "Ready for
           your first search" only repeats the empty state as a number. */}
@@ -1400,6 +1358,31 @@ export function DiscoveryResultsPanel({
       ) : null}
     </div>
   );
+  // The page checkbox sits at the start of the header row, above the rows'
+  // checkbox column, instead of on a row of its own with a hint line.
+  const pageCheckbox =
+    onShortlistJobs && selectablePageJobIds.length > 0 ? (
+      <span className="flex w-6 shrink-0 justify-center">
+        <ListPageCheckbox
+          noun="jobs"
+          onClearPage={clearPage}
+          onSelectPage={selectPage}
+          pageIds={selectablePageJobIds}
+          selectedIds={bulkSelectedJobIds}
+        />
+      </span>
+    ) : null;
+  const runSummaryLabel = latestRun?.targetExecutions?.length
+    ? latestRun.state === "cancelled" ||
+      getDiscoveryRunPhase(latestRun) === "interrupted"
+      ? "Search stopped"
+      : failedSourceCount > 0
+        ? `${isSearchInProgress ? "Searching" : "Partial results"} · ${failedSourceCount} ${failedSourceCount === 1 ? "source failed" : "sources failed"}${isSearchInProgress ? " so far" : ""}`
+        : "What each source found"
+    : null;
+  const showsResultsStatusLine = Boolean(
+    resultsStatusLine && (jobs.length > 0 || liveStatusLine),
+  );
 
   return (
     <section
@@ -1410,7 +1393,7 @@ export function DiscoveryResultsPanel({
           that need names), then search, filters and sort. While rows are
           ticked the same row holds the bulk actions instead, so ticking a
           row never moves the list (ADR 0044). */}
-      <header className="shrink-0 border-b border-(--surface-panel-border)">
+      <header className="@container/results shrink-0 border-b border-(--surface-panel-border)">
         {isSelecting ? (
           <div
             aria-label="Bulk shortlist actions"
@@ -1421,8 +1404,9 @@ export function DiscoveryResultsPanel({
             {/* Kept to one row so ticking a row never moves the list: the
                 title without the plan and count, and short visible labels
                 whose full names are their accessible names. */}
+            {pageCheckbox}
             <h2
-              className="text-(--text-headline)"
+              className="text-(--text-headline) @max-[34rem]/results:sr-only"
               id="discovery-job-results-heading"
             >
               Results
@@ -1480,7 +1464,12 @@ export function DiscoveryResultsPanel({
             className="border-b-0"
             compact
             hideCompactCount
-            leading={resultsTitle}
+            leading={
+              <>
+                {pageCheckbox}
+                {resultsTitle}
+              </>
+            }
             label="Find a job"
             onQueryChange={(query) => {
               view.setQuery(query);
@@ -1538,29 +1527,67 @@ export function DiscoveryResultsPanel({
             {resultsTitle}
           </div>
         )}
-        {resultsStatusLine && (jobs.length > 0 || liveStatusLine) ? (
-          <p
-            aria-atomic="true"
-            aria-live="polite"
-            className="flex items-start gap-1.5 px-3 pb-2 text-(length:--text-small) leading-5 text-foreground-muted"
-            data-testid="discovery-results-status-line"
-            {...(resultsStatusLine.id ? { id: resultsStatusLine.id } : {})}
-            role="status"
-          >
-            {resultsStatusLine.busy ? (
-              <LoaderCircle
-                aria-hidden="true"
-                className="mt-0.5 size-3.5 shrink-0 animate-spin motion-reduce:animate-none"
-              />
-            ) : null}
-            <span className="min-w-0 break-words">
-              {resultsStatusLine.text}
-            </span>
-          </p>
-        ) : null}
-        {onJudgeUnjudgedJobs || onAssessJobListing ? (
-          <div className="px-3 pb-2">
+        {/* One status row under the toolbar: the search's progress or its
+            per-source summary, jobs hidden by the person, and the fit
+            actions. It disappears when it has nothing to say. */}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 px-3 pb-2 empty:hidden">
+          {showsResultsStatusLine && resultsStatusLine ? (
+            <p
+              aria-atomic="true"
+              aria-live="polite"
+              className="flex min-w-0 items-start gap-1.5 text-(length:--text-small) leading-5 text-foreground-muted"
+              data-testid="discovery-results-status-line"
+              {...(resultsStatusLine.id ? { id: resultsStatusLine.id } : {})}
+              role="status"
+            >
+              {resultsStatusLine.busy ? (
+                <LoaderCircle
+                  aria-hidden="true"
+                  className="mt-0.5 size-3.5 shrink-0 animate-spin motion-reduce:animate-none"
+                />
+              ) : null}
+              <span className="min-w-0 break-words">
+                {resultsStatusLine.text}
+              </span>
+            </p>
+          ) : null}
+          {latestRun && runSummaryLabel ? (
+            // Takes what room the row has left and shortens with an ellipsis,
+            // so Hidden and the fit actions stay on this row at 1440 wide.
+            <details
+              className="min-w-0 flex-1 text-xs text-foreground-soft open:basis-full"
+              data-testid="discovery-source-summaries"
+              open={sourceSummariesOpen}
+            >
+              <summary
+                className="cursor-pointer truncate"
+                title={`${runSummaryLabel}${latestRun.startedAt ? ` · ${formatTimestamp(latestRun.startedAt)}` : ""}`}
+                onClick={(event) => {
+                  event.preventDefault();
+                  setSourceSummariesOpen((open) => !open);
+                }}
+              >
+                {runSummaryLabel}
+                {latestRun.startedAt
+                  ? ` · ${formatTimestamp(latestRun.startedAt)}`
+                  : ""}
+              </summary>
+              {sourceSummariesOpen ? (
+                <div className="max-h-80 overflow-y-auto">
+                  <DiscoverySourceSummaryList
+                    discoveryTargets={discoveryTargets}
+                    isSearchInProgress={isSearchInProgress}
+                    latestRun={latestRun}
+                    onRetrySource={onRetrySource}
+                  />
+                </div>
+              ) : null}
+            </details>
+          ) : null}
+          {hiddenJobsControl}
+          {onJudgeUnjudgedJobs || onAssessJobListing ? (
             <DiscoveryAssessmentContinuation
+              className="ml-auto"
               jobs={jobs}
               preferredJobs={visibleJobs}
               isSearchRunning={isSearchInProgress}
@@ -1570,21 +1597,9 @@ export function DiscoveryResultsPanel({
                 : {})}
               {...(onAssessJobListing ? { onAssess: onAssessJobListing } : {})}
             />
-          </div>
-        ) : null}
-        {hiddenJobsControl ? (
-          <div className="px-3 pb-2">{hiddenJobsControl}</div>
-        ) : null}
+          ) : null}
+        </div>
       </header>
-      {onShortlistJobs && selectablePageJobIds.length > 0 ? (
-        <ListPageSelectionBar
-          noun="jobs"
-          onClearPage={clearPage}
-          onSelectPage={selectPage}
-          pageIds={selectablePageJobIds}
-          selectedIds={bulkSelectedJobIds}
-        />
-      ) : null}
       <div
         aria-busy={isPagePending}
         className="overscroll-contain xl:min-h-[360px] xl:flex-1 xl:overflow-y-auto"
@@ -1608,40 +1623,6 @@ export function DiscoveryResultsPanel({
           }
         }}
       >
-        {latestRun?.targetExecutions?.length ? (
-          <details
-            className="shrink-0 px-5 py-2 text-xs text-foreground-soft"
-            data-testid="discovery-source-summaries"
-            open={sourceSummariesOpen}
-          >
-            <summary
-              className="cursor-pointer"
-              onClick={(event) => {
-                event.preventDefault();
-                setSourceSummariesOpen((open) => !open);
-              }}
-            >
-              {latestRun.state === "cancelled" ||
-              getDiscoveryRunPhase(latestRun) === "interrupted"
-                ? "Search stopped"
-                : failedSourceCount > 0
-                  ? `${isSearchInProgress ? "Searching" : "Partial results"} · ${failedSourceCount} ${failedSourceCount === 1 ? "source failed" : "sources failed"}${isSearchInProgress ? " so far" : ""}`
-                  : "What each source found"}
-              {latestRun.startedAt
-                ? ` · ${formatTimestamp(latestRun.startedAt)}`
-                : ""}
-            </summary>
-            {sourceSummariesOpen ? (
-              <DiscoverySourceSummaryList
-                discoveryTargets={discoveryTargets}
-                isSearchInProgress={isSearchInProgress}
-                latestRun={latestRun}
-                onRetrySource={onRetrySource}
-              />
-            ) : null}
-          </details>
-        ) : null}
-
         {/* What the close actually did to the run, in the run's own frozen
           numbers. It sits above the list because it explains the list. */}
         {!isSearchInProgress &&
@@ -2019,12 +2000,16 @@ export function DiscoveryResultsPanel({
                       ? job.matchAssessment.gaps[0]
                       : null) ??
                     assessment.withheldReason ??
-                    // Rows that share a printed percentage state the one
-                    // strongest fact behind their place, so the order between
-                    // equal numbers is something the person can read.
-                    (tiedScores.has(job.matchAssessment.score)
-                      ? describeMatchTieBreakReason(job)
-                      : null);
+                    null;
+                  // Rows that share a printed percentage keep the one fact
+                  // behind their place as the score's tooltip. Printed under
+                  // every row it said "Job title matches one of your target
+                  // roles." down most of a 6,000-job list.
+                  const tieBreakReason = tiedScores.has(
+                    job.matchAssessment.score,
+                  )
+                    ? describeMatchTieBreakReason(job)
+                    : null;
                   const listingDateBadge = getDiscoveryListingDateBadge(job);
                   const listingDateExplanation = listingDateBadge.shown
                     ? listingDateBadge.rankable
@@ -2129,6 +2114,12 @@ export function DiscoveryResultsPanel({
                             >
                               {job.title}
                             </strong>
+                            {/* One slot, one verdict: the fit and, when it is
+                              not the default, its badge. Shortlisted, the
+                              posting date and a listing that went quiet are
+                              plain facts on the meta line below; three
+                              stacked badges used to squeeze the title into a
+                              narrow column three lines tall. */}
                             <div className={jobFinderListRowBadgeSlotClassName}>
                               {isCoveredByUncheckedBand ? null : (
                                 <span
@@ -2140,6 +2131,9 @@ export function DiscoveryResultsPanel({
                                       : "text-(--text-headline)",
                                   )}
                                   data-testid={`discovery-result-fit-${job.id}`}
+                                  {...(tieBreakReason
+                                    ? { title: tieBreakReason }
+                                    : {})}
                                 >
                                   {assessment.headlineScoreLabel}
                                 </span>
@@ -2161,50 +2155,6 @@ export function DiscoveryResultsPanel({
                                   {recommendation.label}
                                 </StatusBadge>
                               ) : null}
-                              {/* No "Provisional assessment" badge: the headline
-                                already reads "Fit not assessed" and the row's
-                                reason line says why. */}
-                              {listingActivity.status !== "active" ? (
-                                <Badge
-                                  aria-label={`${activity.label} listing status${activity.observedDate ? ` observed ${activity.observedDate}` : ""}. ${activityDescription}`}
-                                  title={activityDescription}
-                                  variant="outline"
-                                >
-                                  {activity.label}
-                                  {activity.observedDate
-                                    ? ` · ${activity.observedDate}`
-                                    : ""}
-                                </Badge>
-                              ) : (
-                                <span className="sr-only">
-                                  {`${activity.label} listing status${activity.observedDate ? ` observed ${activity.observedDate}` : ""}. ${activityDescription}`}
-                                </span>
-                              )}
-                              {[
-                                "drafting",
-                                "ready_for_review",
-                                "approved",
-                                "submitted",
-                              ].includes(job.status) ? (
-                                <StatusBadge
-                                  tone={getApplicationTone(job.status)}
-                                >
-                                  {job.status === "submitted"
-                                    ? formatStatusLabel(job.status)
-                                    : "Shortlisted"}
-                                </StatusBadge>
-                              ) : null}
-                              {listingDateBadge.shown ? (
-                                <Badge
-                                  className="justify-start text-left"
-                                  {...(listingDateExplanation
-                                    ? { title: listingDateExplanation }
-                                    : {})}
-                                  variant="outline"
-                                >
-                                  {listingDateBadge.text}
-                                </Badge>
-                              ) : null}
                             </div>
                           </div>
                           {(() => {
@@ -2215,17 +2165,29 @@ export function DiscoveryResultsPanel({
                                 canonicalUrl: job.canonicalUrl,
                                 separator: " • ",
                               });
-                            // One meta line: employer and location, then the
-                            // source it was found on. A source on its own line
-                            // read as a second, unexplained company name.
-                            // Exactly one accessible source mention per row:
-                            // the visible separator is decorative and the
-                            // sr-only prefix completes the sentence.
+                            const pipelineLabel = [
+                              "drafting",
+                              "ready_for_review",
+                              "approved",
+                              "submitted",
+                            ].includes(job.status)
+                              ? job.status === "submitted"
+                                ? formatStatusLabel(job.status)
+                                : "Shortlisted"
+                              : null;
+                            // One meta line: employer and location, the
+                            // source it was found on, then the plain facts
+                            // (posting date, a listing that went quiet,
+                            // Shortlisted). A source on its own line read as
+                            // a second, unexplained company name. Exactly one
+                            // accessible source mention per row: the visible
+                            // separator is decorative and the sr-only prefix
+                            // completes the sentence.
                             return (
                               <span
                                 className={cn(
                                   jobFinderListRowMetaClassName,
-                                  "flex min-w-0 items-baseline gap-1.5",
+                                  "flex min-w-0 flex-wrap items-baseline gap-x-1.5",
                                 )}
                                 {...(employerLocationLine
                                   ? {}
@@ -2280,6 +2242,47 @@ export function DiscoveryResultsPanel({
                                     {sourceText}
                                   </span>
                                 </span>
+                                {listingDateBadge.shown ? (
+                                  <span className="shrink-0 whitespace-nowrap text-foreground-muted">
+                                    <span aria-hidden="true">{"· "}</span>
+                                    <span
+                                      data-testid={`discovery-result-date-${job.id}`}
+                                      {...(listingDateExplanation
+                                        ? { title: listingDateExplanation }
+                                        : {})}
+                                    >
+                                      {listingDateBadge.text}
+                                    </span>
+                                  </span>
+                                ) : null}
+                                {listingActivity.status !== "active" ? (
+                                  <span
+                                    aria-label={`${activity.label} listing status${activity.observedDate ? ` observed ${activity.observedDate}` : ""}. ${activityDescription}`}
+                                    className="shrink-0 whitespace-nowrap text-(--warning-text)"
+                                    title={activityDescription}
+                                  >
+                                    <span aria-hidden="true">{"· "}</span>
+                                    <span aria-hidden="true">
+                                      {activity.label}
+                                      {activity.observedDate
+                                        ? ` · ${activity.observedDate}`
+                                        : ""}
+                                    </span>
+                                  </span>
+                                ) : (
+                                  <span className="sr-only">
+                                    {`${activity.label} listing status${activity.observedDate ? ` observed ${activity.observedDate}` : ""}. ${activityDescription}`}
+                                  </span>
+                                )}
+                                {pipelineLabel ? (
+                                  <span
+                                    className="shrink-0 whitespace-nowrap font-medium text-primary"
+                                    data-testid={`discovery-result-pipeline-${job.id}`}
+                                  >
+                                    <span aria-hidden="true">{"· "}</span>
+                                    {pipelineLabel}
+                                  </span>
+                                ) : null}
                               </span>
                             );
                           })()}
@@ -2397,7 +2400,7 @@ export function DiscoveryResultsPanel({
               >
                 <span
                   aria-live="polite"
-                  className="inline-flex min-w-0 items-center gap-2 truncate whitespace-nowrap text-(length:--text-small) text-foreground-muted"
+                  className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-(length:--text-small) text-foreground-muted"
                 >
                   {isPagePending ? (
                     <>

@@ -365,7 +365,7 @@ describe("DiscoveryScreen established-results layout", () => {
         />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByText(/Hidden by you/iu));
+    fireEvent.click(screen.getByText(/^Hidden \(\d+\)$/u));
     fireEvent.click(
       screen.getByRole("button", {
         name: "Allow this employer in future searches",

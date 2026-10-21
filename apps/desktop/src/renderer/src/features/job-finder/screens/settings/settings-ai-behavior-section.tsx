@@ -377,10 +377,9 @@ export function SettingsAiBehaviorSection({
             {SETTINGS_AI_BEHAVIOR_LABEL}
           </h3>
           <p className="text-(length:--text-description) leading-5 text-foreground-soft">
-            How the AI works for you: how it talks in the side chat, how picky
-            it is when it searches, how far it rewrites your resume, and what it
-            writes when it applies. These choices change what it does and how it
-            sounds, never what it is allowed to do. Sending follows your
+            How it talks, how picky it is when it searches, how far it rewrites
+            your resume, and what it writes when it applies. These change what
+            it does, never what it is allowed to do. Sending follows your
             Applying choice; signing in and creating accounts stay yours.
           </p>
         </div>

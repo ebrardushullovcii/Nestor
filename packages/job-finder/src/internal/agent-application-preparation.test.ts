@@ -21,7 +21,9 @@ import {
   resolveApplicationPreparationTarget,
   resolveApplySiteLabel,
   runAgentApplicationPreparation,
+  applyingConversationKey,
   toApplyDocuments,
+  toApplyLlmClient,
 } from "./agent-application-preparation";
 
 describe("resolveApplicationDocumentMimeType", () => {
@@ -2217,3 +2219,19 @@ test.each([false, true])(
     });
   },
 );
+
+test("every model call of one person's applications shares one conversation", async () => {
+  const chatWithTools = vi.fn(() => Promise.resolve({ content: "ok" }));
+  const client = toApplyLlmClient(
+    { chatWithTools },
+    applyingConversationKey({ id: "candidate_1" }),
+  )!;
+  await client.chatWithTools([], [], { reasoningTask: "claim_check" });
+  expect(chatWithTools).toHaveBeenCalledWith([], [], {
+    reasoningTask: "claim_check",
+    conversationKey: "applying:candidate_1",
+  });
+  expect(applyingConversationKey({ id: "candidate_2" })).not.toBe(
+    applyingConversationKey({ id: "candidate_1" }),
+  );
+});

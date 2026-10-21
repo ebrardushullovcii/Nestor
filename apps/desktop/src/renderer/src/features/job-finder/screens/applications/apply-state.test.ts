@@ -614,9 +614,14 @@ it("offers Prepare again for a lost prepared form", () => {
     blockerReason: "unexpected_navigation",
     latestQuestionCount: 2,
   });
+  // Nothing failed: the form closed before a send was seen.
   expect(
     resolveApplyStatePresentation({ mode: "fill_only", result }),
-  ).toMatchObject({ title: "Could not apply", actionLabel: "Prepare again" });
+  ).toMatchObject({
+    title: "Form closed",
+    actionLabel: "Prepare again",
+    formClosed: true,
+  });
 });
 
 it("a queued job remains queued after a preparation timestamp was written", () => {

@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import { jobDescriptionToText } from "./job-description-text";
 import {
+  formatDateOnly,
+  formatTimestamp,
   getDefaultProfileRoute,
   getPostedDateLabel,
   parseListInput,
@@ -201,5 +203,24 @@ describe("list input parsers", () => {
       "platform",
     ]);
     expect(parseTokenListInput("")).toEqual([]);
+  });
+});
+
+describe("kept date formatters", () => {
+  const originalTimeZone = process.env.TZ;
+
+  afterEach(() => {
+    if (originalTimeZone === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTimeZone;
+  });
+
+  test("follow a change of the device's time zone", () => {
+    const instant = "2026-03-01T23:30:00.000Z";
+    process.env.TZ = "UTC";
+    expect(formatDateOnly(instant)).toBe("01 Mar 2026");
+    expect(formatTimestamp(instant)).toBe("01 Mar, 23:30");
+    process.env.TZ = "Asia/Tokyo";
+    expect(formatDateOnly(instant)).toBe("02 Mar 2026");
+    expect(formatTimestamp(instant)).toBe("02 Mar, 08:30");
   });
 });

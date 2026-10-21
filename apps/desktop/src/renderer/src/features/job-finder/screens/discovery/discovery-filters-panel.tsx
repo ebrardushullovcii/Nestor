@@ -1,4 +1,4 @@
-import { useId, useMemo } from "react";
+import { useId, useMemo, type ReactNode } from "react";
 import type {
   BrowserSessionState,
   DiscoveryAdapterSessionState,
@@ -55,6 +55,8 @@ interface DiscoveryFiltersPanelProps {
    */
   searchSelectivity?: JobSearchSelectivity | null;
   sourceAccessPrompts: readonly SourceAccessPrompt[];
+  /** The way back to the results, on the heading row. */
+  headerAction?: ReactNode;
 }
 
 const SEARCH_SELECTIVITY_LABELS: Record<JobSearchSelectivity, string> = {
@@ -218,6 +220,7 @@ export function DiscoveryFiltersPanel({
   searchPreferences,
   searchSelectivity = null,
   sourceAccessPrompts,
+  headerAction,
 }: DiscoveryFiltersPanelProps) {
   const searchControlsHeadingId = useId();
   const sectionHeadingPrefix = useId();
@@ -442,12 +445,12 @@ export function DiscoveryFiltersPanel({
       aria-labelledby={searchControlsHeadingId}
       className="surface-panel-shell relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-(--radius-panel) border border-(--surface-panel-border) xl:h-full xl:min-h-0"
     >
-      <h2
-        className="border-b border-(--surface-panel-border) px-4 py-3 text-(--text-headline)"
-        id={searchControlsHeadingId}
-      >
-        What this search looks for
-      </h2>
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-(--surface-panel-border) px-4 py-2">
+        <h2 className="py-1 text-(--text-headline)" id={searchControlsHeadingId}>
+          What this search looks for
+        </h2>
+        {headerAction}
+      </div>
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden xl:min-h-0">
         <DiscoveryFiltersFooter

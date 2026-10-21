@@ -622,6 +622,20 @@ test("memory pressure collects garbage without closing forms and admits work whe
   ] as ReturnType<typeof app.getAppMetrics>);
 });
 
+test("search pages parked for the person do not use up the waiting-form budget", () => {
+  const { browser, state } = makeBrowser();
+  state.parkedTabs.set("parked", null);
+  const metrics = vi.spyOn(app, "getAppMetrics");
+  metrics.mockReturnValue([
+    { pid: 100, memory: { workingSetSize: 1100 * 1024 } },
+  ] as ReturnType<typeof app.getAppMetrics>);
+  expect(browser.getWaitingFormMemory().totalBytes).toBe(0);
+  expect(browser.hasAutomationTabCapacity()).toBe(true);
+  metrics.mockReturnValue([
+    { pid: 100, memory: { workingSetSize: 0 } },
+  ] as ReturnType<typeof app.getAppMetrics>);
+});
+
 test("hidden work sleeps between model turns and wakes without losing the page", async () => {
   vi.useFakeTimers();
   try {

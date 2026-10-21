@@ -1423,8 +1423,99 @@ function inferWorkModes(
   return [];
 }
 
+/** Silence (no answer, no bytes) that ends a feed request. */
 const PROVIDER_API_TIMEOUT_MS = 30_000;
+/** The longest a feed may take even while bytes keep arriving. */
+const PROVIDER_API_TOTAL_TIMEOUT_MS = 3 * 60_000;
+/**
+ * Waits before asking a provider again after a failure that passes: the
+ * connection dropped, or the provider asked to slow down. A computer waking
+ * from sleep takes a few seconds to get its network back. A timed-out
+ * request is asked once more; a slow feed asked again and again would hold
+ * a download slot for minutes.
+ */
+const PROVIDER_API_RETRY_DELAYS_MS: readonly number[] = [2_000, 10_000, 30_000];
+const PROVIDER_API_MAX_RETRY_AFTER_MS = 60_000;
+/** Feed jobs converted between turns of the event loop. */
+const PROVIDER_API_JOBS_PER_TURN = 25;
 const SUMMARY_MAX_LENGTH = 280;
+
+class ProviderApiStatusError extends Error {
+  constructor(
+    readonly status: number,
+    readonly retryAfterMs: number | null,
+  ) {
+    super(`Public provider API returned ${status}.`);
+    this.name = "ProviderApiStatusError";
+  }
+}
+
+function readRetryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const at = Date.parse(value);
+  return Number.isNaN(at) ? null : Math.max(0, at - Date.now());
+}
+
+/**
+ * Whether asking again could work: a network error, a first timeout, or a
+ * provider asking to slow down. A 404, a provider error or a malformed feed
+ * is reported as it is.
+ */
+function isPassingProviderFailure(error: unknown, attempt: number): boolean {
+  if (error instanceof ProviderApiStatusError) return error.status === 429;
+  if (isAbortError(error)) return attempt === 0;
+  // undici reports every connection failure as a TypeError "fetch failed"
+  // with the cause attached.
+  return error instanceof TypeError;
+}
+
+/**
+ * What the person reads when a board's feed could not be collected. A
+ * failure that passes (the network, a slow or busy board) says it is tried
+ * again; `source-health` keeps those out of a source's health. A missing
+ * list points at the address, which only the person can fix.
+ */
+function describeProviderFailure(error: unknown): string {
+  if (error instanceof ProviderApiStatusError) {
+    if (error.status === 404 || error.status === 410) {
+      return `No job list was found at this board's address (HTTP ${error.status}). Check the address with Edit.`;
+    }
+    if (error.status === 429 || error.status >= 500) {
+      return `The job board answered with an error (HTTP ${error.status}); it is tried again on the next search.`;
+    }
+    return `The job board refused to share its job list (HTTP ${error.status}).`;
+  }
+  if (isAbortError(error)) {
+    return "The job board did not answer in time; it is tried again on the next search.";
+  }
+  if (error instanceof TypeError) {
+    return "The job board could not be reached; it is tried again on the next search.";
+  }
+  return "The job board's job list could not be read.";
+}
+
+function waitBeforeRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+const yieldToEventLoop = () =>
+  new Promise<void>((resolve) => setImmediate(resolve));
 
 function escapeRegularExpression(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
@@ -1484,23 +1575,72 @@ function resolveProviderCompanyLabel(input: {
   );
 }
 
-function createProviderApiTimeoutSignal() {
-  if (
-    typeof AbortSignal !== "undefined" &&
-    typeof AbortSignal.timeout === "function"
-  ) {
-    return { signal: AbortSignal.timeout(PROVIDER_API_TIMEOUT_MS) };
-  }
-
+/**
+ * Ends a feed request that went quiet: no answer and no body bytes for
+ * `quietMs`, or still unfinished after `totalMs`. Time the main process
+ * spent on other work does not count as quiet: when the timer comes due it
+ * first lets the network events waiting behind that work run (one turn of
+ * the event loop) and ends the request only if none of them moved it. A busy
+ * search used to time out feeds whose bytes had already arrived.
+ */
+function createProviderApiQuietTimeout(quietMs: number, totalMs: number) {
   const controller = new AbortController();
-  const timeoutHandle = setTimeout(
-    () => controller.abort(),
-    PROVIDER_API_TIMEOUT_MS,
-  );
+  let lastProgressAt = Date.now();
+  let finished = false;
+  let quietTimer: ReturnType<typeof setTimeout> | null = null;
+  const end = () => {
+    if (!finished) controller.abort();
+  };
+  const totalTimer = setTimeout(end, totalMs);
+  const arm = (delay: number) => {
+    quietTimer = setTimeout(check, delay);
+  };
+  const check = () => {
+    quietTimer = null;
+    if (finished) return;
+    const quietFor = Date.now() - lastProgressAt;
+    if (quietFor < quietMs) {
+      arm(quietMs - quietFor);
+      return;
+    }
+    const progressBefore = lastProgressAt;
+    setImmediate(() => {
+      if (finished) return;
+      if (lastProgressAt !== progressBefore) arm(quietMs);
+      else end();
+    });
+  };
+  arm(quietMs);
   return {
     signal: controller.signal,
-    cleanup: () => clearTimeout(timeoutHandle),
+    progress: () => {
+      lastProgressAt = Date.now();
+    },
+    cleanup: () => {
+      finished = true;
+      clearTimeout(totalTimer);
+      if (quietTimer) clearTimeout(quietTimer);
+    },
   };
+}
+
+/** The feed's JSON, read chunk by chunk so each chunk counts as progress. */
+async function readFeedJson(
+  response: Response,
+  onProgress: () => void,
+): Promise<unknown> {
+  const reader = response.body?.getReader();
+  if (!reader) return response.json();
+  const decoder = new TextDecoder();
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    onProgress();
+    text += decoder.decode(value, { stream: true });
+  }
+  text += decoder.decode();
+  return JSON.parse(text) as unknown;
 }
 
 function composeAbortSignals(
@@ -1602,17 +1742,96 @@ function isExactProviderJobTarget(
   );
 }
 
+function toProviderJobPosting(
+  job: NormalizedPublicApiJobRecord,
+  input: {
+    target: JobDiscoveryTarget;
+    artifact: Pick<SourceInstructionArtifact, "intelligence">;
+    source: JobSource;
+    provider: NonNullable<SourceIntelligenceArtifact["provider"]>;
+  },
+): JobPosting | null {
+  const { provider } = input;
+  if (!job.sourceJobId || !job.title || !job.canonicalUrl) {
+    return null;
+  }
+
+  const description = htmlToText(job.description);
+  const summaryText = description.replace(/\s+/g, " ").trim();
+  const summary =
+    summaryText.length > SUMMARY_MAX_LENGTH
+      ? `${summaryText.slice(0, SUMMARY_MAX_LENGTH).replace(/\s+\S*$/, "")}…`
+      : summaryText;
+  const applicationUrl = job.applicationUrl ?? job.canonicalUrl;
+  const canonicalUrl = isExactProviderJobTarget(job, input.target.startingUrl)
+    ? input.target.startingUrl
+    : job.canonicalUrl;
+  const location = job.location?.trim() || "Unknown";
+  return JobPostingSchema.parse({
+    source: input.source,
+    sourceJobId: job.sourceJobId,
+    discoveryMethod: "public_api",
+    collectionMethod: "api",
+    canonicalUrl,
+    applicationUrl,
+    title: job.title,
+    company: resolveProviderCompanyLabel({
+      targetLabel: input.target.label,
+      targetStartingUrl: input.target.startingUrl,
+      providerLabel: provider.label,
+      providerIdentifier: provider.providerIdentifier,
+    }),
+    location,
+    workMode: inferWorkModes(`${location} ${job.workplaceType ?? ""}`),
+    applyPath: "external_redirect",
+    easyApplyEligible: false,
+    postedAt: normalizeProviderDateTime(job.postedAtValue),
+    postedAtText: null,
+    providerUpdatedAt: normalizeProviderDateTime(job.providerUpdatedAtValue),
+    discoveredAt: new Date().toISOString(),
+    salaryText: null,
+    summary: summary || null,
+    description: description || job.title,
+    keySkills: [],
+    responsibilities: [],
+    minimumQualifications: [],
+    preferredQualifications: [],
+    seniority: null,
+    employmentType: job.employmentType,
+    department: job.department,
+    team: job.team,
+    employerWebsiteUrl: null,
+    // Provider listing URLs identify the source/ATS, not the employer.
+    // This adapter has no independently employer-owned domain field.
+    employerDomain: null,
+    atsProvider: provider.label,
+    providerKey: provider.key,
+    providerBoardToken: provider.boardToken,
+    providerIdentifier: provider.providerIdentifier,
+    titleTriageOutcome: "pass",
+    sourceIntelligence: input.artifact.intelligence,
+    screeningHints: {},
+    keywordSignals: [],
+    benefits: [],
+  });
+}
+
 export async function collectPublicProviderJobs(input: {
   target: JobDiscoveryTarget;
   artifact: Pick<SourceInstructionArtifact, "intelligence">;
   source: JobSource;
   signal?: AbortSignal;
+  /** Waits before each repeat request; the default suits real networks. */
+  retryDelaysMs?: readonly number[];
+  /** Silence that ends a request; the default suits real networks. */
+  timeoutMs?: number;
 }): Promise<{
   jobs: JobPosting[];
   warning: string | null;
   pagesCovered?: number;
 }> {
   const provider = input.artifact.intelligence.provider;
+  const retryDelaysMs = input.retryDelaysMs ?? PROVIDER_API_RETRY_DELAYS_MS;
   if (!provider || provider.apiAvailability !== "available") {
     return {
       jobs: [],
@@ -1628,112 +1847,97 @@ export async function collectPublicProviderJobs(input: {
         provider.key as keyof typeof PUBLIC_API_RESPONSE_ADAPTERS
       ];
     if (responseAdapter && provider.publicApiUrlTemplate) {
-      const timeout = createProviderApiTimeoutSignal();
-      const composedSignal = composeAbortSignals(timeout.signal, input.signal);
-
-      try {
-        pagesCovered += 1;
-        const response = await fetch(provider.publicApiUrlTemplate, {
-          signal: composedSignal.signal,
-        });
-        if (!response.ok) {
-          throw new Error(`Public provider API returned ${response.status}.`);
+      const publicApiUrl = provider.publicApiUrlTemplate;
+      // One request with its own time limit; the body is read inside it.
+      const requestFeed = async (): Promise<unknown> => {
+        const timeout = createProviderApiQuietTimeout(
+          input.timeoutMs ?? PROVIDER_API_TIMEOUT_MS,
+          PROVIDER_API_TOTAL_TIMEOUT_MS,
+        );
+        const composedSignal = composeAbortSignals(
+          timeout.signal,
+          input.signal,
+        );
+        try {
+          const response = await fetch(publicApiUrl, {
+            signal: composedSignal.signal,
+          });
+          timeout.progress();
+          if (!response.ok) {
+            await response.body?.cancel().catch(() => undefined);
+            throw new ProviderApiStatusError(
+              response.status,
+              response.status === 429
+                ? readRetryAfterMs(response.headers.get("retry-after"))
+                : null,
+            );
+          }
+          return await readFeedJson(response, timeout.progress);
+        } finally {
+          composedSignal.cleanup();
+          timeout.cleanup();
         }
+      };
 
-        const parsedPublicApiRecords = parsePublicApiJobRecords(
-          await response.json(),
-          responseAdapter,
-        );
-        const jobs = parsedPublicApiRecords.records.sort(
-          (left, right) =>
-            Number(isExactProviderJobTarget(right, input.target.startingUrl)) -
-            Number(isExactProviderJobTarget(left, input.target.startingUrl)),
-        );
-
-        return {
-          pagesCovered,
-          jobs: jobs.flatMap((job) => {
-            if (!job.sourceJobId || !job.title || !job.canonicalUrl) {
-              return [];
-            }
-
-            const description = htmlToText(job.description);
-            const summaryText = description.replace(/\s+/g, " ").trim();
-            const summary =
-              summaryText.length > SUMMARY_MAX_LENGTH
-                ? `${summaryText.slice(0, SUMMARY_MAX_LENGTH).replace(/\s+\S*$/, "")}…`
-                : summaryText;
-            const applicationUrl = job.applicationUrl ?? job.canonicalUrl;
-            const canonicalUrl = isExactProviderJobTarget(
-              job,
-              input.target.startingUrl,
-            )
-              ? input.target.startingUrl
-              : job.canonicalUrl;
-            const location = job.location?.trim() || "Unknown";
-            return [
-              JobPostingSchema.parse({
-                source: input.source,
-                sourceJobId: job.sourceJobId,
-                discoveryMethod: "public_api",
-                collectionMethod: "api",
-                canonicalUrl,
-                applicationUrl,
-                title: job.title,
-                company: resolveProviderCompanyLabel({
-                  targetLabel: input.target.label,
-                  targetStartingUrl: input.target.startingUrl,
-                  providerLabel: provider.label,
-                  providerIdentifier: provider.providerIdentifier,
-                }),
-                location,
-                workMode: inferWorkModes(
-                  `${location} ${job.workplaceType ?? ""}`,
-                ),
-                applyPath: "external_redirect",
-                easyApplyEligible: false,
-                postedAt: normalizeProviderDateTime(job.postedAtValue),
-                postedAtText: null,
-                providerUpdatedAt: normalizeProviderDateTime(
-                  job.providerUpdatedAtValue,
-                ),
-                discoveredAt: new Date().toISOString(),
-                salaryText: null,
-                summary: summary || null,
-                description: description || job.title,
-                keySkills: [],
-                responsibilities: [],
-                minimumQualifications: [],
-                preferredQualifications: [],
-                seniority: null,
-                employmentType: job.employmentType,
-                department: job.department,
-                team: job.team,
-                employerWebsiteUrl: null,
-                // Provider listing URLs identify the source/ATS, not the employer.
-                // This adapter has no independently employer-owned domain field.
-                employerDomain: null,
-                atsProvider: provider.label,
-                providerKey: provider.key,
-                providerBoardToken: provider.boardToken,
-                providerIdentifier: provider.providerIdentifier,
-                titleTriageOutcome: "pass",
-                sourceIntelligence: input.artifact.intelligence,
-                screeningHints: {},
-                keywordSignals: [],
-                benefits: [],
-              }),
-            ];
-          }),
-          warning:
-            parsedPublicApiRecords.skippedMalformedCount > 0
-              ? `Skipped ${parsedPublicApiRecords.skippedMalformedCount} malformed ${provider.label} job record${parsedPublicApiRecords.skippedMalformedCount === 1 ? "" : "s"} from the public API response.`
-              : null,
-        };
-      } finally {
-        composedSignal.cleanup();
-        timeout.cleanup?.();
+      pagesCovered += 1;
+      let payload: unknown;
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          payload = await requestFeed();
+          break;
+        } catch (error) {
+          const delay = retryDelaysMs[attempt];
+          if (
+            input.signal?.aborted ||
+            delay === undefined ||
+            !isPassingProviderFailure(error, attempt)
+          ) {
+            throw error;
+          }
+          const retryAfter =
+            error instanceof ProviderApiStatusError ? error.retryAfterMs : null;
+          await waitBeforeRetry(
+            Math.min(
+              Math.max(delay, retryAfter ?? 0),
+              PROVIDER_API_MAX_RETRY_AFTER_MS,
+            ),
+            input.signal,
+          );
+        }
       }
+
+      const parsedPublicApiRecords = parsePublicApiJobRecords(
+        payload,
+        responseAdapter,
+      );
+      payload = null;
+      const records = parsedPublicApiRecords.records.sort(
+        (left, right) =>
+          Number(isExactProviderJobTarget(right, input.target.startingUrl)) -
+          Number(isExactProviderJobTarget(left, input.target.startingUrl)),
+      );
+      // A big board is hundreds of HTML descriptions; converting them in one
+      // go held the main process for a quarter of a second or more.
+      const jobs: JobPosting[] = [];
+      for (const [position, record] of records.entries()) {
+        if (position > 0 && position % PROVIDER_API_JOBS_PER_TURN === 0) {
+          await yieldToEventLoop();
+          if (input.signal?.aborted) {
+            throw new DOMException("Aborted", "AbortError");
+          }
+        }
+        const posting = toProviderJobPosting(record, { ...input, provider });
+        if (posting) jobs.push(posting);
+      }
+
+      return {
+        pagesCovered,
+        jobs,
+        warning:
+          parsedPublicApiRecords.skippedMalformedCount > 0
+            ? `${parsedPublicApiRecords.skippedMalformedCount} ${parsedPublicApiRecords.skippedMalformedCount === 1 ? "job" : "jobs"} in this board's list could not be read and ${parsedPublicApiRecords.skippedMalformedCount === 1 ? "was" : "were"} skipped.`
+            : null,
+      };
     }
 
     return {
@@ -1749,11 +1953,7 @@ export async function collectPublicProviderJobs(input: {
     return {
       jobs: [],
       pagesCovered,
-      warning: isAbortError(error)
-        ? `Public provider API collection failed: ${provider.label} API request timed out.`
-        : error instanceof Error
-          ? `Public provider API collection failed: ${error.message}`
-          : "Public provider API collection failed.",
+      warning: describeProviderFailure(error),
     };
   }
 }

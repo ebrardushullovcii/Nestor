@@ -527,7 +527,7 @@ export function ProfileSetupReviewQueueCard(props: {
 
   return (
     <Card
-      className="min-h-0 flex-1 overflow-hidden rounded-(--radius-panel) border-border/40 scroll-mt-4 sm:scroll-mt-[8.25rem] min-[1440px]:!scroll-mt-[4.5rem]"
+      className="min-h-0 flex-1 overflow-hidden rounded-(--radius-panel) border-border/40 scroll-mt-4 sm:scroll-mt-[8.25rem] xl:scroll-mt-[4.5rem]"
       id="profile-setup-review-queue"
       tabIndex={-1}
     >

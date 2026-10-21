@@ -1,11 +1,16 @@
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   ModelRequestHttpError,
   ModelRequestTimeoutError,
   computeRetryDelayMs,
   parseRetryAfterMs,
   performModelRequest,
+  resetModelCredentialRejections,
 } from "./model-request-transport";
+
+beforeEach(() => {
+  resetModelCredentialRejections();
+});
 
 function sseResponse(
   events: readonly string[],
@@ -58,6 +63,54 @@ const baseInput = {
   retryBaseDelayMs: 1,
   retryMaxDelayMs: 5,
 };
+
+describe("performModelRequest after the key is rejected", () => {
+  test("stops asking with the same key, still asks with another", async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse(
+          { error: { message: "This API key has expired." } },
+          { status: 401 },
+        ),
+      ),
+    );
+    await expect(
+      performModelRequest({ ...baseInput, fetchImpl }),
+    ).rejects.toMatchObject({ status: 401 });
+    // The listing reads, fit batches and full reads queued behind it fail
+    // at once instead of each asking the gateway again.
+    for (let index = 0; index < 5; index += 1) {
+      await expect(
+        performModelRequest({ ...baseInput, fetchImpl }),
+      ).rejects.toMatchObject({ status: 401 });
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    await expect(
+      performModelRequest({
+        ...baseInput,
+        headers: { Authorization: "Bearer replaced" },
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  test("does not pause on a server error", async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({ error: { message: "bad request" } }, { status: 400 }),
+      ),
+    );
+    await expect(
+      performModelRequest({ ...baseInput, fetchImpl }),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      performModelRequest({ ...baseInput, fetchImpl }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("performModelRequest", () => {
   test("returns complete chat output, reasoning, tool calls and final usage without waiting for EOF", async () => {

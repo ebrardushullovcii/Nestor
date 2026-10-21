@@ -63,6 +63,8 @@ export interface JobFinderTaskCenterItem {
   applyRecoveryJobIds?: readonly string[];
   reviewRoute?: string | null;
   reviewActionLabel?: string | null;
+  /** When the run last changed; a finished run older than a day is history. */
+  updatedAt?: string | null;
 }
 
 export interface JobFinderTaskCenterModel {
@@ -328,7 +330,8 @@ function buildSourceCheckTask(
     canCancel: false,
     cancelKind: null,
     resumeRoute: canResume ? JOB_FINDER_ROUTE_PATHS.profileSources : null,
-    resumeActionLabel: canResume ? "Open Sources" : null,
+    resumeActionLabel: canResume ? "Open job sources" : null,
+    updatedAt: run.updatedAt,
   };
 }
 
@@ -413,6 +416,7 @@ function buildDiscoveryTask(
 
   return {
     id: run?.id ?? liveEvent?.runId ?? "discovery-current",
+    updatedAt: run ? (run.completedAt ?? run.startedAt) : null,
     kind: "discovery",
     title: "Job search",
     status,
@@ -838,6 +842,7 @@ function buildApplyRunTask(
       : undefined;
   return {
     id: run.id,
+    updatedAt: run.updatedAt,
     kind: "apply",
     title: "Applications",
     status,
@@ -1014,6 +1019,29 @@ function buildTailoredDraftsTask(
     resumeRoute: "/job-finder/review-queue",
     resumeActionLabel: "Open Shortlisted",
   };
+}
+
+const FINISHED_TASK_SHOWN_FOR_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A run that ended more than a day ago is history: Home, Search history and
+ * Applications keep its outcome, and Activity is for what is going on.
+ * Eight-day-old "Stopped" and "Failed" cards read as news on every open.
+ */
+export function isStaleFinishedTask(
+  item: JobFinderTaskCenterItem,
+  now: number,
+): boolean {
+  if (
+    item.status === "active" ||
+    item.status === "stopping" ||
+    item.status === "paused" ||
+    !item.updatedAt
+  ) {
+    return false;
+  }
+  const endedAt = timestamp(item.updatedAt);
+  return Number.isFinite(endedAt) && now - endedAt > FINISHED_TASK_SHOWN_FOR_MS;
 }
 
 export function buildJobFinderTaskCenterModel(

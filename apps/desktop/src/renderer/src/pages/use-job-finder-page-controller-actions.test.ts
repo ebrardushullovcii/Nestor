@@ -2500,7 +2500,17 @@ describe("createPrimaryPageActions", () => {
       status: "success",
       message: "50 jobs added to Shortlisted.",
     });
-    expect(setSelectedReviewJobId).toHaveBeenCalledExactlyOnceWith("job-0");
+    // Shortlisted keeps its own selection, so it does not open on the last
+    // page where the new jobs landed; the toast's link opens the first one.
+    expect(setSelectedReviewJobId).not.toHaveBeenCalled();
+    expect(setActionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionLink: {
+          label: "Open Shortlisted",
+          route: "/job-finder/review-queue?jobId=job-0",
+        },
+      }),
+    );
     expect(navigate).not.toHaveBeenCalled();
     expect(setResumeWorkspaceDirty).not.toHaveBeenCalled();
     expect(queueJobForReview).not.toHaveBeenCalled();

@@ -941,7 +941,7 @@ export function ProfileSetupTargetingStep(props: {
         >
           <div className="grid gap-1">
             <h3
-              className="scroll-mt-4 text-sm font-semibold text-foreground outline-none sm:scroll-mt-[8.25rem] min-[1440px]:!scroll-mt-[4.5rem]"
+              className="scroll-mt-4 text-sm font-semibold text-foreground outline-none sm:scroll-mt-[8.25rem] xl:scroll-mt-[4.5rem]"
               id="profile-setup-job-sources-heading"
               tabIndex={-1}
             >
@@ -996,7 +996,7 @@ export function ProfileSetupTargetingStep(props: {
 
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/30 pt-3">
                 <h4
-                  className="scroll-mt-4 sm:scroll-mt-[8.25rem] min-[1440px]:!scroll-mt-[4.5rem] text-sm font-semibold text-foreground outline-none"
+                  className="scroll-mt-4 sm:scroll-mt-[8.25rem] xl:scroll-mt-[4.5rem] text-sm font-semibold text-foreground outline-none"
                   id="profile-setup-job-sources-list-heading"
                   tabIndex={-1}
                 >

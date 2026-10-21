@@ -59,6 +59,7 @@ export {
   createFileJobFinderRepository,
   WorkspaceDatabaseRecoveryRequiredError,
 } from "./file-repository";
+export { readCleanCloseFingerprint } from "./internal/clean-close-marker";
 export {
   createFileLiveAssistantRepository,
   type LiveAssistantRepository,

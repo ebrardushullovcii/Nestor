@@ -578,6 +578,18 @@ export interface JobFinderRepository
     staleReason: string;
     tailoredAsset?: TailoredAsset | null;
   }): Promise<void>;
+  /**
+   * Marks stored drafts stale in one transaction, as clearResumeApproval
+   * does for one: status, reason and time, no approval, the job's exports
+   * unapproved, and the job's first tailored asset without its file. Only
+   * those fields change, so whole drafts (often most of a megabyte each)
+   * are not read, validated and written again. Unknown ids are skipped.
+   */
+  staleResumeDrafts?(input: {
+    draftIds: readonly string[];
+    staleReason: string;
+    updatedAt: string;
+  }): Promise<void>;
   listApplicationRecords(): Promise<readonly ApplicationRecord[]>;
   upsertApplicationRecord(
     applicationRecord: ApplicationRecordInput,
@@ -657,6 +669,20 @@ export interface JobFinderRepository
   commitDiscoveryStateUpdate(
     update: (current: BorrowedDiscoveryState) => CanonicalDiscoveryWrite,
   ): Promise<JobFinderDiscoveryState>;
+  /**
+   * Reads the canonical discovery state into its cache without copying it,
+   * so the first discovery commit after start does not pay for the read.
+   */
+  warmDiscoveryState?(): Promise<void>;
+  /**
+   * Atomically changes only the stored browser session states, without
+   * reading discovery runs, logs or checkpoints.
+   */
+  commitDiscoverySessions?(
+    update: (
+      sessions: JobFinderDiscoveryState["sessions"],
+    ) => JobFinderDiscoveryState["sessions"],
+  ): Promise<JobFinderDiscoveryState["sessions"]>;
   getCampaignState(): Promise<JobSearchCampaignCollection | null>;
   saveCampaignState(campaignState: JobSearchCampaignCollection): Promise<void>;
   /**
@@ -796,6 +822,13 @@ export interface FileJobFinderRepositoryOptions {
    * restored-snapshot revalidation regardless.
    */
   recoveryValidationOverrides?: WorkspaceRecoveryValidationOverrides;
+  /**
+   * Identity of the code that validates rows, normally a digest of the
+   * main-process build. Saved job and resume draft rows this identity already
+   * validated, and not written since, are not validated again by the display
+   * reads. Omitted or null validates every row.
+   */
+  rowValidationStamp?: PromiseLike<string | null> | string | null;
 }
 
 export type StateTableKey =

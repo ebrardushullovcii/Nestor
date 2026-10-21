@@ -69,6 +69,7 @@ type FileRepositoryResumeMethods = Pick<
   | "applyResumePatchWithRevision"
   | "approveResumeExport"
   | "clearResumeApproval"
+  | "staleResumeDrafts"
 >;
 
 export function createFileRepositoryResumeMethods(
@@ -906,6 +907,51 @@ export function createFileRepositoryResumeMethods(
       });
 
       return secureDatabaseFile(filePath);
+    },
+    async staleResumeDrafts({ draftIds, staleReason, updatedAt }) {
+      const readJobId = database.prepare(
+        "SELECT job_id FROM resume_drafts WHERE id = ?",
+      );
+      const markDraft = database.prepare(
+        `UPDATE resume_drafts
+           SET updated_at = ?,
+               value = json_set(
+                 value,
+                 '$.status', 'stale',
+                 '$.staleReason', ?,
+                 '$.approvedAt', json('null'),
+                 '$.approvedExportId', json('null'),
+                 '$.updatedAt', ?
+               )
+           WHERE id = ?`,
+      );
+      const readFirstAssetId = database.prepare(
+        `SELECT id FROM tailored_assets WHERE ${TAILORED_ASSET_JOB_ID_SQL} = ? ORDER BY id LIMIT 1`,
+      );
+      const clearAssetFile = database.prepare(
+        `UPDATE tailored_assets
+           SET value = json_set(value, '$.storagePath', json('null'), '$.updatedAt', ?)
+           WHERE id = ?`,
+      );
+      // One draft per transaction, as clearResumeApproval writes them, with a
+      // turn of the event loop between: SQLite still rewrites each whole row,
+      // and 27 large drafts in one go held the app for 0.4 s.
+      let first = true;
+      for (const draftId of new Set(draftIds)) {
+        if (!first) await new Promise<void>((resolve) => setImmediate(resolve));
+        first = false;
+        runImmediateTransaction(database, () => {
+          const row = readJobId.get(draftId);
+          if (!row) return;
+          const jobId = String(row.job_id);
+          syncApprovedResumeExportsForJob(database, jobId, null);
+          markDraft.run(updatedAt, staleReason, updatedAt, draftId);
+          const asset = readFirstAssetId.get(jobId);
+          if (asset) clearAssetFile.run(updatedAt, String(asset.id));
+        });
+      }
+
+      await secureDatabaseFile(filePath);
     },
   };
 }

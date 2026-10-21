@@ -676,7 +676,7 @@ it.each([
   ["planned", "Waiting its turn", "Application queued", 0],
   ["planned", "Waiting for a browser tab", "Waiting for a free browser tab", 0],
   ["awaiting_review", "Needs your answers", "Needs your answers", 2],
-  ["failed", "Could not apply", PREPARED_PAGE_CLOSED_SUMMARY, 0],
+  ["failed", "Form closed", PREPARED_PAGE_CLOSED_SUMMARY, 0],
 ] as const)(
   "per-job run outcome uses the actual %s standing: %s",
   (state, label, summary, latestQuestionCount) => {

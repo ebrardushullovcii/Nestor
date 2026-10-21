@@ -63,7 +63,7 @@ describe("WorkspaceStateScreen", () => {
     expect(outer?.className).toContain("text-center");
     expect(outer?.className).toContain("min-h-[calc(100dvh-7.25rem)]");
     expect(outer?.className).toContain(
-      "min-[1440px]:min-h-[calc(100dvh-3.5rem)]",
+      "xl:min-h-[calc(100dvh-3.5rem)]",
     );
     expect(outer?.dataset.workspaceStateViewportFill).toBe("true");
     expect(status.className).toContain("w-full");

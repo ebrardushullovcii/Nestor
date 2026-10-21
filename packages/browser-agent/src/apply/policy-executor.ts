@@ -1,4 +1,5 @@
 import { questionClassificationKey } from "./question-classification";
+import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import {
   resumeFormFileNames,
   type ApplicationAttemptQuestion,
@@ -23,6 +24,7 @@ import {
 import { attemptKey, judgeBlockedAttempt } from "./blocked-attempts";
 import { isSecurityChallengeControl } from "./blockers";
 import { runSubmitPreflight } from "./submit-preflight";
+import { isShortValueAnswer } from "./written-answer-grounding";
 import type {
   ApplyAgentConfig,
   ApplyAnswer,
@@ -110,6 +112,8 @@ export type ApplyExecutionOutcome =
     };
 
 export interface ApplyExecutorDeps {
+  /** fill_fields verifies all provisional text writes before recording them. */
+  deferTextRetention?: boolean;
   config: ApplyAgentConfig;
   now: () => Date;
   guardState: ApplyGuardState;
@@ -466,6 +470,28 @@ function savedSuggestion(
 }
 
 /**
+ * A short value the fact check could not confirm (a start date worked out
+ * from a notice period, a phone code from a number) is offered back to the
+ * person to accept or change with one press, beside the check's reason. It
+ * is not entered. Prose, eligibility, pay and declarations get no such offer.
+ */
+function proposedValueSuggestion(
+  control: ApplyFormControl,
+  value: string,
+): ApplyAnswer | null {
+  return control.attestationKind === null && isShortValueAnswer(control, value)
+    ? {
+        value: value.trim(),
+        kind: control.questionKind,
+        sourceKind: "generated",
+        sourceId: `proposed.${control.ref}`,
+        provenanceLabel: "Job Finder's proposal for you to confirm",
+        groundedIn: [],
+      }
+    : null;
+}
+
+/**
  * Whether the model's answer about the person goes in (ADR 0041, ADR 0021).
  *
  * The model read the question and the person's facts and chose the answer.
@@ -614,7 +640,8 @@ async function decideAnswer(input: {
             provenanceLabel: "proposed wording for your review",
             groundedIn: [],
           }
-        : savedSuggestion(control, config),
+        : (savedSuggestion(control, config) ??
+          proposedValueSuggestion(control, value)),
       permission: false,
     };
   }
@@ -963,7 +990,7 @@ interface GuardReview {
 }
 
 /** Whether the guard stopped something worth ending the run over. */
-async function guardStop(
+export async function guardStop(
   deps: ApplyExecutorDeps,
   pageUrl: string | null,
 ): Promise<ApplyPause | null> {
@@ -1535,6 +1562,20 @@ export async function executeApplyProposal(
         if (!typed.ok) {
           return { kind: "refused", reason: typed.error, observation };
         }
+        let retainedPage: ApplyFormObservation | null = null;
+        if (!deps.deferTextRetention) {
+          await config.hands.wait(TEXT_RETENTION_MS);
+          const after = await config.hands.observe();
+          retainedPage = after;
+          const error = textRetentionError(
+            observation,
+            after,
+            control,
+            letter.letter.text,
+          );
+          if (error)
+            return { kind: "refused", reason: error, observation: after };
+        }
         afterWrite(deps, questionPrompt(control));
         const letterStop = await guardStop(deps, observation.url);
         if (letterStop) {
@@ -1564,7 +1605,7 @@ export async function executeApplyProposal(
             },
             at,
           },
-          observation: await config.hands.observe(),
+          observation: retainedPage ?? (await config.hands.observe()),
         };
       }
 
@@ -1589,6 +1630,20 @@ export async function executeApplyProposal(
       if (!write.ok) {
         return { kind: "refused", reason: write.error, observation };
       }
+      let retainedPage: ApplyFormObservation | null = null;
+      if (!deps.deferTextRetention) {
+        await config.hands.wait(TEXT_RETENTION_MS);
+        const after = await config.hands.observe();
+        retainedPage = after;
+        const error = textRetentionError(
+          observation,
+          after,
+          control,
+          answer.value,
+        );
+        if (error)
+          return { kind: "refused", reason: error, observation: after };
+      }
       afterWrite(deps, questionPrompt(control));
       const stop = await guardStop(deps, observation.url);
       if (stop) {
@@ -1603,7 +1658,7 @@ export async function executeApplyProposal(
           answer,
           at,
         },
-        observation: await config.hands.observe(),
+        observation: retainedPage ?? (await config.hands.observe()),
       };
     }
 

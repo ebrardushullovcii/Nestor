@@ -11,7 +11,7 @@ The owner's rule: the checks are for the system, not chores for the person. If t
 ## Decision
 
 - The resume writer sees every saved role, achievement, project and skill and decides what this job needs. It can give a relevant role up to six bullets, leave older or unrelated roles and projects off (`"hidden": true`), and choose the additional skills. Whatever it leaves off stays on the draft, hidden, for the person to show again; nothing is deleted.
-- Length is the writer's to fix. It knows the page target, and a clean draft over it gets one more call to leave things off; after that the draft stands. Page length is a quiet note, never a blocker.
+- Length is the writer's to fix. It knows the page target and about how many words fit there, and gives each bullet a priority; a clean draft over the target has its lowest-priority bullets left off (each shown role keeps one) without another call, and after that the draft stands. Page length is a quiet note, never a blocker. (Amended 2026-10-21: the second "leave things off" call cost a full writer call per over-long resume.)
 - A generated line the fact check calls unsupported, and that it offers no fix for, is settled during generation: it goes back to the person's saved wording, or is left off when there is none. A stretch outside Aggressive is settled the same way.
 - Only a generated line the evidence contradicts can hold approval back, and generation settles those. A stretch was accepted by choosing Aggressive; a line the AI has not checked yet, and the person's own wording, never block. The "Lines to confirm" list is gone; the claims panel shows stretches and unchecked lines in neutral tones.
 - Roles the writer left off never hold approval or an application back. Resume Studio lists them under "Left off this resume" with an "Add back" button, and asks for no decision.
@@ -20,7 +20,7 @@ The owner's rule: the checks are for the system, not chores for the person. If t
 
 ## Consequences
 
-- A clean resume costs one writer call; an over-long one two. The writer's notes about running out of tries are gone.
+- A clean resume costs one writer call, an over-long one too (its shortening is local renders). The writer's notes about running out of tries are gone.
 - Claim confirmations and the approve-as-accurate command remain for the rare unbacked generated line that reaches the person, for example after accepting an Assistant proposal the check flagged.
 - The person stays the one who sends: final submission, credentials, CAPTCHA, MFA and the application safeguards are unchanged (ADR 0012, ADR 0024, ADR 0039).
 - New warnings, badges, confirmations and gates must pass the same test: can the system fix it? Then fix it. Otherwise drop it or make it a dismissible notice.

@@ -17,6 +17,7 @@ import {
   toApplyLlmClient,
 } from "./agent-application-preparation";
 import { createApplicationLetterProvider } from "./application-letter-provider";
+import { readSavedJob } from "./read-saved-job";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 
 /** Approval never claims to have changed a form until the guarded replacement succeeds. */
@@ -80,9 +81,8 @@ export async function refreshApprovedApplicationLetter(
       !card.pageUrl ||
       !card.letter.fields?.length ||
       !(await runtime.hasApplicationPageBinding(
-        (await ctx.repository.listSavedJobs()).find(
-          (job) => job.id === result.jobId,
-        )?.source ?? "target_site",
+        (await readSavedJob(ctx.repository, result.jobId))?.source ??
+          "target_site",
         result.id,
       ))
     )

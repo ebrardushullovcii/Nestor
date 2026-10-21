@@ -34,11 +34,12 @@
  * add a border or a corner radius to a row.
  */
 const jobFinderListRowClassName = [
-  "grid gap-2.5",
+  "grid gap-1.5",
   // Flat and flush: no card border, no rounding, one bottom rule as the
   // divider between rows.
   "rounded-none border-x-0 border-t-0 border-b border-b-(--surface-panel-border)",
-  "px-4 py-3.5",
+  // Tight enough that a 1032px window shows eight or more rows, not five.
+  "px-4 py-3",
   // Keeps the focus ring above the neighbouring row's divider.
   "focus-visible:z-10",
 ].join(" ");

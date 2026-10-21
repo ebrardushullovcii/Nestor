@@ -50,6 +50,7 @@ import {
 } from "./resume-generation-grounding";
 import { compactOpenAiCompatibleUserPayload } from "./openai-compatible-request-compaction";
 import { modelConversationKeys } from "./model-request-identity";
+import type { ModelReasoningTask } from "./openai-compatible-transport";
 import {
   ResumeImportStageExtractionResultSchema,
   sanitizeStageCandidates,
@@ -274,6 +275,7 @@ function createModelAdapter(
   options?: {
     contentToToolCalls?: (content: string) => ToolCall[] | null;
     preventRuntimeRetries?: boolean;
+    reasoningTask?: ModelReasoningTask;
   },
 ): AgentTaskModel {
   const status = client.getStatus();
@@ -307,6 +309,9 @@ function createModelAdapter(
           {
             ...(input.signal ? { signal: input.signal } : {}),
             ...(conversationKey ? { conversationKey } : {}),
+            ...(options?.reasoningTask
+              ? { reasoningTask: options.reasoningTask }
+              : {}),
           },
         );
         if (
@@ -315,7 +320,8 @@ function createModelAdapter(
           options?.contentToToolCalls
         ) {
           const toolCalls = options.contentToToolCalls(response.content);
-          if (toolCalls) return { ...response, toolCalls };
+          // The content became the call; keeping both replays it twice.
+          if (toolCalls) return { ...response, content: "", toolCalls };
         }
         return response;
       } catch (error) {
@@ -418,6 +424,161 @@ export function findBulletsOnTwoCards(
 }
 
 /**
+ * The person as the resume writer needs them beside the evidence list: the
+ * records it picks, orders and cites (ids, titles, employers, dates, scopes,
+ * education, credentials, languages). Every fact it may write from is in
+ * groundingEvidence by id; contact details, links, saved application answers
+ * and file metadata are not resume material and stay out.
+ */
+export function buildWriterProfileOutline(
+  profile: CandidateProfile,
+  baseResume:
+    | { textContentEvidenceRef: string }
+    | { textContent: string | null },
+) {
+  return {
+    headline: profile.headline,
+    currentLocation: profile.currentLocation,
+    yearsExperience: profile.yearsExperience,
+    targetRoles: profile.targetRoles,
+    baseResume,
+    experiences: profile.experiences.map((experience) => ({
+      id: experience.id,
+      title: experience.title,
+      companyName: experience.companyName,
+      employmentType: experience.employmentType,
+      location: experience.location,
+      workMode: experience.workMode,
+      startDate: experience.startDate,
+      endDate: experience.endDate,
+      isCurrent: experience.isCurrent,
+      isDraft: experience.isDraft,
+      peopleManagementScope: experience.peopleManagementScope,
+      ownershipScope: experience.ownershipScope,
+    })),
+    projects: profile.projects.map((project) => ({
+      id: project.id,
+      name: project.name,
+      role: project.role,
+    })),
+    education: profile.education.map((education) => ({
+      id: education.id,
+      degree: education.degree,
+      fieldOfStudy: education.fieldOfStudy,
+      schoolName: education.schoolName,
+      location: education.location,
+      startDate: education.startDate,
+      endDate: education.endDate,
+      summary: education.summary,
+      isDraft: education.isDraft,
+    })),
+    certifications: profile.certifications.map((certification) => ({
+      id: certification.id,
+      name: certification.name,
+      issuer: certification.issuer,
+      issueDate: certification.issueDate,
+      expiryDate: certification.expiryDate,
+      isDraft: certification.isDraft,
+    })),
+    spokenLanguages: profile.spokenLanguages.map((language) => ({
+      id: language.id,
+      language: language.language,
+      proficiency: language.proficiency,
+    })),
+  };
+}
+
+/**
+ * About how many words of summary and bullets fit on the page target, by the
+ * template's density. A guide for the writer; the render's page count and the
+ * writer's bullet priorities settle the length.
+ */
+const RESUME_PROSE_WORDS_PER_PAGE = {
+  comfortable: 300,
+  balanced: 360,
+  compact: 420,
+} as const;
+
+export function resumeLengthBudget(input: {
+  targetPageCount: number;
+  density: keyof typeof RESUME_PROSE_WORDS_PER_PAGE | undefined;
+}) {
+  const pages = Math.max(1, input.targetPageCount);
+  const words =
+    RESUME_PROSE_WORDS_PER_PAGE[input.density ?? "balanced"] * pages;
+  return {
+    targetPageCount: pages,
+    approximateWords: words,
+    approximateBullets: Math.round(words / 24),
+  };
+}
+
+/**
+ * The proposal with every bullet of `priority` or lower importance left off;
+ * each shown role or project keeps its most important bullet. Null when
+ * nothing was left off. Bullets without a priority stay.
+ */
+export function leaveOffBulletsByPriority(
+  proposal: Record<string, unknown>,
+  priority: number,
+): Record<string, unknown> | null {
+  const priorityOf = (bullet: unknown) =>
+    bullet &&
+    typeof bullet === "object" &&
+    typeof (bullet as { priority?: unknown }).priority === "number"
+      ? (bullet as { priority: number }).priority
+      : 0;
+  let changed = false;
+  const trim = (entries: unknown) => {
+    if (!Array.isArray(entries)) return entries;
+    return entries.map((entry: unknown) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry))
+        return entry;
+      const record = entry as Record<string, unknown>;
+      if (record.hidden === true || !Array.isArray(record.bullets))
+        return entry;
+      const bullets = record.bullets as unknown[];
+      let kept = bullets.filter((bullet) => priorityOf(bullet) < priority);
+      if (kept.length === 0 && bullets.length > 0) {
+        const mostImportant = bullets.reduce((best, bullet) =>
+          priorityOf(bullet) < priorityOf(best) ? bullet : best,
+        );
+        kept = [mostImportant];
+      }
+      if (kept.length === bullets.length) return entry;
+      changed = true;
+      return { ...record, bullets: kept };
+    });
+  };
+  const next: Record<string, unknown> = { ...proposal };
+  if ("experienceEntries" in proposal)
+    next.experienceEntries = trim(proposal.experienceEntries);
+  if ("projectEntries" in proposal)
+    next.projectEntries = trim(proposal.projectEntries);
+  return changed ? next : null;
+}
+
+/**
+ * Display fields for translation, with a field whose text is exactly one
+ * evidence item's text sent as a reference to it instead of a second copy.
+ */
+function referenceLanguageFields(
+  fields: readonly { id: string; text: string }[] | undefined,
+  evidence: readonly { id: string; text: string }[],
+) {
+  if (!fields) return fields;
+  const evidenceIdByText = new Map<string, string>();
+  for (const item of evidence)
+    if (!evidenceIdByText.has(item.text))
+      evidenceIdByText.set(item.text, item.id);
+  return fields.map((field) => {
+    const evidenceRef =
+      field.text.length >= 40 ? evidenceIdByText.get(field.text) : undefined;
+    return evidenceRef ? { id: field.id, evidenceRef } : field;
+  });
+}
+
+/**
  * Resume generation in as few model calls as the writing needs. The model
  * sends the complete proposal once; the same tool call renders it and runs the
  * checks, and a clean render ends the task. A flagged render goes back to the
@@ -454,8 +615,6 @@ export async function runResumeGenerationAgentTask(input: {
     finish?: boolean;
   };
   let flaggedRenderCount = 0;
-  // A clean draft over the page target gets one call to shorten itself.
-  let lengthRoundUsed = false;
   type RenderedPreview = Awaited<
     ReturnType<NonNullable<typeof input.request.renderPreview>>
   >;
@@ -495,9 +654,9 @@ export async function runResumeGenerationAgentTask(input: {
     return {
       summary: "The writing proposal needs repair before it can be rendered",
       validationIssues: proposalValidationIssues,
+      // The current languageFields go in the next task payload, once.
       value: {
         validationIssues: proposalValidationIssues,
-        languageFields: currentLanguageFields,
         nextAction:
           "Call compose_resume_proposal again with the complete corrected proposal. For translations, use each exact current languageFields ID at most once and omit unchanged fields. Do not invent candidate facts or bypass claim checks.",
       },
@@ -549,64 +708,74 @@ export async function runResumeGenerationAgentTask(input: {
       const pageCount = rendered?.pageCount ?? null;
       const targetPageCount =
         rendered?.targetPageCount ?? input.request.targetPageCount ?? null;
-      if (repairs.length === 0) {
-        lastCheckedProposal = structuredClone(proposal);
-        // Length is the writer's to fix, never the person's: one more call
-        // to choose what to leave off, and then the draft stands either way.
-        if (
-          !lengthRoundUsed &&
-          pageCount !== null &&
-          targetPageCount !== null &&
-          pageCount > targetPageCount
-        ) {
-          lengthRoundUsed = true;
-          return {
-            summary: `Resume rendered at ${pageCount} pages; the target is ${targetPageCount}`,
-            value: {
-              nextAction: `The resume renders at ${pageCount} pages and should fit on ${targetPageCount}. Decide what this job needs least and leave it off: mark whole roles or projects with "hidden": true, give fewer bullets to older or less relevant roles, keep the summary short, and return fewer additionalSkills. Left-off facts stay on the person's draft, hidden. Call compose_resume_proposal once more with the complete proposal.`,
-              selectedTemplateId,
-              pageCount,
-              targetPageCount,
-            },
-            progressMade: false,
-          };
+      // A flagged line does not go back to the writer: the check already
+      // wrote its fix, and keeping the resume applies it (ADR 0049, amended).
+      // Another writer call cost a full payload and about ninety seconds to
+      // reach the same line.
+      const keep = (kept: Record<string, unknown>) => {
+        if (repairs.length === 0) lastCheckedProposal = structuredClone(kept);
+        else lastFlaggedProposal = structuredClone(kept);
+      };
+      if (repairs.length > 0) {
+        flaggedRenderCount += 1;
+        const categories: Record<string, number> = {};
+        for (const repair of repairs) {
+          categories[repair.category] = (categories[repair.category] ?? 0) + 1;
         }
-        return {
-          summary: "Resume rendered and checked; nothing needs repair",
-          value: {
-            selectedTemplateId,
-            pageCount: rendered?.pageCount ?? null,
-            personConfirmationCount: rendered?.personConfirmationCount ?? 0,
-          },
-          progressMade: false,
-          finish: true,
-        };
+        flaggedRenderCategories.push(categories);
       }
-      flaggedRenderCount += 1;
-      lastFlaggedProposal = structuredClone(proposal);
-      const categories: Record<string, number> = {};
-      for (const repair of repairs) {
-        categories[repair.category] = (categories[repair.category] ?? 0) + 1;
+      keep(proposal);
+      // Length is the writer's to decide, never the person's, and costs no
+      // second call: over the page target, the bullets it gave the lowest
+      // priority are left off, and then the draft stands (ADR 0051).
+      let finalProposal = proposal;
+      let finalRender = rendered;
+      if (
+        state.renderPreview &&
+        pageCount !== null &&
+        targetPageCount !== null &&
+        pageCount > targetPageCount
+      ) {
+        for (const priority of [3, 2]) {
+          const shorter = leaveOffBulletsByPriority(finalProposal, priority);
+          if (!shorter) continue;
+          const shorterRender = await state.renderPreview({
+            draft: completeTailoredResumeDraft(shorter, state),
+            templateId: selectedTemplateId,
+            ...(signal ? { signal } : {}),
+            getRemainingBudgetMs: () =>
+              Math.max(0, generationBudgetMs - generationElapsedMs()),
+          });
+          // Leaving lines off cannot add a claim; if a check objects to more
+          // than before, the longer draft stands.
+          if (
+            (shorterRender.requiredModelRepairs ?? []).length > repairs.length
+          )
+            break;
+          finalProposal = shorter;
+          finalRender = shorterRender;
+          lastRenderedPreview = shorterRender;
+          keep(shorter);
+          if (
+            shorterRender.pageCount !== null &&
+            shorterRender.pageCount <= targetPageCount
+          )
+            break;
+        }
       }
-      flaggedRenderCategories.push(categories);
-      const repairAction =
-        flaggedRenderCount >= 2
-          ? "This is the second flagged render. Remove each line named in requiredModelRepairs, or put back the candidate's saved wording for it, and call compose_resume_proposal once more with the complete proposal."
-          : "Repair every requiredModelRepairs item by removing or rephrasing the flagged wording, then call compose_resume_proposal again with the complete corrected proposal. Never invent facts, dates or chronology. Do not resolve person confirmation items.";
       return {
-        summary: `Resume rendered; ${repairs.length} line${repairs.length === 1 ? "" : "s"} must be repaired`,
+        summary:
+          repairs.length === 0
+            ? "Resume rendered and checked; nothing needs repair"
+            : `Resume rendered; the check's fixes settle ${repairs.length} line${repairs.length === 1 ? "" : "s"}`,
+        ...(finalProposal !== proposal ? { draft: finalProposal } : {}),
         value: {
-          nextAction: repairAction,
           selectedTemplateId,
-          pageCount: rendered?.pageCount ?? null,
-          warnings: rendered?.warnings ?? [],
-          requiredModelRepairs: repairs,
-          personConfirmationCount: rendered?.personConfirmationCount ?? 0,
-          ...(rendered?.languageFields
-            ? { languageFields: rendered.languageFields }
-            : {}),
+          pageCount: finalRender?.pageCount ?? null,
+          personConfirmationCount: finalRender?.personConfirmationCount ?? 0,
         },
         progressMade: false,
+        finish: true,
       };
     } catch (error) {
       if (
@@ -644,40 +813,54 @@ export async function runResumeGenerationAgentTask(input: {
 
   const { baseResumeText, ...groundedResumePayload } =
     buildGroundedResumeRewriteModelPayload(input.request);
-  const { textContent: profileResumeText, ...profileResumeMetadata } =
-    input.request.profile.baseResume;
+  const profileResumeText = input.request.profile.baseResume.textContent;
   // Keep the complete selected source once, under its canonical evidence ID.
   // The request used by completion and grounding stays unchanged. A different
   // profile base is separate evidence and must keep its own complete text.
-  const candidateProfile =
+  const candidateProfile = buildWriterProfileOutline(
+    input.request.profile,
     baseResumeText !== undefined && baseResumeText === profileResumeText
-      ? {
-          ...input.request.profile,
-          baseResume: {
-            ...profileResumeMetadata,
-            textContentEvidenceRef: "baseResume:text",
-          },
-        }
-      : input.request.profile;
+      ? { textContentEvidenceRef: "baseResume:text" }
+      : { textContent: profileResumeText },
+  );
   const { discovery, ...searchPreferences } = input.request.searchPreferences;
   // Send the current listing once. Browser navigation/fetch diagnostics and
   // the search source catalog are operational state, not resume evidence.
   // Candidate facts and listing prose are kept intact, including long fields.
   const job = input.request.job;
+  const {
+    groundingEvidence: groundedEvidence,
+    targetJob: groundedTargetJob,
+    ...jobSpecificPayload
+  } = groundedResumePayload;
+  // What is the same for every job comes first: the candidate's evidence,
+  // profile, goals and settings. Requests in a batch then share that prefix,
+  // which the AI service can reuse instead of reading it again each time.
   const resumeGenerationContext = {
-    ...groundedResumePayload,
-    ...(baseResumeText === undefined
-      ? {}
-      : { baseResumeEvidenceRef: "baseResume:text" }),
     groundingEvidence: {
-      ...groundedResumePayload.groundingEvidence,
-      items: groundedResumePayload.groundingEvidence.items.map((item) =>
+      ...groundedEvidence,
+      items: groundedEvidence.items.map((item) =>
         item.id === "baseResume:text" && baseResumeText !== undefined
           ? { ...item, text: baseResumeText }
           : item,
       ),
     },
+    ...(baseResumeText === undefined
+      ? {}
+      : { baseResumeEvidenceRef: "baseResume:text" }),
+    candidateProfile,
+    searchPreferences: {
+      ...searchPreferences,
+      remoteCountsAsAnyLocation: discovery.remoteCountsAsAnyLocation ?? true,
+    },
+    settings: {
+      resumeFormat: input.request.settings.resumeFormat,
+      fontPreset: input.request.settings.fontPreset,
+      humanReviewRequired: input.request.settings.humanReviewRequired,
+    },
+    ...jobSpecificPayload,
     targetJob: {
+      ...groundedTargetJob,
       ...groundedResumePayload.targetJob,
       source: job.source,
       sourceJobId: job.sourceJobId,
@@ -701,16 +884,6 @@ export async function runResumeGenerationAgentTask(input: {
       screeningHints: job.screeningHints,
       benefits: job.benefits,
     },
-    candidateProfile,
-    searchPreferences: {
-      ...searchPreferences,
-      remoteCountsAsAnyLocation: discovery.remoteCountsAsAnyLocation ?? true,
-    },
-    settings: {
-      resumeFormat: input.request.settings.resumeFormat,
-      fontPreset: input.request.settings.fontPreset,
-      humanReviewRequired: input.request.settings.humanReviewRequired,
-    },
   };
   const templateOptions = (input.request.availableTemplates ?? [])
     .filter((template) => template.applyEligible !== false)
@@ -720,9 +893,9 @@ export async function runResumeGenerationAgentTask(input: {
     capability: "resume_generation",
     systemPrompt: [
       input.substantivePrompt,
-      "baseResumeEvidenceRef and candidateProfile.baseResume.textContentEvidenceRef point to groundingEvidence item IDs. Read that item's complete text as the referenced resume source. The evidence IDs and selected base resume are unchanged; a distinct profile base resume is included separately.",
+      "baseResumeEvidenceRef and candidateProfile.baseResume.textContentEvidenceRef point to groundingEvidence item IDs. Read that item's complete text as the referenced resume source. The evidence IDs and selected base resume are unchanged; a distinct profile base resume is included separately. A languageFields entry that has evidenceRef instead of text has exactly the text of that groundingEvidence item. candidateProfile lists the saved records by id; their wording is in groundingEvidence.",
       "Everything you need is in the task payload. Write the complete proposal in one compose_resume_proposal call; do not call any other tool first.",
-      "compose_resume_proposal renders the resume and checks it in the same call. A clean check ends the task. When it returns requiredModelRepairs, repair exactly those lines by removing or rephrasing the unsupported wording and call compose_resume_proposal again with the complete corrected proposal. Never invent missing candidate facts, dates, or chronology. Aggressive person confirmations are deliberate review decisions for the person, not defects for you to erase or confirm.",
+      "compose_resume_proposal renders the resume, checks every line against the evidence and ends the task; there is no second draft, so write each line so the evidence backs it. Never invent missing candidate facts, dates, or chronology. Aggressive person confirmations are deliberate review decisions for the person, not defects for you to erase or confirm.",
       "To use a different template, pass its templateId to compose_resume_proposal when templateSelection.selectionLocked is false.",
       "The runtime preserves identity, chronology, selected strategy, and the final typed resume shape. Your job is to do the actual job-targeted writing within the mode-specific instructions above.",
     ].join(" "),
@@ -730,9 +903,10 @@ export async function runResumeGenerationAgentTask(input: {
     initialDraft: {} as Record<string, unknown>,
     model: createModelAdapter(
       input.client,
-      modelConversationKeys.resumeForJob(input.request.job),
+      modelConversationKeys.resumeWriting(input.request.profile),
       {
         preventRuntimeRetries: true,
+        reasoningTask: "resume_writer",
         contentToToolCalls(content) {
           try {
             const proposal = JSON.parse(content) as unknown;
@@ -762,7 +936,7 @@ export async function runResumeGenerationAgentTask(input: {
       {
         name: "compose_resume_proposal",
         description:
-          "Send the complete sparse job-targeted resume proposal (the exact shape described in the task instructions). The proposal is rendered and checked in the same call: a clean check finishes the task, otherwise the result lists the lines to repair.",
+          "Send the complete sparse job-targeted resume proposal (the exact shape described in the task instructions). The proposal is rendered and checked in the same call, which finishes the task.",
         inputSchema: ResumeGenerationProposalInputSchema,
         parameters: jsonObject(
           {
@@ -792,11 +966,12 @@ export async function runResumeGenerationAgentTask(input: {
             context.signal,
           );
           lastRenderResult = rendered;
+          const nextDraft = rendered.draft ?? parsed.proposal;
           return {
             ...rendered,
-            draft: parsed.proposal,
+            draft: nextDraft,
             progressMade:
-              JSON.stringify(context.draft) !== JSON.stringify(parsed.proposal),
+              JSON.stringify(context.draft) !== JSON.stringify(nextDraft),
           };
         },
       },
@@ -884,18 +1059,6 @@ export async function runResumeGenerationAgentTask(input: {
             },
           ]
         : []),
-      ...(lastRenderedPreview?.requiredModelRepairs ?? []).map((issue) => ({
-        code: `resume_preview_${issue.id}`,
-        message: issue.flaggedText
-          ? `${issue.message} Flagged text: ${issue.flaggedText}`
-          : issue.message,
-        path: [
-          "preview",
-          issue.sectionId ?? "",
-          issue.entryId ?? "",
-          issue.bulletId ?? "",
-        ],
-      })),
     ],
     buildContext: ({ draft, validationIssues }) =>
       compactOpenAiCompatibleUserPayload({
@@ -905,8 +1068,17 @@ export async function runResumeGenerationAgentTask(input: {
         preserveFullPayload: true,
         userPayload: jsonSafe({
           ...resumeGenerationContext,
-          languageFields: currentLanguageFields,
+          languageFields: referenceLanguageFields(
+            currentLanguageFields,
+            resumeGenerationContext.groundingEvidence.items,
+          ),
           targetPageCount: input.request.targetPageCount ?? 2,
+          lengthBudget: resumeLengthBudget({
+            targetPageCount: input.request.targetPageCount ?? 2,
+            density: input.request.availableTemplates?.find(
+              (template) => template.id === selectedTemplateId,
+            )?.density,
+          }),
           templateSelection: {
             selectedTemplateId,
             selectionLocked: input.request.templateSelectionLocked === true,
@@ -933,10 +1105,12 @@ export async function runResumeGenerationAgentTask(input: {
     ...(input.request.getExcludedElapsedMs
       ? { getExcludedElapsedMs: input.request.getExcludedElapsedMs }
       : {}),
-    // One call normally; up to two repairs. A run that needs more is circling.
+    // One call; the others only repair a proposal that did not render.
     providerCallBudget: 3,
     noProgressLimit: 2,
     emergencyCeiling: 4,
+    // workingProposal above is the proposal; the replayed call is a note.
+    draftShownInContext: true,
   });
 
   // A stopped agent task is not model output. Keep the last draft that

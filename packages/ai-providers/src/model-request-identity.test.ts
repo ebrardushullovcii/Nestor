@@ -117,6 +117,50 @@ describe("OpenCode-compatible client requests", () => {
     globalThis.fetch = originalFetch;
   });
 
+  it("routes fit batches for a profile to one session across client instances", async () => {
+    const sessions: Array<string | undefined> = [];
+    globalThis.fetch = vi.fn((_url: unknown, init?: RequestInit) => {
+      sessions.push(
+        (init?.headers as Record<string, string>)["x-opencode-session"],
+      );
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: '{"judgments":[]}' } }],
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+      );
+    });
+    const input = {
+      assessmentDate: "2026-10-21",
+      profile: createProfile(),
+      searchPreferences: createPreferences(),
+      jobs: [{ jobId: "one", posting: createJobPosting() }],
+    };
+    const environment = createEnvironment({
+      NESTOR_AI_BASE_URL: "https://opencode.ai/zen/go/v1",
+    });
+    await createJobFinderAiClientFromEnvironment(environment).judgeJobFits!(
+      input,
+    );
+    const client = createJobFinderAiClientFromEnvironment(environment);
+    await client.judgeJobFits!({
+      ...input,
+      assessmentDate: "2026-10-22",
+      jobs: [{ jobId: "two", posting: createJobPosting() }],
+    });
+    await client.judgeJobFits!({
+      ...input,
+      profile: { ...input.profile, id: "other_profile" },
+    });
+    expect(sessions.slice(0, 2)).toEqual([
+      buildModelSessionId(modelConversationKeys.fitJudging(input.profile)),
+      buildModelSessionId(modelConversationKeys.fitJudging(input.profile)),
+    ]);
+    expect(sessions[2]).not.toBe(sessions[0]);
+  });
+
   it("carries the User-Agent and one stable session id across every request about one job", async () => {
     const seen: Array<Record<string, string>> = [];
     globalThis.fetch = vi.fn((_url: unknown, init?: { headers?: unknown }) => {
@@ -183,7 +227,7 @@ describe("OpenCode-compatible client requests", () => {
     );
     expect(sessionIds.size).toBe(1);
     expect([...sessionIds][0]).toBe(
-      buildModelSessionId(modelConversationKeys.resumeForJob(job)),
+      buildModelSessionId(modelConversationKeys.resumeWriting(input.profile)),
     );
     for (const headers of seen) {
       expect(headers["User-Agent"]).toBe(JOB_FINDER_MODEL_CLIENT_USER_AGENT);

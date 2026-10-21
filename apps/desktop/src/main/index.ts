@@ -17,6 +17,10 @@ import { createMainWindow } from "./setup/window-shell";
 import { runShutdownWithTimeout } from "./setup/shutdown-with-timeout";
 import { createDeferredBackgroundInitController } from "./setup/deferred-background-init";
 import { getMainWindowCloseGuard } from "./setup/main-window-close-guard";
+import {
+  captureStartupWorkspaceView,
+  hasStartupWorkspaceView,
+} from "./services/job-finder/startup-workspace-view";
 import type * as InterviewOverlayApi from "./setup/interview-overlay-windows";
 import type * as InterviewSessionControlsApi from "./setup/interview-session-controls";
 import type * as CandidateAssetLibraryApi from "./services/job-finder/candidate-asset-library-instance";
@@ -38,6 +42,10 @@ try {
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (hasSingleInstanceLock) {
+  // Before anything opens the workspace database (see the module).
+  captureStartupWorkspaceView();
+}
 const startupDiagnosticsPath = getDesktopStartupDiagnosticsPath();
 
 function recordStartupDiagnostic(message: string, error?: unknown) {
@@ -127,6 +135,8 @@ let disposeInterviewSessionControls = () => {};
 // shutdown commits, the latch is permanent. Feature routes also lazily load
 // their own services on demand.
 const deferredBackgroundInit = createDeferredBackgroundInitController({
+  // Counted from the window's page load, not its creation; see below.
+  scheduleDelayMs: 150,
   advancedInterviewSurfacesEnabled,
   loadJobFinderServices,
   loadCampaignSchedulerModule,
@@ -280,8 +290,26 @@ void app
       return;
     }
     recordStartupDiagnostic("main window created");
-    deferredBackgroundInit.schedule();
+    // Electron's browser thread is this JavaScript thread, so loading the
+    // feature services holds the window's own page load (about 0.7 s). With
+    // a saved startup view the window needs nothing from them to show the
+    // workspace: start them once the page has loaded. Without one, the
+    // window waits for them anyway, so they start early and overlap the
+    // page's script compile.
+    let backgroundInitScheduled = false;
+    const scheduleBackgroundInit = () => {
+      if (backgroundInitScheduled) return;
+      backgroundInitScheduled = true;
+      clearTimeout(backgroundInitFallback);
+      deferredBackgroundInit.schedule();
+    };
+    const backgroundInitFallback = setTimeout(
+      scheduleBackgroundInit,
+      hasStartupWorkspaceView() ? 3_000 : 350,
+    );
+    mainWindow.webContents.once("did-finish-load", scheduleBackgroundInit);
     mainWindow.on("closed", () => {
+      clearTimeout(backgroundInitFallback);
       deferredBackgroundInit.cancelScheduled();
       closeInterviewOverlayWindows();
     });
@@ -344,7 +372,7 @@ async function shutdownJobFinderServicesIfLoaded(): Promise<void> {
   const { shutdownAssistantHost } =
     await import("./services/assistant/assistant-service");
   await shutdownAssistantHost();
-  await shutdownJobFinderWorkspaceService();
+  await shutdownJobFinderWorkspaceService({ saveStartupView: true });
 }
 
 async function shutdownLiveAssistantIfLoaded(): Promise<void> {

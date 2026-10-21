@@ -44,7 +44,11 @@ import {
   UserActionRequestSchema,
   type JobFinderRepositoryState,
 } from "@nestor/contracts";
-import type { DatabaseSync, SQLInputValue } from "node:sqlite";
+import type {
+  DatabaseSync,
+  SQLInputValue,
+  SQLOutputValue,
+} from "node:sqlite";
 import {
   APPLICATION_ATTEMPT_INDEXED_COLLECTION_CONFIG,
   APPLY_COLLECTION_ORDER_BY_SQL,
@@ -220,28 +224,45 @@ function describePersistedRowFailure(error: unknown): string {
   return "schema validation failed";
 }
 
+export function parsePersistedRowJson(input: {
+  tableName: string;
+  rowId: string;
+  rawValue: string;
+}): unknown {
+  try {
+    return JSON.parse(input.rawValue) as unknown;
+  } catch {
+    throw new Error(
+      `Corrupted persisted row in table "${input.tableName}" (row "${input.rowId}"): the persisted value is not valid JSON. Repair or remove the corrupted row before using this repository.`,
+    );
+  }
+}
+
+export function validatePersistedRowValue<TValue>(input: {
+  tableName: string;
+  rowId: string;
+  value: unknown;
+  schema: SchemaParser<TValue>;
+}): TValue {
+  try {
+    return input.schema.parse(input.value);
+  } catch (error) {
+    throw new Error(
+      `Corrupted persisted row in table "${input.tableName}" (row "${input.rowId}"): ${describePersistedRowFailure(error)}. Repair or remove the corrupted row before using this repository.`,
+    );
+  }
+}
+
 export function parsePersistedRowValue<TValue>(input: {
   tableName: string;
   rowId: string;
   rawValue: string;
   schema: SchemaParser<TValue>;
 }): TValue {
-  let parsedValue: unknown;
-  try {
-    parsedValue = JSON.parse(input.rawValue) as unknown;
-  } catch {
-    throw new Error(
-      `Corrupted persisted row in table "${input.tableName}" (row "${input.rowId}"): the persisted value is not valid JSON. Repair or remove the corrupted row before using this repository.`,
-    );
-  }
-
-  try {
-    return input.schema.parse(parsedValue);
-  } catch (error) {
-    throw new Error(
-      `Corrupted persisted row in table "${input.tableName}" (row "${input.rowId}"): ${describePersistedRowFailure(error)}. Repair or remove the corrupted row before using this repository.`,
-    );
-  }
+  return validatePersistedRowValue({
+    ...input,
+    value: parsePersistedRowJson(input),
+  });
 }
 
 export function listValues<TValue>(
@@ -281,7 +302,7 @@ export async function listValuesInChunks<TValue>(
   tableName: StateCollectionTable,
   schema: SchemaParser<TValue>,
 ): Promise<TValue[]> {
-  const rows = database
+  const rows: (Record<string, SQLOutputValue> | null)[] = database
     .prepare(`SELECT id, value FROM ${stateTableNames[tableName]} ORDER BY id`)
     .all();
   const values: TValue[] = [];
@@ -289,7 +310,13 @@ export async function listValuesInChunks<TValue>(
     if (start > 0) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    for (const row of rows.slice(start, start + PARSE_CHUNK_ROWS)) {
+    const end = Math.min(rows.length, start + PARSE_CHUNK_ROWS);
+    for (let index = start; index < end; index += 1) {
+      const row = rows[index]!;
+      // Each row's text is let go once parsed: holding every raw row until
+      // the last was parsed kept two copies of the collection alive (over
+      // 900 MB with 20,000 saved jobs).
+      rows[index] = null;
       // Parsed from this read's own JSON, so already the caller's own copy;
       // cloning again was a second full copy of every job per read.
       values.push(

@@ -1,3 +1,4 @@
+import { takePrefetchedResumeWorkspace } from "@renderer/features/job-finder/lib/resume-workspace-prefetch";
 import { useToast } from "@renderer/components/ui/toast";
 import { isActionNews, isActionSuccessToast } from "./action-news-toast";
 import { stopAssistantUiResumeBatch } from "./use-job-finder-page-controller-actions";
@@ -1105,6 +1106,15 @@ export function useJobFinderPageController() {
       };
     }
 
+    // The review pass reads the next resume ahead; showing it at once keeps
+    // "Approve and next" from flashing a loading card. The read below still
+    // runs and replaces it.
+    const prefetched = takePrefetchedResumeWorkspace(activeResumeWorkspaceJobId);
+    if (prefetched) {
+      applyResumeWorkspaceSnapshot(prefetched);
+      setResumeAssistantMessages(prefetched.assistantMessages);
+      setResumeAssistantPending(false);
+    }
     const requestToken = resumeWorkspaceRequestTokenRef.current + 1;
     resumeWorkspaceRequestTokenRef.current = requestToken;
     void getResumeWorkspace(activeResumeWorkspaceJobId)

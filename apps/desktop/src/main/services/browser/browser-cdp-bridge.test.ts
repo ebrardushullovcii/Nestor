@@ -37,6 +37,8 @@ async function fixture() {
       calls.push({ method, params, sessionId });
       if (method === "Target.getTargetInfo")
         return Promise.resolve({ targetInfo: { targetId: "owned-page" } });
+      if (method === "Network.getAllCookies")
+        return Promise.resolve({ cookies: [] });
       if (method === "Target.detachFromTarget")
         debuggerEvents.emit("message", {}, "Target.detachedFromTarget", {
           sessionId: "native-worker",
@@ -153,7 +155,7 @@ describe("scoped embedded browser transport", () => {
     ).toEqual([expect.objectContaining({ targetId: "owned-page" })]);
   });
 
-  test("refuses unknown targets, root page commands, and profile storage", async () => {
+  test("refuses unknown targets, root page commands, and other profile storage", async () => {
     const { transport, calls } = await fixture();
     const client = await connect(transport);
     expect(
@@ -164,16 +166,80 @@ describe("scoped embedded browser transport", () => {
       (await client.send("Runtime.evaluate", { expression: "process.env" }))
         .error?.message,
     ).toContain("page session is required");
-    expect((await client.send("Storage.getCookies")).error?.message).toContain(
-      "Unsupported scoped",
-    );
+    expect(
+      (await client.send("Storage.clearCookies")).error?.message,
+    ).toContain("Unsupported scoped");
     expect(
       calls.some(
         (call) =>
           call.method === "Runtime.evaluate" ||
-          call.method === "Storage.getCookies",
+          call.method === "Storage.clearCookies",
       ),
     ).toBe(false);
+  });
+
+  test("maps Playwright cookie synchronization to an owned page's partition", async () => {
+    const { transport, calls } = await fixture();
+    const client = await connect(transport);
+    const targets = (await client.send("Target.getTargets")).result
+      ?.targetInfos as Array<{ browserContextId: string }>;
+    const browserContextId = targets[0]!.browserContextId;
+    const cookies = [
+      { name: "synthetic", value: "fixture", url: "https://example.test/" },
+    ];
+    for (const scope of [{}, { browserContextId }]) {
+      expect((await client.send("Storage.getCookies", scope)).result).toEqual({
+        cookies: [],
+      });
+      expect(
+        (await client.send("Storage.setCookies", { ...scope, cookies })).error,
+      ).toBeUndefined();
+    }
+    expect(
+      calls.filter((call) => call.method === "Network.getAllCookies"),
+    ).toEqual([
+      { method: "Network.getAllCookies", params: {}, sessionId: undefined },
+      { method: "Network.getAllCookies", params: {}, sessionId: undefined },
+    ]);
+    expect(
+      calls.filter((call) => call.method === "Network.setCookies"),
+    ).toEqual([
+      {
+        method: "Network.setCookies",
+        params: { cookies },
+        sessionId: undefined,
+      },
+      {
+        method: "Network.setCookies",
+        params: { cookies },
+        sessionId: undefined,
+      },
+    ]);
+    expect(calls.some((call) => call.method.startsWith("Storage."))).toBe(
+      false,
+    );
+  });
+
+  test("refuses cookie access to unknown contexts or without an owned live page", async () => {
+    const { bridge, transport, calls } = await fixture();
+    const client = await connect(transport);
+    for (const method of ["Storage.getCookies", "Storage.setCookies"]) {
+      expect(
+        (
+          await client.send(method, {
+            browserContextId: "app-renderer",
+            cookies: [],
+          })
+        ).error?.message,
+      ).toContain("Unknown browser context");
+      bridge.releasePage("owned-tab");
+      expect(
+        (await client.send(method, { cookies: [] })).error?.message,
+      ).toContain("browser page is required");
+    }
+    expect(calls.some((call) => call.method.startsWith("Network."))).toBe(
+      false,
+    );
   });
 
   test("detaches a service worker through its parent without closing the page", async () => {

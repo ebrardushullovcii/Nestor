@@ -104,14 +104,20 @@ export function formatDiscoverySourceAccounting(
         : label;
     return `${value} ${noun}`;
   };
+  // "0 rejected · 0 deferred" said nothing happened, five times over. A zero
+  // is left out; the first count stays so the line always says something.
+  const optional = (value: number | null, label: string) =>
+    value === 0 ? null : count(value, label);
   return [
     count(source.inspected, "inspected"),
-    count(source.saved, "saved"),
-    count(source.rejected, "rejected"),
-    count(source.duplicates, "duplicates"),
-    count(source.deferred, "deferred"),
-    count(source.pagesCovered, "pages covered"),
-  ].join(" · ");
+    optional(source.saved, "saved"),
+    optional(source.rejected, "rejected"),
+    optional(source.duplicates, "duplicates"),
+    optional(source.deferred, "deferred"),
+    optional(source.pagesCovered, "pages covered"),
+  ]
+    .filter((segment) => segment !== null)
+    .join(" · ");
 }
 
 export const DiscoveryRunReportSchema = z.object({
@@ -879,17 +885,21 @@ export function formatDiscoveryAccounting(
     value == null
       ? null
       : `${value} ${value === 1 && label === "pages covered" ? "page covered" : label}`;
+  // Merges, rejects, deferrals and pages are left out at zero ("0 deferred"
+  // was noise); what was seen, new and kept is said even when it is zero.
+  const nonZero = (value: number | null | undefined, label: string) =>
+    value === 0 ? null : count(value, label);
   return [
     count(report.found, "postings seen"),
     count(report.unique, "unique jobs"),
     count(report.new, "new to you"),
     count(report.retained, "kept by this plan"),
-    count(report.duplicates, "duplicates merged"),
+    nonZero(report.duplicates, "duplicates merged"),
     ...(report.rejected !== undefined
       ? [
-          count(report.rejected, "rejected"),
-          count(report.deferred, "deferred"),
-          count(report.pagesCovered, "pages covered"),
+          nonZero(report.rejected, "rejected"),
+          nonZero(report.deferred, "deferred"),
+          nonZero(report.pagesCovered, "pages covered"),
         ]
       : []),
   ]

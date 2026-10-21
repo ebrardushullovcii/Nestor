@@ -249,6 +249,13 @@ export function DiscoverySearchBar(props: {
     selectedSourceIds === "all"
       ? availableSources.length
       : selectedSourceIds.length;
+  const [sourceFilter, setSourceFilter] = useState("");
+  const sourceFilterNeedle = sourceFilter.trim().toLocaleLowerCase();
+  const visibleSources = sourceFilterNeedle
+    ? availableSources.filter((source) =>
+        source.label.toLocaleLowerCase().includes(sourceFilterNeedle),
+      )
+    : availableSources;
   const sourceSelectionLabel =
     selectedSourceIds === "all"
       ? "All sources"
@@ -386,14 +393,44 @@ export function DiscoverySearchBar(props: {
             ref={sourcePickerSurfaceRef}
             role="dialog"
           >
-          <button
-            className="mb-1 w-full rounded-(--radius-small) px-2 py-1.5 text-left text-sm font-medium hover:bg-secondary"
-            onClick={() => setSelectedSourceIds("all")}
-            type="button"
-          >
-            All sources in this plan
-          </button>
-          {availableSources.map((source) => {
+          {/* Hundreds of sources: a name filter and All / None, so searching
+              one source is not hundreds of unticks. */}
+          {availableSources.length > 8 ? (
+            <input
+              aria-label="Find a source"
+              className="mb-1 h-8 w-full rounded-(--radius-small) border border-(--control-border) bg-background px-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
+              onChange={(event) => setSourceFilter(event.target.value)}
+              placeholder="Find a source"
+              type="search"
+              value={sourceFilter}
+            />
+          ) : null}
+          <div className="mb-1 flex items-center justify-between gap-2 px-2 py-1 text-sm">
+            <span className="text-foreground-soft">
+              {selectedSourceCount} of {availableSources.length} selected
+            </span>
+            <span className="flex gap-1">
+              <button
+                aria-label="All sources in this plan"
+                className="rounded-(--radius-small) px-2 py-0.5 font-medium hover:bg-secondary"
+                disabled={isSearchRunning}
+                onClick={() => setSelectedSourceIds("all")}
+                type="button"
+              >
+                All
+              </button>
+              <button
+                aria-label="No sources"
+                className="rounded-(--radius-small) px-2 py-0.5 font-medium hover:bg-secondary"
+                disabled={isSearchRunning}
+                onClick={() => setSelectedSourceIds([])}
+                type="button"
+              >
+                None
+              </button>
+            </span>
+          </div>
+          {visibleSources.map((source) => {
             const checked =
               selectedSourceIds === "all" ||
               selectedSourceIds.includes(source.id);

@@ -112,7 +112,9 @@ export async function checkSameCompanySends(input: {
     const [state, records, jobs, results, runs] = await Promise.all([
       input.repository.getIntelligenceState(),
       input.repository.listApplicationRecords(),
-      input.repository.listSavedJobs(),
+      // Read-only company grouping; the cached display rows spare a full
+      // parse of every saved job on each send.
+      input.repository.readSavedJobsProjection(),
       input.repository.listApplyJobResults(),
       input.repository.listApplyRuns(),
     ]);

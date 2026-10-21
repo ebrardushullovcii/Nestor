@@ -48,16 +48,27 @@ function Count({
   }
 
   const rounded = Math.floor(value);
+  // The rail marker sits on an icon's corner; "678" covered most of the
+  // glyph on the collapsed sidebar. It caps at 99+ and keeps the full number
+  // for assistive technology.
+  const capped = variant === "rail-marker" && rounded > 99;
 
   return (
     <span
       className={cn(COUNT_VARIANT_CLASS[variant], className)}
       data-slot="count"
       data-variant={variant}
+      {...(capped ? { title: String(rounded) } : {})}
       {...props}
     >
-      <span aria-hidden={label ? "true" : undefined}>{rounded}</span>
-      {label ? <span className="sr-only">{`${rounded} ${label}`}</span> : null}
+      <span aria-hidden={label || capped ? "true" : undefined}>
+        {capped ? "99+" : rounded}
+      </span>
+      {label || capped ? (
+        <span className="sr-only">
+          {label ? `${rounded} ${label}` : String(rounded)}
+        </span>
+      ) : null}
     </span>
   );
 }

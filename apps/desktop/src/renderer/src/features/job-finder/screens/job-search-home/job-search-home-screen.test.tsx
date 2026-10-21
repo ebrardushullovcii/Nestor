@@ -195,11 +195,47 @@ describe("JobSearchHomeScreen", () => {
         }}
       />,
     );
-    expect(screen.getByText(/1 job source is failing/)).toBeTruthy();
+    expect(screen.getByText(/1 job source needs attention/)).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Fix in Job sources" }),
+      screen.getByRole("button", { name: "Open job sources" }),
     ).toBeTruthy();
     expect(screen.queryByTestId("home-discovery-run-feedback")).toBeNull();
+  });
+
+  it("keeps the failing-sources line hidden once the person hides it, until another source fails", () => {
+    window.localStorage.clear();
+    const ws = workspace();
+    ws.searchPreferences.discovery.targets[0]!.staleReason =
+      "Starting page returned HTTP 404";
+    const view = render(
+      <JobSearchHomeScreen {...baseProps()} workspace={ws} />,
+    );
+    const line = screen.getByText(/1 job source needs attention/);
+    // A quiet line: no red dot.
+    expect(
+      line
+        .closest("[data-page-status-item]")
+        ?.querySelector("[data-page-status-dot]"),
+    ).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /^Hide for now: 1 job source needs attention/,
+      }),
+    );
+    expect(screen.queryByText(/job source needs attention/)).toBeNull();
+
+    view.unmount();
+    render(<JobSearchHomeScreen {...baseProps()} workspace={ws} />);
+    expect(screen.queryByText(/job source needs attention/)).toBeNull();
+
+    cleanup();
+    const another = workspace();
+    another.searchPreferences.discovery.targets[0]!.staleReason =
+      "Starting page returned HTTP 404";
+    another.searchPreferences.discovery.targets[0]!.id = "target-other";
+    render(<JobSearchHomeScreen {...baseProps()} workspace={another} />);
+    expect(screen.getByText(/1 job source needs attention/)).toBeTruthy();
+    window.localStorage.clear();
   });
 
   it("names a 404-only search failure once, on the next step", () => {
@@ -627,6 +663,35 @@ describe("listCurrentUnreadNotifications", () => {
       } as unknown as JobFinderRendererWorkspaceSnapshot,
     );
     expect(kept.map((entry) => entry.id)).toEqual(["n_open", "n_src"]);
+  });
+
+  it("drops a note about a hold that no longer exists (ADR 0051)", () => {
+    const note = (id: string, body: string) =>
+      ({
+        id,
+        campaignId: "c",
+        kind: "blocked_work",
+        title: "Blocked: QA Lead",
+        body,
+        createdAt: "2026-10-17T01:23:11.597Z",
+        unread: true,
+        readAt: null,
+        jobId: "job_qa",
+        sourceTargetId: null,
+      }) as unknown as CampaignNotification;
+    const kept = listCurrentUnreadNotifications(
+      [
+        note(
+          "n_retired",
+          "The resume for 'QA Lead' leaves out 2 roles that Job Finder wants you to confirm first.",
+        ),
+        note("n_current", "The application page could not be opened."),
+      ],
+      {
+        applicationRecords: [],
+      } as unknown as JobFinderRendererWorkspaceSnapshot,
+    );
+    expect(kept.map((entry) => entry.id)).toEqual(["n_current"]);
   });
 
   it("drops a job's failure note once a newer attempt for that job started", () => {

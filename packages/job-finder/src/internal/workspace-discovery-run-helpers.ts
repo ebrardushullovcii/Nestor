@@ -198,14 +198,27 @@ export function completeTargetExecution(
 
   const executionSummary = summarizeTargetExecutions(nextRun.targetExecutions);
 
-  return DiscoveryRunRecordSchema.parse({
+  // Every source execution and log event was validated when it was put on
+  // the run (updateTargetExecution, appendDiscoveryEvent). Parsing the whole
+  // run again for each finished source copied every execution and event of
+  // a 700-source search hundreds of times, and the copies made each save
+  // compare and rewrite them all. Only the run's own fields are parsed; the
+  // validated rows are kept as they are.
+  const parsed = DiscoveryRunRecordSchema.parse({
     ...nextRun,
+    targetExecutions: [],
+    activity: [],
     summary: {
       ...nextRun.summary,
       ...executionSummary,
       targetsCompleted: countCompletedTargetExecutions(nextRun),
     },
   });
+  return {
+    ...parsed,
+    targetExecutions: nextRun.targetExecutions,
+    activity: nextRun.activity,
+  };
 }
 
 export function finalizeRunningTargetExecutions(

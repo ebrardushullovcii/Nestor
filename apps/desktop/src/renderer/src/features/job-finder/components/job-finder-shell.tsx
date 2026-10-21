@@ -282,9 +282,9 @@ export const DESTINATION_COUNT_RAIL_MARKER_LAYOUT_CLASS =
  * 3:1 non-text floor in both themes.
  */
 export const SHELL_HEADER_CLASS =
-  "relative z-50 shrink-0 overflow-visible border-b border-(--surface-panel-shell-border) bg-(--shell-header-bg) backdrop-blur-sm sm:fixed sm:inset-x-0 sm:top-0 min-[1440px]:h-14";
+  "relative z-50 shrink-0 overflow-visible border-b border-(--surface-panel-shell-border) bg-(--shell-header-bg) backdrop-blur-sm sm:fixed sm:inset-x-0 sm:top-0 xl:h-14";
 export const SHELL_HEADER_GRID_CLASS =
-  "job-finder-shell-grid grid grid-rows-[3.5rem_auto_auto] items-stretch overflow-visible pl-2 pr-2 sm:grid-rows-[3.5rem_3.75rem] sm:pl-3 sm:pr-3 min-[1440px]:!grid-rows-[3.5rem]";
+  "job-finder-shell-grid grid grid-rows-[3.5rem_auto_auto] items-stretch overflow-visible pl-2 pr-2 sm:grid-rows-[3.5rem_3.75rem] sm:pl-3 sm:pr-3 xl:grid-rows-[3.5rem]";
 /**
  * The module switcher is the subtitle of the brand lockup in the header
  * (`JobFinderShellBrand`), so there is exactly one instance at every width and
@@ -354,7 +354,7 @@ export function SidebarDestinationLabel({
 export const SHELL_ROOT_CLASS =
   "flex h-dvh min-h-0 flex-col overflow-hidden text-foreground";
 export const SHELL_CONTENT_CLASS =
-  "flex min-h-0 min-w-0 flex-1 flex-col sm:pt-[7.25rem] min-[1440px]:!pt-14 min-[1440px]:pl-(--job-finder-side-width)";
+  "flex min-h-0 min-w-0 flex-1 flex-col sm:pt-[7.25rem] xl:pt-14 min-[1440px]:pl-(--job-finder-side-width)";
 export const SHELL_MAIN_SCROLLING_CLASS = cn(
   "relative min-h-0 min-w-0 flex-1 overflow-x-hidden outline-none",
   "screen-scroll-area overflow-y-auto px-3 min-[1440px]:px-4",
@@ -761,6 +761,12 @@ export function JobFinderShell({
   );
   const compactPrimaryScreens = primaryScreens.slice(0, compactVisibleCount);
   const compactHiddenScreens = primaryScreens.slice(compactVisibleCount);
+  // Measured again only when the destinations change. A count changing its
+  // badge's width reaches the observer below; re-measuring on every
+  // workspace update forced a page layout after each Find jobs decision.
+  const primaryScreenKey = primaryScreens
+    .map((screen) => `${screen.id}:${screen.label}`)
+    .join("|");
   useLayoutEffect(() => {
     const scroll = compactRouteScrollRef.current;
     const measurement = compactMeasureRef.current;
@@ -794,7 +800,7 @@ export function JobFinderShell({
     observer.observe(scroll);
     observer.observe(measurement);
     return () => observer.disconnect();
-  }, [primaryScreens]);
+  }, [primaryScreenKey]);
   // Grouped by what each destination *is*, not by which part of the product
   // introduced it. The person's own files live under Profile › Files now, so
   // the workspace group is Settings alone.
@@ -1373,9 +1379,13 @@ export function JobFinderShell({
             // `min-[1440px]:!pt-14`); do not drop it back to a plain utility.
             className={cn(
               "col-span-2 col-start-1 row-start-2 flex min-w-0 items-center justify-center overflow-visible sm:col-span-1 sm:col-start-1 sm:justify-center min-[1440px]:hidden",
+              // From 1280px the header is one row: the card moves up between
+              // the brand and the (icon-only) actions, sized to its content
+              // so the rest of the row stays a window drag area.
+              "xl:row-start-1 xl:justify-self-center",
               isMac
-                ? "sm:pr-64 max-[899px]:pr-40 min-[900px]:!pr-0"
-                : "sm:pr-64 max-[899px]:pr-40 min-[900px]:!pr-80",
+                ? "sm:pr-64 max-[899px]:pr-40 min-[900px]:!pr-0 xl:ml-56 xl:mr-[17rem]"
+                : "sm:pr-64 max-[899px]:pr-40 min-[900px]:!pr-80 xl:!pr-0 xl:ml-40 xl:mr-[25rem]",
             )}
             style={noDragRegionStyle}
           >
@@ -1756,7 +1766,7 @@ export function JobFinderShell({
               "col-span-2 col-start-1 row-start-3 flex min-w-0 items-center justify-center gap-1.5 pr-2 max-[899px]:gap-1 max-[899px]:pr-1 sm:absolute sm:z-40 sm:w-auto sm:justify-end min-[1440px]:gap-2 min-[1440px]:!static min-[1440px]:col-span-1 min-[1440px]:col-start-3 min-[1440px]:row-start-1",
               isMac
                 ? "sm:right-0 sm:top-14 sm:h-[3.75rem] min-[900px]:!top-0 min-[900px]:!h-14"
-                : "sm:right-0 sm:top-14 sm:h-[3.75rem] min-[1440px]:mr-36 min-[1440px]:!h-14 min-[1440px]:!z-40",
+                : "sm:right-0 sm:top-14 sm:h-[3.75rem] xl:top-0 xl:h-14 xl:mr-36 min-[1440px]:!z-40",
             )}
             role="group"
             style={noDragRegionStyle}
@@ -1823,7 +1833,7 @@ export function JobFinderShell({
                 {/* A bare bell and a number read as an unlabelled glyph pill
                     beside the task-center pill. The compact navigation row
                     reserves the width this label needs. */}
-                <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden">
+                <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden xl:max-[1439px]:!hidden">
                   Needs you
                 </span>
                 {actionScreen.count !== null ? (
@@ -2030,7 +2040,7 @@ export function JobFinderShell({
       <div
         aria-hidden="true"
         className={cn(
-          "pointer-events-none fixed inset-x-0 top-[7.25rem] z-30 hidden sm:block min-[1440px]:top-14 min-[1440px]:left-(--job-finder-side-width)",
+          "pointer-events-none fixed inset-x-0 top-[7.25rem] z-30 hidden sm:block xl:top-14 min-[1440px]:left-(--job-finder-side-width)",
           SHELL_HEADER_MASK_HEIGHT_CLASS,
           "bg-(--shell-header-bg)",
         )}

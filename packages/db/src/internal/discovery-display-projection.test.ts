@@ -283,3 +283,82 @@ test("other connections invalidate discovery display state and reopening retains
     "completed",
   );
 });
+
+test("display ledger follows in-place edits, appends, removals and moves in stored order", async () => {
+  const temp = await createTempRepository("nestor-discovery-display-ledger-");
+  cleanup.push(temp.cleanup);
+  const repo = await temp.createRepository();
+  cleanup.push(() => repo.close());
+  const entry = (id: string, lastSeenAt = "2026-10-13T10:00:01.000Z") =>
+    DiscoveryLedgerEntrySchema.parse({
+      id,
+      source: "target_site",
+      targetId: "target_checkpoint",
+      canonicalUrl: `https://jobs.example.com/roles/${id}`,
+      title: `Listing ${id}`,
+      firstSeenAt: "2026-10-13T10:00:00.000Z",
+      lastSeenAt,
+    });
+  await repo.commitDiscoveryStateUpdate((current) => ({
+    ...current,
+    discoveryLedger: ["a", "b", "c", "d"].map((id) => entry(id)),
+  }));
+  const ids = async () =>
+    (await repo.readDiscoveryDisplayProjection()).discoveryLedger.map(
+      (row) => `${row.id}@${row.lastSeenAt}`,
+    );
+  const canonicalIds = async () =>
+    (await repo.getDiscoveryState()).discoveryLedger.map(
+      (row) => `${row.id}@${row.lastSeenAt}`,
+    );
+  const first = await repo.readDiscoveryDisplayProjection();
+  const unchanged = first.discoveryLedger[0];
+
+  // A sighting rewritten where it stands, and one listing appended.
+  await repo.commitDiscoveryStateUpdate((current) => ({
+    ...current,
+    discoveryLedger: [
+      ...current.discoveryLedger.map((row) =>
+        row.id === "c" ? entry("c", "2026-10-14T10:00:00.000Z") : row,
+      ),
+      entry("e"),
+    ],
+  }));
+  const second = await repo.readDiscoveryDisplayProjection();
+  expect(second.discoveryLedger[0]).toBe(unchanged);
+  expect(await ids()).toEqual(await canonicalIds());
+  expect(await ids()).toEqual([
+    "a@2026-10-13T10:00:01.000Z",
+    "b@2026-10-13T10:00:01.000Z",
+    "c@2026-10-14T10:00:00.000Z",
+    "d@2026-10-13T10:00:01.000Z",
+    "e@2026-10-13T10:00:01.000Z",
+  ]);
+
+  // A listing seen again moves to the end.
+  await repo.commitDiscoveryStateUpdate((current) => ({
+    ...current,
+    discoveryLedger: [
+      ...current.discoveryLedger.filter((row) => row.id !== "a"),
+      entry("a", "2026-10-15T10:00:00.000Z"),
+    ],
+  }));
+  expect(await ids()).toEqual(await canonicalIds());
+  expect((await ids()).at(-1)).toBe("a@2026-10-15T10:00:00.000Z");
+
+  // A removal, then a move to the front.
+  await repo.commitDiscoveryStateUpdate((current) => ({
+    ...current,
+    discoveryLedger: current.discoveryLedger.filter((row) => row.id !== "b"),
+  }));
+  expect(await ids()).toEqual(await canonicalIds());
+  await repo.commitDiscoveryStateUpdate((current) => ({
+    ...current,
+    discoveryLedger: [
+      current.discoveryLedger.at(-1)!,
+      ...current.discoveryLedger.slice(0, -1),
+    ],
+  }));
+  expect((await ids())[0]).toBe("a@2026-10-15T10:00:00.000Z");
+  expect(await ids()).toEqual(await canonicalIds());
+});

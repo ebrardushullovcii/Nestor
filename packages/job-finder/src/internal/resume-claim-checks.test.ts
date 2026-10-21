@@ -569,7 +569,8 @@ describe("resume claim checks before a draft is kept (ADR 0041)", () => {
           bullet.included,
         ]),
       ).toContainEqual([line.invented, false]);
-      expect(checkResumeClaims).toHaveBeenCalledTimes(2);
+      // Hiding the line leaves no new wording, so nothing is asked again.
+      expect(checkResumeClaims).toHaveBeenCalledTimes(1);
     });
 
     test("a fix that rewords a line already there hides the line too", async () => {

@@ -1,3 +1,4 @@
+import { buildFitVerdictContext } from "@nestor/ai-providers";
 import type {
   CandidateProfile,
   FitJudgment,
@@ -82,6 +83,11 @@ function createFingerprint(prefix: string, value: unknown): string {
   return `${prefix}_${hash.toString(16).padStart(16, "0")}`;
 }
 
+/**
+ * Everything the assessment's arithmetic reads: the whole profile and goals.
+ * Fit verdicts were stamped with it until they got their own fingerprint
+ * (below), so it also identifies a verdict stored by an earlier build.
+ */
 export function createMatchAssessmentContextFingerprint(
   profile: CandidateProfile,
   searchPreferences: JobSearchPreferences,
@@ -99,6 +105,43 @@ export function createMatchAssessmentContextFingerprint(
       },
     },
   );
+}
+
+/**
+ * What a fit verdict was given on: the person's facts and goals the model
+ * reads (buildFitVerdictContext), nothing else. A changed phone number,
+ * link, saved answer or source list leaves every verdict current.
+ */
+export function createFitVerdictFingerprint(
+  profile: CandidateProfile,
+  searchPreferences: JobSearchPreferences,
+): string {
+  return createFingerprint(
+    `fit_verdict_v1_logic${MATCH_ASSESSMENT_LOGIC_REVISION}`,
+    buildFitVerdictContext(profile, searchPreferences),
+  );
+}
+
+/**
+ * The assessment with a verdict stamped by an earlier build re-stamped: a
+ * verdict whose stamp is the whole-input fingerprint of these same inputs
+ * was current, and stays current under the verdict fingerprint. Changing
+ * the fingerprint function therefore never asks the model again.
+ */
+export function rebindLegacyVerdict<T extends Pick<MatchAssessment, "judgment">>(
+  assessment: T,
+  fingerprints: { verdictFingerprint: string; legacyVerdictFingerprint: string },
+): T {
+  const judgment = assessment.judgment;
+  if (judgment?.contextFingerprint !== fingerprints.legacyVerdictFingerprint)
+    return assessment;
+  return {
+    ...assessment,
+    judgment: {
+      ...judgment,
+      contextFingerprint: fingerprints.verdictFingerprint,
+    },
+  };
 }
 
 export function createMatchAssessmentPostingFingerprint(
@@ -134,6 +177,18 @@ export function createMatchAssessmentSession(input: {
     input.profile,
     input.searchPreferences,
   );
+  const verdictFingerprint = createFitVerdictFingerprint(
+    input.profile,
+    input.searchPreferences,
+  );
+  const fingerprints = {
+    verdictFingerprint,
+    legacyVerdictFingerprint: contextFingerprint,
+  };
+  const rebind = <T extends MatchAssessment | null | undefined>(
+    assessment: T,
+  ): T =>
+    assessment ? rebindLegacyVerdict(assessment, fingerprints) : assessment;
   const cache = new Map<string, MatchAssessment>();
   let computationCount = 0;
 
@@ -145,10 +200,15 @@ export function createMatchAssessmentSession(input: {
    */
   const assess = (
     posting: JobPosting & { matchAssessment?: MatchAssessment | null },
-    carried: FitJudgment | null = readCarriedJudgment(posting),
+    carriedInput: FitJudgment | null = readCarriedJudgment(posting),
   ): MatchAssessment => {
-    const previous = (posting as { matchAssessment?: MatchAssessment })
-      .matchAssessment;
+    const carried =
+      carriedInput?.contextFingerprint === fingerprints.legacyVerdictFingerprint
+        ? { ...carriedInput, contextFingerprint: verdictFingerprint }
+        : carriedInput;
+    const previous = rebind(
+      (posting as { matchAssessment?: MatchAssessment }).matchAssessment,
+    );
     // Keep the requirements and evidence from the completed full read too,
     // rather than rebuilding empty requirements around its carried score.
     if (
@@ -190,8 +250,9 @@ export function createMatchAssessmentSession(input: {
 
   const assessPersisted = (
     posting: JobPosting,
-    persistedAssessment: MatchAssessment | null | undefined,
+    storedAssessment: MatchAssessment | null | undefined,
   ): MatchAssessment => {
+    const persistedAssessment = rebind(storedAssessment);
     const postingFingerprint = createMatchAssessmentPostingFingerprint(
       createMatchAssessmentPostingInput(posting),
     );
@@ -236,6 +297,8 @@ export function createMatchAssessmentSession(input: {
     assessPersisted,
     remember,
     contextFingerprint,
+    /** What verdicts given in this session are stamped with and checked against. */
+    verdictFingerprint,
     getComputationCount: () => computationCount,
   };
 }

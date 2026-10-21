@@ -154,6 +154,9 @@ export function deriveRepeatedlyFailingTargetIds(
         broken: false,
       };
       if (current.broken) continue;
+      // A run-side failure (network, time) neither counts against the site
+      // nor ends its streak.
+      if (execution.state === "failed" && !failedOnSite(execution)) continue;
       if (execution.state === "failed") {
         streaks.set(execution.targetId, {
           failures: current.failures + 1,
@@ -186,8 +189,23 @@ export type EnabledSourceHealthCounts = {
   total: number;
 };
 
+// "fetch failed" and "API request timed out" are this computer's connection
+// or a busy search, not the site: one 900-source search left 663 sources
+// failing with them, and Home called every one broken. A job board feed that
+// fails for a passing reason says it "is tried again on the next search".
 const RUN_SIDE_FAILURE_PATTERN =
-  /ERR_INTERNET_DISCONNECTED|ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|did not answer in time|ran out of time|was stopped/iu;
+  /ERR_INTERNET_DISCONNECTED|ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_TIMED_OUT|fetch failed|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|did not answer in time|could not be reached|tried again on the next search|ran out of time|was stopped/iu;
+
+/** A failure that says something about the site rather than this run. */
+function failedOnSite(execution: {
+  state: DiscoveryTargetExecutionState;
+  warning?: string | null;
+}): boolean {
+  return (
+    execution.state === "failed" &&
+    !RUN_SIDE_FAILURE_PATTERN.test(execution.warning ?? "")
+  );
+}
 
 export function listSourceAttentionReasons(
   target: DiscoverySourceHealthFields,
@@ -198,12 +216,9 @@ export function listSourceAttentionReasons(
   const latestExecution = signals.latestExecutions?.get(target.id);
   // A search that lost the network or ran out of time says nothing about
   // the site itself; only a failure on the site counts against it.
-  const failedOnSite =
-    latestExecution?.state === "failed" &&
-    !RUN_SIDE_FAILURE_PATTERN.test(latestExecution.warning ?? "");
   if (
     target.staleReason ||
-    failedOnSite ||
+    (latestExecution && failedOnSite(latestExecution)) ||
     signals.repeatedlyFailingTargetIds?.has(target.id)
   ) {
     reasons.push("failing");
