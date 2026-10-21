@@ -538,6 +538,90 @@ describe("campaign workspace core", () => {
     expect(state?.campaigns[0]?.history[0]?.discoveryRunId).toBe("run_1");
   });
 
+  test("writes the plan membership of many jobs in parts, the run record with the last", async () => {
+    const seed = createSeed();
+    const jobs = Array.from({ length: 600 }, (_, index) =>
+      savedJob(`many_${String(index).padStart(3, "0")}`, 80),
+    );
+    const target = seed.searchPreferences.discovery.targets[0];
+    if (!target) throw new Error("Expected a saved source.");
+    const repository = createInMemoryJobFinderRepository({
+      ...seed,
+      savedJobs: jobs,
+      discovery: {
+        ...seed.discovery,
+        recentRuns: [
+          DiscoveryRunRecordSchema.parse({
+            id: "run_many",
+            campaignId: "campaign_precision",
+            state: "completed",
+            runPhase: "complete",
+            startedAt: "2026-08-15T10:00:00.000Z",
+            completedAt: "2026-08-15T10:01:00.000Z",
+            scope: "run_all",
+            targetIds: [target.id],
+            targetExecutions: [
+              {
+                targetId: target.id,
+                adapterKind: target.adapterKind,
+                state: "completed",
+                encounteredJobIds: jobs.map((job) => job.id),
+              },
+            ],
+            activity: [],
+            summary: { outcome: "completed" },
+          }),
+        ],
+      },
+    });
+    const template = createCampaign({
+      id: "campaign_precision",
+      name: "Precision",
+      mode: "precision",
+      searchPreferences: seed.searchPreferences,
+      now: "2026-08-15T09:00:00.000Z",
+    });
+    await repository.saveCampaignState({
+      notifications: [],
+      activeCampaignId: template.id,
+      campaigns: [
+        { ...template, limits: { ...template.limits, retainedJobTarget: 1000 } },
+      ],
+    });
+    const commits: { ids: number; run: boolean }[] = [];
+    const commit = repository.commitSavedJobDelta.bind(repository);
+    repository.commitSavedJobDelta = (input) => {
+      commits.push({
+        ids: input.updateJobIds?.length ?? -1,
+        run: input.updateDiscoveryState !== undefined,
+      });
+      return commit(input);
+    };
+
+    await recordCampaignDiscoveryResult({
+      ctx: {
+        repository,
+        withCampaignTransition: async (operation) => operation(),
+      } as WorkspaceServiceContext,
+      campaignId: template.id,
+      beforeJobProvenanceFingerprints: new Map(),
+    });
+
+    expect(commits).toEqual([
+      { ids: 250, run: false },
+      { ids: 250, run: false },
+      { ids: 100, run: true },
+    ]);
+    const saved = await repository.listSavedJobs();
+    expect(
+      saved.every((job) => job.campaignIds?.includes("campaign_precision")),
+    ).toBe(true);
+    expect(
+      (await repository.getDiscoveryState()).recentRuns[0]?.summary.report
+        ?.retained,
+    ).toBe(600);
+  });
+
   test("retains discovery-only staged jobs so the active campaign can display them", async () => {
     const seed = createSeed();
     const jobs = [

@@ -120,9 +120,23 @@ export function useDiscoveryTriage(input: {
   const current = input.inspectedJob;
   const currentId = current?.id ?? null;
   const currentWeaker = currentId !== null && weakerIds.has(currentId);
-  const openCount = input.orderedJobIds.filter(
-    (jobId) => weakerIds.has(jobId) === currentWeaker && isOpen(jobId),
-  ).length;
+  // Open jobs in each group, counted once per change to the list or the
+  // decisions. Counted on every render, moving to the next job walked all
+  // 6,000 rows again.
+  const orderedJobIds = input.orderedJobIds;
+  const openCounts = useMemo(() => {
+    let weaker = 0;
+    let stronger = 0;
+    for (const jobId of orderedJobIds) {
+      if (decided.has(jobId) || shortlistedIds.has(jobId)) continue;
+      const job = jobsById.get(jobId);
+      if (!job || SHORTLISTED_STATUSES.has(job.status)) continue;
+      if (weakerIds.has(jobId)) weaker += 1;
+      else stronger += 1;
+    }
+    return { weaker, stronger };
+  }, [decided, jobsById, orderedJobIds, shortlistedIds, weakerIds]);
+  const openCount = currentWeaker ? openCounts.weaker : openCounts.stronger;
   const decidedCount = [...decided.values()].filter(
     (weaker) => weaker === currentWeaker,
   ).length;

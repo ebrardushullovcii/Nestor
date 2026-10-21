@@ -107,6 +107,17 @@ const DISCOVERY_RESULT_GROUP_ORDER: Record<DiscoveryResultGroupId, number> = {
  * still decide order inside a band; they must not split the same caption into
  * two runs with a differently-captioned band between them.
  */
+/** The band order of two rows: negative when `left`'s band comes first. */
+export function compareDiscoveryResultGroups(
+  left: JobListRow,
+  right: JobListRow,
+): number {
+  return (
+    DISCOVERY_RESULT_GROUP_ORDER[getRowResultGroup(left)] -
+    DISCOVERY_RESULT_GROUP_ORDER[getRowResultGroup(right)]
+  );
+}
+
 export function orderDiscoveryResultsByGroup(
   jobs: readonly JobListRow[],
 ): JobListRow[] {

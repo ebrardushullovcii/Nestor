@@ -119,7 +119,7 @@ import type {
   JobFinderResumeWorkspace,
   JobFinderRepositoryState,
   JobFinderTestSaveSurface,
-  JobFinderAgentDiscoveryResult,
+  JobFinderAgentDiscoveryReply,
   JobFinderSettings,
   ProfileSetupState,
   ProjectGroupedManualAnswerCommand,
@@ -467,7 +467,7 @@ declare global {
           onActivity?: (event: DiscoveryActivityEvent) => void,
           targetId?: string,
           searchRequest?: JobFinderSearchRequest,
-        ) => Promise<JobFinderAgentDiscoveryResult>;
+        ) => Promise<JobFinderAgentDiscoveryReply>;
         runSourceDebug: (
           targetId: string,
           onProgress?: (event: SourceDebugProgressEvent) => void,

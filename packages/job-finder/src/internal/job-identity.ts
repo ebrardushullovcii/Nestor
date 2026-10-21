@@ -644,7 +644,11 @@ export function createJobIdentityIndex<T extends object>(
   };
 
   const resolve = (identity: JobIdentityInput): JobIdentityResolution<T> => {
-    const aliases = buildJobIdentityAliases(identity);
+    // A frozen identity (a stored ledger row) is resolved again on every
+    // workspace refresh; its aliases are built once.
+    const aliases = Object.isFrozen(identity)
+      ? readIndexedAliases(identity, identity)
+      : buildJobIdentityAliases(identity);
     // A URL still matches when corrected card facts have no indexed alias.
     // Check every known alias before selecting it: an alias naming another
     // posting must not attach that posting's history or activity to this one.

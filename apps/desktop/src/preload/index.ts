@@ -120,7 +120,7 @@ import type {
   JobFinderRepositoryState,
   JobFinderTestSaveSurface,
   JobFinderAgentDiscoveryActionInput,
-  JobFinderAgentDiscoveryResult,
+  JobFinderAgentDiscoveryReply,
   JobFinderSearchRequest,
   JobFinderSettings,
   ProfileSetupState,
@@ -1076,7 +1076,7 @@ const desktopApi = {
 
       const promise = ipcRenderer
         .invoke("job-finder:run-agent-discovery", payload)
-        .finally(cleanup) as Promise<JobFinderAgentDiscoveryResult>;
+        .finally(cleanup) as Promise<JobFinderAgentDiscoveryReply>;
 
       return promise;
     },

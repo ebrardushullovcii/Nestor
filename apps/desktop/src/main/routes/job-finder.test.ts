@@ -18,6 +18,7 @@ import {
   DiscoveryRunRecordSchema,
   DiscoveryJobViewSchema,
   JobFinderWorkspaceSyncResultSchema,
+  JobFinderAgentDiscoveryReplySchema,
   type JobFinderWorkspaceEntityMutationInput,
   JobFinderProfileCopilotPatchGroupActionInputSchema,
   JobFinderResumePreviewSchema,
@@ -3972,7 +3973,10 @@ describe("job-finder agent discovery outcome routes", () => {
       { requestId: "agent_discovery_partial", targetId: null },
     );
 
-    expect(result).toEqual({ outcome: "cancelled", snapshot });
+    expect(result).toMatchObject({
+      outcome: "cancelled",
+      sync: { kind: "snapshot", snapshot },
+    });
     // Derivation came from the returned run state; the abort fallback never
     // ran.
     expect(mockGetWorkspaceProjection).not.toHaveBeenCalled();
@@ -3994,7 +3998,10 @@ describe("job-finder agent discovery outcome routes", () => {
       { requestId: "agent_discovery_abort", targetId: null },
     );
 
-    expect(result).toEqual({ outcome: "cancelled", snapshot: freshSnapshot });
+    expect(result).toMatchObject({
+      outcome: "cancelled",
+      sync: { kind: "snapshot", snapshot: freshSnapshot },
+    });
     expect(mockGetWorkspaceProjection).toHaveBeenCalledTimes(1);
   });
 
@@ -4015,8 +4022,67 @@ describe("job-finder agent discovery outcome routes", () => {
       { requestId: "agent_discovery_done", targetId: null },
     );
 
-    expect(result).toEqual({ outcome: "completed", snapshot });
+    expect(result).toMatchObject({
+      outcome: "completed",
+      sync: { kind: "snapshot", snapshot },
+    });
     expect(mockGetWorkspaceProjection).not.toHaveBeenCalled();
+  });
+
+  it("answers a window that holds a revision with only what the search changed", async () => {
+    const before = workspaceWithRunState(
+      "2026-08-26T10:07:00.000Z",
+      "completed",
+      0,
+    );
+    const after = workspaceWithRunState(
+      "2026-08-26T10:08:00.000Z",
+      "completed",
+      12,
+    );
+    mockRunAgentDiscovery.mockResolvedValue(after);
+    mockGetWorkspaceProjection.mockResolvedValue(before);
+    mockGetJobFinderWorkspaceService.mockResolvedValue({
+      runAgentDiscovery: mockRunAgentDiscovery,
+      getWorkspaceProjection: mockGetWorkspaceProjection,
+    });
+    const handlers = new Map<string, RegisteredHandler>();
+    registerJobFinderRouteHandlers(
+      {
+        handle: (channel: string, handler: RegisteredHandler) => {
+          handlers.set(channel, handler);
+        },
+      } as unknown as IpcMain,
+      { includeBootstrapRoutes: false },
+    );
+    const window = { id: 8, send: vi.fn() };
+    const baseline = JobFinderWorkspaceSyncResultSchema.parse(
+      await handlers.get("job-finder:sync-workspace")!(
+        { sender: window },
+        { baseRevision: null },
+      ),
+    );
+    if (baseline.kind !== "snapshot")
+      throw new Error("Expected an initial snapshot");
+    await handlers.get("job-finder:note-workspace-revision")!(
+      { sender: window },
+      { revision: baseline.currentRevision },
+    );
+
+    const reply = JobFinderAgentDiscoveryReplySchema.parse(
+      await handlers.get("job-finder:run-agent-discovery")!(
+        { sender: window },
+        { requestId: "agent_discovery_delta", targetId: null },
+      ),
+    );
+
+    expect(reply.outcome).toBe("completed");
+    expect(reply.sync.kind).toBe("delta");
+    if (reply.sync.kind !== "delta") throw new Error("Expected a delta");
+    expect(reply.sync.delta.baseRevision).toBe(baseline.currentRevision);
+    expect(reply.sync.delta.recentDiscoveryRuns.upserts).toEqual(
+      after.recentDiscoveryRuns,
+    );
   });
 
   it("passes the person's search request to the discovery service", async () => {

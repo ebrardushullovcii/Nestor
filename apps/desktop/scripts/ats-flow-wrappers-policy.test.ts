@@ -477,8 +477,10 @@ describe("binding-variable handoff to the prepare-only smoke", () => {
     const runIndex = source.indexOf(
       'const discoveryResult = await runPhase(\n      "fast_configured_source_discovery"',
     );
+    // The route answers with what changed; the smoke reads the whole
+    // workspace when the reply carries no snapshot.
     const unwrapIndex = source.indexOf(
-      "latestWorkspace = discoveryResult.snapshot;",
+      "latestWorkspace =\n      discoveryResult.snapshot ??",
     );
     const summarizeIndex = source.indexOf(
       "report.discovery = buildDiscoverySummary(latestWorkspace);",

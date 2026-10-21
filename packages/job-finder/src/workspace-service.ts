@@ -103,6 +103,11 @@ const applicationPageOwningStates = new Set<ApplyJobResult["state"]>([
   "blocked",
 ]);
 
+/** One turn of the event loop, so pending window messages are served. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 /**
  * Automatic workflow cleanup must not destroy a different application that is
  * still waiting in its exact prepared tab. The person's explicit browser Close
@@ -886,6 +891,9 @@ export function createJobFinderWorkspaceService(
   context.getWorkspaceSnapshot = () => getWorkspaceSnapshot(true);
   context.readWorkspaceSnapshot = () =>
     snapshotProfileMethods.getWorkspaceSnapshot();
+  context.readWorkspaceProjection = () =>
+    snapshotProfileMethods.getWorkspaceProjection?.() ??
+    snapshotProfileMethods.getWorkspaceSnapshot();
   const crmMethods = createWorkspaceCrmMethods({
     ctx: context,
     getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
@@ -1024,6 +1032,11 @@ export function createJobFinderWorkspaceService(
       searchPreferences: searchPreferencesForCampaignRun(campaign),
       runJobBudget: campaign.limits.discoveryRunJobBudget ?? null,
     });
+    // The steps that close a search each take a while on a large workspace
+    // and none of them waits on anything outside main, so together they held
+    // main (and every window) for seconds at once. A turn of the event loop
+    // between them lets the window's messages through.
+    await yieldToEventLoop();
     await recordCampaignDiscoveryResult({
       ctx: context,
       campaignId,
@@ -1035,6 +1048,7 @@ export function createJobFinderWorkspaceService(
         ]),
       ),
     });
+    await yieldToEventLoop();
     if (options.nestedUserActionRecovery) {
       await intelligenceMethods.refreshCompanyIntelligenceState();
       return context.readWorkspaceSnapshot();

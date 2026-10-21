@@ -120,32 +120,47 @@ function sameRowAcrossProcesses(left: unknown, right: unknown): boolean {
   );
 }
 
+/**
+ * Each list's rows by id. A refresh compares the list the window holds with
+ * the new one; the list it holds was the new one of the refresh before, so
+ * its index is kept with it instead of being built again for thousands of
+ * jobs. `getId` must be the same for a given list.
+ */
+const rowsByIdOfList = new WeakMap<readonly object[], ReadonlyMap<string, unknown>>();
+
+function indexRowsById<T>(
+  rows: readonly T[],
+  getId: (value: T) => string,
+): ReadonlyMap<string, T> {
+  const cached = rowsByIdOfList.get(rows as readonly object[]);
+  if (cached) return cached as ReadonlyMap<string, T>;
+  const byId = new Map<string, T>();
+  for (const value of rows) byId.set(getId(value), value);
+  rowsByIdOfList.set(rows as readonly object[], byId);
+  return byId;
+}
+
 function buildEntitySlice<T>(
   previous: readonly T[],
   current: readonly T[],
   getId: (value: T) => string,
   same: (left: T, right: T) => boolean = sameValue,
 ): EntitySlice<T> {
-  const previousById = new Map<string, T>();
-  for (const value of previous) {
-    previousById.set(getId(value), value);
-  }
+  if (previous === current) return { upserts: [], removedIds: [] };
+  const previousById = indexRowsById(previous, getId);
+  const currentById = indexRowsById(current, getId);
 
-  const currentIds = new Set<string>();
   const upserts: T[] = [];
   for (const value of current) {
-    const id = getId(value);
-    currentIds.add(id);
-    const previousValue = previousById.get(id);
+    const previousValue = previousById.get(getId(value));
     if (!previousValue || !same(previousValue, value)) {
       upserts.push(value);
     }
   }
 
   const removedIds: string[] = [];
-  for (const value of previous) {
-    const id = getId(value);
-    if (!currentIds.has(id)) {
+  for (const id of previousById.keys()) {
+    if (!currentById.has(id)) {
       removedIds.push(id);
     }
   }

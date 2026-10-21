@@ -206,6 +206,33 @@ describe("discovery results view", () => {
     }
   });
 
+  it("patches the Best-match order after a few rows change to the same list a full sort gives", () => {
+    const fresh = createRows(40, 99).map((job) => ({
+      ...job,
+      id: `fresh_${job.id}`,
+    }));
+    let current: JobListRow[] = [...rows];
+    sortDiscoveryResults(current, "fit", "desc");
+    for (let step = 0; step < 12; step += 1) {
+      const next = [...current];
+      // Replace one row with a changed copy, drop one, and add a new one.
+      const changed = step * 7;
+      next[changed] = {
+        ...next[changed]!,
+        matchAssessment: {
+          ...next[changed]!.matchAssessment,
+          score: (next[changed]!.matchAssessment.score + 37) % 100,
+        },
+      };
+      next.splice(step * 11 + 3, 1);
+      next.push(fresh[step]!);
+      current = next;
+      expect(
+        sortDiscoveryResults(current, "fit", "desc").map((job) => job.id),
+      ).toEqual(sortAfterFilter(current, "fit", "desc").map((job) => job.id));
+    }
+  });
+
   it("sorts a collection once per order and keeps the result", () => {
     const first = sortDiscoveryResults(rows, "recent", "desc");
     expect(sortDiscoveryResults(rows, "recent", "desc")).toBe(first);

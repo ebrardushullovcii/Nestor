@@ -168,15 +168,17 @@ export function migrateDiscoveryStorage(database: DatabaseSync): void {
   }
 }
 
+type CachedScope = {
+  runId: string;
+  values: Map<string, unknown>;
+  ordered?: Array<{ key: string; value: unknown }>;
+  /** Each listed row's stored position, and the largest of them. */
+  positions?: Map<string, number>;
+  maxPosition?: number;
+};
+
 export interface DiscoveryDisplayRowCache {
-  scopes: Map<
-    string,
-    {
-      runId: string;
-      values: Map<string, unknown>;
-      ordered?: Array<{ key: string; value: unknown }>;
-    }
-  >;
+  scopes: Map<string, CachedScope>;
   dirty: Map<string, Set<string>>;
   /** Display runs by id, with the stored metadata text they were read from. */
   runs?: Map<string, { raw: string; run: DiscoveryRunRecord }>;
@@ -184,6 +186,86 @@ export interface DiscoveryDisplayRowCache {
 
 export function discoveryRowScope(table: string, runId = ""): string {
   return JSON.stringify([table, runId]);
+}
+
+/**
+ * The scope's rows after the changes since its last read, without reading
+ * the order of every row again. A search rewrites thousands of the 30,000
+ * ledger rows (where it saw each listing last, which also moves the entry to
+ * the end) and appends its log; listing every id in order on each refresh
+ * was most of a refresh's cost. Returns null when a new or moved row does not
+ * come after all the others, and the caller reads the whole order.
+ */
+function readChangedRowsInPlace<T>(
+  database: DatabaseSync,
+  table: string,
+  parser: { parse(value: unknown): T },
+  params: string[],
+  cached: CachedScope & {
+    ordered: Array<{ key: string; value: unknown }>;
+    positions: Map<string, number>;
+    maxPosition: number;
+  },
+  dirtyIds: ReadonlySet<string>,
+): Array<{ key: string; value: unknown }> | null {
+  const ids = [...dirtyIds];
+  const rows = statement(database, `SELECT id, position, value FROM ${table} WHERE ${params.length > 0 ? "run_id = ? AND " : ""}id IN (SELECT value FROM json_each(?))`)
+    .all(...params, JSON.stringify(ids));
+  const found = new Map(rows.map((row) => [String(row.id), row]));
+  const replaced = new Map<string, unknown>();
+  // Rows gone from their place: deleted, or moved after all the others.
+  const removed = new Set<string>();
+  const deleted: string[] = [];
+  const appended: Array<{ id: string; position: number; raw: unknown }> = [];
+  for (const id of ids) {
+    const row = found.get(id);
+    const previous = cached.positions.get(id);
+    if (!row) {
+      if (previous !== undefined) {
+        removed.add(id);
+        deleted.push(id);
+      }
+      continue;
+    }
+    const position = Number(row.position);
+    if (previous === position) {
+      replaced.set(id, row.value);
+      continue;
+    }
+    // A row seen again moves to the end; any other move needs the order read.
+    if (previous !== undefined) removed.add(id);
+    appended.push({ id, position, raw: row.value });
+  }
+  appended.sort((left, right) => left.position - right.position);
+  let maxPosition = cached.maxPosition;
+  for (const { position } of appended) {
+    if (!(position > maxPosition)) return null;
+    maxPosition = position;
+  }
+  const ordered: Array<{ key: string; value: unknown }> = [];
+  for (const entry of cached.ordered) {
+    if (removed.has(entry.key)) continue;
+    if (!replaced.has(entry.key)) {
+      ordered.push(entry);
+      continue;
+    }
+    const value = frozen(parseRow(table, entry.key, replaced.get(entry.key), parser));
+    cached.values.set(entry.key, value);
+    ordered.push({ key: entry.key, value });
+  }
+  for (const { id, position, raw } of appended) {
+    const value = frozen(parseRow(table, id, raw, parser));
+    cached.values.set(id, value);
+    cached.positions.set(id, position);
+    ordered.push({ key: id, value });
+  }
+  for (const id of deleted) {
+    cached.values.delete(id);
+    cached.positions.delete(id);
+  }
+  cached.ordered = ordered;
+  cached.maxPosition = maxPosition;
+  return ordered;
 }
 
 function readKeyedRows<T>(database: DatabaseSync, table: string, parser: { parse(value: unknown): T }, where = "", params: string[] = [], cache?: DiscoveryDisplayRowCache): Array<{ key: string; value: T }> {
@@ -194,12 +276,17 @@ function readKeyedRows<T>(database: DatabaseSync, table: string, parser: { parse
   // scope with none since the last read is that read, order included. A
   // finished search's thousands of log rows are not scanned again for an edit
   // somewhere else.
-  if (cached?.ordered && !cache?.dirty.has(scope))
+  const dirtyIds = cache?.dirty.get(scope);
+  if (cached?.ordered && !dirtyIds)
     return cached.ordered as Array<{ key: string; value: T }>;
+  if (cached?.ordered && cached.positions && cached.maxPosition !== undefined && dirtyIds) {
+    const updated = readChangedRowsInPlace(database, table, parser, params, cached as Parameters<typeof readChangedRowsInPlace>[4], dirtyIds);
+    if (updated) return updated as Array<{ key: string; value: T }>;
+  }
   const cold = !cached;
-  const rows = database.prepare(`SELECT id${cold ? ", value" : ""} FROM ${table} ${where} ORDER BY position`).all(...params);
+  const rows = database.prepare(`SELECT id, position${cold ? ", value" : ""} FROM ${table} ${where} ORDER BY position`).all(...params);
   const valuesById = cached?.values ?? new Map<string, unknown>();
-  const dirty = cache?.dirty.get(scope);
+  const dirty = dirtyIds;
   const changedIds = cold ? [] : rows.map((row) => String(row.id))
     .filter((id) => dirty?.has(id) || !valuesById.has(id));
   // One indexed query replaces N per-row SELECTs. Only changed bodies cross
@@ -209,8 +296,15 @@ function readKeyedRows<T>(database: DatabaseSync, table: string, parser: { parse
       .all(...params, JSON.stringify(changedIds))
     : [];
   const rawById = new Map(changed.map((row) => [String(row.id), row.value]));
+  const positions = new Map<string, number>();
+  let maxPosition = -Infinity;
+  let ascending = true;
   const values = rows.map((row) => {
     const id = String(row.id);
+    const position = Number(row.position);
+    if (!(position > maxPosition)) ascending = false;
+    maxPosition = Math.max(maxPosition, position);
+    positions.set(id, position);
     if (!cold && !dirty?.has(id) && valuesById.has(id))
       return { key: id, value: valuesById.get(id) as T };
     const raw = cold ? row.value : rawById.get(id);
@@ -219,7 +313,10 @@ function readKeyedRows<T>(database: DatabaseSync, table: string, parser: { parse
     return { key: id, value: parsed };
   });
   if (cache) {
-    cache.scopes.set(scope, { runId, values: valuesById, ordered: values });
+    // Equal positions have no defined order; such a scope is always read whole.
+    cache.scopes.set(scope, ascending
+      ? { runId, values: valuesById, ordered: values, positions, maxPosition }
+      : { runId, values: valuesById, ordered: values });
     const present = new Set(rows.map((row) => String(row.id)));
     for (const id of valuesById.keys()) if (!present.has(id)) valuesById.delete(id);
   }
@@ -233,7 +330,10 @@ function readRows<T>(database: DatabaseSync, table: string, parser: { parse(valu
   // An unchanged scope returns the same keyed list; keep its value list too.
   let values = rowValueLists.get(keyed) as T[] | undefined;
   if (!values) {
-    values = keyed.map(({ value }) => value);
+    // Frozen here, in one native step: the state built around it is frozen
+    // next, and walking 30,000 ledger rows one by one for that on every
+    // refresh cost several milliseconds.
+    values = Object.freeze(keyed.map(({ value }) => value)) as T[];
     if (cache) rowValueLists.set(keyed, values);
   }
   return values;
@@ -434,6 +534,10 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
     positions.delete(key);
   }
   // The stored list is the next save's "before": it has the same keys.
+  // Frozen here in one native step; the state around it is frozen next, and
+  // walking a 30,000-row ledger row by row for that cost each save
+  // milliseconds.
+  Object.freeze(result);
   rowKeyLists.set(result, nextKeys);
   rowsByKeyLists.set(result, resultByKey);
   return result;

@@ -199,6 +199,28 @@ test("a full read pages through the jobs, and a write between pages lands on the
   expect(next.map((job) => job.id)).toEqual(first.map((job) => job.id));
 });
 
+test("many changed jobs are read again in pages, and a write between pages lands on the next read", async () => {
+  const { put, read } = fixture();
+  for (let index = 0; index < 650; index += 1)
+    put(`job-${String(index).padStart(4, "0")}`);
+  const first = await read();
+  for (let index = 0; index < 650; index += 1)
+    put(`job-${String(index).padStart(4, "0")}`, `Edited ${index}`);
+  const reading = read();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  put("job-0600", "Changed while reading");
+  const second = await reading;
+  expect(second).toHaveLength(650);
+  expect(second[1]?.title).toBe("Edited 1");
+  // The rows published before this read finished stay as they were.
+  expect(first[1]?.title).toBe("job-0001");
+  const third = await read();
+  expect(third.find((job) => job.id === "job-0600")?.title).toBe(
+    "Changed while reading",
+  );
+  expect(third[1]).toBe(second[1]);
+});
+
 test("jobs holding alike values share one frozen copy", async () => {
   const { put, read } = fixture();
   put("a");

@@ -7,12 +7,13 @@ import type {
   SavedJob,
 } from "@nestor/contracts";
 
-import { createJobIdentityIndex } from "./job-identity";
+import { createJobIdentityIndex, type JobIdentityIndex } from "./job-identity";
 
 type ActivityCandidate = Exclude<ListingActivity, { status: "unknown" }>;
 const projectedActivityJobs = new WeakMap<
   SavedJob,
   {
+    activity: ListingActivity;
     activityKey: string;
     view: DiscoveryJobView;
   }
@@ -123,6 +124,11 @@ function activeCandidate(job: SavedJob): ActivityCandidate | undefined {
     : undefined;
 }
 
+const inactiveLedgerEntries = new WeakMap<
+  readonly DiscoveryLedgerEntry[],
+  readonly DiscoveryLedgerEntry[]
+>();
+
 /**
  * Projects non-persisted listing activity in linear indexed passes. Ledger
  * aliases must resolve to exactly one job; possible, ambiguous, and conflicting
@@ -133,17 +139,34 @@ export function projectDiscoveryJobViews(input: {
   discoveryLedger: readonly DiscoveryLedgerEntry[];
   listingSignals: readonly ListingSignalRecord[];
   applicationAttempts?: readonly ApplicationAttempt[];
+  /**
+   * An index the caller keeps between projections of the same workspace,
+   * brought in step with `jobs` here. Indexing every job again on each
+   * refresh took about a second with 12,000 jobs while a search changed a
+   * few of them at a time.
+   */
+  identityIndex?: {
+    sync(values: readonly SavedJob[]): JobIdentityIndex<SavedJob>;
+  };
 }): DiscoveryJobView[] {
-  const inactiveEntries = input.discoveryLedger.filter(
-    (entry) => entry.latestStatus === "inactive" && entry.inactiveAt !== null,
-  );
+  let inactiveEntries = inactiveLedgerEntries.get(input.discoveryLedger);
+  if (!inactiveEntries) {
+    inactiveEntries = input.discoveryLedger.filter(
+      (entry) => entry.latestStatus === "inactive" && entry.inactiveAt !== null,
+    );
+    // Only an immutable ledger list can be read again by identity.
+    if (Object.isFrozen(input.discoveryLedger))
+      inactiveLedgerEntries.set(input.discoveryLedger, inactiveEntries);
+  }
   // Active sightings are projected directly from their jobs. Normalizing every
   // full listing for an identity index only helps when an inactive sighting
   // actually needs resolving; doing it on every progress update was wasteful.
   const jobIdentityIndex =
-    inactiveEntries.length > 0
-      ? createJobIdentityIndex(input.jobs, (job) => job)
-      : null;
+    inactiveEntries.length === 0
+      ? null
+      : input.identityIndex
+        ? input.identityIndex.sync(input.jobs)
+        : createJobIdentityIndex(input.jobs, (job) => job);
   const candidateByJob = new Map<SavedJob, ActivityCandidate>();
   const uniqueJobById = new Map<string, SavedJob | null>();
 
@@ -218,18 +241,27 @@ export function projectDiscoveryJobViews(input: {
   }
 
   return input.jobs.map((job) => {
-    const listingActivity: ListingActivity = candidateByJob.get(job) ?? {
+    const candidate = candidateByJob.get(job);
+    const previous = projectedActivityJobs.get(job);
+    // The same activity object as last time (a job's own sighting, cached
+    // with the job) needs no comparison of its contents.
+    if (candidate !== undefined && previous?.activity === candidate)
+      return previous.view;
+    const listingActivity: ListingActivity = candidate ?? {
       status: "unknown",
     };
     const activityKey = JSON.stringify(listingActivity);
-    const previous = projectedActivityJobs.get(job);
     if (previous?.activityKey === activityKey) return previous.view;
     const view = { ...job, listingActivity };
     // Only immutable repository rows are safe to reuse across display reads.
     if (Object.isFrozen(job)) {
       Object.freeze(listingActivity);
       Object.freeze(view);
-      projectedActivityJobs.set(job, { activityKey, view });
+      projectedActivityJobs.set(job, {
+        activity: listingActivity,
+        activityKey,
+        view,
+      });
     }
     return view;
   });

@@ -1808,7 +1808,10 @@ async function runPrepareOnlySmoke() {
             ),
         ),
     );
-    latestWorkspace = discoveryResult.snapshot;
+    // The route answers with what changed; read the whole workspace.
+    latestWorkspace =
+      discoveryResult.snapshot ??
+      (await page.evaluate(() => window.nestor.jobFinder.getWorkspace()));
     report.discovery = buildDiscoverySummary(latestWorkspace);
     selectedJob = selectTargetJob(latestWorkspace.discoveryJobs ?? []);
 

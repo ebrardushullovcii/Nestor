@@ -26,6 +26,8 @@ import type {
   JobFinderSetWorkHistoryReviewAcknowledgmentInput,
   JobFinderSettings,
   JobFinderSearchRequest,
+  JobFinderAgentDiscoveryReply,
+  JobFinderAgentDiscoveryResult,
   JobFinderRendererWorkspaceSnapshot,
   JobFinderWorkspaceDelta,
   JobFinderWorkspaceEntityMutation,
@@ -385,33 +387,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       commitWorkspaceSyncResult,
       isCurrentWorkspaceRequest,
       recoverFullWorkspaceOnce,
-      scheduleConvergenceFetch,
-    ],
-  );
-
-  // Same request fencing and snapshot commit as runWorkspaceAction, but the
-  // typed envelope around the snapshot survives so callers can classify the
-  // terminal outcome (completed vs user-cancelled) without re-deriving it
-  // from a later refresh.
-  const runWorkspaceResultAction = useCallback(
-    async <T extends { snapshot: JobFinderRendererWorkspaceSnapshot }>(
-      action: () => Promise<T>,
-    ): Promise<T> => {
-      assertWorkspaceHydrated();
-      const sequence = beginWorkspaceRequest();
-      const result = await action();
-      if (!isCurrentWorkspaceRequest(sequence)) {
-        return { ...result, snapshot: workspaceRef.current ?? result.snapshot };
-      }
-
-      commitWorkspace(result.snapshot);
-      return result;
-    },
-    [
-      assertWorkspaceHydrated,
-      beginWorkspaceRequest,
-      commitWorkspace,
-      isCurrentWorkspaceRequest,
       scheduleConvergenceFetch,
     ],
   );
@@ -883,18 +858,27 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           clearTailoredAssetDetailCache();
         });
       },
-      runAgentDiscovery: (
+      runAgentDiscovery: async (
         onProgress?: (event: DiscoveryActivityEvent) => void,
         targetId?: string,
         searchRequest?: JobFinderSearchRequest,
-      ) =>
-        runWorkspaceResultAction(() =>
-          window.nestor.jobFinder.runAgentDiscovery(
+      ) => {
+        // Main answers with what changed since the revision this window
+        // holds; it is committed like any other change this window asked for.
+        let outcome: JobFinderAgentDiscoveryResult["outcome"] = "completed";
+        const snapshot = await runWorkspaceAction(async () => {
+          const reply = (await window.nestor.jobFinder.runAgentDiscovery(
             onProgress,
             targetId,
             searchRequest,
-          ),
-        ),
+          )) as JobFinderAgentDiscoveryReply | JobFinderAgentDiscoveryResult;
+          outcome = reply.outcome;
+          // Test hosts and an older preload may still answer with the
+          // whole workspace.
+          return "sync" in reply ? reply.sync : reply.snapshot;
+        });
+        return { outcome, snapshot };
+      },
       cancelAgentDiscovery: (input) =>
         runWorkspaceAction(() =>
           window.nestor.jobFinder.cancelAgentDiscovery(input),
@@ -1162,7 +1146,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     [
       requestWorkspaceRefresh,
       runWorkspaceAction,
-      runWorkspaceResultAction,
       runWorkspaceEntityMutation,
       syncWorkspace,
     ],

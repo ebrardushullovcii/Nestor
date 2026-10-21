@@ -201,19 +201,30 @@ export function createSavedJobProjectionReader(
     if (snapshot === null || version !== externalVersion) {
       jobsById = await readAllRowsInPages();
     } else {
+      // Changed rows a page at a time, like a full read: a search that just
+      // rewrote thousands of jobs held main for seconds when they were all
+      // parsed in one go. The rows are only published once all are read; a
+      // write landing between pages keeps its marker for the next read.
       const ids = changes.map((row) => String(row.id));
-      const rows = listCollectionValues(
-        database,
-        "saved_jobs",
-        SavedJobSchema,
-        {
-          whereSql: "id IN (SELECT value FROM json_each(?))",
-          params: [JSON.stringify(ids)],
-          orderBySql: "id",
-        },
-      );
-      for (const id of ids) jobsById.delete(id);
-      for (const job of rows) jobsById.set(job.id, toProjectionRow(job, share));
+      const next =
+        ids.length > PROJECTION_PAGE_ROWS ? new Map(jobsById) : jobsById;
+      for (let start = 0; start < ids.length; start += PROJECTION_PAGE_ROWS) {
+        if (start > 0) await new Promise<void>((resolve) => setImmediate(resolve));
+        const pageIds = ids.slice(start, start + PROJECTION_PAGE_ROWS);
+        const rows = listCollectionValues(
+          database,
+          "saved_jobs",
+          SavedJobSchema,
+          {
+            whereSql: "id IN (SELECT value FROM json_each(?))",
+            params: [JSON.stringify(pageIds)],
+            orderBySql: "id",
+          },
+        );
+        for (const id of pageIds) next.delete(id);
+        for (const job of rows) next.set(job.id, toProjectionRow(job, share));
+      }
+      jobsById = next;
     }
     externalVersion = version;
     // A write arriving during chunked parsing belongs to the next projection.

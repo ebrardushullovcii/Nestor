@@ -1886,6 +1886,23 @@ export type JobFinderWorkspaceSyncResult = z.infer<
   typeof JobFinderWorkspaceSyncResultSchema
 >;
 
+/**
+ * What the agent-discovery IPC route answers: the terminal outcome and what
+ * changed relative to the revision the window holds. A finished search used
+ * to answer with the whole workspace (tens of megabytes with thousands of
+ * jobs), which also made the window's next refresh send it all again.
+ */
+export type JobFinderAgentDiscoveryReply = {
+  outcome: JobFinderAgentDiscoveryOutcome;
+  sync: JobFinderWorkspaceSyncResult;
+};
+export const JobFinderAgentDiscoveryReplySchema = z
+  .object({
+    outcome: JobFinderAgentDiscoveryOutcomeSchema,
+    sync: JobFinderWorkspaceSyncResultSchema,
+  })
+  .strict() as z.ZodType<JobFinderAgentDiscoveryReply>;
+
 export const SaveCandidateProfileInputSchema = CandidateProfileSchema;
 export type SaveCandidateProfileInput = z.infer<
   typeof SaveCandidateProfileInputSchema

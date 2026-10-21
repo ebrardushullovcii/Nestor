@@ -147,3 +147,47 @@ it("counts progress within the open job's group, so weaker matches do not bury i
   rerender({ inspected: jobs[2]! });
   expect(result.current).toMatchObject({ goneThrough: 0, total: 3, weaker: true });
 });
+
+it("recounts open jobs when the list or the shortlist changes", () => {
+  vi.stubGlobal("nestor", {
+    jobFinder: { getJobDetail: vi.fn(() => new Promise(() => undefined)) },
+  });
+  const first = [row("a"), row("b"), row("c")];
+  const { result, rerender } = renderHook(
+    ({
+      jobs,
+      reviewQueue,
+    }: {
+      jobs: JobListRow[];
+      reviewQueue: { jobId: string }[];
+    }) =>
+      useDiscoveryTriage({
+        enabled: true,
+        jobs,
+        orderedJobIds: jobs.map((job) => job.id),
+        inspectedJob: jobs[0]!,
+        reviewQueue: reviewQueue as never,
+        campaignId: null,
+        onSelectJob: vi.fn(),
+        onQueueJob: vi.fn(),
+        onDismissJob: vi.fn(() => Promise.resolve()),
+        onRestoreDismissedJob: vi.fn(),
+      }),
+    {
+      initialProps: {
+        jobs: first,
+        reviewQueue: [] as { jobId: string }[],
+      },
+    },
+  );
+  expect(result.current).toMatchObject({ total: 3 });
+  // Shortlisted elsewhere (the assistant, another screen).
+  rerender({ jobs: first, reviewQueue: [{ jobId: "b" }] });
+  expect(result.current).toMatchObject({ total: 2 });
+  // A reply that brings a found job and one now in drafting.
+  rerender({
+    jobs: [row("a"), row("b"), row("c", "drafting"), row("d")],
+    reviewQueue: [{ jobId: "b" }],
+  });
+  expect(result.current).toMatchObject({ total: 2 });
+});

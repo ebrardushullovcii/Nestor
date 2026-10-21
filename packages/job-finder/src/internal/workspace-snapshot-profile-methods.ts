@@ -126,6 +126,7 @@ import {
   ensureCampaignState,
 } from "./campaign-dashboard";
 import { projectDiscoveryJobViews } from "./listing-activity";
+import { createSyncedJobIdentityIndex } from "./discovery-run-indexes";
 import {
   deriveGlobalDailyApplicationPreparationCapacity,
   MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
@@ -159,8 +160,15 @@ type JobViewInput = {
   companies: readonly { canonicalName: string; jobIds: readonly string[] }[];
 };
 
+type JobViewIdentityIndex = NonNullable<
+  Parameters<typeof projectDiscoveryJobViews>[0]["identityIndex"]
+>;
+
 /** The workspace's job lists, from its saved and staged jobs. */
-function buildJobViews(input: JobViewInput) {
+function buildJobViews(
+  input: JobViewInput,
+  identityIndex?: JobViewIdentityIndex,
+) {
   const savedJobs = input.rawSavedJobs.map((job) =>
     readPlanAssessment(job, input.planId),
   );
@@ -179,6 +187,7 @@ function buildJobViews(input: JobViewInput) {
     discoveryLedger: input.discoveryLedger,
     listingSignals: input.listingSignals,
     applicationAttempts: input.applicationAttempts,
+    ...(identityIndex ? { identityIndex } : {}),
   });
   const projectedJobById = new Map(
     projectedJobs.map((job) => [job.id, job] as const),
@@ -601,6 +610,11 @@ export function createWorkspaceSnapshotProfileMethods(
     input: JobViewInput;
     views: ReturnType<typeof buildJobViews>;
   } | null = null;
+  // Kept in step with the listed jobs from one refresh to the next, so a
+  // refresh indexes only the jobs that changed since the last one.
+  const jobViewIdentityIndex = createSyncedJobIdentityIndex<SavedJob>(
+    (job) => job,
+  );
   function deriveJobViews(input: JobViewInput) {
     const last = lastJobViews;
     if (
@@ -615,7 +629,11 @@ export function createWorkspaceSnapshotProfileMethods(
     ) {
       return last.views;
     }
-    const views = buildJobViews(input);
+    // Only the borrowed display rows keep their identity between refreshes.
+    const views = buildJobViews(
+      input,
+      Object.isFrozen(input.rawSavedJobs) ? jobViewIdentityIndex : undefined,
+    );
     lastJobViews = Object.isFrozen(input.rawSavedJobs)
       ? { input, views }
       : null;

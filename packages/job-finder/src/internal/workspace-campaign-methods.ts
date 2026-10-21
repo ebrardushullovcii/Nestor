@@ -296,12 +296,19 @@ async function persistCampaignRuleChange(input: {
   );
 }
 
+/** Plan candidates scored per turn of the event loop at a run's end. */
+const CANDIDATES_PER_TURN = 250;
+/** Saved jobs whose plan membership one transaction rewrites. */
+const MEMBERSHIP_ROWS_PER_COMMIT = 250;
+
 /**
  * Atomically commits the terminal discovery run for a campaign: campaign
  * history, progress, rules, and retained job ids plus the schedule run facts,
  * the latest digest, and merged strong-match/blocked notifications. All writes
  * happen in one serialized campaign-state save so concurrent scheduled runs
- * never interleave mid-commit.
+ * never interleave mid-commit. The saved jobs' plan membership is written
+ * before that save, inside the same campaign transition, a few hundred jobs
+ * per transaction.
  */
 export async function commitCampaignRunTerminal(input: {
   ctx: WorkspaceServiceContext;
@@ -318,6 +325,10 @@ export async function commitCampaignRunTerminal(input: {
 }): Promise<void> {
   let committedCampaign: JobSearchCampaign | null = null;
   await input.ctx.withCampaignTransition(async () => {
+    // The work collections below are only read, so the cached display rows
+    // serve: a fresh copy of every resume draft and application here took
+    // seconds at the end of a large search.
+    const display = await input.ctx.repository.readDisplayCollections?.();
     const [
       state,
       savedJobs,
@@ -333,12 +344,14 @@ export async function commitCampaignRunTerminal(input: {
       // Read-only below; the cached display rows spare a full parse.
       input.ctx.repository.readSavedJobsProjection(),
       input.ctx.repository.getDiscoveryState(),
-      input.ctx.repository.listResumeDrafts(),
-      input.ctx.repository.listTailoredAssets(),
-      input.ctx.repository.listApplyRuns(),
-      input.ctx.repository.listApplyJobResults(),
-      input.ctx.repository.listApplicationRecords(),
-      input.ctx.repository.listApplicationAttempts(),
+      display?.resumeDrafts ?? input.ctx.repository.listResumeDrafts(),
+      display?.tailoredAssets ?? input.ctx.repository.listTailoredAssets(),
+      display?.applyRuns ?? input.ctx.repository.listApplyRuns(),
+      display?.applyJobResults ?? input.ctx.repository.listApplyJobResults(),
+      display?.applicationRecords ??
+        input.ctx.repository.listApplicationRecords(),
+      display?.applicationAttempts ??
+        input.ctx.repository.listApplicationAttempts(),
     ]);
     if (!state) return;
     const recordedRun =
@@ -437,13 +450,12 @@ export async function commitCampaignRunTerminal(input: {
     // not proof that an older workspace job belongs to this run. Start with
     // the plan before the search, then add only this run's actual encounters
     // and jobs the person selected here while it was running.
+    const campaignJobIds = new Set(campaign.jobIds);
     const candidateJobIds = new Set([
       ...priorCampaignJobIds,
       ...encounteredJobIds,
       ...availableJobs
-        .filter(
-          (job) => campaign.jobIds.includes(job.id) && personPickedJob(job),
-        )
+        .filter((job) => campaignJobIds.has(job.id) && personPickedJob(job))
         .map((job) => job.id),
     ]);
     const candidates = availableJobs
@@ -464,13 +476,16 @@ export async function commitCampaignRunTerminal(input: {
     });
     // Discovery judges all eligible jobs before taking this commit lock.
     // Do not make another model request while plan edits are waiting for it.
-    const candidateJobs = candidates.map((job) => {
+    // Thousands of candidates are scored a slice per turn of the event loop,
+    // so the end of a search does not hold the window for seconds.
+    const planId = campaign.id;
+    const assessCandidate = (job: SavedJob): SavedJob => {
       // A verdict from another plan cannot say this job fits the current one.
       // This plan's own verdict stands even when the profile or goals changed
       // since: it is the best answer until the job is judged again (ADR 0041).
       // Dropping it made one search after a profile edit wipe every verdict
       // of the plan (6,200 on the owner's data), each then bought again.
-      const ownVerdict = job.planAssessments?.[campaign.id]?.judgment;
+      const ownVerdict = job.planAssessments?.[planId]?.judgment;
       const assessment =
         ownVerdict ||
         !jobNeedsFitJudgment(
@@ -481,10 +496,16 @@ export async function commitCampaignRunTerminal(input: {
           ? job.matchAssessment
           : session.assess({ ...job, matchAssessment: null });
       return readPlanAssessment(
-        withPlanAssessment(job, campaign.id, assessment),
-        campaign.id,
+        withPlanAssessment(job, planId, assessment),
+        planId,
       );
-    });
+    };
+    const candidateJobs: SavedJob[] = [];
+    for (const [position, job] of candidates.entries()) {
+      if (position > 0 && position % CANDIDATES_PER_TURN === 0)
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      candidateJobs.push(assessCandidate(job));
+    }
     const assessedById = new Map(candidateJobs.map((job) => [job.id, job]));
     const measuredAt = latestRun.completedAt ?? latestRun.startedAt;
     const evaluatedRules = evaluateCampaignRules({
@@ -589,7 +610,7 @@ export async function commitCampaignRunTerminal(input: {
 
     const strongMatches = candidateJobs
       .filter(
-        (job) => retainedJobIds.includes(job.id) && newToPlanJobIds.has(job.id),
+        (job) => retainedMembership.has(job.id) && newToPlanJobIds.has(job.id),
       )
       .map((job) => ({
         jobId: job.id,
@@ -692,24 +713,55 @@ export async function commitCampaignRunTerminal(input: {
       },
       updatedAt: input.now,
     });
-    const updateCampaignMembership = (job: SavedJob): SavedJob => {
+    const planIdsByJobId = new Map<string, string[]>();
+    for (const existingCampaign of state.campaigns) {
+      for (const jobId of existingCampaign.jobIds) {
+        const planIds = planIdsByJobId.get(jobId);
+        if (planIds) planIds.push(existingCampaign.id);
+        else planIdsByJobId.set(jobId, [existingCampaign.id]);
+      }
+    }
+    const nextCampaignIds = (job: SavedJob): string[] => {
       const campaignIds = new Set(job.campaignIds ?? []);
       // Campaign.jobIds is the durable join from workspaces created before
       // the SavedJob membership field existed, and it also repairs a row if
       // an older duplicate-merge build dropped the mirrored list.
-      for (const existingCampaign of state.campaigns) {
-        if (existingCampaign.jobIds.includes(job.id)) {
-          campaignIds.add(existingCampaign.id);
-        }
+      for (const planId of planIdsByJobId.get(job.id) ?? []) {
+        campaignIds.add(planId);
       }
       if (retainedMembership.has(job.id)) {
         campaignIds.add(campaign.id);
       } else {
         campaignIds.delete(campaign.id);
       }
+      return [...campaignIds].sort();
+    };
+    // The jobs this commit can change: a different plan membership or a new
+    // verdict for this plan. Every other saved job was read, parsed, copied
+    // and compared in the write for nothing (about 7 s of the main process
+    // at the end of a search with 12,000 saved jobs). Read again right
+    // before the write, so a job changed meanwhile is judged as it is now.
+    const currentSavedJobs =
+      await input.ctx.repository.readSavedJobsProjection();
+    const changedSavedJobIds = currentSavedJobs
+      .filter((job) => {
+        if (
+          JSON.stringify(nextCampaignIds(job)) !==
+          JSON.stringify(job.campaignIds ?? [])
+        )
+          return true;
+        const assessed = assessedById.get(job.id);
+        return (
+          assessed?.planAssessments !== undefined &&
+          JSON.stringify(job.planAssessments?.[campaign.id]) !==
+            JSON.stringify(assessed.matchAssessment)
+        );
+      })
+      .map((job) => job.id);
+    const updateCampaignMembership = (job: SavedJob): SavedJob => {
       return SavedJobSchema.parse({
         ...job,
-        campaignIds: [...campaignIds].sort(),
+        campaignIds: nextCampaignIds(job),
         ...(assessedById.get(job.id)?.planAssessments
           ? {
               planAssessments: {
@@ -720,8 +772,34 @@ export async function commitCampaignRunTerminal(input: {
           : {}),
       });
     };
+    // Thousands of jobs can join or leave the plan at once (the first search
+    // of a large plan). Written in one transaction that held main for tens
+    // of seconds; written in parts, a turn of the event loop apart, the run
+    // record going with the last part. Each part reads the rows it changes
+    // inside its own transaction. The plan itself is saved after the jobs,
+    // in its own transaction, as before; a stop between parts leaves the same
+    // kind of gap a stop before that save always could, and the plan's next
+    // run settles every membership again.
+    const membershipParts: string[][] = [];
+    for (
+      let start = 0;
+      start < changedSavedJobIds.length;
+      start += MEMBERSHIP_ROWS_PER_COMMIT
+    )
+      membershipParts.push(
+        changedSavedJobIds.slice(start, start + MEMBERSHIP_ROWS_PER_COMMIT),
+      );
+    const lastMembershipPart = membershipParts.pop() ?? [];
+    for (const part of membershipParts) {
+      await input.ctx.repository.commitSavedJobDelta({
+        update: updateCampaignMembership,
+        updateJobIds: part,
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
     await input.ctx.repository.commitSavedJobDelta({
       update: updateCampaignMembership,
+      updateJobIds: lastMembershipPart,
       updateDiscoveryState: (current) => ({
         ...current,
         activeRun:

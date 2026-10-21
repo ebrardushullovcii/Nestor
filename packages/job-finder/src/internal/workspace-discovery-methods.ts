@@ -4531,12 +4531,20 @@ export function createWorkspaceDiscoveryMethods(
           matchAssessment: assessDiscoveryPosting(correctedJob),
         });
       };
-      workingSavedJobs = workingSavedJobs.map((job) => {
-        const next = reconcileCapturedSalary(job, touchedSavedJobIds);
-        return next !== job ? touchSavedJob(next) : job;
-      });
-      workingPendingJobs = workingPendingJobs.map((job) =>
-        reconcileCapturedSalary(job, touchedPendingJobIds),
+      // Each job's whole listing is searched for its pay; with thousands of
+      // jobs that held main for a second, so it goes a slice per turn.
+      workingSavedJobs = await mapInTurns(
+        workingSavedJobs,
+        (job) => {
+          const next = reconcileCapturedSalary(job, touchedSavedJobIds);
+          return next !== job ? touchSavedJob(next) : job;
+        },
+        SETUP_JOBS_PER_TURN,
+      );
+      workingPendingJobs = await mapInTurns(
+        workingPendingJobs,
+        (job) => reconcileCapturedSalary(job, touchedPendingJobIds),
+        SETUP_JOBS_PER_TURN,
       );
       if (correctedSalaryCount > 0) {
         await persistWorkingSavedJobs();
@@ -4715,7 +4723,7 @@ export function createWorkspaceDiscoveryMethods(
     // again here would find the same verifying request and await its own
     // in-flight promise forever. The outer user action performs the recovered
     // snapshot after this exact continuation completes.
-    return ctx.readWorkspaceSnapshot();
+    return (ctx.readWorkspaceProjection ?? ctx.readWorkspaceSnapshot)();
   }
 
   return {

@@ -120,6 +120,13 @@ export interface WorkspaceServiceContext {
    * they cannot await the recovery promise that is waiting for them.
    */
   readWorkspaceSnapshot: () => Promise<JobFinderWorkspaceSnapshot>;
+  /**
+   * The display projection (borrowed, frozen rows), also without recovery.
+   * A finished search answers with this: a canonical read re-parsed every
+   * saved job (about 14 s of the main process with 12,000 jobs) for a
+   * snapshot its callers then discard or convert for display.
+   */
+  readWorkspaceProjection?: () => Promise<JobFinderWorkspaceSnapshot>;
   getActiveCampaignId: () => Promise<string | null>;
   resumeApplicationUserAction: (
     request: UserActionRequest,

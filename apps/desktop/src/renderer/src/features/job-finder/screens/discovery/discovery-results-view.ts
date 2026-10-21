@@ -14,7 +14,10 @@ import {
   presentListingActivity,
 } from "../../lib/listing-activity-presentation";
 import { fitRecommendationCopy } from "../../lib/match-assessment-presentation";
-import { orderDiscoveryResultsByGroup } from "./discovery-result-groups";
+import {
+  compareDiscoveryResultGroups,
+  orderDiscoveryResultsByGroup,
+} from "./discovery-result-groups";
 import {
   compareDiscoveryResults,
   type DiscoveryResultsSortDirection,
@@ -98,6 +101,81 @@ export function matchesDiscoveryJobSearch(
   return getDiscoveryJobSearchText(job).includes(normalizedQuery);
 }
 
+const BEST_MATCH_SORT = { direction: "desc", field: "fit" } as const;
+
+/**
+ * Best match: the bands in order, each in the canonical fit order. That
+ * order is total (it ends in the job id), so the bands and the order make
+ * one comparator.
+ */
+function compareBestMatch(left: JobListRow, right: JobListRow): number {
+  return (
+    compareDiscoveryResultGroups(left, right) ||
+    compareDiscoveryResults(left, right, BEST_MATCH_SORT, 0, 0)
+  );
+}
+
+/** Rows changed per refresh below which the last order is patched. */
+const MAX_PATCHED_SHARE = 1 / 8;
+
+let lastBestMatch: {
+  input: readonly JobListRow[];
+  output: readonly JobListRow[];
+} | null = null;
+
+/**
+ * The Best-match order, patched from the last one when few rows changed:
+ * each answer from main replaces a handful of the thousands of rows, and
+ * sorting them all again cost a few milliseconds of every answer. Rows are
+ * immutable, so a row kept from last time keeps its place; the rest are
+ * merged in. Same list as a full sort, since the order is total.
+ */
+function sortByBestMatch(jobs: readonly JobListRow[]): readonly JobListRow[] {
+  const output =
+    (lastBestMatch && patchBestMatchOrder(lastBestMatch, jobs)) ??
+    orderDiscoveryResultsByGroup(
+      [...jobs].sort((left, right) =>
+        compareDiscoveryResults(left, right, BEST_MATCH_SORT, 0, 0),
+      ),
+    );
+  lastBestMatch = { input: jobs, output };
+  return output;
+}
+
+function patchBestMatchOrder(
+  last: { input: readonly JobListRow[]; output: readonly JobListRow[] },
+  jobs: readonly JobListRow[],
+): JobListRow[] | null {
+  const current = new Set(jobs);
+  const previous = new Set(last.input);
+  // Repeated rows make "the same rows" ambiguous; those are sorted fully.
+  if (current.size !== jobs.length || previous.size !== last.input.length)
+    return null;
+  const added = jobs.filter((job) => !previous.has(job));
+  const removed = last.input.length - (jobs.length - added.length);
+  if (added.length + removed > Math.max(64, jobs.length * MAX_PATCHED_SHARE))
+    return null;
+  added.sort(compareBestMatch);
+  const kept = last.output.filter((job) => current.has(job));
+  const merged: JobListRow[] = [];
+  let from = 0;
+  for (const job of added) {
+    let low = from;
+    let high = kept.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (compareBestMatch(kept[middle]!, job) < 0) low = middle + 1;
+      else high = middle;
+    }
+    for (let index = from; index < low; index += 1) merged.push(kept[index]!);
+    merged.push(job);
+    from = low;
+  }
+  for (let index = from; index < kept.length; index += 1)
+    merged.push(kept[index]!);
+  return merged;
+}
+
 /**
  * The collection in the chosen order: the canonical Best-match bands for
  * "fit" descending, otherwise the comparator with each job's incoming position
@@ -111,11 +189,7 @@ export const sortDiscoveryResults = createIdentityMemo(
   ): readonly JobListRow[] => {
     const sort = { direction, field };
     if (direction === "desc" && field === "fit") {
-      return orderDiscoveryResultsByGroup(
-        [...jobs].sort((left, right) =>
-          compareDiscoveryResults(left, right, sort, 0, 0),
-        ),
-      );
+      return sortByBestMatch(jobs);
     }
     return jobs
       .map((job, sourceIndex) => ({ job, sourceIndex }))

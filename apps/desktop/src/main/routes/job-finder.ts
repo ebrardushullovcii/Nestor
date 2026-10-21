@@ -51,7 +51,6 @@ import {
   DiscoveryActivityEventSchema,
   DesktopTestOkResponseSchema,
   JobFinderAgentDiscoveryActionInputSchema,
-  JobFinderAgentDiscoveryResultSchema,
   JobFinderDiscoveryCancellationInputSchema,
   JobFinderApplicationPacketExportResultSchema,
   JobFinderApplyCopilotActionInputSchema,
@@ -157,6 +156,7 @@ import {
   WriteClipboardTextResultSchema,
 } from "@nestor/contracts";
 import type {
+  JobFinderAgentDiscoveryReply,
   JobFinderApplyQueueActionInput,
   JobFinderWorkspaceSnapshot,
   JobFinderRendererWorkspaceSnapshot,
@@ -2126,13 +2126,19 @@ export function registerJobFinderRouteHandlers(
         // workspace state. Only an AbortError that escaped the pipeline — an
         // abort before the run record existed — is itself proof of
         // cancellation.
-        return JobFinderAgentDiscoveryResultSchema.parse({
+        //
+        // The window gets what changed since the revision it holds, like any
+        // other change it asked for. Parsing and sending the whole workspace
+        // here held main for seconds at the end of a large search, and the
+        // window's next refresh then sent it all again.
+        const reply: JobFinderAgentDiscoveryReply = {
           outcome:
             snapshot.discoveryRunState === "cancelled"
               ? "cancelled"
               : "completed",
-          snapshot: toRendererWorkspaceSnapshot(snapshot),
-        });
+          sync: workspaceMutationResponse(window, snapshot),
+        };
+        return reply;
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
           console.log("[JobFinder] Agent discovery cancelled");
@@ -2140,10 +2146,11 @@ export function registerJobFinderRouteHandlers(
           const currentSnapshot = await readWorkspaceProjection(
             jobFinderWorkspaceService,
           );
-          return JobFinderAgentDiscoveryResultSchema.parse({
+          const reply: JobFinderAgentDiscoveryReply = {
             outcome: "cancelled",
-            snapshot: toRendererWorkspaceSnapshot(currentSnapshot),
-          });
+            sync: workspaceMutationResponse(window, currentSnapshot),
+          };
+          return reply;
         }
         throw error;
       }

@@ -83,6 +83,14 @@ function firstNonEmpty(
 }
 
 function parseDiscoveryRun(run: unknown): DiscoveryRunRecord | null {
+  // Repository display rows are validated and deeply frozen when read.
+  if (
+    typeof run === "object" &&
+    run !== null &&
+    Object.isFrozen(run) &&
+    Object.isFrozen((run as Partial<DiscoveryRunRecord>).targetExecutions)
+  )
+    return run as DiscoveryRunRecord;
   const parsed = DiscoveryRunRecordSchema.safeParse(run);
   return parsed.success ? parsed.data : null;
 }
@@ -442,7 +450,10 @@ export async function persistAutomaticDiscoverySafeguard(input: {
   campaign: JobSearchCampaign;
   now: string;
 }): Promise<void> {
-  const discovery = await input.ctx.repository.getDiscoveryState();
+  // Read only: the display rows (no checkpoints, no copy) carry every run
+  // field the failure count reads. A full copy of the discovery history here
+  // cost about half a second at the end of each search.
+  const discovery = await input.ctx.repository.readDiscoveryDisplayProjection();
   const runs = discovery.recentRuns.filter(
     (run) => run.campaignId === input.campaign.id,
   );
