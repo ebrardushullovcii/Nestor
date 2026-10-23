@@ -148,9 +148,91 @@ function createHarness(seedOverrides?: { discoveryOnly?: boolean }) {
   return { seed };
 }
 
+test("reads and judges full listings before collection ends, and reuses both on a repeat search", async () => {
+  const { seed } = createHarness();
+  seed.settings.discoveryOnly = false;
+  seed.searchPreferences.discovery.collectOnlyHardCriteriaMatches = false;
+  const postings = Array.from({ length: 20 }, (_, index) =>
+    createCollectedJob({ token: `stream_${index}` }),
+  );
+  const fullText =
+    "Own the design system and lead product research with engineers.\n".repeat(
+      15,
+    );
+  const fetched = vi.fn((url: string) =>
+    Promise.resolve({
+      status: 200,
+      html: `<html><body>${fullText}</body></html>`,
+      finalUrl: url,
+    }),
+  );
+  const judged: string[][] = [];
+  const aiClient = {
+    ...createAgentAiClient(),
+    extractJobsFromPage: (input: { pageUrl: string }) => {
+      const posting = postings.find(
+        (row) => row.canonicalUrl === input.pageUrl,
+      )!;
+      return Promise.resolve([{ ...posting, description: fullText }]);
+    },
+    judgeJobFits: (input: JudgeJobFitsInput) => {
+      expect(
+        input.jobs.every(
+          ({ posting }) => posting.description === fullText.trim(),
+        ),
+      ).toBe(true);
+      judged.push(input.jobs.map(({ jobId }) => jobId));
+      return Promise.resolve(
+        input.jobs.map(({ jobId }) => ({
+          jobId,
+          score: 86,
+          recommendation: "strong_fit" as const,
+          role: "exact" as const,
+          roleExplanation: null,
+          preferences: "aligned" as const,
+          preferencesExplanation: null,
+          locationReach: "in_area" as const,
+          reasons: ["Design systems"],
+          gaps: [],
+          listingClosed: false,
+          listingClosedEvidence: null,
+        })),
+      );
+    },
+  };
+  let firstRun = true;
+  const runtime = createIncrementalRuntime({
+    checkpoints: [postings],
+    finalJobs: postings,
+    onCheckpointSaved: async () => {
+      if (!firstRun) return;
+      await vi.waitFor(() => expect(judged.flat()).toHaveLength(20));
+      expect(fetched).toHaveBeenCalledTimes(20);
+    },
+  });
+  const { workspaceService, repository } = createWorkspaceServiceHarness({
+    seed,
+    browserRuntime: runtime,
+    aiClient,
+    fetchListingHtml: fetched,
+  });
+  await workspaceService.runAgentDiscovery();
+  expect(judged).toHaveLength(1);
+  expect(
+    (await repository.listSavedJobs()).every(
+      (job) => job.listingDetailFetch?.outcome === "enriched",
+    ),
+  ).toBe(true);
+  firstRun = false;
+  await workspaceService.runAgentDiscovery();
+  expect(fetched).toHaveBeenCalledTimes(20);
+  expect(judged).toHaveLength(1);
+}, 30_000);
+
 describe("discovery checkpoint incremental persistence", () => {
   test("keeps checkpoint jobs and records a blocked source even when detail retrieval returns partial jobs", async () => {
     const job = createCollectedJob({ token: "before_bot_check" });
+    let reportedBlock = false;
     const runtime = createIncrementalRuntime({
       checkpoints: [[job]],
       finalJobs: [job],
@@ -160,6 +242,7 @@ describe("discovery checkpoint incremental persistence", () => {
       NonNullable<BrowserSessionRuntime["runAgentDiscovery"]>
     >(async (source, options) => {
       const partial = await run(source, options);
+      reportedBlock = true;
       return DiscoveryRunResultSchema.parse({
         ...partial,
         warning:
@@ -176,7 +259,12 @@ describe("discovery checkpoint incremental persistence", () => {
       });
     });
     const { seed } = createHarness();
-    const fetchListingHtml = vi.fn();
+    const fetchListingHtml = vi.fn((url: string) => {
+      // An already-kept checkpoint can start its read before the source
+      // encounters protection. The reported blocker must prevent later reads.
+      expect(reportedBlock).toBe(false);
+      return Promise.resolve({ status: 403, html: "", finalUrl: url });
+    });
     const { workspaceService, repository } = createWorkspaceServiceHarness({
       seed,
       browserRuntime: { ...runtime, runAgentDiscovery },
@@ -192,7 +280,7 @@ describe("discovery checkpoint incremental persistence", () => {
     ).rejects.toThrow("example.com is showing a bot check");
     const snapshot = await workspaceService.getWorkspaceSnapshot();
     expect(runAgentDiscovery).toHaveBeenCalledOnce();
-    expect(fetchListingHtml).not.toHaveBeenCalled();
+    expect(fetchListingHtml).toHaveBeenCalledTimes(1);
     expect(
       (await repository.listSavedJobs()).map((saved) => saved.sourceJobId),
     ).toContain(job.sourceJobId);
