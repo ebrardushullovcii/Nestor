@@ -286,13 +286,16 @@ describe("ApplicationsScreen", () => {
       await screen.findByRole("button", { name: "Open this page" }),
     );
     await waitFor(() =>
-      expect(onFinishInBrowser).toHaveBeenCalledWith({
-        jobId: record.jobId,
-        resultId: result.id,
-        runId: run.id,
-        applicationRecordId: record.id,
-        destinationUrl: url,
-      }),
+      expect(onFinishInBrowser).toHaveBeenCalledWith(
+        {
+          jobId: record.jobId,
+          resultId: result.id,
+          runId: run.id,
+          applicationRecordId: record.id,
+          destinationUrl: url,
+        },
+        expect.any(Function),
+      ),
     );
     // The bound tab is focused first, then the browser is shown (it may be
     // minimized while the person reads the record).

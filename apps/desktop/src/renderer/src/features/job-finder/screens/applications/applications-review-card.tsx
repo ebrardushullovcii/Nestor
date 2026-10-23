@@ -1,11 +1,15 @@
 import { useState } from "react";
-import type { ApplicationReviewCard } from "@nestor/contracts";
+import type {
+  ApplicationPageReopenProgress,
+  ApplicationReviewCard,
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import {
   TECHNICAL_DETAILS_LABEL,
   describeFailure,
   type FailureDescription,
 } from "../../lib/describe-failure";
+import { describeReopenPhase } from "../../lib/job-finder-browser-handoff-copy";
 import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import { runAgainLabel } from "./applications-recovery-state";
 
@@ -29,7 +33,14 @@ export interface ApplicationsReviewCardProps {
    */
   pageClosed?: boolean | undefined;
   onSubmit?: (() => Promise<void>) | undefined;
-  onOpenPage?: (() => Promise<void>) | undefined;
+  /** Opens the page; a closed form is brought back first, step by step. */
+  onOpenPage?:
+    | ((
+        onReopenProgress?: (
+          phase: ApplicationPageReopenProgress["phase"],
+        ) => void,
+      ) => Promise<void>)
+    | undefined;
   onPrepareAgain?: (() => Promise<void>) | undefined;
   /** The mode saved in Settings; preparing again runs in it. */
   applyMode?: ApplyMode | undefined;
@@ -50,6 +61,7 @@ export function ApplicationsReviewCard({
   const prepareAgainLabel = runAgainLabel(applyMode, "Prepare again");
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [pending, setPending] = useState(false);
+  const [reopenPhase, setReopenPhase] = useState<string | null>(null);
   const busy = pending || isSubmitPending === true;
   const readyToSend =
     card.waitingOnYou.length === 0 &&
@@ -102,10 +114,18 @@ export function ApplicationsReviewCard({
                 type="button"
                 pending={busy}
                 onClick={() =>
-                  void run(onOpenPage, "open this application page")
+                  void run(async () => {
+                    try {
+                      await onOpenPage((phase) =>
+                        setReopenPhase(describeReopenPhase(phase)),
+                      );
+                    } finally {
+                      setReopenPhase(null);
+                    }
+                  }, "open this application page")
                 }
               >
-                Open this page
+                {reopenPhase ?? "Open this page"}
               </Button>
             ) : null}
           </div>

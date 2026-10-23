@@ -849,3 +849,50 @@ it("offers Prepare again after Tracker Undo instead of the withdrawn summary", (
     reasonSentence: "Your previous tracker stage is restored.",
   });
 });
+
+describe("a filled-in form whose tab closed", () => {
+  const ready = buildResult({
+    state: "awaiting_review",
+    blockerReason: null,
+    blockerSummary: null,
+  });
+
+  it("offers one Open when the saved form can come back", () => {
+    expect(
+      resolveApplicationRecoveryPresentation({
+        canOpenSafeguards: false,
+        isApplyPending: false,
+        visibleApplyResult: ready,
+        applicationPageState: {
+          resultId: ready.id,
+          state: "reopenable",
+          reason: null,
+        },
+      }),
+    ).toMatchObject({
+      state: "finish_in_browser",
+      primaryAction: "open_browser",
+      primaryActionLabel: "Open",
+    });
+  });
+
+  it("asks to apply again in Send for me when it cannot come back", () => {
+    expect(
+      resolveApplicationRecoveryPresentation({
+        applyMode: "apply_for_me",
+        canOpenSafeguards: false,
+        isApplyPending: false,
+        visibleApplyResult: ready,
+        applicationPageState: {
+          resultId: ready.id,
+          state: "needs_preparing",
+          reason: "form_changed",
+        },
+      }),
+    ).toMatchObject({
+      state: "retry",
+      primaryAction: "try_again",
+      primaryActionLabel: "Apply again",
+    });
+  });
+});

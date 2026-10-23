@@ -1,4 +1,5 @@
 import type {
+  ApplicationPageState,
   GlobalDailyApplicationPreparationCapacity,
   JobFinderExactApplicationTarget,
   JobFinderRendererWorkspaceSnapshot,
@@ -59,6 +60,7 @@ export function ApplicationsDetailPanelRecoverySections(props: {
   selectedRun: JobFinderRendererWorkspaceSnapshot["applyRuns"][number] | null;
   /** What the visible result's run is doing (a planned job's standing). */
   visibleApplyRunContext?: ApplyRunContext | null;
+  applicationPageState?: ApplicationPageState | null;
   visibleApplyResult:
     | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
     | null;
@@ -136,6 +138,7 @@ export function ApplicationsDetailPanelRecoverySections(props: {
       selectedRecordJobId={selectedRecordJobId}
       selectedRun={selectedRun}
       visibleApplyRunContext={visibleApplyRunContext}
+      applicationPageState={props.applicationPageState ?? null}
       visibleApplyResult={visibleApplyResult}
     />
   );

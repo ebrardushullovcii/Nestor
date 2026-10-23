@@ -988,6 +988,48 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     });
   });
 
+  it("counts a ready form that cannot come back as closed, and one that reopens as ready", () => {
+    const ws = withShortlist(withJobs(workspace(), 2), []);
+    ws.applicationRecords = [0, 1].map((index) => ({
+      id: `record-${index}`,
+      jobId: `job_${index}`,
+      title: `Job ${index}`,
+      company: "Employer",
+      status: "ready_for_review",
+      lastAttemptState: "ready",
+      automationMode: "prepare_only",
+      questionSummary: { total: 0, answered: 0 },
+      lastActionLabel: "Filled in",
+      lastUpdatedAt: "2026-08-15T11:00:00.000Z",
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
+    ws.applyJobResults = [0, 1].map((index) => ({
+      id: `result-${index}`,
+      runId: "apply-1",
+      jobId: `job_${index}`,
+      applicationRecordId: `record-${index}`,
+      state: "awaiting_review",
+      blockerReason: null,
+      updatedAt: "2026-08-15T11:00:00.000Z",
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
+    const model = build(ws, {
+      applicationPageStates: new Map([
+        [
+          "result-0",
+          { resultId: "result-0", state: "reopenable", reason: null },
+        ],
+        [
+          "result-1",
+          {
+            resultId: "result-1",
+            state: "needs_preparing",
+            reason: "form_changed",
+          },
+        ],
+      ]),
+    });
+    expect(model.stages?.[2]?.detail).toBe("1 ready to send · 1 form closed");
+  });
+
   it("sends the person to Applications when forms are filled in and ready to send", () => {
     const ws = withShortlist(withJobs(workspace(), 2), [
       queueItem("job_0", {

@@ -18,6 +18,7 @@ import { CampaignNotificationCenter } from "../../components/campaign-notificati
 import { buildJobFinderTaskCenterModel } from "../../components/task-center/job-finder-task-center-model";
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
 import { listApplicationsAwaitingUser } from "../../lib/needs-you-count";
+import { useApplicationPageStates } from "../../hooks/use-application-page-states";
 import { DiscoveryRunFeedbackCallout } from "../discovery/discovery-run-feedback-callout";
 import type { DiscoveryRunFeedback } from "../discovery/discovery-run-feedback";
 import type { ActionState } from "../../lib/job-finder-types";
@@ -261,9 +262,13 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
   // would not open, a source that needs sign-in) keeps its own callout with
   // its own corrective action. A finished search is a status fact and reads
   // as the line under the title instead.
+  const applicationPageStates = useApplicationPageStates(
+    props.workspace.applyJobResults,
+  );
   const model = buildJobSearchHomeModel({
     now,
     workspace: props.workspace,
+    applicationPageStates,
     tasks,
     tailoredDraftPreparation: props.tailoredDraftPreparation,
     discoveryRunPending: props.discoveryRunPending ?? false,

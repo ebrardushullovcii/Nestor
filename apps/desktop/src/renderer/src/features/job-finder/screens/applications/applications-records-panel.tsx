@@ -32,6 +32,10 @@ import {
 } from "./applications-crm-model";
 import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import { resolveApplyStatePresentation } from "./apply-state";
+import {
+  pageNeedsPreparing,
+  useApplicationPageStates,
+} from "../../hooks/use-application-page-states";
 import type { ApplyRunContext } from "./applications-recovery-state";
 import { Input } from "@renderer/components/ui/input";
 import { matchesCollectionSearch } from "../../components/collection-search-toolbar";
@@ -143,6 +147,11 @@ export function ApplicationsRecordsPanel({
 }: ApplicationsRecordsPanelProps) {
   const [query, setQuery] = useState("");
   const [pipelineStage, setPipelineStage] = useState("all");
+  const latestResults = useMemo(
+    () => [...(latestApplyResultByRecordId?.values() ?? [])],
+    [latestApplyResultByRecordId],
+  );
+  const pageStates = useApplicationPageStates(latestResults);
   function stateFor(record: ApplicationRecord) {
     const result = latestApplyResultByRecordId?.get(record.id) ?? null;
     return result
@@ -154,6 +163,7 @@ export function ApplicationsRecordsPanel({
               : "fill_only",
           result,
           run: readApplyRunContext?.(result) ?? null,
+          pageNeedsPreparing: pageNeedsPreparing(pageStates.get(result.id)),
           recordCrm: record.crm,
           recordLatestBlocker: record.latestBlocker,
           recordLastActionLabel: record.lastActionLabel,
@@ -455,6 +465,9 @@ export function ApplicationsRecordsPanel({
                   ...(applyMode ? { nextRunMode: applyMode } : {}),
                   result: latestResult,
                   run: readApplyRunContext?.(latestResult) ?? null,
+                  pageNeedsPreparing: pageNeedsPreparing(
+                    pageStates.get(latestResult.id),
+                  ),
                   pendingQuestionCount:
                     record.questionSummary.total -
                     record.questionSummary.answered,

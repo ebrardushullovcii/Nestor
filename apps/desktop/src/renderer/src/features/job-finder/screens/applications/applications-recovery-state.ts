@@ -19,8 +19,10 @@ import {
   APPLICATION_SKIPPED_BY_PERSON_LABEL,
   PREPARED_PAGE_CLOSED_SUMMARY,
   WITHDRAWAL_UNDONE_SUMMARY,
+  type ApplicationPageState,
   type JobFinderRendererWorkspaceSnapshot,
 } from "@nestor/contracts";
+import { pageNeedsPreparing } from "../../hooks/use-application-page-states";
 import {
   JOB_FINDER_BROWSER_NAME,
   OPEN_JOB_FINDER_BROWSER_ACTION,
@@ -454,8 +456,13 @@ type ApplicationRecoveryInput = {
   personSendReceiptSummary?: string | null;
   /** What the result's run is doing; a planned job means nothing without it. */
   run?: ApplyRunContext | null;
+  /** Whether the filled-in form is open, can be reopened, or is gone. */
+  applicationPageState?: ApplicationPageState | null;
   visibleApplyResult: ApplyResult;
 };
+
+/** The one control for a filled-in form whose tab is gone but can come back. */
+export const OPEN_PREPARED_FORM_ACTION = "Open";
 
 export function resolveApplicationRecoveryPresentation(
   input: ApplicationRecoveryInput,
@@ -910,6 +917,42 @@ function resolveRecoveryForRun(
   // The form was worked to the end and nothing stopped it: the person reads
   // it over and sends it. This used to fall through to "stopped before
   // finishing" with a Try again button under a row that said Ready to send.
+  if (
+    visibleApplyResult?.state === "awaiting_review" &&
+    !visibleApplyResult.blockerReason &&
+    pageNeedsPreparing(input.applicationPageState ?? undefined)
+  ) {
+    return {
+      state: "retry",
+      statusLine: "Prepare again",
+      reasonSentence:
+        input.applicationPageState?.reason === "attachment_unavailable"
+          ? sends
+            ? "A file on this form changed since it was filled in. Apply again fills it in with your current files and sends it."
+            : "A file on this form changed since it was filled in. Prepare again fills it in with your current files."
+          : sends
+            ? "This form cannot be brought back as it was. Apply again opens the page, fills it in from your saved answers and files, and sends it."
+            : "This form cannot be brought back as it was. Prepare again opens the page and fills it in from your saved answers and files.",
+      primaryAction: "try_again",
+      primaryActionLabel: "Prepare again",
+    };
+  }
+
+  if (
+    visibleApplyResult?.state === "awaiting_review" &&
+    !visibleApplyResult.blockerReason &&
+    input.applicationPageState?.state === "reopenable"
+  ) {
+    return {
+      state: "finish_in_browser",
+      statusLine: "Ready for you to read over and send",
+      reasonSentence:
+        "Its tab was closed. Open brings the form back filled in, ready for you to send.",
+      primaryAction: "open_browser",
+      primaryActionLabel: OPEN_PREPARED_FORM_ACTION,
+    };
+  }
+
   if (
     visibleApplyResult?.state === "awaiting_review" &&
     !visibleApplyResult.blockerReason

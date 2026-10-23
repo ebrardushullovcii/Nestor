@@ -13,7 +13,10 @@ import type {
 import { ApplicationsDetailPanelAttemptSection } from "./applications-detail-panel-attempt-section";
 import { ApplicationsDetailPanelPrivacyReceiptSection } from "./applications-detail-panel-privacy-receipt-section";
 import { ApplicationsDetailPanelReviewDataSection } from "./applications-detail-panel-review-data-section";
-import { ApplicationsReviewCard } from "./applications-review-card";
+import {
+  ApplicationsReviewCard,
+  type ApplicationsReviewCardProps,
+} from "./applications-review-card";
 import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import { ApplicationsDetailPanelRunHistorySection } from "./applications-detail-panel-run-history-section";
 import { ApplicationsDetailPanelTimelineSection } from "./applications-detail-panel-timeline-section";
@@ -54,7 +57,7 @@ export function ApplicationsDetailPanelActivitySections(props: {
   applyMode?: ApplyMode;
   /** True when this application is filled in and waiting on their decision. */
   awaitsYourReview?: boolean;
-  onOpenApplicationPage?: (() => Promise<void>) | undefined;
+  onOpenApplicationPage?: ApplicationsReviewCardProps["onOpenPage"];
   /** True when the browser no longer holds the page this was filled in on. */
   applicationPageClosed?: boolean;
   selectedApplyRunDetails: ApplyRunDetails | null;

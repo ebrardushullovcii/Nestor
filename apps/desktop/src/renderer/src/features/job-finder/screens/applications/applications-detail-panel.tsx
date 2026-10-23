@@ -51,6 +51,10 @@ import type {
 } from "./applications-detail-panel-recovery-actions-section";
 import { ApplicationsDetailPanelRecoverySections } from "./applications-detail-panel-recovery-sections";
 import {
+  pageNeedsPreparing,
+  useApplicationPageStates,
+} from "../../hooks/use-application-page-states";
+import {
   ApplicationsDetailPanelSubmitApprovalSection,
   isAwaitingPreparationApproval,
   preparationApprovalActionLabel,
@@ -247,6 +251,14 @@ export function ApplicationsDetailPanel({
   onPrepareApplicationAgain,
 }: ApplicationsDetailPanelProps) {
   const visibleApplyResult = effectiveSelectedApplyResult;
+  const pageStateResults = useMemo(
+    () => (visibleApplyResult ? [visibleApplyResult] : []),
+    [visibleApplyResult],
+  );
+  const applicationPageState =
+    useApplicationPageStates(pageStateResults).get(
+      visibleApplyResult?.id ?? "",
+    ) ?? null;
   const pendingQuestions = selectedRecord
     ? listPendingApplicationQuestions({
         applicationAttempts,
@@ -508,6 +520,7 @@ export function ApplicationsDetailPanel({
       }
       selectedRun={selectedRun}
       visibleApplyRunContext={readApplyRunContext?.(visibleApplyResult) ?? null}
+      applicationPageState={applicationPageState}
       visibleApplyResult={visibleApplyResult}
     />
   ) : null;
@@ -736,21 +749,26 @@ export function ApplicationsDetailPanel({
                 : {})}
               onOpenApplicationPage={
                 onFinishInBrowser && visibleApplyResult
-                  ? async () => {
-                      const outcome = await onFinishInBrowser({
-                        jobId: visibleApplyResult.jobId,
-                        resultId: visibleApplyResult.id,
-                        runId: visibleApplyResult.runId,
-                        applicationRecordId: selectedRecord.id,
-                        destinationUrl:
-                          selectedApplyRunDetails?.reviewCard?.pageUrl ??
-                          getApplyResultDestinationUrl(
-                            visibleApplyResult.privacyReceipt,
-                          ),
-                      });
+                  ? async (onReopenProgress) => {
+                      const outcome = await onFinishInBrowser(
+                        {
+                          jobId: visibleApplyResult.jobId,
+                          resultId: visibleApplyResult.id,
+                          runId: visibleApplyResult.runId,
+                          applicationRecordId: selectedRecord.id,
+                          destinationUrl:
+                            selectedApplyRunDetails?.reviewCard?.pageUrl ??
+                            getApplyResultDestinationUrl(
+                              visibleApplyResult.privacyReceipt,
+                            ),
+                        },
+                        onReopenProgress,
+                      );
                       if (outcome?.kind !== "opened_application_page")
                         throw new Error(
-                          "The application page could not be opened. Prepare it again.",
+                          outcome?.kind === "failed" && outcome.reason
+                            ? outcome.reason
+                            : "The application page could not be opened. Prepare it again.",
                         );
                       // The page is focused, but the browser may be minimized:
                       // show it, as Open the Job Finder browser does.
@@ -765,7 +783,8 @@ export function ApplicationsDetailPanel({
                 ? { onPrepareApplicationAgain }
                 : {})}
               applicationPageClosed={
-                selectedRecord?.nextActionLabel === "Prepare again"
+                selectedRecord?.nextActionLabel === "Prepare again" ||
+                pageNeedsPreparing(applicationPageState ?? undefined)
               }
               selectedApplyRunDetails={selectedApplyRunDetails}
               selectedApplyRunId={selectedApplyRunId}

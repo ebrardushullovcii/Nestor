@@ -1,5 +1,6 @@
 import type {
   ApplicationAutomationMode,
+  ApplicationPageState,
   DiscoveryRunRecord,
   JobFinderSearchRequest,
   JobFinderRendererWorkspaceSnapshot,
@@ -36,6 +37,7 @@ import {
   getDiscoveryRunReportCounts,
 } from "../../lib/discovery-run-count-label";
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
+import { pageNeedsPreparing } from "../../hooks/use-application-page-states";
 import {
   describeSourcesNeedingAttention,
   listSourcesNeedingAttention,
@@ -200,6 +202,11 @@ export interface BuildJobSearchHomeModelInput {
   /** Whether Home may start a search itself. */
   canRunDiscovery: boolean;
   applicationAutomationMode: ApplicationAutomationMode;
+  /**
+   * Whether each ready form is open, can be reopened, or has to be prepared
+   * again. A form that reopens is just ready; only the rest count as closed.
+   */
+  applicationPageStates?: ReadonlyMap<string, ApplicationPageState>;
   now?: number;
 }
 
@@ -488,6 +495,7 @@ function countApplications(
   jobIds: ReadonlySet<string>,
   /** Jobs whose resume the person must approve first; a batch refuses them. */
   resumeReviewJobIds: ReadonlySet<string>,
+  pageStates: ReadonlyMap<string, ApplicationPageState> = new Map(),
 ): ApplicationCounts {
   const retryJobIds: string[] = [];
   const pageClosedJobIds: string[] = [];
@@ -587,6 +595,15 @@ function countApplications(
         else counts.fillingIn += 1;
         break;
       case "ready_to_send":
+        // Its saved form can no longer be filled back in: it is a closed
+        // form, not one ready to send.
+        if (pageNeedsPreparing(pageStates.get(result.id))) {
+          counts.couldNotApply += 1;
+          if (!pageClosedJobIds.includes(record.jobId)) {
+            pageClosedJobIds.push(record.jobId);
+          }
+          break;
+        }
         counts.readyToSend += 1;
         readyToSendJobIds.push(record.jobId);
         if (describeNotSentResult(result)) notSentReasons.push(result.summary);
@@ -1051,6 +1068,7 @@ export function buildJobSearchHomeModel(
         )
         .map((item) => item.jobId),
     ),
+    input.applicationPageStates,
   );
   const dailyPreparationRemaining = Math.max(
     0,

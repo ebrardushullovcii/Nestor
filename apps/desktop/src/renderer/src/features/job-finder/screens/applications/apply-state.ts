@@ -141,6 +141,8 @@ type ApplyStateInput = {
   /** The record's tracker, where the person may have recorded the send. */
   recordCrm?: ApplicationRecord["crm"] | undefined;
   recordLatestBlocker?: ApplicationRecord["latestBlocker"];
+  /** The filled-in form cannot be brought back as it was. */
+  pageNeedsPreparing?: boolean;
 };
 
 export function resolveApplyStatePresentation(
@@ -340,6 +342,21 @@ function resolveApplyStateForRun(
       action: "none",
       actionLabel: null,
       questionsLeftLabel: null,
+    };
+  }
+
+  if (result?.state === "awaiting_review" && input.pageNeedsPreparing) {
+    return {
+      kind: "could_not_apply",
+      title: "Form closed",
+      sentence:
+        (input.nextRunMode ?? mode) === "apply_for_me"
+          ? "The filled-in form cannot be brought back as it was. Apply again fills it in from your saved answers and files and sends it."
+          : "The filled-in form cannot be brought back as it was. Prepare it again with your saved answers and files.",
+      action: "try_again",
+      actionLabel: "Prepare again",
+      questionsLeftLabel: null,
+      formClosed: true,
     };
   }
 
