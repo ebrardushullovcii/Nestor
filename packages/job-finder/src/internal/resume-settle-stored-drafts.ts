@@ -106,14 +106,25 @@ export async function settleStoredResumeDrafts(
       stretchesAreThePersons: tailoringMode === "aggressive",
     });
     if (!settled) {
-      await saveRecheckedDraft(ctx, {
-        draft,
-        job,
-        profile,
-        previousValidation: validations.get(draft.id) ?? null,
-        existingAsset: assetsByJobId.get(job.id) ?? null,
-        templates,
-      });
+      // Only a check written before the model's fact check is redone here.
+      // A line the model itself found unsupported keeps waiting for the
+      // person, even when the draft does not carry that verdict itself.
+      const modelFlagged = validations
+        .get(draft.id)
+        ?.claimAssessments.some(
+          (assessment) =>
+            assessment.verifier.startsWith("model_") &&
+            isBlockingResumeClaimAssessment({ assessment, draft }),
+        );
+      if (!modelFlagged)
+        await saveRecheckedDraft(ctx, {
+          draft,
+          job,
+          profile,
+          previousValidation: validations.get(draft.id) ?? null,
+          existingAsset: assetsByJobId.get(job.id) ?? null,
+          templates,
+        });
       continue;
     }
     const sanitized = sanitizeResumeDraft({
