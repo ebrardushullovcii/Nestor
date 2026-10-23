@@ -45,6 +45,12 @@ describe("ProfileSaveFooter", () => {
     expect(screen.queryByText("Unsaved changes on this page.")).toBeNull();
   });
 
+  it("says Saving while a save runs instead of Unsaved changes", () => {
+    renderFooter({ hasUnsavedChanges: true, isSavePending: true });
+    expect(screen.getByText("Saving…")).toBeTruthy();
+    expect(screen.queryByText("Unsaved changes on this page.")).toBeNull();
+  });
+
   it("saves on Ctrl+S only when there is something to save", () => {
     const onSave = vi.fn();
     const { unmount } = renderFooter({ onSave });
@@ -127,7 +133,7 @@ describe("ProfileSaveFooter", () => {
     fireEvent.click(button);
     fireEvent.keyDown(button, { key: "Enter" });
     fireEvent.keyDown(button, { key: " " });
-    fireEvent.click(screen.getByText(/Unsaved changes on this page/));
+    fireEvent.click(screen.getByText("Saving…"));
     expect(onSave).not.toHaveBeenCalled();
 
     view.rerender(

@@ -81,10 +81,14 @@ export function ProfileSaveFooter({
                   : "bg-(--disabled-foreground)",
               )}
             />
+            {/* A save of a big profile takes seconds; "Unsaved changes" all
+                that time read as if the press (or a quick tick) did nothing. */}
             {hasUnsavedChanges
-              ? hasUserEdits === false
-                ? "Imported details on this page are not saved yet."
-                : "Unsaved changes on this page."
+              ? isSavePending
+                ? "Saving…"
+                : hasUserEdits === false
+                  ? "Imported details on this page are not saved yet."
+                  : "Unsaved changes on this page."
               : "No unsaved changes."}
           </p>
           {/* When a saved profile is felt: the next tailored draft and
