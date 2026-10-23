@@ -258,6 +258,7 @@ export function createJobFinderWorkspaceService(
   options: CreateJobFinderWorkspaceServiceOptions,
 ): JobFinderWorkspaceService {
   const {
+    backgroundWorkReady,
     aiClient,
     visionProvider,
     browserRuntime,
@@ -421,6 +422,7 @@ export function createJobFinderWorkspaceService(
   }
 
   const context: WorkspaceServiceContext = {
+    ...(backgroundWorkReady ? { backgroundWorkReady } : {}),
     ...(resumeDraftProcessor ? { resumeDraftProcessor } : {}),
     aiClient,
     ...(visionProvider ? { visionProvider } : {}),

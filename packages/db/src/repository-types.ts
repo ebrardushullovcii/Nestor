@@ -852,6 +852,8 @@ export interface FileJobFinderRepositoryOptions {
    * reads. Omitted or null validates every row.
    */
   rowValidationStamp?: PromiseLike<string | null> | string | null;
+  /** Let the initial display finish before validating unopened full job rows. */
+  backgroundValidationReady?: PromiseLike<void>;
 }
 
 export type StateTableKey =

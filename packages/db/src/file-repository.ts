@@ -422,6 +422,9 @@ export async function createFileJobFinderRepository(
     readSavedJobsProjection = createSavedJobProjectionReader(database, {
       validationStamp: options.rowValidationStamp ?? null,
       sqliteDetails: true,
+      ...(options.backgroundValidationReady
+        ? { backgroundValidationReady: options.backgroundValidationReady }
+        : {}),
     });
     readIntelligenceProjection = createIntelligenceProjectionReader(database);
     readDisplayCollections = createDisplayCollectionsReader(database, {

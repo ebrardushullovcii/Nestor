@@ -54,7 +54,11 @@ outside-edit and reset protections from ADR 0053 remain unchanged. The full main
 build digest still controls validation marks independently from the view format.
 
 Unmarked full saved-job rows validate in five-row background slices with an event
-loop turn between slices. Reads and marks retain ADR 0054's transaction rules.
+loop turn between slices, after the window acknowledges its first full view.
+Canonical triage-cache warming starts after that acknowledgement too. A clean
+saved view reaches the window before canonical service startup begins. A failed
+renderer releases background work after a bounded wait. Reads and marks retain
+ADR 0054's transaction rules.
 A validation failure fails subsequent projection reads; opened full details
 validate immediately. Without a digest, reads still validate complete rows.
 Resume drafts retain the existing marked display-collection reader.

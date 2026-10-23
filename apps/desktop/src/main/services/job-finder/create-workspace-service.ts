@@ -6,7 +6,10 @@ import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { installDiscoveryFeedWorkers } from "./discovery-cpu";
 import type { Page } from "playwright";
 import { publishJobFinderWorkspaceUpdate } from "./workspace-updates";
-import { mainBuildDigest } from "./startup-workspace-view";
+import {
+  mainBuildDigest,
+  waitForStartupWorkspaceHydration,
+} from "./startup-workspace-view";
 import {
   publishOnApplyStandingChanges,
   publishOnUserActionChanges,
@@ -599,6 +602,7 @@ export async function createJobFinderWorkspaceServiceAsync(
         onRestored: recordRestoredStartupDatabaseRecoveryEvent,
       },
       rowValidationStamp: mainBuildDigest(),
+      backgroundValidationReady: waitForStartupWorkspaceHydration(),
     });
   } catch (error) {
     if (error instanceof WorkspaceDatabaseRecoveryRequiredError) {
@@ -620,12 +624,6 @@ export async function createJobFinderWorkspaceServiceAsync(
   // over a shorter list. Recording the interruption here, before anything
   // reads the workspace, lets every screen say what the run actually kept.
   await recoverInterruptedDiscoveryRuns(jobFinderRepository);
-  // The first hide or shortlist reads the whole canonical discovery state
-  // (about 0.4 s with a large search history). Read it once the app has
-  // settled, not on the way to the first screen.
-  setTimeout(() => {
-    void jobFinderRepository.warmDiscoveryState?.().catch(() => undefined);
-  }, 4_000).unref?.();
   await recoverPendingJobFinderWorkspaceReset(jobFinderRepository);
   await migrateLegacyResumeSource({
     documentsDirectory: getJobFinderDocumentsDirectory(),
@@ -666,6 +664,7 @@ export async function createJobFinderWorkspaceServiceAsync(
   );
   installDiscoveryFeedWorkers();
   const workspaceService = createJobFinderWorkspaceService({
+    backgroundWorkReady: waitForStartupWorkspaceHydration(),
     resumeDraftProcessor,
     aiClient,
     visionProvider,
