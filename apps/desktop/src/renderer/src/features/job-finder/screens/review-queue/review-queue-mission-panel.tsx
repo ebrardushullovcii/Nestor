@@ -427,7 +427,7 @@ export function ReviewQueueMissionPanel({
     ) : null
   ) : null;
   const resumeLevelLabel = (
-    <span className="shrink-0 text-xs font-semibold uppercase tracking-(--tracking-heading) text-foreground-soft">
+    <span className="shrink-0 text-(length:--text-small) font-semibold text-foreground-soft">
       Resume level
     </span>
   );

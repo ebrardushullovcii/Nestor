@@ -114,7 +114,7 @@ export function ReviewQueuePreviewPanel({
       <header className="flex flex-wrap items-start justify-between gap-3 px-5 pt-5">
         {/* An eyebrow is a label, not a heading: as an `h2` it polluted the
             document outline and rendered a 19px level at 11px. */}
-        <p className="font-display text-(length:--text-eyebrow) font-semibold uppercase tracking-(--tracking-caps) text-foreground">
+        <p className="text-(length:--text-small) font-semibold leading-5 text-foreground">
           Resume
         </p>
         {/* The workspace header above this panel already shows the workflow

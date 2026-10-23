@@ -189,7 +189,7 @@ describe("Find jobs fit honesty", () => {
     const srOnly = screen.getByTestId(`discovery-result-fit-sr-${job.id}`);
     expect(srOnly.className).toContain("sr-only");
     expect(srOnly.textContent).toBe(
-      "Overall fit: not judged yet. The AI judges each job against your profile and goals after a search. Choose Read and assess listing to judge this one now.",
+      "Overall fit: not judged yet. The AI judges each job against your profile and goals after a search. Choose Judge fit to do this one now.",
     );
     // …and it is the row's only carrier of that reason.
     expect(

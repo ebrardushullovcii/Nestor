@@ -35,7 +35,7 @@ export function JobFinderActivityControl(props: {
         ) : (
           <Pause aria-hidden="true" className="size-4" />
         )}
-        {props.state.paused ? "Resume" : "Pause"}
+        {props.state.paused ? "Continue" : "Pause"}
       </Button>
       <span
         className="max-w-[44ch] text-(length:--text-tiny) leading-4 text-foreground-muted lg:text-right"

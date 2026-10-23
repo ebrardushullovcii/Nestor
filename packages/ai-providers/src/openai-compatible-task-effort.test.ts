@@ -229,7 +229,7 @@ test("a full listing read nobody waits on runs at the fit-check effort", async (
   await client.assessJobFit(input);
   expect(requests.map((request) => request.effort)).toEqual([
     "medium", // a search refreshing an older full read
-    "high", // the person pressed "Read and assess listing"
+    "high", // the person pressed "Judge fit"
   ]);
 });
 

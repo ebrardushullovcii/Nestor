@@ -1102,7 +1102,7 @@ export function createWorkspaceApplicationMethods(
               ),
               posting,
               signal,
-              // Only "Read and assess listing" waits on this read.
+              // Only "Judge fit" waits on this read.
               { background: !options.throwOnFailure },
             );
             return session.remember(posting, assessed);

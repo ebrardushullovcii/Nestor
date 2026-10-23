@@ -540,7 +540,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
           data-testid="home-now"
         >
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-            <h2 className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-muted-foreground">
+            <h2 className="text-(length:--text-small) font-semibold leading-5 text-muted-foreground">
               Happening now
             </h2>
             {!model.paused ? (
@@ -666,7 +666,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
         data-home-next-step={model.next.id}
         data-testid="home-next-step"
       >
-        <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-muted-foreground">
+        <p className="text-(length:--text-small) font-semibold leading-5 text-muted-foreground">
           Next step
         </p>
         <h2

@@ -186,6 +186,30 @@ describe("ReviewQueueListPanel", () => {
     expect(onSelectItem).toHaveBeenCalledWith("one");
   });
 
+  it("drops the ticks of approved resumes once the approval lands", async () => {
+    const toReview = (jobId: string) =>
+      ({
+        ...createReadyItem(jobId),
+        resumeTailoringMode: "aggressive",
+        resumeReview: { status: "not_started" },
+      }) as unknown as ReviewQueueItem;
+    const onApproveResumes = vi.fn(() => Promise.resolve());
+    renderPanel({
+      onApproveResumes,
+      onPrepareTailoredDrafts: vi.fn(),
+      queue: [toReview("one"), toReview("two"), createEligibleItem("three")],
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Role one" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Role two" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Select Role three" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Approve 2 resumes" }));
+    expect(onApproveResumes).toHaveBeenCalledExactlyOnceWith(["one", "two"]);
+    // The job that still needs a resume keeps its tick.
+    await vi.waitFor(() => expect(screen.getByText("1 selected")).toBeTruthy());
+  });
+
   it("removes the ticked jobs from the shortlist in one request", async () => {
     const onRemoveJobs = vi.fn(() => Promise.resolve());
     renderPanel({
@@ -458,8 +482,8 @@ describe("ReviewQueueListPanel", () => {
 
     // Each row says its status once: the badge. A caption that only
     // repeated it ("No resume yet" under "Needs a resume", "Resume
-    // approved" under "Ready to apply") is gone. The badge uses the status
-    // tab's own words.
+    // approved" under "Ready to apply") is gone. The badge says the status
+    // in full; its tab uses a shorter name.
     expect(screen.queryByText("No resume yet")).toBeNull();
     expect(
       screen
@@ -666,7 +690,7 @@ it("counts a job whose resume is being written under Writing, as its row says", 
     ],
     onPrepareTailoredDrafts: vi.fn(),
   });
-  expect(screen.getByRole("button", { name: "Needs a resume: 1 jobs" }))
+  expect(screen.getByRole("button", { name: "No resume: 1 jobs" }))
     .toBeTruthy();
   expect(screen.getByRole("button", { name: "Writing: 1 jobs" })).toBeTruthy();
   expect(
@@ -680,7 +704,7 @@ it("says nothing about the filter when every job the button covers is shown", ()
     queue: [createEligibleItem("one"), createEligibleItem("two"), ready],
     onPrepareTailoredDrafts: vi.fn(),
   });
-  fireEvent.click(screen.getByRole("button", { name: /^Needs a resume: 2/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^No resume: 2/ }));
   expect(screen.getByRole("button", { name: "Create 2 missing resumes" }))
     .toBeTruthy();
   expect(screen.queryByTestId("shortlist-bulk-filter-scope")).toBeNull();
@@ -698,7 +722,7 @@ it("opens the first job of a status tab when the open job is not in it, and keep
     onShowItem,
     selectedItem: ready,
   });
-  fireEvent.click(screen.getByRole("button", { name: /^Needs a resume: 2/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^No resume: 2/ }));
   expect(onShowItem).toHaveBeenCalledExactlyOnceWith("first");
   expect(onSelectItem).not.toHaveBeenCalled();
   view.unmount();
@@ -709,7 +733,7 @@ it("opens the first job of a status tab when the open job is not in it, and keep
     onShowItem,
     selectedItem: second,
   });
-  fireEvent.click(screen.getByRole("button", { name: /^Needs a resume: 2/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^No resume: 2/ }));
   expect(onShowItem).not.toHaveBeenCalled();
 });
 
@@ -794,7 +818,7 @@ it("filters by resume status with counts while Create missing resumes stays plan
     within(filters).getByRole("button", { name: "All: 103 jobs" }),
   ).toBeTruthy();
   fireEvent.click(
-    within(filters).getByRole("button", { name: "Ready to apply: 2 jobs" }),
+    within(filters).getByRole("button", { name: "Ready: 2 jobs" }),
   );
   expect(screen.getByText("Role page-50")).toBeTruthy();
   expect(screen.queryByText("Role page-0")).toBeNull();

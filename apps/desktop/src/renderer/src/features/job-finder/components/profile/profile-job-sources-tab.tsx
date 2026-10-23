@@ -450,12 +450,18 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
     }
   };
 
+  // A tick is the whole act too, like a Settings switch: it saves at once
+  // instead of turning the page's footer to "Unsaved changes".
   const toggleTarget = (targetId: string, enabled: boolean) => {
     updateDiscoveryTargets(
       discoveryTargets.map((target) =>
         target.id === targetId ? { ...target, enabled } : target,
       ),
     );
+    if (props.onSaveNow) {
+      const saveNow = props.onSaveNow;
+      window.setTimeout(() => saveNow(), 0);
+    }
   };
 
   const moveToPage = (nextPage: number) => {

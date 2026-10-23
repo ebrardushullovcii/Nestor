@@ -678,7 +678,7 @@ describe("discovery three-band result counts", () => {
         srOnly: true,
         // The divider is a plain div outside the arrow-key traversal, so the
         // reason the visible rows gave up survives on the row itself.
-        text: "Overall fit: not judged yet. The AI judges each job against your profile and goals after a search. Choose Read and assess listing to judge this one now.",
+        text: "Overall fit: not judged yet. The AI judges each job against your profile and goals after a search. Choose Judge fit to do this one now.",
       })),
     );
   });
