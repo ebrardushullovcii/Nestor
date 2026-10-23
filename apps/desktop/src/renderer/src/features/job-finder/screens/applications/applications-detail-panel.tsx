@@ -49,6 +49,7 @@ import type {
   FinishInBrowserHandler,
   FinishInBrowserInput,
 } from "./applications-detail-panel-recovery-actions-section";
+import { openApplicationForm } from "./application-form-open";
 import { ApplicationsDetailPanelRecoverySections } from "./applications-detail-panel-recovery-sections";
 import {
   pageNeedsPreparing,
@@ -753,7 +754,10 @@ export function ApplicationsDetailPanel({
               onOpenApplicationPage={
                 onFinishInBrowser && visibleApplyResult
                   ? async (onReopenProgress) => {
-                      const outcome = await onFinishInBrowser(
+                      // The same open the status block and the row use, so
+                      // all three show the same step and outcome.
+                      const outcome = await openApplicationForm(
+                        onFinishInBrowser,
                         {
                           jobId: visibleApplyResult.jobId,
                           resultId: visibleApplyResult.id,
@@ -773,9 +777,6 @@ export function ApplicationsDetailPanel({
                             ? outcome.reason
                             : "The application page could not be opened. Prepare it again.",
                         );
-                      // The page is focused, but the browser may be minimized:
-                      // show it, as Open the Job Finder browser does.
-                      void window.nestor?.browser?.command({ type: "open" });
                     }
                   : undefined
               }

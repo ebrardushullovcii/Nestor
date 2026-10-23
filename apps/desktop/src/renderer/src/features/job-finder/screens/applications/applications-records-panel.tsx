@@ -21,6 +21,7 @@ import {
   type ApplicationCrmStageDefinition,
   type ApplicationRecord,
   type ApplyJobResultListRow,
+  type JobFinderExactApplicationTarget,
 } from "@nestor/contracts";
 import {
   applicationCrmDataForView,
@@ -37,6 +38,17 @@ import {
   useApplicationPageStates,
 } from "../../hooks/use-application-page-states";
 import type { ApplyRunContext } from "./applications-recovery-state";
+import {
+  clearSettledApplicationFormOpenStates,
+  describeFormOpenOutcome,
+  formOpenPhaseLabel,
+  openApplicationForm,
+  resolveRowFormAction,
+  useApplicationFormOpenStates,
+  type FinishInBrowserHandler,
+} from "./application-form-open";
+import { getApplyResultDestinationUrl } from "./applications-detail-panel-helpers";
+import { describeReopenPhase } from "../../lib/job-finder-browser-handoff-copy";
 import { Input } from "@renderer/components/ui/input";
 import { matchesCollectionSearch } from "../../components/collection-search-toolbar";
 import { Button } from "@renderer/components/ui/button";
@@ -134,6 +146,13 @@ interface ApplicationsRecordsPanelProps {
   ) => ApplyRunContext | null;
   /** The mode chosen in Settings; a retry runs in it and is named for it. */
   applyMode?: ApplyMode;
+  /**
+   * The detail panel's own ways to open a form, so a row's Open form shows
+   * the same steps and the same outcome as the panel.
+   */
+  onFinishInBrowser?: FinishInBrowserHandler;
+  onStartApplyCopilot?: (input: JobFinderExactApplicationTarget) => void;
+  isApplyPending?: boolean;
   onFilterChange: (filter: ApplicationsViewFilter) => void;
   onSelectRecord: (recordId: string) => void;
   selectedRecord: ApplicationRecord | null;
@@ -153,10 +172,22 @@ export function ApplicationsRecordsPanel({
   latestApplyResultByRecordId,
   readApplyRunContext,
   applyMode,
+  onFinishInBrowser,
+  onStartApplyCopilot,
+  isApplyPending = false,
   onFilterChange,
   onSelectRecord,
   selectedRecord,
 }: ApplicationsRecordsPanelProps) {
+  const formOpenStates = useApplicationFormOpenStates();
+  // The record whose Prepare again was pressed here, until its run starts.
+  const [preparingRecordId, setPreparingRecordId] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!isApplyPending) setPreparingRecordId(null);
+  }, [isApplyPending]);
+  useEffect(() => clearSettledApplicationFormOpenStates, []);
   // Kept when moving to another screen and back, and after a restart.
   const [query, setQuery] = useRememberedString(
     "applications.query",
@@ -564,6 +595,52 @@ export function ApplicationsRecordsPanel({
               applyState?.kind === "applied" || applyState?.formClosed
                 ? stage.label
                 : applicationCrmStageLabelForView(record, customStages);
+            const formAction =
+              latestResult && applyState
+                ? resolveRowFormAction({
+                    result: latestResult,
+                    applyState,
+                    canOpen: Boolean(onFinishInBrowser),
+                    canPrepare: Boolean(onStartApplyCopilot),
+                  })
+                : null;
+            const formOpenState = latestResult
+              ? (formOpenStates.get(latestResult.id) ?? null)
+              : null;
+            const formOpenPhase =
+              formAction?.kind === "prepare"
+                ? isApplyPending && preparingRecordId === record.id
+                  ? describeReopenPhase("opening")
+                  : null
+                : formOpenPhaseLabel(formOpenState);
+            const formOpenOutcome =
+              formAction?.kind === "open" &&
+              formOpenState &&
+              "outcome" in formOpenState
+                ? formOpenState.outcome
+                : null;
+            const runFormAction = () => {
+              if (!formAction || !latestResult || formOpenPhase) return;
+              if (formAction.kind === "prepare") {
+                setPreparingRecordId(record.id);
+                onStartApplyCopilot?.({
+                  jobId: record.jobId,
+                  applicationRecordId: record.id,
+                });
+                return;
+              }
+              if (!onFinishInBrowser) return;
+              void openApplicationForm(onFinishInBrowser, {
+                jobId: latestResult.jobId,
+                resultId: latestResult.id,
+                runId: latestResult.runId,
+                applicationRecordId:
+                  latestResult.applicationRecordId ?? record.id,
+                destinationUrl: getApplyResultDestinationUrl(
+                  latestResult.privacyReceipt,
+                ),
+              });
+            };
             const recordStateDescriptionId = `applications-record-${record.id}-state-description`;
             const relatedJob = relatedJobsById.get(record.jobId);
             const employerLine = [
@@ -598,12 +675,8 @@ export function ApplicationsRecordsPanel({
                     slot. Selecting row 1 then row 2 used to move every row
                     below by tens of pixels. */}
                 <SelectableRow
-                  aria-describedby={recordStateDescriptionId}
+                  as="div"
                   className={jobFinderListRowClassName}
-                  aria-keyshortcuts="ArrowUp ArrowDown Home End"
-                  aria-label={`View details for ${employerAriaLabel}`}
-                  data-collection-item-id={record.id}
-                  onClick={() => onSelectRecord(record.id)}
                   onContextMenu={(event) =>
                     openRowContextMenu(event, [
                       {
@@ -611,15 +684,38 @@ export function ApplicationsRecordsPanel({
                         label: "Open",
                         run: () => onSelectRecord(record.id),
                       },
+                      ...(formAction
+                        ? [
+                            {
+                              id: "open-form",
+                              label: formAction.label,
+                              run: runFormAction,
+                            },
+                          ]
+                        : []),
                       ...listingRowMenuEntries(relatedJob?.canonicalUrl),
                     ])
                   }
-                  onKeyDown={(event) =>
-                    handleRecordRowKeyDown(event, record.id)
-                  }
                   selected={selectedRecord?.id === record.id}
                 >
-                  <div className={jobFinderListRowLinesClassName}>
+                  <button
+                    aria-current={
+                      selectedRecord?.id === record.id ? "true" : undefined
+                    }
+                    aria-describedby={recordStateDescriptionId}
+                    aria-keyshortcuts="ArrowUp ArrowDown Home End"
+                    aria-label={`View details for ${employerAriaLabel}`}
+                    className={cn(
+                      jobFinderListRowLinesClassName,
+                      "w-full text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
+                    )}
+                    data-collection-item-id={record.id}
+                    onClick={() => onSelectRecord(record.id)}
+                    onKeyDown={(event) =>
+                      handleRecordRowKeyDown(event, record.id)
+                    }
+                    type="button"
+                  >
                     {/* Title line, with the one badge slot trailing it - the
                         same slot Find jobs and Shortlisted use. The row's own
                         description below already reads "Stage <label>", so no
@@ -647,20 +743,74 @@ export function ApplicationsRecordsPanel({
                     </SelectableRowLine>
                     {/* One status line only: the stage badge already names the
                         state, so the latest-activity sentence (which often
-                        repeated this exact next step) is not shown twice. */}
-                    <SelectableRowLine
-                      className={cn(
-                        jobFinderListRowStatusClassName,
-                        "font-medium text-primary",
-                      )}
+                        repeated this exact next step) is not shown twice.
+                        Opening the form from this row reports here, in the
+                        same words the detail panel uses. */}
+                    {formOpenPhase ? (
+                      <SelectableRowLine
+                        className={cn(
+                          jobFinderListRowStatusClassName,
+                          "flex items-center gap-2 pr-28 text-foreground-soft",
+                        )}
+                        role="status"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none"
+                        />
+                        <span className="min-w-0 truncate">
+                          {formOpenPhase}
+                        </span>
+                      </SelectableRowLine>
+                    ) : formOpenOutcome && applyState ? (
+                      <SelectableRowLine
+                        className={cn(
+                          jobFinderListRowStatusClassName,
+                          "pr-28",
+                          formOpenOutcome.kind === "opened_application_page"
+                            ? "text-foreground-soft"
+                            : "text-(--warning-text)",
+                        )}
+                        data-handoff-outcome={formOpenOutcome.kind}
+                        role="status"
+                        title={describeFormOpenOutcome(formOpenOutcome, {
+                          readyToSend: applyState.kind === "ready_to_send",
+                        })}
+                      >
+                        {describeFormOpenOutcome(formOpenOutcome, {
+                          readyToSend: applyState.kind === "ready_to_send",
+                        })}
+                      </SelectableRowLine>
+                    ) : (
+                      <SelectableRowLine
+                        className={cn(
+                          jobFinderListRowStatusClassName,
+                          "font-medium text-primary",
+                          formAction ? "pr-28" : null,
+                        )}
+                      >
+                        {liveLine
+                          ? `Now: ${liveLine}`
+                          : nextStepLabel
+                            ? `Next: ${nextStepLabel}`
+                            : null}
+                      </SelectableRowLine>
+                    )}
+                  </button>
+                  {formAction ? (
+                    <Button
+                      className="absolute right-4 bottom-2.5"
+                      data-testid="applications-row-form-action"
+                      disabled={formOpenPhase !== null}
+                      onClick={runFormAction}
+                      pending={formOpenPhase !== null}
+                      size="xs"
+                      type="button"
+                      variant="secondary"
                     >
-                      {liveLine
-                        ? `Now: ${liveLine}`
-                        : nextStepLabel
-                          ? `Next: ${nextStepLabel}`
-                          : null}
-                    </SelectableRowLine>
-                  </div>
+                      {formAction.label}
+                    </Button>
+                  ) : null}
                   <span className="sr-only" id={recordStateDescriptionId}>
                     {/* The visible badge is deduplicated; the description
                         still names a failed attempt for assistive tech, since

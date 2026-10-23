@@ -1169,6 +1169,11 @@ export function ApplicationsScreen(props: {
             latestApplyResultByRecordId={latestApplyResultByRecordId}
             readApplyRunContext={readApplyRunContext}
             applyMode={applyMode}
+            {...(props.onFinishInBrowser
+              ? { onFinishInBrowser: props.onFinishInBrowser }
+              : {})}
+            onStartApplyCopilot={onStartApplyCopilot}
+            isApplyPending={isApplyPending}
             hasUnassignedLegacyHistory={hasUnassignedLegacyLineage}
             onFilterChange={handleFilterChange}
             onSelectRecord={selectRecordAndRevealDetails}
