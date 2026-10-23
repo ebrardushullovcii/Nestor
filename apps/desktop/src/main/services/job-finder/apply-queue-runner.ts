@@ -51,6 +51,11 @@ export interface ApplyQueueRunner {
   control(
     action: "pause" | "continue" | "stop" | "dismiss",
   ): Promise<ApplyQueue | null>;
+  /**
+   * Takes jobs out before a run takes them; a job already handed to a run
+   * stays. Returns the jobs it took out.
+   */
+  remove(jobIds: readonly string[]): Promise<string[]>;
   /** After launch: carries on a queue that was running or waiting. */
   resumeAfterRestart(): Promise<void>;
   /** Settings or paused activity changed; a waiting queue looks again. */
@@ -113,6 +118,9 @@ export function createApplyQueueRunner(
   let pumpAgain = false;
   let activeRunSettled: Promise<void> | null = null;
   let clearWakeTimer: (() => void) | null = null;
+  // Jobs taken out this session. A run never takes one, even if a save that
+  // read the queue before the removal lands after it.
+  const removedJobIds = new Set<string>();
 
   const save = async (queue: ApplyQueue | null) => {
     await deps.saveQueue(
@@ -140,10 +148,38 @@ export function createApplyQueueRunner(
     );
   };
 
+  /** Drops jobs taken out before a run took them; an emptied queue is done. */
+  async function withoutRemovedJobs(queue: ApplyQueue): Promise<ApplyQueue> {
+    const started = new Set(queue.startedJobIds);
+    const jobIds = queue.jobIds.filter(
+      (id) => started.has(id) || !removedJobIds.has(id),
+    );
+    if (jobIds.length === queue.jobIds.length) return queue;
+    const kept = new Set(jobIds);
+    let next: ApplyQueue = {
+      ...queue,
+      jobIds,
+      skipped: queue.skipped.filter((entry) => kept.has(entry.jobId)),
+    };
+    if (
+      listApplyQueueRemainingJobIds(next).length === 0 &&
+      !next.activeRunId &&
+      (next.state === "paused" || next.state === "waiting_for_tomorrow")
+    ) {
+      clearWakeTimer?.();
+      clearWakeTimer = null;
+      next = { ...next, state: "done", pausedReason: null, resumesAt: null };
+    }
+    await save(next);
+    return next;
+  }
+
   async function step(): Promise<void> {
-    if (disposed || activeRunSettled) return;
-    const queue = await deps.loadQueue();
-    if (!queue) return;
+    if (disposed) return;
+    const loaded = await deps.loadQueue();
+    if (!loaded) return;
+    const queue = await withoutRemovedJobs(loaded);
+    if (activeRunSettled) return;
     if (queue.state !== "running" && queue.state !== "waiting_for_tomorrow") {
       return;
     }
@@ -308,6 +344,8 @@ export function createApplyQueueRunner(
   return {
     async start(jobIds, mode) {
       const unique = [...new Set(jobIds)];
+      // Pressed again after it was taken out: it goes back in.
+      for (const id of unique) removedJobIds.delete(id);
       const existing = await deps.loadQueue();
       const createdAt = now().toISOString();
       const ongoing =
@@ -409,6 +447,19 @@ export function createApplyQueueRunner(
         await deps.cancelRun(queue.activeRunId).catch(onError);
       }
       return next;
+    },
+    async remove(jobIds) {
+      const queue = await deps.loadQueue();
+      if (!queue || queue.state === "done" || queue.state === "stopped")
+        return [];
+      const waiting = new Set(listApplyQueueRemainingJobIds(queue));
+      const removable = [...new Set(jobIds)].filter((id) => waiting.has(id));
+      if (removable.length === 0) return [];
+      for (const id of removable) removedJobIds.add(id);
+      // Applied inside a step, so it never interleaves with a run's take.
+      pump();
+      await pumping;
+      return removable;
     },
     async resumeAfterRestart() {
       const queue = await deps.loadQueue();

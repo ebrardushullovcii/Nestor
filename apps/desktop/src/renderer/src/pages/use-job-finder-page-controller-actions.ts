@@ -113,7 +113,10 @@ import {
   getJobFinderErrorMessage,
 } from "@renderer/features/job-finder/lib/job-finder-error-message";
 import { buildJobFinderContextRoute } from "../features/job-finder/lib/job-finder-context-navigation";
-import type { ApplyQueueControlAction } from "../features/job-finder/lib/apply-queue-view";
+import {
+  listApplyQueueWaitingJobIds,
+  type ApplyQueueControlAction,
+} from "../features/job-finder/lib/apply-queue-view";
 import { buildResumeWorkspaceRoute } from "@renderer/features/job-finder/lib/resume-workspace-route";
 import {
   getRecentChangeUndo,
@@ -1130,9 +1133,7 @@ export function createPrimaryPageActions(
     return job ? `${job.title} at ${job.company}` : "a job";
   };
   /** Records a move for Recent changes; the label names its first job. */
-  const recordMove = (
-    input: Omit<RecentChangeInput, "label">,
-  ): RecentChange =>
+  const recordMove = (input: Omit<RecentChangeInput, "label">): RecentChange =>
     recordRecentChange({
       ...input,
       label: describeJobForChange(input.jobIds[0] ?? ""),
@@ -1177,7 +1178,8 @@ export function createPrimaryPageActions(
       case "hidden":
         return settle(
           async () => {
-            for (const id of ids) await actions.restoreDismissedDiscoveryJob(id);
+            for (const id of ids)
+              await actions.restoreDismissedDiscoveryJob(id);
           },
           `${jobsAre(ids.length)} back in Find jobs.`,
           jobFinderPendingActions.discoveryJob("bulk-dismiss"),
@@ -2084,6 +2086,31 @@ export function createPrimaryPageActions(
         },
       );
     },
+    onTakeOutOfApplyQueue: (jobIds: readonly string[]) => {
+      const ids = [...new Set(jobIds)];
+      return runAction(
+        () => actions.removeFromApplyQueue({ jobIds: ids }),
+        (snapshot) => {
+          const waiting = new Set(
+            listApplyQueueWaitingJobIds(snapshot.applyQueue),
+          );
+          const taken = ids.filter((id) => !waiting.has(id));
+          if (taken.length > 0)
+            recordMove({ kind: "taken_out_of_queue", jobIds: taken });
+        },
+        (snapshot) => {
+          const waiting = new Set(
+            listApplyQueueWaitingJobIds(snapshot.applyQueue),
+          );
+          const left = ids.filter((id) => waiting.has(id)).length;
+          const taken = ids.length - left;
+          if (taken === 0)
+            return "It had already started, so it stays in the run.";
+          return `${taken === 1 ? "1 job" : `${taken} jobs`} taken out of the apply queue. Nothing was started for ${taken === 1 ? "it" : "them"}.`;
+        },
+        { scope: jobFinderPendingActions.apply() },
+      );
+    },
     onControlApplyQueue: (action: ApplyQueueControlAction) =>
       void runAction(
         () => actions.controlApplyQueue({ action }),
@@ -2310,7 +2337,10 @@ export function createPrimaryPageActions(
             await runAction(
               () => actions.removeJobsFromReview!(ids),
               () => {
-                change = recordMove({ kind: "moved_to_find_jobs", jobIds: ids });
+                change = recordMove({
+                  kind: "moved_to_find_jobs",
+                  jobIds: ids,
+                });
               },
               options?.quiet
                 ? null
@@ -2430,7 +2460,10 @@ export function createPrimaryPageActions(
         } catch (error) {
           markResumeReviewFailed(
             jobId,
-            getJobFinderErrorMessage(error, "The resume could not be approved."),
+            getJobFinderErrorMessage(
+              error,
+              "The resume could not be approved.",
+            ),
           );
         }
       });

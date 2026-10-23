@@ -144,6 +144,10 @@ export function ReviewQueueScreen(props: {
   onClaimResumeIdentity?: () => void;
   onKeepResumeIdentity?: () => void;
   onRemoveReviewJob: (jobId: string) => void;
+  /** Approved -> To review, as a deliberate move. */
+  onMoveResumesBackToReview?: (jobIds: readonly string[]) => Promise<unknown>;
+  /** Takes waiting jobs out of the Apply queue. */
+  onTakeOutOfApplyQueue?: (jobIds: readonly string[]) => Promise<unknown>;
   /** The listing's address, for a row's Open listing and Copy link. */
   listingUrlForJob?: (jobId: string) => string | null;
   /** Moves the selected jobs back to Find jobs in one request. */
@@ -194,6 +198,8 @@ export function ReviewQueueScreen(props: {
     onKeepResumeIdentity,
     onRemoveReviewJob,
     onRemoveReviewJobs,
+    onMoveResumesBackToReview,
+    onTakeOutOfApplyQueue,
     onReadJobListing,
     onSetJobResumeApplicationMode,
     onSelectItem,
@@ -609,6 +615,8 @@ export function ReviewQueueScreen(props: {
           )}
           onPrepareTailoredDrafts={onPrepareTailoredDrafts}
           {...(onRemoveReviewJobs ? { onRemoveJobs: onRemoveReviewJobs } : {})}
+          {...(onMoveResumesBackToReview ? { onMoveResumesBackToReview } : {})}
+          {...(onTakeOutOfApplyQueue ? { onTakeOutOfApplyQueue } : {})}
           {...(onOpenSafeguards ? { onOpenSafeguards } : {})}
           safeguardBlocker={safeguardBlocker ?? null}
           applicationWorkPaused={applicationWorkPaused}
@@ -696,6 +704,14 @@ export function ReviewQueueScreen(props: {
                 {...(onClaimResumeIdentity ? { onClaimResumeIdentity } : {})}
                 {...(onKeepResumeIdentity ? { onKeepResumeIdentity } : {})}
                 onRemoveReviewJob={onRemoveReviewJob}
+                {...(onMoveResumesBackToReview
+                  ? { onMoveResumesBackToReview }
+                  : {})}
+                {...(onTakeOutOfApplyQueue &&
+                selectedItem &&
+                queuedJobIds.has(selectedItem.jobId)
+                  ? { onTakeOutOfApplyQueue }
+                  : {})}
                 onSetJobResumeApplicationMode={onSetJobResumeApplicationMode}
                 originalResume={originalResume}
                 {...(profile ? { profile } : {})}
@@ -757,8 +773,10 @@ export function ReviewQueueScreen(props: {
                           <span className="delayed-appear">
                             Loading job details…
                           </span>
-                        ) : (selectedDetail.error ??
-                            "The listing text was not captured. Open the full job details to read it.")}
+                        ) : (
+                          (selectedDetail.error ??
+                          "The listing text was not captured. Open the full job details to read it.")
+                        )}
                         {selectedDetail.error ? (
                           <Button onClick={selectedDetail.retry}>Retry</Button>
                         ) : null}

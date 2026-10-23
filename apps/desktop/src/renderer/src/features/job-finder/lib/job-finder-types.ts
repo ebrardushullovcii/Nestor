@@ -26,6 +26,7 @@ import type {
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
   JobFinderApplyQueueControlInput,
+  JobFinderRemoveFromApplyQueueInput,
   JobFinderApproveResumesInput,
   JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
@@ -439,6 +440,10 @@ export interface JobFinderShellActions {
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   controlApplyQueue: (
     input: JobFinderApplyQueueControlInput,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  /** Takes waiting jobs out of the Apply queue before they start. */
+  removeFromApplyQueue: (
+    input: JobFinderRemoveFromApplyQueueInput,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   approveApplyRun: (
     input: JobFinderApplyRunActionInput,
