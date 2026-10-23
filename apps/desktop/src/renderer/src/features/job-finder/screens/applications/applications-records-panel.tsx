@@ -789,9 +789,12 @@ export function ApplicationsRecordsPanel({
                           formAction ? "pr-28" : null,
                         )}
                       >
+                        {/* The button beside this line already names the
+                            step; "Next: Apply again" next to "Apply again"
+                            said it twice. */}
                         {liveLine
                           ? `Now: ${liveLine}`
-                          : nextStepLabel
+                          : nextStepLabel && nextStepLabel !== formAction?.label
                             ? `Next: ${nextStepLabel}`
                             : null}
                       </SelectableRowLine>

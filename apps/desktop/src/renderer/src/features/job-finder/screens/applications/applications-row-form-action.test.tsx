@@ -135,6 +135,8 @@ describe("Open form on an Applications row", () => {
       onFinishInBrowser: vi.fn(),
       onStartApplyCopilot,
     });
+    // The line beside the button does not repeat its label.
+    expect(screen.queryByText("Next: Prepare again")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Prepare again" }));
     expect(onStartApplyCopilot).toHaveBeenCalledWith({
       jobId: record.jobId,
