@@ -1810,9 +1810,10 @@ export function DiscoveryDetailPanel({
             ) : null}
             {/* Opening the listing, a dismissal and a link copy are secondary
                 work: they keep their natural width on one left-aligned row
-                instead of stacked full-width bars under the primary decision.
-                The open and copy actions stay available while the feedback
-                form is open. */}
+                instead of stacked full-width bars under the primary decision,
+                all in the one secondary style (the row used to mix filled,
+                ghost and outlined buttons). The open and copy actions stay
+                available while the feedback form is open. */}
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               {onAssessJobListing ? (
                 <Button
@@ -1839,7 +1840,7 @@ export function DiscoveryDetailPanel({
                   }}
                   size="sm"
                   type="button"
-                  variant="secondary"
+                  variant="outline"
                 >
                   {assessingJobId === selectedJob.id
                     ? "Reading the listing… about a minute"
@@ -1861,7 +1862,7 @@ export function DiscoveryDetailPanel({
                   onClick={() => onOpenListing(selectedJob.canonicalUrl)}
                   size="sm"
                   type="button"
-                  variant="secondary"
+                  variant="outline"
                 >
                   Open listing
                 </Button>
@@ -1881,7 +1882,7 @@ export function DiscoveryDetailPanel({
                   }}
                   size="sm"
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                 >
                   {triage ? "Not interested because…" : "Not interested"}
                 </Button>
