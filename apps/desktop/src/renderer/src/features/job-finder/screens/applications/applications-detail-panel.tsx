@@ -725,7 +725,10 @@ export function ApplicationsDetailPanel({
           {applyPresentation?.state === "awaiting_your_review"
             ? null
             : documentsSection}
+          {/* Same spacing as the sections above: History and details sat
+              flush against Activity, with a wide gap before them. */}
           <div
+            className="grid min-w-0 gap-5"
             data-application-review-target
             ref={reviewTargetRef}
             tabIndex={-1}

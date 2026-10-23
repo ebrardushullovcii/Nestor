@@ -1491,15 +1491,8 @@ export function ActionsScreen(props: {
               shows up here.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() => props.onNavigate("/job-finder/discovery")}
-              size="compact"
-              type="button"
-            >
-              <ArrowUpRight aria-hidden="true" /> Find jobs
-            </Button>
-          </div>
+          {/* No button: nothing here is waiting, and sending the person to
+            Find jobs from wherever they opened this was a guess. */}
         </div>
       ) : totalCount > 0 && visibleCount === 0 ? (
         <CollectionNoMatches
