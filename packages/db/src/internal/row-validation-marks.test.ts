@@ -236,7 +236,8 @@ test("the workspace marks the saved jobs and drafts it read; staling a draft unm
     staleReason: "Profile details changed.",
     updatedAt: "2026-07-31T09:00:00.000Z",
   });
-  expect(allMarks()).toEqual(["saved_jobs:job_a"]);
+  // Staling changes separate approval state; the validated body is unchanged.
+  expect(allMarks()).toEqual(["resume_drafts:draft_a", "saved_jobs:job_a"]);
   const { resumeDrafts } = await repository.readDisplayCollections!();
   expect(resumeDrafts.map((draft) => draft.status)).toEqual(["stale"]);
   expect(allMarks()).toEqual(["resume_drafts:draft_a", "saved_jobs:job_a"]);

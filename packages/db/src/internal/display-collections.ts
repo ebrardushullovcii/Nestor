@@ -1,8 +1,4 @@
-import type {
-  DatabaseSync,
-  SQLInputValue,
-  StatementSync,
-} from "node:sqlite";
+import type { DatabaseSync, SQLInputValue, StatementSync } from "node:sqlite";
 import {
   ApplicationAttemptSchema,
   ApplicationRecordSchema,
@@ -31,6 +27,7 @@ import {
   type RowValidationStamp,
 } from "./row-validation-marks";
 import { freezeProjection } from "./saved-job-projection";
+import { createResumeApprovalProjection, createTailoredAssetFileProjection } from "./resume-approval-state";
 import { parsePersistedRowValue, type StateCollectionTable } from "./state";
 
 /**
@@ -243,11 +240,13 @@ export function createDisplayCollectionsReader(
     )`,
     ),
   };
+  const projectResumeApprovals = createResumeApprovalProjection(database);
+  const projectTailoredFiles = createTailoredAssetFileProjection(database);
   return (): Promise<JobFinderDisplayCollections> => {
     try {
       return Promise.resolve({
-        tailoredAssets: readers.tailoredAssets(),
-        resumeDrafts: readers.resumeDrafts(),
+        tailoredAssets: projectTailoredFiles(readers.tailoredAssets()),
+        resumeDrafts: projectResumeApprovals(readers.resumeDrafts()),
         resumeExportArtifacts: readers.resumeExportArtifacts(),
         resumeResearchArtifacts: readers.resumeResearchArtifacts(),
         applyRuns: readers.applyRuns(),

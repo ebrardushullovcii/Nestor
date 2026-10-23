@@ -152,10 +152,13 @@ export function createMatchAssessmentPostingFingerprint(
     ? preparedPostingFingerprints.get(posting)
     : undefined;
   if (prepared) return prepared;
-  return createFingerprint(
+  const fingerprint = createFingerprint(
     `match_posting_v4_logic${MATCH_ASSESSMENT_LOGIC_REVISION}`,
     createMatchAssessmentPostingInput(posting),
   );
+  if (Object.isFrozen(posting))
+    preparedPostingFingerprints.set(posting, fingerprint);
+  return fingerprint;
 }
 
 const preparedPostingFingerprints = new WeakMap<object, string>();

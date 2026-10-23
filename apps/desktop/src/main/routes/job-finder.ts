@@ -1405,16 +1405,16 @@ export function registerJobFinderRouteHandlers(
       const { profile, searchPreferences, settings } =
         SaveJobFinderWorkspaceInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      await jobFinderWorkspaceService.saveProfileAndSearchPreferences(
-        profile,
-        searchPreferences,
-      );
+      let snapshot =
+        await jobFinderWorkspaceService.saveProfileAndSearchPreferences(
+          profile,
+          searchPreferences,
+        );
 
       if (settings) {
         await jobFinderWorkspaceService.saveSettings(settings);
+        snapshot = await readWorkspaceProjection(jobFinderWorkspaceService);
       }
-
-      const snapshot = await readWorkspaceProjection(jobFinderWorkspaceService);
 
       return workspaceMutationResponse(event.sender, snapshot);
     },

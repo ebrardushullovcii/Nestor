@@ -19,6 +19,10 @@ import {
 import { secureDatabaseFile } from "./internal/migrations";
 import { TAILORED_ASSET_JOB_ID_SQL } from "./internal/tailored-asset-storage";
 import {
+  resumeDraftValueSql,
+  resumeDraftUpdatedAtSql,
+} from "./internal/resume-approval-state";
+import {
   cloneValue,
   getSingletonValue,
   getSingletonValueWithRevision,
@@ -135,7 +139,7 @@ export function createFileRepositoryResumeMethods(
     getResumeDraftByJobId(jobId) {
       const row = database
         .prepare(
-          "SELECT id, value FROM resume_drafts WHERE job_id = ? ORDER BY updated_at DESC, id ASC LIMIT 1",
+          `SELECT id, ${resumeDraftValueSql} AS value FROM resume_drafts WHERE job_id = ? ORDER BY ${resumeDraftUpdatedAtSql} DESC, id ASC LIMIT 1`,
         )
         .get(jobId);
       if (!row) {
@@ -819,7 +823,9 @@ export function createFileRepositoryResumeMethods(
       runImmediateTransaction(database, () => {
         // CAS needs the timestamp, not another parse of the entire draft.
         const currentPersistedDraft = database
-          .prepare("SELECT updated_at FROM resume_drafts WHERE id = ?")
+          .prepare(
+            `SELECT ${resumeDraftUpdatedAtSql} AS updated_at FROM resume_drafts WHERE id = ?`,
+          )
           .get(normalizedDraft.id) as { updated_at: string } | undefined;
         if (
           !currentPersistedDraft ||
@@ -1021,48 +1027,49 @@ export function createFileRepositoryResumeMethods(
 
       return secureDatabaseFile(filePath);
     },
-    async staleResumeDrafts({ draftIds, staleReason, updatedAt }) {
+    async staleResumeDrafts({
+      draftIds,
+      staleReason,
+      updatedAt,
+      profileInputs,
+    }) {
+      const profile = profileInputs
+        ? CandidateProfileSchema.parse(cloneValue(profileInputs.profile))
+        : null;
+      const preferences = profileInputs?.searchPreferences
+        ? JobSearchPreferencesSchema.parse(
+            cloneValue(profileInputs.searchPreferences),
+          )
+        : null;
       const readJobId = database.prepare(
         "SELECT job_id FROM resume_drafts WHERE id = ?",
       );
       const markDraft = database.prepare(
-        `UPDATE resume_drafts
-           SET updated_at = ?,
-               value = json_set(
-                 value,
-                 '$.status', 'stale',
-                 '$.staleReason', ?,
-                 '$.approvedAt', json('null'),
-                 '$.approvedExportId', json('null'),
-                 '$.updatedAt', ?
-               )
-           WHERE id = ?`,
+        `INSERT INTO resume_draft_approval_state (draft_id, stale_reason, updated_at)
+         VALUES (?, ?, ?) ON CONFLICT(draft_id) DO UPDATE
+         SET stale_reason = excluded.stale_reason, updated_at = excluded.updated_at`,
       );
       const readFirstAssetId = database.prepare(
         `SELECT id FROM tailored_assets WHERE ${TAILORED_ASSET_JOB_ID_SQL} = ? ORDER BY id LIMIT 1`,
       );
       const clearAssetFile = database.prepare(
-        `UPDATE tailored_assets
-           SET value = json_set(value, '$.storagePath', json('null'), '$.updatedAt', ?)
-           WHERE id = ?`,
+        `INSERT INTO tailored_asset_file_state (updated_at, asset_id) VALUES (?, ?)
+         ON CONFLICT(asset_id) DO UPDATE SET updated_at = excluded.updated_at`,
       );
-      // One draft per transaction, as clearResumeApproval writes them, with a
-      // turn of the event loop between: SQLite still rewrites each whole row,
-      // and 27 large drafts in one go held the app for 0.4 s.
-      let first = true;
-      for (const draftId of new Set(draftIds)) {
-        if (!first) await new Promise<void>((resolve) => setImmediate(resolve));
-        first = false;
-        runImmediateTransaction(database, () => {
+      runImmediateTransaction(database, () => {
+        for (const draftId of new Set(draftIds)) {
           const row = readJobId.get(draftId);
-          if (!row) return;
+          if (!row) continue;
           const jobId = String(row.job_id);
           syncApprovedResumeExportsForJob(database, jobId, null);
-          markDraft.run(updatedAt, staleReason, updatedAt, draftId);
+          markDraft.run(draftId, staleReason, updatedAt);
           const asset = readFirstAssetId.get(jobId);
           if (asset) clearAssetFile.run(updatedAt, String(asset.id));
-        });
-      }
+        }
+        if (profile) saveSingletonValue(database, "profile", profile);
+        if (preferences)
+          saveSingletonValue(database, "search_preferences", preferences);
+      });
 
       await secureDatabaseFile(filePath);
     },

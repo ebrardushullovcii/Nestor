@@ -6,10 +6,10 @@ import { createMatchAssessment } from "./matching";
 import { enrichSearchPreferencesFromProfile } from "./workspace-helpers";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 
-/** Jobs scored between turns of the event loop. */
-const JOBS_PER_TURN = 100;
+/** A listing getter may parse a large body; yield after each job. */
+const JOBS_PER_TURN = 1;
 /** Changed jobs written per transaction. */
-const JOBS_PER_COMMIT = 50;
+const JOBS_PER_COMMIT = 1;
 
 // Kept from load time: a yield is a real turn of the event loop even where
 // a test has replaced the timers.

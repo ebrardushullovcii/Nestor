@@ -179,6 +179,9 @@ export interface WorkspaceServiceContext {
   staleApprovedResumeDrafts: (
     staleReason: string,
     jobIds?: readonly string[],
+    profileInputs?: Parameters<
+      NonNullable<JobFinderRepository["staleResumeDrafts"]>
+    >[0]["profileInputs"],
   ) => Promise<void>;
   openRunBrowserSession: (
     source: JobSource,
