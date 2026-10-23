@@ -1249,6 +1249,16 @@ async function runMeasuredApplyAgent(
     ) => Promise<WrittenAnswerCheck>,
     deferTextCommit?: (commit: () => void) => void,
   ): Promise<ApplyExecutionOutcome> => {
+    if (config.readReusableAnswers) {
+      const current = await config.readReusableAnswers();
+      // Keep task-local decisions ahead of the shared answer bank.
+      runConfig.sources.reusableAnswers = [
+        ...runConfig.sources.reusableAnswers.filter((answer) =>
+          answer.id.startsWith("application_"),
+        ),
+        ...current,
+      ];
+    }
     const writeKey = controlWriteKey(proposal);
     if (proposal.tool !== "finish") observationNeeded = true;
     const isField =
@@ -1746,8 +1756,7 @@ async function runMeasuredApplyAgent(
           if (reported.kind !== "ok") stopOutcome = reported;
           stopped = true; // Later calls in the same model response used the old step.
           if (outcome.kind === "moved") {
-            const after = await pageTools.observe();
-            syncObservation(after);
+            const after = outcome.observation;
             observationNeeded = false;
             const errors = [
               ...new Set([
@@ -1802,6 +1811,15 @@ async function runMeasuredApplyAgent(
       }
       // A press of the final action inside the batch is the form's finish.
       if (stopOutcome?.kind === "finish") return stopOutcome;
+      if (parsed.finishWhenReady && !stopped && !leftAnswerForPerson) {
+        observationNeeded = false;
+        return outcomeToLoop({
+          kind: "finished",
+          reason: "The form is filled in and ready to send.",
+          stuck: false,
+          needsPerson: false,
+        });
+      }
       return {
         kind: "ok",
         progress: wrote,

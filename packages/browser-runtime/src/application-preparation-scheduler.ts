@@ -1,5 +1,14 @@
 import { isIP } from "node:net";
 
+export function applicationPreparationConcurrency(
+  value: string | undefined,
+): number {
+  const requested = Number(value ?? 16);
+  return Number.isInteger(requested)
+    ? Math.max(1, Math.min(16, requested))
+    : 16;
+}
+
 /** A shared browser can prepare several forms, but only one on each site. */
 export function applicationSiteKey(url: string): string | null {
   try {

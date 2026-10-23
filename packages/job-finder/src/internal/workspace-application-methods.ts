@@ -54,6 +54,7 @@ import {
 } from "./resume-draft-commit-support";
 import {
   applicationSiteKey,
+  applicationPreparationConcurrency,
   type ExecuteApplicationFlowInput,
 } from "@nestor/browser-runtime";
 import { creditOwnApplicationAnswers } from "./review-card-own-answers";
@@ -3024,6 +3025,8 @@ export function createWorkspaceApplicationMethods(
                 jobId: jobId,
               }),
             prepareApplicationForm: createApplyFormPreparer({
+              readReusableAnswers: async () =>
+                (await ctx.repository.getProfile()).answerBank.customAnswers,
               executionInput: applyFlowFactsRun,
               applicationRecordId: exactApplicationRecordId,
               searchPreferences,
@@ -3678,15 +3681,12 @@ export function createWorkspaceApplicationMethods(
 
       // Preparation can overlap; every result/run transition above is still
       // committed in order. Drain active workers before cleanup or failure.
-      const requestedConcurrency = Number(
-        process.env.NESTOR_APPLICATION_PREPARATION_CONCURRENCY ?? 2,
-      );
       const concurrency =
         input.mode === "single_job_auto"
           ? 1
-          : Number.isInteger(requestedConcurrency)
-            ? Math.max(1, Math.min(5, requestedConcurrency))
-            : 2;
+          : applicationPreparationConcurrency(
+              process.env.NESTOR_APPLICATION_PREPARATION_CONCURRENCY,
+            );
       // The browser runs one form per site at a time. A worker that took the
       // next job in list order could sit waiting on a busy site while a job
       // on another site was free, so each worker takes the first job whose
@@ -7520,6 +7520,8 @@ export function createWorkspaceApplicationMethods(
               jobId: jobId,
             }),
           prepareApplicationForm: createApplyFormPreparer({
+            readReusableAnswers: async () =>
+              (await ctx.repository.getProfile()).answerBank.customAnswers,
             executionInput: applyFlowFactsApproved,
             onPrepared: ({ reviewCard }) => {
               preparedReviewCardApproved = reviewCard;
@@ -8150,6 +8152,8 @@ export function createWorkspaceApplicationMethods(
               jobId: jobId,
             }),
           prepareApplicationForm: createApplyFormPreparer({
+            readReusableAnswers: async () =>
+              (await ctx.repository.getProfile()).answerBank.customAnswers,
             executionInput: applyFlowFactsDirect,
             applicationRecordId: selectedApplicationRecord.id,
             searchPreferences,
