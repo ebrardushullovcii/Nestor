@@ -6,7 +6,7 @@ import {
   type TailoredAsset,
 } from "@nestor/contracts";
 
-/** Atomic approval commits defer writes to the (potentially megabyte) bodies. */
+/** Side state composes pending metadata; changed approval fields fold atomically. */
 export function ensureResumeApprovalState(database: DatabaseSync): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS tailored_asset_file_state (

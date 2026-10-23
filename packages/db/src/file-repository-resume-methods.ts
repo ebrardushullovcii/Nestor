@@ -86,6 +86,7 @@ type FileRepositoryResumeMethods = Pick<
 export function createFileRepositoryResumeMethods(
   context: FileRepositoryContext,
   scheduleApprovalFold: () => void,
+  foldApprovalChanges: () => () => void,
 ): FileRepositoryResumeMethods {
   const { database, filePath, upsertPersistedValue, writePersistedValue } =
     context;
@@ -1057,6 +1058,7 @@ export function createFileRepositoryResumeMethods(
         `INSERT INTO tailored_asset_file_state (updated_at, asset_id) VALUES (?, ?)
          ON CONFLICT(asset_id) DO UPDATE SET updated_at = excluded.updated_at`,
       );
+      let publish = () => {};
       runImmediateTransaction(database, () => {
         for (const draftId of new Set(draftIds)) {
           const row = readJobId.get(draftId);
@@ -1067,10 +1069,12 @@ export function createFileRepositoryResumeMethods(
           const asset = readFirstAssetId.get(jobId);
           if (asset) clearAssetFile.run(updatedAt, String(asset.id));
         }
+        publish = foldApprovalChanges();
         if (profile) saveSingletonValue(database, "profile", profile);
         if (preferences)
           saveSingletonValue(database, "search_preferences", preferences);
       });
+      publish();
 
       await secureDatabaseFile(filePath);
       scheduleApprovalFold();

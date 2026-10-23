@@ -51,13 +51,18 @@ export function createDisplayCollectionsReader(
     string,
     (fold: ResumeStateFold) => () => void
   >();
+  let cachedDraftHasApproval: (id: string) => boolean | undefined = () =>
+    undefined;
 
   function collection<T extends { id: string }>(
     table: StateCollectionTable,
     schema: SchemaParser<T>,
     orderBy: string,
     where = "1",
-    { marked = false }: { marked?: boolean } = {},
+    {
+      marked = false,
+      hasApproval,
+    }: { marked?: boolean; hasApproval?: (row: T) => boolean } = {},
   ): () => readonly T[] {
     const prefix = `display_${table}`;
     const marks = marked
@@ -103,6 +108,18 @@ export function createDisplayCollectionsReader(
       const clearFold = database.prepare(
         `DELETE FROM ${prefix}_changes WHERE id = ?`,
       );
+      if (hasApproval) {
+        cachedDraftHasApproval = (id) => {
+          const body = rowsById.get(id);
+          if (
+            !body ||
+            Number(readVersion.get()?.data_version) !== cachedVersion ||
+            pending.get(id, cachedEpoch)
+          )
+            return undefined;
+          return hasApproval(body);
+        };
+      }
       foldPreparers.set(table, ({ id, patch }) => {
         // Reuse only a body whose exact pre-fold version is already cached.
         // Other writers and earlier unconsumed edits still take the normal read.
@@ -199,7 +216,13 @@ export function createDisplayCollectionsReader(
       ResumeDraftSchema,
       "updated_at DESC, id ASC",
       "1",
-      { marked: true },
+      {
+        marked: true,
+        hasApproval: (draft) =>
+          draft.status === "approved" ||
+          draft.approvedAt !== null ||
+          draft.approvedExportId !== null,
+      },
     ),
     resumeExportArtifacts: collection(
       "resume_export_artifacts",
@@ -299,6 +322,7 @@ export function createDisplayCollectionsReader(
     }
   };
   return Object.assign(read, {
+    draftHasApproval: (id: string) => cachedDraftHasApproval(id),
     prepareResumeStateFold: (fold: ResumeStateFold) =>
       foldPreparers.get(fold.table)?.(fold) ?? (() => {}),
   });
