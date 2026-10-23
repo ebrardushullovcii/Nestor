@@ -296,7 +296,7 @@ describe("ReviewQueueScreen tailored draft preparation (controlled)", () => {
     // never two names for one job. Once on the selected row (rows keep their
     // badge when selected) and once in the detail header.
     expect(screen.getAllByText("Ready to apply").length).toBe(2);
-    expect(screen.queryByText("Review resume")).toBeNull();
+    expect(screen.queryByText("To review")).toBeNull();
   });
 
   it("delegates the create-all run to the page controller without owning it", () => {

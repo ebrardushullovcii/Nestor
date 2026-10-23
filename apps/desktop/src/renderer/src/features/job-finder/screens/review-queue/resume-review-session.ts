@@ -8,6 +8,7 @@ import {
   collectInProgressApplicationJobIds,
   collectPreparedApplicationJobIds,
   getReviewQueueWorkflowStatus,
+  TO_REVIEW_LABEL,
 } from "./review-queue-status";
 
 /**
@@ -100,7 +101,7 @@ export function enqueueResumeApproval(run: () => Promise<void>): void {
 
 /**
  * The shortlisted jobs whose resume waits for the person's read, in the
- * Shortlisted list's order: the same "Review resume" status the rows and the
+ * Shortlisted list's order: the same "To review" status the rows and the
  * "To review" tab show. Approvals still being built are left out.
  */
 export function listResumesToReview(input: {
@@ -125,7 +126,7 @@ export function listResumesToReview(input: {
         false,
         prepared,
         preparing,
-      ).label === "Review resume",
+      ).label === TO_REVIEW_LABEL,
   );
 }
 

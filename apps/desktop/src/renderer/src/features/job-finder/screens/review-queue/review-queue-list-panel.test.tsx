@@ -554,15 +554,15 @@ describe("ReviewQueueListPanel", () => {
       .getByText("Role job_failed")
       .closest("[data-collection-item-id]")!.parentElement!;
 
-    expect(within(restoredRow).getByText("Review resume")).toBeTruthy();
+    expect(within(restoredRow).getByText("To review")).toBeTruthy();
     expect(within(restoredRow).queryByText("Resume failed")).toBeNull();
     expect(within(failedRow).getByText("Resume failed")).toBeTruthy();
-    expect(within(failedRow).queryByText("Review resume")).toBeNull();
+    expect(within(failedRow).queryByText("To review")).toBeNull();
 
     // The selected-detail status helper agrees with each rendered row badge.
     expect(
       getReviewQueueWorkflowStatus(restoredItem, restoredAsset),
-    ).toMatchObject({ label: "Review resume" });
+    ).toMatchObject({ label: "To review" });
     expect(getReviewQueueWorkflowStatus(failedItem, failedAsset)).toMatchObject(
       { label: "Resume failed" },
     );

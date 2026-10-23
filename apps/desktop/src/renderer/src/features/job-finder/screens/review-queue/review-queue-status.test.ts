@@ -50,7 +50,7 @@ it("holds an Aggressive draft back for the person's review before Apply", () => 
 
   expect(isQueueStageReady(draft)).toBe(false);
   expect(getReviewQueueWorkflowStatus(draft)).toEqual({
-    label: "Review resume",
+    label: "To review",
     tone: "active",
   });
   expect(getReviewQueueResumePolicyCaption(draft)).toBe(
@@ -77,7 +77,7 @@ it("holds a Tailored draft with a line still to decide back from Apply, whatever
   expect(needsPersonResumeReview(draft, asset)).toBe(true);
   expect(isQueueStageReady(draft)).toBe(false);
   expect(getReviewQueueWorkflowStatus(draft)).toEqual({
-    label: "Review resume",
+    label: "To review",
     tone: "active",
   });
   expect(getReviewQueueResumePolicyCaption(draft)).toBe(
@@ -514,7 +514,7 @@ describe("restored resume states stay distinct from generation failures", () => 
       tone: "critical",
     });
     expect(getReviewQueueWorkflowStatus(restoredItem, restoredAsset)).toEqual({
-      label: "Review resume",
+      label: "To review",
       tone: "active",
     });
     expect(
@@ -544,7 +544,7 @@ describe("restored resume states stay distinct from generation failures", () => 
         ...readinessInput,
         hasGenerationFailure: false,
       }).label,
-    ).toBe("Review resume");
+    ).toBe("To review");
     expect(
       getApplyReadinessStatus({
         ...readinessInput,
