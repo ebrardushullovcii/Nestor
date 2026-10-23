@@ -4,7 +4,7 @@ export { yieldToEventLoop } from "./event-loop-turn";
 export {
   rememberRowChanges,
   readRowChanges,
-  readRowChangeBase,
+  transferRowChanges,
   type RowChange,
 } from "./row-changes";
 

@@ -5,17 +5,14 @@ export type RowChange<T> = {
 };
 type Changes = {
   before: WeakRef<readonly object[]>;
+  beforeMapped: WeakRef<readonly object[]> | null;
   rows: readonly RowChange<object>[];
 };
 const changes = new WeakMap<readonly object[], Changes>();
-
-export function readRowChangeBase<T extends object>(
-  after: readonly T[],
-): readonly T[] | null {
-  return (
-    (changes.get(after)?.before.deref() as readonly T[] | undefined) ?? null
-  );
-}
+const mappedVersions = new WeakMap<
+  readonly object[],
+  WeakRef<readonly object[]>
+>();
 
 /** Hints name exact immutable versions; they never keep old collections alive. */
 export function rememberRowChanges<T extends object>(
@@ -25,7 +22,35 @@ export function rememberRowChanges<T extends object>(
 ): void {
   if (before === after || !Object.isFrozen(before) || !Object.isFrozen(after))
     return;
-  changes.set(after, { before: new WeakRef(before), rows });
+  changes.set(after, {
+    before: new WeakRef(before),
+    beforeMapped: mappedVersions.get(before) ?? null,
+    rows,
+  });
+}
+
+/** Carry changes to the held thin versions, then release the full-row hint. */
+export function transferRowChanges<T extends object, U extends object>(
+  source: readonly T[],
+  mapped: readonly U[],
+  project: (row: T) => U,
+): void {
+  if (!Object.isFrozen(source) || !Object.isFrozen(mapped)) return;
+  if (Object.is(source, mapped)) return;
+  const hint = changes.get(source);
+  const before = hint?.beforeMapped?.deref();
+  if (hint && before)
+    rememberRowChanges(
+      before as readonly U[],
+      mapped,
+      (hint.rows as readonly RowChange<T>[]).map((row) => ({
+        id: row.id,
+        before: row.before && project(row.before),
+        after: row.after && project(row.after),
+      })),
+    );
+  changes.delete(source);
+  mappedVersions.set(source, new WeakRef(mapped));
 }
 
 /** Fall back to a full diff if a held baseline is outside this known lineage. */

@@ -1,9 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  readRowChangeBase,
-  readRowChanges,
-  rememberRowChanges,
-} from "@nestor/core";
+import { transferRowChanges } from "@nestor/core";
 import {
   TailoredAssetSummarySchema,
   ApplyJobResultListRowSchema,
@@ -328,20 +324,7 @@ function toRendererJobs(jobs: DiscoveryJobView[]): JobListRow[] {
   if (reusable) {
     Object.freeze(rows);
     jobCollections.set(jobs, rows);
-    const before = readRowChangeBase(jobs);
-    const previousRows =
-      before && jobCollections.get(before as DiscoveryJobView[]);
-    const changes = before && readRowChanges(before, jobs);
-    if (previousRows && changes)
-      rememberRowChanges(
-        previousRows,
-        rows,
-        changes.map((change) => ({
-          id: change.id,
-          before: change.before && toRendererJob(change.before),
-          after: change.after && toRendererJob(change.after),
-        })),
-      );
+    transferRowChanges(jobs, rows, toRendererJob);
   }
   return rows;
 }
