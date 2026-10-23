@@ -4,12 +4,14 @@ import type {
   CompanySalaryOfferEvidence,
 } from "@nestor/contracts";
 
+// The select sits under a "Company tracking" label, so each choice is one
+// word instead of repeating the field name five times.
 export const companyPreferenceLabels: Record<CompanyPreference, string> = {
-  neutral: "Company tracking: neutral",
-  follow: "Company tracking: follow",
-  prefer: "Company tracking: prefer",
-  review: "Company tracking: review required",
-  exclude: "Company tracking: exclude",
+  neutral: "Neutral",
+  follow: "Follow",
+  prefer: "Prefer",
+  review: "Review required",
+  exclude: "Exclude",
 };
 
 export const companyPreferenceScopeDescription =

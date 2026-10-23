@@ -363,9 +363,7 @@ describe("CompaniesScreen", () => {
       onSetCompanyPreference,
     });
 
-    expect(
-      screen.getAllByText("Company tracking: exclude").length,
-    ).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Exclude").length).toBeGreaterThanOrEqual(1);
     expect(
       screen.getByText(
         "Local company tracking only. This does not change job search or matching.",

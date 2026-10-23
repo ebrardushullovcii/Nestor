@@ -105,9 +105,12 @@ function CompanyCard(props: {
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge tone={companyPreferenceTones[company.preference]}>
-            {companyPreferenceLabels[company.preference]}
-          </StatusBadge>
+          {/* Neutral is the default the select below already shows. */}
+          {company.preference !== "neutral" ? (
+            <StatusBadge tone={companyPreferenceTones[company.preference]}>
+              {companyPreferenceLabels[company.preference]}
+            </StatusBadge>
+          ) : null}
           {pendingMerges > 0 ? (
             <StatusBadge tone="critical">
               {pendingMerges} merge review{pendingMerges === 1 ? "" : "s"}

@@ -1080,10 +1080,12 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
           {props.activeCapLimitReached ? (
             <StatusBadge tone="critical">Application cap reached</StatusBadge>
           ) : null}
-          <StatusBadge tone="neutral">
-            {company.aliases.length} alias
-            {company.aliases.length === 1 ? "" : "es"}
-          </StatusBadge>
+          {company.aliases.length > 0 ? (
+            <StatusBadge tone="neutral">
+              {company.aliases.length} alias
+              {company.aliases.length === 1 ? "" : "es"}
+            </StatusBadge>
+          ) : null}
           {props.activeCapLimitReached && props.onOpenSafeguards ? (
             <Button
               onClick={props.onOpenSafeguards}
