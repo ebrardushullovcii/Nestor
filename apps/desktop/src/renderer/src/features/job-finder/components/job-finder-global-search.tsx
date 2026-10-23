@@ -24,6 +24,7 @@ const kindLabels: Record<JobFinderGlobalSearchKind, string> = {
   company: "Companies",
   document: "Resumes",
   job: "Jobs and companies",
+  screen: "Go to",
 };
 
 export const JOB_FINDER_GLOBAL_SEARCH_LABEL = "Search your workspace";
@@ -184,7 +185,7 @@ export function JobFinderGlobalSearch(props: {
         id={inputId}
         onChange={(event) => handleQueryChange(event.target.value)}
         onKeyDown={handleInputKeyDown}
-        placeholder="Search jobs, companies, applications, plans, or resumes"
+        placeholder="Search jobs, applications, plans, resumes, or a screen"
         role="combobox"
         type="search"
         value={query}

@@ -349,3 +349,20 @@ describe("buildJobFinderGlobalSearchEntries", () => {
     expect(unassignedJob?.subtitle).toBe("Initech · Remote");
   });
 });
+
+describe("screens in the workspace search", () => {
+  it("finds a screen by name or by a word for it, under any plan", () => {
+    const workspace = buildWorkspaceFixture("campaign_1");
+    const entries = buildJobFinderGlobalSearchEntries(workspace);
+    const first = (query: string) =>
+      searchJobFinderEntries(entries, query, { campaignId: "campaign_1" })[0];
+
+    expect(first("sett")).toMatchObject({ kind: "screen" });
+    expect(first("sett")?.entries[0]?.title).toBe("Settings");
+    expect(first("send for me")?.entries[0]).toMatchObject({
+      title: "Applying settings",
+      href: "/job-finder/settings#settings-application-authority",
+    });
+    expect(first("shortl")?.entries[0]?.href).toBe("/job-finder/review-queue");
+  });
+});
