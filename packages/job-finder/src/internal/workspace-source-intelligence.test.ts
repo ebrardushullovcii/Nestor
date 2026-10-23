@@ -912,18 +912,20 @@ describe("collectPublicProviderJobs", () => {
             { status: 200 },
           );
           setImmediate(() => {
-            // Other work holds the main process past the limit while the
-            // answer arrives; it is handled with the next network events
-            // (a file read stands in for the socket).
-            const until = Date.now() + 80;
-            while (Date.now() < until) {
-              // busy
-            }
+            // The answer arrives while other work holds the main process
+            // past the limit; it waits behind that work with the next
+            // network events (a file read started before the busy stretch
+            // stands in for the socket, so a loaded machine cannot finish
+            // it only after the timeout's own look).
             stat(".", () =>
               init?.signal?.aborted
                 ? reject(new DOMException("Aborted", "AbortError"))
                 : resolve(response),
             );
+            const until = Date.now() + 80;
+            while (Date.now() < until) {
+              // busy
+            }
           });
         }),
     );

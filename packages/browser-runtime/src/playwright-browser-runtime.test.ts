@@ -22,7 +22,13 @@ import {
   type BrowserVisualObservationSet,
 } from "@nestor/contracts";
 import type { BrowserContext, Page } from "playwright";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+
+// The first import of the runtime loads most of the browser stack; on a busy
+// machine that alone outran the first test's five seconds.
+beforeAll(async () => {
+  await import("./playwright-browser-runtime");
+}, 60_000);
 
 test("navigation failures distinguish an unreachable site from a blocked browser", async () => {
   const { classifyBrowserNavigationFailure } =
