@@ -866,7 +866,7 @@ export function DiscoveryResultsPanel({
   const normalizedQuery = normalizeCollectionSearch(deferredQuery);
   // Jobs first seen since the person last left Find jobs: a dot on the row
   // and one press to see only them.
-  const previousVisitEnd = useSinceLastVisit("discovery");
+  const previousVisitEnd = useSinceLastVisit("discovery", jobs);
   const newJobCount = useMemo(
     () =>
       previousVisitEnd

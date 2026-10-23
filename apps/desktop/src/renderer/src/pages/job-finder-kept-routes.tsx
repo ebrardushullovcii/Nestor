@@ -5,7 +5,10 @@ import {
   useLocation,
   useOutlet,
 } from "react-router-dom";
-import { KeptRouteHiddenContext } from "@renderer/features/job-finder/lib/kept-route-visibility";
+import {
+  createKeptRouteVisibility,
+  KeptRouteVisibilityContext,
+} from "@renderer/features/job-finder/lib/kept-route-visibility";
 
 /**
  * The two lists a person goes back and forth between all day. Mounting either
@@ -22,6 +25,8 @@ type LocationContextValue = ContextType<typeof LocationContext>;
 
 interface KeptRoute {
   context: unknown;
+  /** Stable per path, so hiding or showing re-renders nothing in the screen. */
+  visibility: ReturnType<typeof createKeptRouteVisibility>;
   element: ReactElement;
   location: LocationContextValue;
 }
@@ -41,9 +46,17 @@ function sameUrl(left: LocationContextValue, right: LocationContextValue) {
  * change rather than a rebuild (`display: none` threw the layout away and
  * cost as much as mounting). `inert` keeps focus, clicks and find-in-page out.
  */
-function KeptRouteFrame(props: { hidden: boolean; children: ReactNode }) {
+function KeptRouteFrame(props: {
+  hidden: boolean;
+  visibility: KeptRoute["visibility"];
+  children: ReactNode;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const size = useRef<{ width: number; height: number } | null>(null);
+  const { hidden, visibility } = props;
+  useLayoutEffect(() => {
+    visibility.setHidden(hidden);
+  }, [hidden, visibility]);
   useLayoutEffect(() => {
     const node = ref.current;
     if (!node || props.hidden) return undefined;
@@ -115,6 +128,7 @@ export function JobFinderKeptRoutesOutlet(props: {
       !sameUrl(previous.location, location)
     ) {
       kept.current.set(activeKeptPath, {
+        visibility: previous?.visibility ?? createKeptRouteVisibility(false),
         context: props.context,
         element: outlet,
         location,
@@ -127,13 +141,17 @@ export function JobFinderKeptRoutesOutlet(props: {
       {[...kept.current].map(([path, route]) => {
         const hidden = path !== activeKeptPath;
         return (
-          <KeptRouteFrame hidden={hidden} key={path}>
+          <KeptRouteFrame
+            hidden={hidden}
+            key={path}
+            visibility={route.visibility}
+          >
             <Suspense fallback={props.fallback}>
-              <KeptRouteHiddenContext.Provider value={hidden}>
+              <KeptRouteVisibilityContext.Provider value={route.visibility}>
                 <LocationContext.Provider value={route.location}>
                   {route.element}
                 </LocationContext.Provider>
-              </KeptRouteHiddenContext.Provider>
+              </KeptRouteVisibilityContext.Provider>
               {hidden ? null : props.readyMarker}
             </Suspense>
           </KeptRouteFrame>
