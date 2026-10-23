@@ -18,6 +18,11 @@ import type {
   JobFinderApplyCopilotActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
+  JobFinderApplyQueueControlInput,
+  JobFinderRemoveFromApplyQueueInput,
+  JobFinderReturnApplicationToShortlistInput,
+  JobFinderApproveResumesInput,
+  JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
   JobFinderApplicationStartTarget,
   JobFinderPreparedApplicationPageInput,
@@ -336,7 +341,9 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         assertWorkspaceHydrated();
       }
       const sequence = beginWorkspaceRequest();
-      let response: JobFinderRendererWorkspaceSnapshot | JobFinderWorkspaceSyncResult;
+      let response:
+        | JobFinderRendererWorkspaceSnapshot
+        | JobFinderWorkspaceSyncResult;
       try {
         response = await action();
       } catch (error) {
@@ -632,9 +639,9 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         window.nestor.jobFinder.getResumeWorkspace(jobId),
       previewResumeDraft: (draft: ResumeDraft, requestId?: string) =>
         window.nestor.jobFinder.previewResumeDraft(draft, requestId),
-      saveResumeDraft: (draft: ResumeDraft) =>
+      saveResumeDraft: (draft: ResumeDraft, autosaveSessionId?: string) =>
         runWorkspaceAction(() =>
-          window.nestor.jobFinder.saveResumeDraft(draft),
+          window.nestor.jobFinder.saveResumeDraft(draft, autosaveSessionId),
         ),
       regenerateResumeDraft: (jobId: string) =>
         runWorkspaceAction(() =>
@@ -676,9 +683,12 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         runWorkspaceAction(() =>
           window.nestor.jobFinder.approveResume(jobId, exportId),
         ),
-      clearResumeApproval: (jobId: string) =>
+      clearResumeApproval: (
+        jobId: string,
+        restoreStatus?: "draft" | "needs_review",
+      ) =>
         runWorkspaceAction(() =>
-          window.nestor.jobFinder.clearResumeApproval(jobId),
+          window.nestor.jobFinder.clearResumeApproval(jobId, restoreStatus),
         ),
       setWorkHistoryReviewAcknowledgment: (
         input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,
@@ -734,6 +744,30 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
             jobIds,
             applicationAutomationMode,
           ),
+        ),
+      startApplyQueue: (input: JobFinderStartApplyQueueInput) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.startApplyQueue(input),
+        ),
+      approveResumes: (input: JobFinderApproveResumesInput) =>
+        runWorkspaceAction(() => window.nestor.jobFinder.approveResumes(input)),
+      controlApplyQueue: (input: JobFinderApplyQueueControlInput) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.controlApplyQueue(input),
+        ),
+      removeFromApplyQueue: (input: JobFinderRemoveFromApplyQueueInput) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.removeFromApplyQueue(input),
+        ),
+      returnApplicationToShortlist: (
+        input: JobFinderReturnApplicationToShortlistInput,
+      ) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.returnApplicationToShortlist(input),
+        ),
+      undoReturnApplicationToShortlist: (jobId: string) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.undoReturnApplicationToShortlist(jobId),
         ),
       approveApplyRun: (input: JobFinderApplyRunActionInput) =>
         runWorkspaceAction(() =>

@@ -56,7 +56,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   createContext,
   memo,
-  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -69,14 +68,16 @@ import {
 import type { CSSProperties, ReactNode } from "react";
 import type { DesktopWindowControlsState } from "@nestor/contracts";
 import { createPortal } from "react-dom";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useDismissToastsOnScreenChange } from "@renderer/components/ui/toast";
 import { buildJobFinderStartupDatabaseRecoveryBlockedDetail } from "../../../shared/job-finder-startup-db-recovery";
 import { WorkspaceStateScreen } from "./job-finder-page-routes";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
 import { JobFinderUnsavedChangesDialog } from "./job-finder-unsaved-changes-dialog";
 import { JobFinderWindowCloseGuard } from "./job-finder-window-close-guard";
+import { JobFinderKeptRoutesOutlet } from "./job-finder-kept-routes";
 import type { JobFinderPageContext } from "./job-finder-page-context";
+import type { RecentChange } from "@renderer/features/job-finder/lib/recent-changes";
 import {
   type ApplyCopilotVisualCheckpointRequest,
   useJobFinderPageController,
@@ -1148,17 +1149,16 @@ function JobFinderPageOutlet() {
   const location = useLocation();
 
   return (
-    <Suspense
+    <JobFinderKeptRoutesOutlet
+      context={context}
       fallback={
         <RouteSkeleton
           panes={getRouteSkeletonPanes(location.pathname)}
           title={getOpeningRouteLabel(location.pathname)}
         />
       }
-    >
-      <Outlet context={context} />
-      <JobFinderRouteReadyMarker />
-    </Suspense>
+      readyMarker={<JobFinderRouteReadyMarker />}
+    />
   );
 }
 
@@ -1250,6 +1250,12 @@ export function JobFinderPage() {
   const onPrepareRemainingJobs = useCallback(
     (jobIds: readonly string[]) =>
       latestShellState.current.context?.onStartAutoApplyQueue([...jobIds]),
+    [],
+  );
+  const onUndoRecentChange = useCallback(
+    (change: RecentChange) =>
+      latestShellState.current.context?.onUndoRecentChange(change) ??
+      Promise.resolve(false),
     [],
   );
   const onStopTailoredDraftPreparation = useCallback(
@@ -1350,6 +1356,7 @@ export function JobFinderPage() {
             onDismissSavedStatus={dismissSavedStatus}
             onNavigate={navigateFromShell}
             onPrepareRemainingJobs={onPrepareRemainingJobs}
+            onUndoRecentChange={onUndoRecentChange}
             onRetrySave={retryLastSave}
             onStopTailoredDraftPreparation={onStopTailoredDraftPreparation}
             platform={platform}

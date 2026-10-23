@@ -21,10 +21,17 @@ import type { AssessJobFitInput, JobFitJudgmentResult } from "./shared";
 
 export const JOB_FIT_JUDGING_BATCH_SIZE = 20;
 
+/**
+ * Every sentence a model writes for the person to read speaks to them. A fit
+ * note once called the person "he": a name says nothing about pronouns.
+ */
+export const PERSON_FACING_VOICE_INSTRUCTION =
+  "Write every sentence the person will read to them, as you and your. Never refer to the person as he, she, they, his, her, their or the candidate, and never guess their gender, even when their name is given.";
+
 /** Shared by preliminary and full reads so a rescore keeps the same constraints. */
 export function buildFitEvidenceInstructions(): string {
   return [
-    "Write every sentence you return (reasons, gaps, summary and explanations) to the person, in the second person: you and your, never he, she, they or the candidate.",
+    `${PERSON_FACING_VOICE_INSTRUCTION} That covers reasons, gaps, summary and explanations.`,
     "Use the person's plain labels in explanations. Write Yes and No facts as ordinary sentences, never field names, key=value text or true/false flags.",
     "Read Limited work permissions by country: Conditions describe present permission, and Will need sponsorship later describes future work, not necessarily the present job. Compare the job type, hours and dates with every permit condition. Limited permission is neither unrestricted authorization nor absent permission. Unresolved conditions require review_before_applying with a clear question for the person.",
     "Compare country-limited remote work with the person's current location, countries where they can work, sponsorship needs and saved eligibility answers. Remote does not mean worldwide: Accepting remote work outside preferred places never overrides a country restriction or work permission. Do not infer authorization from residence, education or past employers.",

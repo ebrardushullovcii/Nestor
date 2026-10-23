@@ -55,7 +55,9 @@ test.each([3_000, 10_000])(
       expect(result.newJobs).toHaveLength(0);
       expect(result.mergedJobs[0]).not.toBe(existing);
       expect(result.mergedJobs[0]?.provenance).toHaveLength(1);
-      expect(parseSpy).toHaveBeenCalledTimes(3);
+      // The merged row and its audit are checked where they are made; the
+      // repository checks the row again when it is written.
+      expect(parseSpy).toHaveBeenCalledTimes(2);
       for (let index = 1; index < size; index += 1) {
         expect(result.mergedJobs[index]).toBe(jobs[index]);
       }

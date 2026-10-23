@@ -39,6 +39,7 @@ import {
   type JobFinderDiscoveryState,
   type JobFinderWorkspaceSnapshot,
   type JobSearchCampaign,
+  type JobSearchCampaignCollection,
   type JobSearchPreferences,
   type JobSource,
   isBlockingResumeClaimAssessment,
@@ -54,7 +55,11 @@ import {
   type UserActionRequest,
 } from "@nestor/contracts";
 import { reassessSavedJobs } from "./saved-job-reassessment";
+import { createMatchAssessmentContextFingerprint } from "./match-assessment-session";
 import type { JobFinderRepositorySeed } from "@nestor/db";
+import { readSavedJobProjectionChanges } from "@nestor/db";
+import { mergeSortedRowChanges } from "./sorted-row-changes";
+import { createListingActivityChangeResolver } from "./listing-activity-changes";
 
 import { runApplicationNoResponseAutomation } from "./application-crm";
 import {
@@ -125,8 +130,12 @@ import {
   createCampaign,
   ensureCampaignState,
 } from "./campaign-dashboard";
-import { projectDiscoveryJobViews } from "./listing-activity";
+import {
+  projectDiscoveryJobViews,
+  inactiveListingLedger,
+} from "./listing-activity";
 import { createSyncedJobIdentityIndex } from "./discovery-run-indexes";
+import { warmDiscoveryLedgerIndex } from "./workspace-discovery-ledger";
 import {
   deriveGlobalDailyApplicationPreparationCapacity,
   MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
@@ -134,6 +143,9 @@ import {
 import { memoizeSortedBySameElements } from "./same-elements-memo";
 import { settleStoredResumeDrafts } from "./resume-settle-stored-drafts";
 import { rebindLegacyFitVerdicts } from "./legacy-fit-fingerprints";
+
+const realSetImmediate = globalThis.setImmediate;
+const nextTurn = () => new Promise<void>((resolve) => realSetImmediate(resolve));
 
 // Each list keeps its own last ordering: a refresh that changed no job reuses
 // it, and one that changed a few merges them in instead of sorting thousands
@@ -153,7 +165,9 @@ type JobViewInput = {
   discoveryLedger: Parameters<
     typeof projectDiscoveryJobViews
   >[0]["discoveryLedger"];
-  listingSignals: Parameters<typeof projectDiscoveryJobViews>[0]["listingSignals"];
+  listingSignals: Parameters<
+    typeof projectDiscoveryJobViews
+  >[0]["listingSignals"];
   applicationAttempts: NonNullable<
     Parameters<typeof projectDiscoveryJobViews>[0]["applicationAttempts"]
   >;
@@ -187,6 +201,15 @@ function buildJobViews(
     discoveryLedger: input.discoveryLedger,
     listingSignals: input.listingSignals,
     applicationAttempts: input.applicationAttempts,
+    identityJobs:
+      input.pendingDiscoveryJobs.length === 0
+        ? input.rawSavedJobs
+        : [
+            ...input.rawSavedJobs,
+            ...input.pendingDiscoveryJobs.filter(
+              (job) => !savedJobIds.has(job.id),
+            ),
+          ],
     ...(identityIndex ? { identityIndex } : {}),
   });
   const projectedJobById = new Map(
@@ -232,6 +255,8 @@ function buildJobViews(
     discoveryJobs,
     projectedDismissedDiscoveryJobs,
     companyJobs,
+    projectedJobById,
+    companyJobIds,
   };
 }
 
@@ -262,6 +287,7 @@ const BorrowedSnapshotRestSchema = JobFinderWorkspaceSnapshotSchema.omit({
   userActionEvents: true,
   searchPreferences: true,
   campaigns: true,
+  intelligence: true,
 });
 
 const BOOTSTRAP_DEFERRED_COLLECTIONS = [
@@ -554,6 +580,7 @@ export function createWorkspaceSnapshotProfileMethods(
   // whole-profile fingerprint are re-bound before any edit can strand them.
   let legacyFitFingerprintRebinding: Promise<unknown> | null = null;
   let lastNoResponseAutomationRunAt: number | null = null;
+  let ledgerWarmup: Promise<void> | null = null;
   const normalizedDraftRows = new WeakMap<
     object,
     {
@@ -570,6 +597,15 @@ export function createWorkspaceSnapshotProfileMethods(
     readonly ApplicationRecord[],
     ApplicationRecord[]
   >();
+  let displayCampaignProgress: {
+    source: JobSearchCampaignCollection;
+    key: string;
+    projected: JobSearchCampaignCollection;
+  } | null = null;
+  let sourceAccessCache: {
+    input: Parameters<typeof deriveSourceAccessPrompts>[0];
+    prompts: ReturnType<typeof deriveSourceAccessPrompts>;
+  } | null = null;
 
   // Rescoring every saved job against an edited profile or goals took
   // seconds on a large workspace and held the save (and the app) until it
@@ -583,7 +619,8 @@ export function createWorkspaceSnapshotProfileMethods(
       return;
     }
     rescoreAgain = false;
-    savedJobRescoring = reassessSavedJobs(ctx)
+    savedJobRescoring = nextTurn()
+      .then(() => reassessSavedJobs(ctx))
       .then((changed) => {
         if (changed) ctx.onSavedJobsRescored?.();
       })
@@ -609,25 +646,201 @@ export function createWorkspaceSnapshotProfileMethods(
   let lastJobViews: {
     input: JobViewInput;
     views: ReturnType<typeof buildJobViews>;
+    rawById: ReadonlyMap<string, SavedJob>;
   } | null = null;
   // Kept in step with the listed jobs from one refresh to the next, so a
   // refresh indexes only the jobs that changed since the last one.
-  const jobViewIdentityIndex = createSyncedJobIdentityIndex<SavedJob>(
-    (job) => job,
-  );
+  const jobViewIdentityIndex =
+    ctx.listingActivityIdentityIndex ??
+    createSyncedJobIdentityIndex<SavedJob>((job) => job);
+  const listingActivityChanges =
+    createListingActivityChangeResolver(jobViewIdentityIndex);
   function deriveJobViews(input: JobViewInput) {
     const last = lastJobViews;
-    if (
+    const sameEvidence =
       last &&
       last.input.planId === input.planId &&
-      last.input.rawSavedJobs === input.rawSavedJobs &&
       last.input.pendingDiscoveryJobs === input.pendingDiscoveryJobs &&
-      last.input.discoveryLedger === input.discoveryLedger &&
       last.input.listingSignals === input.listingSignals &&
-      last.input.applicationAttempts === input.applicationAttempts &&
-      last.input.companies === input.companies
+      last.input.applicationAttempts === input.applicationAttempts;
+    let companyJobIds = last?.views.companyJobIds ?? new Set<string>();
+    if (!last || last.input.companies !== input.companies) {
+      const next = new Set(
+        input.companies
+          .filter((company) => isListableCompanyName(company.canonicalName))
+          .flatMap((company) => company.jobIds),
+      );
+      if (
+        next.size !== companyJobIds.size ||
+        [...next].some((id) => !companyJobIds.has(id))
+      )
+        companyJobIds = next;
+    }
+    const sameInactive =
+      last &&
+      inactiveListingLedger(last.input.discoveryLedger) ===
+        inactiveListingLedger(input.discoveryLedger);
+    if (
+      sameEvidence &&
+      sameInactive &&
+      companyJobIds === last.views.companyJobIds &&
+      last.input.rawSavedJobs === input.rawSavedJobs
     ) {
+      lastJobViews = { ...last, input };
       return last.views;
+    }
+    if (sameEvidence && Object.isFrozen(input.rawSavedJobs)) {
+      const sameJobs = last.input.rawSavedJobs === input.rawSavedJobs;
+      const changes = sameJobs
+        ? { rows: [], removedIds: [] }
+        : readSavedJobProjectionChanges(
+            last.input.rawSavedJobs,
+            input.rawSavedJobs,
+          );
+      const rawById = changes
+        ? new Map(last.rawById)
+        : new Map(input.rawSavedJobs.map((job) => [job.id, job]));
+      if (changes) {
+        for (const id of changes.removedIds) rawById.delete(id);
+        for (const row of changes.rows) rawById.set(row.id, row);
+      }
+      const rawChanged =
+        changes?.rows ??
+        input.rawSavedJobs.filter((job) => last.rawById.get(job.id) !== job);
+      const removed = changes
+        ? changes.removedIds.map((id) => last.rawById.get(id)!).filter(Boolean)
+        : [...last.rawById.values()].filter((job) => !rawById.has(job.id));
+      const evidenceIds = listingActivityChanges({
+        beforeJobs:
+          input.pendingDiscoveryJobs.length === 0
+            ? last.input.rawSavedJobs
+            : [
+                ...last.input.rawSavedJobs,
+                ...input.pendingDiscoveryJobs.filter(
+                  (row) => !last.rawById.has(row.id),
+                ),
+              ],
+        jobs:
+          input.pendingDiscoveryJobs.length === 0
+            ? input.rawSavedJobs
+            : [
+                ...input.rawSavedJobs,
+                ...input.pendingDiscoveryJobs.filter(
+                  (row) => !rawById.has(row.id),
+                ),
+              ],
+        beforeById: last.rawById,
+        changed: rawChanged,
+        removed,
+        beforeLedger: last.input.discoveryLedger,
+        ledger: input.discoveryLedger,
+      });
+      const changedIds = new Set([
+        ...rawChanged.map((row) => row.id),
+        ...removed.map((row) => row.id),
+        ...evidenceIds,
+      ]);
+      if (companyJobIds !== last.views.companyJobIds) {
+        for (const id of last.views.companyJobIds)
+          if (!companyJobIds.has(id)) changedIds.add(id);
+        for (const id of companyJobIds)
+          if (!last.views.companyJobIds.has(id)) changedIds.add(id);
+      }
+      const changed = [...changedIds].flatMap((id) => {
+        const row = rawById.get(id);
+        return row ? [readPlanAssessment(row, input.planId)] : [];
+      });
+      for (const job of input.pendingDiscoveryJobs)
+        if (changedIds.has(job.id) && !rawById.has(job.id))
+          changed.push(readPlanAssessment(job, input.planId));
+      const projectedJobById = new Map(last.views.projectedJobById);
+      for (const id of changedIds) projectedJobById.delete(id);
+      for (const view of projectDiscoveryJobViews({
+        jobs: changed,
+        identityJobs:
+          input.pendingDiscoveryJobs.length === 0
+            ? input.rawSavedJobs
+            : [
+                ...input.rawSavedJobs,
+                ...input.pendingDiscoveryJobs.filter(
+                  (job) => !rawById.has(job.id),
+                ),
+              ],
+        discoveryLedger: input.discoveryLedger,
+        listingSignals: input.listingSignals,
+        applicationAttempts: input.applicationAttempts,
+        identityIndex: jobViewIdentityIndex,
+      }))
+        projectedJobById.set(view.id, view);
+      const project = (jobs: readonly SavedJob[]) =>
+        jobs.flatMap((job) => {
+          const view = projectedJobById.get(job.id);
+          return view ? [view] : [];
+        });
+      const savedJobs =
+        changes &&
+        changes.removedIds.length === 0 &&
+        input.rawSavedJobs.length === last.input.rawSavedJobs.length
+          ? last.views.savedJobs.slice()
+          : input.rawSavedJobs.map((job) =>
+              readPlanAssessment(job, input.planId),
+            );
+      if (
+        changes &&
+        changes.removedIds.length === 0 &&
+        input.rawSavedJobs.length === last.input.rawSavedJobs.length
+      ) {
+        for (const row of changes.rows) {
+          let low = 0;
+          let high = input.rawSavedJobs.length;
+          while (low < high) {
+            const middle = (low + high) >>> 1;
+            if (input.rawSavedJobs[middle]!.id < row.id) low = middle + 1;
+            else high = middle;
+          }
+          if (input.rawSavedJobs[low]?.id === row.id)
+            savedJobs[low] = readPlanAssessment(row, input.planId);
+        }
+      }
+      const views: ReturnType<typeof buildJobViews> = {
+        savedJobs: Object.freeze(savedJobs) as SavedJob[],
+        discoveryJobs: mergeSortedRowChanges(
+          last.views.discoveryJobs,
+          changedIds,
+          project(selectVisibleDiscoveryJobs(changed)),
+          compareDiscoveryJobs,
+        ),
+        projectedDismissedDiscoveryJobs: mergeSortedRowChanges(
+          last.views.projectedDismissedDiscoveryJobs,
+          changedIds,
+          project(
+            changed.filter(
+              (job) =>
+                job.status === "archived" && job.discoveryFeedback !== null,
+            ),
+          ),
+          compareDiscoveryJobs,
+        ),
+        companyJobs: mergeSortedRowChanges(
+          last.views.companyJobs,
+          changedIds,
+          project(
+            changed.filter(
+              (job) => rawById.has(job.id) && companyJobIds.has(job.id),
+            ),
+          ),
+          (left, right) =>
+            compareDiscoveryJobs(
+              readPlanAssessment(rawById.get(left.id) ?? left, input.planId),
+              readPlanAssessment(rawById.get(right.id) ?? right, input.planId),
+            ),
+        ),
+        projectedJobById,
+        companyJobIds,
+      };
+      Object.freeze(views.companyJobs);
+      lastJobViews = { input, views, rawById };
+      return views;
     }
     // Only the borrowed display rows keep their identity between refreshes.
     const views = buildJobViews(
@@ -635,7 +848,11 @@ export function createWorkspaceSnapshotProfileMethods(
       Object.isFrozen(input.rawSavedJobs) ? jobViewIdentityIndex : undefined,
     );
     lastJobViews = Object.isFrozen(input.rawSavedJobs)
-      ? { input, views }
+      ? {
+          input,
+          views,
+          rawById: new Map(input.rawSavedJobs.map((job) => [job.id, job])),
+        }
       : null;
     return views;
   }
@@ -1261,6 +1478,7 @@ export function createWorkspaceSnapshotProfileMethods(
       recoverInterruptedApplyRunsOnLoad(),
       storedResumeDraftSettlement,
     ]);
+    if (borrowValidatedJobs) await nextTurn();
     await reconcileAutomaticBatchSampleReviews(ctx);
 
     // Display reads exclude resume checkpoints before parsing and reuse
@@ -1332,8 +1550,9 @@ export function createWorkspaceSnapshotProfileMethods(
       userActionEvents,
       activityControl,
       rawIntelligence,
+      applyQueue,
     ] = await Promise.all([
-      getCurrentSetupStateContext(),
+      getCurrentSetupStateContext(borrowValidatedJobs),
       borrowValidatedJobs
         ? ctx.repository.readSavedJobsProjection()
         : ctx.repository.listSavedJobs(),
@@ -1364,8 +1583,10 @@ export function createWorkspaceSnapshotProfileMethods(
       borrowValidatedJobs && ctx.repository.readIntelligenceProjection
         ? ctx.repository.readIntelligenceProjection()
         : ctx.repository.getIntelligenceState(),
+      ctx.repository.getApplyQueue(),
     ]);
     // From the jobs this read already loaded, so it costs no second read.
+    if (borrowValidatedJobs) await nextTurn();
     legacyFitFingerprintRebinding ??= rebindLegacyFitVerdicts(ctx, {
       savedJobs: rawSavedJobs,
       pendingDiscoveryJobs: discovery.pendingDiscoveryJobs,
@@ -1460,7 +1681,7 @@ export function createWorkspaceSnapshotProfileMethods(
       ),
     );
     const generatedAt = new Date().toISOString();
-    const sourceAccessPrompts = deriveSourceAccessPrompts({
+    const sourceAccessInput = {
       targets: setupContext.searchPreferences.discovery.targets,
       recentSourceDebugRuns: discovery.recentSourceDebugRuns,
       activeSourceDebugRun: discovery.activeSourceDebugRun,
@@ -1468,13 +1689,39 @@ export function createWorkspaceSnapshotProfileMethods(
       sourceInstructionArtifacts,
       searchPreferences: setupContext.searchPreferences,
       generatedAt,
-    });
+    };
+    const previousAccess = borrowValidatedJobs ? sourceAccessCache : null;
+    const sameAccess =
+      previousAccess &&
+      (
+        [
+          "targets",
+          "recentSourceDebugRuns",
+          "activeSourceDebugRun",
+          "sourceDebugAttempts",
+          "sourceInstructionArtifacts",
+          "searchPreferences",
+        ] as const
+      ).every((key) => previousAccess.input[key] === sourceAccessInput[key]);
+    const sourceAccessPrompts = sameAccess
+      ? previousAccess.prompts.map((prompt) =>
+          prompt.updatedAt === previousAccess.input.generatedAt
+            ? { ...prompt, updatedAt: generatedAt }
+            : prompt,
+        )
+      : deriveSourceAccessPrompts(sourceAccessInput);
+    if (borrowValidatedJobs)
+      sourceAccessCache = {
+        input: sourceAccessInput,
+        prompts: sourceAccessPrompts,
+      };
 
     let campaignState = await ctx.withCampaignTransition(() =>
       ensureCampaignState({
         repository: ctx.repository,
         searchPreferences: setupContext.searchPreferences,
         now: generatedAt,
+        borrowValidated: borrowValidatedJobs,
       }),
     );
     const snapshotPlanId = campaignState.activeCampaignId;
@@ -1482,10 +1729,23 @@ export function createWorkspaceSnapshotProfileMethods(
       lastJobViews?.input.rawSavedJobs !== rawSavedJobs ||
       lastJobViews.input.planId !== snapshotPlanId
     )
-      await warmDiscoveryJobChecks(rawSavedJobs, {
-        key: snapshotPlanId,
-        of: (job) => readPlanAssessment(job, snapshotPlanId),
-      });
+      await warmDiscoveryJobChecks(
+        lastJobViews && lastJobViews.input.planId === snapshotPlanId
+          ? (readSavedJobProjectionChanges(
+              lastJobViews.input.rawSavedJobs,
+              rawSavedJobs,
+            )?.rows ?? rawSavedJobs)
+          : rawSavedJobs,
+        {
+          key: snapshotPlanId,
+          of: (job) => readPlanAssessment(job, snapshotPlanId),
+        },
+      );
+    if (
+      !lastJobViews &&
+      inactiveListingLedger(discovery.discoveryLedger).length > 0
+    )
+      await jobViewIdentityIndex.warm?.(rawSavedJobs);
     const {
       savedJobs,
       discoveryJobs,
@@ -1645,7 +1905,35 @@ export function createWorkspaceSnapshotProfileMethods(
     const campaignProgressChanged =
       JSON.stringify(comparableProgress(activeCampaign.progress)) !==
       JSON.stringify(comparableProgress(nextProgress));
-    if (campaignProgressChanged) {
+    if (!campaignProgressChanged && borrowValidatedJobs)
+      displayCampaignProgress = null;
+    if (campaignProgressChanged && borrowValidatedJobs) {
+      const key = JSON.stringify(comparableProgress(nextProgress));
+      const projected =
+        displayCampaignProgress?.source === campaignState &&
+        displayCampaignProgress.key === key
+          ? displayCampaignProgress.projected
+          : {
+              ...campaignState,
+              campaigns: campaignState.campaigns.map((campaign) =>
+                campaign.id === activeCampaign.id
+                  ? {
+                      ...campaign,
+                      progress: nextProgress,
+                      updatedAt: generatedAt,
+                    }
+                  : campaign,
+              ),
+            };
+      displayCampaignProgress = { source: campaignState, key, projected };
+      Object.freeze(projected.campaigns);
+      for (const campaign of projected.campaigns) {
+        Object.freeze(campaign.progress);
+        Object.freeze(campaign);
+      }
+      Object.freeze(projected);
+      campaignState = projected;
+    } else if (campaignProgressChanged) {
       // The projection delta lands on the latest committed collection inside
       // the campaign transition: the progress is re-derived against the
       // freshly read campaign so current saved-job counts stay truthful while
@@ -1790,10 +2078,24 @@ export function createWorkspaceSnapshotProfileMethods(
       campaignNotifications: campaignState.notifications,
       dashboard,
       activityControl,
+      applyQueue,
       intelligence: listableIntelligence,
     };
     if (!borrowValidatedJobs)
       return JobFinderWorkspaceSnapshotSchema.parse(snapshot);
+    // The window only needs display evidence. Keep the canonical feedback
+    // cache warm for triage after the first full view has reached the window.
+    ledgerWarmup ??= (async () => {
+      await ctx.backgroundWorkReady;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (ctx.isWorkspaceClosing?.()) return;
+      const canonical = await ctx.repository.readDiscoveryStateForRun?.();
+      await warmDiscoveryLedgerIndex(
+        canonical?.discoveryLedger ?? discovery.discoveryLedger,
+      );
+    })().catch((error: unknown) => {
+      console.warn("[Job Finder] Warming triage history failed", error);
+    });
     // Rows were validated on entering the immutable repository projection.
     // Re-parsing the same jobs in three lists deep-copied every listing again
     // on each progress update. Only display callers borrow these values; IPC
@@ -1802,6 +2104,7 @@ export function createWorkspaceSnapshotProfileMethods(
       ...BorrowedSnapshotRestSchema.parse(snapshot),
       searchPreferences: snapshot.searchPreferences,
       campaigns: snapshot.campaigns,
+      intelligence: snapshot.intelligence,
       activeDiscoveryRun: discovery.activeRun,
       recentDiscoveryRuns: activeCampaignRecentRuns,
       activeSourceDebugRun: discovery.activeSourceDebugRun,
@@ -1843,6 +2146,7 @@ export function createWorkspaceSnapshotProfileMethods(
       existingCampaignState,
       userActionRequests,
       activityControl,
+      applyQueue,
     ] = await Promise.all([
       getCurrentSetupStateContext(),
       ctx.repository.getSettings(),
@@ -1850,6 +2154,7 @@ export function createWorkspaceSnapshotProfileMethods(
       ctx.repository.getCampaignState(),
       ctx.repository.listUserActionRequests(),
       ctx.repository.getActivityControl(),
+      ctx.repository.getApplyQueue(),
     ]);
     const availableResumeTemplates = ctx.documentManager.listResumeTemplates();
     const settings = normalizeJobFinderSettings(
@@ -1981,6 +2286,7 @@ export function createWorkspaceSnapshotProfileMethods(
       campaignNotifications: bootstrapCampaignState.notifications,
       dashboard,
       activityControl,
+      applyQueue,
       intelligence: {},
       userActionRequests: bootstrapUserActionRequests,
       userActionEvents: [],
@@ -2242,13 +2548,17 @@ export function createWorkspaceSnapshotProfileMethods(
         now: new Date().toISOString(),
       });
 
+      await nextTurn();
       if (hasResumeAffectingProfileChange(currentProfile, nextProfile)) {
         await ctx.staleApprovedResumeDrafts(
           "Profile details changed after approval and the resume needs a fresh review.",
+          undefined,
+          { profile: nextProfile },
         );
+      } else {
+        await ctx.repository.saveProfile(nextProfile);
       }
-
-      await ctx.repository.saveProfile(nextProfile);
+      await nextTurn();
       await deriveAndPersistProfileSetupState(ctx, {
         persistedState: nextProfileSetupState,
         profile: nextProfile,
@@ -2256,8 +2566,20 @@ export function createWorkspaceSnapshotProfileMethods(
         latestResumeImportRunId:
           (await ctx.repository.getLatestResumeImportRun())?.id ?? null,
       });
-      rescoreSavedJobsInBackground();
-      return getWorkspaceSnapshot(true);
+      await nextTurn();
+      const snapshot = await getWorkspaceSnapshot(true);
+      if (
+        createMatchAssessmentContextFingerprint(
+          currentProfile,
+          currentSearchPreferences,
+        ) !==
+        createMatchAssessmentContextFingerprint(
+          nextProfile,
+          currentSearchPreferences,
+        )
+      )
+        rescoreSavedJobsInBackground();
+      return snapshot;
     },
     async saveProfileAndSearchPreferences(
       profile: CandidateProfile,
@@ -2298,21 +2620,26 @@ export function createWorkspaceSnapshotProfileMethods(
         now: new Date().toISOString(),
       });
 
-      if (hasResumeAffectingProfileChange(currentProfile, nextProfile)) {
-        await ctx.staleApprovedResumeDrafts(
-          "Profile details changed after approval and the resume needs a fresh review.",
-        );
-      }
-
+      await nextTurn();
       await preserveRemovedSourceLabels(
         currentSearchPreferences,
         nextSearchPreferences,
       );
-      await ctx.repository.saveProfileAndSearchPreferences(
-        nextProfile,
-        nextSearchPreferences,
-      );
+      if (hasResumeAffectingProfileChange(currentProfile, nextProfile)) {
+        await ctx.staleApprovedResumeDrafts(
+          "Profile details changed after approval and the resume needs a fresh review.",
+          undefined,
+          { profile: nextProfile, searchPreferences: nextSearchPreferences },
+        );
+      } else {
+        await ctx.repository.saveProfileAndSearchPreferences(
+          nextProfile,
+          nextSearchPreferences,
+        );
+      }
+      await nextTurn();
       await syncActiveCampaignPreferences(nextSearchPreferences);
+      await nextTurn();
       await deriveAndPersistProfileSetupState(ctx, {
         persistedState: nextProfileSetupState,
         profile: nextProfile,
@@ -2320,9 +2647,20 @@ export function createWorkspaceSnapshotProfileMethods(
         latestResumeImportRunId:
           (await ctx.repository.getLatestResumeImportRun())?.id ?? null,
       });
-      rescoreSavedJobsInBackground();
-
-      return getWorkspaceSnapshot(true);
+      await nextTurn();
+      const snapshot = await getWorkspaceSnapshot(true);
+      if (
+        createMatchAssessmentContextFingerprint(
+          currentProfile,
+          currentSearchPreferences,
+        ) !==
+        createMatchAssessmentContextFingerprint(
+          nextProfile,
+          nextSearchPreferences,
+        )
+      )
+        rescoreSavedJobsInBackground();
+      return snapshot;
     },
     async runResumeImport(input) {
       const baseResume = ResumeSourceDocumentSchema.parse(input.baseResume);

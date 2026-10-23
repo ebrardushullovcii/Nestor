@@ -167,7 +167,7 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           )}
           {selectedApplyRunDetails.result?.visualCheckpoints.length ? (
             <div className="grid gap-2">
-              <p className="label-mono-xs">Screenshots of the form</p>
+              <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Screenshots of the form</p>
               {selectedApplyRunDetails.result.visualCheckpoints.map(
                 (checkpoint) => (
                   <div
@@ -212,7 +212,7 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           ) : null}
           {selectedApplyRunDetails.questionRecords.length ? (
             <div className="grid gap-2">
-              <p className="label-mono-xs">Questions on the form</p>
+              <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Questions on the form</p>
               {selectedApplyRunDetails.questionRecords.map((question) => {
                 const latestAnswer = getLatestAnswerForQuestion(
                   selectedApplyRunDetails.answerRecords,
@@ -290,7 +290,7 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           ) : null}
           {selectedApplyRunDetails.answerRecords.length ? (
             <div className="grid gap-2">
-              <p className="label-mono-xs">Answers Job Finder filled in</p>
+              <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Answers Job Finder filled in</p>
               {selectedApplyRunDetails.answerRecords.map((answer) => (
                 <div
                   key={answer.id}
@@ -324,7 +324,7 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           ) : null}
           {retainedArtifacts.length ? (
             <div className="grid gap-2">
-              <p className="label-mono-xs">Files Job Finder attached</p>
+              <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Files Job Finder attached</p>
               {retainedArtifacts.map((artifact) => (
                 <div
                   key={artifact.id}
@@ -352,7 +352,7 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           ) : null}
           {selectedApplyRunDetails.checkpoints.length ? (
             <div className="grid gap-2">
-              <p className="label-mono-xs">Screenshots of each step</p>
+              <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Screenshots of each step</p>
               {selectedApplyRunDetails.checkpoints.map((checkpoint) => (
                 <div
                   key={checkpoint.id}
@@ -420,7 +420,7 @@ export function ApplicationsDetailPanelReviewDataSection(props: {
           ) : null}
           {selectedApplyRunDetails.consentRequests.length ? (
             <div className="grid gap-2">
-              <p className="label-mono-xs">Consent requests</p>
+              <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Consent requests</p>
               <p className="text-(length:--text-small) leading-6 text-foreground-soft">
                 Consent requests and the Needs you list are two views of the
                 same paused preparation. Resolving it here also clears it in
@@ -768,7 +768,7 @@ function ApplicationQuestionAnswerEditor(props: {
   return (
     <div className="mt-3 grid gap-3 rounded-(--radius-field) border border-border/30 bg-background/55 p-3">
       <div>
-        <p className="label-mono-xs">Your prepared answer</p>
+        <p className={APPLICATION_DETAIL_FACT_LABEL_CLASS}>Your prepared answer</p>
         <p className="mt-1 text-(length:--text-small) leading-6 text-foreground-soft">
           {props.isBlocked
             ? "When all required answers are saved, this application continues in its chosen apply mode."

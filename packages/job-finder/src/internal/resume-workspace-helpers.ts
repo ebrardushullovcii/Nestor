@@ -99,20 +99,32 @@ function escapeRegex(value: string): string {
 
 function matchesWholePhrase(candidate: string, phrase: string): boolean {
   const desiredTokens = tokenize(phrase);
-
-  if (desiredTokens.length === 0) {
-    return false;
-  }
-
-  const candidateTokens = new Set(tokenize(candidate));
-
-  if (desiredTokens.length === 1) {
-    return candidateTokens.has(desiredTokens[0] ?? "");
-  }
-
+  if (desiredTokens.length === 0) return false;
+  if (desiredTokens.length === 1)
+    return new Set(tokenize(candidate)).has(desiredTokens[0] ?? "");
   return new RegExp(`(^|\\s)${escapeRegex(normalizeText(phrase))}($|\\s)`).test(
     normalizeText(candidate),
   );
+}
+
+function createWholePhraseMatcher(candidate: string) {
+  const normalized = normalizeText(candidate);
+  const candidateTokens = new Set(tokenize(candidate));
+  return (phrase: string): boolean => {
+    const desiredTokens = tokenize(phrase);
+
+    if (desiredTokens.length === 0) {
+      return false;
+    }
+
+    if (desiredTokens.length === 1) {
+      return candidateTokens.has(desiredTokens[0] ?? "");
+    }
+
+    return new RegExp(
+      `(^|\\s)${escapeRegex(normalizeText(phrase))}($|\\s)`,
+    ).test(normalized);
+  };
 }
 
 export function buildPreviewSectionsFromResumeDraft(
@@ -263,6 +275,43 @@ export function areNearDuplicateResumeLines(
     rightTokens.has(token),
   ).length;
   return sharedCount / smallestSize >= 0.8;
+}
+
+/** Tokenize each line once; only lines sharing meaningful words are candidates. */
+function createResumeLineDuplicateIndex() {
+  const exact = new Set<string>();
+  const sizes: number[] = [];
+  const postings = new Map<string, number[]>();
+  return (text: string): boolean => {
+    const normalized = normalizeText(text);
+    const tokens = meaningfulLineTokens(text);
+    let duplicate = exact.has(normalized);
+    if (!duplicate && tokens.size >= 4) {
+      const overlaps = new Map<number, number>();
+      for (const token of tokens) {
+        for (const index of postings.get(token) ?? []) {
+          const count = (overlaps.get(index) ?? 0) + 1;
+          overlaps.set(index, count);
+          if (count / Math.min(tokens.size, sizes[index]!) >= 0.8) {
+            duplicate = true;
+            break;
+          }
+        }
+        if (duplicate) break;
+      }
+    }
+    exact.add(normalized);
+    if (tokens.size >= 4) {
+      const index = sizes.length;
+      sizes.push(tokens.size);
+      for (const token of tokens) {
+        const entries = postings.get(token) ?? [];
+        entries.push(index);
+        postings.set(token, entries);
+      }
+    }
+    return duplicate;
+  };
 }
 
 interface ResumeClaimCandidateEvidence {
@@ -1149,12 +1198,7 @@ export function validateResumeDraft(input: {
 }): ResumeValidationResult {
   const validatedAt = input.validatedAt ?? new Date().toISOString();
   const issues: ResumeValidationIssue[] = [];
-  const seenBullets: Array<{
-    text: string;
-    normalized: string;
-    sectionId: string;
-    bulletId: string;
-  }> = [];
+  const isDuplicateBullet = createResumeLineDuplicateIndex();
   const includedSections = input.draft.sections.filter(
     (section) => section.included,
   );
@@ -1208,14 +1252,7 @@ export function validateResumeDraft(input: {
     entryId?: string | null;
     isExperience: boolean;
   }) {
-    const normalizedBullet = normalizeText(args.bullet.text);
-    const existing = seenBullets.find(
-      (entry) =>
-        entry.normalized === normalizedBullet ||
-        areNearDuplicateResumeLines(entry.text, args.bullet.text),
-    );
-
-    if (existing) {
+    if (isDuplicateBullet(args.bullet.text)) {
       issues.push({
         id: `issue_duplicate_${args.bullet.id}`,
         severity: "warning",
@@ -1226,12 +1263,6 @@ export function validateResumeDraft(input: {
         message: "This bullet duplicates another included bullet.",
       });
     }
-    seenBullets.push({
-      text: args.bullet.text,
-      normalized: normalizedBullet,
-      sectionId: args.sectionId,
-      bulletId: args.bullet.id,
-    });
   }
 
   for (const section of includedSections) {
@@ -1265,7 +1296,7 @@ export function validateResumeDraft(input: {
       });
     }
 
-    const seenEntryContent: string[] = [];
+    const isDuplicateSummary = createResumeLineDuplicateIndex();
     for (const entry of includedEntries) {
       if (!hasVisibleEntryContent(entry)) {
         issues.push({
@@ -1280,12 +1311,7 @@ export function validateResumeDraft(input: {
       }
 
       if (entry.summary) {
-        const normalizedSummary = normalizeText(entry.summary);
-        const repeatedSummary = seenEntryContent.some(
-          (summary) =>
-            normalizeText(summary) === normalizedSummary ||
-            areNearDuplicateResumeLines(summary, entry.summary ?? ""),
-        );
+        const repeatedSummary = isDuplicateSummary(entry.summary);
         if (repeatedSummary) {
           issues.push({
             id: `issue_duplicate_entry_${entry.id}`,
@@ -1297,7 +1323,6 @@ export function validateResumeDraft(input: {
             message: `${section.label} repeats the same supporting content more than once.`,
           });
         }
-        seenEntryContent.push(entry.summary);
       }
 
       for (const bullet of entry.bullets.filter((bullet) => bullet.included)) {
@@ -1367,8 +1392,9 @@ export function validateResumeDraft(input: {
       .join(" "),
   );
   const keywordTargets = buildPriorityJobTerms(input.job);
+  const matchesVisiblePhrase = createWholePhraseMatcher(visibleText);
   const matchingKeywords = keywordTargets.filter((skill) =>
-    matchesWholePhrase(visibleText, skill),
+    matchesVisiblePhrase(skill),
   );
 
   if (keywordTargets.length > 0 && matchingKeywords.length === 0) {

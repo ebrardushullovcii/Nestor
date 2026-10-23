@@ -15,6 +15,7 @@ import { createDeterministicJobFinderAiClient } from "@nestor/ai-providers";
 import {
   ensurePrepareOnlyMutationGuard,
   getLatestBlockedPrepareOnlyAttempt,
+  registerPrepareOnlyPreparedValue,
 } from "../../../../packages/browser-runtime/src/playwright-application-flow";
 async function main() {
   const out = process.env.EMBEDDED_BROWSER_TEST_OUTPUT;
@@ -135,6 +136,7 @@ async function main() {
       guarded.setDefaultTimeout(5000);
       await ensurePrepareOnlyMutationGuard(guarded, false);
       await guarded.goto(url + "/guard");
+      await registerPrepareOnlyPreparedValue(guarded, "synthetic@example.test");
       await guarded
         .getByLabel("Email", { exact: true })
         .fill("synthetic@example.test");
@@ -261,14 +263,18 @@ async function main() {
       },
       resume: () => Promise.resolve(),
     });
-    operation = host.runAutomation(
-      "Cancelable work",
-      undefined,
-      (signal) =>
-        new Promise<void>((resolve) =>
-          signal.addEventListener("abort", () => resolve(), { once: true }),
-        ),
-    );
+    operation = host
+      .runAutomation(
+        "Cancelable work",
+        undefined,
+        (signal) =>
+          new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve(), { once: true }),
+          ),
+      )
+      .catch((error: unknown) => {
+        assert.equal(error instanceof Error ? error.name : null, "AbortError");
+      });
     await host.takeControl();
     result.handover = host.getState();
     assert.equal(result.handover && host.getState().tabs.length, 1);

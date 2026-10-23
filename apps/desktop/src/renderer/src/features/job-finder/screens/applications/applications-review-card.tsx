@@ -1,11 +1,17 @@
 import { useState } from "react";
-import type { ApplicationReviewCard } from "@nestor/contracts";
+import type {
+  ApplicationPageReopenProgress,
+  ApplicationReviewCard,
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import {
   TECHNICAL_DETAILS_LABEL,
   describeFailure,
   type FailureDescription,
 } from "../../lib/describe-failure";
+import { describeReopenPhase } from "../../lib/job-finder-browser-handoff-copy";
+import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
+import { runAgainLabel } from "./applications-recovery-state";
 
 /**
  * What Job Finder wrote, before you send it.
@@ -27,8 +33,17 @@ export interface ApplicationsReviewCardProps {
    */
   pageClosed?: boolean | undefined;
   onSubmit?: (() => Promise<void>) | undefined;
-  onOpenPage?: (() => Promise<void>) | undefined;
+  /** Opens the page; a closed form is brought back first, step by step. */
+  onOpenPage?:
+    | ((
+        onReopenProgress?: (
+          phase: ApplicationPageReopenProgress["phase"],
+        ) => void,
+      ) => Promise<void>)
+    | undefined;
   onPrepareAgain?: (() => Promise<void>) | undefined;
+  /** The mode saved in Settings; preparing again runs in it. */
+  applyMode?: ApplyMode | undefined;
   isSubmitPending?: boolean | undefined;
 }
 
@@ -38,10 +53,15 @@ export function ApplicationsReviewCard({
   onSubmit,
   onOpenPage,
   onPrepareAgain,
+  applyMode = "fill_only",
   isSubmitPending,
 }: ApplicationsReviewCardProps) {
+  // In Send for me the new run sends, so the button says so.
+  const sendsAgain = applyMode === "apply_for_me";
+  const prepareAgainLabel = runAgainLabel(applyMode, "Prepare again");
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [pending, setPending] = useState(false);
+  const [reopenPhase, setReopenPhase] = useState<string | null>(null);
   const busy = pending || isSubmitPending === true;
   const readyToSend =
     card.waitingOnYou.length === 0 &&
@@ -94,10 +114,18 @@ export function ApplicationsReviewCard({
                 type="button"
                 pending={busy}
                 onClick={() =>
-                  void run(onOpenPage, "open this application page")
+                  void run(async () => {
+                    try {
+                      await onOpenPage((phase) =>
+                        setReopenPhase(describeReopenPhase(phase)),
+                      );
+                    } finally {
+                      setReopenPhase(null);
+                    }
+                  }, "open this application page")
                 }
               >
-                Open this page
+                {reopenPhase ?? "Open this page"}
               </Button>
             ) : null}
           </div>
@@ -110,8 +138,10 @@ export function ApplicationsReviewCard({
           role="status"
         >
           <p className="text-(length:--text-small) leading-6 text-foreground">
-            The application page was closed before you reviewed it. Prepare it
-            again to continue.
+            The application page was closed before you reviewed it.{" "}
+            {sendsAgain
+              ? "Apply again fills it in again and sends it."
+              : "Prepare it again to continue."}
           </p>
           {onPrepareAgain ? (
             <div>
@@ -124,7 +154,7 @@ export function ApplicationsReviewCard({
                 type="button"
                 variant="secondary"
               >
-                Prepare again
+                {prepareAgainLabel}
               </Button>
             </div>
           ) : null}
@@ -181,7 +211,9 @@ export function ApplicationsReviewCard({
                 {card.letter.fields?.length
                   ? "The form still holds the earlier letter."
                   : "The approved letter has not been added to the form yet."}{" "}
-                Prepare again to attach the letter you approved.
+                {sendsAgain
+                  ? "Apply again to attach the letter you approved and send it."
+                  : "Prepare again to attach the letter you approved."}
               </p>
               {onPrepareAgain ? (
                 <Button
@@ -193,7 +225,7 @@ export function ApplicationsReviewCard({
                     void run(onPrepareAgain, "prepare this application again")
                   }
                 >
-                  Prepare again
+                  {prepareAgainLabel}
                 </Button>
               ) : null}
             </div>

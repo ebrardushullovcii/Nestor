@@ -17,7 +17,7 @@ Apply itself was also disorienting: the person pressed it on Shortlisted and sta
 - Pressing Apply goes to Applications at once, with that job selected, so the person watches Filling in → Ready to send / Applied / Needs you there. Until the run has written its record, Applications stays a usable list with one status line saying the application is starting (a blocking full-page state parked a tester for minutes), and a job with several records resolves to its newest one.
 - In Resume Studio, a line that needs the person's confirmation appears in exactly one place, the "Lines to confirm" list, with two verbs: Keep (records the ADR 0018 ownership statement for that exact wording) and Remove. Skills the job asked for can be kept together; wording lines are kept one at a time, as the service already requires. The validation list no longer repeats those lines. Claims that contradict the evidence stay in the validation list, where Edit, Restore previous text, and Approve as accurate live.
 - When approval or export is refused, the studio reloads the workspace before showing the message, so the fresh list is what the person sees. The refusal says "Some lines in this resume still need your decision" and names the list.
-- Row and state vocabulary is one set of plain words: No resume yet, Writing resume, Review resume, Ready to apply, Applying, In Applications, Resume failed, Out of date.
+- Row and state vocabulary is one set of plain words: Needs a resume, Writing resume, To review, Ready to apply, Applying, In Applications, Resume failed, Out of date.
 
 ## Consequences
 

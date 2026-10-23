@@ -65,7 +65,10 @@ import {
 } from "@renderer/features/job-finder/lib/discovery-run-count-label";
 import { settleJobFinderRouteHeaderScroll } from "@renderer/features/job-finder/lib/job-finder-scroll-reveal";
 import { DiscoveryHistoryModal } from "./discovery-activity-panel";
-import { isDiscoveryAlsoFoundResult } from "./discovery-result-groups";
+import {
+  isDiscoveryAlsoFoundResult,
+  isDiscoveryDecidedJob,
+} from "./discovery-result-groups";
 import {
   DISCOVERY_SEARCH_SETUP_PANEL_ID,
   DiscoverySearchBar,
@@ -159,6 +162,8 @@ export function getNewestRunForCampaign(
       )[0] ?? null
   );
 }
+
+const NO_REVIEW_QUEUE: readonly ReviewQueueItem[] = [];
 
 export function getDiscoveryResultVisibility(
   jobs: readonly JobListRow[],
@@ -492,7 +497,7 @@ export function DiscoveryScreen(props: {
     activityPaused = false,
     activeRun,
     applicationRecords = [],
-    reviewQueue = [],
+    reviewQueue = NO_REVIEW_QUEUE,
     campaigns,
     safeguardPauses = [],
     activeCampaignId = null,
@@ -1012,18 +1017,48 @@ export function DiscoveryScreen(props: {
     null,
   );
   const stableRunId = activeRun?.state === "running" ? activeRun.id : null;
+  // Find jobs lists the jobs still waiting on a decision. The open job stays
+  // in its place when it is decided here (a bulk shortlist that included it),
+  // so the list does not jump back to its first row; it leaves once another
+  // job opens. A decided job restored from an earlier visit is not held, and
+  // a link to one (global search) still opens it.
+  const shortlistedJobIds = useMemo(
+    () => new Set(reviewQueue.map((item) => item.jobId)),
+    [reviewQueue],
+  );
+  const selectedJobDecided =
+    selectedJob !== null && isDiscoveryDecidedJob(selectedJob, shortlistedJobIds);
+  const openedUndecidedJobIdRef = useRef<string | null>(null);
+  if (selectedJob && !selectedJobDecided)
+    openedUndecidedJobIdRef.current = selectedJob.id;
+  const heldDecidedJobId =
+    selectedJob &&
+    selectedJobDecided &&
+    (preserveSelectedJob ||
+      openedUndecidedJobIdRef.current === selectedJob.id)
+      ? selectedJob.id
+      : null;
+  const undecidedJobs = useMemo(
+    () =>
+      jobs.filter(
+        (job) =>
+          job.id === heldDecidedJobId ||
+          !isDiscoveryDecidedJob(job, shortlistedJobIds),
+      ),
+    [heldDecidedJobId, jobs, shortlistedJobIds],
+  );
   // Recomputed only when the jobs or the run change: live search events
   // re-render this screen several times a second, and a new list each time
   // made the results re-filter and re-sort every job.
   const stableReadStage = useMemo(() => {
     const next = updateStableDiscoveryRunSnapshot({
       current: stableReadStageSnapshotRef.current,
-      jobs,
+      jobs: undecidedJobs,
       runId: stableRunId,
     });
     stableReadStageSnapshotRef.current = next.snapshot;
     return next;
-  }, [jobs, stableRunId]);
+  }, [undecidedJobs, stableRunId]);
   const stableJobs = stableReadStage.jobs;
   const stableSelectedJob = selectedJob
     ? (stableJobs.find((job) => job.id === selectedJob.id) ?? selectedJob)
@@ -1531,9 +1566,6 @@ export function DiscoveryScreen(props: {
               </details>
             ) : null
           }
-          {...(assessJobWithFeedback
-            ? { onAssessJobListing: assessJobWithFeedback }
-            : {})}
           {...(onJudgeUnjudgedJobs ? { onJudgeUnjudgedJobs } : {})}
           fitJudgmentProgress={
             props.fitJudgmentProgress?.planId === activeCampaignId
@@ -1604,6 +1636,9 @@ export function DiscoveryScreen(props: {
           onShortlistJobs={async (jobIds) => {
             if (onQueueJobs) {
               const outcome = await onQueueJobs(jobIds);
+              // A bulk success is the toast's, with its Undo all; the
+              // footer keeps only a failure, so it is never said twice.
+              if (outcome.status === "success") return;
               setQueueOutcomesByJobId((current) => {
                 const next = new Map(current);
                 for (const id of jobIds) next.set(id, outcome);

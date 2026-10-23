@@ -59,8 +59,12 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0050](0050-one-selection-model-for-job-lists.md) | accepted | Find jobs and Shortlisted share checkboxes, a page select-all, ranges and one action bar; list screens share one column split |
 | [0051](0051-the-app-fixes-what-it-can-and-does-not-ask.md) | accepted | The app fixes what it can and does not ask the person to manage its rules; the resume writer decides what each resume shows |
 | [0052](0052-nestor-rebrand.md) | accepted | Nordri becomes Nestor; the newest old workspace, browser sign-ins and preferences move once |
-| [0053](0053-the-window-opens-on-the-last-clean-view.md) | accepted | A clean quit saves the window's view; the next start shows it at once and converges by delta, and skips the integrity check on an untouched file |
-| [0054](0054-a-build-skips-validating-rows-it-already-validated.md) | accepted | Saved jobs and resume drafts a build validated unchanged are marked; the same build's next start reads them without the schema |
+| [0053](0053-the-window-opens-on-the-last-clean-view.md) | accepted; amended by 0057 | A clean quit saves the window's view; the next start shows it at once and converges by delta, and skips the integrity check on an untouched file |
+| [0054](0054-a-build-skips-validating-rows-it-already-validated.md) | accepted; amended by 0057 | Saved jobs and resume drafts a build validated unchanged are marked; the same build's next start reads them without the schema |
+| [0055](0055-reclaim-verified-prepared-forms.md) | accepted | Idle tabs freeze; the oldest prepared forms give way only after an exact guarded refill is verified |
+| [0056](0056-resume-autosave-history-groups.md) | accepted | Consecutive Resume Studio autosaves share a history step |
+| [0057](0057-saved-job-details-stay-in-sqlite.md) | accepted | Saved listing details stay in SQLite behind bounded caches; compatible clean views survive updates while unopened saved jobs validate in background slices |
+| [0058](0058-one-apply-press-queues-the-whole-choice.md) | accepted | One Apply press over selected, page or all ready jobs is a saved queue of ten-job runs inside the daily limit; it waits for midnight and carries on after a restart |
 
 ## Policy
 

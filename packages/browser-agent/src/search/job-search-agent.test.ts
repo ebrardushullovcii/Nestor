@@ -171,6 +171,68 @@ const extractor: JobExtractor = {
   ),
 };
 
+test.each(["same", "text", "link", "unlinked"])(
+  "results section reuse across filter routes checks all page evidence (%s)",
+  async (change) => {
+    const link = {
+      index: 0,
+      label: "Platform Engineer",
+      href: "https://jobs.example.test/jobs/j1",
+      visible: true,
+      target: "",
+      topOffset: 0,
+    };
+    const pages = { current: rawPage({ actions: [], links: [link] }) };
+    const pageHands = hands(pages);
+    pageHands.navigate = (url) => {
+      pages.current = rawPage({
+        url,
+        actions: [],
+        bodyText:
+          change === "text"
+            ? "Platform Engineer at Northwind. New restrictions."
+            : pages.current.bodyText,
+        links: [
+          {
+            ...link,
+            href:
+              change === "link"
+                ? "https://jobs.example.test/jobs/j2"
+                : link.href,
+          },
+        ],
+      });
+      return Promise.resolve({ ok: true, url });
+    };
+    const read = vi.fn(() =>
+      Promise.resolve([
+        posting(
+          "Platform Engineer",
+          "Northwind",
+          change === "unlinked" ? "other" : "j1",
+        ),
+      ]),
+    );
+    const result = await runJobSearchAgent({
+      config: config(),
+      hands: pageHands,
+      jobExtractor: { extractJobsFromPage: read },
+      llmClient: scripted([
+        { name: "extract_jobs", args: { pageType: "search_results" } },
+        {
+          name: "navigate",
+          args: { url: "https://jobs.example.test/search?filter=new" },
+        },
+        { name: "extract_jobs", args: { pageType: "search_results" } },
+        { name: "finish", args: { reason: "Read both result pages." } },
+      ]),
+    });
+    expect(read).toHaveBeenCalledTimes(change === "same" ? 1 : 2);
+    expect(result.pagesCovered).toBe(2);
+    expect(result.jobs).toHaveLength(1);
+  },
+);
+
 describe("job search agent", () => {
   test("reports repeated bot checks to the model, lets it continue, and keeps jobs when it finishes blocked", async () => {
     const pages = { current: rawPage() };

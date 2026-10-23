@@ -92,6 +92,25 @@ function SectionCard(props: {
 
 type CompanyDetailJob = JobListRow;
 
+/** Where the job is in the person's own lists, in the lists' own names. */
+function describeJobPlace(status: CompanyDetailJob["status"]): string {
+  switch (status) {
+    case "discovered":
+      return "In Find jobs";
+    case "shortlisted":
+    case "drafting":
+    case "ready_for_review":
+    case "approved":
+      return "Shortlisted";
+    case "submitted":
+      return "Applied";
+    case "archived":
+      return "Hidden";
+    default:
+      return formatStatusLabel(status);
+  }
+}
+
 function JobRow(props: {
   job: CompanyDetailJob;
   onOpen: (jobId: string) => void;
@@ -108,7 +127,7 @@ function JobRow(props: {
           {props.job.title}
         </p>
         <p className="text-(length:--text-tiny) text-foreground-muted">
-          {props.job.location} · Workflow: {formatStatusLabel(props.job.status)}
+          {props.job.location} · {describeJobPlace(props.job.status)}
           {listingDate ? ` · ${listingDate.label} ${listingDate.value}` : ""}
         </p>
         <div className="mt-1 flex min-w-0 flex-wrap items-start gap-2">
@@ -1080,10 +1099,12 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
           {props.activeCapLimitReached ? (
             <StatusBadge tone="critical">Application cap reached</StatusBadge>
           ) : null}
-          <StatusBadge tone="neutral">
-            {company.aliases.length} alias
-            {company.aliases.length === 1 ? "" : "es"}
-          </StatusBadge>
+          {company.aliases.length > 0 ? (
+            <StatusBadge tone="neutral">
+              {company.aliases.length} alias
+              {company.aliases.length === 1 ? "" : "es"}
+            </StatusBadge>
+          ) : null}
           {props.activeCapLimitReached && props.onOpenSafeguards ? (
             <Button
               onClick={props.onOpenSafeguards}
@@ -1097,7 +1118,7 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
         </div>
         <div className="grid shrink-0 gap-1">
           <label className="flex items-center gap-2 text-sm">
-            <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+            <span className="text-(length:--text-tiny) font-medium text-foreground-muted">
               Company tracking
             </span>
             <select
@@ -1167,7 +1188,7 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
         >
           {openings.lastSeenAvailable.length > 0 ? (
             <div className="grid gap-1">
-              <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+              <p className="text-(length:--text-tiny) font-medium text-foreground-muted">
                 Last seen available
               </p>
               <BoundedCollectionList
@@ -1189,7 +1210,7 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
           )}
           {openings.needsVerification.length > 0 ? (
             <div className="grid gap-1">
-              <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+              <p className="text-(length:--text-tiny) font-medium text-foreground-muted">
                 Needs verification
               </p>
               <BoundedCollectionList
@@ -1207,7 +1228,7 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
           ) : null}
           {openings.reportedClosed.length > 0 ? (
             <div className="grid gap-1">
-              <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+              <p className="text-(length:--text-tiny) font-medium text-foreground-muted">
                 Reported closed
               </p>
               <BoundedCollectionList

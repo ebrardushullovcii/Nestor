@@ -7,7 +7,11 @@ import {
   ApplyJobResultSchema,
   SafeguardMutationInputSchema,
 } from "@nestor/contracts";
-import { createSeed } from "../workspace-service.test-support";
+import {
+  createSeed,
+  createWorkspaceServiceHarness,
+} from "../workspace-service.test-support";
+import { SameCompanyApplicationConflictError } from "../application-run-refusal";
 import {
   checkSameCompanySends,
   groupCompanyConflicts,
@@ -38,6 +42,62 @@ const records = jobs.map((job, i) =>
 );
 
 describe("same-company sending decisions", () => {
+  it("staging reports structured conflicting jobs and still allows an unrelated employer", async () => {
+    const seed = createSeed();
+    seed.settings.resumeApplicationMode = "original_resume";
+    seed.savedJobs = [
+      jobs[0]!,
+      jobs[1]!,
+      { ...jobs[2]!, company: "Different Employer" },
+    ].map((job) => ({
+      ...job,
+      resumeApplicationMode: "original_resume" as const,
+    }));
+    const { workspaceService, repository } = createWorkspaceServiceHarness({
+      seed,
+    });
+    let refused: unknown;
+    try {
+      await workspaceService.startAutoApplyQueueRun(
+        seed.savedJobs.map((job) => job.id),
+        "autonomous_submit",
+      );
+    } catch (error: unknown) {
+      refused = error;
+    }
+    expect(refused).toBeInstanceOf(SameCompanyApplicationConflictError);
+    if (!(refused instanceof SameCompanyApplicationConflictError))
+      throw new Error("Expected named company conflicts");
+    expect(refused.skipped.map((entry) => entry.jobId)).toEqual([
+      jobs[0]!.id,
+      jobs[1]!.id,
+    ]);
+    expect(await repository.listApplyRuns()).toEqual([]);
+    await workspaceService.startAutoApplyQueueRun(
+      [jobs[2]!.id],
+      "autonomous_submit",
+    );
+    expect((await repository.listApplyRuns()).map((run) => run.jobIds)).toEqual(
+      [[jobs[2]!.id]],
+    );
+  });
+  it("identifies only the selected conflicting jobs, leaving unrelated employers alone", async () => {
+    const unrelated = { ...jobs[2]!, company: "Different Employer" };
+    const repository = createInMemoryJobFinderRepository({
+      ...createSeed(),
+      savedJobs: [jobs[0]!, jobs[1]!, unrelated],
+    });
+    const refused = new Map<string, string>();
+    await checkSameCompanySends({
+      repository,
+      jobIds: [jobs[0]!.id, jobs[1]!.id, unrelated.id],
+      now: at,
+      onRefusedJob: (jobId, reason) => refused.set(jobId, reason),
+    });
+    expect([...refused.keys()]).toEqual([jobs[0]!.id, jobs[1]!.id]);
+    expect(refused.get(jobs[0]!.id)).toContain("London");
+    expect(refused.get(jobs[1]!.id)).toContain("Manchester");
+  });
   it("checks single, batch and assistant callers with the same exact-pair choice", async () => {
     const repository = createInMemoryJobFinderRepository({
       ...createSeed(),

@@ -54,6 +54,30 @@ export function withEmbeddedBrowserActivity(
   runtime: BrowserSessionRuntime,
   browser: EmbeddedBrowser,
 ): BrowserSessionRuntime {
+  const applicationSources = new Map<string, JobSource>();
+  if (
+    runtime.forgetClosedApplicationPage ||
+    runtime.clearApplicationPageRecovery
+  ) {
+    browser.setApplicationTabsClosedHandler((owner) => {
+      if (owner === null) {
+        runtime.clearApplicationPageRecovery?.();
+        applicationSources.clear();
+        return;
+      }
+      const source = applicationSources.get(owner);
+      if (source && runtime.forgetClosedApplicationPage?.(source, owner))
+        applicationSources.delete(owner);
+    });
+  }
+  if (runtime.hibernateApplicationPageBinding) {
+    browser.setPreparedFormReclaimer(async (owner, canDiscard) => {
+      const source = applicationSources.get(owner);
+      return source
+        ? runtime.hibernateApplicationPageBinding!(source, owner, canDiscard)
+        : false;
+    });
+  }
   const flagSession = (session: BrowserSessionState): BrowserSessionState => {
     if (session.status === "login_required")
       browser.requestAttention({
@@ -160,12 +184,15 @@ export function withEmbeddedBrowserActivity(
             browser.runAutomation(
               "Reading job listing",
               undefined,
-              (signal, _update, claimPage) =>
+              (signal, _update, claimPage, claimedTabs) =>
                 runtime.readRenderedPage!(url, {
                   signal: options?.signal
                     ? AbortSignal.any([signal, options.signal])
                     : signal,
-                  onPage: claimPage,
+                  onPage: async (page) => {
+                    claimPage(page);
+                    await claimedTabs();
+                  },
                 }),
             ),
         }
@@ -248,6 +275,7 @@ export function withEmbeddedBrowserActivity(
       try {
         closed = await runtime.releaseApplicationPageBinding?.(source, key);
       } finally {
+        applicationSources.delete(key);
         browser.releaseOwnedTabs(key, { keepForPerson: closed === false });
       }
       return closed;
@@ -266,6 +294,10 @@ export function withEmbeddedBrowserActivity(
               nextKey,
             );
             if (transferred) browser.transferOwnedTabs(previousKey, nextKey);
+            if (transferred) {
+              applicationSources.delete(previousKey);
+              applicationSources.set(nextKey, source);
+            }
             return transferred;
           },
         }
@@ -344,7 +376,14 @@ export function withEmbeddedBrowserActivity(
                       ),
                   }),
               },
-              { ...options, signal, onAutomationPage: claimPage },
+              {
+                ...options,
+                signal,
+                onAutomationPage: async (page) => {
+                  claimPage(page);
+                  await claimedTabs();
+                },
+              },
             )
             .then(async (result) => {
               const tabs = await claimedTabs();
@@ -358,6 +397,13 @@ export function withEmbeddedBrowserActivity(
                 );
               if (result.state === "failed" || result.state === "submitted")
                 browser.markFinishedTabs(tabs);
+              if (
+                input.applicationPageBindingKey &&
+                result.state === "ready" &&
+                browser.markPreparedForm(input.applicationPageBindingKey)
+              ) {
+                applicationSources.set(input.applicationPageBindingKey, source);
+              }
               return flagResult(result, tabs.at(-1) ?? null, input.job.company);
             }),
         { owner: input.applicationPageBindingKey ?? null },
@@ -390,7 +436,10 @@ export function withEmbeddedBrowserActivity(
                   ...options,
                   protectedPages,
                   signal,
-                  onAutomationPage: claimPage,
+                  onAutomationPage: async (page) => {
+                    claimPage(page);
+                    await claimedTabs();
+                  },
                   onWaitingForBrowserTab: () => {
                     _updateActivity(
                       "Browser tab limit reached · Waiting for a free tab",
@@ -417,11 +466,39 @@ export function withEmbeddedBrowserActivity(
             ),
         } satisfies Partial<BrowserSessionRuntime>)
       : {}),
+    ...(runtime.reopenApplicationPage
+      ? ({
+          async reopenApplicationPage(source, key, onProgress) {
+            const state = await runtime.reopenApplicationPage!(
+              source,
+              key,
+              onProgress,
+            );
+            if (state.state === "open") applicationSources.set(key, source);
+            return state;
+          },
+        } satisfies Partial<BrowserSessionRuntime>)
+      : {}),
     ...(runtime.hasApplicationPageBinding
       ? ({
           hasApplicationPageBinding: (source, pageBindingKey) =>
             runtime.hasApplicationPageBinding!(source, pageBindingKey),
         } satisfies Partial<BrowserSessionRuntime>)
+      : {}),
+    ...(runtime.focusApplicationPageBinding
+      ? {
+          async focusApplicationPageBinding(source: JobSource, key: string) {
+            const focused = await runtime.focusApplicationPageBinding!(
+              source,
+              key,
+            );
+            if (!focused) {
+              browser.releaseOwnedTabs(key);
+              applicationSources.delete(key);
+            }
+            return focused;
+          },
+        }
       : {}),
     ...(runtime.executeExactlyOneFinalAction
       ? ({

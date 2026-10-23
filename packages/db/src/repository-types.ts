@@ -1,4 +1,5 @@
 import type {
+  PreparedApplicationForm,
   ApplyJobResult,
   ApplyJobResultInput,
   ApplyRun,
@@ -18,6 +19,7 @@ import type {
   CandidateProfile,
   JobFinderDiscoveryState,
   JobFinderActivityControl,
+  ApplyQueue,
   JobFinderRepositoryState,
   JobFinderIntelligenceState,
   JobFinderSettings,
@@ -212,6 +214,8 @@ export interface JobFinderRepository
   close(): Promise<void>;
   reset(seed: JobFinderRepositorySeed): Promise<void>;
   getProfile(): Promise<CandidateProfile>;
+  /** Validated frozen singleton; display readers must not mutate it. */
+  readProfileProjection?(): Promise<CandidateProfile>;
   /**
    * Reads the persisted candidate profile together with the profile
    * singleton's monotonic revision. The revision is the compare-and-swap
@@ -240,6 +244,7 @@ export interface JobFinderRepository
     options?: { expectedRevision?: number },
   ): Promise<ProfileCommitOutcome>;
   getSearchPreferences(): Promise<JobSearchPreferences>;
+  readSearchPreferencesProjection?(): Promise<JobSearchPreferences>;
   /**
    * Persists search preferences and advances the shared profile revision
    * epoch, so concurrent compare-and-swap commits that captured preferences
@@ -328,6 +333,8 @@ export interface JobFinderRepository
       current: BorrowedDiscoveryState,
     ) => readonly SavedJob[];
     update?: (job: SavedJob) => SavedJob;
+    /** Give the updater frozen current rows; it must return a new row for changes. */
+    borrowCurrentJobs?: boolean;
     /**
      * Runs `update` only on these rows (and on stored rows an upsert names);
      * every other row stays as stored without being read. Pass it only when
@@ -367,6 +374,8 @@ export interface JobFinderRepository
     update: (
       current: DiscoveryFeedbackCommitCurrent,
     ) => DiscoveryFeedbackCommitNext<TResult>,
+    /** Borrow frozen transaction-current singletons; replace changed values. */
+    options?: { borrowUnchangedState: boolean },
   ): Promise<TResult>;
   /**
    * Destructively replaces the complete saved-job collection. The caller must
@@ -400,6 +409,8 @@ export interface JobFinderRepository
   listResumeDraftRevisions(
     draftId?: string,
   ): Promise<readonly ResumeDraftRevision[]>;
+  /** The id `listResumeDraftRevisions(draftId)[0]` would have, read alone. */
+  getLatestResumeDraftRevisionId(draftId: string): Promise<string | null>;
   upsertResumeDraftRevision(revision: ResumeDraftRevision): Promise<void>;
   listResumeExportArtifacts(options?: {
     jobId?: string;
@@ -462,11 +473,15 @@ export interface JobFinderRepository
   listApplyRuns(options?: { id?: string }): Promise<readonly ApplyRun[]>;
   upsertApplyRun(run: ApplyRun): Promise<void>;
   listApplyJobResults(options?: {
+    id?: string;
     runId?: string;
     jobId?: string;
     applicationRecordId?: string;
   }): Promise<readonly ApplyJobResult[]>;
   upsertApplyJobResult(result: ApplyJobResultInput): Promise<void>;
+  getPreparedApplicationForm(resultId: string): Promise<PreparedApplicationForm | null>;
+  upsertPreparedApplicationForm(form: PreparedApplicationForm): Promise<void>;
+  deletePreparedApplicationForm(resultId: string): Promise<void>;
   markApplicationPreparationStarted(input: {
     resultId: string;
     runId: string;
@@ -561,6 +576,8 @@ export interface JobFinderRepository
     tailoredAsset?: TailoredAsset | null;
   }): Promise<void>;
   applyResumePatchWithRevision(input: {
+    /** Replace only this latest revision, preserving its exact pre-edit snapshot. */
+    coalesceRevision?: { id: string; afterHash: string };
     expectedDraftUpdatedAt: string;
     draft: ResumeDraft;
     revision: ResumeDraftRevision;
@@ -575,20 +592,27 @@ export interface JobFinderRepository
   }): Promise<void>;
   clearResumeApproval(input: {
     draft: ResumeDraft;
-    staleReason: string;
+    /** Null when an undo puts the draft back as it was. */
+    staleReason: string | null;
     tailoredAsset?: TailoredAsset | null;
   }): Promise<void>;
   /**
    * Marks stored drafts stale in one transaction, as clearResumeApproval
    * does for one: status, reason and time, no approval, the job's exports
    * unapproved, and the job's first tailored asset without its file. Only
-   * those fields change, so whole drafts (often most of a megabyte each)
-   * are not read, validated and written again. Unknown ids are skipped.
+   * those fields change in the commit; the file repository then folds them
+   * into the bodies in bounded background slices for older builds. Whole
+   * drafts are not read or validated by the save. Unknown ids are skipped.
    */
   staleResumeDrafts?(input: {
     draftIds: readonly string[];
     staleReason: string;
     updatedAt: string;
+    /** The explicit profile save and its approval invalidation share a commit. */
+    profileInputs?: {
+      profile: CandidateProfile;
+      searchPreferences?: JobSearchPreferences;
+    };
   }): Promise<void>;
   listApplicationRecords(): Promise<readonly ApplicationRecord[]>;
   upsertApplicationRecord(
@@ -651,6 +675,8 @@ export interface JobFinderRepository
     update: (current: JobFinderSettings) => JobFinderSettings,
   ): Promise<JobFinderSettings>;
   getDiscoveryState(): Promise<JobFinderDiscoveryState>;
+  /** Frozen canonical run state, including checkpoints. Never mutate borrowed rows. */
+  readDiscoveryStateForRun?(): Promise<JobFinderDiscoveryState>;
   /**
    * Borrowed immutable display state, reused until discovery changes. Agent
    * checkpoints stay in canonical storage and are null in this projection.
@@ -684,6 +710,7 @@ export interface JobFinderRepository
     ) => JobFinderDiscoveryState["sessions"],
   ): Promise<JobFinderDiscoveryState["sessions"]>;
   getCampaignState(): Promise<JobSearchCampaignCollection | null>;
+  readCampaignProjection?(): Promise<JobSearchCampaignCollection | null>;
   saveCampaignState(campaignState: JobSearchCampaignCollection): Promise<void>;
   /**
    * Applies a campaign collection and its corresponding global preferences
@@ -714,6 +741,9 @@ export interface JobFinderRepository
   ): Promise<JobFinderIntelligenceState>;
   getActivityControl(): Promise<JobFinderActivityControl>;
   saveActivityControl(activityControl: JobFinderActivityControl): Promise<void>;
+  /** The one saved Apply queue (Apply to selected, this page or all), or null. */
+  getApplyQueue(): Promise<ApplyQueue | null>;
+  saveApplyQueue(queue: ApplyQueue | null): Promise<void>;
 }
 
 export interface AutomaticWorkspaceBackupOptions {
@@ -829,6 +859,8 @@ export interface FileJobFinderRepositoryOptions {
    * reads. Omitted or null validates every row.
    */
   rowValidationStamp?: PromiseLike<string | null> | string | null;
+  /** Let the initial display finish before validating unopened full job rows. */
+  backgroundValidationReady?: PromiseLike<void>;
 }
 
 export type StateTableKey =
@@ -839,7 +871,8 @@ export type StateTableKey =
   | "discovery_state"
   | "campaign_state"
   | "intelligence_state"
-  | "activity_control";
+  | "activity_control"
+  | "apply_queue";
 
 export interface SchemaParser<TValue> {
   parse: (value: unknown) => TValue;

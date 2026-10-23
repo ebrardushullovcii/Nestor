@@ -296,7 +296,7 @@ describe("ReviewQueueScreen tailored draft preparation (controlled)", () => {
     // never two names for one job. Once on the selected row (rows keep their
     // badge when selected) and once in the detail header.
     expect(screen.getAllByText("Ready to apply").length).toBe(2);
-    expect(screen.queryByText("Review resume")).toBeNull();
+    expect(screen.queryByText("To review")).toBeNull();
   });
 
   it("delegates the create-all run to the page controller without owning it", () => {
@@ -390,7 +390,7 @@ describe("ReviewQueueScreen tailored draft preparation (controlled)", () => {
   });
 
   it.each([0, 1, 2])(
-    "keeps a ready batch within %i remaining daily slots",
+    "queues every ready job whatever the day has left (%i remaining)",
     async (remaining) => {
       const onStartAutoApplyQueue = vi
         .fn<
@@ -415,24 +415,15 @@ describe("ReviewQueueScreen tailored draft preparation (controlled)", () => {
         })),
       });
 
-      if (remaining === 0) {
-        expect(screen.queryByTestId("apply-all-ready")).toBeNull();
-        expect(onStartAutoApplyQueue).not.toHaveBeenCalled();
-        return;
-      }
+      // The Apply queue waits for tomorrow by itself (ADR 0058).
       await act(async () => {
         fireEvent.click(
-          screen.getByRole("button", {
-            name:
-              remaining === 1
-                ? "Apply to the 1 ready job"
-                : "Apply to all 2 ready jobs",
-          }),
+          screen.getByRole("button", { name: "Prepare all 2 ready" }),
         );
         await Promise.resolve();
       });
       expect(onStartAutoApplyQueue).toHaveBeenCalledWith(
-        ["job_a", "job_b"].slice(0, remaining),
+        ["job_a", "job_b"],
         "prepare_only",
       );
     },
@@ -478,7 +469,12 @@ describe("ReviewQueueScreen tailored draft preparation (controlled)", () => {
 
       await act(async () => {
         fireEvent.click(
-          screen.getByRole("button", { name: "Apply to all 2 ready jobs" }),
+          screen.getByRole("button", {
+            name:
+              applicationAutomationMode === "autonomous_submit"
+                ? "Apply to all 2 ready"
+                : "Prepare all 2 ready",
+          }),
         );
         await Promise.resolve();
       });
@@ -720,7 +716,7 @@ describe("ReviewQueueScreen job details honesty", () => {
     // full assessment with the job detail.
     expect(
       await screen.findAllByText(
-        "The AI judges each job against your profile and goals after a search. Choose Read and assess listing to judge this one now.",
+        "The AI judges each job against your profile and goals after a search. Choose Judge fit to do this one now.",
       ),
     ).toHaveLength(1);
     expect(

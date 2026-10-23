@@ -91,17 +91,22 @@ const jobFinderListRowBadgeSlotClassName =
  */
 const jobFinderListRowLinesClassName = "grid min-w-0 gap-1.5";
 
-/** The row title itself. */
+/**
+ * The row title itself. Each of the three lines is one line tall and cut with
+ * an ellipsis: a long title or employer used to wrap, so rows ran two to four
+ * lines and the list jumped in height row to row. The details pane beside the
+ * list shows the full text.
+ */
 const jobFinderListRowTitleClassName =
-  "min-w-0 break-words text-(length:--text-heading-3) text-(--text-headline)";
+  "min-w-0 truncate text-(length:--text-heading-3) text-(--text-headline)";
 
 /** The meta line under the title: employer, location, source. */
 const jobFinderListRowMetaClassName =
-  "min-w-0 break-words text-(length:--text-small) text-foreground-soft";
+  "min-w-0 truncate text-(length:--text-small) text-foreground-soft";
 
 /** The status line under the meta line: fit verdict, readiness, next step. */
 const jobFinderListRowStatusClassName =
-  "min-w-0 break-words text-(length:--text-small) leading-5";
+  "min-w-0 truncate text-(length:--text-small) leading-5";
 
 export {
   jobFinderListRegionClassName,

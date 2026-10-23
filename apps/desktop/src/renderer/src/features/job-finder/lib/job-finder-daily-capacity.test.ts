@@ -89,8 +89,21 @@ describe("formatDailyPreparationCapacitySummaryText", () => {
       createCapacity({ used: 20, remaining: 0 }),
     );
 
-    expect(text.endsWith("· more available after midnight")).toBe(true);
+    expect(text?.endsWith("· more available after midnight")).toBe(true);
     expect(text).not.toContain("resets at midnight");
+  });
+
+  it("says only what was started under a limit nobody reaches", () => {
+    expect(
+      formatDailyPreparationCapacitySummaryText(
+        createCapacity({ limit: 10000, used: 0, remaining: 10000 }),
+      ),
+    ).toBeNull();
+    expect(
+      formatDailyPreparationCapacitySummaryText(
+        createCapacity({ limit: 10000, used: 3, remaining: 9997 }),
+      ),
+    ).toBe("3 applications started today");
   });
 });
 

@@ -348,11 +348,8 @@ describe("ResumeWorkspaceStudioShell", () => {
     expect(screen.queryByText("Approval eligible")).toBeNull();
     expect(screen.queryByText("Approval blocked")).toBeNull();
     expect(screen.queryByText("Saved draft")).toBeNull();
-    expect(
-      screen.getByText(
-        "The application PDF is built and checked when you approve.",
-      ),
-    ).toBeTruthy();
+    // Before approval there is no PDF to talk about, so nothing is said.
+    expect(document.querySelector("[data-resume-pdf-status]")).toBeNull();
   });
 
   it("moves clear approval behind its explanation and keeps approval out of the toolbars", () => {
@@ -1585,7 +1582,6 @@ describe("ResumeWorkspaceStudioShell locked-pane ownership", () => {
       "[data-resume-studio-attention-panel]",
       "[data-resume-validation-issues]",
       "[data-resume-set-aside-proposal-note]",
-      "[data-resume-pdf-status]",
     ]) {
       const node = container.querySelector<HTMLElement>(selector);
       expect(node, `${selector} renders`).toBeTruthy();

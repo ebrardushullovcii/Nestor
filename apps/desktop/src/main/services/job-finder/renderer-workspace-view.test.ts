@@ -74,6 +74,24 @@ function workspaceWith(discoveryJobs = [job()]): JobFinderWorkspaceSnapshot {
 }
 
 describe("renderer workspace list projection", () => {
+  it("does not open lazy listing or provenance bodies when sending list rows", () => {
+    const full = job();
+    const lazy = Object.freeze({
+      ...full,
+      get description(): string {
+        throw new Error("listing detail opened");
+      },
+      provenance: full.provenance.map((entry) =>
+        Object.freeze({
+          ...entry,
+          get listingFacts(): typeof entry.listingFacts {
+            throw new Error("sighting detail opened");
+          },
+        }),
+      ),
+    });
+    expect(toRendererJob(lazy).id).toBe(full.id);
+  });
   it("omits complete resume bodies and unused attempt/result evidence while selected/canonical data stays complete", () => {
     const at = "2026-10-13T10:00:00.000Z";
     const body = "Synthetic full document and historical capture".repeat(200);

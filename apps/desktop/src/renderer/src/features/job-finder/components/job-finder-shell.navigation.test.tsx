@@ -14,7 +14,14 @@ import {
   within,
 } from "@testing-library/react";
 import { lazy, Suspense } from "react";
-import { Link, MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
+import {
+  Link,
+  MemoryRouter,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -25,6 +32,16 @@ import {
   SHELL_SCROLLING_ROUTE_TOP_GUTTER_PX,
 } from "../lib/job-finder-shell-gutters";
 import { COMPACT_NAV_PILL_CLASS, JobFinderShell } from "./job-finder-shell";
+
+/** What the app's outlet does for a cold route: one boundary per path. */
+function PerPathSuspenseOutlet() {
+  const { pathname } = useLocation();
+  return (
+    <Suspense fallback={<div>Opening screen</div>} key={pathname}>
+      <Outlet />
+    </Suspense>
+  );
+}
 
 const windowControlsState = {
   isClosable: true,
@@ -253,9 +270,7 @@ describe("JobFinderShell section navigation", () => {
           <Route
             element={
               <JobFinderShell platform="win32" workspace={createWorkspace()}>
-                <Suspense fallback={<div>Opening screen</div>}>
-                  <Outlet />
-                </Suspense>
+                <PerPathSuspenseOutlet />
               </JobFinderShell>
             }
           >
@@ -272,8 +287,9 @@ describe("JobFinderShell section navigation", () => {
       name: "Job Finder sidebar destinations",
     });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Home" }));
-    // The route container is keyed, so a cold lazy route shows its opening
-    // surface while the new screen loads rather than keeping the old page.
+    // The outlet keys its Suspense boundary by path, so a cold lazy route
+    // shows its opening surface while the new screen loads rather than
+    // keeping the old page.
     expect(await screen.findByText("Opening screen")).toBeTruthy();
     act(() => {
       finish();
@@ -433,7 +449,11 @@ describe("JobFinderShell section navigation", () => {
     // Important on purpose: Tailwind v4 emits arbitrary `min-[...]` media
     // variants before the named breakpoints, so a plain `min-[900px]:pr-80`
     // loses the cascade to the still-matching `sm:pr-64` that follows it.
-    expect(navigation.className).toContain("min-[900px]:!pr-80");
+    // The reserve is the group's measured width (at least 20rem): with its
+    // labels shown from 1100px the group is wider than a fixed 20rem.
+    expect(navigation.className).toContain(
+      "min-[900px]:!pr-[max(20rem,calc(var(--job-finder-header-actions-width,0px)+0.75rem))]",
+    );
     expect(navigation.className).not.toContain("min-[900px]:pl-80");
     expect(navigation.contains(notificationGroup)).toBe(false);
 
@@ -2420,6 +2440,10 @@ describe("JobFinderShell compact nav responsive contract", () => {
       "⌘",
       "I",
       "?",
+      "Alt",
+      "←",
+      "Alt",
+      "→",
       "⌘",
       "=",
       "⌘",
@@ -3672,7 +3696,7 @@ describe("compact navigation shares the header switcher's axis", () => {
       const navigation = renderShellFor("win32");
 
       expect(resolveWinningPaddingRight(navigation.className, width)).toBe(
-        "pr-80",
+        "pr-[max(20rem,calc(var(--job-finder-header-actions-width,0px)+0.75rem))]",
       );
     },
   );
@@ -3682,9 +3706,7 @@ describe("compact navigation shares the header switcher's axis", () => {
   it("drops the reserve at 1280px off macOS, where the card moves up to the brand row", () => {
     const navigation = renderShellFor("win32");
 
-    expect(resolveWinningPaddingRight(navigation.className, 1280)).toBe(
-      "pr-0",
-    );
+    expect(resolveWinningPaddingRight(navigation.className, 1280)).toBe("pr-0");
     expect(navigation.className).toContain("xl:row-start-1");
     expect(navigation.className).toContain("xl:mr-[25rem]");
   });

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { SourceIntelligenceArtifactSchema } from "@nestor/contracts";
 import { createOpenAiCompatibleJobFinderAiClient } from "./openai-compatible";
+import { normalizeExtractedJobs } from "./openai-compatible-jobs";
 
 import {
   buildFitEvidenceInstructions,
@@ -19,6 +20,49 @@ import {
 } from "./test-fixtures";
 
 describe("batch fit judging", () => {
+  test("card evidence reaches fit judging before the full listing read", () => {
+    const [posting] = normalizeExtractedJobs({
+      payload: {
+        jobs: [
+          {
+            canonicalUrl: "https://jobs.example.test/jobs/card",
+            title: "Platform Engineer",
+            company: "Northwind",
+            location: "Remote, Canada",
+            description:
+              "Build platforms. Canadian work authorization and French C1 required.",
+            keySkills: ["TypeScript"],
+            responsibilities: ["Build platforms"],
+            minimumQualifications: ["French C1"],
+            preferredQualifications: ["Cloud experience"],
+            seniority: "senior",
+            employmentType: "full_time",
+          },
+        ],
+      },
+      pageHostLabel: "jobs.example.test",
+      pageUrl: "https://jobs.example.test/search",
+      pageType: "search_results",
+      effectiveMaxJobs: 12,
+    });
+    const payload = buildJobFitJudgingPayload({
+      assessmentDate: "2026-10-23",
+      profile: createProfile(),
+      searchPreferences: createPreferences(),
+      jobs: [{ jobId: "card", posting: posting! }],
+    });
+    expect(payload.jobs[0]).toMatchObject({
+      keySkills: ["TypeScript"],
+      responsibilities: ["Build platforms"],
+      requirements: ["French C1"],
+      preferredQualifications: ["Cloud experience"],
+      seniority: "senior",
+      employmentType: "full_time",
+    });
+    expect(payload.jobs[0]?.description).toContain(
+      "Canadian work authorization",
+    );
+  });
   test("gives both judges explicit country and office constraints (R3-017)", () => {
     const prompt = buildJobFitJudgingPrompt();
     expect(prompt).toContain(buildFitEvidenceInstructions());

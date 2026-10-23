@@ -56,10 +56,16 @@ export type {
 } from "./application-authority-repository-types";
 export { createInMemoryJobFinderRepository } from "./in-memory-repository";
 export {
+  patchDiscoveryLedger,
+  readDiscoveryLedgerChanges,
+  type DiscoveryLedgerChange,
+} from "./internal/discovery-ledger-patch";
+export {
   createFileJobFinderRepository,
   WorkspaceDatabaseRecoveryRequiredError,
 } from "./file-repository";
 export { readCleanCloseFingerprint } from "./internal/clean-close-marker";
+export { readSavedJobProjectionChanges } from "./internal/saved-job-projection";
 export {
   createFileLiveAssistantRepository,
   type LiveAssistantRepository,

@@ -30,13 +30,13 @@ describe("paused background work", () => {
   it("turns the activity-paused IPC error into a resume instruction", () => {
     const description = describeFailure(
       new Error(
-        "Error invoking remote method 'job-finder:run-source-debug': Error: Browser and application activity is paused. Press Resume background work on the Job Finder Home screen before starting new work.",
+        "Error invoking remote method 'job-finder:start-apply-copilot-run': Error: All work is paused, so this did not start. Press Continue on Home to start work again.",
       ),
-      { action: "check this source" },
+      { action: "start this application" },
     );
     expect(description.kind).toBe("paused");
     expect(description.userMessage).toBe(
-      "Could not check this source. Background work is paused, so nothing new can start. Press Resume background work on the Job Finder Home screen, then try again.",
+      "Could not start this application. All work is paused, so nothing new can start. Press Continue on Home, then try again.",
     );
     expect(description.userMessage).not.toContain("remote method");
   });
@@ -102,4 +102,18 @@ it("names a failed listing site and reserves the internet sentence for an offlin
   expect(describeListingReadFailure(failure, { online: true })).not.toContain(
     "internet",
   );
+});
+
+describe("a file that moved or was deleted", () => {
+  it("says so in plain words and keeps the raw text behind details", () => {
+    const failure = describeFailure(
+      new Error(
+        "Error invoking remote method 'job-finder:import-resume': Error: ENOENT: no such file or directory, open 'C:/Users/person/resume.pdf'",
+      ),
+      { action: "import your resume" },
+    );
+    expect(failure.kind).toBe("file_missing");
+    expect(failure.userMessage).not.toMatch(/ENOENT|no such file/);
+    expect(failure.technicalDetails).toContain("ENOENT");
+  });
 });

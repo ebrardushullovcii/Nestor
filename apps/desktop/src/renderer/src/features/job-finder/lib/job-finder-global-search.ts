@@ -5,7 +5,8 @@ export type JobFinderGlobalSearchKind =
   | "campaign"
   | "company"
   | "document"
-  | "job";
+  | "job"
+  | "screen";
 
 export interface JobFinderGlobalSearchEntry {
   campaignId?: string | null;
@@ -23,6 +24,7 @@ export interface JobFinderGlobalSearchGroup {
 }
 
 const kindOrder: readonly JobFinderGlobalSearchKind[] = [
+  "screen",
   "campaign",
   "job",
   "application",
@@ -38,7 +40,10 @@ export function searchJobFinderEntries(
   const limit = Math.max(1, Math.min(options.limit ?? 40, 200));
   const matches = entries.filter(
     (entry) =>
-      (!options.campaignId || entry.campaignId === options.campaignId) &&
+      // Screens belong to no plan; they are found under any plan.
+      (!options.campaignId ||
+        entry.kind === "screen" ||
+        entry.campaignId === options.campaignId) &&
       matchesCollectionSearch(query, [
         entry.title,
         entry.subtitle,

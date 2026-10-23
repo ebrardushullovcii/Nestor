@@ -135,7 +135,7 @@ describe("tool-using AI capabilities", () => {
     });
 
     expect(calls).toBe(1);
-    // The writer keeps the main effort (NESTOR_AI_REASONING_EFFORT).
+    // Writing has its own effort, separate from the rest of the agent loop.
     expect(reasoningTask).toBe("resume_writer");
     expect(renderPreview).toHaveBeenCalledTimes(1);
     expect(offeredTools).not.toContain("read_resume_generation_context");
@@ -143,6 +143,63 @@ describe("tool-using AI capabilities", () => {
     expect(result.summary).toContain("Builds reliable automation");
     expect(result.fullText).toContain("Builds reliable automation");
   });
+
+  test.each([0, 1, 2])(
+    "a JSON-encoded proposal with %s extra closing braces is decoded and checked without another writer call",
+    async (extraBraces) => {
+      const proposal = {
+        summary: {
+          text: "Builds reliable automation.",
+          evidenceRefs: ["profile:summary"],
+        },
+      };
+      const chatWithTools = vi.fn(() =>
+        Promise.resolve({
+          toolCalls: [
+            composeCall("encoded_proposal", {
+              proposal: JSON.stringify(proposal) + "}".repeat(extraBraces),
+            }),
+          ],
+        }),
+      );
+      const renderPreview = vi.fn<
+        NonNullable<CreateResumeDraftInput["renderPreview"]>
+      >(() => cleanPreview());
+      const result = await runResumeGenerationAgentTask({
+        client: { ...createDeterministicJobFinderAiClient(), chatWithTools },
+        substantivePrompt: "Write a grounded resume.",
+        request: { ...baseRequest(), renderPreview },
+      });
+      expect(chatWithTools).toHaveBeenCalledOnce();
+      expect(renderPreview).toHaveBeenCalledOnce();
+      expect(renderPreview.mock.calls[0]?.[0]).toMatchObject({
+        draft: { summary: proposal.summary.text },
+      });
+      expect(result.summary).toBe(proposal.summary.text);
+    },
+  );
+
+  test.each(["not JSON", "[]", "null", "42"])(
+    "an encoded proposal must still be a JSON object (%s)",
+    async (proposal) => {
+      const renderPreview = vi.fn(() => cleanPreview());
+      const client: AgentCapableJobFinderAiClient = {
+        ...createDeterministicJobFinderAiClient(),
+        chatWithTools: () =>
+          Promise.resolve({
+            toolCalls: [composeCall("invalid_encoded_proposal", { proposal })],
+          }),
+      };
+      await expect(
+        runResumeGenerationAgentTask({
+          client,
+          substantivePrompt: "Write a grounded resume.",
+          request: { ...baseRequest(), renderPreview },
+        }),
+      ).rejects.toThrow();
+      expect(renderPreview).not.toHaveBeenCalled();
+    },
+  );
 
   test("forwards same-route reasoning continuation through the resume model adapter", async () => {
     const continuation = {

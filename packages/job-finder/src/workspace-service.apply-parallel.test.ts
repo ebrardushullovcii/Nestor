@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { JobFinderRepositorySeed } from "@nestor/db";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
@@ -159,9 +159,12 @@ function createParallelHarness(
 }
 
 afterEach(() => vi.unstubAllEnvs());
+beforeEach(() => vi.stubEnv("NESTOR_APPLICATION_PREPARATION_CONCURRENCY", "2"));
 
 describe("parallel application preparation", () => {
-  test.each([2, 4, 5])(
+  // A run holds at most ten jobs, so nine workers plus one waiting job is the
+  // widest case a run can reach.
+  test.each([2, 4, 9])(
     "bounds %i workers and counts out-of-order results without closing active forms",
     async (concurrency) => {
       vi.stubEnv(

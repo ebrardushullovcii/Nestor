@@ -1,6 +1,9 @@
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 
-import { isDiscoveryAlsoFoundResult } from "../screens/discovery/discovery-result-groups";
+import {
+  isDiscoveryAlsoFoundResult,
+  isDiscoveryDecidedJob,
+} from "../screens/discovery/discovery-result-groups";
 import { countActiveSafeguardBlockers } from "./safeguards-blocker-count";
 import { listApplyRunsStoppedBySafeguard } from "./apply-run-pause-state";
 import { countWorkspaceNeedsYouItems } from "./needs-you-count";
@@ -46,15 +49,38 @@ export function countDiscoveryVisibleJobs(
   campaignJobIds: ReadonlySet<string> = selectCampaignJobIds(workspace),
 ): number {
   // Exactly the rows Find jobs lists by default: every kept job the person
-  // has not hidden, minus the weaker matches that sit behind "Show weaker
-  // matches". The badge used to count those too, so Home and the sidebar
-  // said 10 beside a page that said 9.
+  // has not hidden or decided on, minus the weaker matches that sit behind
+  // "Show weaker matches". The badge used to count those too, so Home and the
+  // sidebar said 10 beside a page that said 9.
+  return listFindJobsPool(workspace, campaignJobIds).filter(
+    (job) => !isDiscoveryAlsoFoundResult(job),
+  ).length;
+}
+
+/** Weaker matches Find jobs keeps behind "Show weaker matches". */
+export function countDiscoveryWeakerJobs(
+  workspace: JobFinderRendererWorkspaceSnapshot,
+  campaignJobIds: ReadonlySet<string> = selectCampaignJobIds(workspace),
+): number {
+  return listFindJobsPool(workspace, campaignJobIds).filter(
+    isDiscoveryAlsoFoundResult,
+  ).length;
+}
+
+/** The plan's jobs still waiting on a decision: not hidden, not shortlisted. */
+function listFindJobsPool(
+  workspace: JobFinderRendererWorkspaceSnapshot,
+  campaignJobIds: ReadonlySet<string>,
+) {
+  const shortlistedJobIds = new Set(
+    (workspace.reviewQueue ?? []).map((item) => item.jobId),
+  );
   return (workspace.discoveryJobs ?? []).filter(
     (job) =>
       campaignJobIds.has(job.id) &&
       !job.discoveryFeedback &&
-      !isDiscoveryAlsoFoundResult(job),
-  ).length;
+      !isDiscoveryDecidedJob(job, shortlistedJobIds),
+  );
 }
 
 export function countShortlistedJobs(

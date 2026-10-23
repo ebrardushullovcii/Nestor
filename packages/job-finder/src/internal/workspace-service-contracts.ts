@@ -1,4 +1,5 @@
 import type {
+  ResumeDraftProcessor,
   AddBrowserJobResult,
   ApplicationDocumentRevision,
   ApplicationQuestionRecord,
@@ -532,7 +533,10 @@ export interface JobFinderWorkspaceService {
     draft: ResumeDraft,
     signal?: AbortSignal,
   ): Promise<JobFinderResumePreview>;
-  saveResumeDraft(draft: ResumeDraft): Promise<JobFinderWorkspaceSnapshot>;
+  saveResumeDraft(
+    draft: ResumeDraft,
+    autosaveSessionId?: string,
+  ): Promise<JobFinderWorkspaceSnapshot>;
   restoreResumeDraftRevision(
     jobId: string,
     revisionId: string,
@@ -561,7 +565,12 @@ export interface JobFinderWorkspaceService {
     jobId: string,
     exportId: string,
   ): Promise<JobFinderWorkspaceSnapshot>;
-  clearResumeApproval(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
+  /** Same export/approval gates, reusing a current PDF without a full snapshot. */
+  approveCurrentResume(jobId: string): Promise<void>;
+  clearResumeApproval(
+    jobId: string,
+    options?: { restoreStatus?: "draft" | "needs_review" },
+  ): Promise<JobFinderWorkspaceSnapshot>;
   /**
    * Acknowledges or removes one server-owned work-history review decision as
    * a real draft mutation. The command validates the exact projected
@@ -651,6 +660,18 @@ export interface JobFinderWorkspaceService {
   resolveApplyConsentRequest(
     requestId: string,
     action: "approve" | "decline",
+  ): Promise<JobFinderWorkspaceSnapshot>;
+  /**
+   * Moves an unsent application back to Shortlisted: its prepared form
+   * closes, nothing is sent or prepared again, and its history and receipts
+   * stay. Refused for a sent application and while one is being filled in.
+   */
+  returnApplicationToShortlist(
+    applicationRecordId: string,
+  ): Promise<JobFinderWorkspaceSnapshot>;
+  /** Undo of the move: the application is listed in Applications again. */
+  undoReturnApplicationToShortlist(
+    jobId: string,
   ): Promise<JobFinderWorkspaceSnapshot>;
   revokeApplyRunApproval(runId: string): Promise<JobFinderWorkspaceSnapshot>;
   inspectPreparedApplicationPage(
@@ -916,6 +937,9 @@ export interface CandidateAssetResolver {
 }
 
 export interface CreateJobFinderWorkspaceServiceOptions {
+  /** Host acknowledgement that the first display transfer has finished. */
+  backgroundWorkReady?: PromiseLike<void>;
+  resumeDraftProcessor?: ResumeDraftProcessor;
   onFitJudgmentProgress?: () => void;
   aiClient: JobFinderAiClient;
   visionProvider?: ResumeVisionProvider;

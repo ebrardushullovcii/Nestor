@@ -1,12 +1,6 @@
 // @vitest-environment jsdom
 
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -684,7 +678,7 @@ describe("discovery three-band result counts", () => {
         srOnly: true,
         // The divider is a plain div outside the arrow-key traversal, so the
         // reason the visible rows gave up survives on the row itself.
-        text: "Overall fit: not judged yet. The AI judges each job against your profile and goals after a search. Choose Read and assess listing to judge this one now.",
+        text: "Overall fit: not judged yet. The AI judges each job against your profile and goals after a search. Choose Judge fit to do this one now.",
       })),
     );
   });
@@ -1076,43 +1070,6 @@ it("sorts comparable Best match scores highest first and explains the priority",
   ).toContain("reachable places come first, then fit score");
 });
 
-it("keeps assessment in the toolbar and reads the current page's unjudged listings first", () => {
-  const jobs = Array.from({ length: 70 }, (_, index) =>
-    job({ id: `unread_${index}`, score: 0, titleOnly: true }),
-  );
-  const onAssess = vi.fn(() => new Promise<void>(() => undefined));
-  render(
-    <DiscoveryResultsPanel
-      browserSession={browserSession}
-      jobs={jobs}
-      selectedJob={null}
-      onSelectJob={vi.fn()}
-      onAssessJobListing={onAssess}
-    />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  const firstId = document
-    .querySelector("[data-job-result-id]")
-    ?.getAttribute("data-job-result-id");
-  const button = screen.getByRole("button", {
-    name: "Assess next 20 listings",
-  });
-  expect(
-    screen.getByTestId("discovery-results-group-unchecked").contains(button),
-  ).toBe(false);
-  expect(
-    button.compareDocumentPosition(
-      screen.getByTestId("discovery-results-group-unchecked"),
-    ) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).not.toBe(0);
-  expect(screen.queryByTestId("discovery-best-match-order")).toBeNull();
-  fireEvent.click(button);
-  expect(onAssess).toHaveBeenCalledWith(firstId);
-  expect(
-    screen.getByRole("region", { name: "Job results list" }).className,
-  ).toContain("min-h-[360px]");
-});
-
 it("counts places from the visible result set and does not offer widening mid-search", () => {
   const local = job({ id: "local", score: 85 });
   local.matchAssessment.locationReach = "in_area";
@@ -1134,43 +1091,6 @@ it("counts places from the visible result set and does not offer widening mid-se
     "1 of 1 assessed jobs in or near Bristol · 1 awaiting place checks",
   );
   expect(screen.queryByTestId("discovery-no-area-matches")).toBeNull();
-});
-
-it("keeps the assessment batch running when an assessed row moves out of the unchecked group", async () => {
-  const first = job({ id: "first", score: 0, titleOnly: true });
-  const second = job({ id: "second", score: 0, titleOnly: true });
-  let release!: () => void;
-  const onAssess = vi.fn(
-    () =>
-      new Promise<void>((resolve) => {
-        release = resolve;
-      }),
-  );
-  const props = {
-    browserSession,
-    selectedJob: null,
-    onSelectJob: vi.fn(),
-    onAssessJobListing: onAssess,
-  };
-  const view = render(
-    <DiscoveryResultsPanel {...props} jobs={[first, second]} />,
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "Assess next 2 listings" }),
-  );
-  expect(onAssess).toHaveBeenCalledWith("first");
-  view.rerender(
-    <DiscoveryResultsPanel
-      {...props}
-      jobs={[job({ id: "first", score: 85 }), second]}
-    />,
-  );
-  expect(screen.getByText(/Assessing listings · 0 of 2 finished/)).toBeTruthy();
-  await act(async () => {
-    release();
-    await Promise.resolve();
-  });
-  expect(onAssess).toHaveBeenCalledWith("second");
 });
 
 it("offers weaker matches when an assessment empties the leading list", () => {

@@ -1,4 +1,5 @@
 import type { JobFinderResumeWorkspace } from "@nestor/contracts";
+import { isBlockingResumeValidationIssue } from "@nestor/contracts";
 import { formatStatedNormalizedCompensation } from "../../lib/normalized-compensation";
 import { ExternalUrlLink } from "../../components/open-outside-links";
 import { ResumeClaimTrustPanel } from "./resume-claim-trust-panel";
@@ -43,7 +44,7 @@ export function ResumeWorkspaceSidebar({
   const researchCount = research.length;
   const validationIssues = validation?.issues ?? [];
   const blockingIssueCount = validationIssues.filter(
-    (issue) => issue.severity === "error",
+    isBlockingResumeValidationIssue,
   ).length;
   const normalizedCompensation = formatStatedNormalizedCompensation(job);
   const roleSnapshot = [

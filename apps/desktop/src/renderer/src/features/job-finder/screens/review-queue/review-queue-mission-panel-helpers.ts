@@ -113,14 +113,16 @@ export function describeApplyOutcome(
  */
 export function describeApplyAllOutcome(
   mode: ApplicationAutomationMode,
+  dailyLimit: number | null = null,
 ): string {
+  const pace = `Ten at a time${dailyLimit ? `, up to ${dailyLimit.toLocaleString("en-US")} a day` : ""}, with no more presses.`;
   switch (mode) {
     case "autonomous_submit":
-      return "Apply to all fills in and sends each application, and stops only for one that needs you.";
+      return `Sends each application for you and stops only for one that needs you. ${pace}`;
     case "confirm_before_submit":
-      return "Apply to all fills in each form, then waits for your go-ahead before sending each one.";
+      return `Fills in each form, then waits for your go-ahead before sending each one. ${pace}`;
     default:
-      return "Apply to all fills in each form and attaches its resume; you press Send on each one.";
+      return `Fills in each form and attaches its resume; you press Send on each one. ${pace}`;
   }
 }
 
@@ -425,7 +427,7 @@ export function getReadinessDescription(input: {
     if (draftNeedsPersonReview) {
       // ADR 0051: stretches are not confirmed line by line any more, so the
       // step is a read-through, not a line-by-line chore.
-      return "Aggressive resumes stretch a little past your saved evidence. Read it through, then approve it.";
+      return "Read the resume through, then approve it.";
     }
     return "The resume is ready. Apply approves it and starts the application.";
   }

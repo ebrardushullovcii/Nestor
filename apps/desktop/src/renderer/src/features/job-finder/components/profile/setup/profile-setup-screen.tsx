@@ -503,8 +503,10 @@ export function ProfileSetupScreen(props: {
             }
             title="Guided setup"
             description={
+              // The import card under the title already says what setup
+              // does with a resume; this line said it first, again.
               isPristineSetup
-                ? "Import a resume and we fill in your profile, then ask only about the gaps."
+                ? "Your profile is what Job Finder searches and applies with."
                 : "Work through each step; you can return to any step later."
             }
           />

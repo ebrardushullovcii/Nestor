@@ -1932,6 +1932,9 @@ describe("one queued job's error does not end the batch", () => {
   });
 
   test("a browser the person took over stops the batch and leaves no job filling in", async () => {
+    // Two preparations at once, so the third job is still waiting when the
+    // takeover stops the batch (the rule holds at the wider default too).
+    vi.stubEnv("NESTOR_APPLICATION_PREPARATION_CONCURRENCY", "2");
     const { workspaceService, repository, flowedJobIds } =
       createThreeJobHarness(
         new Error(

@@ -28,11 +28,17 @@ export function ProfileRecordCard({
   statusLabel,
 }: ProfileRecordCardProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
+  // A closed card's fields are mounted the first time it opens, not before:
+  // Work history and Background drew every role's full editor up front
+  // (about 1,500 nodes) behind collapsed cards nobody had opened. Values live
+  // in the form, so an unopened card loses nothing.
+  const [hasOpened, setHasOpened] = useState(defaultOpen);
   const detailSummary = summary?.trim() || "Review and edit this entry.";
 
   useEffect(() => {
     if (forceOpenSignal) {
       setIsOpen(true);
+      setHasOpened(true);
     }
   }, [forceOpenSignal]);
 
@@ -43,10 +49,19 @@ export function ProfileRecordCard({
         "surface-card-tint group rounded-(--radius-panel) border border-(--surface-panel-border) p-4 [&_summary::-webkit-details-marker]:hidden",
         className,
       )}
-      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+      onToggle={(event) => {
+        const open = event.currentTarget.open;
+        setIsOpen(open);
+        if (open) setHasOpened(true);
+      }}
       open={isOpen}
     >
-      <summary className="flex items-start justify-between gap-3 list-none cursor-pointer">
+      <summary
+        className="flex items-start justify-between gap-3 list-none cursor-pointer"
+        // Mount the fields on the press itself, before the toggle event, so
+        // the opened card paints with its fields in the same frame.
+        onClick={() => setHasOpened(true)}
+      >
         <span className="grid gap-1 min-w-0">
           <span className="text-[0.96rem] font-semibold text-(--text-headline)">
             {title}
@@ -71,7 +86,7 @@ export function ProfileRecordCard({
       </summary>
 
       <div className="mt-4 grid gap-4 border-t border-(--surface-panel-border) pt-4">
-        {children}
+        {isOpen || hasOpened ? children : null}
       </div>
     </details>
   );

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { transferRowChanges } from "@nestor/core";
 import {
   TailoredAssetSummarySchema,
   ApplyJobResultListRowSchema,
@@ -63,8 +64,12 @@ export function toRendererJob(job: DiscoveryJobView): JobListRow {
     status: job.status,
     matchAssessment: toListMatchAssessment(job.matchAssessment),
     provenance: job.provenance.map((entry) => {
-      const sighting = { ...entry };
-      delete sighting.listingFacts;
+      const descriptors = Object.getOwnPropertyDescriptors(entry);
+      delete descriptors.listingFacts;
+      const sighting = Object.defineProperties(
+        {},
+        descriptors,
+      ) as JobListRow["provenance"][number];
       return reusable ? Object.freeze(sighting) : sighting;
     }),
     discoveryFeedback: job.discoveryFeedback,
@@ -323,6 +328,7 @@ function toRendererJobs(jobs: DiscoveryJobView[]): JobListRow[] {
   if (reusable) {
     Object.freeze(rows);
     jobCollections.set(jobs, rows);
+    transferRowChanges(jobs, rows, toRendererJob);
   }
   return rows;
 }

@@ -202,7 +202,7 @@ describe("JobSearchHomeScreen", () => {
     expect(screen.queryByTestId("home-discovery-run-feedback")).toBeNull();
   });
 
-  it("keeps the failing-sources line hidden once the person hides it, until another source fails", () => {
+  it("keeps the failing-sources line hidden for good once the person hides it", () => {
     window.localStorage.clear();
     const ws = workspace();
     ws.searchPreferences.discovery.targets[0]!.staleReason =
@@ -234,7 +234,8 @@ describe("JobSearchHomeScreen", () => {
       "Starting page returned HTTP 404";
     another.searchPreferences.discovery.targets[0]!.id = "target-other";
     render(<JobSearchHomeScreen {...baseProps()} workspace={another} />);
-    expect(screen.getByText(/1 job source needs attention/)).toBeTruthy();
+    // Another failing source does not bring it back (ADR 0051).
+    expect(screen.queryByText(/job source needs attention/)).toBeNull();
     window.localStorage.clear();
   });
 
@@ -483,7 +484,7 @@ describe("JobSearchHomeScreen", () => {
     const pipeline = screen.getByTestId("home-pipeline");
     const tiles = within(pipeline).getAllByRole("button");
     expect(tiles.map((tile) => tile.textContent)).toEqual([
-      "Find jobs1",
+      "Find jobs0",
       "Shortlisted11 ready to apply",
       "Applications0",
     ]);
@@ -532,7 +533,7 @@ describe("JobSearchHomeScreen", () => {
       reason: "Paused by you.",
     };
     render(<JobSearchHomeScreen {...props} workspace={ws} />);
-    const resumeButtons = screen.getAllByRole("button", { name: "Resume" });
+    const resumeButtons = screen.getAllByRole("button", { name: "Continue" });
     expect(resumeButtons).toHaveLength(1);
     expect(resumeButtons[0]!.closest("[data-page-header-actions]")).toBeNull();
     fireEvent.click(resumeButtons[0]!);

@@ -8,6 +8,7 @@ import {
   collectInProgressApplicationJobIds,
   collectPreparedApplicationJobIds,
   getReviewQueueWorkflowStatus,
+  TO_REVIEW_LABEL,
 } from "./review-queue-status";
 
 /**
@@ -83,6 +84,17 @@ export function markResumeReviewFailed(jobId: string, reason: string): void {
   });
 }
 
+/** An undone approval: the resume counts as not reviewed again. */
+export function forgetResumeReview(jobId: string): void {
+  const approving = new Set(state.approving);
+  approving.delete(jobId);
+  const approved = new Set(state.approved);
+  approved.delete(jobId);
+  const failed = new Map(state.failed);
+  failed.delete(jobId);
+  update({ approving, approved, failed });
+}
+
 /** For tests: forget the session. */
 export function resetResumeReviewSession(): void {
   update({ approving: new Set(), approved: new Set(), failed: new Map() });
@@ -100,7 +112,7 @@ export function enqueueResumeApproval(run: () => Promise<void>): void {
 
 /**
  * The shortlisted jobs whose resume waits for the person's read, in the
- * Shortlisted list's order: the same "Review resume" status the rows and the
+ * Shortlisted list's order: the same "To review" status the rows and the
  * "To review" tab show. Approvals still being built are left out.
  */
 export function listResumesToReview(input: {
@@ -125,7 +137,7 @@ export function listResumesToReview(input: {
         false,
         prepared,
         preparing,
-      ).label === "Review resume",
+      ).label === TO_REVIEW_LABEL,
   );
 }
 

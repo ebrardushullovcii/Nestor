@@ -1298,7 +1298,7 @@ describe("DiscoveryFiltersPanel", () => {
       </MemoryRouter>,
     );
 
-    expect(getByText(/last completed search/i)).toBeTruthy();
+    expect(getByText(/sign in before the next search/i)).toBeTruthy();
     fireEvent.click(
       within(container).getAllByRole("button", {
         name: "Sign in to LinkedIn",

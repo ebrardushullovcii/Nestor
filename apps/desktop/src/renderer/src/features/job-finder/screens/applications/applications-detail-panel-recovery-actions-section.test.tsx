@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetApplicationFormOpenStates } from "./application-form-open";
 import {
   UserActionRequestSchema,
   PREPARED_PAGE_CLOSED_SUMMARY,
@@ -14,7 +15,10 @@ import {
   type FinishInBrowserHandler,
 } from "./applications-detail-panel-recovery-actions-section";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  resetApplicationFormOpenStates();
+});
 
 it.each([false, true])(
   "answer progress distinguishes waiting from insertion with elapsed time (%s)",

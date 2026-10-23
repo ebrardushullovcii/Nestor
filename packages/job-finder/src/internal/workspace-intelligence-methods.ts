@@ -45,7 +45,7 @@ import {
 import {
   applyCompanyIntelligenceMutation,
   nextCompanyIntelligenceUpdatedAt,
-  reconcileCompanies,
+  reconcileCompaniesInTurns,
   reviewCompanyMerge,
   setCompanyPreference,
 } from "./company-intelligence-operations";
@@ -120,7 +120,7 @@ export function createWorkspaceIntelligenceMethods(input: {
         input.ctx.repository.listApplicationRecords(),
       ]);
       const now = new Date().toISOString();
-      const reconciled = reconcileCompanies({
+      const reconciled = await reconcileCompaniesInTurns({
         companies: state.companies,
         jobs: savedJobs,
         applicationRecords,

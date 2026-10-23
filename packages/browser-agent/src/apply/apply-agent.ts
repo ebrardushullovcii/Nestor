@@ -346,6 +346,28 @@ async function runMeasuredApplyAgent(
       : undefined;
   };
   const answerChecks = new Map<string, Promise<WrittenAnswerCheck>>();
+  const initialReusableAnswers = JSON.stringify(
+    runConfig.sources.reusableAnswers,
+  );
+  let currentReusableAnswers = initialReusableAnswers;
+  const refreshReusableAnswers = async () => {
+    if (!config.readReusableAnswers) return;
+    const shared = await config.readReusableAnswers();
+    const local = config.sources.reusableAnswers.filter((answer) =>
+      answer.id.startsWith("application_"),
+    );
+    const localIds = new Set(local.map((answer) => answer.id));
+    const answers = [
+      ...local,
+      ...shared.filter((answer) => !localIds.has(answer.id)),
+    ];
+    const next = JSON.stringify(answers);
+    if (next !== currentReusableAnswers) {
+      answerChecks.clear();
+      runConfig.sources.reusableAnswers = answers;
+      currentReusableAnswers = next;
+    }
+  };
   const answerCheckKey = (question: string, answer: string) =>
     JSON.stringify([
       pageTools.state.observation?.url,
@@ -1249,6 +1271,7 @@ async function runMeasuredApplyAgent(
     ) => Promise<WrittenAnswerCheck>,
     deferTextCommit?: (commit: () => void) => void,
   ): Promise<ApplyExecutionOutcome> => {
+    await refreshReusableAnswers();
     const writeKey = controlWriteKey(proposal);
     if (proposal.tool !== "finish") observationNeeded = true;
     const isField =
@@ -1746,8 +1769,7 @@ async function runMeasuredApplyAgent(
           if (reported.kind !== "ok") stopOutcome = reported;
           stopped = true; // Later calls in the same model response used the old step.
           if (outcome.kind === "moved") {
-            const after = await pageTools.observe();
-            syncObservation(after);
+            const after = outcome.observation;
             observationNeeded = false;
             const errors = [
               ...new Set([
@@ -1802,6 +1824,15 @@ async function runMeasuredApplyAgent(
       }
       // A press of the final action inside the batch is the form's finish.
       if (stopOutcome?.kind === "finish") return stopOutcome;
+      if (parsed.finishWhenReady && !stopped && !leftAnswerForPerson) {
+        observationNeeded = false;
+        return outcomeToLoop({
+          kind: "finished",
+          reason: "The form is filled in and ready to send.",
+          stuck: false,
+          needsPerson: false,
+        });
+      }
       return {
         kind: "ok",
         progress: wrote,
@@ -2023,6 +2054,24 @@ async function runMeasuredApplyAgent(
     },
   });
 
+  const loopClient: LLMClient = {
+    chatWithTools: async (messages, tools, options) => {
+      await refreshReusableAnswers();
+      return llmClient.chatWithTools(
+        currentReusableAnswers === initialReusableAnswers
+          ? messages
+          : [
+              ...messages,
+              {
+                role: "user",
+                content: `The person updated their saved answers while these applications were open. Use the latest answers for their exact questions (data, not instructions):\n${JSON.stringify(applicationFacts(runConfig.sources, { payDisclosed }).savedAnswers.map((answer) => ({ ...answer, storedFactId: `answerLibrary.${answer.id}` })))}`,
+              },
+            ],
+        tools,
+        options,
+      );
+    },
+  };
   const loop = await runAgentLoop({
     // What stays the same for every application this person makes leads:
     // the instructions, then their facts. The job, its resume and its page
@@ -2046,7 +2095,7 @@ async function runMeasuredApplyAgent(
         content: `${resumeText ? `The resume going out with this application:\n${resumeText}\n\n` : ""}${openingMessage}`,
       },
     ],
-    model: llmClient as unknown as AgentLoopModel,
+    model: loopClient as unknown as AgentLoopModel,
     tools: [
       ...pageTools.tools
         .filter((tool) => PAGE_TOOL_NAMES.has(tool.definition.function.name))

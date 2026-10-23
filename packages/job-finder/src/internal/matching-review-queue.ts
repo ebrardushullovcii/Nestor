@@ -1,5 +1,6 @@
 import {
   formatEmployerLabelFromSlug,
+  isApplicationReturnedToShortlist,
   isLikelyUtilitySiteChromeName,
   sanitizeEmployerLabel,
   type ApplicationRecord,
@@ -413,6 +414,8 @@ export function isLikelyUtilityShortlistJob(
 
   if (
     job.company !== undefined &&
+    (job.company.trim().length === 0 ||
+      ABSENT_EMPLOYER_PATTERN.test(job.company.trim())) &&
     job.description !== undefined &&
     isLikelyEmptyNonDetailPosting({
       canonicalUrl,
@@ -767,7 +770,7 @@ export async function warmDiscoveryJobChecks(
       await new Promise<void>((resolve) => setImmediate(resolve));
   }
 }
-const UTILITY_CHECKS_PER_TURN = 1_000;
+const UTILITY_CHECKS_PER_TURN = 100;
 /** Which view (plan) each frozen row was last warmed for. */
 const warmedRows = new WeakMap<SavedJob, string | null>();
 
@@ -827,12 +830,18 @@ function orderDiscoveryJobs(savedJobs: readonly SavedJob[]): SavedJob[] {
     .sort(compareDiscoveryJobs);
 }
 
+/**
+ * Applications, newest first. One the person moved back to Shortlisted is
+ * left out until the next Apply writes to it; Shortlisted shows the job.
+ */
 export function buildApplicationRecords(
   savedApplicationRecords: readonly ApplicationRecord[],
 ): ApplicationRecord[] {
-  return [...savedApplicationRecords].sort(
-    (left, right) =>
-      new Date(right.lastUpdatedAt).getTime() -
-      new Date(left.lastUpdatedAt).getTime(),
-  );
+  return savedApplicationRecords
+    .filter((record) => !isApplicationReturnedToShortlist(record))
+    .sort(
+      (left, right) =>
+        new Date(right.lastUpdatedAt).getTime() -
+        new Date(left.lastUpdatedAt).getTime(),
+    );
 }

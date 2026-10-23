@@ -1,4 +1,5 @@
 import {
+  PreparedApplicationFormSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
   ApplySubmitApprovalSchema,
@@ -11,6 +12,8 @@ import {
   ApplicationReplayCheckpointSchema,
   CandidateProfileSchema,
   JobFinderActivityControlSchema,
+  ApplyQueueSchema,
+  type ApplyQueue,
   JobFinderDiscoveryStateSchema,
   JobFinderIntelligenceStateSchema,
   JobFinderRepositoryStateSchema,
@@ -98,7 +101,10 @@ import {
   sortValidationResults,
   upsertById,
 } from "./in-memory-repository-utils";
-import { retainResumeDraftRevisions } from "./resume-draft-revision-retention";
+import {
+  assertResumeRevisionCoalescing,
+  retainResumeDraftRevisions,
+} from "./resume-draft-revision-retention";
 import {
   applyProfileCopilotMessagePatchFlags,
   findProfileCopilotMessageByPatchGroup,
@@ -126,6 +132,7 @@ export function createInMemoryJobFinderRepository(
 ): JobFinderRepository {
   const state = JobFinderRepositoryStateSchema.parse(cloneValue(seed));
   assertAtMostOneActiveApplicationAuthority(state);
+  let applyQueue: ApplyQueue | null = null;
   let profileRevision = 1;
   let discoveryProjectionSource: typeof state.discovery | null = null;
   let discoveryProjection: DiscoveryDisplayProjection | null = null;
@@ -136,6 +143,12 @@ export function createInMemoryJobFinderRepository(
   const savedProjectionRows = new WeakMap<SavedJob, SavedJob>();
   const displayCollections = new WeakMap<object, readonly object[]>();
   const displayRows = new WeakMap<object, object>();
+  let campaignProjection: {
+    campaigns: typeof state.campaigns;
+    active: typeof state.activeCampaignId;
+    notifications: typeof state.campaignNotifications;
+    value: ReturnType<typeof JobSearchCampaignCollectionSchema.parse>;
+  } | null = null;
   function borrowDisplayRows<T extends object>(
     source: readonly T[],
     order: (rows: readonly T[]) => readonly T[] = (rows) => rows,
@@ -282,6 +295,7 @@ export function createInMemoryJobFinderRepository(
         cloneValue(nextSeed),
       );
       assertAtMostOneActiveApplicationAuthority(normalizedSeed);
+      applyQueue = null;
 
       // The reset replaces the whole workspace, but the compare-and-swap epoch
       // only ever moves forward — mirroring `initSingletonValue` in the SQLite
@@ -323,6 +337,7 @@ export function createInMemoryJobFinderRepository(
         normalizedSeed.applicationQuestionRecords;
       state.applicationAnswerRecords = normalizedSeed.applicationAnswerRecords;
       state.applicationArtifactRefs = normalizedSeed.applicationArtifactRefs;
+      state.preparedApplicationForms = normalizedSeed.preparedApplicationForms;
       state.applicationReplayCheckpoints =
         normalizedSeed.applicationReplayCheckpoints;
       state.applicationConsentRequests =
@@ -351,6 +366,9 @@ export function createInMemoryJobFinderRepository(
     getProfile() {
       return Promise.resolve(cloneValue(state.profile));
     },
+    readProfileProjection() {
+      return Promise.resolve(borrowDisplayRows([state.profile])[0]!);
+    },
     getProfileWithRevision() {
       return Promise.resolve(readProfileWithRevision());
     },
@@ -372,6 +390,9 @@ export function createInMemoryJobFinderRepository(
     },
     getSearchPreferences() {
       return Promise.resolve(cloneValue(state.searchPreferences));
+    },
+    readSearchPreferencesProjection() {
+      return Promise.resolve(borrowDisplayRows([state.searchPreferences])[0]!);
     },
     getProfileSetupState() {
       return Promise.resolve(cloneValue(state.profileSetupState));
@@ -577,6 +598,7 @@ export function createInMemoryJobFinderRepository(
       upsertsFromDiscovery,
       upsertsFromBorrowedDiscovery,
       update,
+      borrowCurrentJobs,
       updateJobIds,
       updateSettings,
       clearResumeApproval,
@@ -628,7 +650,11 @@ export function createInMemoryJobFinderRepository(
               return currentJob;
             }
             const nextJob = SavedJobSchema.parse(
-              cloneValue(update(cloneValue(currentJob))),
+              update(
+                borrowCurrentJobs
+                  ? freezeProjection(currentJob)
+                  : cloneValue(currentJob),
+              ),
             );
             if (nextJob.id !== currentJob.id) {
               throw new Error(
@@ -739,8 +765,12 @@ export function createInMemoryJobFinderRepository(
         );
       }
     },
-    commitDiscoveryFeedbackUpdate(jobId, update) {
+    commitDiscoveryFeedbackUpdate(jobId, update, feedbackOptions) {
       try {
+        const singleton = <T>(value: T): T =>
+          feedbackOptions?.borrowUnchangedState
+            ? freezeProjection(cloneValue(value))
+            : cloneValue(value);
         const pendingJob =
           state.discovery.pendingDiscoveryJobs.find(
             (job) => job.id === jobId,
@@ -750,18 +780,18 @@ export function createInMemoryJobFinderRepository(
         const next = update({
           job: cloneValue(pendingJob ?? savedJob),
           jobIsPending: pendingJob !== null,
-          searchPreferences: cloneValue(state.searchPreferences),
+          searchPreferences: singleton(state.searchPreferences),
           campaignState:
             state.campaigns.length === 0 || !state.activeCampaignId
               ? null
-              : cloneValue(
+              : singleton(
                   JobSearchCampaignCollectionSchema.parse({
                     campaigns: state.campaigns,
                     activeCampaignId: state.activeCampaignId,
                     notifications: state.campaignNotifications,
                   }),
                 ),
-          intelligenceState: cloneValue(state.intelligence),
+          intelligenceState: singleton(state.intelligence),
           discoveryState: freezeProjection(cloneValue(state.discovery)),
         });
         const nextSearchPreferences = JobSearchPreferencesSchema.parse(
@@ -895,6 +925,15 @@ export function createInMemoryJobFinderRepository(
           )
         : state.resumeDraftRevisions;
       return Promise.resolve(sortNewestFirst(cloneValue(values)));
+    },
+    getLatestResumeDraftRevisionId(draftId) {
+      return Promise.resolve(
+        sortNewestFirst(
+          state.resumeDraftRevisions.filter(
+            (entry) => entry.draftId === draftId,
+          ),
+        )[0]?.id ?? null,
+      );
     },
     upsertResumeDraftRevision(revision) {
       const normalizedRevision = ResumeDraftRevisionSchema.parse(
@@ -1249,6 +1288,7 @@ export function createInMemoryJobFinderRepository(
     listApplyJobResults(options) {
       const values = state.applyJobResults.filter((result) =>
         matchesOptionalStringFilters(result, [
+          ["id", options?.id],
           ["runId", options?.runId],
           ["jobId", options?.jobId],
           ["applicationRecordId", options?.applicationRecordId],
@@ -1256,6 +1296,17 @@ export function createInMemoryJobFinderRepository(
       );
 
       return Promise.resolve(sortApplyJobResults(cloneValue(values)));
+    },
+    getPreparedApplicationForm(resultId) {
+      return Promise.resolve(cloneValue(state.preparedApplicationForms?.find(form => form.id === resultId) ?? null));
+    },
+    upsertPreparedApplicationForm(form) {
+      state.preparedApplicationForms = upsertById(state.preparedApplicationForms ?? [], PreparedApplicationFormSchema.parse(cloneValue(form)));
+      return Promise.resolve();
+    },
+    deletePreparedApplicationForm(resultId) {
+      state.preparedApplicationForms = (state.preparedApplicationForms ?? []).filter(form => form.id !== resultId);
+      return Promise.resolve();
     },
     upsertApplyJobResult(result) {
       const normalizedResult = ApplyJobResultSchema.parse(cloneValue(result));
@@ -1911,6 +1962,7 @@ export function createInMemoryJobFinderRepository(
       return Promise.resolve();
     },
     applyResumePatchWithRevision({
+      coalesceRevision,
       expectedDraftUpdatedAt,
       draft,
       revision,
@@ -1966,6 +2018,20 @@ export function createInMemoryJobFinderRepository(
       }
 
       const nextResumeDrafts = upsertById(state.resumeDrafts, normalizedDraft);
+      if (coalesceRevision) {
+        const previous = [...state.resumeDraftRevisions]
+          .filter((entry) => entry.draftId === normalizedDraft.id)
+          .sort(
+            (a, b) =>
+              b.createdAt.localeCompare(a.createdAt) ||
+              a.id.localeCompare(b.id),
+          )[0];
+        assertResumeRevisionCoalescing(
+          previous,
+          normalizedRevision,
+          coalesceRevision,
+        );
+      }
       const nextResumeExportArtifacts = clearApprovedResumeExportsForJob(
         state.resumeExportArtifacts,
         normalizedDraft.jobId,
@@ -2104,7 +2170,15 @@ export function createInMemoryJobFinderRepository(
       state.tailoredAssets = nextTailoredAssets;
       return Promise.resolve();
     },
-    staleResumeDrafts({ draftIds, staleReason, updatedAt }) {
+    staleResumeDrafts({ draftIds, staleReason, updatedAt, profileInputs }) {
+      const profile = profileInputs
+        ? CandidateProfileSchema.parse(cloneValue(profileInputs.profile))
+        : null;
+      const preferences = profileInputs?.searchPreferences
+        ? JobSearchPreferencesSchema.parse(
+            cloneValue(profileInputs.searchPreferences),
+          )
+        : null;
       for (const draftId of new Set(draftIds)) {
         const draft = state.resumeDrafts.find((entry) => entry.id === draftId);
         if (!draft) continue;
@@ -2131,6 +2205,11 @@ export function createInMemoryJobFinderRepository(
           });
         }
       }
+      if (profile) {
+        state.profile = profile;
+        profileRevision += 1;
+      }
+      if (preferences) state.searchPreferences = preferences;
       return Promise.resolve();
     },
     listApplicationRecords() {
@@ -2384,6 +2463,30 @@ export function createInMemoryJobFinderRepository(
         ),
       );
     },
+    readCampaignProjection() {
+      if (state.campaigns.length === 0 || !state.activeCampaignId)
+        return Promise.resolve(null);
+      if (
+        campaignProjection?.campaigns === state.campaigns &&
+        campaignProjection.active === state.activeCampaignId &&
+        campaignProjection.notifications === state.campaignNotifications
+      )
+        return Promise.resolve(campaignProjection.value);
+      const value = freezeProjection(
+        JobSearchCampaignCollectionSchema.parse({
+          campaigns: state.campaigns,
+          activeCampaignId: state.activeCampaignId,
+          notifications: state.campaignNotifications,
+        }),
+      );
+      campaignProjection = {
+        campaigns: state.campaigns,
+        active: state.activeCampaignId,
+        notifications: state.campaignNotifications,
+        value,
+      };
+      return Promise.resolve(value);
+    },
     saveCampaignState(campaignState) {
       const normalized = JobSearchCampaignCollectionSchema.parse(
         cloneValue(campaignState),
@@ -2501,6 +2604,13 @@ export function createInMemoryJobFinderRepository(
       state.activityControl = JobFinderActivityControlSchema.parse(
         cloneValue(activityControl),
       );
+      return Promise.resolve();
+    },
+    getApplyQueue() {
+      return Promise.resolve(applyQueue ? cloneValue(applyQueue) : null);
+    },
+    saveApplyQueue(queue) {
+      applyQueue = queue ? ApplyQueueSchema.parse(cloneValue(queue)) : null;
       return Promise.resolve();
     },
   };

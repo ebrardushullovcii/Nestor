@@ -34,7 +34,7 @@ export function AssistantToggle(props: { platform: JobFinderPlatform }) {
       type="button"
     >
       <Sparkles aria-hidden="true" className="size-4 shrink-0" />
-      <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden xl:max-[1439px]:!hidden">
+      <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden xl:max-[1440px]:!hidden">
         Assistant
       </span>
       {assistant.working && !assistant.open ? (

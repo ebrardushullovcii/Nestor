@@ -7,11 +7,13 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   createTokenCalibrator,
   estimateJsonTokens,
+  estimateTokens,
   runConversationTurn,
   type AgentLoopMessage,
   type ConversationModel,
   type ConversationTurnEvent,
   type TokenCalibrator,
+  withStatusArgument,
 } from "@nestor/agent-runtime";
 import {
   AssistantNavigationAcknowledgmentSchema,
@@ -59,11 +61,7 @@ import {
   migrateLegacyChats,
 } from "./legacy-migration";
 import type { AssistantBrowserLease, AssistantHostPorts } from "./ports";
-import {
-  ASSISTANT_SYSTEM_PROMPT,
-  buildContextBlock,
-  buildProfileDigest,
-} from "./prompt";
+import { ASSISTANT_SYSTEM_PROMPT, buildContextBlock } from "./prompt";
 import { readRunStatus } from "./run-watch";
 import { closeStoppedTurn } from "./turn-closure";
 import { allJobs, createJobCaveats } from "./tools/format";
@@ -73,6 +71,8 @@ import {
   type AssistantHandleStore,
   type AssistantToolOutputs,
   type AssistantTurnSession,
+  assistantToolGroupValues,
+  type AssistantToolGroup,
 } from "./tool-kit";
 import {
   buildAssistantToolCatalog,
@@ -732,12 +732,21 @@ export class AssistantSessionHost {
     ]);
 
     const session = this.createTurnSession(live, handle);
-    const catalog = buildAssistantToolCatalog({
-      mode: this.options.catalogMode ?? "flat",
+    const catalogMode = this.options.catalogMode ?? "grouped";
+    const loadedGroups = new Set<AssistantToolGroup>();
+    const catalogOptions = {
+      mode: catalogMode,
       browserAvailable: Boolean(this.ports.browser),
       screen: live.sourceMessage?.context?.screen ?? null,
+      onLoadGroups: (groups: readonly AssistantToolGroup[]) => {
+        for (const group of groups) loadedGroups.add(group);
+      },
+    };
+    const allTools = buildAssistantToolCatalog({
+      ...catalogOptions,
+      loadedGroups: assistantToolGroupValues,
     });
-    const tools = catalog.map((definition) =>
+    const tools = allTools.map((definition) =>
       this.withOperationRecord(
         toConversationTool(
           definition,
@@ -748,16 +757,21 @@ export class AssistantSessionHost {
         definition.effect,
       ),
     );
-    const toolSchemaTokens = estimateJsonTokens(
-      catalog.map((definition) => ({
-        name: definition.name,
-        description: definition.description,
-        parameters: definition.parameters,
-      })),
-    );
     const calibrator = this.calibratorFor(conversationId);
-    const snapshot = await this.readWorkspaceSnapshot();
-    const systemPrompt = `${ASSISTANT_SYSTEM_PROMPT}\n\n${buildProfileDigest(snapshot)}`;
+    const systemPrompt = ASSISTANT_SYSTEM_PROMPT;
+    const contextTime = this.now();
+    const definitions = () =>
+      buildAssistantToolCatalog({
+        ...catalogOptions,
+        loadedGroups: [...loadedGroups],
+      }).map((definition) => ({
+        type: "function" as const,
+        function: {
+          name: definition.name,
+          description: definition.description,
+          parameters: definition.parameters,
+        },
+      }));
     let lastEstimate = 0;
 
     this.startStallWatch(live);
@@ -766,6 +780,7 @@ export class AssistantSessionHost {
       result = await runConversationTurn({
         model: handle.createModel(conversationId),
         tools,
+        getToolDefinitions: definitions,
         signal: live.controller.signal,
         isCurrent: () => live.generation === live.turn.generation,
         ceilings: {
@@ -792,7 +807,7 @@ export class AssistantSessionHost {
             plan: await session.plans.active(),
             grants: await session.grants.list(),
             pendingQuestions: [],
-            now: this.now(),
+            now: contextTime,
           });
           const messages = await assembleModelInput({
             repository: this.repository,
@@ -802,7 +817,9 @@ export class AssistantSessionHost {
             turnMessages,
             contextWindowTokens: handle.capabilities.contextWindowTokens,
             maxOutputTokens: handle.capabilities.maxOutputTokens,
-            toolSchemaTokens,
+            toolSchemaTokens: estimateJsonTokens(
+              definitions().map(withStatusArgument),
+            ),
             calibrator,
             summarize: handle.summarize
               ? (prompt) => handle.summarize!(conversationId, prompt)
@@ -820,10 +837,11 @@ export class AssistantSessionHost {
             budgetOverrideTokens: this.options.budgetOverrideTokens ?? null,
             pinnedAfterSummary: () => this.describeOrderedLists(conversationId),
           });
-          lastEstimate = messages.reduce(
-            (sum, message) => sum + Math.ceil(message.content.length / 3.6) + 6,
-            0,
-          );
+          // Provider usage includes tools too; treating that as message-only
+          // usage inflated the learned ratio and compacted history too early.
+          lastEstimate =
+            estimateTokens(messages) +
+            estimateJsonTokens(definitions().map(withStatusArgument));
           return messages;
         },
         onEvent: (event) =>

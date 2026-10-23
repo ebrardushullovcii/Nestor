@@ -55,7 +55,11 @@ import type {
 import {
   AiBehaviorPreferenceSchema,
   ApplicationCrmSettingsSchema,
+  type ApplicationPageReopenProgress,
+  type ApplicationPageState,
 } from "@nestor/contracts";
+import { REOPEN_FAILED_REASON } from "@renderer/features/job-finder/lib/job-finder-browser-handoff-copy";
+import { notifyApplicationPageStatesChanged } from "@renderer/features/job-finder/hooks/use-application-page-states";
 import { isListableCompanyName } from "@nestor/contracts";
 import { countActiveSafeguardBlockers } from "@renderer/features/job-finder/lib/safeguards-blocker-count";
 import { ApplicationsScreen } from "@renderer/features/job-finder/screens/applications/applications-screen";
@@ -525,6 +529,10 @@ export function JobFinderCompaniesRoute() {
         actionMessage={context.actionState.message}
         companies={context.workspace.intelligence.companies}
         discoveryJobs={context.workspace.companyJobs}
+        hasSavedJobs={
+          context.workspace.discoveryJobs.length > 0 ||
+          context.workspace.applicationRecords.length > 0
+        }
         isMergePending={(companyId) =>
           context.isPending(
             jobFinderPendingActions.companyMergeReview(companyId),
@@ -676,84 +684,100 @@ export function JobFinderHomeRoute() {
     });
   };
 
+  // Home reads every collection: on the bootstrap snapshot (no saved search
+  // runs or jobs yet) it told a person with thousands of jobs to "Run your
+  // first search" for several seconds after launch.
   return (
-    <JobSearchHomeScreen
-      actionState={context.actionState}
-      activityPending={activityPending}
-      applicationAutomationMode={
-        context.workspace.settings.applicationAutomationMode ?? "prepare_only"
-      }
-      browserSessionPending={context.isPending(
-        jobFinderPendingActions.browserSession(),
-      )}
-      campaignNotificationAllPending={context.isPending(
-        jobFinderPendingActions.campaignNotificationAll(),
-      )}
-      campaignNotificationPending={(notificationId) =>
-        context.isPending(
-          jobFinderPendingActions.campaignNotification(notificationId),
-        )
-      }
-      campaignNotifications={context.workspace.campaignNotifications}
-      discoveryRunFeedback={context.discoveryRunFeedback}
-      discoveryRunPending={context.isPending(
-        jobFinderPendingActions.discoveryAll(),
-      )}
-      isDiscoveryPending={context.isPending(
-        jobFinderPendingActions.discoveryAll(),
-      )}
-      isResumeImportPending={context.isPending(
-        jobFinderPendingActions.profileImport(),
-      )}
-      liveDiscoveryEvents={context.liveDiscoveryEvents}
-      onApplyToJobs={(jobIds) =>
-        context.onStartAutoApplyQueue(
-          [...jobIds],
-          context.workspace.settings.applicationAutomationMode ??
-            "prepare_only",
-          { stayOnCurrentPage: true },
-        )
-      }
-      onCreateResumes={context.onPrepareTailoredDrafts}
-      onSendPreparedApplications={context.onSendPreparedApplications}
-      onResumeSetup={context.onResumeProfileSetup}
-      onMarkAllCampaignNotificationsRead={
-        context.onMarkAllCampaignNotificationsRead
-      }
-      onMarkCampaignNotificationRead={context.onMarkCampaignNotificationRead}
-      onNavigate={context.onNavigateSafely}
-      onOpenBrowserSession={() => {
-        void context.onOpenBrowserSession();
-      }}
-      onPauseActivity={() =>
-        handleActivityControl({
-          paused: true,
-          reason: "Paused by you.",
-          pauseBehavior: "finish_current",
-        })
-      }
-      onResumeActivity={() => handleActivityControl({ paused: false })}
-      {...(context.onRunAgentDiscovery
-        ? { onRunDiscovery: context.onRunAgentDiscovery }
-        : {})}
-      onSelectCampaign={(campaignId) => {
-        void context.onSelectCampaign(campaignId);
-      }}
-      onStopApply={stopApplyRun}
-      onStopResumes={context.onStopTailoredDraftPreparation}
-      {...(context.onCancelDiscovery
-        ? {
-            onStopSearch: (runId: string) => {
-              void context.onCancelDiscovery?.(runId);
-            },
-          }
-        : {})}
-      resumeImportProgress={context.resumeImportProgress}
-      tailoredDraftPreparation={context.tailoredDraftPreparation}
+    <JobFinderHydrationGate
+      collections={HOME_REQUIRED_COLLECTIONS}
       workspace={context.workspace}
-    />
+    >
+      <JobSearchHomeScreen
+        actionState={context.actionState}
+        activityPending={activityPending}
+        applicationAutomationMode={
+          context.workspace.settings.applicationAutomationMode ?? "prepare_only"
+        }
+        browserSessionPending={context.isPending(
+          jobFinderPendingActions.browserSession(),
+        )}
+        campaignNotificationAllPending={context.isPending(
+          jobFinderPendingActions.campaignNotificationAll(),
+        )}
+        campaignNotificationPending={(notificationId) =>
+          context.isPending(
+            jobFinderPendingActions.campaignNotification(notificationId),
+          )
+        }
+        campaignNotifications={context.workspace.campaignNotifications}
+        discoveryRunFeedback={context.discoveryRunFeedback}
+        discoveryRunPending={context.isPending(
+          jobFinderPendingActions.discoveryAll(),
+        )}
+        isDiscoveryPending={context.isPending(
+          jobFinderPendingActions.discoveryAll(),
+        )}
+        isResumeImportPending={context.isPending(
+          jobFinderPendingActions.profileImport(),
+        )}
+        liveDiscoveryEvents={context.liveDiscoveryEvents}
+        onApplyToJobs={(jobIds) =>
+          context.onStartAutoApplyQueue(
+            [...jobIds],
+            context.workspace.settings.applicationAutomationMode ??
+              "prepare_only",
+            { stayOnCurrentPage: true },
+          )
+        }
+        onCreateResumes={context.onPrepareTailoredDrafts}
+        onSendPreparedApplications={context.onSendPreparedApplications}
+        onResumeSetup={context.onResumeProfileSetup}
+        onMarkAllCampaignNotificationsRead={
+          context.onMarkAllCampaignNotificationsRead
+        }
+        onMarkCampaignNotificationRead={context.onMarkCampaignNotificationRead}
+        onNavigate={context.onNavigateSafely}
+        onOpenBrowserSession={() => {
+          void context.onOpenBrowserSession();
+        }}
+        onPauseActivity={() =>
+          handleActivityControl({
+            paused: true,
+            reason: "Paused by you.",
+            pauseBehavior: "finish_current",
+          })
+        }
+        onResumeActivity={() => handleActivityControl({ paused: false })}
+        {...(context.onRunAgentDiscovery
+          ? { onRunDiscovery: context.onRunAgentDiscovery }
+          : {})}
+        onSelectCampaign={(campaignId) => {
+          void context.onSelectCampaign(campaignId);
+        }}
+        onStopApply={stopApplyRun}
+        onControlApplyQueue={context.onControlApplyQueue}
+        onStopResumes={context.onStopTailoredDraftPreparation}
+        {...(context.onCancelDiscovery
+          ? {
+              onStopSearch: (runId: string) => {
+                void context.onCancelDiscovery?.(runId);
+              },
+            }
+          : {})}
+        resumeImportProgress={context.resumeImportProgress}
+        tailoredDraftPreparation={context.tailoredDraftPreparation}
+        workspace={context.workspace}
+      />
+    </JobFinderHydrationGate>
   );
 }
+
+const HOME_REQUIRED_COLLECTIONS = [
+  "discovery_jobs",
+  "review_queue",
+  "applications",
+  "source_history",
+] as const;
 
 export function JobFinderCampaignsRoute() {
   const context = useJobFinderPageContext();
@@ -1638,6 +1662,9 @@ function JobFinderReviewQueueRouteContent() {
       workspace={context.workspace}
     >
       <ReviewQueueScreen
+        applicationWorkPaused={
+          context.workspace.activityControl?.paused ?? false
+        }
         // One plan has nothing to choose between; a picker with one entry
         // was just another row above the list.
         scopeControl={
@@ -1673,6 +1700,11 @@ function JobFinderReviewQueueRouteContent() {
         resumeBatchCheckpoint={
           context.workspace.intelligence.resumeBatchCheckpoint
         }
+        applyQueue={context.workspace.applyQueue}
+        listingUrlForJob={(jobId) =>
+          context.workspace.discoveryJobs.find((job) => job.id === jobId)
+            ?.canonicalUrl ?? null
+        }
         globalDailyApplicationPreparationCapacity={
           context.workspace.dashboard
             ?.globalDailyApplicationPreparationCapacity ?? null
@@ -1698,6 +1730,10 @@ function JobFinderReviewQueueRouteContent() {
           context.onSelectApplicationRecord(recordId);
           context.onNavigateSafely("/job-finder/applications");
         }}
+        onOpenApplications={() =>
+          context.onNavigateSafely("/job-finder/applications")
+        }
+        onApproveResumes={context.onApproveResumes}
         onOpenProfile={context.onOpenProfile}
         {...(() => {
           // A safeguard that has paused the plan refuses every preparation
@@ -1719,6 +1755,8 @@ function JobFinderReviewQueueRouteContent() {
         onClaimResumeIdentity={context.onClaimResumeIdentity}
         onKeepResumeIdentity={context.onKeepResumeIdentity}
         onRemoveReviewJob={context.onRemoveReviewJob}
+        onMoveResumesBackToReview={context.onMoveResumesBackToReview}
+        onTakeOutOfApplyQueue={context.onTakeOutOfApplyQueue}
         onReadJobListing={context.onAssessJobListing}
         {...(context.onRemoveReviewJobs
           ? { onRemoveReviewJobs: context.onRemoveReviewJobs }
@@ -1783,7 +1821,10 @@ function useResumeReviewFlow(
   const nextJobId = next?.jobId ?? null;
   // Read the next resume while this one is being read.
   useEffect(() => {
-    if (!nextJobId || typeof window.nestor?.jobFinder?.getResumeWorkspace !== "function")
+    if (
+      !nextJobId ||
+      typeof window.nestor?.jobFinder?.getResumeWorkspace !== "function"
+    )
       return;
     const timer = window.setTimeout(
       () =>
@@ -1908,6 +1949,7 @@ export function JobFinderResumeWorkspaceRoute() {
         }
         onSaveDraft={context.onSaveResumeDraft}
         onSaveDraftAndThen={context.onSaveResumeDraftAndThen}
+        onAutosaveDraft={context.onAutosaveResumeDraft}
         onSendAssistantMessage={context.onSendResumeAssistantMessage}
         onResolveAssistantProposal={context.onResolveResumeAssistantProposal}
         reviewFlow={reviewFlow}
@@ -1975,6 +2017,18 @@ export async function runJobFinderApplicationBrowserHandoff(input: {
   onPerformUserAction: (
     command: UserActionCommandInput,
   ) => void | Promise<boolean>;
+  /**
+   * Reads whether the form is open, can be brought back from what was saved,
+   * or is gone, and brings it back. Without them the page is focused as is.
+   */
+  readApplicationPageState?: (
+    resultId: string,
+  ) => Promise<ApplicationPageState | undefined>;
+  onReopenApplicationPage?: (
+    resultId: string,
+    onProgress: (progress: ApplicationPageReopenProgress) => void,
+  ) => Promise<ApplicationPageState>;
+  onReopenProgress?: (phase: ApplicationPageReopenProgress["phase"]) => void;
   requests: JobFinderRendererWorkspaceSnapshot["userActionRequests"];
   target: FinishInBrowserInput;
 }): Promise<FinishInBrowserOutcome> {
@@ -2012,6 +2066,27 @@ export async function runJobFinderApplicationBrowserHandoff(input: {
     }
 
     return { kind: "opened_application_page" };
+  }
+
+  // A filled-in form whose tab closed comes back from what was saved, filled
+  // in again and checked, before it is handed to the person. Reopening never
+  // sends; the focus below hands the page over as it always did.
+  if (input.readApplicationPageState && input.onReopenApplicationPage) {
+    const state = await input
+      .readApplicationPageState(input.target.resultId)
+      .catch(() => undefined);
+    if (state?.state === "reopenable") {
+      const reopened = await input
+        .onReopenApplicationPage(input.target.resultId, (progress) =>
+          input.onReopenProgress?.(progress.phase),
+        )
+        .catch(() => null);
+      notifyApplicationPageStatesChanged();
+      // A passing failure keeps the saved form for another try.
+      if (!reopened || reopened.state === "reopenable") {
+        return { kind: "failed", reason: REOPEN_FAILED_REASON };
+      }
+    }
   }
 
   try {
@@ -2339,6 +2414,16 @@ export function JobFinderApplicationsRoute() {
         const startingJob = discoveryJobs.find(
           (job) => job.id === navigationContext.jobId,
         );
+        // Prepare again starts a job that is already listed; saying it
+        // "will appear in this list" pointed at a row that was right there.
+        const alreadyListed = applicationRecords.some(
+          (record) => record.jobId === navigationContext.jobId,
+        );
+        if (alreadyListed) {
+          return startingJob
+            ? `Starting ${startingJob.title} at ${startingJob.company} again.`
+            : "Starting the application again.";
+        }
         return startingJob
           ? `Starting the application for ${startingJob.title} at ${startingJob.company}. It will appear in this list in a moment.`
           : "Starting the application. It will appear in this list in a moment.";
@@ -2526,6 +2611,9 @@ export function JobFinderApplicationsRoute() {
         onResolveSubmissionOutcome={context.onResolveSubmissionOutcome}
         onExportApplicationCrm={context.onExportApplicationCrm}
         onMutateApplicationCrm={context.onMutateApplicationCrm}
+        onReturnApplicationToShortlist={(record) =>
+          void context.onReturnApplicationToShortlist(record)
+        }
         onMutateApplicationCrmBulkStage={
           context.onMutateApplicationCrmBulkStage
         }
@@ -2568,6 +2656,13 @@ export function JobFinderApplicationsRoute() {
         onStartAutoApplyQueue={(jobIds, applicationAutomationMode) => {
           void context.onStartAutoApplyQueue(jobIds, applicationAutomationMode);
         }}
+        applyQueue={context.workspace.applyQueue}
+        onControlApplyQueue={context.onControlApplyQueue}
+        onRaiseDailyLimit={() =>
+          context.onNavigateSafely(
+            "/job-finder/settings#settings-application-authority",
+          )
+        }
         onStartApplyCopilot={context.onStartApplyCopilot}
         onReviewResumePdf={context.onReviewResumePdf}
         onSelectRecord={handleSelectRecord}
@@ -2605,7 +2700,7 @@ export function JobFinderApplicationsRoute() {
             },
           });
         }}
-        onFinishInBrowser={(input) =>
+        onFinishInBrowser={(input, onReopenProgress) =>
           runJobFinderApplicationBrowserHandoff({
             // `rethrowError` is passed HERE and nowhere else. Every other
             // caller of these two actions fires and forgets, and keeps the
@@ -2622,6 +2717,18 @@ export function JobFinderApplicationsRoute() {
               }),
             onPerformUserAction: (command) =>
               context.onPerformUserAction(command, { rethrowError: true }),
+            readApplicationPageState: async (resultId) =>
+              (
+                await window.nestor.jobFinder.getApplicationPageStates([
+                  resultId,
+                ])
+              )[0],
+            onReopenApplicationPage: (resultId, onProgress) =>
+              window.nestor.jobFinder.reopenApplicationPage(
+                { resultId },
+                onProgress,
+              ),
+            ...(onReopenProgress ? { onReopenProgress } : {}),
             requests: context.workspace.userActionRequests,
             target: input,
           })
@@ -2747,6 +2854,12 @@ export function JobFinderActionsRoute() {
       workspace={context.workspace}
     >
       <ActionsScreen
+        applyMode={
+          context.workspace.settings?.applicationAutomationMode ===
+          "autonomous_submit"
+            ? "apply_for_me"
+            : "fill_only"
+        }
         selectedApplicationRecordId={
           readJobFinderNavigationContext(searchParams).applicationRecordId
         }

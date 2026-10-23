@@ -5,6 +5,7 @@ import { prefetchJobDetail } from "../../hooks/use-job-detail";
 import { hasOpenJobFinderOverlays } from "../../lib/job-finder-overlay-ownership";
 import { isImeComposingEvent } from "../../lib/job-finder-shortcuts";
 import { isDiscoveryAlsoFoundResult } from "./discovery-result-groups";
+import { useEffectWhileKeptRouteShown } from "../../lib/kept-route-visibility";
 
 /**
  * A pass through Find jobs, one job at a time: Shortlist, Not interested, or
@@ -234,7 +235,8 @@ export function useDiscoveryTriage(input: {
   const handlersRef = useRef({ shortlist, notInterested, skip, back, undo });
   handlersRef.current = { shortlist, notInterested, skip, back, undo };
   const enabled = input.enabled;
-  useEffect(() => {
+  // Find jobs stays mounted behind other screens; its keys are off there.
+  useEffectWhileKeptRouteShown(() => {
     if (!enabled) return undefined;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (

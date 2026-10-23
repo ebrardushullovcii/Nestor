@@ -9,6 +9,9 @@ import {
   type SavedJobDiscoveryProvenance,
 } from "@nestor/contracts";
 import { createUniqueId } from "./shared";
+import { isDeepStrictEqual } from "node:util";
+import { fnv1a64, yieldToEventLoop } from "@nestor/core";
+import { patchDiscoveryLedger, readDiscoveryLedgerChanges } from "@nestor/db";
 import {
   createJobIdentityIndex,
   normalizeJobIdentityUrl,
@@ -71,17 +74,80 @@ function normalizeFingerprintList(values: readonly string[]): string[] {
 
 function createVersionOneFingerprint(value: unknown): string {
   const serialized = JSON.stringify(value);
-  let hash = 0xcbf29ce484222325n;
-  for (let index = 0; index < serialized.length; index += 1) {
-    hash ^= BigInt(serialized.charCodeAt(index));
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
-  }
-  return `v1_${hash.toString(16).padStart(16, "0")}`;
+  return `v1_${fnv1a64(serialized)}`;
+}
+
+const preparedFingerprints = new WeakMap<
+  object,
+  DiscoveryListingFingerprints
+>();
+const preparedPostings = new Map<string, WeakRef<JobPosting>>();
+const fingerprintFieldSet: Record<keyof DiscoveryFingerprintPosting, true> = {
+  applicationUrl: true,
+  title: true,
+  company: true,
+  location: true,
+  workMode: true,
+  applyPath: true,
+  easyApplyEligible: true,
+  postedAt: true,
+  postedAtText: true,
+  providerUpdatedAt: true,
+  salaryText: true,
+  employmentType: true,
+  department: true,
+  team: true,
+  detailQuality: true,
+  summary: true,
+  description: true,
+  keySkills: true,
+  responsibilities: true,
+  minimumQualifications: true,
+  preferredQualifications: true,
+  seniority: true,
+  screeningHints: true,
+  benefits: true,
+};
+const fingerprintFields = Object.keys(fingerprintFieldSet) as Array<
+  keyof DiscoveryFingerprintPosting
+>;
+
+/** Only owned worker results are frozen and eligible for this memo. */
+export function rememberDiscoveryListingFingerprints(
+  posting: JobPosting,
+  fingerprints: DiscoveryListingFingerprints,
+): void {
+  const freeze = (value: unknown): void => {
+    if (!value || typeof value !== "object" || Object.isFrozen(value)) return;
+    for (const child of Object.values(value)) freeze(child);
+    Object.freeze(value);
+  };
+  freeze(posting);
+  preparedFingerprints.set(posting, fingerprints);
+  if (preparedPostings.size >= 2_000) preparedPostings.clear();
+  preparedPostings.set(posting.canonicalUrl, new WeakRef(posting));
 }
 
 export function createDiscoveryListingFingerprints(
   posting: DiscoveryFingerprintPosting,
 ): DiscoveryListingFingerprints {
+  const prepared = preparedFingerprints.get(posting);
+  if (prepared) return { ...prepared };
+  // Schema parsing and triage create owned copies. Reuse the worker's digest
+  // only when every fingerprint input still equals its frozen source.
+  const source =
+    "canonicalUrl" in posting && typeof posting.canonicalUrl === "string"
+      ? preparedPostings.get(posting.canonicalUrl)?.deref()
+      : undefined;
+  if (
+    source &&
+    fingerprintFields.every((field) =>
+      isDeepStrictEqual(source[field], posting[field]),
+    )
+  ) {
+    const fingerprints = preparedFingerprints.get(source);
+    if (fingerprints) return { ...fingerprints };
+  }
   const card = createVersionOneFingerprint({
     applicationUrl: normalizeFingerprintText(posting.applicationUrl),
     title: normalizeFingerprintText(posting.title),
@@ -154,10 +220,7 @@ export type DiscoveryLedgerIndex = {
   find(posting: DiscoveryLedgerIdentity): DiscoveryLedgerEntry | null;
   add(entry: DiscoveryLedgerEntry): void;
   remove(entry: DiscoveryLedgerEntry): void;
-  replace(
-    previous: DiscoveryLedgerEntry,
-    next: DiscoveryLedgerEntry,
-  ): void;
+  replace(previous: DiscoveryLedgerEntry, next: DiscoveryLedgerEntry): void;
 };
 
 export function createDiscoveryLedgerIndex(
@@ -270,8 +333,7 @@ export async function createDiscoveryFreshnessDigestInTurns(
   const { counts, classify } = startFreshnessDigest(input);
   const classified: ReturnType<typeof classify>[] = [];
   for (const [position, posting] of input.postings.entries()) {
-    if (position > 0 && position % input.perTurn === 0)
-      await new Promise<void>((resolve) => setImmediate(resolve));
+    if (position % input.perTurn === 0) await yieldToEventLoop();
     classified.push(classify(posting));
   }
   return finishFreshnessDigest(input.postings.length, counts, classified);
@@ -308,7 +370,6 @@ export function formatDiscoveryFreshnessDigest(
   return `Freshness: ${freshness.counts.new} new, ${freshness.counts.unchanged} unchanged, ${freshness.counts.changed} changed, ${freshness.counts.reactivated} reactivated. Digest ${freshness.digest}.`;
 }
 
-
 const frozenLedgerIndexes = new WeakMap<
   readonly DiscoveryLedgerEntry[],
   DiscoveryLedgerIndex
@@ -319,6 +380,26 @@ let lastIndexedLedger: {
 } | null = null;
 /** More changed entries than this rebuild the index instead. */
 const MAX_CARRIED_LEDGER_CHANGES = 64;
+
+/** Build the feedback lookup between turns, before the first Hide needs it. */
+export async function warmDiscoveryLedgerIndex(
+  ledger: readonly DiscoveryLedgerEntry[],
+): Promise<void> {
+  if (!Object.isFrozen(ledger) || frozenLedgerIndexes.has(ledger)) return;
+  const carried = carryLedgerIndex(ledger);
+  if (carried) {
+    frozenLedgerIndexes.set(ledger, carried);
+    lastIndexedLedger = { ledger, index: carried };
+    return;
+  }
+  const index = createDiscoveryLedgerIndex([]);
+  for (let start = 0; start < ledger.length; start += 100) {
+    for (const entry of ledger.slice(start, start + 100)) index.add(entry);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  frozenLedgerIndexes.set(ledger, index);
+  lastIndexedLedger = { ledger, index };
+}
 
 /**
  * The last ledger's index, moved to `ledger` when the two share all but a
@@ -331,10 +412,15 @@ function carryLedgerIndex(
   ledger: readonly DiscoveryLedgerEntry[],
 ): DiscoveryLedgerIndex | null {
   const last = lastIndexedLedger;
-  if (
-    !last ||
-    Math.abs(last.ledger.length - ledger.length) > MAX_CARRIED_LEDGER_CHANGES
-  )
+  if (!last) return null;
+  const changes = readDiscoveryLedgerChanges(last.ledger, ledger);
+  if (changes) {
+    frozenLedgerIndexes.delete(last.ledger);
+    for (const entry of changes.removed) last.index.remove(entry);
+    for (const entry of changes.added) last.index.add(entry);
+    return last.index;
+  }
+  if (Math.abs(last.ledger.length - ledger.length) > MAX_CARRIED_LEDGER_CHANGES)
     return null;
   const current = new Set(ledger);
   const previous = new Set(last.ledger);
@@ -373,6 +459,14 @@ function upsertLedgerEntry(
   existingEntry: DiscoveryLedgerEntry | null,
   nextEntry: DiscoveryLedgerEntry,
 ): DiscoveryLedgerEntry[] {
+  if (Object.isFrozen(ledger))
+    return patchDiscoveryLedger(ledger, [
+      {
+        id: nextEntry.id,
+        moveToEnd: true,
+        update: () => nextEntry,
+      },
+    ]);
   const nextLedger = existingEntry
     ? ledger.filter((entry) => entry !== existingEntry)
     : [...ledger];
@@ -599,10 +693,7 @@ export function shouldSkipPostingFromLedger(input: {
     };
   }
 
-  if (
-    input.hasRetainedJob &&
-    input.ledgerEntry.latestStatus !== "inactive"
-  ) {
+  if (input.hasRetainedJob && input.ledgerEntry.latestStatus !== "inactive") {
     const classification = classifyDiscoveryPostingFreshness({
       ledgerEntry: input.ledgerEntry,
       posting: input.posting,

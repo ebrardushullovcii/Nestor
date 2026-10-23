@@ -117,6 +117,253 @@ function saveCommand(commandId: string, expectedAnswerRevision: number) {
 }
 
 describe("workspace application answer methods", () => {
+  it.each([
+    ["reusable_profile", "none"],
+    ["reusable_profile", "prior_answer"],
+    ["reusable_profile", "user"],
+    ["application_once", "none"],
+    ["application_once", "prior_answer"],
+    ["application_once", "user"],
+  ] as const)(
+    "%s answers respect reuse across open applications with an existing %s answer",
+    async (saveScope, existingSource) => {
+      const { job, repository, methods } = createHarness({
+        questionKind: "other",
+      });
+      const peerJob = { ...job, id: "job-peer" };
+      await repository.commitSavedJobDelta({ upserts: [peerJob] });
+      const run = (await repository.listApplyRuns())[0]!;
+      await repository.upsertApplyRun({
+        ...run,
+        jobIds: [job.id, peerJob.id],
+        totalJobs: 2,
+      });
+      const result = (await repository.listApplyJobResults())[0]!;
+      const question = (await repository.listApplicationQuestionRecords())[0]!;
+      const record = (await repository.listApplicationRecords())[0]!;
+      await repository.upsertApplicationRecord({
+        ...record,
+        id: "record-peer",
+        jobId: peerJob.id,
+      });
+      await repository.upsertApplyJobResult({
+        ...result,
+        id: "result-peer",
+        jobId: peerJob.id,
+        applicationRecordId: "record-peer",
+      });
+      await repository.upsertApplicationQuestionRecord({
+        ...question,
+        id: "question-peer",
+        jobId: peerJob.id,
+        resultId: "result-peer",
+        applicationRecordId: "record-peer",
+      });
+      if (existingSource !== "none")
+        await repository.upsertApplicationAnswerRecord(
+          ApplicationAnswerRecordSchema.parse({
+            id: "peer-suggestion",
+            runId: run.id,
+            jobId: peerJob.id,
+            resultId: "result-peer",
+            applicationRecordId: "record-peer",
+            questionId: "question-peer",
+            status: "suggested",
+            revision: 1,
+            text: "Yes",
+            value: { type: "single_choice", value: "Yes" },
+            sourceKind: existingSource,
+            sourceId: "previous",
+            createdAt: "2026-08-10T10:00:00.000Z",
+          }),
+        );
+      await methods.saveApplicationAnswer({
+        ...saveCommand("save-batch", 0),
+        jobId: job.id,
+        saveScope,
+      });
+      const peerAnswers = await repository.listApplicationAnswerRecords({
+        questionId: "question-peer",
+      });
+      const reused =
+        saveScope === "reusable_profile" && existingSource !== "user";
+      expect(peerAnswers).toHaveLength(
+        (existingSource === "none" ? 0 : 1) + (reused ? 1 : 0),
+      );
+      expect(
+        peerAnswers.find((answer) =>
+          answer.sourceId?.startsWith("save-batch_reuse"),
+        )?.text,
+      ).toBe(reused ? "No" : undefined);
+    },
+  );
+
+  it("saves and continues the person's own answer when a reused one fails or keeps working", async () => {
+    let ownRequestId = "";
+    const performUserAction = vi.fn((command: UserActionCommand) =>
+      "requestId" in command && command.requestId === ownRequestId
+        ? Promise.resolve(undefined)
+        : new Promise<undefined>(() => undefined),
+    );
+    const { job, repository, methods } = createHarness({
+      questionKind: "other",
+      performUserAction,
+    });
+    const run = (await repository.listApplyRuns())[0]!;
+    const result = (await repository.listApplyJobResults())[0]!;
+    const question = (await repository.listApplicationQuestionRecords())[0]!;
+    const record = (await repository.listApplicationRecords())[0]!;
+    const blocker = ApplicationAttemptBlockerSchema.parse({
+      code: "missing_candidate_answer",
+      userActionKind: "manual_answer",
+      summary: "Answer the employer question.",
+      questionIds: [question.id],
+      url: job.applicationUrl ?? job.canonicalUrl,
+    });
+    const peers = ["job-slow", "job-failing"];
+    await repository.commitSavedJobDelta({
+      upserts: peers.map((id) => ({ ...job, id })),
+    });
+    await repository.upsertApplyRun({
+      ...run,
+      jobIds: [job.id, ...peers],
+      totalJobs: 3,
+    });
+    for (const id of [job.id, ...peers]) {
+      const own = id === job.id;
+      const suffix = own ? "" : `-${id}`;
+      if (!own) {
+        await repository.upsertApplicationRecord({
+          ...record,
+          id: `${record.id}${suffix}`,
+          jobId: id,
+        });
+        await repository.upsertApplyJobResult({
+          ...result,
+          id: `${result.id}${suffix}`,
+          jobId: id,
+          applicationRecordId: `${record.id}${suffix}`,
+        });
+        await repository.upsertApplicationQuestionRecord({
+          ...question,
+          id: `${question.id}${suffix}`,
+          jobId: id,
+          resultId: `${result.id}${suffix}`,
+          applicationRecordId: `${record.id}${suffix}`,
+        });
+      }
+      await persistApplicationUserAction({
+        repository,
+        applicationRecordId: `${record.id}${suffix}`,
+        job: { ...job, id },
+        runId: run.id,
+        resultId: `${result.id}${suffix}`,
+        replayCheckpointId: `checkpoint${suffix}`,
+        blocker: { ...blocker, questionIds: [`${question.id}${suffix}`] },
+        occurredAt: "2026-08-10T10:00:00.000Z",
+      });
+    }
+    ownRequestId = (await repository.listUserActionRequests()).find(
+      (request) =>
+        request.scope.type === "application" &&
+        request.scope.resultId === result.id,
+    )!.id;
+    const commit = repository.commitApplicationAnswerMutation.bind(repository);
+    vi.spyOn(repository, "commitApplicationAnswerMutation").mockImplementation(
+      (input) =>
+        input.answer.jobId === "job-failing"
+          ? Promise.reject(new Error("Peer write failed"))
+          : commit(input),
+    );
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await methods.saveApplicationAnswer({
+      ...saveCommand("save-shared", 0),
+      jobId: job.id,
+      saveScope: "reusable_profile",
+    });
+
+    expect(
+      await repository.listApplicationAnswerRecords({ questionId: question.id }),
+    ).toHaveLength(1);
+    expect(
+      await repository.listApplicationAnswerRecords({
+        questionId: `${question.id}-job-slow`,
+      }),
+    ).toHaveLength(1);
+    expect(performUserAction).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: ownRequestId }),
+    );
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  it.each([
+    ["Canada", false],
+    ["United Kingdom", true],
+  ] as const)(
+    "does not copy eligibility to %s with conditional permission %s",
+    async (country, conditional) => {
+      const { job, repository, methods } = createHarness();
+      await repository.commitSavedJobDelta({
+        upserts: [
+          { ...job, location: "United Kingdom" },
+          { ...job, id: "job-other-country", location: country },
+        ],
+      });
+      if (conditional)
+        await repository.commitProfileUpdate((profile) => ({
+          ...profile,
+          workEligibility: {
+            ...profile.workEligibility,
+            limitedWorkPermissions: [
+              {
+                country: "United Kingdom",
+                conditions: "Part-time work only, at most 20 hours weekly",
+                requiresFutureSponsorship: true,
+              },
+            ],
+          },
+        }));
+      const run = (await repository.listApplyRuns())[0]!;
+      await repository.upsertApplyRun({
+        ...run,
+        jobIds: [job.id, "job-other-country"],
+        totalJobs: 2,
+      });
+      const record = (await repository.listApplicationRecords())[0]!;
+      await repository.upsertApplicationRecord({
+        ...record,
+        id: "record-other-country",
+        jobId: "job-other-country",
+      });
+      const result = (await repository.listApplyJobResults())[0]!;
+      const question = (await repository.listApplicationQuestionRecords())[0]!;
+      await repository.upsertApplyJobResult({
+        ...result,
+        id: "result-other-country",
+        jobId: "job-other-country",
+        applicationRecordId: "record-other-country",
+      });
+      await repository.upsertApplicationQuestionRecord({
+        ...question,
+        id: "question-other-country",
+        jobId: "job-other-country",
+        resultId: "result-other-country",
+        applicationRecordId: "record-other-country",
+      });
+      await methods.saveApplicationAnswer({
+        ...saveCommand("save-country", 0),
+        jobId: job.id,
+        saveScope: "reusable_profile",
+      });
+      expect(
+        await repository.listApplicationAnswerRecords({
+          questionId: "question-other-country",
+        }),
+      ).toEqual([]);
+    },
+  );
   it.each(["blocked", "awaiting_review"] as const)(
     "continues the exact %s step once after its last required answer is saved",
     async (state) => {

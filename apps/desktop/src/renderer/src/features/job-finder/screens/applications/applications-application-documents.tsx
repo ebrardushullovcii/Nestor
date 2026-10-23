@@ -317,7 +317,13 @@ export function ApplicationsApplicationDocuments(props: {
 
   const body = (
     <>
-      <div className="grid gap-3 md:grid-cols-2">
+      <div
+        className={
+          attachmentQuestions.length > 0
+            ? "grid gap-3 md:grid-cols-2"
+            : "grid max-w-sm gap-3"
+        }
+      >
         <label className="grid gap-1 text-(length:--text-small)">
           Document type
           <select
@@ -332,31 +338,37 @@ export function ApplicationsApplicationDocuments(props: {
             <option value="short_response">Short response document</option>
           </select>
         </label>
-        <label className="grid gap-1 text-(length:--text-small)">
-          Exact attachment question
-          <select
-            className="h-11 rounded-(--radius-field) border border-(--field-border) bg-(--field) px-3.5 text-(length:--text-field) outline-none focus-visible:border-(--field-focus-border) focus-visible:bg-(--field-strong) focus-visible:shadow-[var(--field-focus-shadow)]"
-            disabled={isWorking}
-            onChange={(event) => setQuestionId(event.target.value)}
-            value={questionId}
-          >
-            <option value="">No question selected yet</option>
-            {attachmentQuestions.map((question) => (
-              <option key={question.id} value={question.id}>
-                {question.prompt}
-              </option>
-            ))}
-          </select>
-        </label>
+        {/* Only a form that asked for an attachment has a question to pick;
+            without one this was a dropdown whose one entry said so. */}
+        {attachmentQuestions.length > 0 ? (
+          <label className="grid gap-1 text-(length:--text-small)">
+            Exact attachment question
+            <select
+              className="h-11 rounded-(--radius-field) border border-(--field-border) bg-(--field) px-3.5 text-(length:--text-field) outline-none focus-visible:border-(--field-focus-border) focus-visible:bg-(--field-strong) focus-visible:shadow-[var(--field-focus-shadow)]"
+              disabled={isWorking}
+              onChange={(event) => setQuestionId(event.target.value)}
+              value={questionId}
+            >
+              <option value="">Choose a question</option>
+              {attachmentQuestions.map((question) => (
+                <option key={question.id} value={question.id}>
+                  {question.prompt}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
       <div className="flex flex-wrap gap-2">
         <Button
           disabled={isWorking}
           onClick={() => void propose(false)}
           size="compact"
-          variant={demoteAsSecondary ? "ghost" : "primary"}
+          variant={demoteAsSecondary ? "secondary" : "primary"}
         >
-          Draft a cover letter
+          {kind === "short_response"
+            ? "Draft a short response"
+            : "Draft a cover letter"}
         </Button>
         {selectedDocument ? (
           <Button
@@ -541,7 +553,9 @@ export function ApplicationsApplicationDocuments(props: {
       }
     >
       {demoteAsSecondary ? (
-        <details className="group grid gap-4">
+        // Not a grid: a closed <details> still lays out its hidden content
+        // slot as a grid row, so the gap added 16 px under the summary.
+        <details className="group">
           {header}
           <div className="mt-3 grid gap-4 rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-4">
             <p className="text-(length:--text-small) leading-6 text-foreground-soft">

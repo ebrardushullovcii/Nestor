@@ -336,6 +336,8 @@ export function settleResumeClaimLines(input: {
   draft: ResumeDraft;
   profile: CandidateProfile | undefined;
   stretchesAreThePersons: boolean;
+  /** A failed re-check restores saved wording instead of trying another fix. */
+  useSavedWordingOnly?: boolean;
 }): ResumeDraft | null {
   const { draft } = input;
   const checks = new Map(
@@ -379,7 +381,7 @@ export function settleResumeClaimLines(input: {
     const failed =
       check.verdict === "unsupported" ||
       (check.verdict === "stretch" && !input.stretchesAreThePersons);
-    if (check.fix === null) {
+    if (input.useSavedWordingOnly || check.fix === null) {
       if (!failed) return null;
       changed = true;
       return savedWording && savedWording !== claim.text.trim()
@@ -498,7 +500,17 @@ export async function withResumeClaimFixes(
   input.signal?.throwIfAborted();
   const settled = settleResumeClaimLines(input);
   if (!settled) return input.draft;
-  return withResumeClaimChecks({ ...input, draft: settled });
+  const checked = await withResumeClaimChecks({ ...input, draft: settled });
+  // Do not keep a rewrite the model just rejected or start another model
+  // loop. The saved source wording needs no check; without it the line is
+  // left off, as for a failed line with no fix (ADR 0051).
+  return (
+    settleResumeClaimLines({
+      ...input,
+      draft: checked,
+      useSavedWordingOnly: true,
+    }) ?? checked
+  );
 }
 
 /**

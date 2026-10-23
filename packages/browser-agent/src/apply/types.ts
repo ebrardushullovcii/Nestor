@@ -475,6 +475,8 @@ export interface ApplyAgentConfig {
    * classification on the observation stands.
    */
   modelQuestionClassification?: boolean;
+  /** Latest saved answers while other applications in this batch are open. */
+  readReusableAnswers?: () => Promise<readonly CandidateReusableAnswer[]>;
   /** The guard and worker checks for this page. Absent only in tests. */
   safety?: ApplySafetyHooks;
   /** Writes and renders the letter this application sends, when it needs one. */

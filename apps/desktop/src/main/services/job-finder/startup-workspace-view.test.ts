@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { deserialize, serialize } from "node:v8";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
@@ -68,6 +75,74 @@ describe("startup workspace view", () => {
 
     expect(next.takeStartupBootstrap()).toBeNull();
     expect(next.takeStartupSnapshot()).toBeNull();
+  });
+
+  it("lets the full saved view reach the window before canonical startup", async () => {
+    (await freshModule()).writeStartupWorkspaceView(view("saved"));
+    const next = await freshModule();
+    next.captureStartupWorkspaceView();
+    let ready = false;
+    const waiting = next.waitForSavedStartupWorkspace()!.then(() => {
+      ready = true;
+    });
+    next.noteStartupWorkspaceRevisionHeld(); // bootstrap acknowledgement
+    await Promise.resolve();
+    expect(ready).toBe(false);
+    expect(next.takeStartupSnapshot()).toMatchObject({ label: "saved" });
+    next.noteStartupWorkspaceSnapshotSent();
+    await Promise.resolve();
+    expect(ready).toBe(false);
+    next.noteStartupWorkspaceRevisionHeld();
+    await waiting;
+    expect(ready).toBe(true);
+  });
+
+  it.each(["bootstrap", "snapshot"] as const)(
+    "falls back immediately when the saved %s cannot be decoded",
+    async (field) => {
+      (await freshModule()).writeStartupWorkspaceView(view("saved"));
+      const file = path.join(state.directory, "job-finder-startup-view.bin");
+      const stored = deserialize(readFileSync(file)) as Record<string, unknown>;
+      stored[field] = new Uint8Array([0]);
+      writeFileSync(file, serialize(stored));
+      const next = await freshModule();
+      next.captureStartupWorkspaceView();
+      const waiting = next.waitForSavedStartupWorkspace();
+      expect(
+        field === "bootstrap"
+          ? next.takeStartupBootstrap()
+          : next.takeStartupSnapshot(),
+      ).toBeNull();
+      await expect(waiting).resolves.toBeUndefined();
+      expect(next.waitForSavedStartupWorkspace()).toBeNull();
+    },
+  );
+
+  it("accepts a compatible clean view from a different main build", async () => {
+    (await freshModule()).writeStartupWorkspaceView(view("before update"));
+    const file = path.join(state.directory, "job-finder-startup-view.bin");
+    const stored = deserialize(readFileSync(file)) as {
+      build?: { stamp: string; contents: string };
+    };
+    stored.build = { stamp: "older build", contents: "older bundle" };
+    writeFileSync(file, serialize(stored));
+    const next = await freshModule();
+    next.captureStartupWorkspaceView();
+    expect(next.takeStartupSnapshot()).toMatchObject({
+      label: "before update",
+    });
+  });
+
+  it("rejects a view with an incompatible format", async () => {
+    (await freshModule()).writeStartupWorkspaceView(view("old format"));
+    const file = path.join(state.directory, "job-finder-startup-view.bin");
+    const stored = deserialize(readFileSync(file)) as { format: number };
+    stored.format = -1;
+    writeFileSync(file, serialize(stored));
+    const next = await freshModule();
+    next.captureStartupWorkspaceView();
+    expect(next.takeStartupSnapshot()).toBeNull();
+    expect(next.waitForSavedStartupWorkspace()).toBeNull();
   });
 
   it("removes the view when the close was not clean", async () => {

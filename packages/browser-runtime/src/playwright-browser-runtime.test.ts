@@ -22,7 +22,13 @@ import {
   type BrowserVisualObservationSet,
 } from "@nestor/contracts";
 import type { BrowserContext, Page } from "playwright";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+
+// The first import of the runtime loads most of the browser stack; on a busy
+// machine that alone outran the first test's five seconds.
+beforeAll(async () => {
+  await import("./playwright-browser-runtime");
+}, 60_000);
 
 test("navigation failures distinguish an unreachable site from a blocked browser", async () => {
   const { classifyBrowserNavigationFailure } =
@@ -1801,7 +1807,9 @@ describe("playwright browser runtime", () => {
         navigationHostnames: ["example.com"],
         siteLabel: "Sign-in Jobs",
         dedicatedPage: true,
-        onAutomationPage: (claimedPage) => claimed.push(claimedPage),
+        onAutomationPage: (claimedPage) => {
+          claimed.push(claimedPage);
+        },
       });
 
       expect(result.agentMetadata?.parkedTab).toEqual({
@@ -1904,7 +1912,9 @@ describe("playwright browser runtime", () => {
           sourceCatalog: [createTestJob()],
           sourceCatalogComplete: true,
           dedicatedPage,
-          onAutomationPage: (claimedPage) => claimed.push(claimedPage),
+          onAutomationPage: (claimedPage) => {
+            claimed.push(claimedPage);
+          },
         });
 
         expect(result.warning).toBeNull();
@@ -1925,7 +1935,9 @@ describe("playwright browser runtime", () => {
           sourceCatalog: [createTestJob()],
           sourceCatalogComplete: true,
           dedicatedPage,
-          onAutomationPage: (claimedPage) => claimed.push(claimedPage),
+          onAutomationPage: (claimedPage) => {
+            claimed.push(claimedPage);
+          },
         });
         expect(repeated.jobs).toEqual(result.jobs);
         expect(repeated.agentMetadata?.steps).toBe(0);

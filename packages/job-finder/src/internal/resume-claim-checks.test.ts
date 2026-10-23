@@ -592,7 +592,7 @@ describe("resume claim checks before a draft is kept (ADR 0041)", () => {
       ).toBe(false);
     });
 
-    test("a rewrite that still fails is not fixed again", async () => {
+    test("a rewrite that still fails is left off without a third check", async () => {
       const line = lines("again");
       const worse = "Cut cloud spend by 30% across ten teams (again).";
       const checkResumeClaims = checker(
@@ -603,6 +603,45 @@ describe("resume claim checks before a draft is kept (ADR 0041)", () => {
       const fixed = await generateAndFix(line, checkResumeClaims, false);
 
       expect(fixed.sections[0]?.bullets[0]?.text).toBe(worse);
+      expect(fixed.sections[0]?.bullets[0]?.included).toBe(false);
+      expect(fixed.sections[0]?.bullets[3]?.included).toBe(true);
+      expect(checkResumeClaims).toHaveBeenCalledTimes(2);
+    });
+
+    test("a failed rewrite restores its saved achievement without checking the person's wording", async () => {
+      const { profile, job } = context();
+      const experience = profile.experiences[0]!;
+      const source =
+        "Maintained the synthetic migration ledger (saved-recheck).";
+      experience.achievements = [source];
+      const invented = "Owned twelve migration teams (saved-recheck).";
+      const rewrite = "Led the migration programme (saved-recheck).";
+      const checkResumeClaims = checker(
+        { [invented]: "unsupported", [rewrite]: "unsupported" },
+        { [invented]: rewrite, [rewrite]: "Another unchecked rewrite." },
+      );
+      const draft = draftWith([{ text: invented, origin: "ai_generated" }]);
+      draft.sections[0]!.bullets[0]!.sourceRefs = [
+        {
+          id: "saved-recheck-source",
+          sourceKind: "profile",
+          sourceId: `experience:${experience.id}:achievement:0`,
+          snippet: source,
+        },
+      ];
+      const base = { aiClient: { checkResumeClaims }, job, profile };
+      const checked = await withResumeClaimChecks({ ...base, draft });
+      const fixed = await withResumeClaimFixes({
+        ...base,
+        draft: checked,
+        stretchesAreThePersons: true,
+      });
+      expect(fixed.sections[0]!.bullets[0]).toMatchObject({
+        text: source,
+        included: true,
+        origin: "ai_generated",
+        sourceRefs: draft.sections[0]!.bullets[0]!.sourceRefs,
+      });
       expect(checkResumeClaims).toHaveBeenCalledTimes(2);
     });
   });

@@ -525,9 +525,10 @@ describe("ApplicationsApplicationDocuments", () => {
 
     const selects = [...container.querySelectorAll("select")];
     const textareas = [...container.querySelectorAll("textarea")];
-    // Document type + Exact attachment question; the saved-document select only
-    // appears with more than one revision.
-    expect(selects).toHaveLength(2);
+    // Document type only: the attachment-question select appears once the
+    // form asked for an attachment, and the saved-document select only with
+    // more than one revision.
+    expect(selects).toHaveLength(1);
     expect(textareas).toHaveLength(1);
 
     for (const control of [...selects, ...textareas]) {

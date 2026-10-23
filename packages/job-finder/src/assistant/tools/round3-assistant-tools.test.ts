@@ -105,6 +105,44 @@ describe("R3-117 saved search on a return visit", () => {
       { search: { latestSavedSearch: { summaryReport: run.summary.report } } },
     );
   });
+  it("keeps a search over hundreds of sources to totals and a short digest", async () => {
+    const ctx = world();
+    const snapshot = await ctx.service.getWorkspaceSnapshot();
+    const targetIds = Array.from({ length: 900 }, (_, i) => `target_${i}`);
+    const run = DiscoveryRunRecordSchema.parse({
+      id: "wide",
+      state: "completed",
+      startedAt: "2026-10-05T09:00:00.000Z",
+      targetIds,
+      summary: {
+        report: {
+          measuredAt: "2026-10-05T09:10:00.000Z",
+          saved: 40,
+          new: 40,
+          sources: targetIds.map((targetId, i) => ({
+            targetId,
+            inspected: 10,
+            saved: i < 8 ? 5 : 0,
+            rejected: 0,
+            duplicates: 0,
+            deferred: 0,
+            pagesCovered: 1,
+          })),
+        },
+      },
+    });
+    snapshot.recentDiscoveryRuns = [run];
+    const saved = getAssistantSavedSearch(snapshot);
+    expect(saved).toMatchObject({
+      sourceCount: 900,
+      sourcesWithSavedJobs: 8,
+      historicalCounts: { saved: 40, new: 40 },
+    });
+    expect(saved).not.toHaveProperty("sourceIds");
+    expect(saved?.topSourcesBySaved).toHaveLength(5);
+    // It rides on every message, so it stays a few hundred bytes.
+    expect(JSON.stringify(saved).length).toBeLessThan(1_500);
+  });
   it("does not fabricate a comparison when no search was saved", async () => {
     const ctx = world();
     const snapshot = await ctx.service.getWorkspaceSnapshot();

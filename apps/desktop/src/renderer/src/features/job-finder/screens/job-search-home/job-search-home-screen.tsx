@@ -10,6 +10,8 @@ import type {
   ResumeImportProgressEvent,
 } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
+import { cn } from "@renderer/lib/cn";
+import type { ApplyQueueControlAction } from "../../lib/apply-queue-view";
 import {
   PageHeaderStack,
   type PageStatusItem,
@@ -18,6 +20,7 @@ import { CampaignNotificationCenter } from "../../components/campaign-notificati
 import { buildJobFinderTaskCenterModel } from "../../components/task-center/job-finder-task-center-model";
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
 import { listApplicationsAwaitingUser } from "../../lib/needs-you-count";
+import { useApplicationPageStates } from "../../hooks/use-application-page-states";
 import { DiscoveryRunFeedbackCallout } from "../discovery/discovery-run-feedback-callout";
 import type { DiscoveryRunFeedback } from "../discovery/discovery-run-feedback";
 import type { ActionState } from "../../lib/job-finder-types";
@@ -68,6 +71,7 @@ export interface JobSearchHomeScreenProps {
   onResumeSetup?: (step: ProfileSetupStep) => void;
   onSelectCampaign: (campaignId: string) => void;
   onStopApply?: (runId: string) => void;
+  onControlApplyQueue?: (action: ApplyQueueControlAction) => void;
   onStopResumes?: () => void;
   onStopSearch?: (runId: string) => void;
 }
@@ -261,9 +265,13 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
   // would not open, a source that needs sign-in) keeps its own callout with
   // its own corrective action. A finished search is a status fact and reads
   // as the line under the title instead.
+  const applicationPageStates = useApplicationPageStates(
+    props.workspace.applyJobResults,
+  );
   const model = buildJobSearchHomeModel({
     now,
     workspace: props.workspace,
+    applicationPageStates,
     tasks,
     tailoredDraftPreparation: props.tailoredDraftPreparation,
     discoveryRunPending: props.discoveryRunPending ?? false,
@@ -303,8 +311,13 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
     props.discoveryRunFeedback.status !== "cancelled" &&
     !failureSupersededByCompletedRun &&
     !missingStartingPageCoveredBySourceFix &&
-    // The next step already names the broken source and where to fix it.
+    // The next step already names the broken source and where to fix it,
+    // or the failed search and why; a banner above it said it again.
     model.next.id !== "source_failed" &&
+    !(
+      model.next.id === "search_failed" &&
+      props.discoveryRunFeedback.recovery?.kind !== "browser_session"
+    ) &&
     model.next.id !== "sources" &&
     // A source to correct is Home's card or problem line, which follow the
     // sources as they are now; this callout kept naming a source the person
@@ -398,6 +411,9 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
       case "stop_apply":
         props.onStopApply?.(action.runId);
         return;
+      case "apply_queue":
+        props.onControlApplyQueue?.(action.action);
+        return;
       case "stop_resumes":
         props.onStopResumes?.();
         return;
@@ -436,7 +452,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
     // the 20px grid gap that would double it.
     // Home is one column: at 1920 its card and tiles ran 1600px wide around
     // a 68-character sentence. It keeps a readable width instead.
-    <section className="grid min-w-0 max-w-[76rem] gap-5 pb-8 [&>[data-page-header-stack]]:-mb-2">
+    <section className="grid min-w-0 max-w-[76rem] grid-cols-[minmax(0,1fr)] gap-5 pb-8 [&>[data-page-header-stack]]:-mb-2">
       <PageHeaderStack
         actions={
           // While paused the next-step card below offers Resume; the header
@@ -524,7 +540,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
           data-testid="home-now"
         >
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-            <h2 className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-muted-foreground">
+            <h2 className="text-(length:--text-small) font-semibold leading-5 text-muted-foreground">
               Happening now
             </h2>
             {!model.paused ? (
@@ -546,11 +562,16 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
                 className="flex min-w-0 flex-wrap items-center justify-between gap-3"
                 key={item.id}
               >
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="min-w-0 break-words text-sm font-medium text-(--text-headline)">
                     <span
                       aria-hidden="true"
-                      className="mr-2 inline-block size-2 animate-pulse rounded-full bg-primary align-middle"
+                      className={cn(
+                        "mr-2 inline-block size-2 rounded-full align-middle",
+                        item.active === false
+                          ? "bg-foreground-muted"
+                          : "animate-pulse bg-primary",
+                      )}
                     />
                     {item.title}
                   </p>
@@ -645,7 +666,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
         data-home-next-step={model.next.id}
         data-testid="home-next-step"
       >
-        <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-muted-foreground">
+        <p className="text-(length:--text-small) font-semibold leading-5 text-muted-foreground">
           Next step
         </p>
         <h2

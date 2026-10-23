@@ -17,6 +17,7 @@ import type {
   RecordOutcomeInput,
   ResumeImportProgressEvent,
   ResumeAssistantMessage,
+  ResumeDraft,
   SafeguardMutationInput,
   SaveCampaignRuleInput,
   SaveJobSearchCampaignInput,
@@ -109,6 +110,7 @@ type BuildJobFinderPageContextArgs = {
       updateAssistantMessages?: boolean;
     },
   ) => Promise<boolean>;
+  adoptAutosavedResumeDraft: (draft: ResumeDraft) => void;
   resumeAssistantRequestTokenRef: MutableRefObject<number>;
   selectedApplicationAttempt: JobFinderPageContext["selectedApplicationAttempt"];
   selectedApplicationRecord: JobFinderPageContext["selectedApplicationRecord"];
@@ -189,6 +191,7 @@ export function buildJobFinderPageContext(
     saveCoordinator,
     saveState,
     refreshResumeWorkspace,
+    adoptAutosavedResumeDraft,
     resumeAssistantRequestTokenRef,
     selectedApplicationAttempt,
     selectedApplicationRecord,
@@ -251,6 +254,7 @@ export function buildJobFinderPageContext(
     profileCopilotRequestTokenRef,
     requestApplyCopilotVisualCheckpoints,
     refreshResumeWorkspace,
+    adoptAutosavedResumeDraft,
     resumeAssistantRequestTokenRef,
     runAction,
     runResumeWorkspaceAction,

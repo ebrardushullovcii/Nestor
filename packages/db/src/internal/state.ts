@@ -1,4 +1,10 @@
 import {
+  resumeDraftValueSql,
+  resumeDraftUpdatedAtSql,
+  tailoredAssetValueSql,
+} from "./resume-approval-state";
+import {
+  PreparedApplicationFormSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
   ApplySubmitApprovalSchema,
@@ -44,11 +50,7 @@ import {
   UserActionRequestSchema,
   type JobFinderRepositoryState,
 } from "@nestor/contracts";
-import type {
-  DatabaseSync,
-  SQLInputValue,
-  SQLOutputValue,
-} from "node:sqlite";
+import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
 import {
   APPLICATION_ATTEMPT_INDEXED_COLLECTION_CONFIG,
   APPLY_COLLECTION_ORDER_BY_SQL,
@@ -68,6 +70,7 @@ import type {
 } from "../repository-types";
 
 export const stateTableNames = {
+  prepared_application_forms: "prepared_application_forms",
   application_authority_envelopes: "application_authority_envelopes",
   application_answer_snapshots: "application_answer_snapshots",
   application_answer_records: "application_answer_records",
@@ -276,7 +279,7 @@ export function listValues<TValue>(
 ): TValue[] {
   const pagination = buildPaginationSql(options);
   const statement = database.prepare(
-    `SELECT id, value FROM ${stateTableNames[tableName]} ORDER BY id${pagination.sql}`,
+    `SELECT id, ${collectionValueSql(tableName)} AS value FROM ${stateTableNames[tableName]} ORDER BY id${pagination.sql}`,
   );
   const rows = statement.all(...pagination.params);
   return rows.map((row) =>
@@ -291,6 +294,12 @@ export function listValues<TValue>(
 
 const PARSE_CHUNK_ROWS = 100;
 
+function collectionValueSql(tableName: StateCollectionTable): string {
+  if (tableName === "resume_drafts") return resumeDraftValueSql;
+  if (tableName === "tailored_assets") return tailoredAssetValueSql;
+  return "value";
+}
+
 /**
  * `listValues` for a whole large collection without holding the event loop:
  * the rows are read at once, so the result is one consistent read, and are
@@ -303,7 +312,9 @@ export async function listValuesInChunks<TValue>(
   schema: SchemaParser<TValue>,
 ): Promise<TValue[]> {
   const rows: (Record<string, SQLOutputValue> | null)[] = database
-    .prepare(`SELECT id, value FROM ${stateTableNames[tableName]} ORDER BY id`)
+    .prepare(
+      `SELECT id, ${collectionValueSql(tableName)} AS value FROM ${stateTableNames[tableName]} ORDER BY id`,
+    )
     .all();
   const values: TValue[] = [];
   for (let start = 0; start < rows.length; start += PARSE_CHUNK_ROWS) {
@@ -349,7 +360,7 @@ export function listCollectionValues<TValue>(
   const baseParams = [...(options.params ?? [])] as SQLInputValue[];
   return database
     .prepare(
-      `SELECT id, value FROM ${stateTableNames[tableName]}${whereClause} ORDER BY ${options.orderBySql}${pagination.sql}`,
+      `SELECT id, ${collectionValueSql(tableName)} AS value FROM ${stateTableNames[tableName]}${whereClause} ORDER BY ${tableName === "resume_drafts" ? options.orderBySql.replace(/\bupdated_at\b/g, resumeDraftUpdatedAtSql) : options.orderBySql}${pagination.sql}`,
     )
     .all(...baseParams, ...pagination.params)
     .map((row) =>
@@ -595,6 +606,7 @@ export function upsertIndexedCollectionValue(
   options: {
     columnNames: readonly string[];
     getColumns: (value: { id: string }) => readonly SQLInputValue[];
+    serializedValue?: string;
   },
 ): void {
   const columnSql = ["id", ...options.columnNames, "value"].join(", ");
@@ -607,7 +619,11 @@ export function upsertIndexedCollectionValue(
     .prepare(
       `INSERT OR REPLACE INTO ${stateTableNames[tableName]} (${columnSql}) VALUES (${placeholders})`,
     )
-    .run(value.id, ...options.getColumns(value), JSON.stringify(value));
+    .run(
+      value.id,
+      ...options.getColumns(value),
+      options.serializedValue ?? JSON.stringify(value),
+    );
 }
 
 export function upsertCollectionValue(
@@ -653,6 +669,10 @@ export function writeState(
   database: DatabaseSync,
   state: JobFinderRepositoryState,
 ): void {
+  // A reset or restore ends any Apply queue; it is not part of the seed.
+  database
+    .prepare(`DELETE FROM ${stateTableNames.singleton_state} WHERE key = ?`)
+    .run("apply_queue");
   assertPersistableCampaignPointer(state);
   const activeAuthorityCount = state.applicationAuthorityEnvelopes.filter(
     (envelope) => envelope.status === "active",
@@ -687,6 +707,7 @@ export function writeState(
     }
     initSingletonValue(database, "activity_control", state.activityControl);
     initSingletonValue(database, "intelligence_state", state.intelligence);
+    replaceCollection(database, "prepared_application_forms", state.preparedApplicationForms ?? []);
     replaceCollection(database, "saved_jobs", state.savedJobs);
     replaceCollection(database, "tailored_assets", state.tailoredAssets);
     replaceIndexedCollection(
@@ -1275,6 +1296,7 @@ export function readState(
         orderBySql: APPLY_COLLECTION_ORDER_BY_SQL.application_artifact_refs,
       },
     ),
+    preparedApplicationForms: listValues(database, "prepared_application_forms", PreparedApplicationFormSchema),
     applicationReplayCheckpoints: listCollectionValues(
       database,
       "application_replay_checkpoints",

@@ -1,4 +1,6 @@
+import { isDeepStrictEqual } from "node:util";
 import {
+  PreparedApplicationFormSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
   ApplySubmitApprovalSchema,
@@ -13,6 +15,7 @@ import {
   ApprovedApplicationAnswerSnapshotSchema,
   CandidateProfileSchema,
   JobFinderActivityControlSchema,
+  ApplyQueueSchema,
   JobFinderDiscoveryStateSchema,
   JobFinderIntelligenceStateSchema,
   JobFinderRepositoryStateSchema,
@@ -122,7 +125,10 @@ import type {
   WorkspaceDatabaseRecoveryRequiredDetails,
   WorkspaceDatabaseRecoveryRequiredOutcome,
 } from "./repository-types";
-import { createSavedJobProjectionReader } from "./internal/saved-job-projection";
+import {
+  createSavedJobProjectionReader,
+  freezeProjection,
+} from "./internal/saved-job-projection";
 import { createDiscoveryDisplayProjectionReader } from "./internal/discovery-display-projection";
 import {
   createDiscoveryStorage,
@@ -130,6 +136,10 @@ import {
 } from "./internal/discovery-storage";
 import { createIntelligenceProjectionReader } from "./internal/intelligence-projection";
 import { createDisplayCollectionsReader } from "./internal/display-collections";
+import { createSingletonProjectionReader } from "./internal/singleton-projection";
+import { createResumeApprovalFolder } from "./internal/resume-approval-fold";
+
+const nullableCampaignSchema = JobSearchCampaignCollectionSchema.nullable();
 
 /**
  * Thrown by createFileJobFinderRepository when the workspace database could
@@ -343,7 +353,11 @@ export async function createFileJobFinderRepository(
   }
 
   const database = await openWorkspaceDatabaseWithRecovery();
+  // Detail versions are disk-backed, with a bounded SQLite page cache.
+  // Set this before any connection-local projection tables are created.
+  database.exec("PRAGMA temp_store = FILE; PRAGMA temp.cache_size = -2048");
   const stopWalCheckpoints = scheduleWalCheckpoints(database, options.filePath);
+  let approvalFolder: ReturnType<typeof createResumeApprovalFolder>;
 
   // Everything below runs on the open connection. If any step fails, the
   // connection is closed before the error leaves: an orphaned handle keeps the
@@ -357,6 +371,9 @@ export async function createFileJobFinderRepository(
     typeof createIntelligenceProjectionReader
   >;
   let readDisplayCollections: ReturnType<typeof createDisplayCollectionsReader>;
+  let readSingletonProjection: ReturnType<
+    typeof createSingletonProjectionReader
+  >;
   let readDiscoveryDisplayProjection: ReturnType<
     typeof createDiscoveryDisplayProjectionReader
   >;
@@ -395,26 +412,62 @@ export async function createFileJobFinderRepository(
       await secureDatabaseFile(options.filePath);
     }
 
+    // Complete interrupted folds before publishing any startup view.
+    await createResumeApprovalFolder(database).flush();
     context = createFileRepositoryContext({
       database,
       filePath: options.filePath,
     });
+    readSingletonProjection = createSingletonProjectionReader(database);
     discoveryStorage = createDiscoveryStorage(
       database,
       normalizedSeed.discovery,
     );
     readSavedJobsProjection = createSavedJobProjectionReader(database, {
       validationStamp: options.rowValidationStamp ?? null,
+      sqliteDetails: true,
+      ...(options.backgroundValidationReady
+        ? { backgroundValidationReady: options.backgroundValidationReady }
+        : {}),
     });
     readIntelligenceProjection = createIntelligenceProjectionReader(database);
     readDisplayCollections = createDisplayCollectionsReader(database, {
       validationStamp: options.rowValidationStamp ?? null,
     });
-    readDiscoveryDisplayProjection = createDiscoveryDisplayProjectionReader(
+    approvalFolder = createResumeApprovalFolder(
+      database,
+      readDisplayCollections.prepareResumeStateFold,
+      readDisplayCollections.draftHasApproval,
+    );
+    const readDiscoveryDisplay = createDiscoveryDisplayProjectionReader(
       database,
       normalizedSeed.discovery,
     );
+    let sharedDiscovery: Awaited<
+      ReturnType<typeof readDiscoveryDisplay>
+    > | null = null;
+    let sharedFrom: Awaited<ReturnType<typeof readDiscoveryDisplay>> | null =
+      null;
+    readDiscoveryDisplayProjection = async () => {
+      const display = await readDiscoveryDisplay();
+      const canonical = discoveryStorage.peek();
+      if (!canonical) return display;
+      if (
+        sharedFrom === display &&
+        sharedDiscovery?.discoveryLedger === canonical.discoveryLedger &&
+        sharedDiscovery.pendingDiscoveryJobs === canonical.pendingDiscoveryJobs
+      )
+        return sharedDiscovery;
+      sharedFrom = display;
+      sharedDiscovery = Object.freeze({
+        ...display,
+        discoveryLedger: canonical.discoveryLedger,
+        pendingDiscoveryJobs: canonical.pendingDiscoveryJobs,
+      });
+      return sharedDiscovery;
+    };
   } catch (error) {
+    await stopWalCheckpoints();
     closeDatabaseQuietly(database);
     throw error;
   }
@@ -815,7 +868,11 @@ export async function createFileJobFinderRepository(
           return result;
         }),
     }),
-    ...createFileRepositoryResumeMethods(context),
+    ...createFileRepositoryResumeMethods(
+      context,
+      approvalFolder.schedule,
+      approvalFolder.foldApprovalChanges,
+    ),
     // These reads need only authority envelopes, not the application/result
     // bodies loaded by the transaction store for preflight/outcome mutations.
     listApplicationAuthorityEnvelopes(filter) {
@@ -853,6 +910,7 @@ export async function createFileJobFinderRepository(
     exportState: () =>
       Promise.resolve(cloneValue(readState(database, normalizedSeed))),
     async close() {
+      await approvalFolder.flush();
       if (automaticBackup.onClose) {
         const backup = await createWorkspaceCloseDatabaseBackup({
           database,
@@ -900,6 +958,15 @@ export async function createFileJobFinderRepository(
       return Promise.resolve(
         getSingletonValue(database, "profile", CandidateProfileSchema) ??
           cloneValue(normalizedSeed.profile),
+      );
+    },
+    readProfileProjection() {
+      return Promise.resolve(
+        readSingletonProjection(
+          "profile",
+          CandidateProfileSchema,
+          normalizedSeed.profile,
+        ),
       );
     },
     getProfileWithRevision() {
@@ -975,6 +1042,15 @@ export async function createFileJobFinderRepository(
           "search_preferences",
           JobSearchPreferencesSchema,
         ) ?? cloneValue(normalizedSeed.searchPreferences),
+      );
+    },
+    readSearchPreferencesProjection() {
+      return Promise.resolve(
+        readSingletonProjection(
+          "search_preferences",
+          JobSearchPreferencesSchema,
+          normalizedSeed.searchPreferences,
+        ),
       );
     },
     getProfileSetupState() {
@@ -1210,15 +1286,14 @@ export async function createFileJobFinderRepository(
       upsertsFromDiscovery,
       upsertsFromBorrowedDiscovery,
       update,
+      borrowCurrentJobs,
       updateJobIds,
       updateSettings,
       clearResumeApproval,
       updateDiscoveryState,
     }) {
       try {
-        const suppliedUpserts = SavedJobSchema.array().parse(
-          cloneValue([...upserts]),
-        );
+        const suppliedUpserts = SavedJobSchema.array().parse([...upserts]);
         let committedDiscovery: JobFinderDiscoveryState | null = null;
 
         runImmediateTransaction(database, () => {
@@ -1283,7 +1358,11 @@ export async function createFileJobFinderRepository(
             for (const currentJob of currentJobs) {
               existingJobIds.add(currentJob.id);
               const nextJob = SavedJobSchema.parse(
-                cloneValue(update(cloneValue(currentJob))),
+                update(
+                  borrowCurrentJobs
+                    ? freezeProjection(currentJob)
+                    : cloneValue(currentJob),
+                ),
               );
               if (nextJob.id !== currentJob.id) {
                 throw new Error(
@@ -1294,7 +1373,7 @@ export async function createFileJobFinderRepository(
                 previousJobForResumeApproval = currentJob;
                 nextJobForResumeApproval = nextJob;
               }
-              if (JSON.stringify(nextJob) !== JSON.stringify(currentJob)) {
+              if (!isDeepStrictEqual(nextJob, currentJob)) {
                 context.writePersistedValue("saved_jobs", nextJob);
               }
             }
@@ -1390,7 +1469,7 @@ export async function createFileJobFinderRepository(
 
       return secureDatabaseFile(options.filePath);
     },
-    commitDiscoveryFeedbackUpdate(jobId, update) {
+    commitDiscoveryFeedbackUpdate(jobId, update, feedbackOptions) {
       try {
         let committedDiscovery: JobFinderDiscoveryState | null = null;
         const result = runImmediateTransaction(database, () => {
@@ -1406,38 +1485,61 @@ export async function createFileJobFinderRepository(
                 params: [jobId],
                 orderBySql: "id",
               })[0] ?? null);
-          const searchPreferences =
-            getSingletonValue(
-              database,
-              "search_preferences",
-              JobSearchPreferencesSchema,
-            ) ?? normalizedSeed.searchPreferences;
-          const campaignState = getSingletonValue(
-            database,
-            "campaign_state",
-            JobSearchCampaignCollectionSchema,
-          );
-          const intelligenceState =
-            getSingletonValue(
-              database,
-              "intelligence_state",
-              JobFinderIntelligenceStateSchema,
-            ) ?? normalizedSeed.intelligence;
+          const searchPreferences = feedbackOptions?.borrowUnchangedState
+            ? readSingletonProjection(
+                "search_preferences",
+                JobSearchPreferencesSchema,
+                normalizedSeed.searchPreferences,
+              )
+            : (getSingletonValue(
+                database,
+                "search_preferences",
+                JobSearchPreferencesSchema,
+              ) ?? normalizedSeed.searchPreferences);
+          const campaignState = feedbackOptions?.borrowUnchangedState
+            ? readSingletonProjection(
+                "campaign_state",
+                nullableCampaignSchema,
+                null,
+              )
+            : getSingletonValue(
+                database,
+                "campaign_state",
+                JobSearchCampaignCollectionSchema,
+              );
+          const intelligenceState = feedbackOptions?.borrowUnchangedState
+            ? readSingletonProjection(
+                "intelligence_state",
+                JobFinderIntelligenceStateSchema,
+                normalizedSeed.intelligence,
+              )
+            : (getSingletonValue(
+                database,
+                "intelligence_state",
+                JobFinderIntelligenceStateSchema,
+              ) ?? normalizedSeed.intelligence);
           const next = update({
             job: cloneValue(pendingJob ?? savedJob),
             jobIsPending: pendingJob !== null,
-            searchPreferences: cloneValue(searchPreferences),
-            campaignState: cloneValue(campaignState),
-            intelligenceState: cloneValue(intelligenceState),
+            searchPreferences: feedbackOptions?.borrowUnchangedState
+              ? searchPreferences
+              : cloneValue(searchPreferences),
+            campaignState: feedbackOptions?.borrowUnchangedState
+              ? campaignState
+              : cloneValue(campaignState),
+            intelligenceState: feedbackOptions?.borrowUnchangedState
+              ? intelligenceState
+              : cloneValue(intelligenceState),
             discoveryState,
           });
           // Most feedback (hiding a job) leaves the preferences and plans as
           // they were. Validating and rewriting both (about 1 MB with 900
           // sources) on every hide was most of its cost, so an unchanged
           // value is left alone; only the profile epoch is ever compared.
-          const searchPreferencesTouched =
-            JSON.stringify(next.searchPreferences) !==
-            JSON.stringify(searchPreferences);
+          const searchPreferencesTouched = feedbackOptions?.borrowUnchangedState
+            ? next.searchPreferences !== searchPreferences
+            : JSON.stringify(next.searchPreferences) !==
+              JSON.stringify(searchPreferences);
           const nextSearchPreferences = searchPreferencesTouched
             ? JobSearchPreferencesSchema.parse(
                 cloneValue(next.searchPreferences),
@@ -1445,7 +1547,10 @@ export async function createFileJobFinderRepository(
             : null;
           const nextCampaignState =
             next.campaignState === null ||
-            JSON.stringify(next.campaignState) === JSON.stringify(campaignState)
+            (feedbackOptions?.borrowUnchangedState
+              ? next.campaignState === campaignState
+              : JSON.stringify(next.campaignState) ===
+                JSON.stringify(campaignState))
               ? null
               : JobSearchCampaignCollectionSchema.parse(
                   cloneValue(next.campaignState),
@@ -1580,6 +1685,7 @@ export async function createFileJobFinderRepository(
             schema: ApplyJobResultSchema,
             orderBySql: APPLY_COLLECTION_ORDER_BY_SQL.apply_job_results,
             filters: [
+              ...(options?.id ? [["id", options.id] as const] : []),
               ...(options?.runId ? [["run_id", options.runId] as const] : []),
               ...(options?.jobId ? [["job_id", options.jobId] as const] : []),
               ...(options?.applicationRecordId
@@ -1594,6 +1700,18 @@ export async function createFileJobFinderRepository(
           }),
         ),
       );
+    },
+    getPreparedApplicationForm(resultId) {
+      const forms = listCollectionValues(database, "prepared_application_forms", PreparedApplicationFormSchema,
+        { orderBySql: "id", whereSql: "id = ?", params: [resultId] });
+      return Promise.resolve(forms[0] ?? null);
+    },
+    upsertPreparedApplicationForm(form) {
+      return context.upsertPersistedValue("prepared_application_forms", PreparedApplicationFormSchema.parse(form));
+    },
+    deletePreparedApplicationForm(resultId) {
+      database.prepare("DELETE FROM prepared_application_forms WHERE id = ?").run(resultId);
+      return secureDatabaseFile(options.filePath);
     },
     upsertApplyJobResult(result) {
       const normalizedResult = ApplyJobResultSchema.parse(cloneValue(result));
@@ -2279,6 +2397,9 @@ export async function createFileJobFinderRepository(
     getDiscoveryState() {
       return Promise.resolve(cloneValue(discoveryStorage.read()));
     },
+    readDiscoveryStateForRun() {
+      return Promise.resolve(discoveryStorage.read());
+    },
     warmDiscoveryState() {
       try {
         if (!database.isTransaction) discoveryStorage.read();
@@ -2331,6 +2452,11 @@ export async function createFileJobFinderRepository(
           "campaign_state",
           JobSearchCampaignCollectionSchema,
         ),
+      );
+    },
+    readCampaignProjection() {
+      return Promise.resolve(
+        readSingletonProjection("campaign_state", nullableCampaignSchema, null),
       );
     },
     saveCampaignState(campaignState) {
@@ -2496,6 +2622,31 @@ export async function createFileJobFinderRepository(
       );
       runImmediateTransaction(database, () => {
         saveSingletonValue(database, "activity_control", normalized);
+      });
+      return secureDatabaseFile(options.filePath);
+    },
+    getApplyQueue() {
+      return Promise.resolve(
+        getSingletonValue(database, "apply_queue", ApplyQueueSchema, {
+          onInvalid: "fallback",
+        }),
+      );
+    },
+    saveApplyQueue(queue) {
+      runImmediateTransaction(database, () => {
+        if (queue === null) {
+          database
+            .prepare(
+              `DELETE FROM ${stateTableNames.singleton_state} WHERE key = ?`,
+            )
+            .run("apply_queue");
+          return;
+        }
+        saveSingletonValue(
+          database,
+          "apply_queue",
+          ApplyQueueSchema.parse(cloneValue(queue)),
+        );
       });
       return secureDatabaseFile(options.filePath);
     },

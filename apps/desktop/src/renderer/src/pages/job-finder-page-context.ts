@@ -69,6 +69,8 @@ import type { DiscoveryRunFeedback } from "@renderer/features/job-finder/screens
 import type { TailoredDraftPreparationViewState } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
 import type { ResumeWorkHistoryDecisionRequest } from "@renderer/features/job-finder/screens/review-queue/resume-workspace-work-history-decisions";
 import type { JobFinderSaveState } from "./job-finder-save-state";
+import type { ApplyQueueControlAction } from "@renderer/features/job-finder/lib/apply-queue-view";
+import type { RecentChange } from "@renderer/features/job-finder/lib/recent-changes";
 
 /**
  * Opt-in error propagation for one call, not a mode change for the action.
@@ -116,6 +118,10 @@ export interface JobFinderPageContext {
     applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
     options?: { stayOnCurrentPage?: boolean },
   ) => Promise<JobFinderAutoApplyQueueStartOutcome>;
+  /** The person's "Approve N resumes" press on Shortlisted. */
+  onApproveResumes: (jobIds: readonly string[]) => Promise<boolean>;
+  /** Pause, Continue, Stop or Dismiss the Apply queue (ADR 0058). */
+  onControlApplyQueue: (action: ApplyQueueControlAction) => void;
   onStartApplyCopilot: (input: JobFinderApplicationStartTarget) => void;
   onReviewResumePdf: (jobId: string) => void;
   /** Sends one finished application after the person presses Send. */
@@ -150,16 +156,27 @@ export interface JobFinderPageContext {
   ) => Promise<EmployerExclusionPreview>;
   onRemoveEmployerExclusion: (input: RemoveEmployerExclusionInput) => void;
   /** `quiet`: no success message; the triage bar's Undo asked for it. */
-  onRestoreDismissedJob: (
-    jobId: string,
-    options?: { quiet?: boolean },
-  ) => void;
+  onRestoreDismissedJob: (jobId: string, options?: { quiet?: boolean }) => void;
   onEditResumeWorkspace: (jobId: string) => void;
   onGenerateResume: (
     jobId: string,
     options?: { selectAfter?: boolean },
   ) => Promise<boolean>;
   onRemoveReviewJob: (jobId: string) => void;
+  /** Approved -> To review on purpose; Undo approves the same PDF again. */
+  onMoveResumesBackToReview: (jobIds: readonly string[]) => Promise<boolean>;
+  /** Takes waiting jobs out of the Apply queue before a run takes them. */
+  onTakeOutOfApplyQueue: (jobIds: readonly string[]) => Promise<boolean>;
+  /**
+   * Applications -> Shortlisted for an application nothing was sent for:
+   * its form closes, nothing is sent, history stays. Undo lists it again.
+   */
+  onReturnApplicationToShortlist: (record: {
+    id: string;
+    jobId: string;
+  }) => Promise<boolean>;
+  /** Puts a recorded move back (toast Undo, Activity's Recent changes). */
+  onUndoRecentChange: (change: RecentChange) => Promise<boolean>;
   onRemoveReviewJobs?: (
     jobIds: readonly string[],
     options?: { quiet?: boolean },
@@ -332,6 +349,12 @@ export interface JobFinderPageContext {
     pendingRequest: string | null,
   ) => void;
   onSaveResumeDraft: (draft: ResumeDraft) => void;
+  /** Saves Resume Studio edits by itself; resolves with what happened. */
+  onAutosaveResumeDraft: (
+    draft: ResumeDraft,
+    onSaved: (updatedAt: string) => void,
+    autosaveSessionId?: string,
+  ) => Promise<{ saved: true } | { saved: false; message: string }>;
   onSaveResumeDraftAndThen: (
     draft: ResumeDraft,
     next: () => void | Promise<void>,

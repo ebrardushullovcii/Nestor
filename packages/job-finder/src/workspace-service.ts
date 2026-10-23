@@ -1,4 +1,5 @@
 import { clearResumeBatchLiveness } from "./internal/resume-batch-checkpoint";
+import { createListingActivityIdentityIndex } from "./internal/listing-activity-identity-index";
 import type {
   BrowserSessionRuntime,
   OpenBrowserSessionOptions,
@@ -10,7 +11,9 @@ import { isDeepStrictEqual } from "node:util";
 import { recordApplicationsSentByPerson } from "./internal/application-sent-by-person";
 import { judgeUnjudgedPlanJobs } from "./internal/backlog-fit-judgment";
 import { refreshAutomaticApplicationFailurePauses } from "./internal/automatic-safeguards";
+import type { JobFinderRepository } from "@nestor/db";
 import {
+  ACTIVITY_PAUSED_MESSAGE,
   ApplicationRecordSchema,
   JobFinderDiscoveryCancellationInputSchema,
   JobFinderActivityControlSchema,
@@ -74,7 +77,10 @@ import { createWorkspaceGroupedAnswerMethods } from "./internal/workspace-groupe
 import { createWorkspaceCrmMethods } from "./internal/workspace-crm-methods";
 import { createWorkspaceIntelligenceMethods } from "./internal/workspace-intelligence-methods";
 import { createWorkspaceSafeguardMethods } from "./internal/workspace-safeguard-methods";
-import { createWorkspaceUserActionMethods } from "./internal/workspace-user-action-methods";
+import {
+  createWorkspaceUserActionMethods,
+  isWorkspaceActivityPaused,
+} from "./internal/workspace-user-action-methods";
 import { toDiscoverySessionState } from "./internal/discovery-state";
 import { uniqueStrings } from "./internal/shared";
 import { buildDiscoveryJobs } from "./internal/matching-review-queue";
@@ -203,6 +209,7 @@ import { readSavedJob } from "./internal/read-saved-job";
 export {
   MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
   MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN,
+  deriveGlobalDailyApplicationPreparationCapacity,
 } from "./internal/application-preparation-capacity";
 
 type PreparationCapacityState = {
@@ -256,11 +263,13 @@ export function createJobFinderWorkspaceService(
   options: CreateJobFinderWorkspaceServiceOptions,
 ): JobFinderWorkspaceService {
   const {
+    backgroundWorkReady,
     aiClient,
     visionProvider,
     browserRuntime,
     candidateAssetResolver,
     documentManager,
+    resumeDraftProcessor,
     exportFileVerifier,
     repository,
     researchAdapter,
@@ -418,6 +427,8 @@ export function createJobFinderWorkspaceService(
   }
 
   const context: WorkspaceServiceContext = {
+    ...(backgroundWorkReady ? { backgroundWorkReady } : {}),
+    ...(resumeDraftProcessor ? { resumeDraftProcessor } : {}),
     aiClient,
     ...(visionProvider ? { visionProvider } : {}),
     browserRuntime,
@@ -426,6 +437,7 @@ export function createJobFinderWorkspaceService(
     ...(exportFileVerifier ? { exportFileVerifier } : {}),
     repository,
     listingAssessmentJobIds: new Set<string>(),
+    listingActivityIdentityIndex: createListingActivityIdentityIndex(),
     listingAssessmentGenerationRef: { current: 0 },
     listingAssessmentAbortControllerRef: { current: new AbortController() },
     isWorkspaceClosing: () =>
@@ -653,6 +665,9 @@ export function createJobFinderWorkspaceService(
     async staleApprovedResumeDrafts(
       staleReason: string,
       jobIds?: readonly string[],
+      profileInputs?: Parameters<
+        NonNullable<JobFinderRepository["staleResumeDrafts"]>
+      >[0]["profileInputs"],
     ): Promise<void> {
       // The cached display rows, when the repository keeps them: every
       // draft holds whole resumes, and parsing them all again made each
@@ -697,7 +712,7 @@ export function createJobFinderWorkspaceService(
         }
         toStale.push({ draft, existingAsset });
       }
-      if (toStale.length === 0) return;
+      if (toStale.length === 0 && !profileInputs) return;
       // Only the approval fields change, so a repository that can mark them
       // in place does so in one transaction. Reading, validating and writing
       // each whole draft again held a profile save for about 1.5 s.
@@ -706,6 +721,7 @@ export function createJobFinderWorkspaceService(
           draftIds: toStale.map(({ draft }) => draft.id),
           staleReason,
           updatedAt: new Date().toISOString(),
+          ...(profileInputs ? { profileInputs } : {}),
         });
         return;
       }
@@ -723,6 +739,14 @@ export function createJobFinderWorkspaceService(
               }
             : null,
         });
+      }
+      if (profileInputs) {
+        if (profileInputs.searchPreferences)
+          await repository.saveProfileAndSearchPreferences(
+            profileInputs.profile,
+            profileInputs.searchPreferences,
+          );
+        else await repository.saveProfile(profileInputs.profile);
       }
     },
     async openRunBrowserSession(
@@ -985,14 +1009,7 @@ export function createJobFinderWorkspaceService(
     options: { nestedUserActionRecovery?: boolean } = {},
   ) {
     await requireDiscoverySafeguardClearance();
-    // Only read here, to fingerprint each job's sightings before the run:
-    // the cached display rows serve that without parsing and copying every
-    // job and run again (seconds of the main process at the press of Search).
-    let [campaignState, savedJobs, discoveryState] = await Promise.all([
-      repository.getCampaignState(),
-      repository.readSavedJobsProjection(),
-      repository.readDiscoveryDisplayProjection(),
-    ]);
+    let campaignState = await repository.getCampaignState();
     if (!campaignState && requestedCampaignId) {
       throw new Error("This search plan was removed; run the plan again");
     }
@@ -1009,10 +1026,6 @@ export function createJobFinderWorkspaceService(
           searchPreferences: await repository.getSearchPreferences(),
         });
       });
-      [savedJobs, discoveryState] = await Promise.all([
-        repository.readSavedJobsProjection(),
-        repository.readDiscoveryDisplayProjection(),
-      ]);
     }
     const campaignId = requestedCampaignId ?? campaignState.activeCampaignId;
     const campaign = campaignState.campaigns.find(
@@ -1041,12 +1054,6 @@ export function createJobFinderWorkspaceService(
       ctx: context,
       campaignId,
       beforeCampaignJobIds: campaign.jobIds,
-      beforeJobProvenanceFingerprints: new Map(
-        [...savedJobs, ...discoveryState.pendingDiscoveryJobs].map((job) => [
-          job.id,
-          JSON.stringify(job.provenance),
-        ]),
-      ),
     });
     await yieldToEventLoop();
     if (options.nestedUserActionRecovery) {
@@ -1111,6 +1118,19 @@ export function createJobFinderWorkspaceService(
   async function requireActivityEnabled(): Promise<void> {
     if ((await repository.getActivityControl()).paused) {
       await setActivityControl({ paused: false });
+    }
+    await onExplicitUserStart?.();
+  }
+
+  /**
+   * Application work is the exception: the global pause is the person's brake
+   * on anything that fills in or sends a form, so a row's Try again or an
+   * Apply press refuses instead of quietly lifting it. Continue on Home (or in
+   * the header) is the one way back.
+   */
+  async function requireApplicationActivityNotPaused(): Promise<void> {
+    if (await isWorkspaceActivityPaused(repository)) {
+      throw new Error(ACTIVITY_PAUSED_MESSAGE);
     }
     await onExplicitUserStart?.();
   }
@@ -1256,7 +1276,7 @@ export function createJobFinderWorkspaceService(
     reservedJobs = 0,
     reservedJobIds: readonly string[] = [],
   ): Promise<void> {
-    await requireActivityEnabled();
+    await requireApplicationActivityNotPaused();
     await requireEmployerApplicationCapacity(
       jobIds,
       run,
@@ -1609,6 +1629,7 @@ export function createJobFinderWorkspaceService(
         (discoveryState?.sessions ?? []).map((session) => session.adapterKind),
       ).filter(isJobSource);
       const shutdownResults = await Promise.allSettled([
+        ...(resumeDraftProcessor ? [resumeDraftProcessor.close()] : []),
         ...sessionSources.map((source) => browserRuntime.closeSession(source)),
         repository.close(),
       ]);

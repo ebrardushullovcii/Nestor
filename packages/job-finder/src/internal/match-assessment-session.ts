@@ -1,4 +1,5 @@
 import { buildFitVerdictContext } from "@nestor/ai-providers";
+import { fnv1a64 } from "@nestor/core";
 import type {
   CandidateProfile,
   FitJudgment,
@@ -75,12 +76,7 @@ function stableSerialize(value: unknown): string {
 
 function createFingerprint(prefix: string, value: unknown): string {
   const serialized = stableSerialize(value);
-  let hash = 0xcbf29ce484222325n;
-  for (let index = 0; index < serialized.length; index += 1) {
-    hash ^= BigInt(serialized.charCodeAt(index));
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
-  }
-  return `${prefix}_${hash.toString(16).padStart(16, "0")}`;
+  return `${prefix}_${fnv1a64(serialized)}`;
 }
 
 /**
@@ -128,9 +124,14 @@ export function createFitVerdictFingerprint(
  * was current, and stays current under the verdict fingerprint. Changing
  * the fingerprint function therefore never asks the model again.
  */
-export function rebindLegacyVerdict<T extends Pick<MatchAssessment, "judgment">>(
+export function rebindLegacyVerdict<
+  T extends Pick<MatchAssessment, "judgment">,
+>(
   assessment: T,
-  fingerprints: { verdictFingerprint: string; legacyVerdictFingerprint: string },
+  fingerprints: {
+    verdictFingerprint: string;
+    legacyVerdictFingerprint: string;
+  },
 ): T {
   const judgment = assessment.judgment;
   if (judgment?.contextFingerprint !== fingerprints.legacyVerdictFingerprint)
@@ -147,10 +148,27 @@ export function rebindLegacyVerdict<T extends Pick<MatchAssessment, "judgment">>
 export function createMatchAssessmentPostingFingerprint(
   posting: MatchAssessmentPostingInput,
 ): string {
-  return createFingerprint(
+  const prepared = Object.isFrozen(posting)
+    ? preparedPostingFingerprints.get(posting)
+    : undefined;
+  if (prepared) return prepared;
+  const fingerprint = createFingerprint(
     `match_posting_v4_logic${MATCH_ASSESSMENT_LOGIC_REVISION}`,
     createMatchAssessmentPostingInput(posting),
   );
+  if (Object.isFrozen(posting))
+    preparedPostingFingerprints.set(posting, fingerprint);
+  return fingerprint;
+}
+
+const preparedPostingFingerprints = new WeakMap<object, string>();
+/** Only frozen repository rows may reuse an inventory worker's exact digest. */
+export function rememberMatchAssessmentPostingFingerprint(
+  posting: MatchAssessmentPostingInput,
+  fingerprint: string,
+): void {
+  if (Object.isFrozen(posting))
+    preparedPostingFingerprints.set(posting, fingerprint);
 }
 
 function assessmentCacheKey(
@@ -201,6 +219,7 @@ export function createMatchAssessmentSession(input: {
   const assess = (
     posting: JobPosting & { matchAssessment?: MatchAssessment | null },
     carriedInput: FitJudgment | null = readCarriedJudgment(posting),
+    knownPostingFingerprint?: string,
   ): MatchAssessment => {
     const carried =
       carriedInput?.contextFingerprint === fingerprints.legacyVerdictFingerprint
@@ -227,7 +246,8 @@ export function createMatchAssessmentSession(input: {
       return previous;
     const postingInput = createMatchAssessmentPostingInput(posting);
     const postingFingerprint =
-      createMatchAssessmentPostingFingerprint(postingInput);
+      knownPostingFingerprint ??
+      createMatchAssessmentPostingFingerprint(posting);
     const cacheKey = assessmentCacheKey(postingFingerprint, carried);
     const cached = cache.get(cacheKey);
     if (cached) {
@@ -253,9 +273,11 @@ export function createMatchAssessmentSession(input: {
     storedAssessment: MatchAssessment | null | undefined,
   ): MatchAssessment => {
     const persistedAssessment = rebind(storedAssessment);
-    const postingFingerprint = createMatchAssessmentPostingFingerprint(
-      createMatchAssessmentPostingInput(posting),
-    );
+    // assess() carries a completed model verdict unchanged even when its
+    // context is stale. Hashing the full listing first cannot change that
+    // answer and allocated gigabytes during inventory revalidation.
+    if (persistedAssessment?.judgment) return persistedAssessment;
+    const postingFingerprint = createMatchAssessmentPostingFingerprint(posting);
     if (
       persistedAssessment?.scorerVersion === MATCH_ASSESSMENT_SCORER_VERSION &&
       persistedAssessment.contextFingerprint === contextFingerprint &&
@@ -273,6 +295,7 @@ export function createMatchAssessmentSession(input: {
       assess(
         { ...posting, matchAssessment: persistedAssessment ?? null },
         persistedAssessment?.judgment ?? null,
+        postingFingerprint,
       ),
     );
   };

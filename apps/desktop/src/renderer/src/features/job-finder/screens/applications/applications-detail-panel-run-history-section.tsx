@@ -110,7 +110,9 @@ export function ApplicationsDetailPanelRunHistorySection(props: {
 }) {
   const { applyRunHistory, onSelectApplyRun, selectedApplyRunId } = props;
 
-  if (!applyRunHistory.length) {
+  // One run is the state the status line above already gives; the list only
+  // earns its place once there is an earlier run to compare or open.
+  if (applyRunHistory.length < 2) {
     return null;
   }
 
@@ -124,7 +126,7 @@ export function ApplicationsDetailPanelRunHistorySection(props: {
   return (
     <section className="surface-card-tint grid gap-3 rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-4">
       <h3 className={cn(APPLICATION_DETAIL_FACT_LABEL_CLASS, "text-primary")}>
-        Current preparation run
+        Preparation runs
       </h3>
       <RunHistoryEntry
         isSelected

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   buildResumeDraftContentHash,
   buildResumeRenderDocument,
@@ -9,6 +9,93 @@ import {
 } from "./workspace-service.test-support";
 
 describe("resume pdf export binding", () => {
+  function hashedDocumentManager() {
+    const manager = createDocumentManager();
+    return {
+      ...manager,
+      async renderResumeArtifact(
+        input: Parameters<typeof manager.renderResumeArtifact>[0],
+      ) {
+        return {
+          ...(await manager.renderResumeArtifact(input)),
+          sha256: "a".repeat(64),
+        };
+      },
+    };
+  }
+  test("bulk approval reuses the exact current PDF and runs the normal approval write", async () => {
+    const { repository, workspaceService, documentManager } =
+      createWorkspaceServiceHarness({
+        documentManager: hashedDocumentManager(),
+        exportFileVerifier: {
+          exists: () => Promise.resolve(true),
+          sha256: () => Promise.resolve("a".repeat(64)),
+        },
+      });
+    await workspaceService.getResumeWorkspace("job_ready");
+    const exported = await workspaceService.exportResumePdf("job_ready");
+    const artifact = exported.resumeExportArtifacts.find(
+      (a) => a.jobId === "job_ready",
+    )!;
+    const render = vi.spyOn(documentManager, "renderResumeArtifact");
+    const approve = vi.spyOn(repository, "approveResumeExport");
+    await workspaceService.approveCurrentResume("job_ready");
+    await workspaceService.approveCurrentResume("job_ready");
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(render).not.toHaveBeenCalled();
+    const [approval] = approve.mock.calls[0]!;
+    expect(approval.exportArtifact).toEqual({ ...artifact, isApproved: true });
+    expect(approval.draft).toMatchObject({
+      status: "approved",
+      approvedExportId: artifact.id,
+    });
+    expect(
+      await repository.listResumeExportArtifacts({ jobId: "job_ready" }),
+    ).toHaveLength(1);
+  });
+
+  test("bulk approval rebuilds a missing export and refuses changed PDF bytes", async () => {
+    let exists = true;
+    let digest = "a".repeat(64);
+    const { workspaceService, documentManager } = createWorkspaceServiceHarness(
+      {
+        documentManager: hashedDocumentManager(),
+        exportFileVerifier: {
+          exists: () => Promise.resolve(exists),
+          sha256: () => Promise.resolve(digest),
+        },
+      },
+    );
+    await workspaceService.getResumeWorkspace("job_ready");
+    await workspaceService.exportResumePdf("job_ready");
+    const render = vi.spyOn(documentManager, "renderResumeArtifact");
+    digest = "b".repeat(64);
+    await expect(
+      workspaceService.approveCurrentResume("job_ready"),
+    ).rejects.toThrow(/(hash|changed|match)/i);
+    expect(render).not.toHaveBeenCalled();
+    digest = "a".repeat(64);
+    exists = false;
+    render.mockImplementation(() => {
+      exists = true;
+      return Promise.resolve({
+        fileName: "rebuilt.pdf",
+        storagePath: "/tmp/rebuilt.pdf",
+        sha256: digest,
+        format: "pdf" as const,
+        intermediateFileName: "rebuilt.html",
+        intermediateStoragePath: "/tmp/rebuilt.html",
+        pageCount: 1,
+        warnings: [],
+      });
+    });
+    await workspaceService.approveCurrentResume("job_ready");
+    expect(render).toHaveBeenCalledTimes(1);
+    expect(
+      (await workspaceService.getResumeWorkspace("job_ready")).draft.status,
+    ).toBe("approved");
+  });
+
   test("exports and approves the exact sanitized draft whose claims were validated", async () => {
     const baseDocumentManager = createDocumentManager();
     let capturedRenderDocument:

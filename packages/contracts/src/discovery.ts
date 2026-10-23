@@ -59,7 +59,10 @@ import {
   BrowserVisualObservationSetSchema,
   ApplyVisualCheckpointSchema,
 } from "./visual";
-import { ApplicationCrmDataSchema } from "./application-crm";
+import {
+  ApplicationCrmDataSchema,
+  isApplicationTrackedAsSentByPerson,
+} from "./application-crm";
 import { ApplicationListingSignalEvidenceSchema } from "./job-finder-intelligence";
 
 export const JobDiscoveryTargetSchema = z.object({
@@ -1225,13 +1228,28 @@ function normalizeDetailQualityText(value: string): string {
 }
 
 function countDetailQualityWords(value: string): number {
-  return value.trim().split(/\s+/u).filter(Boolean).length;
+  // All decisions use thresholds at or below 70. Count only that prefix;
+  // splitting a full listing allocated thousands of strings each time it
+  // passed through normalization, capture and assessment.
+  const words = /\S+/gu;
+  let count = 0;
+  while (count < ENRICHED_DESCRIPTION_WORD_FLOOR && words.test(value))
+    count += 1;
+  return count;
 }
 
-function isSyntheticDescription(input: JobPostingDetailQualityInput): boolean {
-  const description = normalizeDetailQualityText(input.description);
+function isSyntheticDescription(
+  input: JobPostingDetailQualityInput,
+  descriptionWords: number,
+): boolean {
   const title = normalizeDetailQualityText(input.title);
   const company = normalizeDetailQualityText(input.company);
+  if (
+    descriptionWords >
+    countDetailQualityWords(title) + countDetailQualityWords(company) + 3
+  )
+    return false;
+  const description = normalizeDetailQualityText(input.description);
 
   return (
     description === title ||
@@ -1257,7 +1275,10 @@ export function assessJobPostingDetailQuality(
     (total, entry) => total + entry.length,
     0,
   );
-  const syntheticDescription = isSyntheticDescription(input);
+  const syntheticDescription = isSyntheticDescription(
+    input,
+    descriptionWordCount,
+  );
 
   if (
     (!syntheticDescription &&
@@ -1617,21 +1638,41 @@ type SavedJobInput = z.input<typeof JobPostingSchema> & {
     | undefined;
 };
 
+const SavedJobObjectSchema = JobPostingSchema.extend({
+  id: NonEmptyStringSchema,
+  campaignIds: z.array(NonEmptyStringSchema).default([]),
+  personSupplied: z.boolean().optional(),
+  planAssessments: z.record(MatchAssessmentSchema).optional(),
+  status: ApplicationStatusSchema,
+  matchAssessment: MatchAssessmentSchema,
+  provenance: z.array(SavedJobDiscoveryProvenanceSchema).default([]),
+  discoveryFeedback: DiscoveryFeedbackSchema.nullable().default(null),
+  resumeApplicationMode: ResumeApplicationModeSchema.nullable().default(null),
+  resumeTailoringMode: TailoringModeSchema.nullable().default(null),
+  latestMatchAssessmentAudit:
+    MatchAssessmentChangeAuditSchema.nullable().default(null),
+});
 export const SavedJobSchema: z.ZodType<SavedJob, z.ZodTypeDef, SavedJobInput> =
-  JobPostingSchema.extend({
-    id: NonEmptyStringSchema,
-    campaignIds: z.array(NonEmptyStringSchema).default([]),
-    personSupplied: z.boolean().optional(),
-    planAssessments: z.record(MatchAssessmentSchema).optional(),
-    status: ApplicationStatusSchema,
-    matchAssessment: MatchAssessmentSchema,
-    provenance: z.array(SavedJobDiscoveryProvenanceSchema).default([]),
-    discoveryFeedback: DiscoveryFeedbackSchema.nullable().default(null),
-    resumeApplicationMode: ResumeApplicationModeSchema.nullable().default(null),
-    resumeTailoringMode: TailoringModeSchema.nullable().default(null),
-    latestMatchAssessmentAudit:
-      MatchAssessmentChangeAuditSchema.nullable().default(null),
-  });
+  SavedJobObjectSchema;
+
+/** Main's retained list facts; listing bodies remain behind repository reads. */
+export const SavedJobListFactsSchema = SavedJobObjectSchema.omit({
+  description: true,
+  summary: true,
+  keySkills: true,
+  responsibilities: true,
+  minimumQualifications: true,
+  preferredQualifications: true,
+  benefits: true,
+  sourceIntelligence: true,
+  screeningHints: true,
+  keywordSignals: true,
+}).extend({
+  provenance: z
+    .array(SavedJobDiscoveryProvenanceSchema.omit({ listingFacts: true }))
+    .default([]),
+});
+export type SavedJobListFacts = z.infer<typeof SavedJobListFactsSchema>;
 
 export const ListingActivitySchema = z.discriminatedUnion("status", [
   z
@@ -2833,13 +2874,12 @@ export function recoverInterruptedDiscoveryRun(
  * failure.
  */
 /**
- * What the service says when background work is paused and something tried to
- * start anyway. It names the control the person can actually press: the app
- * has no "command center", it has a "Resume background work" button in the
- * header of the Job Finder Home screen.
+ * What the service says when all work is paused and an application tried to
+ * start anyway. It names the control the person can actually press: Continue,
+ * on Home and in the header.
  */
 export const ACTIVITY_PAUSED_MESSAGE =
-  "Browser and application activity is paused. Press Resume background work on the Job Finder Home screen before starting new work.";
+  "All work is paused, so this did not start. Press Continue on Home to start work again.";
 
 export const DISCOVERY_RUN_ALREADY_ACTIVE_MESSAGE =
   "A search is already running for this plan.";
@@ -2899,8 +2939,61 @@ export const ApplicationRecordSchema = z.object({
    * did.
    */
   automationMode: ApplicationAutomationModeSchema.default("prepare_only"),
+  /**
+   * When the person moved this unsent application back to Shortlisted. It
+   * leaves Applications until the record is next updated (a new Apply), and
+   * keeps its history and receipts. Optional so a build without it reads the
+   * record anyway (the object is not strict and drops the key); such a build
+   * simply lists the application again.
+   */
+  returnedToShortlistAt: IsoDateTimeSchema.nullable().optional(),
 });
 export type ApplicationRecord = z.infer<typeof ApplicationRecordSchema>;
+
+/**
+ * Moved back to Shortlisted and not touched since: Applications leaves it out
+ * and Shortlisted shows the job again. Any later write (a new Apply) moves the
+ * last update past the marker and brings it back.
+ */
+export function isApplicationReturnedToShortlist(
+  record: Pick<ApplicationRecord, "lastUpdatedAt" | "returnedToShortlistAt">,
+): boolean {
+  return (
+    typeof record.returnedToShortlistAt === "string" &&
+    Date.parse(record.returnedToShortlistAt) >= Date.parse(record.lastUpdatedAt)
+  );
+}
+
+const SENT_APPLICATION_STATUSES = new Set<ApplicationRecord["status"]>([
+  "submitted",
+  "assessment",
+  "interview",
+  "rejected",
+  "offer",
+]);
+
+/**
+ * The record says this application went to the employer: sent by Job Finder,
+ * or by the person by their own word. A sent application cannot go back to
+ * Shortlisted; it can be marked withdrawn or archived.
+ */
+export function isApplicationRecordSent(
+  record: Pick<
+    ApplicationRecord,
+    "status" | "lastAttemptState" | "personSendReceipt" | "crm"
+  >,
+): boolean {
+  return (
+    SENT_APPLICATION_STATUSES.has(record.status) ||
+    record.lastAttemptState === "submitted" ||
+    record.personSendReceipt !== undefined ||
+    isApplicationTrackedAsSentByPerson(record.crm)
+  );
+}
+
+/** Why a sent application has no "Move back to Shortlisted". */
+export const APPLICATION_SENT_CANNOT_MOVE_BACK_MESSAGE =
+  "It was sent, so it stays here. Mark it withdrawn or archive it instead.";
 /**
  * What a caller may hand the repository. Defaulted fields may be omitted; the
  * repository parses before it stores, so every stored record is complete.

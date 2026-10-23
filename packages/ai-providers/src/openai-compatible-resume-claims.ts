@@ -1,3 +1,4 @@
+import { PERSON_FACING_VOICE_INSTRUCTION } from "./openai-compatible-fit";
 import type { ResumeClaimCheckInput, ResumeClaimCheckResult } from "./shared";
 
 /**
@@ -13,7 +14,9 @@ export const RESUME_CLAIM_CHECK_BATCH_SIZE = 40;
 export function buildResumeClaimCheckPrompt(): string {
   return [
     "You check the lines of a tailored resume against the candidate's own evidence: their profile, their saved records and the resume they imported.",
+    `The reason and style notes are shown to that person (a fix is resume text, not a note). ${PERSON_FACING_VOICE_INSTRUCTION}`,
     'Return JSON {"checks": [{"id": "<the claim id exactly as given>", "verdict": "...", "reason": "...", "evidenceIds": ["..."], "style": null, "fix": "..."}]} with one entry per claim: a short reason addressed to the candidate, and evidenceIds: the ids of the evidence entries that back the line (empty when none do).',
+    "Cite each evidence entry's short id, never its sourceId. sourceId preserves its original source identity and groups facts from the same saved record; keep those facts with that record.",
     'verdict "supported": the evidence states it, in these or other words. A skill named in a skills section is supported when the evidence shows the candidate using it. Summaries that combine supported facts are supported.',
     'verdict "stretch": a small, plausible step beyond the evidence that the candidate could back in an interview, such as a technology the job asks for that fits work they describe, or years of experience rounded up by at most one. The candidate confirms each stretch before the resume is used.',
     'verdict "unsupported": the evidence does not support it: an invented number, result, employer, title, date, degree, certification or achievement, a tool or duty with no basis in the evidence, or a duty from the job posting written as the candidate\'s own experience.',

@@ -1,8 +1,4 @@
-import type {
-  DatabaseSync,
-  SQLInputValue,
-  StatementSync,
-} from "node:sqlite";
+import type { DatabaseSync, SQLInputValue, StatementSync } from "node:sqlite";
 import {
   ApplicationAttemptSchema,
   ApplicationRecordSchema,
@@ -31,7 +27,12 @@ import {
   type RowValidationStamp,
 } from "./row-validation-marks";
 import { freezeProjection } from "./saved-job-projection";
+import {
+  createResumeApprovalProjection,
+  createTailoredAssetFileProjection,
+} from "./resume-approval-state";
 import { parsePersistedRowValue, type StateCollectionTable } from "./state";
+import type { ResumeStateFold } from "./resume-approval-fold";
 
 /**
  * This is a borrowed read path, not a canonical repository cache. TEMP markers
@@ -46,13 +47,22 @@ export function createDisplayCollectionsReader(
   } = {},
 ) {
   const readVersion = database.prepare("PRAGMA data_version");
+  const foldPreparers = new Map<
+    string,
+    (fold: ResumeStateFold) => () => void
+  >();
+  let cachedDraftHasApproval: (id: string) => boolean | undefined = () =>
+    undefined;
 
   function collection<T extends { id: string }>(
     table: StateCollectionTable,
     schema: SchemaParser<T>,
     orderBy: string,
     where = "1",
-    { marked = false }: { marked?: boolean } = {},
+    {
+      marked = false,
+      hasApproval,
+    }: { marked?: boolean; hasApproval?: (row: T) => boolean } = {},
   ): () => readonly T[] {
     const prefix = `display_${table}`;
     const marks = marked
@@ -91,6 +101,41 @@ export function createDisplayCollectionsReader(
     const clear = database.prepare(
       `DELETE FROM ${prefix}_changes WHERE revision <= ?`,
     );
+    if (table === "resume_drafts" || table === "tailored_assets") {
+      const pending = database.prepare(
+        `SELECT revision FROM ${prefix}_changes WHERE id = ? AND revision > ?`,
+      );
+      const clearFold = database.prepare(
+        `DELETE FROM ${prefix}_changes WHERE id = ?`,
+      );
+      if (hasApproval) {
+        cachedDraftHasApproval = (id) => {
+          const body = rowsById.get(id);
+          if (
+            !body ||
+            Number(readVersion.get()?.data_version) !== cachedVersion ||
+            pending.get(id, cachedEpoch)
+          )
+            return undefined;
+          return hasApproval(body);
+        };
+      }
+      foldPreparers.set(table, ({ id, patch }) => {
+        // Reuse only a body whose exact pre-fold version is already cached.
+        // Other writers and earlier unconsumed edits still take the normal read.
+        const body = rowsById.get(id);
+        if (
+          !body ||
+          Number(readVersion.get()?.data_version) !== cachedVersion ||
+          pending.get(id, cachedEpoch)
+        )
+          return () => {};
+        return () => {
+          rowsById.set(id, Object.freeze({ ...body, ...patch }));
+          clearFold.run(id);
+        };
+      });
+    }
     let snapshot: readonly T[] | null = null;
     let rowsById = new Map<string, T>();
     let cachedEpoch = -1;
@@ -171,7 +216,13 @@ export function createDisplayCollectionsReader(
       ResumeDraftSchema,
       "updated_at DESC, id ASC",
       "1",
-      { marked: true },
+      {
+        marked: true,
+        hasApproval: (draft) =>
+          draft.status === "approved" ||
+          draft.approvedAt !== null ||
+          draft.approvedExportId !== null,
+      },
     ),
     resumeExportArtifacts: collection(
       "resume_export_artifacts",
@@ -243,11 +294,13 @@ export function createDisplayCollectionsReader(
     )`,
     ),
   };
-  return (): Promise<JobFinderDisplayCollections> => {
+  const projectResumeApprovals = createResumeApprovalProjection(database);
+  const projectTailoredFiles = createTailoredAssetFileProjection(database);
+  const read = (): Promise<JobFinderDisplayCollections> => {
     try {
       return Promise.resolve({
-        tailoredAssets: readers.tailoredAssets(),
-        resumeDrafts: readers.resumeDrafts(),
+        tailoredAssets: projectTailoredFiles(readers.tailoredAssets()),
+        resumeDrafts: projectResumeApprovals(readers.resumeDrafts()),
         resumeExportArtifacts: readers.resumeExportArtifacts(),
         resumeResearchArtifacts: readers.resumeResearchArtifacts(),
         applyRuns: readers.applyRuns(),
@@ -268,4 +321,9 @@ export function createDisplayCollectionsReader(
       );
     }
   };
+  return Object.assign(read, {
+    draftHasApproval: (id: string) => cachedDraftHasApproval(id),
+    prepareResumeStateFold: (fold: ResumeStateFold) =>
+      foldPreparers.get(fold.table)?.(fold) ?? (() => {}),
+  });
 }

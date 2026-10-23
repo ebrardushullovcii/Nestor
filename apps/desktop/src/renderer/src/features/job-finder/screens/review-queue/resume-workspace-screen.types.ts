@@ -52,6 +52,14 @@ export interface ResumeWorkspaceScreenProps {
     successMessage?: string | null,
     onSaved?: (updatedAt: string) => void,
   ) => void;
+  /**
+   * Saves the edits a moment after the last one, without locking the
+   * fields. Absent in tests and previews that only render the editor.
+   */
+  onAutosaveDraft?: (
+    draft: ResumeDraft,
+    onSaved: (updatedAt: string) => void,
+  ) => Promise<{ saved: true } | { saved: false; message: string }>;
   onExportPdf: (jobId: string) => void;
   /** Records that the imported resume is this person's own document. */
   onClaimResumeIdentity?: () => void;

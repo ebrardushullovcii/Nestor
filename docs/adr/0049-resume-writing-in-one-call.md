@@ -16,4 +16,4 @@ Resume generation ran as an open agent loop: read the context, read the template
 
 ## Consequences
 
-A resume costs one writer call, the claim check its render triggers, and a short re-check of any lines the check's fixes rewrote. Grounding, claim checks, Aggressive confirmations and the person's review are unchanged. A model that cannot produce a clean draft within three calls stops instead of looping, and its draft arrives with the unresolved lines marked for review. On a slow provider (about 100 seconds a call) a failure used to discard seven minutes of writing.
+A resume costs one writer call, the claim check its render triggers, and a short re-check of any lines the check's fixes rewrote. Grounding, claim checks, Aggressive confirmations and the person's review are unchanged. A model that cannot produce a clean draft within three calls stops instead of looping, and the check settles the draft: a rewrite that fails its re-check returns to saved wording or is left off. On a slow provider (about 100 seconds a call) a failure used to discard seven minutes of writing.

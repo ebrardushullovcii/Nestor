@@ -182,6 +182,11 @@ export function ProfileSetupStepFooter(props: {
     canFinishSetup: props.canFinishSetup,
     remainingBlockerLabels: props.remainingBlockerLabels ?? [],
   });
+  // Only what the person typed is "unsaved": details filled in from their
+  // resume save with the step's own button, so they get no warning and no
+  // separate Save button.
+  const showsUnsavedEdits =
+    props.hasUnsavedChanges && props.hasUserEdits !== false;
 
   return (
     // F82: `sm:flex-wrap` + `justify-between` meant that whenever the status
@@ -201,7 +206,7 @@ export function ProfileSetupStepFooter(props: {
               answered at a glance rather than read out of muted body text. */}
           <p
             className={
-              props.hasUnsavedChanges
+              showsUnsavedEdits
                 ? "flex items-center gap-2 text-sm font-medium leading-5 text-(--warning-text)"
                 : "flex items-center gap-2 text-sm leading-5 text-foreground-soft"
             }
@@ -212,7 +217,7 @@ export function ProfileSetupStepFooter(props: {
             <span
               aria-hidden="true"
               className={
-                props.hasUnsavedChanges
+                showsUnsavedEdits
                   ? "size-2 shrink-0 rounded-full bg-(--warning-text)"
                   : "size-2 shrink-0 rounded-full bg-(--disabled-foreground)"
               }
@@ -224,7 +229,7 @@ export function ProfileSetupStepFooter(props: {
                   // user of leaving work behind before they have typed anything.
                   // Not "on this step": an import lands on Job targets while
                   // the detail it filled in (a summary) sits on Basics.
-                  "Imported details are not saved yet."
+                  "Filled in from your resume. Saved when you continue."
                 : "Unsaved setup changes."
               : "No unsaved changes."}
           </p>
@@ -248,15 +253,17 @@ export function ProfileSetupStepFooter(props: {
       </div>
 
       <div className="flex shrink-0 flex-wrap items-center gap-2 sm:ml-auto sm:justify-end">
-        <Button
-          disabled={props.isProfileSetupPending || !props.hasUnsavedChanges}
-          pending={props.isProfileSetupPending}
-          onClick={props.onSaveCurrentStep}
-          type="button"
-          variant="secondary"
-        >
-          Save changes
-        </Button>
+        {showsUnsavedEdits ? (
+          <Button
+            disabled={props.isProfileSetupPending}
+            pending={props.isProfileSetupPending}
+            onClick={props.onSaveCurrentStep}
+            type="button"
+            variant="secondary"
+          >
+            Save changes
+          </Button>
+        ) : null}
         {continueAction ? (
           <Button
             disabled={props.isProfileSetupPending}

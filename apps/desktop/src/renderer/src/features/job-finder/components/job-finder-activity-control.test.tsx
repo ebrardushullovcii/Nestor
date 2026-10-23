@@ -42,7 +42,7 @@ describe("JobFinderActivityControl", () => {
     );
     expect(screen.getByText(/local edits still work/i)).toBeTruthy();
     fireEvent.click(
-      screen.getByRole("button", { name: "Resume" }),
+      screen.getByRole("button", { name: "Continue" }),
     );
     expect(onResume).toHaveBeenCalledOnce();
   });

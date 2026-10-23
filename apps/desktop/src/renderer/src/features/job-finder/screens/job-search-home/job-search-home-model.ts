@@ -1,5 +1,6 @@
 import type {
   ApplicationAutomationMode,
+  ApplicationPageState,
   DiscoveryRunRecord,
   JobFinderSearchRequest,
   JobFinderRendererWorkspaceSnapshot,
@@ -24,6 +25,7 @@ import type {
 import {
   countApplicationRecords,
   countDiscoveryVisibleJobs,
+  countDiscoveryWeakerJobs,
   countNeedsYou,
   countSafeguardBlockers,
   countShortlistedJobs,
@@ -35,6 +37,7 @@ import {
   getDiscoveryRunReportCounts,
 } from "../../lib/discovery-run-count-label";
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
+import { pageNeedsPreparing } from "../../hooks/use-application-page-states";
 import {
   describeSourcesNeedingAttention,
   listSourcesNeedingAttention,
@@ -47,8 +50,10 @@ import {
   resolveApplyStatePresentation,
 } from "../applications/apply-state";
 import { buildApplyRunContextReader } from "../applications/applications-recovery-state";
-import { isDiscoveryAlsoFoundResult } from "../discovery/discovery-result-groups";
-import { getDiscoveryRunFailureRecovery } from "../discovery/discovery-run-feedback";
+import {
+  getDiscoveryRunFailureRecovery,
+  isAppSideDiscoveryFailure,
+} from "../discovery/discovery-run-feedback";
 import {
   APPLICATION_PREPARATION_BATCH_LIMIT,
   collectInProgressApplicationJobIds,
@@ -61,6 +66,13 @@ import {
   needsPersonResumeReview,
 } from "../review-queue/review-queue-status";
 import { buildResumeWorkspaceRoute } from "../../lib/resume-workspace-route";
+import {
+  describeApplyQueue,
+  isApplyQueueOngoing,
+  listApplyQueueWaitingJobIds,
+  type ApplyQueueControlAction,
+  type ApplyQueueViewButton,
+} from "../../lib/apply-queue-view";
 import {
   formatDiscoveryRunSourceProblemSummary,
   selectNewestSettledDiscoveryRun,
@@ -85,6 +97,7 @@ export type HomeAction =
   | { kind: "send_prepared"; jobIds: readonly string[] }
   | { kind: "stop_search"; runId: string }
   | { kind: "stop_apply"; runId: string }
+  | { kind: "apply_queue"; action: ApplyQueueControlAction }
   | { kind: "stop_resumes" }
   | { kind: "pause_activity" }
   | { kind: "resume_activity" };
@@ -149,6 +162,8 @@ interface HomeNowItem {
   detail: string;
   stop: HomeButton | null;
   open: HomeButton | null;
+  /** False for work that waits (paused, or until tomorrow): no pulse. */
+  active?: boolean;
 }
 
 interface HomeProblem {
@@ -188,12 +203,20 @@ interface JobSearchHomeModel {
 export interface BuildJobSearchHomeModelInput {
   workspace: JobFinderRendererWorkspaceSnapshot;
   tasks: JobFinderTaskCenterModel;
-  tailoredDraftPreparation?: TailoredDraftPreparationViewState | null | undefined;
+  tailoredDraftPreparation?:
+    | TailoredDraftPreparationViewState
+    | null
+    | undefined;
   /** A search request is in flight but the run has not been recorded yet. */
   discoveryRunPending: boolean;
   /** Whether Home may start a search itself. */
   canRunDiscovery: boolean;
   applicationAutomationMode: ApplicationAutomationMode;
+  /**
+   * Whether each ready form is open, can be reopened, or has to be prepared
+   * again. A form that reopens is just ready; only the rest count as closed.
+   */
+  applicationPageStates?: ReadonlyMap<string, ApplicationPageState>;
   now?: number;
 }
 
@@ -339,8 +362,8 @@ function describeRetryReason(
   const notSentReasons = retryJobIds.flatMap((jobId) =>
     closedFilledFormJobIds.includes(jobId)
       ? []
-      : [notSentRetryReasons.get(jobId)].filter(
-          (reason): reason is string => Boolean(reason),
+      : [notSentRetryReasons.get(jobId)].filter((reason): reason is string =>
+          Boolean(reason),
         ),
   );
   const notSent = notSentReasons.length;
@@ -386,17 +409,30 @@ function describeHeldForResumeReview(count: number): string | null {
     : `${count} others wait until you approve their changed Aggressive resumes; open them in Applications.`;
 }
 
+/**
+ * The word on a press that runs applications again. In Send for me those runs
+ * send, so it says Apply; "Try again" there read as harmless.
+ */
+function retryWord(mode: ApplicationAutomationMode): string {
+  return mode === "autonomous_submit" ? "Apply again" : "Try again";
+}
+
 /** The in-place press named with its count, for use beside another card. */
-function describeSecondaryPress(step: HomeNextStep, total: number): string {
+function describeSecondaryPress(
+  step: HomeNextStep,
+  total: number,
+  mode: ApplicationAutomationMode,
+): string {
   const action = step.primary.action;
   if (action.kind !== "apply_all") return step.primary.label;
   const n = action.jobIds.length;
   if (step.id === "retry") {
+    const again = retryWord(mode);
     return n < total
-      ? `Try again for ${n} of ${total}`
+      ? `${again} for ${n} of ${total}`
       : n === 1
-        ? "Try again for 1 application"
-        : `Try again for all ${n}`;
+        ? `${again} for 1 application`
+        : `${again} for all ${n}`;
   }
   return n < total
     ? `Apply to ${n} of ${total}`
@@ -469,6 +505,7 @@ function countApplications(
   jobIds: ReadonlySet<string>,
   /** Jobs whose resume the person must approve first; a batch refuses them. */
   resumeReviewJobIds: ReadonlySet<string>,
+  pageStates: ReadonlyMap<string, ApplicationPageState> = new Map(),
 ): ApplicationCounts {
   const retryJobIds: string[] = [];
   const pageClosedJobIds: string[] = [];
@@ -568,6 +605,15 @@ function countApplications(
         else counts.fillingIn += 1;
         break;
       case "ready_to_send":
+        // Its saved form can no longer be filled back in: it is a closed
+        // form, not one ready to send.
+        if (pageNeedsPreparing(pageStates.get(result.id))) {
+          counts.couldNotApply += 1;
+          if (!pageClosedJobIds.includes(record.jobId)) {
+            pageClosedJobIds.push(record.jobId);
+          }
+          break;
+        }
         counts.readyToSend += 1;
         readyToSendJobIds.push(record.jobId);
         if (describeNotSentResult(result)) notSentReasons.push(result.summary);
@@ -733,6 +779,37 @@ function countShortlist(
         readyJobIds.length -
         missingResumes,
     ),
+  };
+}
+
+function toHomeQueueButton(
+  button: ApplyQueueViewButton | null,
+): HomeButton | null {
+  if (!button) return null;
+  return {
+    label: button.label,
+    action:
+      button.action === "raise_limit"
+        ? { kind: "navigate", route: applyingSettingsRoute }
+        : { kind: "apply_queue", action: button.action },
+  };
+}
+
+/** The Apply queue, first in Happening now, with its two controls. */
+function buildApplyQueueNowItem(
+  queue: JobFinderRendererWorkspaceSnapshot["applyQueue"],
+  dailyLimit: number | null,
+  results: JobFinderRendererWorkspaceSnapshot["applyJobResults"],
+): HomeNowItem | null {
+  const view = describeApplyQueue(queue, { dailyLimit, results });
+  if (!view) return null;
+  return {
+    id: "apply-queue",
+    title: view.title,
+    detail: view.detail,
+    active: view.active,
+    open: toHomeQueueButton(view.primary),
+    stop: toHomeQueueButton(view.secondary),
   };
 }
 
@@ -938,29 +1015,49 @@ export function buildJobSearchHomeModel(
   );
 
   const newestRun = newestDiscoveryRun(workspace);
+  // Every source of the newest search failed for the same reason the app
+  // owns (its AI was unavailable): that is an outage to say once, not a
+  // source to fix.
+  const newestRunFailedWarnings = (newestRun?.targetExecutions ?? [])
+    .filter((execution) => execution.state === "failed")
+    .map((execution) => execution.warning ?? "");
+  const newestRunFailedForTheApp =
+    newestRunFailedWarnings.length > 0 &&
+    newestRunFailedWarnings.every(isAppSideDiscoveryFailure);
   const hasDiscoveryNow = tasks.items.some(
     (item) =>
       item.kind === "discovery" &&
       (item.status === "active" || item.status === "stopping"),
   );
-  const nowItems = tasks.items
-    .map((item) =>
-      buildNowItem(
-        item,
-        workspace.activityControl.paused &&
-          workspace.activityControl.pauseBehavior === "finish_current",
-      ),
-    )
-    .filter((item): item is HomeNowItem => item !== null);
+  const queueNow = buildApplyQueueNowItem(
+    workspace.applyQueue,
+    workspace.dashboard?.globalDailyApplicationPreparationCapacity?.limit ??
+      null,
+    workspace.applyJobResults,
+  );
+  const nowItems = [
+    ...(queueNow ? [queueNow] : []),
+    ...tasks.items
+      .map((item) =>
+        buildNowItem(
+          item,
+          workspace.activityControl.paused &&
+            workspace.activityControl.pauseBehavior === "finish_current",
+        ),
+      )
+      .filter((item): item is HomeNowItem => item !== null),
+  ];
   const searchRunning = hasDiscoveryNow || input.discoveryRunPending;
   const resumesWriting = tasks.items.some(
     (item) => item.kind === "tailored_drafts" && item.status === "active",
   );
-  const applyRunning = tasks.items.some(
-    (item) =>
-      item.kind === "apply" &&
-      (item.status === "active" || item.status === "stopping"),
-  );
+  const applyRunning =
+    isApplyQueueOngoing(workspace.applyQueue) ||
+    tasks.items.some(
+      (item) =>
+        item.kind === "apply" &&
+        (item.status === "active" || item.status === "stopping"),
+    );
 
   if (input.discoveryRunPending && !hasDiscoveryNow) {
     nowItems.unshift({
@@ -976,12 +1073,7 @@ export function buildJobSearchHomeModel(
   }
 
   const visibleJobs = countDiscoveryVisibleJobs(workspace, jobIds);
-  const hiddenWeaker = (workspace.discoveryJobs ?? []).filter(
-    (job) =>
-      jobIds.has(job.id) &&
-      !job.discoveryFeedback &&
-      isDiscoveryAlsoFoundResult(job),
-  ).length;
+  const hiddenWeaker = countDiscoveryWeakerJobs(workspace, jobIds);
   const shortlisted = countShortlistedJobs(workspace, jobIds);
   const shortlist = countShortlist(queue, workspace);
   const resumeBatch =
@@ -1028,16 +1120,18 @@ export function buildJobSearchHomeModel(
         )
         .map((item) => item.jobId),
     ),
+    input.applicationPageStates,
   );
   const dailyPreparationRemaining = Math.max(
     0,
     workspace.dashboard?.globalDailyApplicationPreparationCapacity?.remaining ??
       Number.POSITIVE_INFINITY,
   );
-  // One press starts at most one batch, and never more than today's limit.
-  const pressLimit = Math.min(
-    APPLICATION_PREPARATION_BATCH_LIMIT,
-    dailyPreparationRemaining,
+  // One press queues every job: the Apply queue keeps to ten at a time and
+  // to the daily limit by itself (ADR 0058).
+  const pressLimit = Number.POSITIVE_INFINITY;
+  const queuedJobIds = new Set(
+    listApplyQueueWaitingJobIds(workspace.applyQueue),
   );
   // A job its batch never reached goes first when a press covers only some:
   // it has no failed attempt behind it, and it was the one left stranded.
@@ -1048,11 +1142,12 @@ export function buildJobSearchHomeModel(
     ...applications.retryJobIds.filter(
       (jobId) => !applications.notStartedJobIds.includes(jobId),
     ),
-  ].slice(0, pressLimit);
-  const readyJobIdsWithinDailyLimit = shortlist.readyJobIds.slice(
-    0,
-    pressLimit,
-  );
+  ]
+    .filter((jobId) => !queuedJobIds.has(jobId))
+    .slice(0, pressLimit);
+  const readyJobIdsWithinDailyLimit = shortlist.readyJobIds
+    .filter((jobId) => !queuedJobIds.has(jobId))
+    .slice(0, pressLimit);
   /** Why a press covers fewer jobs than are waiting, or null when it covers all. */
   const describePartialPress = (
     n: number,
@@ -1111,7 +1206,11 @@ export function buildJobSearchHomeModel(
 
   // Problems: things that are wrong, each with the one place to fix it.
   const problems: HomeProblem[] = [];
-  if (!setupIncomplete && sourcesNeedingAttention.length > 0) {
+  if (
+    !setupIncomplete &&
+    sourcesNeedingAttention.length > 0 &&
+    !newestRunFailedForTheApp
+  ) {
     // Searches carry on with the other sources and the app cannot fix a
     // site, so this is a quiet line the person can hide for good (ADR 0051,
     // issue #50), not a red alarm listing every name. The button opens Job
@@ -1127,12 +1226,13 @@ export function buildJobSearchHomeModel(
           route: profileSourcesNeedingAttentionRoute,
         },
       },
-      dismissKey: sourcesNeedingAttention
-        .map((target) => target.id)
-        .sort()
-        .join(","),
+      // Hidden for good once dismissed (ADR 0051). Keyed by the set of
+      // sources it came back every time one more of ~900 sources failed, so
+      // a person with many sources never got rid of it. Job sources keeps
+      // the Needs attention filter for anyone who goes looking.
+      dismissKey: "dismissed",
     });
-  } else if (!setupIncomplete && !searchRunning) {
+  } else if (!setupIncomplete && !searchRunning && !newestRunFailedForTheApp) {
     const newestSettledRun = selectNewestSettledDiscoveryRun(
       workspace.recentDiscoveryRuns ?? [],
     );
@@ -1161,14 +1261,18 @@ export function buildJobSearchHomeModel(
       ? null
       : formatDiscoveryRunSourceProblemSummary(settledRun);
     if (summary) {
+      // The app retries these sources on the next search by itself; the
+      // line is a quiet note that can be hidden for good, like the one
+      // above, not a warning to act on.
       problems.push({
         id: "source-problems",
-        tone: "warning",
+        tone: null,
         text: summary,
         button: {
           label: "Open job sources",
           action: { kind: "navigate", route: profileSourcesRoute },
         },
+        dismissKey: "dismissed",
       });
     }
   }
@@ -1207,7 +1311,7 @@ export function buildJobSearchHomeModel(
           const partial = describePartialPress(n, total, "Applications");
           return {
             id: "retry",
-            title: `Try again for ${n < total ? `${n} of ${total} applications` : plural(n, "application")}`,
+            title: `${retryWord(input.applicationAutomationMode)} for ${n < total ? `${n} of ${total} applications` : plural(n, "application")}`,
             detail: [
               partial ??
                 describeRetryReason(
@@ -1226,10 +1330,10 @@ export function buildJobSearchHomeModel(
             primary: {
               label:
                 n === 1
-                  ? "Try again"
+                  ? retryWord(input.applicationAutomationMode)
                   : n < total
-                    ? `Try again for ${n}`
-                    : `Try again for all ${n}`,
+                    ? `${retryWord(input.applicationAutomationMode)} for ${n}`
+                    : `${retryWord(input.applicationAutomationMode)} for all ${n}`,
               action: {
                 kind: "apply_all",
                 jobIds: retryJobIdsWithinDailyLimit,
@@ -1289,7 +1393,7 @@ export function buildJobSearchHomeModel(
           primary: {
             label:
               shortlist.missingResumes === 1
-                ? "Create the resume"
+                ? "Create the missing resume"
                 : `Create ${shortlist.missingResumes} resumes`,
             action: { kind: "create_resumes" },
           },
@@ -1357,6 +1461,7 @@ export function buildJobSearchHomeModel(
           nextInPlaceStep.id === "retry"
             ? applications.retryJobIds.length
             : shortlist.readyToApply,
+          input.applicationAutomationMode,
         ),
       }
     : retryNext?.id === "daily_limit" || applyNext?.id === "daily_limit"
@@ -1422,9 +1527,11 @@ export function buildJobSearchHomeModel(
       title: "Work is paused",
       detail:
         needsYouCount > 0
-          ? `Resume to continue or start work. ${needsYouCount === 1 ? "1 thing needs" : `${needsYouCount} things need`} you meanwhile.`
-          : "Resume to continue or start work.",
-      primary: { label: "Resume", action: { kind: "resume_activity" } },
+          ? `Continue to start new work again. ${needsYouCount === 1 ? "1 thing needs" : `${needsYouCount} things need`} you meanwhile.`
+          : "Continue to start new work again.",
+      // "Continue", as on the Apply queue: in an app about resumes, a
+      // "Resume" button read as the document.
+      primary: { label: "Continue", action: { kind: "resume_activity" } },
       // The pause holds new work, not the person's answers.
       secondary:
         needsYouCount > 0
@@ -1592,6 +1699,7 @@ export function buildJobSearchHomeModel(
                     label: describeSecondaryPress(
                       retryNext,
                       applications.retryJobIds.length,
+                      input.applicationAutomationMode,
                     ),
                   },
                 ]
@@ -1600,18 +1708,18 @@ export function buildJobSearchHomeModel(
           ],
         }
       : {
-            id: "send",
-            title: `Send ${plural(n, "application")}`,
-            detail:
-              input.applicationAutomationMode === "confirm_before_submit"
-                ? "The forms are filled in. Look each one over and give the go-ahead."
-                : "The forms are filled in and the resume is attached. Press Send on each one in the browser.",
-            primary: {
-              label: "Open Applications",
-              action: { kind: "navigate", route: applicationsRoute },
-            },
-            secondary: nextInPlaceAction ? [nextInPlaceAction] : [],
-          };
+          id: "send",
+          title: `Send ${plural(n, "application")}`,
+          detail:
+            input.applicationAutomationMode === "confirm_before_submit"
+              ? "The forms are filled in. Look each one over and give the go-ahead."
+              : "The forms are filled in and the resume is attached. Press Send on each one in the browser.",
+          primary: {
+            label: "Open Applications",
+            action: { kind: "navigate", route: applicationsRoute },
+          },
+          secondary: nextInPlaceAction ? [nextInPlaceAction] : [],
+        };
   } else if (shortlist.reviewResumes > 0) {
     // Reading the resumes is what lets the person apply, so with resumes
     // waiting it is the next step; a failed batch to retry and forms that
@@ -1641,12 +1749,10 @@ export function buildJobSearchHomeModel(
     const heldBack =
       applyNext?.id === "apply" && shortlist.readyToApply > 0
         ? only
-          ? ` "${describeSecondaryPress(applyNext, shortlist.readyToApply)}" starts ${pressCount < shortlist.readyToApply ? `${pressCount} of the ${shortlist.readyToApply} ready jobs` : pressCount === 1 ? "the ready one" : "the others"}; ${only.title} waits for this.${pressCount < shortlist.readyToApply ? ` ${describePartialPress(pressCount, shortlist.readyToApply, "Shortlisted") ?? ""}`.trimEnd() : ""}`
+          ? ` "${describeSecondaryPress(applyNext, shortlist.readyToApply, input.applicationAutomationMode)}" starts ${pressCount < shortlist.readyToApply ? `${pressCount} of the ${shortlist.readyToApply} ready jobs` : pressCount === 1 ? "the ready one" : "the others"}; ${only.title} waits for this.${pressCount < shortlist.readyToApply ? ` ${describePartialPress(pressCount, shortlist.readyToApply, "Shortlisted") ?? ""}`.trimEnd() : ""}`
           : ` The ready jobs can start now; these ${n} wait for their review.`
         : "";
-    const closedCount = applyRunning
-      ? 0
-      : applications.pageClosedJobIds.length;
+    const closedCount = applyRunning ? 0 : applications.pageClosedJobIds.length;
     next = {
       id: "review_resumes",
       title: only ? "Review the resume" : `Review ${plural(n, "resume")}`,
@@ -1684,6 +1790,7 @@ export function buildJobSearchHomeModel(
                 label: describeSecondaryPress(
                   retryNext,
                   applications.retryJobIds.length,
+                  input.applicationAutomationMode,
                 ),
               },
             ]
@@ -1696,6 +1803,7 @@ export function buildJobSearchHomeModel(
                 label: describeSecondaryPress(
                   applyNext,
                   shortlist.readyToApply,
+                  input.applicationAutomationMode,
                 ),
               },
             ]
@@ -1708,8 +1816,8 @@ export function buildJobSearchHomeModel(
                 id: "check_closed",
                 text:
                   closedCount === 1
-                    ? "1 application's form closed before it was sent: check it, then mark it Applied or prepare it again."
-                    : `${closedCount} applications' forms closed before they were sent: check them, then mark each Applied or prepare it again.`,
+                    ? `1 application's form closed before it was sent: check it, then mark it Applied or ${input.applicationAutomationMode === "autonomous_submit" ? "apply again" : "prepare it again"}.`
+                    : `${closedCount} applications' forms closed before they were sent: check them, then mark each Applied or ${input.applicationAutomationMode === "autonomous_submit" ? "apply again" : "prepare it again"}.`,
                 link: {
                   label: "Open Applications",
                   action: { kind: "navigate", route: applicationsRoute },
@@ -1731,8 +1839,8 @@ export function buildJobSearchHomeModel(
       title: `Check ${plural(n, "application")} whose form closed`,
       detail:
         n === 1
-          ? "Job Finder filled this one in, but its form closed before Job Finder saw it sent. If you sent it yourself, set its tracker stage to Applied. If not, choose Prepare again on it in Applications."
-          : "Job Finder filled these in, but their forms closed before Job Finder saw them sent. If you sent any yourself, set its tracker stage to Applied. Choose Prepare again on the others in Applications.",
+          ? `Job Finder filled this one in, but its form closed before Job Finder saw it sent. If you sent it yourself, set its tracker stage to Applied. If not, choose ${input.applicationAutomationMode === "autonomous_submit" ? "Apply again" : "Prepare again"} on it in Applications.`
+          : `Job Finder filled these in, but their forms closed before Job Finder saw them sent. If you sent any yourself, set its tracker stage to Applied. Choose ${input.applicationAutomationMode === "autonomous_submit" ? "Apply again" : "Prepare again"} on the others in Applications.`,
       primary: {
         label: "Open Applications",
         action: { kind: "navigate", route: applicationsRoute },
@@ -1771,7 +1879,11 @@ export function buildJobSearchHomeModel(
       secondary: [
         {
           ...applyNext.primary,
-          label: describeSecondaryPress(applyNext, shortlist.readyToApply),
+          label: describeSecondaryPress(
+            applyNext,
+            shortlist.readyToApply,
+            input.applicationAutomationMode,
+          ),
         },
         ...createNext.secondary,
       ],
@@ -1785,10 +1897,7 @@ export function buildJobSearchHomeModel(
       createNext && applyNext.id === "apply"
         ? {
             ...applyNext,
-            secondary: [
-              createNext.primary,
-              ...applyNext.secondary,
-            ],
+            secondary: [createNext.primary, ...applyNext.secondary],
           }
         : applyNext;
   } else if (createNext) {
@@ -1883,7 +1992,14 @@ export function buildJobSearchHomeModel(
       detail:
         retryRequest === null
           ? "The sources it used are no longer enabled. Choose which sources to search."
-          : "Run it again to pick up the openings it missed.",
+          : newestRunFailedForTheApp
+            ? (() => {
+                const recovery = getDiscoveryRunFailureRecovery(
+                  newestRunFailedWarnings[0] ?? "",
+                );
+                return `${recovery.headline} ${recovery.nextStep}`;
+              })()
+            : "Run it again to pick up the openings it missed.",
       primary: searchAgain,
       secondary: [],
     };
@@ -1953,7 +2069,11 @@ export function buildJobSearchHomeModel(
     // up" beside an overdue reminder was not true.
     const parts = [
       trackerDue.overdue > 0
-        ? plural(trackerDue.overdue, "follow-up is overdue", "follow-ups are overdue")
+        ? plural(
+            trackerDue.overdue,
+            "follow-up is overdue",
+            "follow-ups are overdue",
+          )
         : null,
       trackerDue.interviewsSoon > 0
         ? `${plural(trackerDue.interviewsSoon, "interview")} in the next two days`
@@ -2032,15 +2152,13 @@ export function buildJobSearchHomeModel(
     };
   }
   const paused = workspace.activityControl.paused;
+  // One running item is the Happening now card right under this line, so the
+  // line says what it would say otherwise (the last search, the setup) rather
+  // than the card's title a second time.
   let statusLine: string;
   if (paused) {
     statusLine =
       "Paused. New searches and applications will not start until you resume.";
-  } else if (nowItems.length === 1 && nowItems[0]) {
-    statusLine = `${nowItems[0].title} · ${nowItems[0].detail}`.replace(
-      /\.?$/,
-      ".",
-    );
   } else if (nowItems.length > 1) {
     // "Nothing needs you yet" stood beside a card saying "2 things need you".
     statusLine = `${nowItems.length} things are running. ${
@@ -2103,13 +2221,9 @@ export function buildJobSearchHomeModel(
             label: "Shortlisted",
             count: shortlisted,
             detail: joinParts([
-              untouchedResumes > 0
-                ? `${untouchedResumes} need a resume`
-                : null,
+              untouchedResumes > 0 ? `${untouchedResumes} need a resume` : null,
               queuedResumes > 0 ? `${queuedResumes} queued` : null,
-              activeResumes > 0
-                ? `${activeResumes} being written`
-                : null,
+              activeResumes > 0 ? `${activeResumes} being written` : null,
               shortlist.reviewResumes > 0
                 ? `${shortlist.reviewResumes} to review`
                 : null,
@@ -2147,7 +2261,7 @@ export function buildJobSearchHomeModel(
                 ? `${applications.applied} applied`
                 : null,
               applications.pageClosedJobIds.length > 0
-                ? `${applications.pageClosedJobIds.length} ${applications.pageClosedJobIds.length === 1 ? "needs" : "need"} Prepare again`
+                ? `${plural(applications.pageClosedJobIds.length, "form")} closed`
                 : null,
               applications.couldNotApply -
                 applications.notStarted -

@@ -54,15 +54,17 @@ it.each([3_000, 10_000])(
     expect(
       screen.getByRole("button", { name: `Listing signals ${count}` }),
     ).toBeTruthy();
+    // Role queries walk the accessibility tree; 10,000 of them made this test
+    // take a minute, so the per-card link is found by its anchor instead.
+    const shortlistedLinkHref = (card: HTMLElement) =>
+      [...card.querySelectorAll("a")]
+        .find((link) => link.textContent.trim() === "Open Shortlisted")
+        ?.getAttribute("href");
     for (let page = 1; page <= Math.ceil(count / 40); page++) {
       expect(cards().length).toBeLessThanOrEqual(40);
       for (const card of cards()) {
         reached.add(card.textContent.match(/Scale event \d+/)![0]);
-        expect(
-          within(card)
-            .getByRole("link", { name: "Open Shortlisted" })
-            .getAttribute("href"),
-        ).toBe("/job-finder/review-queue");
+        expect(shortlistedLinkHref(card)).toBe("/job-finder/review-queue");
       }
       if (page < Math.ceil(count / 40)) {
         fireEvent.click(within(nav).getByRole("button", { name: "Next page" }));

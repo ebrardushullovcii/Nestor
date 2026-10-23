@@ -880,10 +880,26 @@ export const ResumeValidationIssueSchema = z.object({
 });
 export type ResumeValidationIssue = z.infer<typeof ResumeValidationIssueSchema>;
 
+/**
+ * The severity an issue is treated and shown with. Length is a quiet note,
+ * never a blocker (ADR 0051), but drafts checked before that decision still
+ * carry page overflow saved as an error, which held their approval back
+ * behind a red "Blocks approval" box.
+ */
+export function getResumeValidationIssueSeverity(
+  issue: Pick<ResumeValidationIssue, "severity"> & {
+    category?: ResumeValidationCategory;
+  },
+): ResumeValidationSeverity {
+  return issue.category === "page_overflow" ? "info" : issue.severity;
+}
+
 export function isBlockingResumeValidationIssue(
-  issue: Pick<ResumeValidationIssue, "severity">,
+  issue: Pick<ResumeValidationIssue, "severity"> & {
+    category?: ResumeValidationCategory;
+  },
 ): boolean {
-  return issue.severity === "error";
+  return getResumeValidationIssueSeverity(issue) === "error";
 }
 
 /**

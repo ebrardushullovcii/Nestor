@@ -1,29 +1,41 @@
-import { describeListingReadFailure } from "../../lib/describe-failure";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { JobListRow, FitJudgmentProgress } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
 import { isDiscoveryUncheckedResult } from "./discovery-result-groups";
 
+/**
+ * Whether this app session already judged the jobs left without a fit score.
+ * Reset by every search, so the jobs a stopped search leaves behind are judged
+ * once it ends. Module state on purpose: leaving Find jobs and coming back
+ * must not start another pass.
+ */
+let autoJudgeDone = false;
+
+/** Test seam: forget that this session already judged. */
+export function resetDiscoveryAutoJudgeForTests() {
+  autoJudgeDone = false;
+}
+
+/**
+ * Jobs without a fit score are judged on their own: when Find jobs opens with
+ * some, and again after each search. The person used to have to find and
+ * press "Judge fit for all 81" (or "Assess next 20") before the list could be
+ * trusted. Only a pass that could not finish offers a way to try again.
+ */
 export function DiscoveryAssessmentContinuation(props: {
   className?: string;
   jobs: readonly JobListRow[];
-  preferredJobs?: readonly JobListRow[];
   isSearchRunning: boolean;
-  onAssess?: (jobId: string) => Promise<void>;
   /** Judges every unjudged job in batches, in main, saving as it goes. */
   onJudgeAll?: () => Promise<unknown>;
   fitJudgmentProgress?: FitJudgmentProgress | null;
 }) {
-  const unread = useMemo(
-    () => props.jobs.filter(isDiscoveryUncheckedResult),
+  const unreadCount = useMemo(
+    () => props.jobs.filter(isDiscoveryUncheckedResult).length,
     [props.jobs],
   );
-  const [progress, setProgress] = useState<{
-    done: number;
-    total: number;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   const [isJudgingAll, setIsJudgingAll] = useState(false);
   const [localStartedAt, setLocalStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now);
@@ -33,7 +45,7 @@ export function DiscoveryAssessmentContinuation(props: {
   const startedAt =
     judging && fitProgress
       ? Date.parse(fitProgress.startedAt)
-      : progress || isJudgingAll
+      : isJudgingAll
         ? localStartedAt
         : null;
   useEffect(() => {
@@ -42,77 +54,59 @@ export function DiscoveryAssessmentContinuation(props: {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [startedAt]);
-  const stopped = useRef(false);
+  const mounted = useRef(true);
   const busy = useRef(false);
-  useEffect(
-    () => () => {
-      stopped.current = true;
-    },
-    [],
-  );
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
-  const assessMore = async () => {
-    const assess = props.onAssess;
-    if (busy.current || !assess) return;
-    busy.current = true;
-    stopped.current = false;
-    setError(null);
-    setLocalStartedAt(Date.now());
-    // Prioritize the visible page only when the person starts a bounded read.
-    // Page turns do not rebuild and refilter the entire plan's job array.
-    const batch: JobListRow[] = [];
-    const added = new Set<string>();
-    for (const candidates of [props.preferredJobs ?? [], unread]) {
-      for (const job of candidates) {
-        if (batch.length === 20) break;
-        if (added.has(job.id) || !isDiscoveryUncheckedResult(job)) continue;
-        added.add(job.id);
-        batch.push(job);
-      }
-    }
-    setProgress({ done: 0, total: batch.length });
-    let listingUrl: string | undefined;
-    try {
-      for (const [index, job] of batch.entries()) {
-        if (stopped.current) break;
-        listingUrl = job.canonicalUrl;
-        await assess(job.id);
-        if (!stopped.current)
-          setProgress({ done: index + 1, total: batch.length });
-      }
-    } catch (error) {
-      if (!stopped.current)
-        setError(
-          describeListingReadFailure(error, listingUrl ? { listingUrl } : {}),
-        );
-    } finally {
-      busy.current = false;
-      if (!stopped.current) setProgress(null);
-    }
-  };
-
+  const onJudgeAll = props.onJudgeAll;
   const judgeAll = async () => {
-    if (busy.current || !props.onJudgeAll) return;
+    if (busy.current || !onJudgeAll) return;
     busy.current = true;
-    stopped.current = false;
-    setError(null);
+    autoJudgeDone = true;
+    setFailed(false);
     setLocalStartedAt(Date.now());
     setIsJudgingAll(true);
     try {
-      await props.onJudgeAll();
+      await onJudgeAll();
     } catch {
-      if (!stopped.current)
-        setError(
-          "Fit could not be judged right now. The jobs judged so far keep their scores; try again in a few minutes.",
-        );
+      if (mounted.current) setFailed(true);
     } finally {
       busy.current = false;
-      if (!stopped.current) setIsJudgingAll(false);
+      if (mounted.current) setIsJudgingAll(false);
     }
   };
+  const judgeAllRef = useRef(judgeAll);
+  judgeAllRef.current = judgeAll;
 
-  if (unread.length === 0 && !progress && !isJudgingAll && !fitProgress)
-    return null;
+  const isSearchRunning = props.isSearchRunning;
+  const canJudge = Boolean(onJudgeAll);
+  useEffect(() => {
+    if (isSearchRunning) {
+      autoJudgeDone = false;
+      return;
+    }
+    if (autoJudgeDone || judging || !canJudge || unreadCount === 0) return;
+    void judgeAllRef.current();
+  }, [canJudge, isSearchRunning, judging, unreadCount]);
+
+  const leftUnjudged =
+    !isJudgingAll && !judging && fitProgress?.phase === "completed"
+      ? fitProgress.total - fitProgress.judged
+      : 0;
+  const offerRetry =
+    canJudge &&
+    !isJudgingAll &&
+    !judging &&
+    !isSearchRunning &&
+    unreadCount > 0 &&
+    (failed || fitProgress?.phase === "failed" || leftUnjudged > 0);
+
+  if (!judging && !isJudgingAll && !offerRetry) return null;
   return (
     <div
       className={cn(
@@ -123,71 +117,31 @@ export function DiscoveryAssessmentContinuation(props: {
     >
       {judging && fitProgress ? (
         <p>
-          Judging fit · {fitProgress.judged} of {fitProgress.total} scores saved
-          · {Math.max(0, fitProgress.total - fitProgress.processed)} waiting to
-          be reviewed.
-          {fitProgress.phase === "saving"
-            ? " Saving this batch."
-            : " Waiting for the model."}{" "}
-          It carries on if you leave this page.
+          Judging fit · {fitProgress.judged} of {fitProgress.total} scored
         </p>
       ) : isJudgingAll ? (
-        <p>
-          Judging fit · {unread.length} left. Scores appear as each batch is
-          judged, and it carries on if you leave this page.
-        </p>
-      ) : progress ? (
-        <p>
-          Assessing listings · {progress.done} of {progress.total} finished.
-          Leaving this page stops the batch after the current listing.
-        </p>
-      ) : !props.isSearchRunning && unread.length > 0 ? (
+        <p>Judging fit for {unreadCount} jobs</p>
+      ) : (
         <>
-          {props.onJudgeAll ? (
-            <Button
-              size="toolbar"
-              title="Scores every job that has no fit score yet. It carries on if you leave this page."
-              variant="secondary"
-              onClick={() => void judgeAll()}
-            >
-              Judge fit for all {unread.length}
-            </Button>
-          ) : null}
-          {props.onAssess ? (
-            <Button
-              aria-label={`Assess next ${Math.min(20, unread.length)} ${unread.length === 1 ? "listing" : "listings"}`}
-              size="toolbar"
-              title="Reads the full listing of the next jobs on this page and scores each one."
-              variant="ghost"
-              onClick={() => void assessMore()}
-            >
-              Assess next {Math.min(20, unread.length)}
-            </Button>
-          ) : null}
+          <p>
+            {unreadCount} {unreadCount === 1 ? "job has" : "jobs have"} no fit
+            score yet
+          </p>
+          <Button
+            className="h-auto px-0 text-xs"
+            onClick={() => void judgeAll()}
+            size="compact"
+            type="button"
+            variant="link"
+          >
+            Try again
+          </Button>
         </>
-      ) : null}
-      {!isJudgingAll && !judging && fitProgress?.phase === "completed" ? (
-        <p>
-          Fit judging finished · {fitProgress.judged} of {fitProgress.total}{" "}
-          judged.
-          {fitProgress.judged < fitProgress.total
-            ? ` ${fitProgress.total - fitProgress.judged} could not be judged; retry them when ready.`
-            : ""}
-        </p>
-      ) : null}
-      {!judging && fitProgress?.phase === "failed" ? (
-        <p role="alert">
-          Fit judging stopped. {fitProgress.judged} scores were saved; the rest
-          can be retried.
-        </p>
-      ) : null}
+      )}
       {startedAt !== null ? (
-        <span>
-          {Math.max(0, Math.floor((now - startedAt) / 1000))}s elapsed
+        <span className="tabular-nums">
+          {Math.max(0, Math.floor((now - startedAt) / 1000))}s
         </span>
-      ) : null}
-      {error && fitProgress?.phase !== "failed" ? (
-        <p role="alert">{error}</p>
       ) : null}
     </div>
   );

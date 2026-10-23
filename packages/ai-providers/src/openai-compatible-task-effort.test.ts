@@ -21,8 +21,15 @@ function captureEfforts(): Array<{ model: string; effort: string | null }> {
     vi.fn((_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(
         typeof init?.body === "string" ? init.body : "{}",
-      ) as { model: string; reasoning_effort?: string };
-      requests.push({ model: body.model, effort: body.reasoning_effort ?? null });
+      ) as {
+        model: string;
+        reasoning_effort?: string;
+        reasoning?: { effort?: string };
+      };
+      requests.push({
+        model: body.model,
+        effort: body.reasoning?.effort ?? body.reasoning_effort ?? null,
+      });
       const content = JSON.stringify({
         jobs: [],
         judgments: [],
@@ -62,7 +69,7 @@ const claimInput = {
   claims: [{ id: "a", section: "Experience", text: "Built SQL dashboards." }],
 };
 
-test("each task asks for its own effort; the writer keeps the main effort", async () => {
+test("each task asks for its own effort; other writers keep their route effort", async () => {
   const requests = captureEfforts();
   const client = createJobFinderAiClientFromEnvironment(
     createEnvironment(ownerEnvironment),
@@ -111,6 +118,38 @@ test("each task asks for its own effort; the writer keeps the main effort", asyn
   ]);
 });
 
+test.each([undefined, "high"])(
+  "Muse writing has its own effort while full reads and untagged turns keep theirs (override %s)",
+  async (override) => {
+    const requests = captureEfforts();
+    const client = createJobFinderAiClientFromEnvironment(
+      createEnvironment({
+        ...ownerEnvironment,
+        NESTOR_AI_MODEL: "muse-spark-1.3-contributor",
+        NESTOR_AI_API_MODE: "chat_completions",
+        ...(override
+          ? { NESTOR_AI_RESUME_WRITER_REASONING_EFFORT: override }
+          : {}),
+      }),
+    );
+    for (const reasoningTask of [
+      "resume_writer",
+      "listing_read",
+      undefined,
+    ] as const)
+      await client.chatWithTools!(
+        [{ role: "user", content: "Synthetic turn" }],
+        [],
+        reasoningTask ? { reasoningTask } : {},
+      );
+    expect(requests.map((request) => request.effort)).toEqual([
+      override ?? "medium",
+      "high",
+      "high",
+    ]);
+  },
+);
+
 test("every task effort can be overridden by its own variable", async () => {
   const requests = captureEfforts();
   const client = createJobFinderAiClientFromEnvironment(
@@ -125,11 +164,7 @@ test("every task effort can be overridden by its own variable", async () => {
       NESTOR_AI_REASONING_EFFORT: "xhigh",
     }),
   );
-  for (const reasoningTask of [
-    "search",
-    "apply",
-    "resume_writer",
-  ] as const) {
+  for (const reasoningTask of ["search", "apply", "resume_writer"] as const) {
     await client.chatWithTools!(
       [{ role: "user", content: "Synthetic turn" }],
       [],
@@ -194,6 +229,35 @@ test("a full listing read nobody waits on runs at the fit-check effort", async (
   await client.assessJobFit(input);
   expect(requests.map((request) => request.effort)).toEqual([
     "medium", // a search refreshing an older full read
-    "high", // the person pressed "Read and assess listing"
+    "high", // the person pressed "Judge fit"
+  ]);
+});
+
+test("card and detail extraction preserve the existing page-read effort and its override", async () => {
+  const requests = captureEfforts();
+  for (const overrides of [
+    {},
+    {
+      NESTOR_AI_PAGE_READ_REASONING_EFFORT: "medium",
+      NESTOR_AI_LISTING_READ_REASONING_EFFORT: "medium",
+    },
+  ]) {
+    const client = createJobFinderAiClientFromEnvironment(
+      createEnvironment({ ...ownerEnvironment, ...overrides }),
+    );
+    for (const pageType of ["search_results", "job_detail"] as const) {
+      await client.extractJobsFromPage({
+        pageText: "Analyst at Northwind",
+        pageUrl: "https://jobs.example.test/job/1",
+        pageType,
+        maxJobs: 1,
+      });
+    }
+  }
+  expect(requests.map((request) => request.effort)).toEqual([
+    "low",
+    "low",
+    "medium",
+    "medium",
   ]);
 });

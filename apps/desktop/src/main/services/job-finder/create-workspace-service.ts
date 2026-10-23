@@ -1,6 +1,15 @@
+import {
+  createApplicationPageAccess,
+  createPreparedApplicationFormStore,
+} from "./prepared-application-forms";
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
+import { installDiscoveryFeedWorkers } from "./discovery-cpu";
+import type { Page } from "playwright";
 import { publishJobFinderWorkspaceUpdate } from "./workspace-updates";
-import { mainBuildDigest } from "./startup-workspace-view";
+import {
+  mainBuildDigest,
+  waitForStartupWorkspaceHydration,
+} from "./startup-workspace-view";
 import {
   publishOnApplyStandingChanges,
   publishOnUserActionChanges,
@@ -25,6 +34,7 @@ import {
 } from "@nestor/browser-runtime";
 import type {
   BrowserSessionRuntime,
+  PreparedApplicationFormStore,
   OpenBrowserSessionOptions,
 } from "@nestor/browser-runtime";
 import type { BrowserSessionState } from "@nestor/contracts";
@@ -41,6 +51,7 @@ import {
   createJobFinderWorkspaceService,
 } from "@nestor/job-finder";
 import { createLocalJobFinderDocumentManager } from "../../adapters/job-finder-document-manager";
+import { createResumeDraftProcessor } from "../../adapters/resume-draft-processor";
 import { createLocalResumeExportFileVerifier } from "../../adapters/job-finder-export-file-verifier";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { createDesktopResumeResearchAdapter } from "../../adapters/job-finder-research-adapter";
@@ -82,6 +93,15 @@ import type {
 // The authority manager must use the same repository handle as the workspace
 // service. A weak association keeps this accessor scoped to the live service
 // instance without retaining a shut-down workspace in process memory.
+const pageAccessByWorkspaceService = new WeakMap<
+  object,
+  ReturnType<typeof createApplicationPageAccess>
+>();
+export function getApplicationPageAccessForWorkspaceService(service: object) {
+  const access = pageAccessByWorkspaceService.get(service);
+  if (!access) throw new Error("Application page access is unavailable.");
+  return access;
+}
 const repositoryByWorkspaceService = new WeakMap<object, JobFinderRepository>();
 let disposeAutomaticSourceAccessResume: (() => void) | null = null;
 let disposeAutomaticApplicationAccessResume: (() => void) | null = null;
@@ -415,6 +435,7 @@ export function createDesktopBrowserRuntime(
     env?: NodeJS.ProcessEnv;
     aiClient?: ReturnType<typeof createDesktopJobFinderAiClient>;
     desktopTestApiEnabled?: boolean;
+    preparedFormStore?: PreparedApplicationFormStore;
   } = {},
 ): BrowserSessionRuntime {
   const env = input.env ?? process.env;
@@ -439,6 +460,9 @@ export function createDesktopBrowserRuntime(
         ? null
         : getEmbeddedBrowser();
     const baseRuntime = createBrowserAgentRuntime({
+      ...(input.preparedFormStore
+        ? { preparedFormStore: input.preparedFormStore }
+        : {}),
       userDataDir: getBrowserAgentProfileDirectory(),
       headless: isBrowserHeadlessEnabled(env),
       ...(env.NESTOR_CHROME_PATH
@@ -450,6 +474,32 @@ export function createDesktopBrowserRuntime(
       aiClient,
       ...(embedded
         ? {
+            onApplicationPageRestored: async (
+              key: string,
+              page: Page,
+              label?: string,
+            ) => {
+              await embedded.runAutomation(
+                "Restoring application",
+                undefined,
+                async (_signal, _update, claim, tabs) => {
+                  claim(page);
+                  const claimed = await tabs();
+                  if (label)
+                    for (const id of claimed)
+                      embedded.setApplicationTabLabel(
+                        id,
+                        "",
+                        "",
+                        "",
+                        key.slice(-6),
+                        label,
+                      );
+                },
+                { owner: key },
+              );
+              embedded.markPreparedForm(key);
+            },
             browserHost: {
               connect: () => embedded.connect(),
               getOpenBrowser: () => embedded.getOpenBrowser(),
@@ -457,8 +507,8 @@ export function createDesktopBrowserRuntime(
               assertAutomationSafe: () => embedded.assertAutomationSafe(),
               openTabCount: () => embedded.openTabCount(),
               workingTabCount: () => embedded.workingTabCount(),
-              hasAutomationTabCapacity: () =>
-                embedded.hasAutomationTabCapacity(),
+              hasAutomationTabCapacity: (reservedTabs?: number) =>
+                embedded.hasAutomationTabCapacity(reservedTabs),
             },
           }
         : {}),
@@ -552,6 +602,7 @@ export async function createJobFinderWorkspaceServiceAsync(
         onRestored: recordRestoredStartupDatabaseRecoveryEvent,
       },
       rowValidationStamp: mainBuildDigest(),
+      backgroundValidationReady: waitForStartupWorkspaceHydration(),
     });
   } catch (error) {
     if (error instanceof WorkspaceDatabaseRecoveryRequiredError) {
@@ -573,12 +624,6 @@ export async function createJobFinderWorkspaceServiceAsync(
   // over a shorter list. Recording the interruption here, before anything
   // reads the workspace, lets every screen say what the run actually kept.
   await recoverInterruptedDiscoveryRuns(jobFinderRepository);
-  // The first hide or shortlist reads the whole canonical discovery state
-  // (about 0.4 s with a large search history). Read it once the app has
-  // settled, not on the way to the first screen.
-  setTimeout(() => {
-    void jobFinderRepository.warmDiscoveryState?.().catch(() => undefined);
-  }, 4_000).unref?.();
   await recoverPendingJobFinderWorkspaceReset(jobFinderRepository);
   await migrateLegacyResumeSource({
     documentsDirectory: getJobFinderDocumentsDirectory(),
@@ -587,11 +632,18 @@ export async function createJobFinderWorkspaceServiceAsync(
   const aiClient = createDesktopJobFinderAiClient(env);
   const visionProvider = createDesktopResumeVisionProvider(env);
   const browserRuntime = createDesktopBrowserRuntime({
+    preparedFormStore: createPreparedApplicationFormStore(
+      jobFinderRepository,
+      getCandidateAssetLibrary(),
+    ),
     env,
     aiClient,
     desktopTestApiEnabled,
   });
+  const resumeDraftProcessor = createResumeDraftProcessor();
   const documentManager = createLocalJobFinderDocumentManager({
+    renderResumeHtml: (input) => resumeDraftProcessor.render(input),
+    inspectPdf: (filePath) => resumeDraftProcessor.inspectPdf(filePath),
     outputDirectory: getGeneratedResumeDocumentsDirectory(),
     previewTestMode: desktopTestApiEnabled
       ? getResumePreviewTestMode(env)
@@ -611,7 +663,10 @@ export async function createJobFinderWorkspaceServiceAsync(
   publishOnApplyStandingChanges(jobFinderRepository, () =>
     publishJobFinderWorkspaceUpdate(),
   );
+  installDiscoveryFeedWorkers();
   const workspaceService = createJobFinderWorkspaceService({
+    backgroundWorkReady: waitForStartupWorkspaceHydration(),
+    resumeDraftProcessor,
     aiClient,
     visionProvider,
     documentManager,
@@ -658,6 +713,10 @@ export async function createJobFinderWorkspaceServiceAsync(
       : {}),
   });
   repositoryByWorkspaceService.set(workspaceService, jobFinderRepository);
+  pageAccessByWorkspaceService.set(
+    workspaceService,
+    createApplicationPageAccess(jobFinderRepository, browserRuntime),
+  );
   disposeAutomaticSourceAccessResume?.();
   disposeAutomaticSourceAccessResume = null;
   disposeAutomaticApplicationAccessResume?.();

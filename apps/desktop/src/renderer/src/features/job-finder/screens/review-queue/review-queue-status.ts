@@ -81,6 +81,13 @@ export interface ReviewQueueWorkflowStatus {
 export const NEEDS_RESUME_LABEL = "Needs a resume";
 
 /**
+ * A resume waiting for the person's read: the status tab, the row badge and
+ * the detail header. A state, not a verb: "Review resume" sat beside the
+ * "Review the resume" button and read as a second button.
+ */
+export const TO_REVIEW_LABEL = "To review";
+
+/**
  * True when the job's saved resume kept the person's own wording because the
  * listing text was not there when it was written, and the person has not
  * approved it as it is. Nothing was tailored, so the job still needs its
@@ -221,7 +228,7 @@ export function getReviewQueueWorkflowStatus(
 
   // Same words as the status tab it sits under: a resume that kept the
   // person's wording because the listing was not read was never tailored
-  // (ADR 0049). The row used to say "Review resume" inside "Needs a resume".
+  // (ADR 0049). The row used to say it was to review inside "Needs a resume".
   if (needsTailoredResume(item)) {
     return { label: NEEDS_RESUME_LABEL, tone: "muted" };
   }
@@ -230,7 +237,7 @@ export function getReviewQueueWorkflowStatus(
   // so the row says so instead of promising Apply.
   if (needsPersonResumeReview(item, asset)) {
     return {
-      label: "Review resume",
+      label: TO_REVIEW_LABEL,
       tone: "active",
     };
   }
@@ -260,7 +267,7 @@ export function getReviewQueueWorkflowStatus(
   }
 
   return {
-    label: "Review resume",
+    label: TO_REVIEW_LABEL,
     tone: "active",
   };
 }
@@ -865,7 +872,7 @@ export function getApplyReadinessStatus(params: {
 
   if (!hasReadyApprovedAsset) {
     return {
-      label: resumeReviewStatus === "stale" ? "Out of date" : "Review resume",
+      label: resumeReviewStatus === "stale" ? "Out of date" : TO_REVIEW_LABEL,
       tone: "critical",
     };
   }
@@ -961,7 +968,7 @@ const CAPTIONS_REPEATING_STATUS: Readonly<Record<string, readonly string[]>> = {
   [NEEDS_RESUME_LABEL]: ["No resume yet"],
   "Writing resume": ["Writing the resume…"],
   "Resume failed": ["Resume failed — try again"],
-  "Review resume": ["Resume ready — review it before applying"],
+  [TO_REVIEW_LABEL]: ["Resume ready — review it before applying"],
   "Ready to apply": ["Resume approved", "Resume ready — Apply approves it"],
   "Out of date": ["Resume is out of date — refresh it"],
 };
@@ -1009,15 +1016,20 @@ export type ShortlistStatusFilter =
   | "ready"
   | "in_applications";
 
+/**
+ * Tab names, shorter than the row badges they count: five or six tabs with
+ * their counts have to fit the list column at 1440 px, where "Needs a resume"
+ * and "Ready to apply" pushed the last tab under a scrollbar.
+ */
 export const SHORTLIST_STATUS_FILTER_LABELS: Record<
   ShortlistStatusFilter,
   string
 > = {
   all: "All",
-  needs_resume: NEEDS_RESUME_LABEL,
+  needs_resume: "No resume",
   writing: "Writing",
-  to_review: "To review",
-  ready: "Ready to apply",
+  to_review: TO_REVIEW_LABEL,
+  ready: "Ready",
   in_applications: "In Applications",
 };
 
@@ -1044,7 +1056,7 @@ export function getShortlistStatusFilter(
     workflowLabel === "Resume failed"
   )
     return "needs_resume";
-  if (workflowLabel === "Review resume") return "to_review";
+  if (workflowLabel === TO_REVIEW_LABEL) return "to_review";
   if (workflowLabel === "Ready to apply") return "ready";
   return null;
 }

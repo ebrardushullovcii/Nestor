@@ -1,4 +1,5 @@
 import type { SavedJob, MatchAssessment } from "@nestor/contracts";
+import { copyView } from "@nestor/core";
 const planViews = new WeakMap<
   SavedJob,
   {
@@ -11,6 +12,12 @@ export function withPlanAssessment<T extends SavedJob>(
   planId: string | null,
   assessment: MatchAssessment = job.matchAssessment,
 ): T {
+  if (
+    planId
+      ? job.planAssessments?.[planId] === assessment
+      : job.matchAssessment === assessment
+  )
+    return job;
   return {
     ...job,
     matchAssessment: planId ? job.matchAssessment : assessment,
@@ -33,7 +40,7 @@ export function readPlanAssessment<T extends SavedJob>(
     // A cached view was made by spreading this exact source object, so it
     // retains the caller's additional fields as well as the SavedJob fields.
     if (previous?.assessment === assessment) return previous.view as T;
-    const view: T = { ...job, matchAssessment: assessment };
+    const view: T = copyView(job, { matchAssessment: assessment });
     Object.freeze(view);
     planViews.set(job, { assessment, view });
     return view;

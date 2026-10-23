@@ -45,6 +45,33 @@ describe("ProfileSaveFooter", () => {
     expect(screen.queryByText("Unsaved changes on this page.")).toBeNull();
   });
 
+  it("says Saving while a save runs instead of Unsaved changes", () => {
+    renderFooter({ hasUnsavedChanges: true, isSavePending: true });
+    expect(screen.getByText("Saving…")).toBeTruthy();
+    expect(screen.queryByText("Unsaved changes on this page.")).toBeNull();
+  });
+
+  it("saves on Ctrl+S only when there is something to save", () => {
+    const onSave = vi.fn();
+    const { unmount } = renderFooter({ onSave });
+    const clean = fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    // The browser's own "Save page" never opens, even with nothing to save.
+    expect(clean).toBe(false);
+    expect(onSave).not.toHaveBeenCalled();
+    unmount();
+
+    renderFooter({ onSave, hasUnsavedChanges: true });
+    fireEvent.keyDown(window, { key: "s" });
+    expect(onSave).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: "S", ctrlKey: true });
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(
+      screen
+        .getByRole("button", { name: "Save changes" })
+        .getAttribute("aria-keyshortcuts"),
+    ).toBe("Control+s");
+  });
+
   it("keeps Save changes disabled until the form is dirty", () => {
     const onSave = vi.fn();
     const { rerender } = render(
@@ -106,7 +133,7 @@ describe("ProfileSaveFooter", () => {
     fireEvent.click(button);
     fireEvent.keyDown(button, { key: "Enter" });
     fireEvent.keyDown(button, { key: " " });
-    fireEvent.click(screen.getByText(/Unsaved changes on this page/));
+    fireEvent.click(screen.getByText("Saving…"));
     expect(onSave).not.toHaveBeenCalled();
 
     view.rerender(

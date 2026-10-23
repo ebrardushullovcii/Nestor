@@ -4,7 +4,7 @@ import {
   createSavedJob,
   createTempRepository,
 } from "../file-repository.test-support";
-import { createSavedJobProjectionReader } from "./saved-job-projection";
+import { createSavedJobProjectionReader, readSavedJobProjectionChanges } from "./saved-job-projection";
 
 const databases: DatabaseSync[] = [];
 afterEach(() => {
@@ -37,11 +37,18 @@ test("progress-only writes reuse rows; a job change replaces only its immutable 
   expect(() => first[0]!.keySkills.push("accidental edit")).toThrow();
   put("a", "Changed");
   const changed = await read();
+  expect(readSavedJobProjectionChanges(first, changed)?.rows.map((row) => row.id)).toEqual(["a"]);
   expect(changed[0]).toBe(first[0]);
   expect(changed[1]?.title).toBe("Changed");
+  expect(changed[1]?.provenance).toBe(first[1]?.provenance);
+  expect(changed[1]?.keySkills).toBe(first[1]?.keySkills);
+  expect(changed[1]?.matchAssessment).toBe(first[1]?.matchAssessment);
   expect(first[1]?.title).toBe("a");
   db.prepare("DELETE FROM saved_jobs WHERE id=?").run("B");
-  expect((await read()).map((job) => job.id)).toEqual(["a"]);
+  const removed = await read();
+  expect(removed.map((job) => job.id)).toEqual(["a"]);
+  expect(readSavedJobProjectionChanges(changed, removed)?.removedIds).toEqual(["B"]);
+  expect(readSavedJobProjectionChanges(first, changed)).toBeNull();
 });
 
 test("a sighting's copy of the listing and an equal plan verdict share the job's values", async () => {

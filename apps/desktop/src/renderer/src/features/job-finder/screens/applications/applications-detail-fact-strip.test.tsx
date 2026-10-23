@@ -742,7 +742,7 @@ describe("ApplicationsDetailPanelRunHistorySection", () => {
     );
 
     expect(
-      screen.getByRole("heading", { name: "Current preparation run" }),
+      screen.getByRole("heading", { name: "Preparation runs" }),
     ).toBeTruthy();
     expect(screen.getByTitle("run_latest01").getAttribute("aria-pressed")).toBe(
       "true",
@@ -906,20 +906,16 @@ describe("ApplicationsDetailPanel container contract", () => {
     ).toBeNull();
     expect(detailRegion?.className).toContain("overflow-y-auto");
 
-    // Diagnostics collapse into one closed "Run details and history" block that
-    // owns the run history, review data, and preparation details.
+    // Diagnostics collapse into one closed "History and details" block that
+    // owns the review data and preparation details. A single run has no
+    // run list: the status above already gives its state.
     const technicalDetails = within(detailRegion).getByTestId(
       "applications-technical-details",
     );
     expect(technicalDetails.tagName).toBe("DETAILS");
     expect(technicalDetails.hasAttribute("open")).toBe(false);
     expect(
-      within(technicalDetails).getByText("Run details and history"),
-    ).toBeTruthy();
-    expect(
-      within(technicalDetails).getByRole("heading", {
-        name: "Current preparation run",
-      }),
+      within(technicalDetails).getByText("History and details"),
     ).toBeTruthy();
     expect(
       within(technicalDetails).getByText("What Job Finder filled in"),
@@ -993,6 +989,17 @@ it("labels a cancelled preparation history entry as cancelled by the person", ()
           },
           run: null,
         },
+        {
+          result: {
+            ...baseApplyResult,
+            id: "older_result",
+            runId: "older_run",
+            state: "failed",
+            summary: "Could not finish",
+            detail: "The page did not load.",
+          },
+          run: null,
+        },
       ]}
       onSelectApplyRun={vi.fn()}
       selectedApplyRunId={baseApplyResult.runId}
@@ -1061,6 +1068,20 @@ it("labels a ready application's latest run Ready to send", () => {
             detail: "Filled in",
             startedAt: "2026-10-05T10:00:00Z",
             updatedAt: "2026-10-05T10:00:00Z",
+          } as ApplyJobResultSummary,
+          run: null,
+        },
+        {
+          result: {
+            id: "older_result",
+            runId: "older_run",
+            jobId: "job_1",
+            applicationRecordId: "application_1",
+            state: "failed",
+            summary: "Could not finish",
+            detail: "The page did not load.",
+            startedAt: "2026-10-04T10:00:00Z",
+            updatedAt: "2026-10-04T10:00:00Z",
           } as ApplyJobResultSummary,
           run: null,
         },

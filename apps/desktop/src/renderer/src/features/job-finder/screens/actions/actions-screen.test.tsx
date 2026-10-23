@@ -519,9 +519,9 @@ describe("ActionsScreen", () => {
     expect(queryByTestId("needs-you-start-over")).toBeNull();
   });
 
-  it("gives the empty inbox one clear next action toward discovery", () => {
+  it("says the empty inbox is empty without sending the person elsewhere", () => {
     const onNavigate = vi.fn();
-    const { getByRole } = render(
+    const { getByRole, queryByRole } = render(
       <ActionsScreen
         discoveryJobs={[]}
         isPending={() => false}
@@ -534,8 +534,7 @@ describe("ActionsScreen", () => {
     expect(
       getByRole("heading", { name: "Nothing needs you right now" }),
     ).toBeTruthy();
-    fireEvent.click(getByRole("button", { name: "Find jobs" }));
-    expect(onNavigate).toHaveBeenCalledWith("/job-finder/discovery");
+    expect(queryByRole("button", { name: "Find jobs" })).toBeNull();
   });
 
   it("offers a clear recovery route when the browser link is unavailable", () => {

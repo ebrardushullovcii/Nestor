@@ -2,6 +2,7 @@ import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
 import { createJobFinderWorkspaceDeltaTracker } from "./workspace-delta";
+import { rememberRowChanges } from "@nestor/core";
 
 const SCALE_OPERATION_BUDGET_MS = 1_000;
 
@@ -45,6 +46,54 @@ function createWorkspace(input: {
 }
 
 describe("Job Finder workspace delta tracker", () => {
+  it("diffs only nominated rows on an exact immutable lineage, even from a held baseline", () => {
+    const a = { id: "job-1", title: "Original" };
+    const b = { id: "job-2", title: "Added" };
+    const changed = { ...a, title: "Updated" };
+    const guarded = (rows: readonly Record<string, unknown>[]) =>
+      new Proxy(Object.freeze([...rows]), {
+        get(target, key, receiver) {
+          if (
+            key === Symbol.iterator ||
+            (typeof key === "string" && /^\d+$/.test(key))
+          )
+            throw new Error("Unchanged collection was walked");
+          return Reflect.get(target, key, receiver) as unknown;
+        },
+      });
+    const first = guarded([a]);
+    const second = guarded([changed, b]);
+    const third = guarded([a]);
+    rememberRowChanges(first, second, [
+      { id: a.id, before: a, after: changed },
+      { id: b.id, before: undefined, after: b },
+    ]);
+    rememberRowChanges(second, third, [
+      { id: a.id, before: changed, after: a },
+      { id: b.id, before: b, after: undefined },
+    ]);
+    const workspace = (jobs: readonly Record<string, unknown>[]) =>
+      createWorkspace({
+        generatedAt: "2026-08-09T10:00:00.000Z",
+        jobIds: [],
+        selectedJobId: null,
+        discoveryJobs: jobs,
+      });
+    const tracker = createJobFinderWorkspaceDeltaTracker();
+    tracker.synchronize(null, workspace(first));
+    expect(tracker.synchronize(1, workspace(second))).toMatchObject({
+      kind: "delta",
+      delta: { discoveryJobs: { upserts: [changed, b], removedIds: [] } },
+    });
+    expect(tracker.synchronize(1, workspace(third))).toMatchObject({
+      kind: "delta",
+      delta: { discoveryJobs: { upserts: [], removedIds: [] } },
+    });
+    expect(tracker.synchronize(2, workspace(third))).toMatchObject({
+      kind: "delta",
+      delta: { discoveryJobs: { upserts: [a], removedIds: [b.id] } },
+    });
+  });
   it("returns a bounded entity delta with the current selection", () => {
     const tracker = createJobFinderWorkspaceDeltaTracker();
     const initial = createWorkspace({

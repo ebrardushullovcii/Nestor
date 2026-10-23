@@ -175,6 +175,18 @@ describe("ReviewQueueMissionPanel", () => {
     expect(props.onStartApplyCopilot).toHaveBeenCalledWith({ jobId: "job_1" });
   });
 
+  it("holds Apply while all work is paused and says how to continue", () => {
+    const props = renderPanel({ applicationWorkPaused: true });
+
+    const apply = screen.getByRole("button", { name: "Apply" });
+    expect(apply.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByTestId("apply-outcome").textContent).toBe(
+      "All work is paused. Press Continue to start it again.",
+    );
+    fireEvent.click(apply);
+    expect(props.onStartApplyCopilot).not.toHaveBeenCalled();
+  });
+
   it("carries none of the old readiness chrome", () => {
     renderPanel();
 
@@ -193,7 +205,7 @@ describe("ReviewQueueMissionPanel", () => {
       screen.getByRole("button", { name: "Open the listing" }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Remove from shortlist" }),
+      screen.getByRole("button", { name: "Move back to Find jobs" }),
     ).toBeTruthy();
   });
 
@@ -347,7 +359,7 @@ describe("ReviewQueueMissionPanel", () => {
     // The primary already opens the resume, so it is not offered twice.
     expect(screen.queryByRole("button", { name: "Edit resume" })).toBeNull();
     expect(screen.getByTestId("shortlisted-state-line").textContent).toContain(
-      "Read it through, then approve it.",
+      "Read the resume through, then approve it.",
     );
     // ADR 0051: no line-by-line chore for Aggressive stretches.
     expect(
@@ -585,7 +597,7 @@ it("explains that changing a written level starts a draft before the click", () 
 it("lets a person remove a job during writing and explains remaining AI work", () => {
   const props = renderPanel({ isJobPending: () => true });
   fireEvent.click(
-    screen.getByRole("button", { name: "Remove from shortlist" }),
+    screen.getByRole("button", { name: "Move back to Find jobs" }),
   );
   expect(props.onRemoveReviewJob).toHaveBeenCalledWith("job_1");
   expect(screen.getByText(/Removing this job stops the draft/)).toBeTruthy();

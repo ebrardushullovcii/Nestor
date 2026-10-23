@@ -8,6 +8,7 @@ import type {
 } from "@nestor/browser-runtime";
 import type {
   ApplyJobResult,
+  ResumeDraftProcessor,
   JobFinderDiscoveryState,
   FitJudgmentProgress,
   JobFinderWorkspaceSnapshot,
@@ -20,6 +21,7 @@ import type {
   UserActionRequest,
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
+import type { createListingActivityIdentityIndex } from "./listing-activity-identity-index";
 import type {
   CandidateAssetResolver,
   JobFinderDocumentManager,
@@ -69,11 +71,16 @@ export interface WorkspaceServiceContext {
   visionProvider?: ResumeVisionProvider;
   browserRuntime: BrowserSessionRuntime;
   documentManager: JobFinderDocumentManager;
+  resumeDraftProcessor?: ResumeDraftProcessor;
   candidateAssetResolver?: CandidateAssetResolver;
   exportFileVerifier?: ResumeExportFileVerifier;
   researchAdapter?: ResumeResearchAdapter;
   repository: JobFinderRepository;
+  backgroundWorkReady?: PromiseLike<void>;
   listingAssessmentJobIds?: Set<string>;
+  listingActivityIdentityIndex?: ReturnType<
+    typeof createListingActivityIdentityIndex
+  >;
   listingAssessmentGenerationRef?: MutableRef<number>;
   listingAssessmentAbortControllerRef?: MutableRef<AbortController>;
   withListingAssessmentSlot?: <T>(
@@ -172,6 +179,9 @@ export interface WorkspaceServiceContext {
   staleApprovedResumeDrafts: (
     staleReason: string,
     jobIds?: readonly string[],
+    profileInputs?: Parameters<
+      NonNullable<JobFinderRepository["staleResumeDrafts"]>
+    >[0]["profileInputs"],
   ) => Promise<void>;
   openRunBrowserSession: (
     source: JobSource,

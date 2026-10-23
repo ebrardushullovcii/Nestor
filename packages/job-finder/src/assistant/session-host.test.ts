@@ -380,11 +380,98 @@ describe("assistant session host", () => {
     ).mockResolvedValue(current);
     world.harness.workspaceService.getWorkspaceProjection = () =>
       world.harness.workspaceService.getWorkspaceSnapshot();
-    await sendAndWait(world.host, "Is this resume approved?");
+    await sendAndWait(
+      world.host,
+      "Is this resume approved?",
+      context({
+        focus: { kind: "job", id: current.reviewQueue[0]!.jobId, label: null },
+      }),
+    );
     expect(inputs[0]).toContain('"approved":true');
     expect(inputs[1]).toContain('"approved":false');
     expect(inputs[1]).toContain('"active":true');
     expect(inputs[1]).toContain("Is this resume approved?");
+  });
+
+  it("loads off-screen edit tools and refreshes facts without changing the system prefix", async () => {
+    const systems: string[] = [];
+    const offered: string[][] = [];
+    const userInputs: string[] = [];
+    let step = 0;
+    const world = setup({
+      modelHandle: {
+        ...createScriptedAssistantModelHandle(),
+        createModel: () => ({
+          chatWithTools(messages, definitions) {
+            systems.push(messages[0]!.content);
+            offered.push(
+              definitions.map((definition) => definition.function.name),
+            );
+            userInputs.push(
+              messages.filter((message) => message.role === "user").at(-1)!
+                .content,
+            );
+            const actions = [
+              {
+                name: "load_tools",
+                arguments: JSON.stringify({ groups: ["profile"] }),
+              },
+              {
+                name: "edit_profile",
+                arguments: JSON.stringify({
+                  summary: "Change headline",
+                  mode: "apply",
+                  operations: [
+                    {
+                      operation: "replace_identity_fields",
+                      value: { headline: "Synthetic engineer" },
+                    },
+                  ],
+                }),
+              },
+            ];
+            const action = actions[step++];
+            return Promise.resolve(
+              action
+                ? {
+                    toolCalls: [
+                      {
+                        id: `call_${step}`,
+                        type: "function" as const,
+                        function: action,
+                      },
+                    ],
+                  }
+                : { content: "Your headline is saved. Undo is available." },
+            );
+          },
+        }),
+      },
+    });
+    const sent = await sendAndWait(
+      world.host,
+      "Change my headline to Synthetic engineer",
+      context({ screen: "home" }),
+    );
+    expect(offered[0]).toContain("load_tools");
+    expect(offered[0]).not.toContain("edit_profile");
+    expect(offered[1]).toContain("edit_profile");
+    expect(offered[2]).toContain("edit_profile");
+    expect(new Set(systems)).toEqual(new Set([ASSISTANT_SYSTEM_PROMPT]));
+    expect(userInputs[2]).toContain("Headline: Synthetic engineer");
+    const view = await world.host.readConversation({
+      conversationId: sent.conversationId,
+    });
+    const change = view.messages
+      .at(-1)!
+      .parts.find((part) => part.type === "change");
+    expect(change?.type).toBe("change");
+    if (change?.type !== "change") throw new Error("Expected Undo receipt");
+    await world.host.undoChange(sent.conversationId, change.receiptId);
+    expect(
+      (await world.harness.workspaceService.getWorkspaceSnapshot()).profile
+        .headline,
+    ).not.toBe("Synthetic engineer");
   });
 
   it("persists the exact proposed summary on its review card", async () => {

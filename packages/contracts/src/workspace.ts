@@ -1,3 +1,4 @@
+import { PreparedApplicationFormSchema } from "./prepared-application-form";
 import { z } from "zod";
 
 import {
@@ -124,12 +125,37 @@ import {
   ResumeStrategyRecommendationSourceSchema,
   ResumeStrategySkillsPolicySchema,
 } from "./job-finder-intelligence";
+import { ApplyQueueSchema } from "./apply-queue";
 
 export const JobFinderJobActionInputSchema = z.object({
   jobId: NonEmptyStringSchema,
 });
 export type JobFinderJobActionInput = z.infer<
   typeof JobFinderJobActionInputSchema
+>;
+
+/**
+ * Moves an unsent application back to Shortlisted: its prepared form closes,
+ * nothing is sent, and its history stays. Undo names the job.
+ */
+export const JobFinderReturnApplicationToShortlistInputSchema = z.object({
+  applicationRecordId: NonEmptyStringSchema,
+});
+export type JobFinderReturnApplicationToShortlistInput = z.infer<
+  typeof JobFinderReturnApplicationToShortlistInputSchema
+>;
+
+/**
+ * Clearing a resume's approval. Undo of an approval names the status the
+ * draft had before it, so the resume goes back to To review as it was
+ * instead of reading as stale.
+ */
+export const JobFinderClearResumeApprovalInputSchema =
+  JobFinderJobActionInputSchema.extend({
+    restoreStatus: z.enum(["draft", "needs_review"]).optional(),
+  });
+export type JobFinderClearResumeApprovalInput = z.infer<
+  typeof JobFinderClearResumeApprovalInputSchema
 >;
 
 /** Send for me: the filled-in forms the agent sends, one after another. */
@@ -334,6 +360,7 @@ export type JobFinderResumeWorkspaceQuery = z.infer<
 
 export const JobFinderSaveResumeDraftInputSchema = z.object({
   draft: ResumeDraftSchema,
+  autosaveSessionId: NonEmptyStringSchema.optional(),
 });
 export type JobFinderSaveResumeDraftInput = z.infer<
   typeof JobFinderSaveResumeDraftInputSchema
@@ -958,6 +985,7 @@ const PersistedDiscoveryStateSchema: z.ZodType<
 > = JobFinderDiscoveryStateSchema;
 
 const JobFinderRepositoryStateShape = {
+  preparedApplicationForms: z.array(PreparedApplicationFormSchema).optional(),
   profile: CandidateProfileSchema,
   searchPreferences: JobSearchPreferencesSchema,
   profileSetupState: ProfileSetupStateSchema.default({}),
@@ -1473,6 +1501,7 @@ const WorkspaceSnapshotCoreSchema = z.object({
   campaignNotifications: z.array(CampaignNotificationSchema).default([]),
   dashboard: JobFinderDashboardSummarySchema,
   activityControl: JobFinderActivityControlSchema.default({}),
+  applyQueue: ApplyQueueSchema.nullable().default(null),
 });
 const SnapshotIntelligenceSchema = JobFinderIntelligenceStateSchema.default({});
 const WorkspaceSnapshotBaseSchema: z.ZodObject<
@@ -2000,6 +2029,38 @@ export const DesktopWindowCloseGuardStateSchema = z.object({
 });
 export type DesktopWindowCloseGuardState = z.infer<
   typeof DesktopWindowCloseGuardStateSchema
+>;
+
+/**
+ * A right-click menu the window asks main to show as the system's own menu.
+ * Main answers with the chosen item's id, or null when it was dismissed.
+ */
+export const DesktopContextMenuItemSchema = z.union([
+  z
+    .object({
+      id: z.string().trim().min(1).max(80),
+      label: z.string().trim().min(1).max(120),
+      enabled: z.boolean().optional(),
+    })
+    .strict(),
+  z.object({ type: z.literal("separator") }).strict(),
+]);
+export type DesktopContextMenuItem = z.infer<
+  typeof DesktopContextMenuItemSchema
+>;
+
+export const DesktopContextMenuInputSchema = z
+  .object({ items: z.array(DesktopContextMenuItemSchema).min(1).max(24) })
+  .strict();
+export type DesktopContextMenuInput = z.infer<
+  typeof DesktopContextMenuInputSchema
+>;
+
+export const DesktopContextMenuResultSchema = z
+  .object({ id: z.string().nullable() })
+  .strict();
+export type DesktopContextMenuResult = z.infer<
+  typeof DesktopContextMenuResultSchema
 >;
 
 /**

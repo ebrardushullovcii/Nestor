@@ -2,6 +2,28 @@
 
 Status: accepted (2026-09-26).
 
+Amended 2026-10-23 for the owner's Apply speed work: preparation uses up to 16
+workers, bounded by the browser's working-tab capacity. The environment override
+accepts 1 through 16; site ownership and serialized final sends are unchanged.
+The ten-job run ceiling from ADR 0012 stays, so one run prepares at most ten
+forms at once, and the saved daily limit (twenty by default) still controls
+admission. A wider ceiling was tried and kept out: one press should not be able
+to start more applications, AI work and tabs than the person expects.
+
+A model may request `finishWhenReady` with its final `fill_fields` call. The same
+live readiness, answer, attachment and submission preflight checks run; this
+combines the model's fill and finish decisions without granting send authority.
+Duplicate observations after an already observed Continue are not repeated;
+fresh observations before writes and at final verification remain mandatory.
+
+An answer explicitly saved for reuse is also applied to unanswered matching
+questions in other open applications of that batch, using their own durable
+answer records and normal continuation path. Question kind, choices and control
+type must match; eligibility also keeps the same job location. Application-only
+answers and existing peer answers are preserved. Running applications refresh
+the shared answer bank before proposing a write; semantic and authority checks
+remain in the executor.
+
 Supersedes the sequential-applying paragraph of ADR 0035.
 
 ## Context

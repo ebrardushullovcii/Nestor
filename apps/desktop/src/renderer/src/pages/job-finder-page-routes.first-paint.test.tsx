@@ -451,6 +451,21 @@ describe("canonical route first paint", () => {
     expect(onOpenBrowserSession.mock.calls[0]).toEqual([]);
   });
 
+  it("does not tell a workspace still loading its saved jobs to run a first search", () => {
+    const context = createContext();
+    context.workspace = {
+      ...context.workspace,
+      hydration: {
+        phase: "bootstrap",
+        deferredCollections: ["discovery_jobs", "applications"],
+      },
+    };
+    renderCanonicalRoute("/job-finder", <JobFinderHomeRoute />, context);
+
+    expect(screen.getByText("Loading your workspace")).toBeTruthy();
+    expect(screen.queryByText("Run your first search")).toBeNull();
+  });
+
   it("mounts the real Your profile heading immediately without a suspense fallback or deferred surface timer", () => {
     const { setTimeoutSpy } = renderCanonicalRoute(
       "/job-finder/profile",

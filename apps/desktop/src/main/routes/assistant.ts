@@ -24,6 +24,7 @@ import {
   AssistantResumeBatchStateSchema,
   AssistantUndoChangeInputSchema,
   AssistantUndoChangeResultSchema,
+  type AssistantResumeBatchState,
   type CandidateAssetKind,
 } from "@nestor/contracts";
 
@@ -35,6 +36,8 @@ import {
 } from "../services/assistant/ui-resume-batch";
 
 import { getAssistantHost } from "../services/assistant/assistant-service";
+import { getFinishedWorkNotifier } from "../setup/finished-work-notifier-instance";
+import { resumesFinishedNotice } from "../setup/finished-work-notices";
 import { getCandidateAssetLibrary } from "../services/job-finder/candidate-asset-library-instance";
 
 /**
@@ -120,6 +123,7 @@ export function registerAssistantRouteHandlers(ipcMain: IpcMain): void {
       const batch = AssistantResumeBatchStateSchema.parse(
         syncUiResumeBatch(input),
       );
+      noteResumeBatchOnTaskbar(batch);
       const service = await getJobFinderWorkspaceService();
       if (isUiResumeBatchInvalidated(input.id)) return invalidatedResponse();
       await service.saveResumeBatchCheckpoint(batch);
@@ -362,5 +366,28 @@ export function registerAssistantRouteHandlers(ipcMain: IpcMain): void {
               : null,
       });
     },
+  );
+}
+
+/** A running batch fills the taskbar button; a finished one says so once. */
+function noteResumeBatchOnTaskbar(batch: AssistantResumeBatchState): void {
+  const notices = getFinishedWorkNotifier();
+  if (!batch.done && batch.running !== false) {
+    notices.progress(
+      "resumes",
+      batch.jobIds.length > 0
+        ? batch.completedJobIds.length / batch.jobIds.length
+        : null,
+    );
+    return;
+  }
+  notices.end(
+    "resumes",
+    batch.done &&
+      !batch.stopRequested &&
+      !batch.providerBlock &&
+      batch.completedJobIds.length > 0
+      ? resumesFinishedNotice(batch.completedJobIds.length)
+      : null,
   );
 }

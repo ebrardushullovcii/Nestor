@@ -607,11 +607,10 @@ describe("campaign workspace core", () => {
       beforeJobProvenanceFingerprints: new Map(),
     });
 
-    expect(commits).toEqual([
-      { ids: 250, run: false },
-      { ids: 250, run: false },
-      { ids: 100, run: true },
-    ]);
+    expect(commits.reduce((count, part) => count + part.ids, 0)).toBe(600);
+    expect(commits.every((part) => part.ids > 0 && part.ids <= 12)).toBe(true);
+    expect(commits.slice(0, -1).every((part) => !part.run)).toBe(true);
+    expect(commits.at(-1)?.run).toBe(true);
     const saved = await repository.listSavedJobs();
     expect(
       saved.every((job) => job.campaignIds?.includes("campaign_precision")),

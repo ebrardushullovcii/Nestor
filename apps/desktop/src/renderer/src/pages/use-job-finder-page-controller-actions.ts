@@ -1,3 +1,4 @@
+import { APPLICATION_WORK_PAUSED_REASON } from "@renderer/features/job-finder/lib/application-work-paused";
 import type { ResumeBatchGenerationProgress } from "@nestor/contracts";
 import { FAILURE_SENTENCES } from "@renderer/features/job-finder/lib/describe-failure";
 import {
@@ -112,9 +113,23 @@ import {
   getJobFinderErrorMessage,
 } from "@renderer/features/job-finder/lib/job-finder-error-message";
 import { buildJobFinderContextRoute } from "../features/job-finder/lib/job-finder-context-navigation";
+import {
+  listApplyQueueWaitingJobIds,
+  type ApplyQueueControlAction,
+} from "../features/job-finder/lib/apply-queue-view";
 import { buildResumeWorkspaceRoute } from "@renderer/features/job-finder/lib/resume-workspace-route";
 import {
+  getRecentChangeUndo,
+  listRecentChanges,
+  markRecentChangeUndone,
+  recordRecentChange,
+  type RecentChange,
+  type RecentChangeInput,
+} from "@renderer/features/job-finder/lib/recent-changes";
+import {
   enqueueResumeApproval,
+  forgetResumeReview,
+  getResumeReviewSession,
   markResumeReviewApproved,
   markResumeReviewApproving,
   markResumeReviewFailed,
@@ -143,6 +158,10 @@ export { COMMAND_PENDING_RELEASE_MS };
 
 type ActionOptions = {
   toastTone?: () => "success" | "warning";
+  /** Offered as Undo on the success toast. */
+  undo?: () => void;
+  /** "Undo all" for a move of many jobs. */
+  undoLabel?: string;
   clearMessageOnStart?: boolean;
   /** A flow that navigates immediately keeps later failures on its destination. */
   statusOwnerPath?: string;
@@ -197,6 +216,11 @@ type BaseActionArgs = {
       updateAssistantMessages?: boolean;
     },
   ) => Promise<boolean>;
+  /**
+   * Puts an autosaved draft into the open resume at once and reloads the rest
+   * (checks, history) only once the edits settle.
+   */
+  adoptAutosavedResumeDraft: (draft: ResumeDraft) => void;
   resumeAssistantRequestTokenRef: MutableRefObject<number>;
   setActionState: Dispatch<SetStateAction<ActionState>>;
   setLiveDiscoveryEvents: Dispatch<SetStateAction<DiscoveryActivityEvent[]>>;
@@ -593,51 +617,42 @@ function getActiveCampaignReviewQueue(
 }
 
 /**
- * What an Apply press started. Main holds back a job whose resume still
- * waits on the person and starts the rest, so the sentence counts the jobs
- * the new batch took and names any it left out.
+ * What an Apply press queued. Up to ten start at once; a longer choice goes
+ * on in runs of ten, and a day's limit waits for tomorrow (ADR 0058).
  */
-export function describeAutoApplyQueueStart(
+export function describeApplyQueueStart(
   snapshot:
-    | (Pick<JobFinderRendererWorkspaceSnapshot, "applyRuns" | "reviewQueue"> &
-        Partial<Pick<JobFinderRendererWorkspaceSnapshot, "applyJobResults">>)
+    | Pick<JobFinderRendererWorkspaceSnapshot, "applyQueue" | "reviewQueue">
     | null
     | undefined,
   jobIds: readonly string[],
   options?: { onlyWhenHeldBack?: boolean },
 ): string | null {
-  const sentJobIds = new Set(
-    (snapshot?.applyJobResults ?? [])
-      .filter(
-        (result) =>
-          result.privacyReceipt?.finalSubmitOccurred === true &&
-          (!result.privacyReceipt.submissionOutcome ||
-            result.privacyReceipt.submissionOutcome.outcome === "submitted"),
-      )
-      .map((result) => result.jobId),
-  );
-  if (jobIds.length > 0 && jobIds.every((id) => sentJobIds.has(id)))
-    return "These applications are already sent. Nothing was started.";
-  const newestRun = [...(snapshot?.applyRuns ?? [])].sort((left, right) =>
-    right.createdAt.localeCompare(left.createdAt),
-  )[0];
-  const inRun = new Set(newestRun?.jobIds ?? jobIds);
-  const started = jobIds.filter((jobId) => inRun.has(jobId)).length;
-  const heldBack = jobIds
-    .filter((jobId) => !inRun.has(jobId))
-    .map(
-      (jobId) =>
-        snapshot?.reviewQueue.find((item) => item.jobId === jobId)?.title ??
-        "one job",
-    );
-  const startedSentence =
-    started === 1
-      ? "Application started. Watch it in Applications."
-      : `${started} applications started. Watch them in Applications.`;
-  if (heldBack.length === 0 || started === 0) {
-    return options?.onlyWhenHeldBack ? null : startedSentence;
+  const queue = snapshot?.applyQueue ?? null;
+  if (!queue) return null;
+  const chosen = new Set(jobIds);
+  const heldBack = queue.skipped.filter((entry) => chosen.has(entry.jobId));
+  const heldBackSentence =
+    heldBack.length === 0
+      ? ""
+      : heldBack.length === 1
+        ? ` ${snapshot?.reviewQueue.find((item) => item.jobId === heldBack[0]!.jobId)?.title ?? "One job"} waits: ${heldBack[0]!.reason}`
+        : ` ${heldBack.length} wait for you first: ${heldBack[0]!.reason}`;
+  if (queue.state === "paused" && queue.pausedReason) {
+    return `Nothing new started. ${queue.pausedReason}`;
   }
-  return `${startedSentence} ${heldBack.length === 1 ? `${heldBack[0]} waits` : `${heldBack.join(", ")} wait`}: ${heldBack.length === 1 ? "its resume has" : "their resumes have"} a line for you to decide first.`;
+  if (options?.onlyWhenHeldBack) return heldBackSentence.trim() || null;
+  const going = jobIds.length - heldBack.length;
+  if (queue.state === "waiting_for_tomorrow") {
+    return `Today's limit is reached, so ${going === 1 ? "this one starts" : `these ${going} start`} after midnight by themselves.${heldBackSentence}`;
+  }
+  const started =
+    going <= 10
+      ? going === 1
+        ? "Application started. Watch it in Applications."
+        : `${going} applications started. Watch them in Applications.`
+      : `${going} applications queued: ten at a time, inside your daily limit, with no more presses. Progress is on Home and Applications.`;
+  return `${started}${heldBackSentence}`;
 }
 
 export function describePreparedApplicationSubmitResult(
@@ -804,6 +819,14 @@ export function createActionRunners(args: {
             message: resolvedSuccessMessage,
             tone: resolvedSuccessMessage ? "success" : null,
             ...(options?.toastTone ? { toastTone: options.toastTone() } : {}),
+            ...(options?.undo && resolvedSuccessMessage
+              ? {
+                  undo: options.undo,
+                  ...(options.undoLabel
+                    ? { undoLabel: options.undoLabel }
+                    : {}),
+                }
+              : {}),
           });
         },
         options?.releasePendingAfterMs,
@@ -1010,6 +1033,7 @@ export function createPrimaryPageActions(
     profileSetupState,
     profileCopilotRequestTokenRef,
     refreshResumeWorkspace,
+    adoptAutosavedResumeDraft,
     resumeAssistantRequestTokenRef,
     runAction,
     runResumeWorkspaceAction,
@@ -1084,7 +1108,12 @@ export function createPrimaryPageActions(
   // start surfaces disable their own controls when nothing remains, but any
   // caller that still reaches a start handler must see the refusal as a
   // visible actionable status instead of a dialog flowing into a no-op.
-  const getDailyCapacityRefusalMessage = (): string | null => {
+  // Every application start asks this first. The pause is the person's
+  // brake (the service refuses the same starts), then the spent day.
+  const getApplicationStartRefusalMessage = (): string | null => {
+    if (workspace?.activityControl?.paused) {
+      return APPLICATION_WORK_PAUSED_REASON;
+    }
     const capacity =
       workspace?.dashboard?.globalDailyApplicationPreparationCapacity ?? null;
     if (!capacity || !isDailyPreparationCapacityExhausted(capacity)) {
@@ -1092,6 +1121,165 @@ export function createPrimaryPageActions(
     }
     return formatDailyPreparationCapacityReachedText(capacity);
   };
+
+  const jobsAre = (count: number) =>
+    count === 1 ? "1 job is" : `${count} jobs are`;
+  const describeJobForChange = (jobId: string): string => {
+    const current = latestWorkspaceRef.current ?? workspace;
+    const job =
+      current.reviewQueue.find((item) => item.jobId === jobId) ??
+      current.discoveryJobs.find((entry) => entry.id === jobId) ??
+      current.dismissedDiscoveryJobs.find((entry) => entry.id === jobId) ??
+      current.applicationRecords.find((record) => record.jobId === jobId);
+    return job ? `${job.title} at ${job.company}` : "a job";
+  };
+  /**
+   * Records a move for Recent changes; the label names its first job. The
+   * move itself already happened, so a record that cannot be written only
+   * costs its Undo and never turns the move into a failure.
+   */
+  const recordMove = (
+    input: Omit<RecentChangeInput, "label">,
+  ): RecentChange | null => {
+    let label = "a job";
+    try {
+      label = describeJobForChange(input.jobIds[0] ?? "");
+    } catch {
+      // A workspace still loading names no job; the move keeps its Undo.
+    }
+    try {
+      return recordRecentChange({ ...input, label });
+    } catch {
+      return null;
+    }
+  };
+  const undoToastFor = (change: RecentChange | null) =>
+    change ? () => void undoRecentChange(change) : null;
+  // One way back for every move, shared by each toast's Undo and Activity's
+  // Recent changes. A job that moved on since keeps its newer state; the
+  // reason says where it went instead.
+  const undoRecentChange = (change: RecentChange): Promise<boolean> => {
+    const current = latestWorkspaceRef.current ?? workspace;
+    const undo = getRecentChangeUndo(
+      change,
+      {
+        discoveryJobs: current.discoveryJobs,
+        dismissedDiscoveryJobs: current.dismissedDiscoveryJobs,
+        reviewQueue: current.reviewQueue,
+        applicationJobIds: collectPreparedApplicationJobIds(
+          current.applicationRecords,
+        ),
+      },
+      listRecentChanges(),
+    );
+    if (!undo.possible) {
+      applyRouteScopedMessage({ message: undo.reason, tone: "failure" });
+      return Promise.resolve(false);
+    }
+    const ids = undo.jobIds;
+    const settle = (
+      action: () => Promise<unknown>,
+      message: string,
+      scope: PendingActionScope,
+    ) =>
+      runAction(action, () => markRecentChangeUndone(change), message, {
+        scope,
+      });
+    switch (change.kind) {
+      case "shortlisted":
+        return settle(
+          async () => {
+            if (actions.removeJobsFromReview)
+              return actions.removeJobsFromReview(ids);
+            for (const id of ids) await actions.removeJobFromReview(id);
+          },
+          `${jobsAre(ids.length)} back in Find jobs.`,
+          jobFinderPendingActions.resumeJob("bulk-remove"),
+        );
+      case "hidden":
+        return settle(
+          async () => {
+            for (const id of ids)
+              await actions.restoreDismissedDiscoveryJob(id);
+          },
+          `${jobsAre(ids.length)} back in Find jobs.`,
+          jobFinderPendingActions.discoveryJob("bulk-dismiss"),
+        );
+      case "shown_again":
+        return settle(
+          async () => {
+            if (actions.dismissDiscoveryJobs)
+              return actions.dismissDiscoveryJobs(ids, []);
+            for (const id of ids)
+              await actions.dismissDiscoveryJob(id, [], "hide_job", null);
+          },
+          `${ids.length === 1 ? "1 job" : `${ids.length} jobs`} hidden again.`,
+          jobFinderPendingActions.discoveryJob("bulk-dismiss"),
+        );
+      case "moved_to_find_jobs":
+        return settle(
+          async () => {
+            if (actions.queueJobsForReview)
+              return actions.queueJobsForReview(ids);
+            for (const id of ids) await actions.queueJobForReview(id);
+          },
+          `${jobsAre(ids.length)} back in Shortlisted.`,
+          jobFinderPendingActions.resumeJob("bulk-remove"),
+        );
+      case "approved":
+        return settle(
+          async () => {
+            for (const id of ids)
+              await actions.clearResumeApproval(
+                id,
+                change.restoreStatus?.[id] ?? "needs_review",
+              );
+            for (const id of ids) forgetResumeReview(id);
+          },
+          ids.length === 1
+            ? "The resume is back under To review."
+            : `${ids.length} resumes are back under To review.`,
+          jobFinderPendingActions.apply(),
+        );
+      case "moved_to_review":
+        return settle(
+          async () => {
+            // Clearing the approval touched the draft, so the old PDF
+            // reads as out of date; a fresh one is built and approved, as
+            // the studio's Approve does.
+            for (const id of ids) {
+              await actions.exportResumePdf(id, "approval");
+              await approveLatestResumeExport(id);
+            }
+          },
+          ids.length === 1
+            ? "Resume approved again."
+            : `${ids.length} resumes approved again.`,
+          jobFinderPendingActions.apply(),
+        );
+      case "moved_to_shortlisted":
+        return settle(
+          async () => {
+            for (const id of ids)
+              await actions.undoReturnApplicationToShortlist(id);
+          },
+          ids.length === 1
+            ? "Back in Applications. Its form was closed; Apply again fills it in."
+            : `${ids.length} applications are back in Applications.`,
+          jobFinderPendingActions.apply(),
+        );
+      case "taken_out_of_queue":
+        return Promise.resolve(false);
+    }
+  };
+  const reviewStatusBeforeApproval = (
+    jobId: string,
+  ): "draft" | "needs_review" =>
+    (latestWorkspaceRef.current ?? workspace).reviewQueue.find(
+      (item) => item.jobId === jobId,
+    )?.resumeReview.status === "draft"
+      ? "draft"
+      : "needs_review";
 
   const runDiscoveryAction = (
     targetId?: string,
@@ -1770,6 +1958,11 @@ export function createPrimaryPageActions(
         },
       ),
     onApproveApply: (jobId: string) => {
+      const startRefusal = getApplicationStartRefusalMessage();
+      if (startRefusal) {
+        applyRouteScopedMessage({ message: startRefusal, tone: "failure" });
+        return;
+      }
       void confirmLeaveDirtyResumeWorkspace("approve this application").then(
         (mayLeave) => {
           if (!mayLeave) {
@@ -1818,20 +2011,17 @@ export function createPrimaryPageActions(
       applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
       options?: { stayOnCurrentPage?: boolean },
     ): Promise<JobFinderAutoApplyQueueStartOutcome> => {
-      const capacityRefusal = getDailyCapacityRefusalMessage();
-      if (capacityRefusal) {
-        applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
-        return {
-          status: "refused",
-          reason: "daily_capacity_exhausted",
-          message: capacityRefusal,
-        };
-      }
-
+      // No daily-limit refusal here: the Apply queue waits for tomorrow and
+      // says so on Home and Applications (ADR 0058).
       if (jobIds.length === 0) {
         const message = "No jobs selected for auto-apply queue.";
         applyRouteScopedMessage({ message });
         return { status: "refused", reason: "empty_selection", message };
+      }
+      if (workspace?.activityControl?.paused) {
+        const message = APPLICATION_WORK_PAUSED_REASON;
+        applyRouteScopedMessage({ message, tone: "failure" });
+        return { status: "refused", reason: "work_paused", message };
       }
 
       // Stay resolves false: take no action and keep every draft. Leave
@@ -1855,13 +2045,17 @@ export function createPrimaryPageActions(
       let backendRejected = false;
       const confirmed = await runAction(
         () =>
-          (applicationAutomationMode
-            ? actions.startAutoApplyQueueRun(jobIds, applicationAutomationMode)
-            : actions.startAutoApplyQueueRun(jobIds)
-          ).catch((error: unknown) => {
-            backendRejected = true;
-            throw error;
-          }),
+          actions
+            .startApplyQueue({
+              jobIds: [...jobIds],
+              ...(applicationAutomationMode
+                ? { applicationAutomationMode }
+                : {}),
+            })
+            .catch((error: unknown) => {
+              backendRejected = true;
+              throw error;
+            }),
         () => {
           setResumeWorkspaceDirty(false);
           if (!options?.stayOnCurrentPage) {
@@ -1871,9 +2065,9 @@ export function createPrimaryPageActions(
           }
         },
         (snapshot) =>
-          describeAutoApplyQueueStart(snapshot, jobIds, {
-            // Home shows the running batch itself; a "started" line there
-            // outlived the batch. It keeps only a job held back.
+          describeApplyQueueStart(snapshot, jobIds, {
+            // Home shows the queue itself; a "started" line there outlived
+            // it. It keeps only what needs the person.
             onlyWhenHeldBack: options?.stayOnCurrentPage === true,
           }),
         { scope: jobFinderPendingActions.apply() },
@@ -1886,8 +2080,99 @@ export function createPrimaryPageActions(
         ? { status: "failed", message: null }
         : { status: "unknown" };
     },
+    onApproveResumes: (jobIds: readonly string[]) => {
+      const restoreStatus = Object.fromEntries(
+        jobIds.map((id) => [id, reviewStatusBeforeApproval(id)]),
+      );
+      let change: RecentChange | null = null;
+      return runAction(
+        () => actions.approveResumes({ jobIds: [...jobIds] }),
+        () => undefined,
+        (snapshot) => {
+          const chosen = new Set(jobIds);
+          const approvedIds = (snapshot.reviewQueue ?? [])
+            .filter(
+              (item) =>
+                chosen.has(item.jobId) &&
+                item.resumeReview.status === "approved",
+            )
+            .map((item) => item.jobId);
+          const approved = approvedIds.length;
+          if (approved > 0)
+            change = recordMove({
+              kind: "approved",
+              jobIds: approvedIds,
+              restoreStatus,
+            });
+          const left = jobIds.length - approved;
+          return `${approved === 1 ? "1 resume approved" : `${approved} resumes approved`}.${left > 0 ? ` ${left} could not be: open ${left === 1 ? "it" : "them"} under To review.` : ""}`;
+        },
+        {
+          scope: jobFinderPendingActions.apply(),
+          startMessage: `Approving ${jobIds.length === 1 ? "1 resume" : `${jobIds.length} resumes`}...`,
+          undo: () => {
+            if (change) void undoRecentChange(change);
+          },
+          ...(jobIds.length > 1 ? { undoLabel: "Undo all" } : {}),
+        },
+      );
+    },
+    onReturnApplicationToShortlist: (record: { id: string; jobId: string }) => {
+      let change: RecentChange | null = null;
+      return runAction(
+        () =>
+          actions.returnApplicationToShortlist({
+            applicationRecordId: record.id,
+          }),
+        () => {
+          change = recordMove({
+            kind: "moved_to_shortlisted",
+            jobIds: [record.jobId],
+          });
+        },
+        "Moved back to Shortlisted. Nothing was sent.",
+        {
+          scope: jobFinderPendingActions.apply(),
+          undo: () => {
+            if (change) void undoRecentChange(change);
+          },
+        },
+      );
+    },
+    onTakeOutOfApplyQueue: (jobIds: readonly string[]) => {
+      const ids = [...new Set(jobIds)];
+      return runAction(
+        () => actions.removeFromApplyQueue({ jobIds: ids }),
+        (snapshot) => {
+          const waiting = new Set(
+            listApplyQueueWaitingJobIds(snapshot.applyQueue),
+          );
+          const taken = ids.filter((id) => !waiting.has(id));
+          if (taken.length > 0)
+            recordMove({ kind: "taken_out_of_queue", jobIds: taken });
+        },
+        (snapshot) => {
+          const waiting = new Set(
+            listApplyQueueWaitingJobIds(snapshot.applyQueue),
+          );
+          const left = ids.filter((id) => waiting.has(id)).length;
+          const taken = ids.length - left;
+          if (taken === 0)
+            return "It had already started, so it stays in the run.";
+          return `${taken === 1 ? "1 job" : `${taken} jobs`} taken out of the apply queue. Nothing was started for ${taken === 1 ? "it" : "them"}.`;
+        },
+        { scope: jobFinderPendingActions.apply() },
+      );
+    },
+    onControlApplyQueue: (action: ApplyQueueControlAction) =>
+      void runAction(
+        () => actions.controlApplyQueue({ action }),
+        () => undefined,
+        null,
+        { scope: jobFinderPendingActions.apply() },
+      ),
     onStartAutoApply: (input: JobFinderApplicationStartTarget) => {
-      const capacityRefusal = getDailyCapacityRefusalMessage();
+      const capacityRefusal = getApplicationStartRefusalMessage();
       if (capacityRefusal) {
         applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
         return;
@@ -1920,7 +2205,7 @@ export function createPrimaryPageActions(
       );
     },
     onStartApplyCopilot: (input: JobFinderApplicationStartTarget) => {
-      const capacityRefusal = getDailyCapacityRefusalMessage();
+      const capacityRefusal = getApplicationStartRefusalMessage();
       if (capacityRefusal) {
         applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
         return;
@@ -1993,6 +2278,9 @@ export function createPrimaryPageActions(
       expectedNormalizedCompanyName: string | null = null,
       options?: { quiet?: boolean },
     ) => {
+      // Undo shows the job again; excluding the employer is undone where it
+      // was made, so that one keeps its own message.
+      let change: RecentChange | null = null;
       await runAction(
         () =>
           actions.dismissDiscoveryJob(
@@ -2001,15 +2289,25 @@ export function createPrimaryPageActions(
             action,
             expectedNormalizedCompanyName,
           ),
-        () => undefined,
+        () => {
+          if (action === "hide_job")
+            change = recordMove({ kind: "hidden", jobIds: [jobId] });
+        },
         options?.quiet
           ? null
           : action === "hide_and_exclude_employer"
             ? "Job hidden and the exact employer name excluded from future searches. Fit scoring is unchanged."
-            : "Job hidden. Your reasons stay local and do not change fit scoring.",
+            : "Job hidden.",
         {
           rethrowError: true,
           scope: jobFinderPendingActions.discoveryJob(jobId),
+          ...(action === "hide_job"
+            ? {
+                undo: () => {
+                  if (change) void undoRecentChange(change);
+                },
+              }
+            : {}),
         },
       );
     },
@@ -2022,13 +2320,22 @@ export function createPrimaryPageActions(
         "Employer allowed in future searches. The hidden job was not restored.",
         { scope: jobFinderPendingActions.discoveryJob(input.jobId) },
       ),
-    onRestoreDismissedJob: (jobId: string, options?: { quiet?: boolean }) =>
+    onRestoreDismissedJob: (jobId: string, options?: { quiet?: boolean }) => {
+      let change: RecentChange | null = null;
       void runAction(
         () => actions.restoreDismissedDiscoveryJob(jobId),
-        () => undefined,
-        options?.quiet ? null : "Job restored and feedback reset.",
-        { scope: jobFinderPendingActions.discoveryJob(jobId) },
-      ),
+        () => {
+          change = recordMove({ kind: "shown_again", jobIds: [jobId] });
+        },
+        options?.quiet ? null : "Job is back in Find jobs.",
+        {
+          scope: jobFinderPendingActions.discoveryJob(jobId),
+          undo: () => {
+            if (change) void undoRecentChange(change);
+          },
+        },
+      );
+    },
     onEditResumeWorkspace: (jobId: string) => {
       void confirmLeaveDirtyResumeWorkspace("open that resume instead").then(
         (mayLeave) => {
@@ -2079,15 +2386,25 @@ export function createPrimaryPageActions(
               "remove these jobs from Shortlisted",
             );
             if (!mayLeave) return;
+            let change: RecentChange | null = null;
             await runAction(
               () => actions.removeJobsFromReview!(ids),
-              () => undefined,
+              () => {
+                change = recordMove({
+                  kind: "moved_to_find_jobs",
+                  jobIds: ids,
+                });
+              },
               options?.quiet
                 ? null
                 : `${ids.length} ${ids.length === 1 ? "job" : "jobs"} moved back to Find jobs.`,
               {
                 rethrowError: true,
                 scope: jobFinderPendingActions.resumeJob("bulk-remove"),
+                undo: () => {
+                  if (change) void undoRecentChange(change);
+                },
+                ...(ids.length > 1 ? { undoLabel: "Undo all" } : {}),
               },
             );
           },
@@ -2101,9 +2418,14 @@ export function createPrimaryPageActions(
           return;
         }
 
+        let change: RecentChange | null = null;
         void runAction(
           () => actions.removeJobFromReview(jobId),
           () => {
+            change = recordMove({
+              kind: "moved_to_find_jobs",
+              jobIds: [jobId],
+            });
             clearResumeWorkspaceState();
             const queue = getCampaignReviewQueue();
             const index = queue.findIndex((item) => item.jobId === jobId);
@@ -2112,11 +2434,18 @@ export function createPrimaryPageActions(
             navigate("/job-finder/review-queue", { replace: true });
           },
           "Job moved back to Find jobs.",
-          { scope: jobFinderPendingActions.resumeJob(jobId) },
+          {
+            scope: jobFinderPendingActions.resumeJob(jobId),
+            undo: () => {
+              if (change) void undoRecentChange(change);
+            },
+          },
         );
       });
     },
-    onApproveCurrentResume: (jobId: string) =>
+    onApproveCurrentResume: (jobId: string) => {
+      const restoreStatus = reviewStatusBeforeApproval(jobId);
+      let change: RecentChange | null = null;
       void runResumeWorkspaceAction(
         async () => {
           try {
@@ -2133,11 +2462,22 @@ export function createPrimaryPageActions(
           return approveLatestResumeExport(jobId);
         },
         async () => {
+          change = recordMove({
+            kind: "approved",
+            jobIds: [jobId],
+            restoreStatus: { [jobId]: restoreStatus },
+          });
           await refreshResumeWorkspace(jobId);
         },
-        "Resume approved and ready for application preparation.",
-        { scope: jobFinderPendingActions.resumeExport(jobId) },
-      ),
+        "Resume approved.",
+        {
+          scope: jobFinderPendingActions.resumeExport(jobId),
+          undo: () => {
+            if (change) void undoRecentChange(change);
+          },
+        },
+      );
+    },
     onApproveResumeAndContinue: (
       jobId: string,
       nextJobId: string | null,
@@ -2147,6 +2487,14 @@ export function createPrimaryPageActions(
       // has read this resume and approved it, so the next one opens now and
       // the approval finishes behind it, one at a time. A failure keeps the
       // job in "To review" and is named on the review line in the studio.
+      // Undo puts the resume back under To review as it was, so it needs
+      // the status the approval is about to replace.
+      const restoreStatus = reviewStatusBeforeApproval(jobId);
+      const change = recordMove({
+        kind: "approved",
+        jobIds: [jobId],
+        restoreStatus: { [jobId]: restoreStatus },
+      });
       markResumeReviewApproving(jobId);
       enqueueResumeApproval(async () => {
         try {
@@ -2165,19 +2513,46 @@ export function createPrimaryPageActions(
         } catch (error) {
           markResumeReviewFailed(
             jobId,
-            getJobFinderErrorMessage(error, "The resume could not be approved."),
+            getJobFinderErrorMessage(
+              error,
+              "The resume could not be approved.",
+            ),
           );
         }
       });
       setSelectedReviewJobId(nextJobId ?? jobId);
-      navigate(
-        nextJobId
-          ? buildResumeWorkspaceRoute(nextJobId)
-          : "/job-finder/review-queue",
+      const destination = nextJobId
+        ? buildResumeWorkspaceRoute(nextJobId)
+        : "/job-finder/review-queue";
+      navigate(destination);
+      let undone = false;
+      applyRouteScopedMessage(
+        {
+          message: "Resume approved.",
+          tone: "success",
+          undo: () => {
+            if (undone) return;
+            undone = true;
+            // After the approval itself, which may still be building.
+            enqueueResumeApproval(async () => {
+              if (getResumeReviewSession().failed.has(jobId)) return;
+              await runAction(
+                () => actions.clearResumeApproval(jobId, restoreStatus),
+                () => {
+                  forgetResumeReview(jobId);
+                  if (change) markRecentChangeUndone(change);
+                },
+                "The resume is back under To review.",
+                { scope: jobFinderPendingActions.resumeExport(jobId) },
+              );
+            });
+          },
+        },
+        destination,
       );
     },
     onApproveResumeAndApply: (jobId: string) => {
-      const capacityRefusal = getDailyCapacityRefusalMessage();
+      const capacityRefusal = getApplicationStartRefusalMessage();
       if (capacityRefusal) {
         applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
         return;
@@ -2239,15 +2614,69 @@ export function createPrimaryPageActions(
         );
       })();
     },
-    onApproveResume: (jobId: string, exportId: string) =>
+    onApproveResume: (jobId: string, exportId: string) => {
+      const restoreStatus = reviewStatusBeforeApproval(jobId);
+      let change: RecentChange | null = null;
       void runResumeWorkspaceAction(
         () => actions.approveResume(jobId, exportId),
         async () => {
+          change = recordMove({
+            kind: "approved",
+            jobIds: [jobId],
+            restoreStatus: { [jobId]: restoreStatus },
+          });
           await refreshResumeWorkspace(jobId);
         },
         "Resume approved for this job.",
-        { scope: jobFinderPendingActions.resumeJob(jobId) },
-      ),
+        {
+          scope: jobFinderPendingActions.resumeJob(jobId),
+          undo: () => {
+            if (change) void undoRecentChange(change);
+          },
+        },
+      );
+    },
+    onMoveResumesBackToReview: (jobIds: readonly string[]) => {
+      // Approved -> To review, on purpose: the approval is cleared and the
+      // resume waits for a read again exactly as before it was approved.
+      // Undo approves the same PDF again.
+      const current = latestWorkspaceRef.current ?? workspace;
+      const approvedExportIds: Record<string, string> = {};
+      for (const item of current.reviewQueue)
+        if (
+          jobIds.includes(item.jobId) &&
+          item.resumeReview.status === "approved"
+        )
+          approvedExportIds[item.jobId] = item.resumeReview.approvedExportId;
+      const ids = Object.keys(approvedExportIds);
+      if (ids.length === 0) return Promise.resolve(false);
+      let change: RecentChange | null = null;
+      return runAction(
+        async () => {
+          for (const id of ids)
+            await actions.clearResumeApproval(id, "needs_review");
+          for (const id of ids) forgetResumeReview(id);
+        },
+        () => {
+          change = recordMove({
+            kind: "moved_to_review",
+            jobIds: ids,
+            approvedExportIds,
+          });
+        },
+        ids.length === 1
+          ? "The resume is back under To review."
+          : `${ids.length} resumes are back under To review.`,
+        {
+          scope: jobFinderPendingActions.apply(),
+          undo: () => {
+            if (change) void undoRecentChange(change);
+          },
+          ...(ids.length > 1 ? { undoLabel: "Undo all" } : {}),
+        },
+      );
+    },
+    onUndoRecentChange: undoRecentChange,
     onSetWorkHistoryReviewAcknowledgment: (
       jobId: string,
       decision: ResumeWorkHistoryDecisionRequest,
@@ -2416,13 +2845,20 @@ export function createPrimaryPageActions(
           onDismissJobs: async (jobIds: readonly string[]) => {
             const ids = [...new Set(jobIds)];
             if (ids.length === 0) return;
+            let change: RecentChange | null = null;
             await runAction(
               () => actions.dismissDiscoveryJobs!(ids, []),
-              () => undefined,
-              `${ids.length} ${ids.length === 1 ? "job" : "jobs"} hidden. They stay in Not interested, where you can restore them.`,
+              () => {
+                change = recordMove({ kind: "hidden", jobIds: ids });
+              },
+              `${ids.length} ${ids.length === 1 ? "job" : "jobs"} hidden.`,
               {
                 rethrowError: true,
                 scope: jobFinderPendingActions.discoveryJob("bulk-dismiss"),
+                undo: () => {
+                  if (change) void undoRecentChange(change);
+                },
+                ...(ids.length > 1 ? { undoLabel: "Undo all" } : {}),
               },
             );
           },
@@ -2454,20 +2890,16 @@ export function createPrimaryPageActions(
               );
               // Shortlisted keeps its own selection: the new jobs join the end
               // of the list, so selecting one there opened Shortlisted on its
-              // last page the next time the person went to it. The toast's
-              // link opens the first new job instead.
-              const message = `${ids.length} ${ids.length === 1 ? "job added" : "jobs added"} to Shortlisted.`;
+              // last page the next time the person went to it. The toast
+              // offers Undo instead.
+              const message = `Shortlisted ${ids.length === 1 ? "1 job" : `${ids.length} jobs`}.`;
+              const change = recordMove({ kind: "shortlisted", jobIds: ids });
               applyRouteScopedMessage(
                 {
                   message,
                   tone: "success",
-                  actionLink: {
-                    label: "Open Shortlisted",
-                    route: buildJobFinderContextRoute(
-                      "/job-finder/review-queue",
-                      { jobId: ids[0]! },
-                    ),
-                  },
+                  undo: undoToastFor(change),
+                  undoLabel: ids.length > 1 ? "Undo all" : null,
                 },
                 ownerRoute,
               );
@@ -2509,6 +2941,7 @@ export function createPrimaryPageActions(
         // review collections. Retain the exact clicked id so the refreshed
         // Shortlisted surface cannot silently fall back to another row.
         setSelectedReviewJobId(jobId);
+        const change = recordMove({ kind: "shortlisted", jobIds: [jobId] });
         // A triage pass says each decision on its own bar with Undo; a
         // toast for every one of a hundred shortlists would only stack up.
         if (!options?.quiet)
@@ -2516,10 +2949,7 @@ export function createPrimaryPageActions(
             {
               message: successMessage,
               tone: "success",
-              actionLink: {
-                label: "Open Shortlisted",
-                route: "/job-finder/review-queue",
-              },
+              undo: undoToastFor(change),
             },
             ownerStartRoute,
           );
@@ -3124,6 +3554,51 @@ export function createPrimaryPageActions(
         scope: jobFinderPendingActions.resumeJob(draft.jobId),
         surface: "resume",
       }),
+    // Resume Studio saves edits by itself a moment after the last one. It is
+    // quiet: no "Saving…" line, no toast, no pending scope that would lock
+    // the fields, and it stays out of the save coordinator so leaving the
+    // page mid-save asks nothing. The editor shows its own state and keeps
+    // the edits marked unsaved only when this fails.
+    onAutosaveResumeDraft: async (
+      draft: ResumeDraft,
+      onSaved: (updatedAt: string) => void,
+      autosaveSessionId?: string,
+    ): Promise<{ saved: true } | { saved: false; message: string }> => {
+      try {
+        const snapshot = await actions.saveResumeDraft(
+          draft,
+          autosaveSessionId,
+        );
+        const savedDraft = snapshot.resumeDrafts.find(
+          (entry) => entry.id === draft.id,
+        );
+        if (savedDraft) {
+          onSaved(savedDraft.updatedAt);
+          // Not a reload of the whole resume (~0.3 s of main-process work
+          // after every pause in typing): the save's own fields go on the
+          // text that was sent, and the checks and history follow later.
+          adoptAutosavedResumeDraft({
+            ...draft,
+            status: savedDraft.status,
+            approvedAt: savedDraft.approvedAt,
+            approvedExportId: savedDraft.approvedExportId,
+            staleReason: savedDraft.staleReason,
+            updatedAt: savedDraft.updatedAt,
+          });
+        } else {
+          await refreshResumeWorkspace(draft.jobId);
+        }
+        return { saved: true };
+      } catch (error) {
+        return {
+          saved: false,
+          message: getJobFinderErrorMessage(
+            error,
+            "Your latest resume edits were not saved.",
+          ),
+        };
+      }
+    },
     onSaveResumeDraftAndThen: (
       draft: ResumeDraft,
       next: () => void | Promise<void>,

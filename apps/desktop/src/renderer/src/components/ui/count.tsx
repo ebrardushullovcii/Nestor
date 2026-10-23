@@ -28,7 +28,7 @@ const COUNT_VARIANT_CLASS = {
   // so it reads as belonging to the row instead of floating at the far edge.
   pill: "inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-(--input) px-1.5 text-(length:--text-tiny) font-medium tabular-nums text-foreground",
   "rail-marker":
-    "inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-(--surface-panel-border) bg-(--input) px-1 text-(length:--text-tiny) tabular-nums text-foreground",
+    "inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full border border-(--surface-panel-border) bg-(--input) px-0.5 text-[0.625rem] leading-none tabular-nums text-foreground",
 } as const satisfies Record<CountVariant, string>;
 
 function Count({

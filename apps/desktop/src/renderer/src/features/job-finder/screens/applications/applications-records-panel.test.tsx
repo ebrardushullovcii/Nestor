@@ -31,7 +31,98 @@ Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
   configurable: true,
   value: vi.fn(),
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // The list remembers its search and stage; each test starts without them.
+  window.localStorage.clear();
+});
+
+describe("ApplicationsRecordsPanel row menu: the way back", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, "nestor");
+  });
+  const counts = {
+    all: 1,
+    needs_action: 0,
+    in_progress: 0,
+    submitted: 0,
+    manual_only: 0,
+  };
+  function openMenuFor(record: ApplicationRecord) {
+    const showContextMenu = vi.fn(() => Promise.resolve({ id: null }));
+    (window as unknown as { nestor?: unknown }).nestor = {
+      window: { showContextMenu },
+    };
+    const onReturnToShortlist = vi.fn();
+    const onMutateApplicationCrm = vi.fn(() => Promise.resolve());
+    render(
+      <MemoryRouter>
+        <ApplicationsRecordsPanel
+          activeFilter="all"
+          applicationRecords={[record]}
+          filterCounts={counts}
+          hasAnyApplications
+          onFilterChange={vi.fn()}
+          onSelectRecord={vi.fn()}
+          onReturnToShortlist={onReturnToShortlist}
+          onMutateApplicationCrm={onMutateApplicationCrm}
+          selectedRecord={record}
+        />
+      </MemoryRouter>,
+    );
+    fireEvent.contextMenu(
+      screen.getByRole("button", { name: /View details for/ }),
+    );
+    const [call] = showContextMenu.mock.calls as unknown as [
+      [{ items: { label?: string; enabled?: boolean }[] }],
+    ];
+    return {
+      labels: call[0].items.map((item) =>
+        item.enabled === false ? `(${item.label})` : (item.label ?? "-"),
+      ),
+      onReturnToShortlist,
+    };
+  }
+  const base = {
+    id: "application_1",
+    jobId: "job_1",
+    title: "Engineer",
+    company: "Example",
+    lastActionLabel: "Prepared",
+    nextActionLabel: null,
+    lastUpdatedAt: "2026-10-02T10:00:00.000Z",
+  };
+
+  it("offers Move back to Shortlisted for an application nothing was sent for", () => {
+    const { labels } = openMenuFor(
+      ApplicationRecordSchema.parse({
+        ...base,
+        status: "approved",
+        lastAttemptState: "failed",
+      }),
+    );
+    expect(labels).toContain("Move back to Shortlisted");
+    expect(labels).not.toContain("Archive");
+  });
+
+  it("offers Mark withdrawn and Archive for a sent one, and says why it stays", () => {
+    const { labels } = openMenuFor(
+      ApplicationRecordSchema.parse({
+        ...base,
+        status: "submitted",
+        lastAttemptState: "submitted",
+      }),
+    );
+    expect(labels).not.toContain("Move back to Shortlisted");
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        "(It was sent, so it cannot move back)",
+        "Mark withdrawn",
+        "Archive",
+      ]),
+    );
+  });
+});
 
 describe("ApplicationsRecordsPanel", () => {
   it("removes stale preparing guidance from a failed row", () => {
@@ -349,9 +440,12 @@ describe("ApplicationsRecordsPanel", () => {
     const firstRowAction = screen.getByRole("button", {
       name: "View details for Product Engineer 1 at Acme",
     });
-    // The row IS the action now (the shared SelectableRow primitive), rather
-    // than an absolutely positioned overlay button on top of the content.
-    expect(firstRowAction.getAttribute("data-slot")).toBe("selectable-row");
+    // The details action fills the shared SelectableRow, as on Shortlisted,
+    // rather than an absolutely positioned overlay button on top of the
+    // content; the row's Open form button sits beside it, not inside it.
+    expect(firstRowAction.parentElement?.getAttribute("data-slot")).toBe(
+      "selectable-row",
+    );
     expect(firstRowAction.className).toContain("w-full");
     expect(firstRowAction.className).not.toContain("absolute");
     fireEvent.click(firstRowAction);
@@ -460,7 +554,9 @@ describe("ApplicationsRecordsPanel", () => {
     // list's own two-column grid. `list-row.test.tsx` pins that the three
     // panels agree; this pins what the Applications row itself renders.
     const rowLines = rowAction?.firstElementChild;
-    expect(rowLines?.className).toBe(jobFinderListRowLinesClassName);
+    expect(rowLines?.className.startsWith(jobFinderListRowLinesClassName)).toBe(
+      true,
+    );
     const rowTitleLine = rowLines?.firstElementChild;
     expect(rowTitleLine?.className).toBe(jobFinderListRowTitleLineClassName);
     const rowBadgeSlot = rowTitleLine?.lastElementChild;

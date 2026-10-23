@@ -70,14 +70,53 @@ function resolvePlanSourceIds(
   >,
 ): string[] {
   const selectedIds = new Set(campaign.sourceTargetIds ?? []);
-  const followsProfile =
-    campaign.sourceSelectionMode === "profile" ||
-    (campaign.sourceSelectionMode === undefined && selectedIds.size === 0);
+  const followsProfile = planFollowsProfile(campaign);
   return campaign.searchPreferences.discovery.targets
     .filter((target) =>
       followsProfile ? target.enabled : selectedIds.has(target.id),
     )
     .map((target) => target.id);
+}
+
+function planFollowsProfile(
+  campaign: Pick<JobSearchCampaign, "sourceTargetIds" | "sourceSelectionMode">,
+): boolean {
+  return (
+    campaign.sourceSelectionMode === "profile" ||
+    (campaign.sourceSelectionMode === undefined &&
+      (campaign.sourceTargetIds ?? []).length === 0)
+  );
+}
+
+// The default plan was saved with this sentence in its description, and the
+// card's own sites line already says it with the count, so it is read once.
+const PROFILE_SOURCES_DESCRIPTION_SENTENCE =
+  "Follows the job sites switched on in Profile.";
+
+function describePlanSources(
+  campaign: Pick<
+    JobSearchCampaign,
+    "searchPreferences" | "sourceTargetIds" | "sourceSelectionMode"
+  >,
+): string {
+  const used = resolvePlanSourceIds(campaign).length;
+  return planFollowsProfile(campaign)
+    ? `Searches the ${used} job ${used === 1 ? "site" : "sites"} switched on in Profile.`
+    : `Uses ${used} of your ${campaign.searchPreferences.discovery.targets.length} job sites.`;
+}
+
+function describePlan(
+  campaign: Pick<
+    JobSearchCampaign,
+    "description" | "sourceTargetIds" | "sourceSelectionMode"
+  >,
+): string {
+  const description = planFollowsProfile(campaign)
+    ? campaign.description
+        .replace(PROFILE_SOURCES_DESCRIPTION_SENTENCE, "")
+        .trim()
+    : campaign.description;
+  return description || "No description yet.";
 }
 
 const jobFinderDateInputLocale = getJobFinderDateInputLocale();
@@ -2178,12 +2217,10 @@ export function CampaignsScreen(props: {
                     </div>
                   </div>
                   <p className="text-sm text-foreground-soft">
-                    {campaign.description || "No description yet."}
+                    {describePlan(campaign)}
                   </p>
                   <p className="text-sm text-foreground-soft">
-                    Uses {resolvePlanSourceIds(campaign).length} of your{" "}
-                    {campaign.searchPreferences.discovery.targets.length} job
-                    sites.
+                    {describePlanSources(campaign)}
                   </p>
                   {describeScheduleStart(campaign.schedule) ? (
                     <p className="text-sm text-foreground-soft">

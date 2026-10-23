@@ -13,7 +13,11 @@ import type {
 import { ApplicationsDetailPanelAttemptSection } from "./applications-detail-panel-attempt-section";
 import { ApplicationsDetailPanelPrivacyReceiptSection } from "./applications-detail-panel-privacy-receipt-section";
 import { ApplicationsDetailPanelReviewDataSection } from "./applications-detail-panel-review-data-section";
-import { ApplicationsReviewCard } from "./applications-review-card";
+import {
+  ApplicationsReviewCard,
+  type ApplicationsReviewCardProps,
+} from "./applications-review-card";
+import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import { ApplicationsDetailPanelRunHistorySection } from "./applications-detail-panel-run-history-section";
 import { ApplicationsDetailPanelTimelineSection } from "./applications-detail-panel-timeline-section";
 
@@ -49,9 +53,11 @@ export function ApplicationsDetailPanelActivitySections(props: {
   onSubmitPreparedApplication?: (jobId: string) => Promise<void>;
   /** Prepares the application again when its page is no longer open. */
   onPrepareApplicationAgain?: (jobId: string) => Promise<void>;
+  /** The mode saved in Settings; preparing again runs in it. */
+  applyMode?: ApplyMode;
   /** True when this application is filled in and waiting on their decision. */
   awaitsYourReview?: boolean;
-  onOpenApplicationPage?: (() => Promise<void>) | undefined;
+  onOpenApplicationPage?: ApplicationsReviewCardProps["onOpenPage"];
   /** True when the browser no longer holds the page this was filled in on. */
   applicationPageClosed?: boolean;
   selectedApplyRunDetails: ApplyRunDetails | null;
@@ -85,12 +91,20 @@ export function ApplicationsDetailPanelActivitySections(props: {
   } = props;
   // A live consent decision or an unresolved manual answer lives inside the
   // review data, so the collapsed block opens itself while one is waiting.
+  // A run that already ended (failed, closed, cancelled, sent) has no live
+  // decision left: its leftover request is history and stays folded.
+  const visibleRunEnded =
+    visibleApplyResult?.state === "failed" ||
+    visibleApplyResult?.state === "cancelled" ||
+    visibleApplyResult?.state === "skipped" ||
+    visibleApplyResult?.state === "submitted";
   const hasPendingReviewDecision =
-    (visibleApplyResult?.pendingConsentRequestCount ?? 0) > 0 ||
-    (selectedApplyRunDetails?.consentRequests.some(
-      (request) => request.status === "pending",
-    ) ??
-      false);
+    !visibleRunEnded &&
+    ((visibleApplyResult?.pendingConsentRequestCount ?? 0) > 0 ||
+      (selectedApplyRunDetails?.consentRequests.some(
+        (request) => request.status === "pending",
+      ) ??
+        false));
 
   // What the run that filled this in actually recorded, rather than a later
   // reconstruction from the individual records.
@@ -126,6 +140,7 @@ export function ApplicationsDetailPanelActivitySections(props: {
               }
             : {})}
           pageClosed={applicationPageClosed}
+          applyMode={props.applyMode}
         />
       ) : null}
       <details
@@ -134,7 +149,7 @@ export function ApplicationsDetailPanelActivitySections(props: {
         {...(hasPendingReviewDecision ? { open: true } : {})}
       >
         <ApplicationsDisclosureSummary data-testid="applications-technical-details-summary">
-          Run details and history
+          History and details
         </ApplicationsDisclosureSummary>
         <div className="mt-3 grid min-w-0 gap-4">
           <ApplicationsDetailPanelRunHistorySection

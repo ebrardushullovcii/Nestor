@@ -1,4 +1,7 @@
 import type {
+  ApplicationPageState,
+  ApplicationPageReopenProgress,
+  ReopenApplicationPageInput,
   ResumeBatchGenerationInput,
   ResumeBatchGenerationResult,
   ResumeBatchGenerationProgress,
@@ -43,6 +46,11 @@ import type {
   JobFinderApplyCopilotActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
+  JobFinderApplyQueueControlInput,
+  JobFinderRemoveFromApplyQueueInput,
+  JobFinderReturnApplicationToShortlistInput,
+  JobFinderApproveResumesInput,
+  JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
   JobFinderApplicationStartTarget,
   JobFinderPreparedApplicationPageInput,
@@ -54,6 +62,8 @@ import type {
   EditApplicationDocumentInput,
   ExportApplicationDocumentInput,
   DesktopPlatformPing,
+  DesktopContextMenuInput,
+  DesktopContextMenuResult,
   DesktopWindowCloseGuardState,
   DesktopWindowCloseResolution,
   DesktopWindowCloseRequest,
@@ -172,6 +182,9 @@ declare global {
       ping: () => Promise<DesktopPlatformPing>;
       window: {
         close: () => Promise<{ ok: true }>;
+        showContextMenu: (
+          input: DesktopContextMenuInput,
+        ) => Promise<DesktopContextMenuResult>;
         getControlsState: () => Promise<DesktopWindowControlsState>;
         onControlsStateChange: (
           listener: (state: DesktopWindowControlsState) => void,
@@ -312,6 +325,7 @@ declare global {
         /** Tells main which revision this window shows (0: none it knows). */
         noteWorkspaceRevision: (revision: WorkspaceRevision) => void;
         onWorkspaceUpdate: (listener: () => void) => () => void;
+        onOpenRoute: (listener: (route: string) => void) => () => void;
         mutateWorkspaceEntities: (
           input: JobFinderWorkspaceEntityMutationInput,
         ) => Promise<JobFinderWorkspaceSyncResult>;
@@ -566,6 +580,7 @@ declare global {
         ) => Promise<JobFinderResumePreview>;
         saveResumeDraft: (
           draft: ResumeDraft,
+          autosaveSessionId?: string,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         restoreResumeDraftRevision: (
           jobId: string,
@@ -594,6 +609,7 @@ declare global {
         ) => Promise<JobFinderWorkspaceSyncResult>;
         clearResumeApproval: (
           jobId: string,
+          restoreStatus?: "draft" | "needs_review",
         ) => Promise<JobFinderWorkspaceSyncResult>;
         setWorkHistoryReviewAcknowledgment: (
           input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,
@@ -618,6 +634,13 @@ declare global {
           action: "accept" | "reject",
           patchIds: readonly string[],
         ) => Promise<readonly ResumeAssistantMessage[]>;
+        getApplicationPageStates: (
+          resultIds: string[],
+        ) => Promise<ApplicationPageState[]>;
+        reopenApplicationPage: (
+          input: ReopenApplicationPageInput,
+          onProgress?: (progress: ApplicationPageReopenProgress) => void,
+        ) => Promise<ApplicationPageState>;
         generateResumeForBatch: (
           input: ResumeBatchGenerationInput,
         ) => Promise<ResumeBatchGenerationResult>;
@@ -636,6 +659,24 @@ declare global {
         startAutoApplyQueueRun: (
           jobIds: JobFinderApplyQueueActionInput["jobIds"],
           applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
+        ) => Promise<JobFinderWorkspaceSyncResult>;
+        startApplyQueue: (
+          input: JobFinderStartApplyQueueInput,
+        ) => Promise<JobFinderWorkspaceSyncResult>;
+        approveResumes: (
+          input: JobFinderApproveResumesInput,
+        ) => Promise<JobFinderWorkspaceSyncResult>;
+        controlApplyQueue: (
+          input: JobFinderApplyQueueControlInput,
+        ) => Promise<JobFinderWorkspaceSyncResult>;
+        removeFromApplyQueue: (
+          input: JobFinderRemoveFromApplyQueueInput,
+        ) => Promise<JobFinderWorkspaceSyncResult>;
+        returnApplicationToShortlist: (
+          input: JobFinderReturnApplicationToShortlistInput,
+        ) => Promise<JobFinderWorkspaceSyncResult>;
+        undoReturnApplicationToShortlist: (
+          jobId: string,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         approveApplyRun: (
           input: JobFinderApplyRunActionInput,

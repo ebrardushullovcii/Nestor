@@ -229,9 +229,9 @@ export const PENDING_ADOPTION = {
   rawThrownMessage: [
     "features/job-finder/components/profile/use-profile-source-debug-review.ts",
     "features/job-finder/hooks/use-job-finder-workspace.ts",
+    "features/job-finder/screens/applications/application-form-open.ts",
     "features/job-finder/screens/applications/applications-crm-detail.tsx",
     "features/job-finder/screens/applications/applications-crm-settings.tsx",
-    "features/job-finder/screens/applications/applications-detail-panel-recovery-actions-section.tsx",
     "features/job-finder/screens/applications/applications-detail-panel-review-data-section.tsx",
     "features/job-finder/screens/applications/applications-outcome-recorder.tsx",
     "features/job-finder/screens/applications/use-applications-apply-run-details.ts",

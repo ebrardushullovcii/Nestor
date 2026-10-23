@@ -307,7 +307,7 @@ it("keeps recorded source explanations and coverage after a no-match search", ()
   expect(screen.getAllByText(/inspected not recorded/)).toHaveLength(2);
 });
 
-it("shows partial results and retries the failed source directly", () => {
+it("says no source could be searched when every source failed, and retries it directly", () => {
   const run = DiscoveryRunRecordSchema.parse({
     id: "partial",
     state: "completed",
@@ -333,11 +333,13 @@ it("shows partial results and retries the failed source directly", () => {
       />
     </MemoryRouter>,
   );
-  expect(screen.getByText(/Partial results · 1 source failed/)).toBeTruthy();
+  // Nothing was found, so it is not "Partial results".
+  expect(screen.queryByText(/Partial results/)).toBeNull();
+  expect(screen.getByText(/No source could be searched/)).toBeTruthy();
   expect(
     screen.getByTestId("discovery-source-summaries").hasAttribute("open"),
   ).toBe(false);
-  fireEvent.click(screen.getByText(/Partial results · 1 source failed/));
+  fireEvent.click(screen.getByText(/No source could be searched/));
   fireEvent.click(screen.getByRole("button", { name: "Retry A job source" }));
   expect(onRetrySource).toHaveBeenCalledWith("blocked");
 });

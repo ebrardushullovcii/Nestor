@@ -738,16 +738,6 @@ export function ResumeStudioPreviewPane(props: ResumeStudioPreviewPaneProps) {
                 {isPreviewFitToWidth ? "Readable size" : "Fit width"}
               </Button>
             ) : null}
-            <Button
-              disabled={props.isPending || props.previewStatus === "loading"}
-              onClick={requestPreviewRefresh}
-              size="compact"
-              type="button"
-              variant="secondary"
-            >
-              <RefreshCcw className="size-4" />
-              Refresh preview
-            </Button>
           </div>
         </div>
       </header>

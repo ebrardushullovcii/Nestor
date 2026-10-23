@@ -1,6 +1,7 @@
 import {
   DiscoveryRunRecordSchema,
   DiscoveryRunReportSchema,
+  DiscoveryRunSummarySchema,
   DiscoveryTimingSummarySchema,
   DISCOVERY_RUN_JOB_BUDGET_MAX,
   browserRunWaitReasonValues,
@@ -385,7 +386,7 @@ export function applyDiscoveryRunRetentionCounts(
   const report =
     run.summary.report ?? buildDiscoveryRunReport(run, counts.measuredAt);
 
-  return DiscoveryRunRecordSchema.parse({
+  return {
     ...run,
     summary: {
       ...run.summary,
@@ -396,19 +397,22 @@ export function applyDiscoveryRunRetentionCounts(
         worthOpening: counts.worthOpening,
       }),
     },
-  });
+  };
 }
 
+const TerminalRunFields = DiscoveryRunRecordSchema.pick({
+  state: true,
+  completedAt: true,
+});
 export function finalizeDiscoveryRun(
   run: DiscoveryRunRecord,
   state: "completed" | "cancelled" | "failed",
   completedAt: string,
 ): DiscoveryRunRecord {
-  return DiscoveryRunRecordSchema.parse({
+  return {
     ...run,
-    state,
-    completedAt,
-    summary: {
+    ...TerminalRunFields.parse({ state, completedAt }),
+    summary: DiscoveryRunSummarySchema.parse({
       ...run.summary,
       durationMs: calculateDurationMs(run.startedAt, completedAt),
       outcome: state,
@@ -418,8 +422,8 @@ export function finalizeDiscoveryRun(
         completedAt,
       ),
       report: buildDiscoveryRunReport(run, completedAt),
-    },
-  });
+    }),
+  };
 }
 
 export function recoverInterruptedDiscoveryRun(

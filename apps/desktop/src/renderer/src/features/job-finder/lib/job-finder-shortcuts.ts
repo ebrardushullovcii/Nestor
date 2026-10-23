@@ -1,6 +1,7 @@
 export type JobFinderPlatform = "darwin" | "linux" | "win32";
 
 export type JobFinderShortcutId =
+  | "focus-list-search"
   | "open-global-search"
   | "open-shortcuts"
   | "toggle-assistant"
@@ -12,7 +13,8 @@ export type JobFinderShortcutCombo =
   | "mod+b"
   | "mod+enter"
   | "mod+i"
-  | "mod+k";
+  | "mod+k"
+  | "mod+s";
 
 const LITERAL_KEY_COMBOS: readonly JobFinderShortcutCombo[] = ["/", "?"];
 
@@ -42,8 +44,8 @@ export const JOB_FINDER_SHORTCUTS: readonly JobFinderShortcutDefinition[] = [
   },
   {
     combo: "/",
-    id: "open-global-search",
-    label: "Search your workspace",
+    id: "focus-list-search",
+    label: "Search this list, or your workspace off a list",
     scope: "Outside text fields, controls, and dialogs",
   },
   {
@@ -75,6 +77,9 @@ export const JOB_FINDER_SHORTCUTS: readonly JobFinderShortcutDefinition[] = [
  * in the app-wide list, which holds no approve, delete or submit shortcut.
  */
 export const RESUME_REVIEW_APPROVE_AND_NEXT_COMBO = "mod+enter" as const;
+
+/** Profile's own combo: save the page's unsaved changes, named on Save. */
+export const PROFILE_SAVE_COMBO = "mod+s" as const;
 
 export interface JobFinderKeyEventLike {
   altKey: boolean;
@@ -177,7 +182,13 @@ export type JobFinderShortcutKeycaps = readonly string[];
 
 export interface JobFinderShortcutHelpEntry {
   combos: readonly JobFinderShortcutKeycaps[];
-  id: JobFinderShortcutId | "zoom-in" | "zoom-out" | "actual-size";
+  id:
+    | JobFinderShortcutId
+    | "history-back"
+    | "history-forward"
+    | "zoom-in"
+    | "zoom-out"
+    | "actual-size";
   /** Stable row key; an id can appear once per distinct scope. */
   rowId: string;
   label: string;
@@ -218,6 +229,20 @@ export function buildJobFinderShortcutHelp(
   const modifier = platform === "darwin" ? "⌘" : "Ctrl";
   return [
     ...entries.values(),
+    {
+      id: "history-back",
+      rowId: "history-back",
+      label: "Back to the previous screen",
+      scope: "Also the mouse's back button",
+      combos: [["Alt", "←"]],
+    },
+    {
+      id: "history-forward",
+      rowId: "history-forward",
+      label: "Forward again",
+      scope: "Also the mouse's forward button",
+      combos: [["Alt", "→"]],
+    },
     {
       id: "zoom-in",
       rowId: "zoom-in",

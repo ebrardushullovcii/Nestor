@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type UserConfig } from "electron-vite";
 import type { PluginOption, UserConfig as ViteUserConfig } from "vite";
+import { build as buildVite } from "vite";
 import {
   devBuildCache,
   hashFiles,
@@ -114,6 +115,14 @@ const workspaceAliases = {
 };
 
 const mainWorkspaceAliases = {
+  "@nestor/job-finder/discovery-cpu": path.resolve(
+    currentDir,
+    "../../packages/job-finder/src/discovery-cpu.ts",
+  ),
+  "@nestor/job-finder/resume-computation": path.resolve(
+    currentDir,
+    "../../packages/job-finder/src/resume-computation.ts",
+  ),
   ...workspaceAliases,
   "@nestor/job-finder/application-submission-runtime-main":
     jobFinderApplicationSubmissionRuntimeMainPath,
@@ -125,6 +134,17 @@ const mainConfig = {
   },
   build: {
     rollupOptions: {
+      input: {
+        index: path.resolve(currentDir, "src/main/index.ts"),
+        "discovery-cpu-worker": path.resolve(
+          currentDir,
+          "src/main/services/job-finder/discovery-cpu-worker.ts",
+        ),
+        "resume-computation-worker": path.resolve(
+          currentDir,
+          "src/main/adapters/resume-computation-worker.ts",
+        ),
+      },
       external: [
         "playwright",
         "playwright-core",
@@ -165,6 +185,53 @@ const preloadConfig = {
     },
   },
 } satisfies ViteUserConfig;
+
+function productionMainConfig(): ViteUserConfig {
+  const { index, ...workers } = mainConfig.build.rollupOptions.input;
+  return {
+    ...mainConfig,
+    build: {
+      ...mainConfig.build,
+      rollupOptions: {
+        ...mainConfig.build.rollupOptions,
+        input: { index },
+      },
+    },
+    plugins: [
+      {
+        name: "independent-worker-bundles",
+        async closeBundle() {
+          // Sharing chunks across the main and worker entries made main open
+          // three more files before ready on Windows. Workers keep their own
+          // dependency graph; starting the window never loads their chunks.
+          await buildVite({
+            configFile: false,
+            root: currentDir,
+            resolve: mainConfig.resolve,
+            build: {
+              ssr: true,
+              target: "node24",
+              minify: false,
+              emptyOutDir: false,
+              outDir: path.join(currentDir, "out/main"),
+              rollupOptions: {
+                input: workers,
+                external: [
+                  "electron",
+                  ...mainConfig.build.rollupOptions.external,
+                ],
+                output: {
+                  ...mainConfig.build.rollupOptions.output,
+                  chunkFileNames: "worker-[name]-[hash].cjs",
+                },
+              },
+            },
+          });
+        },
+      },
+    ],
+  };
+}
 
 // `pnpm desktop:dev` only. The main and preload bundles are reused from the
 // last dev start when nothing they are built from changed, and otherwise
@@ -214,7 +281,7 @@ export default defineConfig(({ command, mode }) =>
   command === "serve"
     ? devConfig(mode)
     : {
-        main: mainConfig,
+        main: productionMainConfig(),
         preload: preloadConfig,
         renderer: rendererConfig([tailwindcss(), react()]),
       },

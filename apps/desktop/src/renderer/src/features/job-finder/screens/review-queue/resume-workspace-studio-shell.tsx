@@ -31,6 +31,7 @@ import {
   ResumeStudioAttentionPanel,
 } from "./resume-studio-attention-panel";
 import { useDesktopStudioLayout } from "./use-desktop-studio-layout";
+import type { ResumeAutosaveStatus } from "./use-resume-autosave";
 import type { ResumeReviewFlow } from "./resume-review-session";
 import {
   eventMatchesJobFinderShortcut,
@@ -107,6 +108,11 @@ interface ResumeWorkspaceStudioShellProps {
    * suggestion stays inspectable and recoverable. */
   onReviewSetAsideProposal?: () => void;
   onSaveDraft: () => void;
+  /**
+   * The editor saves itself a moment after each edit; its state replaces the
+   * Save draft button. Absent: the button stays.
+   */
+  autosave?: StudioAutosave;
   onSelectValidationIssue?: (
     issue: ResumeValidationIssue,
     targetId: string | null,
@@ -197,7 +203,58 @@ function StudioHistoryDisclosure(props: { children: ReactNode }) {
   );
 }
 
+interface StudioAutosave {
+  status: ResumeAutosaveStatus;
+  failure: string | null;
+  onRetry: () => void;
+}
+
+/**
+ * Where the autosave stands, in the spot Save draft held: quiet while it
+ * works, and a button only when a save failed.
+ */
+function StudioAutosaveState(props: {
+  autosave: StudioAutosave;
+  isApproved: boolean;
+}) {
+  const { autosave } = props;
+  if (autosave.status === "failed") {
+    return (
+      <span className="flex flex-wrap items-center gap-1.5" role="status">
+        <span className="text-(length:--text-small) text-destructive">
+          {autosave.failure ?? "Not saved."}
+        </span>
+        <Button
+          onClick={autosave.onRetry}
+          size="compact"
+          type="button"
+          variant="secondary"
+        >
+          <Save className="size-4" />
+          Save again
+        </Button>
+      </span>
+    );
+  }
+  return (
+    <span
+      aria-live="polite"
+      className="px-1 text-(length:--text-small) text-foreground-soft"
+      data-testid="resume-autosave-state"
+      role="status"
+      title={
+        props.isApproved
+          ? "Saving an edit clears the current approval; you approve again."
+          : undefined
+      }
+    >
+      {autosave.status === "saving" ? "Saving…" : "Saved"}
+    </span>
+  );
+}
+
 function StudioToolbar(props: {
+  autosave?: StudioAutosave | undefined;
   canDownloadPdf: boolean;
   isApproved: boolean;
   isExportPending: boolean;
@@ -207,21 +264,28 @@ function StudioToolbar(props: {
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <Button
-        pending={props.isWorkspacePending}
-        onClick={props.onSaveDraft}
-        size="compact"
-        title={
-          props.isApproved
-            ? "Saving a new draft clears the current approval; you will approve again."
-            : "Save the current draft"
-        }
-        type="button"
-        variant="secondary"
-      >
-        <Save className="size-4" />
-        Save draft
-      </Button>
+      {props.autosave ? (
+        <StudioAutosaveState
+          autosave={props.autosave}
+          isApproved={props.isApproved}
+        />
+      ) : (
+        <Button
+          pending={props.isWorkspacePending}
+          onClick={props.onSaveDraft}
+          size="compact"
+          title={
+            props.isApproved
+              ? "Saving a new draft clears the current approval; you will approve again."
+              : "Save the current draft"
+          }
+          type="button"
+          variant="secondary"
+        >
+          <Save className="size-4" />
+          Save draft
+        </Button>
+      )}
       {/* "Refresh draft" here and "Retry with AI" in the disclosure were the
           same whole-draft rewrite under two names, neither of which said it
           discards your edits. Both now live in the Assistant. */}
@@ -589,7 +653,9 @@ export function ResumeWorkspaceStudioShell(
     !props.exportBlockedReason;
   const approveAndNextRef = useRef<(() => void) | null>(null);
   approveAndNextRef.current =
-    canApproveAndNext && reviewFlow ? () => reviewFlow.onApproveAndNext() : null;
+    canApproveAndNext && reviewFlow
+      ? () => reviewFlow.onApproveAndNext()
+      : null;
   const hasReviewFlow = reviewFlow !== null;
   // Ctrl/Cmd+Enter approves and opens the next resume, from anywhere in the
   // studio including a field being edited (the edit is saved first).
@@ -830,7 +896,7 @@ export function ResumeWorkspaceStudioShell(
             ? `Application PDF ready${describeApprovedPageCount(
                 props.approvedExportPageCount ?? null,
               )}. Download a copy if you want one.`
-            : "The application PDF is built and checked when you approve."
+            : null
       }
       {...(props.setAsideProposalNote
         ? { setAsideProposalNote: props.setAsideProposalNote }
@@ -1052,6 +1118,7 @@ export function ResumeWorkspaceStudioShell(
           {/* Unsaved edits to an approved resume: the next step is saving
               them, which reopens approval (N-048). */}
           {!props.originalResume &&
+          !props.autosave &&
           props.canClearApproval &&
           props.hasUnsavedChanges ? (
             <Button
@@ -1181,7 +1248,10 @@ export function ResumeWorkspaceStudioShell(
           role="alert"
         >
           {reviewFlow.failures.slice(0, 2).map((failure) => (
-            <span className="flex min-w-0 items-center gap-2" key={failure.jobId}>
+            <span
+              className="flex min-w-0 items-center gap-2"
+              key={failure.jobId}
+            >
               <span className="min-w-0 truncate" title={failure.reason}>
                 Not approved: {failure.title}. {failure.reason}
               </span>
@@ -1211,7 +1281,9 @@ export function ResumeWorkspaceStudioShell(
           owns the approved state, its warning and `Clear approval` at compact
           widths, so this band only renders while there is a different status
           to report. */}
-      {props.canClearApproval || isDesktopStudio ? null : (
+      {props.canClearApproval ||
+      isDesktopStudio ||
+      (!studioStatusText && !props.approvalStateLabel) ? null : (
         <div
           className="grid shrink-0 gap-2.5 border-b border-(--surface-panel-border) px-4 py-2"
           data-resume-studio-compact-status
@@ -1294,6 +1366,7 @@ export function ResumeWorkspaceStudioShell(
                       <div className="grid min-h-0 min-w-0 grid-cols-1 gap-4">
                         <div className="grid gap-2.5">
                           <StudioToolbar
+                            autosave={props.autosave}
                             canDownloadPdf={canDownloadPdf}
                             isApproved={props.canClearApproval}
                             isExportPending={isExportPending}
@@ -1383,6 +1456,7 @@ export function ResumeWorkspaceStudioShell(
                     opens on its controls, with the status as plain text
                     beside them rather than a boxed row of its own. */}
                       <StudioToolbar
+                        autosave={props.autosave}
                         canDownloadPdf={canDownloadPdf}
                         isApproved={props.canClearApproval}
                         isExportPending={isExportPending}
