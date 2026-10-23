@@ -513,6 +513,11 @@ function CampaignDefaultsSection(props: {
   const enabledStrategies = props.strategies.filter(
     (strategy) => strategy.enabled,
   );
+  // With no approach to pick, each plan's select held only "No default".
+  const anyDefaultSet = props.campaigns.some(
+    (campaign) => campaign.applicationPolicy.defaultResumeStrategyId,
+  );
+  if (enabledStrategies.length === 0 && !anyDefaultSet) return null;
 
   if (props.campaigns.length === 0) {
     return (
@@ -686,15 +691,18 @@ export function ResumeStrategiesScreen(props: {
                 <Link to={shortlistedReturnPath}>Back to shortlisted job</Link>
               </Button>
             ) : null}
-            <Button
-              onClick={() =>
-                setEditing(emptyFormInput(props.baseResumeDocumentId))
-              }
-              size="sm"
-              type="button"
-            >
-              New resume approach
-            </Button>
+            {/* The empty state carries its own button; one is enough. */}
+            {props.strategies.length > 0 || props.loadError ? (
+              <Button
+                onClick={() =>
+                  setEditing(emptyFormInput(props.baseResumeDocumentId))
+                }
+                size="sm"
+                type="button"
+              >
+                New resume approach
+              </Button>
+            ) : null}
           </>
         }
         description="Save reusable resume approaches and review every change before applying them."
