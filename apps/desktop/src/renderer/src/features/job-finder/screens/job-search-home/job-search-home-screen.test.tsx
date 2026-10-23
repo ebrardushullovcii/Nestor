@@ -533,7 +533,7 @@ describe("JobSearchHomeScreen", () => {
       reason: "Paused by you.",
     };
     render(<JobSearchHomeScreen {...props} workspace={ws} />);
-    const resumeButtons = screen.getAllByRole("button", { name: "Resume" });
+    const resumeButtons = screen.getAllByRole("button", { name: "Continue" });
     expect(resumeButtons).toHaveLength(1);
     expect(resumeButtons[0]!.closest("[data-page-header-actions]")).toBeNull();
     fireEvent.click(resumeButtons[0]!);

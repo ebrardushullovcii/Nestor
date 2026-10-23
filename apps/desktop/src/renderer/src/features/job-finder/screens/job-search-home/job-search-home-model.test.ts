@@ -403,9 +403,8 @@ describe("buildJobSearchHomeModel · while something runs", () => {
       },
     });
     expect(model.next.id).toBe("wait_search");
-    expect(model.statusLine.startsWith("Searching Replica board · ")).toBe(
-      true,
-    );
+    // The card right under the line says it; the line does not repeat it.
+    expect(model.statusLine).not.toContain("Searching Replica board");
   });
 
   it("shows a search that was just requested before the run is recorded", () => {
@@ -562,7 +561,7 @@ describe("buildJobSearchHomeModel · while something runs", () => {
     expect(model.statusLine.startsWith("Paused.")).toBe(true);
     expect(model.next).toMatchObject({
       id: "paused",
-      primary: { label: "Resume", action: { kind: "resume_activity" } },
+      primary: { label: "Continue", action: { kind: "resume_activity" } },
     });
   });
 });
@@ -1703,9 +1702,9 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
       stop: { label: "Stop", action: { kind: "apply_queue", action: "stop" } },
     });
     expect(model.next.id).not.toBe("apply");
-    // The card holds the detail; the status line keeps to the title.
+    // The card holds the title and the detail; the line does not repeat it.
     expect(model.now).toHaveLength(1);
-    expect(model.statusLine).toBe("Applying to 30 jobs.");
+    expect(model.statusLine).not.toContain("Applying to 30 jobs");
   });
 
   it("keeps Try again for all one press away while a form waits to be sent", () => {

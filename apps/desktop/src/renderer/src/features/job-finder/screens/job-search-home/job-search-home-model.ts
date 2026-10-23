@@ -1525,9 +1525,11 @@ export function buildJobSearchHomeModel(
       title: "Work is paused",
       detail:
         needsYouCount > 0
-          ? `Resume to continue or start work. ${needsYouCount === 1 ? "1 thing needs" : `${needsYouCount} things need`} you meanwhile.`
-          : "Resume to continue or start work.",
-      primary: { label: "Resume", action: { kind: "resume_activity" } },
+          ? `Continue to start new work again. ${needsYouCount === 1 ? "1 thing needs" : `${needsYouCount} things need`} you meanwhile.`
+          : "Continue to start new work again.",
+      // "Continue", as on the Apply queue: in an app about resumes, a
+      // "Resume" button read as the document.
+      primary: { label: "Continue", action: { kind: "resume_activity" } },
       // The pause holds new work, not the person's answers.
       secondary:
         needsYouCount > 0
@@ -2148,19 +2150,13 @@ export function buildJobSearchHomeModel(
     };
   }
   const paused = workspace.activityControl.paused;
+  // One running item is the Happening now card right under this line, so the
+  // line says what it would say otherwise (the last search, the setup) rather
+  // than the card's title a second time.
   let statusLine: string;
   if (paused) {
     statusLine =
       "Paused. New searches and applications will not start until you resume.";
-  } else if (nowItems.length === 1 && nowItems[0]) {
-    // The queue's detail can be a whole pause reason; Happening now says it
-    // under the title, so the line keeps to the title.
-    const item = nowItems[0];
-    const detail = item.id === "apply-queue" ? "" : item.detail;
-    statusLine = (detail ? `${item.title} · ${detail}` : item.title).replace(
-      /\.?$/,
-      ".",
-    );
   } else if (nowItems.length > 1) {
     // "Nothing needs you yet" stood beside a card saying "2 things need you".
     statusLine = `${nowItems.length} things are running. ${

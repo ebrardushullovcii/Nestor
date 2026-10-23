@@ -540,7 +540,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
           data-testid="home-now"
         >
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-            <h2 className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-muted-foreground">
+            <h2 className="text-(length:--text-small) font-semibold leading-5 text-muted-foreground">
               Happening now
             </h2>
             {!model.paused ? (
