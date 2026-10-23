@@ -2342,10 +2342,17 @@ export function createBrowserAgentRuntime(
     actionInput: ExecuteExactlyOneFinalActionInput,
   ) {
     actionInput.signal?.throwIfAborted();
-    return executeExactlyOneFinalActionOnPage(
-      await getPreparedApplicationPage(source, actionInput.pageBindingKey),
-      actionInput,
+    const page = await getPreparedApplicationPage(
+      source,
+      actionInput.pageBindingKey,
     );
+    // Marks the page in use so tab reclamation cannot close it mid-send.
+    const releasePageUse = usePage(page);
+    try {
+      return await executeExactlyOneFinalActionOnPage(page, actionInput);
+    } finally {
+      releasePageUse();
+    }
   }
 
   return {
@@ -2540,21 +2547,27 @@ export function createBrowserAgentRuntime(
           // that this form can never be restored. Keep it for a later try.
           return false;
         }
+        const pageIsFree = () =>
+          canDiscard() &&
+          !page.isClosed() &&
+          !pagesInUse.has(page) &&
+          !preparedPagesWithPerson.has(key);
         if (
-          !canDiscard() ||
-          pagesInUse.has(page) ||
-          preparedPagesWithPerson.has(key) ||
+          !pageIsFree() ||
           JSON.stringify(await capturePreparedForm(page)) !==
             JSON.stringify(snapshot)
         )
           return false;
-        recovery.snapshot = snapshot;
         if (recovery.saved && preparedFormStore) {
           recovery.saved = {...recovery.saved, snapshot, savedAt: new Date().toISOString()};
           await preparedFormStore.save(recovery.saved);
         }
-        await page.close({ runBeforeUnload: false });
+        // The readback and save awaited: a Send or the person may have taken
+        // the page since. Close it only if it is still free right now.
+        if (!pageIsFree()) return false;
+        recovery.snapshot = snapshot;
         preparedApplicationPages.delete(key);
+        await page.close({ runBeforeUnload: false });
         return true;
       } finally {
         await duplicate
