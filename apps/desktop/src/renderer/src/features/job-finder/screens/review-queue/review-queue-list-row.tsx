@@ -83,9 +83,13 @@ function ReviewQueueRowComponent({
   statusTone,
   title,
 }: ReviewQueueRowProps) {
-  const metaParts = [employerLocationLine, levelLabel].filter(
+  const metaParts = [employerLocationLine].filter(
     (part): part is string => Boolean(part),
   );
+  // The third line Find jobs and Applications rows have too, so the three
+  // lists share one rhythm: what the badge cannot say, else the level.
+  const statusLine =
+    resumePolicyCaption ?? (levelLabel ? `${levelLabel} resume` : null);
   return (
     // Selection is a tint plus an inset accent bar owned by the shared
     // primitive. The row's padding, margin and border-width are identical in
@@ -159,18 +163,10 @@ function ReviewQueueRowComponent({
               ) : null}
             </span>
           ) : null}
-          {resumePolicyCaption ? (
-            <SelectableRowLine
-              className={cn(
-                jobFinderListRowStatusClassName,
-                "text-foreground-soft",
-              )}
-            >
-              {resumePolicyCaption}
-            </SelectableRowLine>
-          ) : null}
+          {/* Always present, one line tall, so every row is one height; the
+              writing bar takes the line's place instead of adding one. */}
           {showProgress ? (
-            <div className="grid min-w-0 w-full gap-1.5">
+            <div className="flex min-h-[1lh] min-w-0 w-full items-center text-(length:--text-small) leading-5">
               {/* Row-level progress had no real percentage behind it either; it
                 only needs to say "this one is running". */}
               <ProgressBar
@@ -179,7 +175,16 @@ function ReviewQueueRowComponent({
                 indeterminate
               />
             </div>
-          ) : null}
+          ) : (
+            <SelectableRowLine
+              className={cn(
+                jobFinderListRowStatusClassName,
+                "min-h-[1lh] text-foreground-soft",
+              )}
+            >
+              {statusLine}
+            </SelectableRowLine>
+          )}
         </button>
       </SelectableRow>
     </div>
