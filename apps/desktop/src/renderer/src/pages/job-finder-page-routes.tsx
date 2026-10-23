@@ -529,6 +529,10 @@ export function JobFinderCompaniesRoute() {
         actionMessage={context.actionState.message}
         companies={context.workspace.intelligence.companies}
         discoveryJobs={context.workspace.companyJobs}
+        hasSavedJobs={
+          context.workspace.discoveryJobs.length > 0 ||
+          context.workspace.applicationRecords.length > 0
+        }
         isMergePending={(companyId) =>
           context.isPending(
             jobFinderPendingActions.companyMergeReview(companyId),
@@ -680,84 +684,99 @@ export function JobFinderHomeRoute() {
     });
   };
 
+  // Home reads every collection: on the bootstrap snapshot (no saved search
+  // runs or jobs yet) it told a person with thousands of jobs to "Run your
+  // first search" for several seconds after launch.
   return (
-    <JobSearchHomeScreen
-      actionState={context.actionState}
-      activityPending={activityPending}
-      applicationAutomationMode={
-        context.workspace.settings.applicationAutomationMode ?? "prepare_only"
-      }
-      browserSessionPending={context.isPending(
-        jobFinderPendingActions.browserSession(),
-      )}
-      campaignNotificationAllPending={context.isPending(
-        jobFinderPendingActions.campaignNotificationAll(),
-      )}
-      campaignNotificationPending={(notificationId) =>
-        context.isPending(
-          jobFinderPendingActions.campaignNotification(notificationId),
-        )
-      }
-      campaignNotifications={context.workspace.campaignNotifications}
-      discoveryRunFeedback={context.discoveryRunFeedback}
-      discoveryRunPending={context.isPending(
-        jobFinderPendingActions.discoveryAll(),
-      )}
-      isDiscoveryPending={context.isPending(
-        jobFinderPendingActions.discoveryAll(),
-      )}
-      isResumeImportPending={context.isPending(
-        jobFinderPendingActions.profileImport(),
-      )}
-      liveDiscoveryEvents={context.liveDiscoveryEvents}
-      onApplyToJobs={(jobIds) =>
-        context.onStartAutoApplyQueue(
-          [...jobIds],
-          context.workspace.settings.applicationAutomationMode ??
-            "prepare_only",
-          { stayOnCurrentPage: true },
-        )
-      }
-      onCreateResumes={context.onPrepareTailoredDrafts}
-      onSendPreparedApplications={context.onSendPreparedApplications}
-      onResumeSetup={context.onResumeProfileSetup}
-      onMarkAllCampaignNotificationsRead={
-        context.onMarkAllCampaignNotificationsRead
-      }
-      onMarkCampaignNotificationRead={context.onMarkCampaignNotificationRead}
-      onNavigate={context.onNavigateSafely}
-      onOpenBrowserSession={() => {
-        void context.onOpenBrowserSession();
-      }}
-      onPauseActivity={() =>
-        handleActivityControl({
-          paused: true,
-          reason: "Paused by you.",
-          pauseBehavior: "finish_current",
-        })
-      }
-      onResumeActivity={() => handleActivityControl({ paused: false })}
-      {...(context.onRunAgentDiscovery
-        ? { onRunDiscovery: context.onRunAgentDiscovery }
-        : {})}
-      onSelectCampaign={(campaignId) => {
-        void context.onSelectCampaign(campaignId);
-      }}
-      onStopApply={stopApplyRun}
-      onStopResumes={context.onStopTailoredDraftPreparation}
-      {...(context.onCancelDiscovery
-        ? {
-            onStopSearch: (runId: string) => {
-              void context.onCancelDiscovery?.(runId);
-            },
-          }
-        : {})}
-      resumeImportProgress={context.resumeImportProgress}
-      tailoredDraftPreparation={context.tailoredDraftPreparation}
+    <JobFinderHydrationGate
+      collections={HOME_REQUIRED_COLLECTIONS}
       workspace={context.workspace}
-    />
+    >
+      <JobSearchHomeScreen
+        actionState={context.actionState}
+        activityPending={activityPending}
+        applicationAutomationMode={
+          context.workspace.settings.applicationAutomationMode ?? "prepare_only"
+        }
+        browserSessionPending={context.isPending(
+          jobFinderPendingActions.browserSession(),
+        )}
+        campaignNotificationAllPending={context.isPending(
+          jobFinderPendingActions.campaignNotificationAll(),
+        )}
+        campaignNotificationPending={(notificationId) =>
+          context.isPending(
+            jobFinderPendingActions.campaignNotification(notificationId),
+          )
+        }
+        campaignNotifications={context.workspace.campaignNotifications}
+        discoveryRunFeedback={context.discoveryRunFeedback}
+        discoveryRunPending={context.isPending(
+          jobFinderPendingActions.discoveryAll(),
+        )}
+        isDiscoveryPending={context.isPending(
+          jobFinderPendingActions.discoveryAll(),
+        )}
+        isResumeImportPending={context.isPending(
+          jobFinderPendingActions.profileImport(),
+        )}
+        liveDiscoveryEvents={context.liveDiscoveryEvents}
+        onApplyToJobs={(jobIds) =>
+          context.onStartAutoApplyQueue(
+            [...jobIds],
+            context.workspace.settings.applicationAutomationMode ??
+              "prepare_only",
+            { stayOnCurrentPage: true },
+          )
+        }
+        onCreateResumes={context.onPrepareTailoredDrafts}
+        onSendPreparedApplications={context.onSendPreparedApplications}
+        onResumeSetup={context.onResumeProfileSetup}
+        onMarkAllCampaignNotificationsRead={
+          context.onMarkAllCampaignNotificationsRead
+        }
+        onMarkCampaignNotificationRead={context.onMarkCampaignNotificationRead}
+        onNavigate={context.onNavigateSafely}
+        onOpenBrowserSession={() => {
+          void context.onOpenBrowserSession();
+        }}
+        onPauseActivity={() =>
+          handleActivityControl({
+            paused: true,
+            reason: "Paused by you.",
+            pauseBehavior: "finish_current",
+          })
+        }
+        onResumeActivity={() => handleActivityControl({ paused: false })}
+        {...(context.onRunAgentDiscovery
+          ? { onRunDiscovery: context.onRunAgentDiscovery }
+          : {})}
+        onSelectCampaign={(campaignId) => {
+          void context.onSelectCampaign(campaignId);
+        }}
+        onStopApply={stopApplyRun}
+        onStopResumes={context.onStopTailoredDraftPreparation}
+        {...(context.onCancelDiscovery
+          ? {
+              onStopSearch: (runId: string) => {
+                void context.onCancelDiscovery?.(runId);
+              },
+            }
+          : {})}
+        resumeImportProgress={context.resumeImportProgress}
+        tailoredDraftPreparation={context.tailoredDraftPreparation}
+        workspace={context.workspace}
+      />
+    </JobFinderHydrationGate>
   );
 }
+
+const HOME_REQUIRED_COLLECTIONS = [
+  "discovery_jobs",
+  "review_queue",
+  "applications",
+  "source_history",
+] as const;
 
 export function JobFinderCampaignsRoute() {
   const context = useJobFinderPageContext();
@@ -1787,7 +1806,10 @@ function useResumeReviewFlow(
   const nextJobId = next?.jobId ?? null;
   // Read the next resume while this one is being read.
   useEffect(() => {
-    if (!nextJobId || typeof window.nestor?.jobFinder?.getResumeWorkspace !== "function")
+    if (
+      !nextJobId ||
+      typeof window.nestor?.jobFinder?.getResumeWorkspace !== "function"
+    )
       return;
     const timer = window.setTimeout(
       () =>

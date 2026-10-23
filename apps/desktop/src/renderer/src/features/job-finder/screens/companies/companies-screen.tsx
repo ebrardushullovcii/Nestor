@@ -36,6 +36,12 @@ interface CompaniesScreenProps {
   actionMessage: string | null;
   companies: readonly CompanyEntity[];
   discoveryJobs: readonly JobListRow[];
+  /**
+   * Whether any saved job or application exists. `discoveryJobs` holds only
+   * jobs already tied to a company, so it is empty exactly when the list has
+   * never been built and cannot tell the screen to build it.
+   */
+  hasSavedJobs?: boolean;
   isLoading?: boolean;
   isMergePending: (companyId: string) => boolean;
   isMutationPending: (companyId: string) => boolean;
@@ -99,9 +105,12 @@ function CompanyCard(props: {
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge tone={companyPreferenceTones[company.preference]}>
-            {companyPreferenceLabels[company.preference]}
-          </StatusBadge>
+          {/* Neutral is the default the select below already shows. */}
+          {company.preference !== "neutral" ? (
+            <StatusBadge tone={companyPreferenceTones[company.preference]}>
+              {companyPreferenceLabels[company.preference]}
+            </StatusBadge>
+          ) : null}
           {pendingMerges > 0 ? (
             <StatusBadge tone="critical">
               {pendingMerges} merge review{pendingMerges === 1 ? "" : "s"}
@@ -418,7 +427,7 @@ export function CompaniesScreen(props: CompaniesScreenProps) {
   const needsFirstBuild =
     !props.isLoading &&
     listableCompanies.length === 0 &&
-    props.discoveryJobs.length > 0;
+    (props.hasSavedJobs ?? props.discoveryJobs.length > 0);
   useEffect(() => {
     if (!needsFirstBuild || autoRefreshed.current) return;
     autoRefreshed.current = true;

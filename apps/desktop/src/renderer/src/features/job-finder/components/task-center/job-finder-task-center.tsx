@@ -40,8 +40,7 @@ interface JobFinderTaskCenterProps {
     | undefined;
 }
 
-const CLEARED_ACTIVITY_STORAGE_KEY =
-  "nestor.job-finder.cleared-activity.v1";
+const CLEARED_ACTIVITY_STORAGE_KEY = "nestor.job-finder.cleared-activity.v1";
 
 function readClearedActivityIds(): ReadonlySet<string> {
   try {
@@ -278,7 +277,8 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
   const visibleItems = model.items.filter(
     (item) =>
       !isFinishedActivity(item) ||
-      (!clearedActivityIds.has(item.id) && !isStaleFinishedTask(item, Date.now())),
+      (!clearedActivityIds.has(item.id) &&
+        !isStaleFinishedTask(item, Date.now())),
   );
   const finishedItems = visibleItems.filter(isFinishedActivity);
 
@@ -330,7 +330,7 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
         {/* One name at every width. "Tasks" read as a to-do list for the
             person, which is what Needs you is; this panel is what Job Finder
             itself is doing, so it is named for that. */}
-        <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden xl:max-[1439px]:!hidden">
+        <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden xl:max-[1440px]:!hidden">
           Activity
         </span>
         {/* One zero rule for every count in the shell: a badge never renders

@@ -766,10 +766,16 @@ export function ReviewQueueListPanel({
       ) : null}
       {showsStatusTabs ? (
         <div className="min-w-0 overflow-x-auto border-b border-(--surface-panel-border) px-3 py-1.5">
+          {/* The track keeps its full width so this row scrolls instead of
+            the track clipping "In Applications 4" when the chat narrows the
+            list; the tighter segments fit all four at 1440px with the chat
+            open. */}
           <SegmentedControl
+            className="max-w-none"
             label="Show shortlisted jobs by status"
             onValueChange={setStatusFilter}
             options={statusFilterOptions}
+            segmentClassName="px-2"
             value={statusFilter}
           />
         </div>

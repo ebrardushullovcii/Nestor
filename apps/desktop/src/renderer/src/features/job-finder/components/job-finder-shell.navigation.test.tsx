@@ -449,7 +449,11 @@ describe("JobFinderShell section navigation", () => {
     // Important on purpose: Tailwind v4 emits arbitrary `min-[...]` media
     // variants before the named breakpoints, so a plain `min-[900px]:pr-80`
     // loses the cascade to the still-matching `sm:pr-64` that follows it.
-    expect(navigation.className).toContain("min-[900px]:!pr-80");
+    // The reserve is the group's measured width (at least 20rem): with its
+    // labels shown from 1100px the group is wider than a fixed 20rem.
+    expect(navigation.className).toContain(
+      "min-[900px]:!pr-[max(20rem,calc(var(--job-finder-header-actions-width,0px)+0.75rem))]",
+    );
     expect(navigation.className).not.toContain("min-[900px]:pl-80");
     expect(navigation.contains(notificationGroup)).toBe(false);
 
@@ -3688,7 +3692,7 @@ describe("compact navigation shares the header switcher's axis", () => {
       const navigation = renderShellFor("win32");
 
       expect(resolveWinningPaddingRight(navigation.className, width)).toBe(
-        "pr-80",
+        "pr-[max(20rem,calc(var(--job-finder-header-actions-width,0px)+0.75rem))]",
       );
     },
   );
@@ -3698,9 +3702,7 @@ describe("compact navigation shares the header switcher's axis", () => {
   it("drops the reserve at 1280px off macOS, where the card moves up to the brand row", () => {
     const navigation = renderShellFor("win32");
 
-    expect(resolveWinningPaddingRight(navigation.className, 1280)).toBe(
-      "pr-0",
-    );
+    expect(resolveWinningPaddingRight(navigation.className, 1280)).toBe("pr-0");
     expect(navigation.className).toContain("xl:row-start-1");
     expect(navigation.className).toContain("xl:mr-[25rem]");
   });
