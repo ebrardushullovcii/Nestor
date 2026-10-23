@@ -180,9 +180,9 @@ describe("JobFinderCompanyDetailRoute", () => {
         "2 last seen available · 1 need verification · 1 reported closed",
       ),
     ).toBeTruthy();
-    expect(screen.getByText(/Workflow: Rejected/)).toBeTruthy();
-    expect(screen.getByText(/Workflow: Submitted/)).toBeTruthy();
-    expect(screen.getAllByText(/Workflow: Archived/)).toHaveLength(2);
+    expect(screen.getByText(/· Rejected/)).toBeTruthy();
+    expect(screen.getByText(/· Applied/)).toBeTruthy();
+    expect(screen.getAllByText(/· Hidden/)).toHaveLength(2);
     expect(screen.getByText("Dismissed role")).toBeTruthy();
     expect(screen.getByText("Archived active role")).toBeTruthy();
   }, 20_000);

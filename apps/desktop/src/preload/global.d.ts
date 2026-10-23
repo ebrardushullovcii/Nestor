@@ -48,6 +48,7 @@ import type {
   JobFinderApplyRunActionInput,
   JobFinderApplyQueueControlInput,
   JobFinderRemoveFromApplyQueueInput,
+  JobFinderReturnApplicationToShortlistInput,
   JobFinderApproveResumesInput,
   JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
@@ -670,6 +671,12 @@ declare global {
         ) => Promise<JobFinderWorkspaceSyncResult>;
         removeFromApplyQueue: (
           input: JobFinderRemoveFromApplyQueueInput,
+        ) => Promise<JobFinderWorkspaceSyncResult>;
+        returnApplicationToShortlist: (
+          input: JobFinderReturnApplicationToShortlistInput,
+        ) => Promise<JobFinderWorkspaceSyncResult>;
+        undoReturnApplicationToShortlist: (
+          jobId: string,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         approveApplyRun: (
           input: JobFinderApplyRunActionInput,

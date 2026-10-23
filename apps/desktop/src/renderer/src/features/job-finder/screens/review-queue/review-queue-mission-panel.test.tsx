@@ -175,6 +175,18 @@ describe("ReviewQueueMissionPanel", () => {
     expect(props.onStartApplyCopilot).toHaveBeenCalledWith({ jobId: "job_1" });
   });
 
+  it("holds Apply while all work is paused and says how to continue", () => {
+    const props = renderPanel({ applicationWorkPaused: true });
+
+    const apply = screen.getByRole("button", { name: "Apply" });
+    expect(apply.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByTestId("apply-outcome").textContent).toBe(
+      "All work is paused. Press Continue to start it again.",
+    );
+    fireEvent.click(apply);
+    expect(props.onStartApplyCopilot).not.toHaveBeenCalled();
+  });
+
   it("carries none of the old readiness chrome", () => {
     renderPanel();
 

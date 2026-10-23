@@ -1,5 +1,6 @@
 import {
   formatEmployerLabelFromSlug,
+  isApplicationReturnedToShortlist,
   isLikelyUtilitySiteChromeName,
   sanitizeEmployerLabel,
   type ApplicationRecord,
@@ -829,12 +830,18 @@ function orderDiscoveryJobs(savedJobs: readonly SavedJob[]): SavedJob[] {
     .sort(compareDiscoveryJobs);
 }
 
+/**
+ * Applications, newest first. One the person moved back to Shortlisted is
+ * left out until the next Apply writes to it; Shortlisted shows the job.
+ */
 export function buildApplicationRecords(
   savedApplicationRecords: readonly ApplicationRecord[],
 ): ApplicationRecord[] {
-  return [...savedApplicationRecords].sort(
-    (left, right) =>
-      new Date(right.lastUpdatedAt).getTime() -
-      new Date(left.lastUpdatedAt).getTime(),
-  );
+  return savedApplicationRecords
+    .filter((record) => !isApplicationReturnedToShortlist(record))
+    .sort(
+      (left, right) =>
+        new Date(right.lastUpdatedAt).getTime() -
+        new Date(left.lastUpdatedAt).getTime(),
+    );
 }

@@ -687,6 +687,7 @@ export function ReviewQueueScreen(props: {
                 }
                 applyJobResults={applyJobResults ?? []}
                 isApplyPending={isApplyPending}
+                applicationWorkPaused={applicationWorkPaused}
                 isJobPending={isJobPending}
                 isSelectedJobPendingTooLong={selectedJobPendingTooLong}
                 onStartApplyCopilot={onStartApplyCopilot}

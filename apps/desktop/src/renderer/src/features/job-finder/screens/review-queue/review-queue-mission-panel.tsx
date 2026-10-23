@@ -1,4 +1,5 @@
 import { joinUniqueSentences } from "../../lib/sentence-copy";
+import { APPLICATION_WORK_PAUSED_REASON } from "../../lib/application-work-paused";
 import { StatusBadge } from "../../components/status-badge";
 import { fitRecommendationCopy } from "../../lib/match-assessment-presentation";
 import { Check, ChevronDown, Pencil } from "lucide-react";
@@ -49,6 +50,8 @@ interface ReviewQueueMissionPanelProps {
   pendingElapsedSeconds: number;
   globalDailyApplicationPreparationCapacity?: GlobalDailyApplicationPreparationCapacity | null;
   isApplyPending: boolean;
+  /** All work is paused: Apply waits for Continue, as the list's buttons do. */
+  applicationWorkPaused?: boolean;
   isJobPending: (jobId: string) => boolean;
   isSelectedJobPendingTooLong?: boolean;
   onStartApplyCopilot: (input: JobFinderApplicationStartTarget) => void;
@@ -154,6 +157,7 @@ export function ReviewQueueMissionPanel({
   pendingElapsedSeconds,
   globalDailyApplicationPreparationCapacity = null,
   isApplyPending,
+  applicationWorkPaused = false,
   isJobPending,
   isSelectedJobPendingTooLong = false,
   onStartApplyCopilot,
@@ -613,7 +617,13 @@ export function ReviewQueueMissionPanel({
               disabled={
                 !primaryApplicationAction.enabled ||
                 (primaryApplicationAction.kind === "start_apply" &&
-                  dailyCapacityExhausted)
+                  dailyCapacityExhausted) ||
+                (showsApplyOutcome && applicationWorkPaused)
+              }
+              title={
+                showsApplyOutcome && applicationWorkPaused
+                  ? APPLICATION_WORK_PAUSED_REASON
+                  : undefined
               }
               onClick={() => {
                 if (primaryApplicationAction.kind === "open_safeguards") {
@@ -759,10 +769,12 @@ export function ReviewQueueMissionPanel({
             className="min-w-0 break-words text-(length:--text-small) leading-5 text-foreground-muted"
             data-testid="apply-outcome"
           >
-            {describeApplyOutcome(
-              applicationAutomationMode,
-              usesOriginalResume,
-            )}
+            {applicationWorkPaused
+              ? APPLICATION_WORK_PAUSED_REASON
+              : describeApplyOutcome(
+                  applicationAutomationMode,
+                  usesOriginalResume,
+                )}
           </p>
         ) : null}
         {/* Quiet capacity fact below the actions, and only where it can

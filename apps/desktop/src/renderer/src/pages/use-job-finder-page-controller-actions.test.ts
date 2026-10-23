@@ -2388,10 +2388,7 @@ describe("createPrimaryPageActions", () => {
       expect(setActionState).toHaveBeenLastCalledWith({
         message: "Job added to Shortlisted.",
         tone: "success",
-        actionLink: {
-          label: "Open Shortlisted",
-          route: "/job-finder/review-queue",
-        },
+        undo: expect.any(Function) as unknown,
       });
     });
     expect(navigate).not.toHaveBeenCalled();
@@ -2441,17 +2438,15 @@ describe("createPrimaryPageActions", () => {
     finish({} as JobFinderRendererWorkspaceSnapshot);
     expect(await first).toEqual({
       status: "success",
-      message: "50 jobs added to Shortlisted.",
+      message: "Shortlisted 50 jobs.",
     });
     // Shortlisted keeps its own selection, so it does not open on the last
-    // page where the new jobs landed; the toast's link opens the first one.
+    // page where the new jobs landed; the toast offers Undo all instead.
     expect(setSelectedReviewJobId).not.toHaveBeenCalled();
     expect(setActionState).toHaveBeenCalledWith(
       expect.objectContaining({
-        actionLink: {
-          label: "Open Shortlisted",
-          route: "/job-finder/review-queue?jobId=job-0",
-        },
+        undo: expect.any(Function) as unknown,
+        undoLabel: "Undo all",
       }),
     );
     expect(navigate).not.toHaveBeenCalled();
@@ -3068,9 +3063,9 @@ describe("createPrimaryPageActions auto-apply queue outcomes", () => {
   });
   it("queues a press when today's limit is used; the queue waits for tomorrow", async () => {
     const harness = createQueueHarness({ capacity: exhaustedCapacity });
-    await expect(
-      harness.startQueue(["job_a", "job_b"]),
-    ).resolves.toMatchObject({ status: "confirmed" });
+    await expect(harness.startQueue(["job_a", "job_b"])).resolves.toMatchObject(
+      { status: "confirmed" },
+    );
     expect(harness.startAutoApplyQueueRun).toHaveBeenCalledTimes(1);
   });
 

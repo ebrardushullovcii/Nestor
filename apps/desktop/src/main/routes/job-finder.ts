@@ -173,6 +173,7 @@ import type {
 import {
   JobFinderApplyQueueControlInputSchema,
   JobFinderRemoveFromApplyQueueInputSchema,
+  JobFinderReturnApplicationToShortlistInputSchema,
   JobFinderApproveResumesInputSchema,
   JobFinderStartApplyQueueInputSchema,
   type ApplicationAutomationMode,
@@ -3699,6 +3700,35 @@ export function registerJobFinderRouteHandlers(
       return workspaceMutationResponse(
         event.sender,
         await readWorkspaceProjection(service),
+      );
+    },
+  );
+
+  // Applications -> Shortlisted for an application nothing was sent for. Its
+  // form closes; nothing is sent or prepared again.
+  ipcMain.handle(
+    "job-finder:return-application-to-shortlist",
+    async (event, payload: unknown) => {
+      const { applicationRecordId } =
+        JobFinderReturnApplicationToShortlistInputSchema.parse(payload);
+      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
+      return workspaceMutationResponse(
+        event.sender,
+        await jobFinderWorkspaceService.returnApplicationToShortlist(
+          applicationRecordId,
+        ),
+      );
+    },
+  );
+
+  ipcMain.handle(
+    "job-finder:undo-return-application-to-shortlist",
+    async (event, payload: unknown) => {
+      const { jobId } = JobFinderJobActionInputSchema.parse(payload);
+      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
+      return workspaceMutationResponse(
+        event.sender,
+        await jobFinderWorkspaceService.undoReturnApplicationToShortlist(jobId),
       );
     },
   );

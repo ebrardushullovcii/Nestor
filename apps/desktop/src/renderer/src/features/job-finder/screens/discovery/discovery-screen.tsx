@@ -1636,6 +1636,9 @@ export function DiscoveryScreen(props: {
           onShortlistJobs={async (jobIds) => {
             if (onQueueJobs) {
               const outcome = await onQueueJobs(jobIds);
+              // A bulk success is the toast's, with its Undo all; the
+              // footer keeps only a failure, so it is never said twice.
+              if (outcome.status === "success") return;
               setQueueOutcomesByJobId((current) => {
                 const next = new Map(current);
                 for (const id of jobIds) next.set(id, outcome);

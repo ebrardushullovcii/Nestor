@@ -1662,7 +1662,9 @@ function JobFinderReviewQueueRouteContent() {
       workspace={context.workspace}
     >
       <ReviewQueueScreen
-        applicationWorkPaused={context.workspace.activityControl?.paused ?? false}
+        applicationWorkPaused={
+          context.workspace.activityControl?.paused ?? false
+        }
         // One plan has nothing to choose between; a picker with one entry
         // was just another row above the list.
         scopeControl={
@@ -2609,6 +2611,9 @@ export function JobFinderApplicationsRoute() {
         onResolveSubmissionOutcome={context.onResolveSubmissionOutcome}
         onExportApplicationCrm={context.onExportApplicationCrm}
         onMutateApplicationCrm={context.onMutateApplicationCrm}
+        onReturnApplicationToShortlist={(record) =>
+          void context.onReturnApplicationToShortlist(record)
+        }
         onMutateApplicationCrmBulkStage={
           context.onMutateApplicationCrmBulkStage
         }
