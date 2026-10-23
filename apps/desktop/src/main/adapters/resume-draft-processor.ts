@@ -60,6 +60,16 @@ export function createResumeDraftProcessor(): ResumeDraftProcessor {
     });
   };
   return {
+    async inspectPdf(filePath) {
+      const response = await run({
+        id: ++sequence,
+        kind: "inspectPdf",
+        input: filePath,
+      });
+      if (response.kind !== "inspectPdf")
+        throw new Error("Unexpected PDF inspection response.");
+      return response.result;
+    },
     async render(input) {
       const response = await run({ id: ++sequence, kind: "render", input });
       if (response.kind !== "render")

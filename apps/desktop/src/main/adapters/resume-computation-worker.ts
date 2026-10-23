@@ -1,4 +1,7 @@
 import { parentPort } from "node:worker_threads";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { getPdfPageCount } from "./resume-document/pdf";
 import type {
   ResumeComputationRequest,
   ResumeComputationResponse,
@@ -12,10 +15,22 @@ import {
   buildResumeDraftRevision,
 } from "@nestor/job-finder/resume-computation";
 
-parentPort?.on("message", (request: ResumeComputationRequest) => {
+async function compute(request: ResumeComputationRequest): Promise<void> {
   let response: ResumeComputationResponse;
   try {
     switch (request.kind) {
+      case "inspectPdf":
+        response = {
+          id: request.id,
+          kind: request.kind,
+          result: {
+            pageCount: await getPdfPageCount(request.input),
+            sha256: createHash("sha256")
+              .update(await readFile(request.input))
+              .digest("hex"),
+          },
+        };
+        break;
       case "render":
         response = {
           id: request.id,
@@ -72,4 +87,8 @@ parentPort?.on("message", (request: ResumeComputationRequest) => {
     };
   }
   parentPort!.postMessage(response);
+}
+
+parentPort?.on("message", (request: ResumeComputationRequest) => {
+  void compute(request);
 });

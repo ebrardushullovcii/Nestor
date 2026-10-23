@@ -13,6 +13,7 @@ import {
   ResumeResearchArtifactSchema,
   ResumeValidationResultSchema,
   TailoredAssetSchema,
+  type ResumeDraft,
 } from "@nestor/contracts";
 
 import { secureDatabaseFile } from "./internal/migrations";
@@ -22,6 +23,7 @@ import {
   getSingletonValue,
   getSingletonValueWithRevision,
   listCollectionValues,
+  parsePersistedRowValue,
   listValues,
   upsertIndexedCollectionValue,
   saveSingletonValue,
@@ -82,6 +84,10 @@ export function createFileRepositoryResumeMethods(
 ): FileRepositoryResumeMethods {
   const { database, filePath, upsertPersistedValue, writePersistedValue } =
     context;
+  // Canonical, schema-normalized values, keyed by the exact stored JSON.
+  // Every read still checks SQLite and returns its own mutable clone. This
+  // only avoids parsing the same large draft several times during approval.
+  const draftReads = new Map<string, { json: string; draft: ResumeDraft }>();
 
   return {
     getTailoredAssetById(assetId) {
@@ -127,18 +133,30 @@ export function createFileRepositoryResumeMethods(
       );
     },
     getResumeDraftByJobId(jobId) {
-      const draft = listCollectionValues(
-        database,
-        "resume_drafts",
-        ResumeDraftSchema,
-        {
-          whereSql: "job_id = ?",
-          params: [jobId],
-          orderBySql: "updated_at DESC, id ASC",
-        },
-      )[0];
-      // This query parsed its own JSON; the caller already owns the value.
-      return Promise.resolve(draft ?? null);
+      const row = database
+        .prepare(
+          "SELECT id, value FROM resume_drafts WHERE job_id = ? ORDER BY updated_at DESC, id ASC LIMIT 1",
+        )
+        .get(jobId);
+      if (!row) {
+        draftReads.delete(jobId);
+        return Promise.resolve(null);
+      }
+      const json = String(row.value);
+      const cached = draftReads.get(jobId);
+      if (cached?.json === json)
+        return Promise.resolve(cloneValue(cached.draft));
+      const draft = parsePersistedRowValue({
+        tableName: "resume_drafts",
+        rowId: String(row.id),
+        rawValue: json,
+        schema: ResumeDraftSchema,
+      });
+      draftReads.delete(jobId);
+      draftReads.set(jobId, { json, draft });
+      if (draftReads.size > 8)
+        draftReads.delete(draftReads.keys().next().value!);
+      return Promise.resolve(cloneValue(draft));
     },
     upsertResumeDraft(draft) {
       const normalizedDraft = ResumeDraftSchema.parse(cloneValue(draft));

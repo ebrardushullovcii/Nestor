@@ -55,6 +55,11 @@ export interface ResumeHtmlRenderResult {
   exportHtml: string;
 }
 
+export interface ResumePdfInspection {
+  pageCount: number;
+  sha256: string;
+}
+
 export interface ResumeDraftSanitizationInput {
   draft: ResumeDraft;
   job: SavedJob;
@@ -71,13 +76,14 @@ export interface ResumeDraftValidationInput {
 }
 
 export interface ResumeDraftProcessor {
-  parse(draft: ResumeDraft): Promise<ResumeDraft>;
+  parse(draft: unknown): Promise<ResumeDraft>;
   sanitize(input: ResumeDraftSanitizationInput): Promise<ResumeDraft>;
   validate(input: ResumeDraftValidationInput): Promise<ResumeValidationResult>;
   stateHash(draft: ResumeDraft): Promise<string>;
   revision(input: ResumeDraftRevisionInput): Promise<ResumeDraftRevision>;
   close(): Promise<void>;
   render(input: ResumeHtmlRenderInput): Promise<ResumeHtmlRenderResult>;
+  inspectPdf(filePath: string): Promise<ResumePdfInspection>;
 }
 
 export interface ResumeDraftRevisionInput {
@@ -95,9 +101,10 @@ export type ResumeComputationRequest = { id: number } & (
   | { kind: "sanitize"; input: ResumeDraftSanitizationInput }
   | { kind: "validate"; input: ResumeDraftValidationInput }
   | { kind: "stateHash"; input: ResumeDraft }
-  | { kind: "parse"; input: ResumeDraft }
+  | { kind: "parse"; input: unknown }
   | { kind: "revision"; input: ResumeDraftRevisionInput }
   | { kind: "render"; input: ResumeHtmlRenderInput }
+  | { kind: "inspectPdf"; input: string }
 );
 
 export type ResumeComputationResponse = { id: number } & (
@@ -107,5 +114,6 @@ export type ResumeComputationResponse = { id: number } & (
   | { kind: "parse"; result: ResumeDraft }
   | { kind: "revision"; result: ResumeDraftRevision }
   | { kind: "render"; result: ResumeHtmlRenderResult }
+  | { kind: "inspectPdf"; result: ResumePdfInspection }
   | { kind: "error"; message: string }
 );

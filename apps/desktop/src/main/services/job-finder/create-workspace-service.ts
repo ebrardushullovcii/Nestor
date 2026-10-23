@@ -645,6 +645,7 @@ export async function createJobFinderWorkspaceServiceAsync(
   const resumeDraftProcessor = createResumeDraftProcessor();
   const documentManager = createLocalJobFinderDocumentManager({
     renderResumeHtml: (input) => resumeDraftProcessor.render(input),
+    inspectPdf: (filePath) => resumeDraftProcessor.inspectPdf(filePath),
     outputDirectory: getGeneratedResumeDocumentsDirectory(),
     previewTestMode: desktopTestApiEnabled
       ? getResumePreviewTestMode(env)
