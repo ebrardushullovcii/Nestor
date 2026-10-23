@@ -1254,11 +1254,6 @@ export function createPrimaryPageActions(
     )?.resumeReview.status === "draft"
       ? "draft"
       : "needs_review";
-  /** The toast's Undo for a move just recorded. */
-  const undoMoveOptions = (change: RecentChange) => ({
-    undo: () => void undoRecentChange(change),
-    ...(change.jobIds.length > 1 ? { undoLabel: "Undo all" } : {}),
-  });
 
   const runDiscoveryAction = (
     targetId?: string,
