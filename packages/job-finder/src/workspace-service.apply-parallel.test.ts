@@ -162,7 +162,9 @@ afterEach(() => vi.unstubAllEnvs());
 beforeEach(() => vi.stubEnv("NESTOR_APPLICATION_PREPARATION_CONCURRENCY", "2"));
 
 describe("parallel application preparation", () => {
-  test.each([2, 4, 16])(
+  // A run holds at most ten jobs, so nine workers plus one waiting job is the
+  // widest case a run can reach.
+  test.each([2, 4, 9])(
     "bounds %i workers and counts out-of-order results without closing active forms",
     async (concurrency) => {
       vi.stubEnv(

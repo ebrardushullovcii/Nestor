@@ -279,7 +279,7 @@ function seedBegunPreparations(
 
 describe("workspace campaign preparation capacity", () => {
   test("uses fixed product safeguards instead of persisted campaign limits", async () => {
-    expect(MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN).toBe(1000);
+    expect(MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN).toBe(10);
     expect(MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY).toBe(20);
 
     const harness = createWorkspaceServiceHarness({
@@ -299,27 +299,15 @@ describe("workspace campaign preparation capacity", () => {
     ).toEqual(["job_ready", "job_generating"]);
   });
 
-  test("stages twenty jobs in one batch within the saved daily limit", async () => {
+  test("rejects more than ten unique jobs at staging and approval", async () => {
     const seed = createCapacitySeed();
-    const jobIds = addClonedJobs(seed, 20);
-    const harness = createWorkspaceServiceHarness({ seed });
-    await seedActiveCampaign(harness, { jobIds });
-    const snapshot = await harness.workspaceService.startAutoApplyQueueRun(jobIds);
-    expect(snapshot.applyRuns[0]?.jobIds).toHaveLength(20);
-  });
-
-  test("rejects oversized runs at staging and approval", async () => {
-    const seed = createCapacitySeed();
-    const jobIds = addClonedJobs(
-      seed,
-      MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN + 1,
-    );
+    const jobIds = addClonedJobs(seed, 11);
     const harness = createWorkspaceServiceHarness({ seed });
     await seedActiveCampaign(harness, { jobIds });
 
     await expect(
       harness.workspaceService.startAutoApplyQueueRun(jobIds),
-    ).rejects.toThrow("limited to 1000 unique jobs");
+    ).rejects.toThrow("limited to 10 unique jobs");
 
     await harness.repository.upsertApplyRun(
       applyRunFixture({
@@ -330,7 +318,7 @@ describe("workspace campaign preparation capacity", () => {
     );
     await expect(
       harness.workspaceService.approveApplyRun("run_oversized"),
-    ).rejects.toThrow("limited to 1000 unique jobs");
+    ).rejects.toThrow("limited to 10 unique jobs");
 
     const duplicateSnapshot =
       await harness.workspaceService.startAutoApplyQueueRun(
