@@ -82,6 +82,18 @@ test("approval-only saves reuse bodies and remain canonical across rollback, res
       (await repo.listResumeDrafts()).every((d) => d.status === "approved"),
     ).toBe(true);
     expect(
+      db.prepare("SELECT value FROM resume_drafts WHERE id='a'").get()!.value,
+    ).toBe(bytes);
+    expect(
+      db.prepare("SELECT value FROM tailored_assets WHERE id='asset_a'").get()!
+        .value,
+    ).toBe(assetBytes);
+    expect(
+      (await repo.readDisplayCollections!()).resumeDrafts.every(
+        (d) => d.status === "approved",
+      ),
+    ).toBe(true);
+    expect(
       db.prepare("SELECT count(*) n FROM resume_draft_approval_state").get()!.n,
     ).toBe(0);
     db.exec("DROP TRIGGER fail_profile");
@@ -113,15 +125,25 @@ test("approval-only saves reuse bodies and remain canonical across rollback, res
       updatedAt: staleAt,
     });
     expect(
-      db.prepare("SELECT value FROM resume_drafts WHERE id='a'").get()!.value,
-    ).toBe(bytes);
+      JSON.parse(
+        String(
+          db.prepare("SELECT value FROM resume_drafts WHERE id='a'").get()!
+            .value,
+        ),
+      ),
+    ).toEqual(changed);
     expect(await repo.getResumeDraftByJobId("a")).toEqual(changed);
     const changedAsset = { ...asset, storagePath: null, updatedAt: staleAt };
     expect(await repo.getTailoredAssetById(asset.id)).toEqual(changedAsset);
     expect(
-      db.prepare("SELECT value FROM tailored_assets WHERE id='asset_a'").get()!
-        .value,
-    ).toBe(assetBytes);
+      JSON.parse(
+        String(
+          db
+            .prepare("SELECT value FROM tailored_assets WHERE id='asset_a'")
+            .get()!.value,
+        ),
+      ),
+    ).toEqual(changedAsset);
     expect(await repo.getProfile()).toEqual(profile);
     expect(await repo.getSearchPreferences()).toEqual(preferences);
     const exported = await repo.exportState();
@@ -181,7 +203,85 @@ test("an existing workspace gains approval state without changing draft bytes", 
   }
 });
 
-test("background folds yield and preserve cached bodies while legacy SQL reads become stale", async () => {
+test("a failed body write rolls back all approval fields and the Profile commit", async () => {
+  const temp = await createTempRepository("nestor-approval-atomic-");
+  const repo = await temp.createRepository();
+  const db = new DatabaseSync(temp.filePath);
+  try {
+    await repo.upsertResumeDraft(draft("a"));
+    await repo.upsertResumeDraft(draft("b"));
+    db.exec(`CREATE TRIGGER fail_second_body BEFORE UPDATE ON resume_drafts
+      WHEN NEW.id='b' BEGIN SELECT RAISE(ABORT, 'synthetic body failure'); END;`);
+    const before = await repo.readDisplayCollections!();
+    const profile = await repo.getProfile();
+    await expect(
+      repo.staleResumeDrafts!({
+        draftIds: ["a", "b"],
+        staleReason: reason,
+        updatedAt: staleAt,
+        profileInputs: {
+          profile: { ...profile, headline: "Changed synthetic headline" },
+        },
+      }),
+    ).rejects.toThrow("synthetic body failure");
+    expect(await repo.getProfile()).toEqual(profile);
+    expect(await repo.readDisplayCollections!()).toEqual(before);
+    for (const row of db.prepare("SELECT id, value FROM resume_drafts").all())
+      expect(JSON.parse(String(row.value))).toEqual(draft(String(row.id)));
+    expect(
+      db.prepare("SELECT count(*) n FROM resume_draft_approval_state").get()!.n,
+    ).toBe(0);
+  } finally {
+    db.exec("DROP TRIGGER IF EXISTS fail_second_body");
+    db.close();
+    await repo.close();
+    await temp.cleanup();
+  }
+});
+
+test.each(["local", "external"])(
+  "an uncached %s approval edit is folded in the Profile transaction",
+  async (writer) => {
+    const temp = await createTempRepository("nestor-approval-cache-edit-");
+    const repo = await temp.createRepository();
+    const db = new DatabaseSync(temp.filePath);
+    try {
+      await repo.upsertResumeDraft({
+        ...draft("a"),
+        status: "needs_review",
+        approvedAt: null,
+      });
+      await repo.readDisplayCollections!();
+      if (writer === "local") await repo.upsertResumeDraft(draft("a"));
+      else
+        db.prepare("UPDATE resume_drafts SET value=? WHERE id='a'").run(
+          JSON.stringify(draft("a")),
+        );
+      await repo.staleResumeDrafts!({
+        draftIds: ["a"],
+        staleReason: reason,
+        updatedAt: staleAt,
+        profileInputs: { profile: await repo.getProfile() },
+      });
+      expect(
+        JSON.parse(
+          String(db.prepare("SELECT value FROM resume_drafts").get()!.value),
+        ),
+      ).toMatchObject({
+        status: "stale",
+        staleReason: reason,
+        approvedAt: null,
+        approvedExportId: null,
+      });
+    } finally {
+      db.close();
+      await repo.close();
+      await temp.cleanup();
+    }
+  },
+);
+
+test("approval changes reach legacy SQL before returning; cached bodies stay shared", async () => {
   const temp = await createTempRepository("nestor-approval-fold-");
   const repo = await temp.createRepository();
   const db = new DatabaseSync(temp.filePath);
@@ -198,11 +298,6 @@ test("background folds yield and preserve cached bodies while legacy SQL reads b
         db.prepare("SELECT count(*) n FROM resume_draft_approval_state").get()!
           .n,
       );
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(pending()).toBeGreaterThan(0);
-    expect(pending()).toBeLessThan(8);
-    for (let i = 0; i < 100 && pending(); i++)
-      await new Promise<void>((resolve) => setImmediate(resolve));
     expect(pending()).toBe(0);
     const parse = vi.spyOn(JSON, "parse");
     const after = await repo.readDisplayCollections!();
@@ -317,14 +412,19 @@ test("startup and close fold pending draft and asset state; later body writes wi
   }
 });
 
-test("a failed fold keeps durable side state and retries on close without publishing rolled-back cache fields", async () => {
+test("unapproved folds yield and retry without publishing rolled-back cache fields", async () => {
   const temp = await createTempRepository("nestor-approval-fold-retry-");
   const repo = await temp.createRepository();
   let closed = false;
   const db = new DatabaseSync(temp.filePath);
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   try {
-    await repo.upsertResumeDraft(draft("a"));
+    await repo.upsertResumeDraft({
+      ...draft("a"),
+      status: "needs_review",
+      approvedAt: null,
+      approvedExportId: null,
+    });
     await repo.readDisplayCollections!();
     db.exec(`CREATE TRIGGER fail_fold BEFORE UPDATE ON resume_drafts
       BEGIN SELECT RAISE(ABORT, 'synthetic fold failure'); END;`);
@@ -340,7 +440,7 @@ test("a failed fold keeps durable side state and retries on close without publis
       JSON.parse(
         String(db.prepare("SELECT value FROM resume_drafts").get()!.value),
       ),
-    ).toMatchObject({ status: "approved" });
+    ).toMatchObject({ status: "needs_review", updatedAt: originalAt });
     expect(
       db.prepare("SELECT count(*) n FROM resume_draft_approval_state").get()!.n,
     ).toBe(1);

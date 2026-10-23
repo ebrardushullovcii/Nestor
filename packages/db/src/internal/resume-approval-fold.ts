@@ -25,10 +25,11 @@ export type ResumeStateFold =
       patch: Pick<TailoredAsset, "storagePath" | "updatedAt">;
     };
 
-/** Keep legacy readers safe without putting large JSON writes in Profile save. */
+/** Fold approval metadata without parsing or replacing cached document bodies. */
 export function createResumeApprovalFolder(
   database: DatabaseSync,
   prepareDisplayFold: (fold: ResumeStateFold) => () => void = () => () => {},
+  draftHasApproval: (id: string) => boolean | undefined = () => undefined,
 ) {
   const nextDraft = database.prepare(
     "SELECT draft_id, stale_reason, updated_at FROM resume_draft_approval_state LIMIT 1",
@@ -40,6 +41,17 @@ export function createResumeApprovalFolder(
     value = ${resumeDraftValueSql}, updated_at = ? WHERE id = ?`);
   const writeAsset = database.prepare(`UPDATE tailored_assets SET
     value = ${tailoredAssetValueSql} WHERE id = ?`);
+  const pendingDrafts = database.prepare(
+    "SELECT draft_id, stale_reason, updated_at FROM resume_draft_approval_state",
+  );
+  const readDraftApproval = database.prepare(`SELECT
+    json_extract(value, '$.status') = 'approved'
+      OR json_extract(value, '$.approvedAt') IS NOT NULL
+      OR json_extract(value, '$.approvedExportId') IS NOT NULL AS approved
+    FROM resume_drafts WHERE id = ?`);
+  const changedAssets = database.prepare(`SELECT a.asset_id, a.updated_at
+    FROM tailored_asset_file_state a JOIN tailored_assets t ON t.id = a.asset_id
+    WHERE json_extract(t.value, '$.storagePath') IS NOT NULL`);
   let running: Promise<void> | null = null;
   let failure: Error | null = null;
 
@@ -104,6 +116,45 @@ export function createResumeApprovalFolder(
 
   return {
     schedule,
+    /** Run inside the Profile transaction; publish caches only after its commit. */
+    foldApprovalChanges(this: void): () => void {
+      const publish: (() => void)[] = [];
+      for (const draft of pendingDrafts.all()) {
+        const id = String(draft.draft_id);
+        const approved =
+          draftHasApproval(id) ??
+          Number(readDraftApproval.get(id)?.approved) === 1;
+        if (!approved) continue;
+        publish.push(
+          prepareDisplayFold({
+            table: "resume_drafts",
+            id,
+            patch: {
+              status: "stale",
+              staleReason: String(draft.stale_reason),
+              approvedAt: null,
+              approvedExportId: null,
+              updatedAt: String(draft.updated_at),
+            },
+          }),
+        );
+        writeDraft.run(draft.updated_at!, id);
+      }
+      for (const asset of changedAssets.all()) {
+        const id = String(asset.asset_id);
+        publish.push(
+          prepareDisplayFold({
+            table: "tailored_assets",
+            id,
+            patch: { storagePath: null, updatedAt: String(asset.updated_at) },
+          }),
+        );
+        writeAsset.run(id);
+      }
+      return () => {
+        for (const apply of publish) apply();
+      };
+    },
     async flush(): Promise<void> {
       schedule();
       await running;

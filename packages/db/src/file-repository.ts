@@ -437,6 +437,7 @@ export async function createFileJobFinderRepository(
     approvalFolder = createResumeApprovalFolder(
       database,
       readDisplayCollections.prepareResumeStateFold,
+      readDisplayCollections.draftHasApproval,
     );
     const readDiscoveryDisplay = createDiscoveryDisplayProjectionReader(
       database,
@@ -867,7 +868,11 @@ export async function createFileJobFinderRepository(
           return result;
         }),
     }),
-    ...createFileRepositoryResumeMethods(context, approvalFolder.schedule),
+    ...createFileRepositoryResumeMethods(
+      context,
+      approvalFolder.schedule,
+      approvalFolder.foldApprovalChanges,
+    ),
     // These reads need only authority envelopes, not the application/result
     // bodies loaded by the transaction store for preflight/outcome mutations.
     listApplicationAuthorityEnvelopes(filter) {

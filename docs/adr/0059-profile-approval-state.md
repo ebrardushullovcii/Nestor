@@ -1,4 +1,4 @@
-# ADR 0059: Profile saves defer resume body writes
+# ADR 0059: Profile saves reuse resume bodies and commit approval changes
 
 Status: accepted (2026-10-23).
 
@@ -8,12 +8,14 @@ Store bulk resume invalidation in `resume_draft_approval_state`, keyed by draft 
 
 Canonical repository reads, export, recovery and ordering compose this state with the full draft. Display reads share the already validated, frozen body and replace only the approval fields. The unchanged body's validation mark remains valid. An explicit profile save commits its profile, optional search preferences and affected approval state atomically, including export and tailored-file invalidation. Submitted drafts remain protected.
 
-Immediately after saving, background work folds the state into the original JSON bodies, one row per event-loop turn. Each row and its state deletion commit together. Cached display bodies keep their nested data when only these known metadata fields change; a concurrent or external body edit still takes the normal validation path. Startup finishes interrupted folds before publishing repository reads; graceful close drains pending folds before backup and close.
+Before the Profile transaction commits, fold drafts whose body has approved status, an approval timestamp or an approved export id, and assets with non-null file paths into their original JSON bodies. Each body update removes its side state through the existing trigger. Publish the prepared display-cache patches only after the outer transaction commits; a failed save leaves both bodies and cached fields unchanged. Cached display bodies keep their nested data when only these known metadata fields change; a concurrent or external body edit still takes the normal validation path.
 
-Older builds read the original bodies. They see the correct stale reasons and cleared approval/file fields once folding finishes or after graceful quit. A forced kill before folding finishes leaves a short downgrade window: an older build can still read approval fields from the remaining unfurled bodies, although export records were invalidated atomically. Starting this build again completes the pending work. This is a compatibility limit of deferring those writes, not a safety guarantee for immediate downgrade after a crash.
+The approval check reuses a validated cached body only while its local change marker and SQLite data version still match. Uncached or changed bodies use SQL to inspect the stored approval fields inside the transaction.
+
+Older builds read the original bodies. They cannot read a newly invalidated draft as approved once the Profile commit is visible, including after a forced kill. Unapproved drafts may still show their previous status, stale reason or timestamp until folding finishes. Background work folds these one row per event-loop turn, and each row and its state deletion commit together. Startup finishes interrupted folds before publishing repository reads; graceful close drains pending folds before backup and close.
 
 Source-only edits do not launch job reassessment when the assessment inputs are identical. Required reassessment starts on a later event-loop turn and processes bounded slices; canonical reads continue to wait for it.
 
 ## Reason
 
-The owner's 200 drafts contained about 140 MB of JSON. A profile save rewrote that body data merely to change approval fields, then parsed and validated it again for display. Separate approval state removes that work from the save while preserving complete canonical documents and an atomic commit. Bounded folding performs the body writes afterward for older readers. Existing workspaces gain an empty state table; no document migration or truncation is needed.
+The owner's 200 drafts contained about 140 MB of JSON. Rewriting all their bodies in the Profile transaction took about 5 s on the owner-data copy. SQLite updates only bodies that can expose an old approval or file path during downgrade; display reads reuse the validated nested bodies. Already-stale drafts with the same reason and no approval or file are skipped by the service. Deferring approval changes allowed older builds to read an approved body after a crash, so those writes belong in the Profile transaction. Existing workspaces gain an empty state table; no document migration or truncation is needed.
