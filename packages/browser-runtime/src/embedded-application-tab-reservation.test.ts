@@ -1,6 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
 import type { BrowserContext, Page } from "playwright";
-import { reserveEmbeddedApplicationTab } from "./playwright-browser-runtime";
+import {
+  reserveEmbeddedApplicationTab,
+  takeEmbeddedApplicationTab,
+} from "./playwright-browser-runtime";
 
 function fakeContext(urls: string[]) {
   const pages = urls.map((url) => {
@@ -185,4 +188,24 @@ test("memory pressure queues a new form without losing waiting tabs and wakes wh
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("taking a tab never waits and counts what is already taken", () => {
+  const { context } = fakeContext([]);
+  let working = 15;
+  // The host has room while working tabs plus taken tabs stay under 16.
+  const hasCapacity = (reserved: number) => working + reserved < 16;
+  const take = (spare = 0) =>
+    takeEmbeddedApplicationTab(context, () => working, () => working, hasCapacity, spare);
+  const first = take();
+  expect(first).toBeTypeOf("function");
+  expect(take()).toBeNull();
+  first!();
+  first!();
+  const second = take();
+  expect(second).toBeTypeOf("function");
+  second!();
+  working = 14;
+  expect(take(2)).toBeNull();
+  expect(take(1)).toBeTypeOf("function");
 });

@@ -1206,6 +1206,42 @@ async function prepareAutomationPageForTarget(
 
 const pendingEmbeddedApplicationTabs = new WeakMap<BrowserContext, number>();
 
+/** Takes a tab now if the browser has room; never waits. */
+export function takeEmbeddedApplicationTab(
+  context: BrowserContext,
+  hostTabCount?: () => number,
+  hostWorkingTabCount?: () => number,
+  hostHasCapacity?: (reservedTabs: number) => boolean,
+  spareWorkingTabs = 0,
+): (() => void) | null {
+  const pending = pendingEmbeddedApplicationTabs.get(context) ?? 0;
+  const occupied =
+    Math.max(
+      context.pages().filter((page) => !page.isClosed()).length,
+      hostTabCount?.() ?? 0,
+    ) + pending;
+  const working = hostWorkingTabCount
+    ? hostWorkingTabCount() + pending
+    : occupied;
+  // The native host owns its capacity, including tabs hidden from CDP.
+  // Keep the old bounded fallback only for hosts without that capability.
+  if (
+    !(hostHasCapacity
+      ? hostHasCapacity(pending + spareWorkingTabs)
+      : working < 7 && occupied < (hostWorkingTabCount ? 15 : 7))
+  )
+    return null;
+  pendingEmbeddedApplicationTabs.set(context, pending + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const remaining = (pendingEmbeddedApplicationTabs.get(context) ?? 1) - 1;
+    if (remaining > 0) pendingEmbeddedApplicationTabs.set(context, remaining);
+    else pendingEmbeddedApplicationTabs.delete(context);
+  };
+}
+
 export async function reserveEmbeddedApplicationTab(
   context: BrowserContext,
   signal?: AbortSignal,
@@ -1231,38 +1267,14 @@ export async function reserveEmbeddedApplicationTab(
   let toldWaiting = false;
   while (true) {
     signal?.throwIfAborted();
-    const occupied =
-      Math.max(
-        context.pages().filter((page) => !page.isClosed()).length,
-        hostTabCount?.() ?? 0,
-      ) + (pendingEmbeddedApplicationTabs.get(context) ?? 0);
-    const working = hostWorkingTabCount
-      ? hostWorkingTabCount() +
-        (pendingEmbeddedApplicationTabs.get(context) ?? 0)
-      : occupied;
-    const pending = pendingEmbeddedApplicationTabs.get(context) ?? 0;
-    // The native host owns its capacity, including tabs hidden from CDP.
-    // Keep the old bounded fallback only for hosts without that capability.
-    if (
-      hostHasCapacity
-        ? hostHasCapacity(pending + spareWorkingTabs)
-        : working < 7 && occupied < (hostWorkingTabCount ? 15 : 7)
-    ) {
-      pendingEmbeddedApplicationTabs.set(
-        context,
-        (pendingEmbeddedApplicationTabs.get(context) ?? 0) + 1,
-      );
-      let released = false;
-      return () => {
-        if (released) return;
-        released = true;
-        const remaining =
-          (pendingEmbeddedApplicationTabs.get(context) ?? 1) - 1;
-        if (remaining > 0)
-          pendingEmbeddedApplicationTabs.set(context, remaining);
-        else pendingEmbeddedApplicationTabs.delete(context);
-      };
-    }
+    const release = takeEmbeddedApplicationTab(
+      context,
+      hostTabCount,
+      hostWorkingTabCount,
+      hostHasCapacity,
+      spareWorkingTabs,
+    );
+    if (release) return release;
     // An empty tab nobody uses (the browser's startup tab) is not worth a
     // form: close it before waiting on the person.
     if (closeIdlePage && (await closeIdlePage())) continue;
@@ -2940,11 +2952,23 @@ export function createBrowserAgentRuntime(
                   boundPage !== null &&
                   !boundPage.isClosed() &&
                   areExactHttpUrls(boundPage.url(), targetUrl);
-                if (usesEmbeddedBrowserHost && !boundPageMatchesTarget)
-                  // Waiting for a tab must not hold the site: the pages
-                  // occupying the tabs may need it to finish.
-                  releaseReservedTab = await preparationLease.suspend(() =>
-                    reserveEmbeddedApplicationTab(
+                // Take a free tab while holding the site. Only a full browser
+                // gives the site up, and that wait keeps no tab: the pages
+                // occupying the tabs may need the site to finish, and a
+                // preparation queued behind its site must not hold a working
+                // tab that searches and other sites could use.
+                while (
+                  usesEmbeddedBrowserHost &&
+                  !boundPageMatchesTarget &&
+                  !(releaseReservedTab = takeEmbeddedApplicationTab(
+                    context,
+                    hostTabCount,
+                    hostWorkingTabCount,
+                    hostHasCapacity,
+                  ))
+                )
+                  await preparationLease.suspend(async () =>
+                    (await reserveEmbeddedApplicationTab(
                       context,
                       options?.signal,
                       async () => {
@@ -2979,7 +3003,7 @@ export function createBrowserAgentRuntime(
                       hostTabCount,
                       hostWorkingTabCount,
                       hostHasCapacity,
-                    ),
+                    ))(),
                   );
                 const protectedPreparedPages = [
                   ...otherPreparedPages,
