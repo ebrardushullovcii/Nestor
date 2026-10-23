@@ -2181,7 +2181,7 @@ export function DiscoveryResultsPanel({
                               <span
                                 className={cn(
                                   jobFinderListRowMetaClassName,
-                                  "flex min-w-0 flex-wrap items-baseline gap-x-1.5",
+                                  "flex min-w-0 flex-nowrap items-baseline gap-x-1.5",
                                 )}
                                 {...(employerLocationLine
                                   ? {}
@@ -2192,7 +2192,7 @@ export function DiscoveryResultsPanel({
                               >
                                 <span
                                   className={cn(
-                                    "min-w-0 break-words",
+                                    "min-w-0 truncate",
                                     employerLocationLine
                                       ? "font-medium"
                                       : "shrink-0",
@@ -2296,17 +2296,23 @@ export function DiscoveryResultsPanel({
                                 ? `${assessment.headlineScoreAriaLabel}. ${rowReason}`
                                 : assessment.headlineScoreAriaLabel}
                             </span>
-                          ) : rowReason ? (
+                          ) : (
+                            // Every row keeps the reason line, empty or not,
+                            // so rows are one height down the list.
                             <span
                               className={cn(
                                 jobFinderListRowStatusClassName,
-                                "text-foreground-soft",
+                                "min-h-[1lh] text-foreground-soft",
                               )}
-                              data-testid={`discovery-result-fit-reason-${job.id}`}
+                              {...(rowReason
+                                ? {
+                                    "data-testid": `discovery-result-fit-reason-${job.id}`,
+                                  }
+                                : {})}
                             >
                               {rowReason}
                             </span>
-                          ) : null}
+                          )}
                           {wasRescoredAfterRead ? (
                             <span className="text-(length:--text-tiny) text-foreground-soft">
                               Rescored after reading the listing

@@ -1135,7 +1135,7 @@ export function DiscoveryDetailPanel({
                         aria-keyshortcuts="X"
                         disabled={isSelectedJobPending || !triage.onNotInterested}
                         onClick={() => triage.onNotInterested?.()}
-                        title="Hide this job and open the next one (X). To say why, use Not interested because… below."
+                        title="Hide this job and open the next one (X)"
                         type="button"
                         variant="outline"
                       >
@@ -1873,18 +1873,23 @@ export function DiscoveryDetailPanel({
                   onClick={() => {
                     employerExclusionPreviewRequestRef.current += 1;
                     setFeedbackJobId(selectedJob.id);
-                    setFeedbackReasons([]);
+                    setFeedbackReasons(triage ? ["company"] : []);
                     setFeedbackAction("hide_job");
                     setEmployerExclusionPreview(null);
                     setEmployerExclusionPreviewPending(false);
                     setEmployerExclusionPreviewError(null);
                     setDismissError(null);
+                    if (triage) previewEmployerExclusion(selectedJob.id);
                   }}
                   size="sm"
                   type="button"
                   variant="outline"
                 >
-                  {triage ? "Not interested because…" : "Not interested"}
+                  {/* The triage bar above already offers Not interested; the
+                      second "Not interested because…" here read as a
+                      different action. What only this form adds is leaving
+                      the employer out of future searches. */}
+                  {triage ? "Hide this employer…" : "Not interested"}
                 </Button>
               )}
               <Button

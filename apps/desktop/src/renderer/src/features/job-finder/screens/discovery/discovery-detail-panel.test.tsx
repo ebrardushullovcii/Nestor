@@ -1944,8 +1944,11 @@ it("puts the verdict, the deciding facts and the triage actions above the listin
   expect(onShortlist).toHaveBeenCalledTimes(1);
   expect(onNotInterested).toHaveBeenCalledTimes(1);
   expect(onSkip).toHaveBeenCalledTimes(1);
-  // The reasons form stays one press away under its own name.
+  // Not interested is offered once; the form below adds only the employer.
+  expect(screen.getAllByRole("button", { name: /Not interested/ })).toHaveLength(
+    1,
+  );
   expect(
-    screen.getByRole("button", { name: "Not interested because…" }),
+    screen.getByRole("button", { name: "Hide this employer…" }),
   ).toBeTruthy();
 });
