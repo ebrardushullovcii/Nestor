@@ -335,6 +335,7 @@ export type JobFinderResumeWorkspaceQuery = z.infer<
 
 export const JobFinderSaveResumeDraftInputSchema = z.object({
   draft: ResumeDraftSchema,
+  autosaveSessionId: NonEmptyStringSchema.optional(),
 });
 export type JobFinderSaveResumeDraftInput = z.infer<
   typeof JobFinderSaveResumeDraftInputSchema

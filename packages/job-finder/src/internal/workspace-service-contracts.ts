@@ -1,4 +1,5 @@
 import type {
+  ResumeDraftProcessor,
   AddBrowserJobResult,
   ApplicationDocumentRevision,
   ApplicationQuestionRecord,
@@ -532,7 +533,10 @@ export interface JobFinderWorkspaceService {
     draft: ResumeDraft,
     signal?: AbortSignal,
   ): Promise<JobFinderResumePreview>;
-  saveResumeDraft(draft: ResumeDraft): Promise<JobFinderWorkspaceSnapshot>;
+  saveResumeDraft(
+    draft: ResumeDraft,
+    autosaveSessionId?: string,
+  ): Promise<JobFinderWorkspaceSnapshot>;
   restoreResumeDraftRevision(
     jobId: string,
     revisionId: string,
@@ -916,6 +920,7 @@ export interface CandidateAssetResolver {
 }
 
 export interface CreateJobFinderWorkspaceServiceOptions {
+  resumeDraftProcessor?: ResumeDraftProcessor;
   onFitJudgmentProgress?: () => void;
   aiClient: JobFinderAiClient;
   visionProvider?: ResumeVisionProvider;

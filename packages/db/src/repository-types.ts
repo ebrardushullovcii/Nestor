@@ -575,6 +575,8 @@ export interface JobFinderRepository
     tailoredAsset?: TailoredAsset | null;
   }): Promise<void>;
   applyResumePatchWithRevision(input: {
+    /** Replace only this latest revision, preserving its exact pre-edit snapshot. */
+    coalesceRevision?: { id: string; afterHash: string };
     expectedDraftUpdatedAt: string;
     draft: ResumeDraft;
     revision: ResumeDraftRevision;

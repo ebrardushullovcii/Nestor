@@ -597,6 +597,7 @@ export function upsertIndexedCollectionValue(
   options: {
     columnNames: readonly string[];
     getColumns: (value: { id: string }) => readonly SQLInputValue[];
+    serializedValue?: string;
   },
 ): void {
   const columnSql = ["id", ...options.columnNames, "value"].join(", ");
@@ -609,7 +610,11 @@ export function upsertIndexedCollectionValue(
     .prepare(
       `INSERT OR REPLACE INTO ${stateTableNames[tableName]} (${columnSql}) VALUES (${placeholders})`,
     )
-    .run(value.id, ...options.getColumns(value), JSON.stringify(value));
+    .run(
+      value.id,
+      ...options.getColumns(value),
+      options.serializedValue ?? JSON.stringify(value),
+    );
 }
 
 export function upsertCollectionValue(

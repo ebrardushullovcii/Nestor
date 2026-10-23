@@ -2918,9 +2918,9 @@ export function registerJobFinderRouteHandlers(
   handleJobFinderSaveRoute(
     "job-finder:save-resume-draft",
     async (event, payload: unknown) => {
-      const { draft } = JobFinderSaveResumeDraftInputSchema.parse(payload);
+      const { draft, autosaveSessionId } = JobFinderSaveResumeDraftInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const snapshot = await jobFinderWorkspaceService.saveResumeDraft(draft);
+      const snapshot = await jobFinderWorkspaceService.saveResumeDraft(draft, autosaveSessionId);
 
       return workspaceMutationResponse(event.sender, snapshot);
     },

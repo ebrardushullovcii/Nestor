@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 
 import {
   JobFinderResumeWorkspaceSchema,
@@ -198,7 +199,9 @@ export async function sanitizeAndCheckResumeDraft(
     askModel?: boolean;
   } = {},
 ): Promise<ResumeDraft> {
-  const sanitized = sanitizeResumeDraft(input);
+  const sanitized = ctx.resumeDraftProcessor
+    ? await ctx.resumeDraftProcessor.sanitize(input)
+    : sanitizeResumeDraft(input);
   const tailoringStrength = await resolveEffectiveResumeTailoringStrengthForJob(
     ctx,
     input.job.id,
@@ -486,16 +489,19 @@ export async function assertResumeProfileRevisionCurrent(
 export async function loadResumeWorkspaceState(
   ctx: WorkspaceServiceContext,
   jobId: string,
+  yieldBetweenReads = false,
 ): Promise<LoadedResumeWorkspaceState> {
   const templates = ctx.documentManager.listResumeTemplates();
-  const [profileState, rawSettings, savedJobs, tailoredAsset, draft] =
-    await Promise.all([
-      ctx.repository.getProfileWithRevision(),
-      ctx.repository.getSettings(),
-      ctx.repository.listSavedJobsByIds([jobId]),
-      ctx.repository.getTailoredAssetByJobId(jobId),
-      ctx.repository.getResumeDraftByJobId(jobId),
-    ]);
+  const profilePromise = ctx.repository.getProfileWithRevision();
+  if (yieldBetweenReads) await yieldToEventLoop();
+  const [profileState, rawSettings, savedJobs, tailoredAsset, draft] = await Promise.all([
+    profilePromise,
+    ctx.repository.getSettings(),
+    ctx.repository.listSavedJobsByIds([jobId]),
+    ctx.repository.getTailoredAssetByJobId(jobId),
+    ctx.repository.getResumeDraftByJobId(jobId),
+  ]);
+  if (yieldBetweenReads) await yieldToEventLoop();
   const settings = normalizeJobFinderSettings(rawSettings, templates);
   const job = savedJobs.find((entry) => entry.id === jobId);
 
@@ -548,7 +554,9 @@ export async function ensureResumeDraft(
     job: state.job,
     profile: state.profile,
   });
-  const validation = validateResumeDraft({
+  const validation = await (
+    ctx.resumeDraftProcessor?.validate ?? validateResumeDraft
+  )({
     draft: sanitizedDraft,
     job: state.job,
     profile: state.profile,
@@ -651,7 +659,7 @@ export async function previewResumeDraft(
   signal?: AbortSignal,
 ): Promise<JobFinderResumePreview> {
   throwIfResumePreviewAborted(signal);
-  const state = await loadResumeWorkspaceState(ctx, draft.jobId);
+  const state = await loadResumeWorkspaceState(ctx, draft.jobId, true);
   throwIfResumePreviewAborted(signal);
   await assertResumeProfileRevisionCurrent(
     ctx,
@@ -734,7 +742,9 @@ export async function previewResumeDraft(
     { askModel: false, ...(signal ? { signal } : {}) },
   );
   const renderedAt = new Date().toISOString();
-  const validation = validateResumeDraft({
+  const validation = await (
+    ctx.resumeDraftProcessor?.validate ?? validateResumeDraft
+  )({
     draft: sanitizedDraft,
     job: state.job,
     profile: state.profile,

@@ -23,10 +23,14 @@ import {
   getSingletonValueWithRevision,
   listCollectionValues,
   listValues,
+  upsertIndexedCollectionValue,
   saveSingletonValue,
 } from "./internal/state";
 import type { JobFinderRepository } from "./repository-types";
-import { prunePersistedResumeDraftRevisions } from "./resume-draft-revision-retention";
+import {
+  assertResumeRevisionCoalescing,
+  prunePersistedResumeDraftRevisions,
+} from "./resume-draft-revision-retention";
 import {
   resolveApprovedExportId,
   runImmediateTransaction,
@@ -133,7 +137,8 @@ export function createFileRepositoryResumeMethods(
           orderBySql: "updated_at DESC, id ASC",
         },
       )[0];
-      return Promise.resolve(draft ? cloneValue(draft) : null);
+      // This query parsed its own JSON; the caller already owns the value.
+      return Promise.resolve(draft ?? null);
     },
     upsertResumeDraft(draft) {
       const normalizedDraft = ResumeDraftSchema.parse(cloneValue(draft));
@@ -723,7 +728,8 @@ export function createFileRepositoryResumeMethods(
 
       return secureDatabaseFile(filePath);
     },
-    applyResumePatchWithRevision({
+    async applyResumePatchWithRevision({
+      coalesceRevision,
       expectedDraftUpdatedAt,
       draft,
       revision,
@@ -731,21 +737,27 @@ export function createFileRepositoryResumeMethods(
       tailoredAsset,
     }) {
       const normalizedDraft = ResumeDraftSchema.parse(
-        cloneValue(
-          draft.approvedExportId
-            ? draft
-            : { ...draft, approvedAt: null, approvedExportId: null },
-        ),
+        draft.approvedExportId
+          ? draft
+          : { ...draft, approvedAt: null, approvedExportId: null },
       );
-      const normalizedRevision = ResumeDraftRevisionSchema.parse(
-        cloneValue(revision),
-      );
-      const normalizedValidation = ResumeValidationResultSchema.parse(
-        cloneValue(validation),
-      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const normalizedRevision = ResumeDraftRevisionSchema.parse(revision);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const normalizedValidation =
+        ResumeValidationResultSchema.parse(validation);
       const normalizedAsset = tailoredAsset
-        ? TailoredAssetSchema.parse(cloneValue(tailoredAsset))
+        ? TailoredAssetSchema.parse(tailoredAsset)
         : null;
+
+      // Schemas already return independent values. Prepare their JSON and
+      // index columns before the transaction, with turns between large rows.
+      const draftJson = JSON.stringify(normalizedDraft);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const revisionJson = JSON.stringify(normalizedRevision);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const validationJson = JSON.stringify(normalizedValidation);
+      await new Promise<void>((resolve) => setImmediate(resolve));
 
       if (normalizedRevision.draftId !== normalizedDraft.id) {
         throw new Error(
@@ -765,24 +777,52 @@ export function createFileRepositoryResumeMethods(
         );
       }
 
+      // Validate the retained snapshot outside the transaction. Recheck its
+      // exact stored bytes inside it so another connection cannot change it.
+      const latestRevisionRow = () =>
+        database
+          .prepare(
+            "SELECT id, value FROM resume_draft_revisions WHERE draft_id = ? ORDER BY created_at DESC, id ASC LIMIT 1",
+          )
+          .get(normalizedDraft.id) as { id: string; value: string } | undefined;
+      const coalescedRow = coalesceRevision ? latestRevisionRow() : undefined;
+      if (coalesceRevision) {
+        const previous = coalescedRow
+          ? ResumeDraftRevisionSchema.parse(JSON.parse(coalescedRow.value))
+          : undefined;
+        assertResumeRevisionCoalescing(
+          previous,
+          normalizedRevision,
+          coalesceRevision,
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+
       runImmediateTransaction(database, () => {
-        const currentPersistedDraft = listCollectionValues(
-          database,
-          "resume_drafts",
-          ResumeDraftSchema,
-          {
-            orderBySql: "id ASC",
-            whereSql: "id = ?",
-            params: [normalizedDraft.id],
-          },
-        ).find((entry) => entry.id === normalizedDraft.id);
+        // CAS needs the timestamp, not another parse of the entire draft.
+        const currentPersistedDraft = database
+          .prepare("SELECT updated_at FROM resume_drafts WHERE id = ?")
+          .get(normalizedDraft.id) as { updated_at: string } | undefined;
         if (
           !currentPersistedDraft ||
-          currentPersistedDraft.updatedAt !== expectedDraftUpdatedAt
+          currentPersistedDraft.updated_at !== expectedDraftUpdatedAt
         ) {
           throw new Error(
             "Resume draft changed before this edit could be saved. Reload the workspace and try again.",
           );
+        }
+
+        if (coalesceRevision) {
+          const current = latestRevisionRow();
+          if (
+            !current ||
+            current.id !== coalescedRow?.id ||
+            current.value !== coalescedRow.value
+          ) {
+            throw new Error(
+              "Resume edit history changed before this autosave could be grouped.",
+            );
+          }
         }
 
         const approvedExportId = resolveApprovedExportId(
@@ -805,14 +845,55 @@ export function createFileRepositoryResumeMethods(
           persistedDraft.approvedExportId,
         );
 
-        writePersistedValue("resume_drafts", persistedDraft);
-        writePersistedValue("resume_draft_revisions", normalizedRevision);
+        upsertIndexedCollectionValue(
+          database,
+          "resume_drafts",
+          persistedDraft,
+          {
+            columnNames: ["job_id", "created_at", "updated_at"],
+            getColumns: () => [
+              persistedDraft.jobId,
+              persistedDraft.createdAt,
+              persistedDraft.updatedAt,
+            ],
+            serializedValue:
+              persistedDraft === normalizedDraft
+                ? draftJson
+                : JSON.stringify(persistedDraft),
+          },
+        );
+        upsertIndexedCollectionValue(
+          database,
+          "resume_draft_revisions",
+          normalizedRevision,
+          {
+            columnNames: ["draft_id", "created_at"],
+            getColumns: () => [
+              normalizedRevision.draftId,
+              normalizedRevision.createdAt,
+            ],
+            serializedValue: revisionJson,
+          },
+        );
         prunePersistedResumeDraftRevisions(
           database,
           normalizedRevision.draftId,
         );
-        writePersistedValue("resume_validation_results", normalizedValidation);
+        upsertIndexedCollectionValue(
+          database,
+          "resume_validation_results",
+          normalizedValidation,
+          {
+            columnNames: ["draft_id", "validated_at"],
+            getColumns: () => [
+              normalizedValidation.draftId,
+              normalizedValidation.validatedAt,
+            ],
+            serializedValue: validationJson,
+          },
+        );
         if (normalizedAsset) {
+          // Small asset bridge; its generic writer owns the asset index.
           writePersistedValue("tailored_assets", normalizedAsset);
         }
       });

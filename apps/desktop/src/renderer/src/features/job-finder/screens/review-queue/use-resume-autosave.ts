@@ -5,6 +5,7 @@ import { setPendingCloseSave } from "../../../../pages/job-finder-window-close-g
 export type ResumeAutosave = (
   draft: ResumeDraft,
   onSaved: (updatedAt: string) => void,
+  autosaveSessionId?: string,
 ) => Promise<{ saved: true } | { saved: false; message: string }>;
 
 /** How long after the last edit the draft saves itself. */
@@ -39,6 +40,10 @@ export function useResumeAutosave(input: {
 } {
   const delayMs = input.delayMs ?? RESUME_AUTOSAVE_DELAY_MS;
   const latest = useRef(input);
+  const session = useRef({ draftId: input.draft?.id, id: crypto.randomUUID() });
+  if (session.current.draftId !== input.draft?.id) {
+    session.current = { draftId: input.draft?.id, id: crypto.randomUUID() };
+  }
   latest.current = input;
   const inFlight = useRef<Promise<void> | null>(null);
   const mounted = useRef(true);
@@ -62,8 +67,10 @@ export function useResumeAutosave(input: {
       const save = latest.current.save;
       if (!save || inFlight.current) return;
       setSaving(true);
-      inFlight.current = save(draft, (updatedAt) =>
-        latest.current.onSaved(draft, updatedAt),
+      inFlight.current = save(
+        draft,
+        (updatedAt) => latest.current.onSaved(draft, updatedAt),
+        session.current.id,
       ).then(
         (result) => {
           inFlight.current = null;
@@ -110,9 +117,9 @@ export function useResumeAutosave(input: {
 
   // What was on screen at the last commit, read when the editor closes or
   // switches drafts (cleanups run before this render's effects update it).
-  const committed = useRef({ draft, unsaved });
+  const committed = useRef({ draft, unsaved, sessionId: session.current.id });
   useEffect(() => {
-    committed.current = { draft, unsaved };
+    committed.current = { draft, unsaved, sessionId: session.current.id };
   });
   const draftId = draft?.id ?? null;
   useEffect(
@@ -122,7 +129,7 @@ export function useResumeAutosave(input: {
       if (!save || !pending.draft || !pending.unsaved) return;
       const pendingDraft = pending.draft;
       const run = () => {
-        void save(pendingDraft, () => undefined);
+        void save(pendingDraft, () => undefined, pending.sessionId);
       };
       if (inFlight.current) void inFlight.current.then(run);
       else run();
@@ -136,8 +143,10 @@ export function useResumeAutosave(input: {
     const { draft: current, unsaved: pending, save } = latest.current;
     if (!save || !current || !pending) return true;
     let saved = false;
-    const run = save(current, (updatedAt) =>
-      latest.current.onSaved(current, updatedAt),
+    const run = save(
+      current,
+      (updatedAt) => latest.current.onSaved(current, updatedAt),
+      session.current.id,
     ).then(
       (result) => {
         saved = result.saved;

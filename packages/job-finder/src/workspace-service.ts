@@ -262,6 +262,7 @@ export function createJobFinderWorkspaceService(
     browserRuntime,
     candidateAssetResolver,
     documentManager,
+    resumeDraftProcessor,
     exportFileVerifier,
     repository,
     researchAdapter,
@@ -419,6 +420,7 @@ export function createJobFinderWorkspaceService(
   }
 
   const context: WorkspaceServiceContext = {
+    ...(resumeDraftProcessor ? { resumeDraftProcessor } : {}),
     aiClient,
     ...(visionProvider ? { visionProvider } : {}),
     browserRuntime,
@@ -1594,6 +1596,7 @@ export function createJobFinderWorkspaceService(
         (discoveryState?.sessions ?? []).map((session) => session.adapterKind),
       ).filter(isJobSource);
       const shutdownResults = await Promise.allSettled([
+        ...(resumeDraftProcessor ? [resumeDraftProcessor.close()] : []),
         ...sessionSources.map((source) => browserRuntime.closeSession(source)),
         repository.close(),
       ]);

@@ -336,6 +336,7 @@ export interface JobFinderPageContext {
   onAutosaveResumeDraft: (
     draft: ResumeDraft,
     onSaved: (updatedAt: string) => void,
+    autosaveSessionId?: string,
   ) => Promise<{ saved: true } | { saved: false; message: string }>;
   onSaveResumeDraftAndThen: (
     draft: ResumeDraft,

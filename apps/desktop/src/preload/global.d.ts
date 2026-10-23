@@ -569,6 +569,7 @@ declare global {
         ) => Promise<JobFinderResumePreview>;
         saveResumeDraft: (
           draft: ResumeDraft,
+          autosaveSessionId?: string,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         restoreResumeDraftRevision: (
           jobId: string,

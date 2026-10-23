@@ -1306,9 +1306,10 @@ const desktopApi = {
         draft,
         requestId,
       }) as Promise<JobFinderResumePreview>,
-    saveResumeDraft: (draft: ResumeDraft) =>
+    saveResumeDraft: (draft: ResumeDraft, autosaveSessionId?: string) =>
       ipcRenderer.invoke("job-finder:save-resume-draft", {
         draft,
+        autosaveSessionId,
       }) as Promise<JobFinderWorkspaceSyncResult>,
     restoreResumeDraftRevision: (jobId: string, revisionId: string) =>
       ipcRenderer.invoke("job-finder:restore-resume-draft-revision", {

@@ -4,6 +4,7 @@ import {
 } from "@nestor/ai-providers";
 import type {
   CandidateProfile,
+  ResumeRenderDocument,
   ResumeDraft,
   ResumeDraftBullet,
   ResumeDraftIdentity,
@@ -507,37 +508,11 @@ function toSectionPreviewLines(
   return lines;
 }
 
-export interface ResumeRenderSectionEntry {
-  id: string;
-  title: string | null;
-  subtitle: string | null;
-  location: string | null;
-  dateRange: string | null;
-  startDate: string | null;
-  endDate: string | null;
-  isCurrent: boolean;
-  heading: string | null;
-  summary: string | null;
-  bullets: Array<{ id: string; text: string }>;
-}
-
-export interface ResumeRenderSection {
-  id: string;
-  kind: ResumeDraftSection["kind"];
-  label: string;
-  text: string | null;
-  bullets: Array<{ id: string; text: string }>;
-  entries: ResumeRenderSectionEntry[];
-}
-
-export interface ResumeRenderDocument {
-  fullName: string;
-  headline: string | null;
-  location: string | null;
-  contactItems: Array<{ field: ResumePreviewIdentityField; text: string }>;
-  includePreviewAnchors?: boolean;
-  sections: ResumeRenderSection[];
-}
+export type {
+  ResumeRenderDocument,
+  ResumeRenderSection,
+  ResumeRenderSectionEntry,
+} from "@nestor/contracts";
 
 export interface ResumeRenderOptions {
   includePreviewAnchors?: boolean;

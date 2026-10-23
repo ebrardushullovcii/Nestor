@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./discovery-cpu": "./src/discovery-cpu.ts",
+    "./resume-computation": "./src/resume-computation.ts",
     ".": "./src/index.ts",
     "./assistant-attention": "./src/assistant/attention.ts",
     "./discovery-ordering": "./src/discovery-ordering.ts",

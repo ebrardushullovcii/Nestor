@@ -354,6 +354,7 @@ export interface JobFinderShellActions {
   ) => Promise<JobFinderResumePreview>;
   saveResumeDraft: (
     draft: ResumeDraft,
+    autosaveSessionId?: string,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   regenerateResumeDraft: (
     jobId: string,
