@@ -1,4 +1,5 @@
 import { buildFitVerdictContext } from "@nestor/ai-providers";
+import { fnv1a64 } from "@nestor/core";
 import type {
   CandidateProfile,
   FitJudgment,
@@ -75,12 +76,7 @@ function stableSerialize(value: unknown): string {
 
 function createFingerprint(prefix: string, value: unknown): string {
   const serialized = stableSerialize(value);
-  let hash = 0xcbf29ce484222325n;
-  for (let index = 0; index < serialized.length; index += 1) {
-    hash ^= BigInt(serialized.charCodeAt(index));
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
-  }
-  return `${prefix}_${hash.toString(16).padStart(16, "0")}`;
+  return `${prefix}_${fnv1a64(serialized)}`;
 }
 
 /**
@@ -128,9 +124,14 @@ export function createFitVerdictFingerprint(
  * was current, and stays current under the verdict fingerprint. Changing
  * the fingerprint function therefore never asks the model again.
  */
-export function rebindLegacyVerdict<T extends Pick<MatchAssessment, "judgment">>(
+export function rebindLegacyVerdict<
+  T extends Pick<MatchAssessment, "judgment">,
+>(
   assessment: T,
-  fingerprints: { verdictFingerprint: string; legacyVerdictFingerprint: string },
+  fingerprints: {
+    verdictFingerprint: string;
+    legacyVerdictFingerprint: string;
+  },
 ): T {
   const judgment = assessment.judgment;
   if (judgment?.contextFingerprint !== fingerprints.legacyVerdictFingerprint)
@@ -253,6 +254,10 @@ export function createMatchAssessmentSession(input: {
     storedAssessment: MatchAssessment | null | undefined,
   ): MatchAssessment => {
     const persistedAssessment = rebind(storedAssessment);
+    // assess() carries a completed model verdict unchanged even when its
+    // context is stale. Hashing the full listing first cannot change that
+    // answer and allocated gigabytes during inventory revalidation.
+    if (persistedAssessment?.judgment) return persistedAssessment;
     const postingFingerprint = createMatchAssessmentPostingFingerprint(
       createMatchAssessmentPostingInput(posting),
     );

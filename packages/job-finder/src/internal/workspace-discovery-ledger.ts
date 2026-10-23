@@ -9,6 +9,7 @@ import {
   type SavedJobDiscoveryProvenance,
 } from "@nestor/contracts";
 import { createUniqueId } from "./shared";
+import { fnv1a64 } from "@nestor/core";
 import {
   createJobIdentityIndex,
   normalizeJobIdentityUrl,
@@ -71,12 +72,7 @@ function normalizeFingerprintList(values: readonly string[]): string[] {
 
 function createVersionOneFingerprint(value: unknown): string {
   const serialized = JSON.stringify(value);
-  let hash = 0xcbf29ce484222325n;
-  for (let index = 0; index < serialized.length; index += 1) {
-    hash ^= BigInt(serialized.charCodeAt(index));
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
-  }
-  return `v1_${hash.toString(16).padStart(16, "0")}`;
+  return `v1_${fnv1a64(serialized)}`;
 }
 
 export function createDiscoveryListingFingerprints(
@@ -154,10 +150,7 @@ export type DiscoveryLedgerIndex = {
   find(posting: DiscoveryLedgerIdentity): DiscoveryLedgerEntry | null;
   add(entry: DiscoveryLedgerEntry): void;
   remove(entry: DiscoveryLedgerEntry): void;
-  replace(
-    previous: DiscoveryLedgerEntry,
-    next: DiscoveryLedgerEntry,
-  ): void;
+  replace(previous: DiscoveryLedgerEntry, next: DiscoveryLedgerEntry): void;
 };
 
 export function createDiscoveryLedgerIndex(
@@ -307,7 +300,6 @@ export function formatDiscoveryFreshnessDigest(
 ): string {
   return `Freshness: ${freshness.counts.new} new, ${freshness.counts.unchanged} unchanged, ${freshness.counts.changed} changed, ${freshness.counts.reactivated} reactivated. Digest ${freshness.digest}.`;
 }
-
 
 const frozenLedgerIndexes = new WeakMap<
   readonly DiscoveryLedgerEntry[],
@@ -599,10 +591,7 @@ export function shouldSkipPostingFromLedger(input: {
     };
   }
 
-  if (
-    input.hasRetainedJob &&
-    input.ledgerEntry.latestStatus !== "inactive"
-  ) {
+  if (input.hasRetainedJob && input.ledgerEntry.latestStatus !== "inactive") {
     const classification = classifyDiscoveryPostingFreshness({
       ledgerEntry: input.ledgerEntry,
       posting: input.posting,

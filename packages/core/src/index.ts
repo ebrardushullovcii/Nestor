@@ -1,4 +1,5 @@
 export * from "./concurrency-limiter";
+export { fnv1a64 } from "./fnv1a64";
 
 export type Result<TValue, TError> =
   | { ok: true; value: TValue }
