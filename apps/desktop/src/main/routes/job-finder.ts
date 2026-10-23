@@ -203,6 +203,12 @@ import {
   withJobFinderWorkspaceUpdates,
 } from "../services/job-finder/workspace-updates";
 import { runBoundedNewSourceReadabilityCheck } from "../services/job-finder/new-source-readability-check";
+import type { ApplyQueue } from "@nestor/contracts";
+import { getFinishedWorkNotifier } from "../setup/finished-work-notifier-instance";
+import {
+  applyQueueFinishedNotice,
+  searchFinishedNotice,
+} from "../setup/finished-work-notices";
 import {
   listJobsNotInProgress,
   startApplyBatch,
@@ -881,13 +887,40 @@ async function requireApplyQueueRepository() {
 
 let applyQueueRunner: ApplyQueueRunner | null = null;
 
+/** A running queue fills the taskbar button; a finished one says so once. */
+function noteApplyQueueOnTaskbar(queue: ApplyQueue | null): void {
+  const notices = getFinishedWorkNotifier();
+  if (queue?.state === "running") {
+    notices.progress(
+      "apply",
+      queue.jobIds.length > 0
+        ? queue.startedJobIds.length / queue.jobIds.length
+        : null,
+    );
+    return;
+  }
+  notices.end(
+    "apply",
+    queue?.state === "done" && queue.startedJobIds.length > 0
+      ? applyQueueFinishedNotice(
+          queue.startedJobIds.length,
+          queue.mode === "autonomous_submit",
+        )
+      : null,
+  );
+}
+
 /** The one Apply queue (Apply to selected, this page or all ready). */
 export function getApplyQueueRunner(): ApplyQueueRunner {
   applyQueueRunner ??= createApplyQueueRunner({
     loadQueue: async () =>
       (await requireApplyQueueRepository()).repository.getApplyQueue(),
-    saveQueue: async (queue) =>
-      (await requireApplyQueueRepository()).repository.saveApplyQueue(queue),
+    saveQueue: async (queue) => {
+      await (await requireApplyQueueRepository()).repository.saveApplyQueue(
+        queue,
+      );
+      noteApplyQueueOnTaskbar(queue);
+    },
     readDailyCapacity: async () => {
       const { repository } = await requireApplyQueueRepository();
       const [applyRuns, applyJobResults, applicationRecords, settings] =
@@ -926,6 +959,19 @@ export function getApplyQueueRunner(): ApplyQueueRunner {
 /** At launch: a queue that was running or waiting for tomorrow carries on. */
 export async function resumeApplyQueueAfterRestart(): Promise<void> {
   await getApplyQueueRunner().resumeAfterRestart();
+}
+
+/** Jobs the search that just ended saved for the person to look at. */
+function countNewJobsOfLatestRun(snapshot: {
+  recentDiscoveryRuns?: readonly {
+    startedAt: string;
+    summary: { jobsPersisted: number; jobsStaged: number };
+  }[];
+}): number {
+  const latest = [...(snapshot.recentDiscoveryRuns ?? [])].sort((left, right) =>
+    right.startedAt.localeCompare(left.startedAt),
+  )[0];
+  return latest ? latest.summary.jobsPersisted + latest.summary.jobsStaged : 0;
 }
 
 function parseOptionalRequestId(payload: unknown): string | null {
@@ -2303,6 +2349,10 @@ export function registerJobFinderRouteHandlers(
       const window = event.sender;
       const { requestId, targetId, searchRequest } =
         parseAgentDiscoveryRequest(payload);
+      const notices = getFinishedWorkNotifier();
+      notices.progress("search", null);
+      let finishedNotice: ReturnType<typeof searchFinishedNotice> | null =
+        null;
 
       try {
         const snapshot = await jobFinderWorkspaceService.runAgentDiscovery(
@@ -2336,6 +2386,9 @@ export function registerJobFinderRouteHandlers(
               : "completed",
           sync: workspaceMutationResponse(window, snapshot),
         };
+        if (reply.outcome === "completed") {
+          finishedNotice = searchFinishedNotice(countNewJobsOfLatestRun(snapshot));
+        }
         return reply;
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
@@ -2351,6 +2404,8 @@ export function registerJobFinderRouteHandlers(
           return reply;
         }
         throw error;
+      } finally {
+        notices.end("search", finishedNotice);
       }
     },
   );

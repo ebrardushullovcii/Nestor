@@ -14,6 +14,7 @@ import {
 } from "./setup/user-data-directory";
 import { resolveBrandIconPaths } from "./setup/brand-icons";
 import { createMainWindow } from "./setup/window-shell";
+import { registerFinishedWorkWindow } from "./setup/finished-work-notifier-instance";
 import { runShutdownWithTimeout } from "./setup/shutdown-with-timeout";
 import { createDeferredBackgroundInitController } from "./setup/deferred-background-init";
 import { getMainWindowCloseGuard } from "./setup/main-window-close-guard";
@@ -196,6 +197,7 @@ function createMainWindowSafely(): BrowserWindow | null {
   try {
     const window = createMainWindow(currentDir);
     getEmbeddedBrowser().attachWindow(window);
+    registerFinishedWorkWindow(window);
     return window;
   } catch (error) {
     recordStartupDiagnostic("main window creation failed", error);

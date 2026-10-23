@@ -1245,6 +1245,11 @@ export function JobFinderShell({
     onToggleSidebar: toggleSidebar,
   });
   useHistoryNavigationShortcuts(stepHistory);
+  useEffect(
+    // A clicked "Search finished" notice opens the screen it is about.
+    () => window.nestor?.jobFinder?.onOpenRoute?.((route) => void navigate(route)),
+    [navigate],
+  );
 
   return (
     <div

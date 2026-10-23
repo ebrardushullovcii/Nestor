@@ -318,6 +318,7 @@ declare global {
         /** Tells main which revision this window shows (0: none it knows). */
         noteWorkspaceRevision: (revision: WorkspaceRevision) => void;
         onWorkspaceUpdate: (listener: () => void) => () => void;
+        onOpenRoute: (listener: (route: string) => void) => () => void;
         mutateWorkspaceEntities: (
           input: JobFinderWorkspaceEntityMutationInput,
         ) => Promise<JobFinderWorkspaceSyncResult>;

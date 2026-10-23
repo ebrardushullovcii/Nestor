@@ -723,6 +723,17 @@ const desktopApi = {
         ipcRenderer.removeListener("job-finder:workspace-updated", handler);
       };
     },
+    // A clicked "Search finished" notice opens the screen it is about.
+    onOpenRoute: (listener: (route: string) => void) => {
+      const handler = (_event: unknown, route: unknown) => {
+        if (typeof route === "string" && route.startsWith("/job-finder/"))
+          listener(route);
+      };
+      ipcRenderer.on("job-finder:open-route", handler);
+      return () => {
+        ipcRenderer.removeListener("job-finder:open-route", handler);
+      };
+    },
     mutateWorkspaceEntities: (input: JobFinderWorkspaceEntityMutationInput) =>
       ipcRenderer.invoke(
         "job-finder:mutate-workspace-entities",
