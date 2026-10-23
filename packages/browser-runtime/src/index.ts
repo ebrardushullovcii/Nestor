@@ -5,6 +5,7 @@ export type {
   ApplicationExecutionMode,
   ApplicationPreparationProgress,
   BrowserSessionRuntime,
+  PreparedApplicationFormStore,
   CatalogBrowserSessionRuntimeSeed,
   ExecuteApplicationFlowInput,
   ExecuteEasyApplyInput,

@@ -1,4 +1,9 @@
 import {
+  ApplicationPageStatesInputSchema, ApplicationPageStatesSchema,
+  ReopenApplicationPageInputSchema, ApplicationPageStateSchema, ApplicationPageReopenProgressSchema,
+} from "@nestor/contracts";
+import { getApplicationPageAccessForWorkspaceService } from "../services/job-finder/create-workspace-service";
+import {
   ResumeBatchGenerationInputSchema,
   ResumeBatchGenerationResultSchema,
   ResumeBatchGenerationProgressSchema,
@@ -3477,6 +3482,23 @@ export function registerJobFinderRouteHandlers(
       return workspaceMutationResponse(event.sender, snapshot);
     },
   );
+
+  ipcMain.handle("job-finder:get-application-page-states", async (_event, payload: unknown) => {
+    const input = ApplicationPageStatesInputSchema.parse(payload);
+    const service = await getJobFinderWorkspaceService();
+    return ApplicationPageStatesSchema.parse(await getApplicationPageAccessForWorkspaceService(service).getStates(input.resultIds));
+  });
+  ipcMain.handle("job-finder:reopen-application-page", async (event, payload: unknown) => {
+    const requestId = parseOptionalRequestId(payload);
+    // requestId is transport metadata, not part of the product command.
+    const input = ReopenApplicationPageInputSchema.parse(
+      payload && typeof payload === "object" && "resultId" in payload ? {resultId: payload.resultId} : payload);
+    const service = await getJobFinderWorkspaceService();
+    return ApplicationPageStateSchema.parse(await getApplicationPageAccessForWorkspaceService(service).reopen(input.resultId, progress => {
+      if (requestId && !event.sender.isDestroyed()) event.sender.send(
+        `job-finder:application-page-reopen-progress:${requestId}`, ApplicationPageReopenProgressSchema.parse(progress));
+    }));
+  });
 
   ipcMain.handle(
     "job-finder:focus-prepared-application-page",

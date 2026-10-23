@@ -1,4 +1,10 @@
 import type { BrowserContext, Page } from "playwright";
+import { createHash } from "node:crypto";
+import {
+  PreparedFormSnapshotSchema,
+  type PreparedFormSnapshot,
+} from "@nestor/contracts";
+export type { PreparedFormSnapshot } from "@nestor/contracts";
 
 const FIELDS =
   "input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]),textarea,select";
@@ -8,30 +14,17 @@ export interface RecoveryFile {
   load(): Promise<Uint8Array>;
 }
 
-/** Ephemeral main-process state; never logged or sent through IPC. */
-export interface PreparedFormSnapshot {
-  url: string;
-  structure: string;
-  fields: Array<{
-    type: string;
-    value: string;
-    checked: boolean;
-    selected: string[];
-    files: Array<{ name: string; type: string; size: number }>;
-    disabled: boolean;
-    readOnly: boolean;
-  }>;
-}
-
 export async function capturePreparedForm(
   page: Page,
 ): Promise<PreparedFormSnapshot | null> {
   if (page.isClosed() || page.frames().length !== 1) return null;
-  return page.evaluate((selector) => {
+  const captured = await page.evaluate(async (selector) => {
+    const url = new URL(location.href);
+    if (url.username || url.password || url.search || url.hash) return null;
     // Custom widgets, frame state and credentials need the original page.
     if (
       document.querySelector(
-        "input[type=password],input[autocomplete=one-time-code],[contenteditable=true],[role=combobox]:not(input):not(select),[role=checkbox]:not(input),[role=radio]:not(input)",
+        "input[type=password],input[autocomplete=one-time-code],input[autocomplete=username],[contenteditable=true],[role=combobox]:not(select),[role=listbox]:not(select),[role=switch]:not(input),[role=checkbox]:not(input),[role=radio]:not(input),input[autocomplete=current-password],input[autocomplete=new-password]",
       )
     )
       return null;
@@ -47,6 +40,18 @@ export async function capturePreparedForm(
       >(selector),
     ];
     if (!controls.length || controls.length > 200) return null;
+    if (
+      controls.some((control) =>
+        /password|passwd|captcha|csrf|token|secret|session|otp|credential/iu.test(
+          `${control.name} ${control.id} ${control.autocomplete}`,
+        ),
+      )
+    )
+      return null;
+    const digest = async (bytes: ArrayBuffer) =>
+      [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
     if (
       controls.some(
         (control) =>
@@ -104,27 +109,39 @@ export async function capturePreparedForm(
             element.textContent?.trim() || element.getAttribute("value"),
         ),
       }),
-      fields: controls.map((control) => ({
-        type: control.type,
-        value: control.type === "file" ? "" : control.value,
-        checked: control instanceof HTMLInputElement && control.checked,
-        selected:
-          control instanceof HTMLSelectElement
-            ? [...control.selectedOptions].map((option) => option.value)
-            : [],
-        files:
-          control instanceof HTMLInputElement
-            ? [...(control.files ?? [])].map((file) => ({
-                name: file.name,
-                type: file.type,
-                size: file.size,
-              }))
-            : [],
-        disabled: control.disabled,
-        readOnly: "readOnly" in control && control.readOnly,
-      })),
+      fields: await Promise.all(
+        controls.map(async (control) => ({
+          type: control.type,
+          value: control.type === "file" ? "" : control.value,
+          checked: control instanceof HTMLInputElement && control.checked,
+          selected:
+            control instanceof HTMLSelectElement
+              ? [...control.selectedOptions].map((option) => option.value)
+              : [],
+          files:
+            control instanceof HTMLInputElement
+              ? await Promise.all(
+                  [...(control.files ?? [])].map(async (file) => ({
+                    name: file.name,
+                    type: file.type,
+                    size: file.size,
+                    sha256: await digest(await file.arrayBuffer()),
+                  })),
+                )
+              : [],
+          disabled: control.disabled,
+          readOnly: "readOnly" in control && control.readOnly,
+        })),
+      ),
     };
   }, FIELDS);
+  if (!captured) return null;
+  // Structure includes hidden values only while hashing in main. Persist only
+  // its digest: never a CSRF token, hidden answer, cookie or session value.
+  return PreparedFormSnapshotSchema.parse({
+    ...captured,
+    structure: createHash("sha256").update(captured.structure).digest("hex"),
+  });
 }
 
 /** No model calls, clicks, navigation between steps, or submission. */
@@ -133,6 +150,10 @@ export async function restorePreparedForm(input: {
   snapshot: PreparedFormSnapshot;
   files: readonly RecoveryFile[];
   guard(page: Page): Promise<unknown>;
+  onProgress?(phase: "refilling" | "verifying"): void;
+  onFailure?(
+    reason: "form_changed" | "attachment_unavailable" | "reopen_failed",
+  ): void;
 }): Promise<Page | null> {
   const creation = input.context.newPage();
   let page: Page | null = null;
@@ -162,6 +183,7 @@ export async function restorePreparedForm(input: {
     )
       throw new Error("Form changed");
     const controls = page.locator(FIELDS);
+    input.onProgress?.("refilling");
     for (const [index, field] of input.snapshot.fields.entries()) {
       const control = controls.nth(index);
       if (field.disabled || field.readOnly) continue;
@@ -173,7 +195,11 @@ export async function restorePreparedForm(input: {
           if (matches.length !== 1) throw new Error("Attachment unavailable");
           const file = matches[0]!;
           const bytes = await file.load();
-          if (bytes.byteLength !== savedFile.size)
+          if (
+            bytes.byteLength !== savedFile.size ||
+            createHash("sha256").update(bytes).digest("hex") !==
+              savedFile.sha256
+          )
             throw new Error("Attachment changed");
           payloads.push({
             name,
@@ -200,11 +226,20 @@ export async function restorePreparedForm(input: {
         await control.fill(field.value, { timeout: 3_000 });
       }
     }
+    input.onProgress?.("verifying");
     const restored = await capturePreparedForm(page);
     if (JSON.stringify(restored) !== JSON.stringify(input.snapshot))
       throw new Error("Answers did not restore exactly");
     return page;
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    input.onFailure?.(
+      /Attachment/u.test(message)
+        ? "attachment_unavailable"
+        : ["Form changed", "Answers did not restore exactly"].includes(message)
+          ? "form_changed"
+          : "reopen_failed",
+    );
     await page?.close({ runBeforeUnload: false }).catch(() => undefined);
     return null;
   } finally {

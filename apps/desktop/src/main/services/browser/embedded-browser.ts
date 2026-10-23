@@ -129,12 +129,14 @@ export class EmbeddedBrowser {
     company: string,
     location = "",
     reference = tabId.slice(-6),
+    restoredLabel?: string,
   ): void {
     const page = this.pageMap.get(tabId);
     if (!page || page.contents.isDestroyed()) return;
     const baseLabel =
       // The place leads, so two tabs for the same role differ where the tab
       // text is cut; the short reference is only added when even that matches.
+      restoredLabel?.slice(0, 280) ??
       [location, title.slice(0, 120), company.slice(0, 80)]
         .filter(Boolean)
         .join(" · ")

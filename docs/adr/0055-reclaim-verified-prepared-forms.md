@@ -28,7 +28,7 @@ used 269 MiB working set; a single per-tab estimate does not describe every site
   native field and known verified attachment, and compare its structure and
   values with the original. Check again that the person has not taken over
   and that the original has not changed. Only then close both renderers and
-  keep the small recovery snapshot in main-process memory.
+  keep the small recovery snapshot.
 - Opening that application recreates its exact verified form, under the same
   prepare-only guard, and binds the new page to the same application key.
   This makes no model calls and adds no submission authority. Attachment
@@ -36,8 +36,21 @@ used 269 MiB working set; a single per-tab estimate does not describe every site
 - Passwords, frames, custom widgets, unavailable attachments and forms whose
   structure changes on reopening keep their original page. Multi-step flows
   are not replayed by clicking through old actions. Full AI preparation is
-  not retried just to reclaim memory. Recovery snapshots are not persisted
-  or exported, and browser Close clears them with the normal page lifecycle.
+  not retried just to reclaim memory.
+
+Amended 2026-10-23: a supported ready form also saves its answers, application
+key and label, structure digest and attachment identities/hashes through
+`packages/db` when preparation finishes. Hidden values contribute only to the
+structure digest; passwords, security controls, cookies and tokens are never
+saved. Credential-bearing URLs and non-native controls are unsupported.
+The snapshot survives restart, browser Close and canonical export/import until
+the application finishes, is replaced or the workspace is reset. Attachments
+are resolved through their owning repositories and verified again. Old records
+without a snapshot retain their existing prepare-again path. Availability reads
+never open a tab; reopening refills under a fresh guard with no intermediate
+write or final-send window, regardless of the original mode. Changed forms
+fail closed and offer preparation again. A temporary navigation failure keeps
+the snapshot for another reopen attempt. No AI call or send is part of reopening.
 
 ## Consequences
 

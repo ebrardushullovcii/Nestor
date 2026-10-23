@@ -466,6 +466,19 @@ export function withEmbeddedBrowserActivity(
             ),
         } satisfies Partial<BrowserSessionRuntime>)
       : {}),
+    ...(runtime.reopenApplicationPage
+      ? ({
+          async reopenApplicationPage(source, key, onProgress) {
+            const state = await runtime.reopenApplicationPage!(
+              source,
+              key,
+              onProgress,
+            );
+            if (state.state === "open") applicationSources.set(key, source);
+            return state;
+          },
+        } satisfies Partial<BrowserSessionRuntime>)
+      : {}),
     ...(runtime.hasApplicationPageBinding
       ? ({
           hasApplicationPageBinding: (source, pageBindingKey) =>

@@ -1,4 +1,8 @@
 import type {
+  ApplicationPageState,
+  ApplicationPageReopenProgress,
+  PreparedApplicationForm,
+  PreparedFormAttachment,
   AgentDiscoveryProgress,
   ApplicationAttestationKind,
   ApplicationAuthorityEnvelope,
@@ -42,6 +46,13 @@ import type {
   ExecuteExactlyOneFinalActionInput,
   ObserveApplicationFormOptions,
 } from "./application-submission-browser-hands";
+
+export interface PreparedApplicationFormStore {
+  get(key: string): Promise<PreparedApplicationForm | null>;
+  save(form: PreparedApplicationForm): Promise<void>;
+  delete(key: string): Promise<void>;
+  loadAttachment(file: PreparedFormAttachment): Promise<Uint8Array>;
+}
 
 export interface OpenBrowserSessionOptions {
   /** Automation setup must not steal focus from a user-minimized browser. */
@@ -294,6 +305,9 @@ export interface BrowserSessionRuntime {
     source: JobSource,
     pageBindingKey: string,
   ): Promise<boolean>;
+  getApplicationPageState?(source: JobSource, key: string): Promise<ApplicationPageState>;
+  reopenApplicationPage?(source: JobSource, key: string,
+    onProgress?: (progress: ApplicationPageReopenProgress) => void): Promise<ApplicationPageState>;
   /** Discard a ready form only after an exact guarded refill has been verified. */
   hibernateApplicationPageBinding?(
     source: JobSource,

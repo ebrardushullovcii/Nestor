@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readRenderedPageHtml } from "./rendered-page-reader";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
@@ -19,6 +20,10 @@ import {
   BrowserVisualSnapshotRequestSchema,
   BrowserSessionStateSchema,
   DiscoveryRunResultSchema,
+  type ApplicationPageState,
+  type ApplicationPageReopenProgress,
+  type PreparedApplicationForm,
+  type PreparedFormAttachment,
   type ApplyExecutionResult,
   type ApplyExecutionStage,
   type ApplyExecutionTiming,
@@ -45,6 +50,7 @@ import {
 import type {
   AgentDiscoveryOptions,
   BrowserSessionRuntime,
+  PreparedApplicationFormStore,
   ExecuteApplicationFlowInput,
   ExecuteEasyApplyInput,
 } from "./runtime-types";
@@ -624,7 +630,8 @@ async function buildApplyVisualDiagnostics(input: {
 export interface BrowserAgentRuntimeOptions {
   userDataDir: string;
   /** Rebind native tab ownership after a verified, model-free refill. */
-  onApplicationPageRestored?(key: string, page: Page): Promise<void>;
+  onApplicationPageRestored?(key: string, page: Page, label?: string): Promise<void>;
+  preparedFormStore?: PreparedApplicationFormStore;
   /** Host-owned pages, for example a desktop application's embedded browser. */
   browserHost?: {
     connect(): Promise<Browser>;
@@ -1372,16 +1379,59 @@ export function createBrowserAgentRuntime(
   // Prepared pages the person was handed to finish themselves, until the
   // next continuation or send locks them again.
   const preparedPagesWithPerson = new Set<string>();
+  const preparedFormStore = options.preparedFormStore;
   const formRecovery = new Map<
     string,
     {
       files: RecoveryFile[];
       guard: (page: Page) => Promise<unknown>;
       snapshot?: PreparedFormSnapshot;
+      saved?: PreparedApplicationForm;
     }
   >();
   const recoveryUnavailable = new Set<string>();
   const recoveringForms = new Map<string, Promise<void>>();
+
+  async function loadSavedForm(key: string): Promise<PreparedApplicationForm | null> {
+    const saved = await preparedFormStore?.get(key) ?? null;
+    if (saved?.snapshot && !formRecovery.has(key)) {
+      formRecovery.set(key, {
+        snapshot: saved.snapshot,
+        saved,
+        files: saved.attachments.map(file => ({name: file.name, load: async () => {
+          const bytes = await preparedFormStore!.loadAttachment(file);
+          if (createHash("sha256").update(bytes).digest("hex") !== file.sha256)
+            throw new Error("Attachment changed");
+          return bytes;
+        }})),
+        // Recovery does not inherit any old send or intermediate-write window.
+        guard: page => ensurePrepareOnlyMutationGuard(page, false),
+      });
+    }
+    return saved;
+  }
+
+  async function invalidateSavedForm(key: string, reason: "form_changed" | "attachment_unavailable") {
+    const saved = await preparedFormStore?.get(key);
+    if (saved) await preparedFormStore!.save({...saved, snapshot: null, attachments: [], reason});
+    formRecovery.delete(key);
+  }
+
+  async function applicationPageState(key: string): Promise<ApplicationPageState> {
+    const live = preparedApplicationPages.get(key);
+    if (live && !live.isClosed()) return {resultId: key, state: "open", reason: null};
+    const saved = await loadSavedForm(key);
+    if (formRecovery.get(key)?.snapshot) {
+      try {
+        for (const file of formRecovery.get(key)!.files) await file.load();
+      } catch {
+        await invalidateSavedForm(key, "attachment_unavailable");
+        return {resultId: key, state: "needs_preparing", reason: "attachment_unavailable"};
+      }
+      return {resultId: key, state: "reopenable", reason: null};
+    }
+    return {resultId: key, state: "needs_preparing", reason: saved?.reason ?? "no_snapshot"};
+  }
 
   async function markPreparedPage(key: string, page: Page): Promise<void> {
     if (typeof page.evaluate !== "function") return;
@@ -1434,33 +1484,51 @@ export function createBrowserAgentRuntime(
    * connection was dropped (the person took over or paused the browser), by
    * the key that tab carries, and only on a browser that is already open.
    */
-  async function rebindPreparedApplicationPage(key: string): Promise<void> {
+  async function rebindPreparedApplicationPage(key: string,
+    onProgress?: (progress: ApplicationPageReopenProgress) => void): Promise<void> {
     const current = preparedApplicationPages.get(key);
     if (current && !current.isClosed()) {
       // Keep the mark fresh across the form's own navigations.
       await markPreparedPage(key, current);
       return;
     }
+    await loadSavedForm(key);
     const recovery = formRecovery.get(key);
     if (recovery?.snapshot) {
       let pending = recoveringForms.get(key);
       if (!pending) {
         const snapshot = recovery.snapshot;
         pending = (async () => {
+          let failure: "form_changed" | "attachment_unavailable" | "reopen_failed" = "reopen_failed";
           const page = await restorePreparedForm({
             context: await getContext(),
             snapshot,
             files: recovery.files,
             guard: recovery.guard,
+            onProgress: phase => onProgress?.({resultId: key, phase}),
+            onFailure: reason => { failure = reason; },
           });
-          if (!page)
+          if (!page) {
+            if (failure !== "reopen_failed") await invalidateSavedForm(key, failure);
             throw new Error(
               "The saved form could not be refilled exactly. Prepare the application again before sending.",
             );
+          }
+          if (formRecovery.get(key) !== recovery) {
+            await page.close({runBeforeUnload: false});
+            throw new Error("Application changed while reopening");
+          }
           bindPreparedApplicationPage(key, page);
           await markPreparedPage(key, page);
           delete recovery.snapshot;
-          await options.onApplicationPageRestored?.(key, page);
+          try {
+            await options.onApplicationPageRestored?.(key, page, recovery.saved?.label);
+          } catch (error) {
+            recovery.snapshot = snapshot;
+            preparedApplicationPages.delete(key);
+            await page.close({runBeforeUnload: false}).catch(() => undefined);
+            throw error;
+          }
         })().finally(() => recoveringForms.delete(key));
         recoveringForms.set(key, pending);
       }
@@ -1489,6 +1557,7 @@ export function createBrowserAgentRuntime(
 
   /** Forgets a finished application's page and closes it unless the person has it. */
   async function releaseApplicationPage(key: string): Promise<boolean> {
+    await preparedFormStore?.delete(key);
     // Completing an evicted application must not reopen it just to close it.
     if (!formRecovery.get(key)?.snapshot)
       await rebindPreparedApplicationPage(key);
@@ -2381,7 +2450,31 @@ export function createBrowserAgentRuntime(
         : createInconclusiveSourceAccessProbeResult(input);
     },
     observeApplicationForm: observeApplicationFormForSource,
+    getApplicationPageState: (_source, key) => applicationPageState(key),
+    async reopenApplicationPage(_source, key, onProgress) {
+      const state = await applicationPageState(key);
+      if (state.state === "needs_preparing") {
+        onProgress?.({resultId: key, phase: "needs_preparing"});
+        return state;
+      }
+      onProgress?.({resultId: key, phase: "opening"});
+      try {
+        await rebindPreparedApplicationPage(key, onProgress);
+        const page = selectPreparedApplicationPage(preparedApplicationPages, key);
+        await ensurePrepareOnlyMutationGuard(page, false);
+        await closePrepareOnlyAuthorizedFormActionWindow(page);
+        await closePrepareOnlyFinalActionWindow(page);
+        await focusPreparedApplicationPage(preparedApplicationPages, key);
+        onProgress?.({resultId: key, phase: "ready"});
+        return {resultId: key, state: "open", reason: null};
+      } catch {
+        const failed = await applicationPageState(key);
+        onProgress?.({resultId: key, phase: failed.state === "needs_preparing" ? "needs_preparing" : "failed"});
+        return {...failed, reason: failed.reason ?? "reopen_failed"};
+      }
+    },
     async hasApplicationPageBinding(_source, pageBindingKey) {
+      await loadSavedForm(pageBindingKey);
       if (formRecovery.get(pageBindingKey)?.snapshot) return true;
       await rebindPreparedApplicationPage(pageBindingKey);
       try {
@@ -2457,6 +2550,10 @@ export function createBrowserAgentRuntime(
         )
           return false;
         recovery.snapshot = snapshot;
+        if (recovery.saved && preparedFormStore) {
+          recovery.saved = {...recovery.saved, snapshot, savedAt: new Date().toISOString()};
+          await preparedFormStore.save(recovery.saved);
+        }
         await page.close({ runBeforeUnload: false });
         preparedApplicationPages.delete(key);
         return true;
@@ -2566,9 +2663,17 @@ export function createBrowserAgentRuntime(
       await closePrepareOnlyAuthorizedFormActionWindow(page);
       await closePrepareOnlyFinalActionWindow(page);
       preparedApplicationPages.delete(previousKey);
+      const saved = await preparedFormStore?.get(previousKey);
+      if (saved) {
+        await preparedFormStore!.save({...saved, id: nextKey});
+        await preparedFormStore!.delete(previousKey);
+      }
       const recovery = formRecovery.get(previousKey);
       formRecovery.delete(previousKey);
-      if (recovery) formRecovery.set(nextKey, recovery);
+      if (recovery) {
+        if (recovery.saved) recovery.saved = {...recovery.saved, id: nextKey};
+        formRecovery.set(nextKey, recovery);
+      }
       recoveryUnavailable.delete(previousKey);
       markedPreparedApplicationKeys.delete(previousKey);
       preparedPagesWithPerson.delete(previousKey);
@@ -3135,16 +3240,43 @@ export function createBrowserAgentRuntime(
         ) {
           const resumeArtifact = input.resumeArtifact;
           const attachments = input.applicationAttachments ?? [];
-          const authorized = input.intermediateMutationsAuthorized === true;
-          const origins = [...(input.intermediateMutationAllowedOrigins ?? [])];
           formRecovery.set(input.applicationPageBindingKey, {
             files: [
               { name: resumeArtifact.fileName, load: () => loadVerifiedResumeBytes(resumeArtifact) },
               ...attachments.map(file => ({name: file.fileName, load: file.loadVerifiedBytes})),
             ],
-            guard: page => ensurePrepareOnlyMutationGuard(page, authorized, origins),
+            guard: page => ensurePrepareOnlyMutationGuard(page, false),
           });
           recoveryUnavailable.delete(input.applicationPageBindingKey);
+          if (preparedFormStore) {
+            const key = input.applicationPageBindingKey;
+            const page = preparedApplicationPages.get(key)!;
+            let snapshot = await capturePreparedForm(page).catch(() => null);
+            let reason: PreparedApplicationForm["reason"] = snapshot ? null : "unsupported_form";
+            const descriptors: PreparedFormAttachment[] = [];
+            if (snapshot) {
+              const available: PreparedFormAttachment[] = [
+                ...(resumeArtifact.sha256 && (resumeArtifact.exportArtifactId || resumeArtifact.sourceDocumentId) ? [{
+                  kind: resumeArtifact.exportArtifactId ? "resume_export" as const : "resume_source" as const,
+                  id: (resumeArtifact.exportArtifactId ?? resumeArtifact.sourceDocumentId)!,
+                  name: resumeArtifact.fileName, sha256: resumeArtifact.sha256.toLowerCase(),
+                }] : []),
+                ...attachments.map(file => ({kind: "candidate_asset" as const, id: file.assetId, name: file.fileName, sha256: file.sha256.toLowerCase()})),
+              ];
+              for (const file of snapshot.fields.flatMap(field => field.files)) {
+                const matches = available.filter(candidate => candidate.name === file.name && candidate.sha256 === file.sha256);
+                if (matches.length !== 1) { snapshot = null; reason = "attachment_unavailable"; break; }
+                if (!descriptors.some(candidate => candidate.name === file.name)) descriptors.push(matches[0]!);
+              }
+            }
+            const saved: PreparedApplicationForm = {id: key,
+              label: [input.job.location, input.job.title.slice(0, 120), input.job.company.slice(0, 80)].filter(Boolean).join(" · ").slice(0, 280),
+              savedAt: new Date().toISOString(), snapshot,
+              attachments: snapshot ? descriptors : [], reason,
+            };
+            await preparedFormStore.save(saved);
+            formRecovery.get(key)!.saved = saved;
+          }
         }
 
         if (

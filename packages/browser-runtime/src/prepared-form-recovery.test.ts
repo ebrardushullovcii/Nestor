@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { BrowserContext, Page } from "playwright";
 import { expect, test, vi } from "vitest";
 import {
@@ -7,7 +8,7 @@ import {
 
 const snapshot: PreparedFormSnapshot = {
   url: "https://jobs.example/apply",
-  structure: "native-single-page",
+  structure: createHash("sha256").update("native-single-page").digest("hex"),
   fields: [
     {
       type: "text",
@@ -57,8 +58,18 @@ function setup(fresh: PreparedFormSnapshot | null, restored = snapshot) {
     isClosed: () => false,
     evaluate: vi
       .fn()
-      .mockResolvedValueOnce(fresh)
-      .mockResolvedValueOnce(restored),
+      .mockResolvedValueOnce(
+        fresh
+          ? {
+              ...fresh,
+              structure:
+                fresh.structure === snapshot.structure
+                  ? "native-single-page"
+                  : "changed",
+            }
+          : null,
+      )
+      .mockResolvedValueOnce({ ...restored, structure: "native-single-page" }),
     goto,
     close,
     locator: () => ({ nth: () => ({ fill }) }),
