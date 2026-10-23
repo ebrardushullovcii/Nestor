@@ -33,6 +33,7 @@ import {
 import {
   buildPendingQuestion,
   approvedApplicationLetter,
+  applicationLetterRequest,
   createApplyGuardState,
   executeApplyProposal,
   guardStop,
@@ -89,6 +90,8 @@ const DEFAULT_MAX_STEPS = 200;
 // 15 minutes cut them off just before it.
 const DEFAULT_TIME_BUDGET_MS = 30 * 60_000;
 const DEFAULT_NO_PROGRESS_STEP_LIMIT = 12;
+// Writing and then checking a high-effort letter can exceed a page tool's 90s.
+const DOCUMENT_TOOL_TIMEOUT_MS = 5 * 60_000;
 
 const PAGE_TOOL_NAMES = new Set([
   "observe",
@@ -289,10 +292,18 @@ export async function runApplyAgent(
 }
 
 async function runMeasuredApplyAgent(
-  config: ApplyAgentConfig,
+  input: ApplyAgentConfig,
   llmClient: LLMClient,
   timingRecord: ReturnType<typeof createApplyTiming>,
 ): Promise<ApplyAgentResult> {
+  const runAbort = new AbortController();
+  const runSignal = input.signal
+    ? AbortSignal.any([input.signal, runAbort.signal])
+    : runAbort.signal;
+  const config: ApplyAgentConfig = {
+    ...input,
+    signal: runSignal,
+  };
   const now = config.now ?? (() => new Date());
   const filled: ApplyFilledControl[] = [];
   const attachments: ApplyAttachedDocument[] = [];
@@ -318,9 +329,34 @@ async function runMeasuredApplyAgent(
       })
     : undefined;
   const documentCatalog: ApplyDocument[] = [...config.sources.documents];
+  const letterRequests = new Map<
+    string,
+    ReturnType<NonNullable<ApplyAgentConfig["letters"]>["provide"]>
+  >();
   const runConfig: ApplyAgentConfig = {
     ...config,
     sources: { ...config.sources, documents: documentCatalog },
+    ...(config.letters
+      ? {
+          letters: {
+            ...config.letters,
+            provide: (request) => {
+              const key = JSON.stringify(request);
+              let pending = letterRequests.get(key);
+              if (!pending) {
+                pending = config.letters!.provide({
+                  ...request,
+                  signal: runSignal,
+                });
+                letterRequests.set(key, pending);
+                // A draft may still be running when a page changes or Stop lands.
+                void pending.catch(() => undefined);
+              }
+              return pending;
+            },
+          },
+        }
+      : {}),
   };
   let readyToSend: ApplyAgentResult["readyToSend"] = null;
   const payDisclosed =
@@ -1371,6 +1407,23 @@ async function runMeasuredApplyAgent(
     if (PAGE_TOOL_NAMES.has(name)) continue;
     domainTools.push({
       definition,
+      ...(name === "upload" || name === "type"
+        ? {
+            timeoutMs: (rawArguments: string) => {
+              const parsed = parseApplyProposal(name, rawArguments);
+              const ref =
+                parsed.ok && "ref" in parsed.proposal
+                  ? parsed.proposal.ref
+                  : null;
+              const control = pageTools.state.observation?.controls.find(
+                (candidate) => candidate.ref === ref,
+              );
+              return control && isCoverLetterControl(control)
+                ? DOCUMENT_TOOL_TIMEOUT_MS
+                : undefined;
+            },
+          }
+        : {}),
       failureKind: browserFailureKind(name),
       describeError: (error) =>
         error instanceof WrittenAnswerCheckUnavailableError
@@ -1415,6 +1468,22 @@ async function runMeasuredApplyAgent(
 
   domainTools.push({
     definition: FILL_FIELDS_TOOL_DEFINITION,
+    timeoutMs: (rawArguments) => {
+      const parsed = parseFillFields(rawArguments);
+      return parsed.ok &&
+        parsed.fields.some((entry) => {
+          const control = pageTools.state.observation?.controls.find(
+            (candidate) => candidate.ref === entry.ref,
+          );
+          return (
+            (entry.tool === "upload" || entry.tool === "type") &&
+            control !== undefined &&
+            isCoverLetterControl(control)
+          );
+        })
+        ? DOCUMENT_TOOL_TIMEOUT_MS
+        : undefined;
+    },
     failureKind: "browser",
     describeError: (error) =>
       error instanceof WrittenAnswerCheckUnavailableError
@@ -1429,6 +1498,44 @@ async function runMeasuredApplyAgent(
         return { kind: "ok", content: "Look at the page first." };
       }
       observationNeeded = true;
+      // The model has chosen these letter fields. Start their local drafts
+      // beside the other fills; only the executor may attach or type them.
+      for (const entry of parsed.fields) {
+        if (!runConfig.letters || config.signal?.aborted) break;
+        if (entry.tool !== "type" && entry.tool !== "upload") continue;
+        const control = observation.controls.find(
+          (candidate) => candidate.ref === entry.ref,
+        );
+        if (
+          !control ||
+          control.answered ||
+          control.disabled ||
+          control.readOnly ||
+          (!control.visible && control.kind !== "file") ||
+          !isCoverLetterControl(control) ||
+          (entry.tool === "type" &&
+            control.kind !== "text" &&
+            control.kind !== "long_text") ||
+          (entry.tool === "upload" && control.kind !== "file") ||
+          observation.blocker?.requiresPerson ||
+          (!approvedApplicationLetter(runConfig, control) &&
+            !coverLetterPolicyAllows(
+              control,
+              runConfig.writing?.coverLetterPolicy ?? "when_required",
+            )) ||
+          (entry.tool === "upload" &&
+            documentCatalog.some(
+              (document) => document.kind === "cover_letter",
+            ))
+        )
+          continue;
+        void runConfig.letters
+          .provide(applicationLetterRequest(runConfig, control))
+          .catch(() => undefined);
+        // A second delivery on this form reuses the first completed version.
+        // Starting both together could ask the provider to write two letters.
+        break;
+      }
       // Reorder only independent value writes in a contiguous segment. Clicks,
       // uploads, repeated refs and shared choice groups are order barriers.
       // Every write still gets a fresh page read and the same policy executor.
@@ -1929,6 +2036,7 @@ async function runMeasuredApplyAgent(
         },
       },
     },
+    timeoutMs: DOCUMENT_TOOL_TIMEOUT_MS,
     execute: async (rawArguments) => {
       if (!runConfig.letters) {
         return {
@@ -2245,6 +2353,11 @@ async function runMeasuredApplyAgent(
       : {}),
     ...(config.signal ? { signal: config.signal } : {}),
     now,
+  }).finally(async () => {
+    // Stop aborts the provider through the run's signal; cleanup still drains
+    // the local drafts if a page change left their writes unattempted.
+    runAbort.abort();
+    await Promise.allSettled(letterRequests.values());
   });
 
   for (const pause of pauses) {

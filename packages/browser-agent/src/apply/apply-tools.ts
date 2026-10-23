@@ -526,7 +526,7 @@ export const FILL_FIELDS_TOOL_DEFINITION: ApplyToolDefinition = {
               documentId: {
                 type: "string",
                 description:
-                  "For upload: an id from the available document list.",
+                  "For upload: an id from the available document list, or letter for an observed cover-letter field. Job Finder writes and checks a missing permitted letter locally; put that upload after the other fields so its writing can overlap their fills.",
               },
               reason: {
                 type: "string",
@@ -553,9 +553,7 @@ export type FillFieldsEntry = Extract<
   { tool: "type" | "select" | "set_checkbox" | "upload" | "click" }
 >;
 
-export function parseFillFields(
-  rawArguments: string,
-):
+export function parseFillFields(rawArguments: string):
   | {
       ok: true;
       fields: FillFieldsEntry[];

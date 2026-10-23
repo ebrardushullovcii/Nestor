@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
   runAgentLoop,
@@ -575,43 +575,46 @@ describe("runAgentLoop", () => {
     }
   });
 
-  test.each([4, 1])("a host can keep fewer recent tool answers whole (batch=%s)", async (batchSize) => {
-    let looks = 0;
-    const look = tool("look", () => {
-      looks += 1;
-      return Promise.resolve({
-        kind: "ok",
-        content: `Page ${looks}\n${"x".repeat(3_000)}`,
-        progress: true,
+  test.each([4, 1])(
+    "a host can keep fewer recent tool answers whole (batch=%s)",
+    async (batchSize) => {
+      let looks = 0;
+      const look = tool("look", () => {
+        looks += 1;
+        return Promise.resolve({
+          kind: "ok",
+          content: `Page ${looks}\n${"x".repeat(3_000)}`,
+          progress: true,
+        });
       });
-    });
-    const turns: AgentLoopToolCall[][] = Array.from({ length: 8 }, () => [
-      call("look"),
-    ]);
-    turns.push([call("finish", { reason: "Done" })]);
-    const result = await runAgentLoop({
-      messages: opening,
-      model: scripted(turns),
-      tools: [look, finishTool],
-      subjectLabel: "the site",
-      staleToolResultKeepRecent: 2,
-      staleToolResultBatchSize: batchSize,
-    });
-    const answers = result.messages.filter(
-      (message) =>
-        message.role === "tool" && message.content.startsWith("Page"),
-    );
-    // A batch of four leaves two old answers whole until the next batch;
-    // shortening immediately leaves exactly the two recent answers whole.
-    expect(
-      answers.filter((answer) =>
-        answer.content.includes("Older answer shortened"),
-      ),
-    ).toHaveLength(batchSize === 4 ? 4 : 6);
-    for (const recent of answers.slice(-2)) {
-      expect(recent.content.length).toBeGreaterThan(3_000);
-    }
-  });
+      const turns: AgentLoopToolCall[][] = Array.from({ length: 8 }, () => [
+        call("look"),
+      ]);
+      turns.push([call("finish", { reason: "Done" })]);
+      const result = await runAgentLoop({
+        messages: opening,
+        model: scripted(turns),
+        tools: [look, finishTool],
+        subjectLabel: "the site",
+        staleToolResultKeepRecent: 2,
+        staleToolResultBatchSize: batchSize,
+      });
+      const answers = result.messages.filter(
+        (message) =>
+          message.role === "tool" && message.content.startsWith("Page"),
+      );
+      // A batch of four leaves two old answers whole until the next batch;
+      // shortening immediately leaves exactly the two recent answers whole.
+      expect(
+        answers.filter((answer) =>
+          answer.content.includes("Older answer shortened"),
+        ),
+      ).toHaveLength(batchSize === 4 ? 4 : 6);
+      for (const recent of answers.slice(-2)) {
+        expect(recent.content.length).toBeGreaterThan(3_000);
+      }
+    },
+  );
 
   test("a tool that hangs is given up after its deadline and the run carries on", async () => {
     let calls = 0;
@@ -643,6 +646,73 @@ describe("runAgentLoop", () => {
     );
     expect(gaveUp).toBeDefined();
     expect(result.turnNotes.join("\n")).toContain("took too long");
+  });
+
+  test("only a requested local task gets its longer deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const local = tool(
+        "local",
+        () =>
+          new Promise((resolve) => {
+            setTimeout(
+              () =>
+                resolve({
+                  kind: "ok",
+                  content: "Local task complete.",
+                  progress: true,
+                }),
+              1500,
+            );
+          }),
+      );
+      local.timeoutMs = (raw) =>
+        (JSON.parse(raw) as { writing?: boolean }).writing ? 3000 : undefined;
+      const pending = runAgentLoop({
+        messages: opening,
+        model: scripted([
+          [call("local", { writing: true })],
+          [call("local")],
+          [call("finish", { reason: "Done" })],
+        ]),
+        tools: [local, finishTool],
+        subjectLabel: "the task",
+        ceilings: { toolTimeoutMs: 1000 },
+      });
+      await vi.runAllTimersAsync();
+      const result = await pending;
+      const toolMessages = result.messages.filter(
+        (message) => message.role === "tool",
+      );
+      expect(
+        toolMessages.filter(
+          (message) => message.content === "Local task complete.",
+        ),
+      ).toHaveLength(1);
+      expect(
+        toolMessages.filter((message) =>
+          message.content.includes("took longer than 1 seconds"),
+        ),
+      ).toHaveLength(1);
+      expect(result.ending).toBe("finished");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("Stop still interrupts a tool with a longer deadline", async () => {
+    const controller = new AbortController();
+    const local = tool("local", () => new Promise(() => undefined));
+    local.timeoutMs = 300_000;
+    const pending = runAgentLoop({
+      messages: opening,
+      model: scripted([[call("local")]]),
+      tools: [local, finishTool],
+      subjectLabel: "the task",
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 10);
+    expect((await pending).ending).toBe("aborted");
   });
 
   test("a stop request lands while the model ignores its abort signal", async () => {

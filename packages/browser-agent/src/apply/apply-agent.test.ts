@@ -286,6 +286,401 @@ test("a completed form returns an obstructed final button to the model in fill-o
   expect(click).not.toHaveBeenCalled();
 });
 
+test.each(["upload", "type"] as const)(
+  "a chosen letter drafts during the other fills and is reused for %s",
+  async (tool) => {
+    const source = page({
+      controls: [
+        { ...nameControl(), value: "" },
+        {
+          ...nameControl(),
+          index: 1,
+          inputType: tool === "upload" ? "file" : "text",
+          label: "Cover letter",
+          value: "",
+        },
+      ],
+    });
+    const input = config(source);
+    const text = "I build dependable internal tools. ".repeat(8);
+    let finishDraft: (value: {
+      ok: true;
+      text: string;
+      document: null;
+    }) => void = () => {};
+    const drafted = new Promise<{
+      ok: true;
+      text: string;
+      document: null;
+    }>((resolve) => {
+      finishDraft = resolve;
+    });
+    const provide = vi.fn(async () => {
+      const result = await drafted;
+      return {
+        ...result,
+        document:
+          tool === "upload"
+            ? {
+                id: "letter",
+                kind: "cover_letter" as const,
+                label: "Cover letter",
+                fileName: "letter.pdf",
+                mimeType: "application/pdf",
+                loadBytes: () => Promise.resolve(new Uint8Array([1])),
+              }
+            : null,
+      };
+    });
+    input.letters = {
+      preference: {
+        tone: "direct",
+        length: "short",
+        language: null,
+        sample: null,
+      },
+      provide,
+    };
+    const fill = input.hands.fillText;
+    input.hands.fillText = (ref, value) => {
+      if (ref === "c0") {
+        expect(provide).toHaveBeenCalledOnce();
+        finishDraft({ ok: true, text, document: null });
+      }
+      return fill(ref, value);
+    };
+    input.hands.uploadFile = (_ref, file) => {
+      source.controls[1].value = file.name;
+      return Promise.resolve({ ok: true, observedValue: file.name });
+    };
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        {
+          name: "fill_fields",
+          args: {
+            fields: [
+              {
+                tool: "type",
+                ref: "c0",
+                text: "Robin Ashford",
+                storedFactId: "profile.fullName",
+              },
+              tool === "upload"
+                ? { tool, ref: "c1", documentId: "letter" }
+                : {
+                    tool,
+                    ref: "c1",
+                    text: "Write the letter from the saved facts.",
+                  },
+            ],
+            finishWhenReady: true,
+          },
+        },
+        { name: "finish", args: { reason: "Done." } },
+      ]),
+    );
+    expect(provide).toHaveBeenCalledOnce();
+    expect(result.outcome).toBe("prepared");
+    expect(
+      tool === "upload" ? result.attachments : result.filled,
+    ).not.toHaveLength(0);
+    if (tool === "type") expect(source.controls[1].value).toBe(text);
+  },
+);
+
+test.each(["never", "when_required"] as const)(
+  "an optional letter does not start a draft under %s",
+  async (policy) => {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          inputType: "file",
+          label: "Cover letter",
+          required: false,
+          value: "",
+        },
+      ],
+    });
+    const input = config(source);
+    const provide = vi.fn(() =>
+      Promise.resolve({ ok: false as const, reason: "Must not run" }),
+    );
+    input.letters = {
+      preference: {
+        tone: "direct",
+        length: "short",
+        language: null,
+        sample: null,
+      },
+      provide,
+    };
+    input.writing = {
+      coverLetterPolicy: policy,
+      writtenAnswerLength: "short",
+      preApprovedDeclarations: [],
+    };
+    await runApplyAgent(
+      input,
+      scriptedModel([
+        {
+          name: "fill_fields",
+          args: {
+            fields: [{ tool: "upload", ref: "c0", documentId: "letter" }],
+          },
+        },
+        { name: "finish", args: { reason: "Done." } },
+      ]),
+    );
+    expect(provide).not.toHaveBeenCalled();
+  },
+);
+
+test("Stop drains a pending local letter without attaching it", async () => {
+  const source = page({
+    controls: [
+      { ...nameControl(), value: "" },
+      {
+        ...nameControl(),
+        index: 1,
+        inputType: "file",
+        label: "Cover letter",
+        value: "",
+      },
+    ],
+  });
+  const controller = new AbortController();
+  const input = config(source, { signal: controller.signal });
+  let drained = false;
+  const provide = vi.fn(
+    () =>
+      new Promise<{ ok: false; reason: string }>((resolve) => {
+        controller.signal.addEventListener(
+          "abort",
+          () => {
+            drained = true;
+            resolve({ ok: false, reason: "Stopped" });
+          },
+          { once: true },
+        );
+      }),
+  );
+  input.letters = {
+    preference: {
+      tone: "direct",
+      length: "short",
+      language: null,
+      sample: null,
+    },
+    provide,
+  };
+  input.hands.fillText = (_ref, value) => {
+    controller.abort();
+    return Promise.resolve({ ok: true, observedValue: value });
+  };
+  const upload = vi.fn(input.hands.uploadFile);
+  input.hands.uploadFile = upload;
+  await runApplyAgent(
+    input,
+    scriptedModel([
+      {
+        name: "fill_fields",
+        args: {
+          fields: [
+            {
+              tool: "type",
+              ref: "c0",
+              text: "Robin Ashford",
+              storedFactId: "profile.fullName",
+            },
+            { tool: "upload", ref: "c1", documentId: "letter" },
+          ],
+        },
+      },
+    ]),
+  ).catch((error: unknown) => {
+    expect(error).toBeInstanceOf(Error);
+  });
+  expect(provide).toHaveBeenCalledOnce();
+  expect(drained).toBe(true);
+  expect(upload).not.toHaveBeenCalled();
+});
+
+test("a rejected background letter fills the contact field and leaves the letter for review", async () => {
+  const source = page({
+    controls: [
+      { ...nameControl(), value: "" },
+      {
+        ...nameControl(),
+        index: 1,
+        inputType: "file",
+        label: "Cover letter",
+        value: "",
+      },
+    ],
+  });
+  const input = config(source);
+  const provide = vi.fn(() =>
+    Promise.resolve({
+      ok: false as const,
+      draftText: "A letter needing review.",
+      reason: "The proposed hours conflict with your saved availability.",
+    }),
+  );
+  input.letters = {
+    preference: {
+      tone: "direct",
+      length: "short",
+      language: null,
+      sample: null,
+    },
+    provide,
+  };
+  const upload = vi.fn(input.hands.uploadFile);
+  input.hands.uploadFile = upload;
+  const result = await runApplyAgent(
+    input,
+    scriptedModel([
+      {
+        name: "fill_fields",
+        args: {
+          fields: [
+            {
+              tool: "type",
+              ref: "c0",
+              text: "Robin Ashford",
+              storedFactId: "profile.fullName",
+            },
+            { tool: "upload", ref: "c1", documentId: "letter" },
+          ],
+        },
+      },
+      {
+        name: "finish",
+        args: { reason: "The letter needs review.", needsPerson: true },
+      },
+    ]),
+  );
+  expect(source.controls[0].value).toBe("Robin Ashford");
+  expect(provide).toHaveBeenCalledOnce();
+  expect(upload).not.toHaveBeenCalled();
+  expect(result.outcome).toBe("paused");
+  expect(result.pauses[0]?.reviewDraft?.text).toBe("A letter needing review.");
+});
+
+test("a checked letter taking over ninety seconds is awaited once", async () => {
+  vi.useFakeTimers();
+  try {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          inputType: "file",
+          label: "Cover letter",
+          value: "",
+        },
+      ],
+    });
+    const input = config(source);
+    const provide = vi.fn(
+      () =>
+        new Promise<{
+          ok: true;
+          text: string;
+          document: NonNullable<
+            ApplyAgentConfig["sources"]["documents"][number]
+          >;
+        }>((resolve) => {
+          setTimeout(
+            () =>
+              resolve({
+                ok: true,
+                text: "I build dependable internal tools. ".repeat(8),
+                document: {
+                  id: "letter",
+                  kind: "cover_letter",
+                  label: "Cover letter",
+                  fileName: "letter.pdf",
+                  mimeType: "application/pdf",
+                  loadBytes: () => Promise.resolve(new Uint8Array([1])),
+                },
+              }),
+            100_000,
+          );
+        }),
+    );
+    input.letters = {
+      preference: {
+        tone: "direct",
+        length: "short",
+        language: null,
+        sample: null,
+      },
+      provide,
+    };
+    input.hands.uploadFile = (_ref, file) => {
+      source.controls[0].value = file.name;
+      return Promise.resolve({ ok: true, observedValue: file.name });
+    };
+    const pending = runApplyAgent(
+      input,
+      scriptedModel([
+        {
+          name: "fill_fields",
+          args: {
+            fields: [{ tool: "upload", ref: "c0", documentId: "letter" }],
+            finishWhenReady: true,
+          },
+        },
+        { name: "finish", args: { reason: "Done." } },
+      ]),
+    );
+    await vi.runAllTimersAsync();
+    const result = await pending;
+    expect(provide).toHaveBeenCalledOnce();
+    expect(result.outcome).toBe("prepared");
+    expect(result.notes.join("\n")).not.toContain("took too long");
+    expect(result.attachments).toHaveLength(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a covered Send is handed back to the model before the form finishes", async () => {
+  const source = page({
+    actions: [
+      { index: 0, label: "Submit application", visible: true, disabled: false },
+      { index: 1, label: "Use essential only", visible: true, disabled: false },
+    ],
+  });
+  const input = config(source);
+  let covered = true;
+  input.hands.checkAction = () => Promise.resolve(covered
+    ? { ok: false, error: "Use essential only covers Send." }
+    : { ok: true });
+  input.hands.clickElement = (ref) => {
+    expect(ref).toBe("a1");
+    covered = false;
+    source.actions[1].visible = false;
+    return Promise.resolve({ ok: true, observedValue: "dismissed" });
+  };
+  const result = await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "finish", args: { reason: "Done." } },
+      {
+        name: "click",
+        args: { ref: "a1", reason: "Dismiss the ordinary storage notice." },
+      },
+      { name: "finish", args: { reason: "Done." } },
+    ]),
+  );
+  expect(covered).toBe(false);
+  expect(result.outcome).toBe("prepared");
+  expect(result.pauses).toEqual([]);
+});
+
 test("prose instructions separate candidate evidence from job requirements", () => {
   const prompt = createApplySystemPrompt(config(page()));
   expect(prompt).toContain(

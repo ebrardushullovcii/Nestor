@@ -1,7 +1,4 @@
-import type {
-  ApplyDocument,
-  ApplyLetterProvider,
-} from "@nestor/browser-agent";
+import type { ApplyDocument, ApplyLetterProvider } from "@nestor/browser-agent";
 import type { CoverLetterPreference } from "@nestor/contracts";
 
 /**
@@ -89,6 +86,11 @@ export function createApplicationLetterProvider(
   return {
     preference: dependencies.preference,
     provide: async (request) => {
+      const signal =
+        request.signal && dependencies.signal
+          ? AbortSignal.any([request.signal, dependencies.signal])
+          : (request.signal ?? dependencies.signal);
+      signal?.throwIfAborted();
       const purpose = request.purpose ?? "cover_letter";
       const requestKey = `${purpose}\n${request.prompt.trim()}\n${request.approvedText ?? ""}`;
       let writtenVersion = versionsByRequest.get(requestKey) ?? null;
@@ -104,8 +106,9 @@ export function createApplicationLetterProvider(
               language: request.language,
               preference: dependencies.preference,
               priorText: latestByPurpose.get(purpose)?.text ?? null,
-              ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+              ...(signal ? { signal } : {}),
             }));
+          signal?.throwIfAborted();
         } catch (error) {
           if (error instanceof ApplicationLetterGroundingError) {
             return {
@@ -139,6 +142,7 @@ export function createApplicationLetterProvider(
         latestByPurpose.set(purpose, writtenVersion);
       }
 
+      signal?.throwIfAborted();
       if (request.delivery === "text") {
         return { ok: true, text: writtenVersion.text, document: null };
       }

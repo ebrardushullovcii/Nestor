@@ -1809,8 +1809,7 @@ export async function executeApplyProposal(
                 : candidate.ref === control.ref) &&
               [candidate.value, candidate.label].some(
                 (value) =>
-                  normalizeSignal(value) ===
-                  normalizeSignal(radioAnswer.value),
+                  normalizeSignal(value) === normalizeSignal(radioAnswer.value),
               ),
           );
           if (!selected)
@@ -2333,17 +2332,8 @@ async function provideApplicationLetter(
     };
   }
 
-  const request = buildCoverLetterRequest({
-    sources: config.sources,
-    preference: letters.preference,
-  });
-  const produced = await letters.provide({
-    ...request,
-    purpose: "cover_letter",
-    delivery: coverLetterDeliveryFor(control),
-    fileType: requiredLetterFileType(control),
-    ...(approvedText ? { approvedText } : {}),
-  });
+  const request = applicationLetterRequest(config, control);
+  const produced = await letters.provide(request);
 
   const pauseWith = (summary: string): LetterOutcome => ({
     kind: "stop",
@@ -2394,6 +2384,24 @@ async function provideApplicationLetter(
         ? ["your letter for this application"]
         : request.groundedIn,
     },
+  };
+}
+
+/** The same local draft request is used while filling and at the guarded write. */
+export function applicationLetterRequest(
+  config: ApplyAgentConfig,
+  control: ApplyFormControl,
+): Parameters<NonNullable<ApplyAgentConfig["letters"]>["provide"]>[0] {
+  const approvedText = approvedApplicationLetter(config, control);
+  return {
+    ...buildCoverLetterRequest({
+      sources: config.sources,
+      preference: config.letters!.preference,
+    }),
+    purpose: "cover_letter",
+    delivery: coverLetterDeliveryFor(control),
+    fileType: requiredLetterFileType(control),
+    ...(approvedText ? { approvedText } : {}),
   };
 }
 

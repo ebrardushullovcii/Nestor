@@ -346,6 +346,8 @@ export interface ApplyLetterProvider {
     approvedText?: string;
     /** A file type the form insists on, when it named one. */
     fileType: "pdf" | "docx" | "txt" | null;
+    /** Cancel local drafting when this form run ends or the person stops it. */
+    signal?: AbortSignal;
   }) => Promise<
     | { ok: true; text: string; document: ApplyDocument | null }
     | { ok: false; reason: string; draftText?: string }
