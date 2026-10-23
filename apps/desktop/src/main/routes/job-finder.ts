@@ -170,6 +170,7 @@ import type {
 } from "@nestor/contracts";
 import {
   JobFinderApplyQueueControlInputSchema,
+  JobFinderApproveResumesInputSchema,
   JobFinderStartApplyQueueInputSchema,
   type ApplicationAutomationMode,
   type ApplyQueueSkippedJob,
@@ -621,6 +622,13 @@ export async function approveApplicationResumes(
      * approves the rest; a single-job press refuses with the same sentence.
      */
     holdBackResumesAwaitingPerson?: boolean;
+    /**
+     * The person pressed Approve for exactly these resumes: that press is
+     * the Aggressive approval, and one resume that cannot be approved is
+     * held back with its reason instead of stopping the others.
+     */
+    personApproved?: boolean;
+    onProgress?: (done: number) => void;
   },
 ): Promise<HeldBackApplicationResume[]> {
   const heldBack: HeldBackApplicationResume[] = [];
@@ -642,18 +650,41 @@ export async function approveApplicationResumes(
     repository.getSearchPreferences(),
   ]);
 
-  for (const jobId of [...new Set(jobIds)]) {
+  const uniqueJobIds = [...new Set(jobIds)];
+  for (const [index, jobId] of uniqueJobIds.entries()) {
+    options?.onProgress?.(index);
     const job = jobs.find((candidate) => candidate.id === jobId) ?? null;
     if (!job) {
       throw new Error(
         "Job Finder could not find a selected application, so nothing was started.",
       );
     }
+    if (options?.personApproved) {
+      try {
+        await approveOneApplicationResume(job, { personApproved: true });
+      } catch (error: unknown) {
+        heldBack.push({
+          jobId: job.id,
+          title: job.title,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+      continue;
+    }
+    await approveOneApplicationResume(job, {});
+  }
+  return heldBack;
+
+  async function approveOneApplicationResume(
+    job: (typeof jobs)[number],
+    approval: { personApproved?: boolean },
+  ): Promise<void> {
+    const jobId = job.id;
     const usesOriginalResume =
       (job.resumeApplicationMode ??
         settings.resumeApplicationMode ??
         "tailored_per_job") === "original_resume";
-    if (usesOriginalResume) continue;
+    if (usesOriginalResume) return;
 
     const workspace = await workspaceService.getResumeWorkspace(jobId);
     const approvedExport = workspace.exports.find(
@@ -669,19 +700,23 @@ export async function approveApplicationResumes(
         () => true,
         () => false,
       );
-      if (exportExists) continue;
+      if (exportExists) return;
       // Re-render the same approved draft if its managed PDF was removed.
       // Its existing claim decisions still apply, including Aggressive ones.
     }
 
     const tailoringMode =
       job.resumeTailoringMode ?? searchPreferences.tailoringMode;
-    if (tailoringMode === "aggressive" && !alreadyApproved) {
+    if (
+      tailoringMode === "aggressive" &&
+      !alreadyApproved &&
+      !approval.personApproved
+    ) {
       holdBack(
         job,
         `Read and approve the Aggressive resume for '${job.title}' before applying.`,
       );
-      continue;
+      return;
     }
 
     try {
@@ -691,11 +726,16 @@ export async function approveApplicationResumes(
         error instanceof Error &&
         /still need your decision/iu.test(error.message)
       ) {
+        if (approval.personApproved) {
+          throw new Error(
+            `The resume for '${job.title}' has a line waiting for your decision.`,
+          );
+        }
         holdBack(
           job,
           `The resume for '${job.title}' has a line waiting for your decision. Open it, keep or change the line, then apply.`,
         );
-        continue;
+        return;
       }
       throw error;
     }
@@ -716,7 +756,6 @@ export async function approveApplicationResumes(
     }
     await workspaceService.approveResume(jobId, exportToApprove.id);
   }
-  return heldBack;
 }
 
 /**
@@ -3535,6 +3574,27 @@ export function registerJobFinderRouteHandlers(
         (await repository.getSettings()).applicationAutomationMode ??
         "prepare_only";
       await getApplyQueueRunner().start(jobIds, mode);
+      return workspaceMutationResponse(
+        event.sender,
+        await readWorkspaceProjection(service),
+      );
+    },
+  );
+
+  // "Approve N resumes": the person's press approves each named resume as
+  // the single Approve does; a line still to decide keeps its resume out.
+  ipcMain.handle(
+    "job-finder:approve-resumes",
+    async (event, payload: unknown) => {
+      const { jobIds } = JobFinderApproveResumesInputSchema.parse(payload);
+      const service = await getJobFinderWorkspaceService();
+      await approveApplicationResumes(service, jobIds, {
+        personApproved: true,
+        onProgress: (done) => {
+          if (done > 0 && done % 10 === 0)
+            publishJobFinderWorkspaceUpdate(event.sender);
+        },
+      });
       return workspaceMutationResponse(
         event.sender,
         await readWorkspaceProjection(service),

@@ -720,7 +720,7 @@ describe("ApplicationsScreen", () => {
       behavior: "smooth",
     });
   });
-  it("shows fourteen outstanding retries and starts only the next ten", () => {
+  it("retries all fourteen applications with one press (ADR 0058)", () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
     stubCandidateAssetsBridge();
     const records = Array.from({ length: 14 }, (_, i) =>
@@ -762,14 +762,12 @@ describe("ApplicationsScreen", () => {
         />
       </MemoryRouter>,
     );
-    expect(
-      screen.getByText(
-        "14 applications need another try; 10 start at a time, 4 wait for the next batch",
-      ),
-    ).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Retry next 10" }));
+    expect(screen.getByText("14 applications need another try")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Try again for all 14" }),
+    );
     expect(onStartAutoApplyQueue).toHaveBeenCalledWith(
-      records.slice(0, 10).map((record) => record.jobId),
+      records.map((record) => record.jobId),
       "prepare_only",
     );
   });

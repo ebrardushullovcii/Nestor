@@ -74,6 +74,20 @@ export type JobFinderApplyQueueControlInput = z.infer<
   typeof JobFinderApplyQueueControlInputSchema
 >;
 
+/**
+ * The person's press of "Approve N resumes": each named job's current resume
+ * is approved as written, as the single Approve does. A resume with a line
+ * still to decide is left for the person.
+ */
+export const JobFinderApproveResumesInputSchema = z
+  .object({
+    jobIds: z.array(NonEmptyStringSchema).min(1).max(APPLY_QUEUE_MAX_JOBS),
+  })
+  .strict();
+export type JobFinderApproveResumesInput = z.infer<
+  typeof JobFinderApproveResumesInputSchema
+>;
+
 /** Jobs of the queue no run has taken yet, in the order they were chosen. */
 export function listApplyQueueRemainingJobIds(queue: ApplyQueue): string[] {
   const taken = new Set([

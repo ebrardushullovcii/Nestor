@@ -291,9 +291,9 @@ describe("ReviewQueueListPanel", () => {
 
   it("offers one press to create every missing resume and one to apply to every ready job", () => {
     const onPrepareTailoredDrafts = vi.fn();
-    const onApplyToAllReady = vi.fn();
+    const onApplyToJobs = vi.fn();
     renderPanel({
-      onApplyToAllReady,
+      onApplyToJobs,
       onPrepareTailoredDrafts,
       queue: [
         createEligibleItem("job_a"),
@@ -311,7 +311,7 @@ describe("ReviewQueueListPanel", () => {
     fireEvent.click(
       within(row).getByRole("button", { name: "Apply to the 1 ready job" }),
     );
-    expect(onApplyToAllReady).toHaveBeenCalledWith(1);
+    expect(onApplyToJobs).toHaveBeenCalledWith(["job_c"]);
     // The reassurance is the button's tooltip, not a paragraph under it.
     expect(
       within(row)
@@ -327,19 +327,19 @@ describe("ReviewQueueListPanel", () => {
 
   it("says under Apply to all which saved mode the batch runs in", () => {
     renderPanel({
-      applyAllOutcome: describeApplyAllOutcome("autonomous_submit"),
-      onApplyToAllReady: vi.fn(),
+      applyAllOutcome: describeApplyAllOutcome("autonomous_submit", 20),
+      onApplyToJobs: vi.fn(),
       queue: [createReadyItem("job_a"), createReadyItem("job_b")],
     });
 
     expect(screen.getByTestId("apply-all-outcome").textContent).toBe(
-      "Apply to all fills in and sends each application, and stops only for one that needs you.",
+      "Sends each application for you and stops only for one that needs you. Ten at a time, up to 20 a day, with no more presses.",
     );
   });
 
   it("leaves a job already in Applications out of the ready count", () => {
     renderPanel({
-      onApplyToAllReady: vi.fn(),
+      onApplyToJobs: vi.fn(),
       preparedJobIds: new Set(["job_done"]),
       queue: [createReadyItem("job_done"), createReadyItem("job_ready")],
     });
@@ -436,7 +436,7 @@ describe("ReviewQueueListPanel", () => {
   it("replaces Apply to all with Open Safeguards while a safeguard holds, without internal codes", () => {
     const onOpenSafeguards = vi.fn();
     renderPanel({
-      onApplyToAllReady: vi.fn(),
+      onApplyToJobs: vi.fn(),
       onOpenSafeguards,
       queue: [createReadyItem("job_a"), createReadyItem("job_b")],
       safeguardBlocker:
@@ -610,7 +610,7 @@ it("excludes a locally pending rewrite from the bulk ready count", () => {
   renderPanel({
     queue: items,
     isJobPending: (jobId) => jobId === "pending",
-    onApplyToAllReady: vi.fn(),
+    onApplyToJobs: vi.fn(),
   });
   expect(
     screen.getByRole("button", { name: "Apply to the 1 ready job" }),
@@ -713,20 +713,53 @@ it("opens the first job of a status tab when the open job is not in it, and keep
   expect(onShowItem).not.toHaveBeenCalled();
 });
 
-it("explains the next ten out of 53 ready applications before starting", () => {
-  const onApplyToAllReady = vi.fn();
+it("queues all 53 ready applications with one press, or just this page", () => {
+  const onApplyToJobs = vi.fn();
   renderPanel({
     queue: Array.from({ length: 53 }, (_, i) => createReadyItem(`ready_${i}`)),
-    applicationBatchLimit: 10,
-    onApplyToAllReady,
+    onApplyToJobs,
+  });
+  expect(screen.queryByText(/start now/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Apply to all 53 ready" }));
+  expect(onApplyToJobs).toHaveBeenLastCalledWith(
+    Array.from({ length: 53 }, (_, i) => `ready_${i}`),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Apply to these 50" }));
+  expect(onApplyToJobs.mock.lastCall?.[0]).toHaveLength(50);
+});
+
+it("leaves jobs an Apply queue already holds out of the ready count", () => {
+  renderPanel({
+    queue: [createReadyItem("queued"), createReadyItem("free")],
+    queuedJobIds: new Set(["queued"]),
+    onApplyToJobs: vi.fn(),
   });
   expect(
-    screen.getByText(/53 ready jobs. 10 start now; 43 remain after this batch/),
+    screen.getByRole("button", { name: "Apply to the 1 ready job" }),
   ).toBeTruthy();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Apply to next 10 ready jobs" }),
+});
+
+it("applies to the ticked ready jobs and says how many still need a resume", () => {
+  const onApplyToJobs = vi.fn();
+  renderPanel({
+    queue: [
+      createReadyItem("ready_a"),
+      createReadyItem("ready_b"),
+      createEligibleItem("missing_a"),
+    ],
+    onApplyToJobs,
+    applyVerb: "Prepare",
+  });
+  for (const checkbox of screen.getAllByRole("checkbox").slice(1)) {
+    fireEvent.click(checkbox);
+  }
+  expect(screen.getByTestId("apply-selected-not-ready").textContent).toBe(
+    "1 of the selected needs its resume first; Create 1 resume writes the missing ones.",
   );
-  expect(onApplyToAllReady).toHaveBeenCalledWith(10);
+  fireEvent.click(screen.getByRole("button", { name: "Prepare 2 selected" }));
+  expect(onApplyToJobs).toHaveBeenCalledWith(
+    expect.arrayContaining(["ready_a", "ready_b"]),
+  );
 });
 
 it("names all 33 missing resumes in one control", () => {

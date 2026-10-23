@@ -25,6 +25,9 @@ import type {
   JobFinderApplyCopilotActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
+  JobFinderApplyQueueControlInput,
+  JobFinderApproveResumesInput,
+  JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
   JobFinderApplicationStartTarget,
   JobFinderPreparedApplicationPageInput,
@@ -423,6 +426,17 @@ export interface JobFinderShellActions {
   startAutoApplyQueueRun: (
     jobIds: JobFinderApplyQueueActionInput["jobIds"],
     applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  /** One Apply press over many jobs: a saved queue of runs of ten. */
+  startApplyQueue: (
+    input: JobFinderStartApplyQueueInput,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  /** The person's "Approve N resumes" press. */
+  approveResumes: (
+    input: JobFinderApproveResumesInput,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  controlApplyQueue: (
+    input: JobFinderApplyQueueControlInput,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   approveApplyRun: (
     input: JobFinderApplyRunActionInput,

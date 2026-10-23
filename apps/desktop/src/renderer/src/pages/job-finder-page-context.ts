@@ -69,6 +69,7 @@ import type { DiscoveryRunFeedback } from "@renderer/features/job-finder/screens
 import type { TailoredDraftPreparationViewState } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
 import type { ResumeWorkHistoryDecisionRequest } from "@renderer/features/job-finder/screens/review-queue/resume-workspace-work-history-decisions";
 import type { JobFinderSaveState } from "./job-finder-save-state";
+import type { ApplyQueueControlAction } from "@renderer/features/job-finder/lib/apply-queue-view";
 
 /**
  * Opt-in error propagation for one call, not a mode change for the action.
@@ -116,6 +117,10 @@ export interface JobFinderPageContext {
     applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
     options?: { stayOnCurrentPage?: boolean },
   ) => Promise<JobFinderAutoApplyQueueStartOutcome>;
+  /** The person's "Approve N resumes" press on Shortlisted. */
+  onApproveResumes: (jobIds: readonly string[]) => Promise<boolean>;
+  /** Pause, Continue, Stop or Dismiss the Apply queue (ADR 0058). */
+  onControlApplyQueue: (action: ApplyQueueControlAction) => void;
   onStartApplyCopilot: (input: JobFinderApplicationStartTarget) => void;
   onReviewResumePdf: (jobId: string) => void;
   /** Sends one finished application after the person presses Send. */

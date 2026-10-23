@@ -94,6 +94,7 @@ import type {
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
   JobFinderApplyQueueControlInput,
+  JobFinderApproveResumesInput,
   JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
   JobFinderApplicationStartTarget,
@@ -1472,6 +1473,11 @@ const desktopApi = {
     startApplyQueue: (input: JobFinderStartApplyQueueInput) =>
       ipcRenderer.invoke(
         "job-finder:start-apply-queue",
+        input,
+      ) as Promise<JobFinderWorkspaceSyncResult>,
+    approveResumes: (input: JobFinderApproveResumesInput) =>
+      ipcRenderer.invoke(
+        "job-finder:approve-resumes",
         input,
       ) as Promise<JobFinderWorkspaceSyncResult>,
     controlApplyQueue: (input: JobFinderApplyQueueControlInput) =>

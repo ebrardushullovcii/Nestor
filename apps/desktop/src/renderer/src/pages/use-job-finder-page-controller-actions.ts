@@ -112,6 +112,7 @@ import {
   getJobFinderErrorMessage,
 } from "@renderer/features/job-finder/lib/job-finder-error-message";
 import { buildJobFinderContextRoute } from "../features/job-finder/lib/job-finder-context-navigation";
+import type { ApplyQueueControlAction } from "../features/job-finder/lib/apply-queue-view";
 import { buildResumeWorkspaceRoute } from "@renderer/features/job-finder/lib/resume-workspace-route";
 import {
   enqueueResumeApproval,
@@ -598,51 +599,42 @@ function getActiveCampaignReviewQueue(
 }
 
 /**
- * What an Apply press started. Main holds back a job whose resume still
- * waits on the person and starts the rest, so the sentence counts the jobs
- * the new batch took and names any it left out.
+ * What an Apply press queued. Up to ten start at once; a longer choice goes
+ * on in runs of ten, and a day's limit waits for tomorrow (ADR 0058).
  */
-export function describeAutoApplyQueueStart(
+export function describeApplyQueueStart(
   snapshot:
-    | (Pick<JobFinderRendererWorkspaceSnapshot, "applyRuns" | "reviewQueue"> &
-        Partial<Pick<JobFinderRendererWorkspaceSnapshot, "applyJobResults">>)
+    | Pick<JobFinderRendererWorkspaceSnapshot, "applyQueue" | "reviewQueue">
     | null
     | undefined,
   jobIds: readonly string[],
   options?: { onlyWhenHeldBack?: boolean },
 ): string | null {
-  const sentJobIds = new Set(
-    (snapshot?.applyJobResults ?? [])
-      .filter(
-        (result) =>
-          result.privacyReceipt?.finalSubmitOccurred === true &&
-          (!result.privacyReceipt.submissionOutcome ||
-            result.privacyReceipt.submissionOutcome.outcome === "submitted"),
-      )
-      .map((result) => result.jobId),
-  );
-  if (jobIds.length > 0 && jobIds.every((id) => sentJobIds.has(id)))
-    return "These applications are already sent. Nothing was started.";
-  const newestRun = [...(snapshot?.applyRuns ?? [])].sort((left, right) =>
-    right.createdAt.localeCompare(left.createdAt),
-  )[0];
-  const inRun = new Set(newestRun?.jobIds ?? jobIds);
-  const started = jobIds.filter((jobId) => inRun.has(jobId)).length;
-  const heldBack = jobIds
-    .filter((jobId) => !inRun.has(jobId))
-    .map(
-      (jobId) =>
-        snapshot?.reviewQueue.find((item) => item.jobId === jobId)?.title ??
-        "one job",
-    );
-  const startedSentence =
-    started === 1
-      ? "Application started. Watch it in Applications."
-      : `${started} applications started. Watch them in Applications.`;
-  if (heldBack.length === 0 || started === 0) {
-    return options?.onlyWhenHeldBack ? null : startedSentence;
+  const queue = snapshot?.applyQueue ?? null;
+  if (!queue) return null;
+  const chosen = new Set(jobIds);
+  const heldBack = queue.skipped.filter((entry) => chosen.has(entry.jobId));
+  const heldBackSentence =
+    heldBack.length === 0
+      ? ""
+      : heldBack.length === 1
+        ? ` ${snapshot?.reviewQueue.find((item) => item.jobId === heldBack[0]!.jobId)?.title ?? "One job"} waits: ${heldBack[0]!.reason}`
+        : ` ${heldBack.length} wait for you first: ${heldBack[0]!.reason}`;
+  if (queue.state === "paused" && queue.pausedReason) {
+    return `Nothing new started. ${queue.pausedReason}`;
   }
-  return `${startedSentence} ${heldBack.length === 1 ? `${heldBack[0]} waits` : `${heldBack.join(", ")} wait`}: ${heldBack.length === 1 ? "its resume has" : "their resumes have"} a line for you to decide first.`;
+  if (options?.onlyWhenHeldBack) return heldBackSentence.trim() || null;
+  const going = jobIds.length - heldBack.length;
+  if (queue.state === "waiting_for_tomorrow") {
+    return `Today's limit is reached, so ${going === 1 ? "this one starts" : `these ${going} start`} after midnight by themselves.${heldBackSentence}`;
+  }
+  const started =
+    going <= 10
+      ? going === 1
+        ? "Application started. Watch it in Applications."
+        : `${going} applications started. Watch them in Applications.`
+      : `${going} applications queued: ten at a time, inside your daily limit, with no more presses. Progress is on Home and Applications.`;
+  return `${started}${heldBackSentence}`;
 }
 
 export function describePreparedApplicationSubmitResult(
@@ -1824,16 +1816,8 @@ export function createPrimaryPageActions(
       applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
       options?: { stayOnCurrentPage?: boolean },
     ): Promise<JobFinderAutoApplyQueueStartOutcome> => {
-      const capacityRefusal = getDailyCapacityRefusalMessage();
-      if (capacityRefusal) {
-        applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
-        return {
-          status: "refused",
-          reason: "daily_capacity_exhausted",
-          message: capacityRefusal,
-        };
-      }
-
+      // No daily-limit refusal here: the Apply queue waits for tomorrow and
+      // says so on Home and Applications (ADR 0058).
       if (jobIds.length === 0) {
         const message = "No jobs selected for auto-apply queue.";
         applyRouteScopedMessage({ message });
@@ -1861,13 +1845,17 @@ export function createPrimaryPageActions(
       let backendRejected = false;
       const confirmed = await runAction(
         () =>
-          (applicationAutomationMode
-            ? actions.startAutoApplyQueueRun(jobIds, applicationAutomationMode)
-            : actions.startAutoApplyQueueRun(jobIds)
-          ).catch((error: unknown) => {
-            backendRejected = true;
-            throw error;
-          }),
+          actions
+            .startApplyQueue({
+              jobIds: [...jobIds],
+              ...(applicationAutomationMode
+                ? { applicationAutomationMode }
+                : {}),
+            })
+            .catch((error: unknown) => {
+              backendRejected = true;
+              throw error;
+            }),
         () => {
           setResumeWorkspaceDirty(false);
           if (!options?.stayOnCurrentPage) {
@@ -1877,9 +1865,9 @@ export function createPrimaryPageActions(
           }
         },
         (snapshot) =>
-          describeAutoApplyQueueStart(snapshot, jobIds, {
-            // Home shows the running batch itself; a "started" line there
-            // outlived the batch. It keeps only a job held back.
+          describeApplyQueueStart(snapshot, jobIds, {
+            // Home shows the queue itself; a "started" line there outlived
+            // it. It keeps only what needs the person.
             onlyWhenHeldBack: options?.stayOnCurrentPage === true,
           }),
         { scope: jobFinderPendingActions.apply() },
@@ -1892,6 +1880,31 @@ export function createPrimaryPageActions(
         ? { status: "failed", message: null }
         : { status: "unknown" };
     },
+    onApproveResumes: (jobIds: readonly string[]) =>
+      runAction(
+        () => actions.approveResumes({ jobIds: [...jobIds] }),
+        () => undefined,
+        (snapshot) => {
+          const chosen = new Set(jobIds);
+          const approved = (snapshot.reviewQueue ?? []).filter(
+            (item) =>
+              chosen.has(item.jobId) && item.resumeReview.status === "approved",
+          ).length;
+          const left = jobIds.length - approved;
+          return `${approved === 1 ? "1 resume approved" : `${approved} resumes approved`}.${left > 0 ? ` ${left} could not be: open ${left === 1 ? "it" : "them"} under To review.` : ""}`;
+        },
+        {
+          scope: jobFinderPendingActions.apply(),
+          startMessage: `Approving ${jobIds.length === 1 ? "1 resume" : `${jobIds.length} resumes`}...`,
+        },
+      ),
+    onControlApplyQueue: (action: ApplyQueueControlAction) =>
+      void runAction(
+        () => actions.controlApplyQueue({ action }),
+        () => undefined,
+        null,
+        { scope: jobFinderPendingActions.apply() },
+      ),
     onStartAutoApply: (input: JobFinderApplicationStartTarget) => {
       const capacityRefusal = getDailyCapacityRefusalMessage();
       if (capacityRefusal) {

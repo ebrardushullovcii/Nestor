@@ -113,14 +113,16 @@ export function describeApplyOutcome(
  */
 export function describeApplyAllOutcome(
   mode: ApplicationAutomationMode,
+  dailyLimit: number | null = null,
 ): string {
+  const pace = `Ten at a time${dailyLimit ? `, up to ${dailyLimit.toLocaleString("en-US")} a day` : ""}, with no more presses.`;
   switch (mode) {
     case "autonomous_submit":
-      return "Apply to all fills in and sends each application, and stops only for one that needs you.";
+      return `Sends each application for you and stops only for one that needs you. ${pace}`;
     case "confirm_before_submit":
-      return "Apply to all fills in each form, then waits for your go-ahead before sending each one.";
+      return `Fills in each form, then waits for your go-ahead before sending each one. ${pace}`;
     default:
-      return "Apply to all fills in each form and attaches its resume; you press Send on each one.";
+      return `Fills in each form and attaches its resume; you press Send on each one. ${pace}`;
   }
 }
 

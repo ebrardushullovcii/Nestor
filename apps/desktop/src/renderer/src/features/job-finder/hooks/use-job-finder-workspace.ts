@@ -18,6 +18,9 @@ import type {
   JobFinderApplyCopilotActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
+  JobFinderApplyQueueControlInput,
+  JobFinderApproveResumesInput,
+  JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
   JobFinderApplicationStartTarget,
   JobFinderPreparedApplicationPageInput,
@@ -734,6 +737,18 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
             jobIds,
             applicationAutomationMode,
           ),
+        ),
+      startApplyQueue: (input: JobFinderStartApplyQueueInput) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.startApplyQueue(input),
+        ),
+      approveResumes: (input: JobFinderApproveResumesInput) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.approveResumes(input),
+        ),
+      controlApplyQueue: (input: JobFinderApplyQueueControlInput) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.controlApplyQueue(input),
         ),
       approveApplyRun: (input: JobFinderApplyRunActionInput) =>
         runWorkspaceAction(() =>

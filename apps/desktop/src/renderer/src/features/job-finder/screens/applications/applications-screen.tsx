@@ -72,7 +72,11 @@ import {
   WAITING_FOR_BROWSER_TAB_SUMMARY,
 } from "./apply-state";
 import { buildApplyRunContextReader } from "./applications-recovery-state";
-import { APPLICATION_PREPARATION_BATCH_LIMIT } from "../review-queue/review-queue-status";
+import { ApplyQueueStrip } from "../../components/apply-queue-strip";
+import {
+  listApplyQueueWaitingJobIds,
+  type ApplyQueueControlAction,
+} from "../../lib/apply-queue-view";
 import { useAssistantContextSource } from "../../assistant/assistant-provider";
 import { buildListContext } from "../../assistant/assistant-context-capture";
 
@@ -145,6 +149,10 @@ export function ApplicationsScreen(props: {
     jobIds: string[],
     applicationAutomationMode?: ApplicationAutomationMode,
   ) => void;
+  /** The Apply queue (ADR 0058), shown above the list with its controls. */
+  applyQueue?: JobFinderRendererWorkspaceSnapshot["applyQueue"];
+  onControlApplyQueue?: (action: ApplyQueueControlAction) => void;
+  onRaiseDailyLimit?: () => void;
   onStartApplyCopilot: (input: JobFinderExactApplicationTarget) => void;
   onReviewResumePdf?: (jobId: string) => void;
   onOpenCompany?: (companyId: string) => void;
@@ -421,6 +429,8 @@ export function ApplicationsScreen(props: {
         .filter((run) => run.state === "running")
         .flatMap((run) => run.jobIds),
     );
+    for (const jobId of listApplyQueueWaitingJobIds(props.applyQueue))
+      running.add(jobId);
     const jobIds: string[] = [];
     for (const record of applicationRecords) {
       if (running.has(record.jobId)) continue;
@@ -894,28 +904,19 @@ export function ApplicationsScreen(props: {
     }
     const retryCount = retryableJobIds.length;
     if (applicationRecords.length > 0 && retryCount > 1) {
-      const limit = APPLICATION_PREPARATION_BATCH_LIMIT;
-      // ADR 0043: the total, how many start now and how many remain.
+      // One press queues them all; the Apply queue goes ten at a time and
+      // waits for tomorrow at the daily limit (ADR 0058).
       applicationsStatusItems.push({
         id: "bulk-retry",
         tone: "warning",
-        text:
-          retryCount > limit
-            ? `${retryCount} applications need another try; ${limit} start at a time, ${retryCount - limit} wait for the next batch`
-            : `${retryCount} applications need another try`,
+        text: `${retryCount} applications need another try`,
         action: {
           kind: "button",
-          label:
-            retryCount > limit
-              ? `Retry next ${limit}`
-              : `Try again for all ${retryCount}`,
-          disabled:
-            isApplyPending ||
-            (dailyPreparationCapacity !== null &&
-              dailyPreparationCapacity.remaining < 1),
+          label: `Try again for all ${retryCount}`,
+          disabled: isApplyPending,
           onClick: () =>
             onStartAutoApplyQueue(
-              retryableJobIds.slice(0, limit),
+              retryableJobIds,
               props.applicationAutomationMode ?? "prepare_only",
             ),
         },
@@ -1034,6 +1035,15 @@ export function ApplicationsScreen(props: {
             statusItems={applicationsStatusItems}
             title={workspaceView === "crm" ? "Tracker" : "Applications"}
           />
+          {workspaceView === "workflow" && props.onControlApplyQueue ? (
+            <ApplyQueueStrip
+              dailyLimit={dailyPreparationCapacity?.limit ?? null}
+              onControl={props.onControlApplyQueue}
+              onRaiseLimit={() => props.onRaiseDailyLimit?.()}
+              pending={isApplyPending}
+              queue={props.applyQueue}
+            />
+          ) : null}
           {visibleActionMessage ? (
             <p
               aria-atomic="true"
