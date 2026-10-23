@@ -1,4 +1,13 @@
 import {
+  ApplicationPageStatesInputSchema,
+  ApplicationPageStatesSchema,
+  ReopenApplicationPageInputSchema,
+  ApplicationPageStateSchema,
+  ApplicationPageReopenProgressSchema,
+  type ReopenApplicationPageInput,
+  type ApplicationPageReopenProgress,
+} from "@nestor/contracts";
+import {
   ResumeBatchGenerationResultSchema,
   ResumeBatchGenerationProgressSchema,
   type ResumeBatchGenerationInput,
@@ -1390,6 +1399,37 @@ const desktopApi = {
         action,
         patchIds,
       }) as Promise<readonly ResumeAssistantMessage[]>,
+    getApplicationPageStates: async (resultIds: string[]) =>
+      ApplicationPageStatesSchema.parse(
+        await ipcRenderer.invoke(
+          "job-finder:get-application-page-states",
+          ApplicationPageStatesInputSchema.parse({ resultIds }),
+        ),
+      ),
+    reopenApplicationPage: async (
+      input: ReopenApplicationPageInput,
+      onProgress?: (progress: ApplicationPageReopenProgress) => void,
+    ) => {
+      const command = ReopenApplicationPageInputSchema.parse(input);
+      const requestId = `reopen_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const channel = `job-finder:application-page-reopen-progress:${requestId}`;
+      const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+        const parsed = ApplicationPageReopenProgressSchema.safeParse(payload);
+        if (parsed.success && parsed.data.resultId === command.resultId)
+          onProgress?.(parsed.data);
+      };
+      ipcRenderer.on(channel, handler);
+      try {
+        return ApplicationPageStateSchema.parse(
+          await ipcRenderer.invoke("job-finder:reopen-application-page", {
+            ...command,
+            requestId,
+          }),
+        );
+      } finally {
+        ipcRenderer.off(channel, handler);
+      }
+    },
     generateResumeForBatch: async (input: ResumeBatchGenerationInput) =>
       ResumeBatchGenerationResultSchema.parse(
         await ipcRenderer.invoke("job-finder:generate-resume-for-batch", input),

@@ -1,4 +1,5 @@
 import {
+  PreparedApplicationFormSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
   ApplySubmitApprovalSchema,
@@ -329,6 +330,7 @@ export function createInMemoryJobFinderRepository(
         normalizedSeed.applicationQuestionRecords;
       state.applicationAnswerRecords = normalizedSeed.applicationAnswerRecords;
       state.applicationArtifactRefs = normalizedSeed.applicationArtifactRefs;
+      state.preparedApplicationForms = normalizedSeed.preparedApplicationForms;
       state.applicationReplayCheckpoints =
         normalizedSeed.applicationReplayCheckpoints;
       state.applicationConsentRequests =
@@ -1270,6 +1272,7 @@ export function createInMemoryJobFinderRepository(
     listApplyJobResults(options) {
       const values = state.applyJobResults.filter((result) =>
         matchesOptionalStringFilters(result, [
+          ["id", options?.id],
           ["runId", options?.runId],
           ["jobId", options?.jobId],
           ["applicationRecordId", options?.applicationRecordId],
@@ -1277,6 +1280,17 @@ export function createInMemoryJobFinderRepository(
       );
 
       return Promise.resolve(sortApplyJobResults(cloneValue(values)));
+    },
+    getPreparedApplicationForm(resultId) {
+      return Promise.resolve(cloneValue(state.preparedApplicationForms?.find(form => form.id === resultId) ?? null));
+    },
+    upsertPreparedApplicationForm(form) {
+      state.preparedApplicationForms = upsertById(state.preparedApplicationForms ?? [], PreparedApplicationFormSchema.parse(cloneValue(form)));
+      return Promise.resolve();
+    },
+    deletePreparedApplicationForm(resultId) {
+      state.preparedApplicationForms = (state.preparedApplicationForms ?? []).filter(form => form.id !== resultId);
+      return Promise.resolve();
     },
     upsertApplyJobResult(result) {
       const normalizedResult = ApplyJobResultSchema.parse(cloneValue(result));

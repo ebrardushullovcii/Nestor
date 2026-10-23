@@ -1,4 +1,7 @@
 import type {
+  ApplicationPageState,
+  ApplicationPageReopenProgress,
+  ReopenApplicationPageInput,
   ResumeBatchGenerationInput,
   ResumeBatchGenerationResult,
   ResumeBatchGenerationProgress,
@@ -618,6 +621,13 @@ declare global {
           action: "accept" | "reject",
           patchIds: readonly string[],
         ) => Promise<readonly ResumeAssistantMessage[]>;
+        getApplicationPageStates: (
+          resultIds: string[],
+        ) => Promise<ApplicationPageState[]>;
+        reopenApplicationPage: (
+          input: ReopenApplicationPageInput,
+          onProgress?: (progress: ApplicationPageReopenProgress) => void,
+        ) => Promise<ApplicationPageState>;
         generateResumeForBatch: (
           input: ResumeBatchGenerationInput,
         ) => Promise<ResumeBatchGenerationResult>;

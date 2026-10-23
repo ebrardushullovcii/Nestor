@@ -16,6 +16,8 @@ import {
 import type { Browser } from "playwright";
 import {
   DesktopBrowserStateSchema,
+  EMBEDDED_BROWSER_MAX_WORKING_TABS,
+  EMBEDDED_BROWSER_MAX_TOTAL_TABS,
   resolveBrowserAddress,
   type DesktopBrowserState,
   type DesktopBrowserAttention,
@@ -26,6 +28,7 @@ import {
   type WaitingFormMemory,
 } from "@nestor/contracts";
 import path from "node:path";
+import { TabLifecycle } from "./tab-lifecycle";
 import { routeMainWindowZoomShortcut } from "../../setup/window-zoom";
 import { createAgentInputLedger } from "./agent-input-ledger";
 import { BrowserCdpBridge, type BrowserCdpPage } from "./browser-cdp-bridge";
@@ -45,8 +48,8 @@ import {
 } from "./browser-navigation";
 
 export const EMBEDDED_BROWSER_PARTITION = "persist:nestor-browser";
-const MAX_TABS = 8;
-const MAX_TOTAL_TABS = 16;
+const MAX_TABS = EMBEDDED_BROWSER_MAX_WORKING_TABS;
+const MAX_TOTAL_TABS = EMBEDDED_BROWSER_MAX_TOTAL_TABS;
 interface BrowserPage extends BrowserCdpPage {
   view: WebContentsView;
   createdAt: number;
@@ -100,6 +103,7 @@ export class EmbeddedBrowser {
   private backstage: BrowserWindow | null = null;
   private browserSession: Session | null = null;
   private readonly pageMap = new Map<string, BrowserPage>();
+  private readonly tabLifecycle = new TabLifecycle();
   private readonly pageListeners = new Set<(page: BrowserCdpPage) => void>();
   private stateListeners = new Set<(state: DesktopBrowserState) => void>();
   private activeTabId: string | null = null;
@@ -125,12 +129,14 @@ export class EmbeddedBrowser {
     company: string,
     location = "",
     reference = tabId.slice(-6),
+    restoredLabel?: string,
   ): void {
     const page = this.pageMap.get(tabId);
     if (!page || page.contents.isDestroyed()) return;
     const baseLabel =
       // The place leads, so two tabs for the same role differ where the tab
       // text is cut; the short reference is only added when even that matches.
+      restoredLabel?.slice(0, 280) ??
       [location, title.slice(0, 120), company.slice(0, 80)]
         .filter(Boolean)
         .join(" · ")
@@ -207,7 +213,6 @@ export class EmbeddedBrowser {
     string,
     ReturnType<typeof setTimeout>
   >();
-  private readonly idleGarbageCollectionAt = new Map<string, number>();
   /** The agent's input, told apart from the person's by source. */
   private readonly agentPresses = createAgentInputLedger();
   private readonly operationClaims = new Map<
@@ -345,6 +350,69 @@ export class EmbeddedBrowser {
   private readonly finishedTabs = new Set<string>();
   private readonly ownedTabs = new Map<string, Set<string>>();
   private readonly releasedOwnedTabs = new Set<string>();
+  private readonly preparedForms = new Map<string, number>();
+  private applicationTabsClosed: ((owner: string | null) => void) | null = null;
+
+  setApplicationTabsClosedHandler(
+    handler: (owner: string | null) => void,
+  ): void {
+    this.applicationTabsClosed = handler;
+  }
+  private readonly discardedFormLabels = new Map<
+    string,
+    { title: string; url: string; baseLabel: string; reference: string }
+  >();
+  private reclaimPreparedForm:
+    | ((owner: string, canDiscard: () => boolean) => Promise<boolean>)
+    | null = null;
+
+  setPreparedFormReclaimer(
+    reclaim: (owner: string, canDiscard: () => boolean) => Promise<boolean>,
+  ): void {
+    this.reclaimPreparedForm = reclaim;
+  }
+
+  markPreparedForm(owner: string): boolean {
+    if (!this.ownedTabs.get(owner)?.size) return false;
+    this.preparedForms.set(owner, Date.now());
+    const label = this.discardedFormLabels.get(owner);
+    if (label) {
+      for (const id of this.ownedTabs.get(owner) ?? []) {
+        const page = this.pageMap.get(id);
+        if (page && !page.contents.isDestroyed())
+          this.applicationTabLabels.set(id, {
+            ...label,
+            url: page.contents.getURL(),
+          });
+      }
+      this.discardedFormLabels.delete(owner);
+      this.emit();
+    }
+    return true;
+  }
+
+  private canDiscardPreparedForm(owner: string): boolean {
+    const tabs = this.ownedTabs.get(owner);
+    return (
+      Boolean(tabs?.size) &&
+      [...(tabs ?? [])].every(
+        (id) =>
+          !this.heldTabs.has(id) &&
+          !this.parkedTabs.has(id) &&
+          !this.personTabs.has(id) &&
+          !this.personInputTabs.has(id) &&
+          !this.lentTabs.has(id) &&
+          !(
+            this.activeTabId === id &&
+            this.presentation !== "minimized" &&
+            this.viewport.visible
+          ) &&
+          ![...this.operationClaims.values()].some((claim) =>
+            claim.tabs.has(id),
+          ),
+      )
+    );
+  }
 
   async reclaimOwnedTabs(owner: string): Promise<void> {
     const tabs = this.ownedTabs.get(owner);
@@ -384,6 +452,8 @@ export class EmbeddedBrowser {
   ): void {
     const tabs = this.ownedTabs.get(owner);
     this.ownedTabs.delete(owner);
+    this.preparedForms.delete(owner);
+    this.discardedFormLabels.delete(owner);
     for (const id of tabs ?? []) {
       if (options.keepForPerson || this.personInputTabs.has(id)) {
         this.personTabs.add(id);
@@ -703,13 +773,24 @@ export class EmbeddedBrowser {
     if (!page || page.contents.isDestroyed() || page.contents.isLoading())
       return null;
     const url = page.contents.getURL();
-    const value = (await Promise.race([
-      page.contents.executeJavaScript(script, false),
-      new Promise((_resolve, reject) =>
-        setTimeout(() => reject(new Error("The page did not answer.")), 3_000),
-      ),
-    ])) as T;
-    return { url, value };
+    await this.noteAutomationCommand(tabId, true, false);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const value = (await Promise.race([
+        page.contents.executeJavaScript(script, false),
+        new Promise((_resolve, reject) => {
+          deadline = setTimeout(
+            () => reject(new Error("The page did not answer.")),
+            3_000,
+          );
+        }),
+      ])) as T;
+      return { url, value };
+    } finally {
+      clearTimeout(deadline);
+      await this.noteAutomationCommand(tabId, false, false);
+      this.syncTabLifecycle(page);
+    }
   }
 
   private handleUserInput(
@@ -821,7 +902,12 @@ export class EmbeddedBrowser {
       [...this.ownedTabs.values()].flatMap((tabs) => [...tabs]),
     );
     return [...this.pageMap.keys()].filter(
-      (id) => working.has(id) || (!this.parkedTabs.has(id) && !waiting.has(id)),
+      (id) =>
+        working.has(id) ||
+        (!this.parkedTabs.has(id) &&
+          !waiting.has(id) &&
+          !this.personTabs.has(id) &&
+          !this.heldTabs.has(id)),
     ).length;
   }
 
@@ -835,15 +921,17 @@ export class EmbeddedBrowser {
 
   private shouldThrottleTab(id: string): boolean {
     return (
-      this.operations.size === 0 ||
-      this.isWaitingTab(id) ||
-      (!this.automationCommands.has(id) && !this.automationIdleTimers.has(id))
+      !this.automationCommands.has(id) && !this.automationIdleTimers.has(id)
     );
   }
 
-  private noteAutomationCommand(id: string, active: boolean): void {
+  private noteAutomationCommand(
+    id: string,
+    active: boolean,
+    emulateFocus = true,
+  ): Promise<void> {
     const page = this.pageMap.get(id);
-    if (!page || page.contents.isDestroyed()) return;
+    if (!page || page.contents.isDestroyed()) return Promise.resolve();
     const previousTimer = this.automationIdleTimers.get(id);
     if (previousTimer) clearTimeout(previousTimer);
     this.automationIdleTimers.delete(id);
@@ -853,9 +941,24 @@ export class EmbeddedBrowser {
     );
     if (count > 0) {
       this.automationCommands.set(id, count);
-      page.contents.setBackgroundThrottling(false);
+      if (emulateFocus) page.contents.setBackgroundThrottling(false);
+      return this.tabLifecycle
+        .setFrozen(page.contents, false)
+        .then(async () => {
+          if (emulateFocus && !page.contents.isDestroyed())
+            await page.contents.debugger.sendCommand(
+              "Emulation.setFocusEmulationEnabled",
+              { enabled: true },
+            );
+        });
     } else {
       this.automationCommands.delete(id);
+      // Native DOM probes need no animation frames or focus. Once their
+      // result arrives, a waiting form can sleep again immediately.
+      if (!emulateFocus) {
+        page.contents.setBackgroundThrottling(this.shouldThrottleTab(id));
+        return Promise.resolve();
+      }
       // Model requests can take minutes. Ads and page timers do not need to
       // run at foreground speed while no browser command is using this page.
       const timer = setTimeout(() => {
@@ -863,34 +966,53 @@ export class EmbeddedBrowser {
         if (page.contents.isDestroyed()) return;
         if (!page.contents.isDestroyed())
           page.contents.setBackgroundThrottling(this.shouldThrottleTab(id));
-        const metrics = app
-          .getAppMetrics?.()
-          .find((process) => process.pid === page.contents.getOSProcessId());
-        if (
-          !page.contents.isDestroyed() &&
-          (metrics?.memory.workingSetSize ?? 0) > 256 * 1024 &&
-          Date.now() - (this.idleGarbageCollectionAt.get(id) ?? 0) > 10_000 &&
-          page.contents.debugger.isAttached()
-        ) {
-          this.idleGarbageCollectionAt.set(id, Date.now());
-          // Reclaim unreachable page-read/JavaScript allocations while the
-          // model thinks. Live DOM, answers and attachments remain intact.
+        if (page.contents.debugger.isAttached() && this.shouldThrottleTab(id))
           void page.contents.debugger
-            .sendCommand("HeapProfiler.collectGarbage")
+            .sendCommand("Emulation.setFocusEmulationEnabled", {
+              enabled: false,
+            })
             .catch(() => undefined);
-        }
+        this.syncTabLifecycle(page);
       }, 5_000);
       timer.unref();
       this.automationIdleTimers.set(id, timer);
     }
+    return Promise.resolve();
+  }
+
+  private syncTabLifecycle(page: BrowserPage): void {
+    if (page.contents.isDestroyed()) return;
+    const visible =
+      !this.closed &&
+      !this.closing &&
+      this.presentation !== "minimized" &&
+      this.viewport.visible &&
+      this.activeTabId === page.id;
+    const retained =
+      this.isWaitingTab(page.id) ||
+      this.personTabs.has(page.id) ||
+      this.heldTabs.has(page.id) ||
+      this.finishedTabs.has(page.id);
+    const working = [...this.operationClaims.values()].some((claim) =>
+      claim.tabs.has(page.id),
+    );
+    const frozen =
+      retained &&
+      !working &&
+      !visible &&
+      !page.contents.isLoading() &&
+      this.shouldThrottleTab(page.id);
+    void this.tabLifecycle
+      .setFrozen(page.contents, frozen)
+      .catch(() => undefined);
   }
 
   private memoryCleanup: Promise<void> | null = null;
   private lastMemoryCleanupAt = 0;
 
   /**
-   * A retained application form: its answers and files are never reloaded
-   * or discarded, so it has its own memory budget. A search page parked for
+   * A retained application form has its own reclamation target. Only forms
+   * with a verified exact refill can be discarded. A search page parked for
    * the person (a sign-in or a site check) is not a form; counting two such
    * pages (530 and 600 MB on a check page) filled the budget and held every
    * other source of a search at "Waiting for a free tab" (ADR 0051).
@@ -919,63 +1041,95 @@ export class EmbeddedBrowser {
   }
 
   async reduceWaitingFormMemory(): Promise<WaitingFormMemory> {
-    if (this.memoryCleanup) await this.memoryCleanup;
-    const memory = this.getWaitingFormMemory();
-    if (
-      !waitingFormsHaveCapacity(memory) &&
-      Date.now() - this.lastMemoryCleanupAt > 10_000
-    ) {
-      this.lastMemoryCleanupAt = Date.now();
-      const hidden = memory.tabs.filter(
-        (tab) =>
-          tab.tabId !== this.activeTabId || this.presentation === "minimized",
+    if (this.memoryCleanup) {
+      await this.memoryCleanup;
+      return this.getWaitingFormMemory();
+    }
+    const needsReclaim = () => {
+      const memory = this.getWaitingFormMemory();
+      return (
+        (memory.measurementComplete && !waitingFormsHaveCapacity(memory)) ||
+        this.pageMap.size >= MAX_TOTAL_TABS - 2
       );
-      this.memoryCleanup = Promise.all(
-        hidden.map(async ({ tabId }) => {
-          const page = this.pageMap.get(tabId);
-          if (!page || page.contents.isDestroyed() || !this.isWaitingTab(tabId))
-            return;
-          page.contents.setBackgroundThrottling(true);
-          // Only unreachable objects are collected. The live DOM, selected files,
-          // session and form answers remain in the same tab.
-          if (page.contents.debugger.isAttached()) {
-            let deadline: ReturnType<typeof setTimeout> | undefined;
-            await Promise.race([
-              page.contents.debugger
-                .sendCommand("HeapProfiler.collectGarbage")
-                .catch(() => undefined),
-              new Promise<void>((resolve) => {
-                deadline = setTimeout(resolve, 2_000);
-              }),
-            ]).finally(() => clearTimeout(deadline));
-          }
-        }),
-      )
-        .then(() => undefined)
-        .finally(() => {
-          this.memoryCleanup = null;
-        });
+    };
+    if (needsReclaim() && Date.now() - this.lastMemoryCleanupAt > 10_000) {
+      this.lastMemoryCleanupAt = Date.now();
+      this.memoryCleanup = (async () => {
+        const oldest = [...this.preparedForms].sort((a, b) => a[1] - b[1]);
+        const started = Date.now();
+        for (const [owner] of oldest) {
+          if (!needsReclaim()) break;
+          // Exact refill verification needs a temporary working tab. Wait
+          // for one rather than treating a full browser as an unsafe form.
+          if (!this.hasTabCapacity()) break;
+          if (!this.canDiscardPreparedForm(owner)) continue;
+          if (Date.now() - started > 5_000) break;
+          const label = [...(this.ownedTabs.get(owner) ?? [])]
+            .map((id) => this.applicationTabLabels.get(id))
+            .find((value) => value !== undefined);
+          const discarded = await this.reclaimPreparedForm?.(owner, () =>
+            this.canDiscardPreparedForm(owner),
+          ).catch(() => false);
+          if (discarded && label) this.discardedFormLabels.set(owner, label);
+        }
+        if (!needsReclaim()) return;
+        // Unsupported forms keep their exact page; reclaim unreachable objects
+        // without retrying an AI preparation or changing their answers.
+        const hidden = this.getWaitingFormMemory().tabs.filter(
+          (tab) =>
+            tab.tabId !== this.activeTabId || this.presentation === "minimized",
+        );
+        await Promise.all(
+          hidden.map(async ({ tabId }) => {
+            const page = this.pageMap.get(tabId);
+            if (
+              !page ||
+              page.contents.isDestroyed() ||
+              !this.isWaitingTab(tabId)
+            )
+              return;
+            page.contents.setBackgroundThrottling(true);
+            // Only unreachable objects are collected. The live DOM, selected files,
+            // session and form answers remain in the same tab.
+            if (page.contents.debugger.isAttached()) {
+              let deadline: ReturnType<typeof setTimeout> | undefined;
+              await Promise.race([
+                page.contents.debugger
+                  .sendCommand("HeapProfiler.collectGarbage")
+                  .catch(() => undefined),
+                new Promise<void>((resolve) => {
+                  deadline = setTimeout(resolve, 2_000);
+                }),
+              ]).finally(() => clearTimeout(deadline));
+            }
+          }),
+        );
+      })().finally(() => {
+        this.memoryCleanup = null;
+      });
       await this.memoryCleanup;
     }
     return this.getWaitingFormMemory();
   }
 
-  hasAutomationTabCapacity(): boolean {
+  hasAutomationTabCapacity(reservedTabs = 0): boolean {
     const memory = this.getWaitingFormMemory();
-    if (!waitingFormsHaveCapacity(memory))
+    if (
+      (memory.measurementComplete && !waitingFormsHaveCapacity(memory)) ||
+      this.pageMap.size + reservedTabs >= MAX_TOTAL_TABS - 2
+    )
       void this.reduceWaitingFormMemory().catch(() => undefined);
     // Finished search tabs give way before a search waits for a free tab;
     // they close asynchronously, so the room shows at the next check.
-    if (!this.hasTabCapacity())
+    if (!this.hasTabCapacity(reservedTabs))
       this.closeIdleFinishedTabs({ keepActive: false });
-    return this.hasTabCapacity();
+    return this.hasTabCapacity(reservedTabs);
   }
 
-  private hasTabCapacity(): boolean {
+  private hasTabCapacity(reservedTabs = 0): boolean {
     return (
-      this.pageMap.size < MAX_TOTAL_TABS &&
-      this.workingTabCount() < MAX_TABS &&
-      waitingFormsHaveCapacity(this.getWaitingFormMemory())
+      this.pageMap.size + reservedTabs < MAX_TOTAL_TABS &&
+      this.workingTabCount() + reservedTabs < MAX_TABS
     );
   }
 
@@ -1031,6 +1185,9 @@ export class EmbeddedBrowser {
       ...(openerId ? { openerId } : {}),
     };
     this.pageMap.set(page.id, page);
+    // Let navigation and CDP initialization finish before freezing a new
+    // about:blank target; freezing it here can strand context.newPage().
+    void this.noteAutomationCommand(page.id, false);
     beforeAnnounce?.(page.id);
     this.closed = false;
     const selected = this.activeTabId
@@ -1056,7 +1213,10 @@ export class EmbeddedBrowser {
       : this.window
     ).contentView.addChildView(view);
     const update = () => {
-      if (!page.contents.isDestroyed()) this.emit();
+      if (!page.contents.isDestroyed()) {
+        this.syncTabLifecycle(page);
+        this.emit();
+      }
     };
     page.contents.on("did-start-loading", update);
     page.contents.on("did-stop-loading", update);
@@ -1194,13 +1354,18 @@ export class EmbeddedBrowser {
       if (idleTimer) clearTimeout(idleTimer);
       this.automationIdleTimers.delete(page.id);
       this.automationCommands.delete(page.id);
-      this.idleGarbageCollectionAt.delete(page.id);
+      this.tabLifecycle.forget(page.contents.id);
+      this.applicationTabLabels.delete(page.id);
       this.pageMap.delete(page.id);
       this.finishedTabs.delete(page.id);
       this.releasedOwnedTabs.delete(page.id);
       for (const [owner, tabs] of this.ownedTabs) {
         tabs.delete(page.id);
-        if (tabs.size === 0) this.ownedTabs.delete(owner);
+        if (tabs.size === 0) {
+          this.ownedTabs.delete(owner);
+          this.preparedForms.delete(owner);
+          this.applicationTabsClosed?.(owner);
+        }
       }
       this.agentPresses.forget(page.id);
       this.personInputTabs.delete(page.id);
@@ -1288,6 +1453,7 @@ export class EmbeddedBrowser {
     )
       return { dataUrl: null };
     try {
+      await this.noteAutomationCommand(page.id, true, false);
       const image = await page.contents.capturePage();
       if (image.isEmpty()) return { dataUrl: null };
       return {
@@ -1295,6 +1461,9 @@ export class EmbeddedBrowser {
       };
     } catch {
       return { dataUrl: null };
+    } finally {
+      await this.noteAutomationCommand(page.id, false, false);
+      this.syncTabLifecycle(page);
     }
   }
 
@@ -1350,6 +1519,7 @@ export class EmbeddedBrowser {
         if (bounds) page.view.setBounds(bounds);
         page.view.setVisible(true);
         page.contents.setBackgroundThrottling(this.shouldThrottleTab(page.id));
+        this.syncTabLifecycle(page);
         continue;
       }
       // Minimize preserves the last usable viewport; never resize a live page
@@ -1372,6 +1542,7 @@ export class EmbeddedBrowser {
       // its preferences were applied. Reassert the active-run rendering policy
       // after visibility changes so background tabs keep animation frames.
       page.contents.setBackgroundThrottling(this.shouldThrottleTab(page.id));
+      this.syncTabLifecycle(page);
     }
   }
 
@@ -1589,8 +1760,9 @@ export class EmbeddedBrowser {
           return () => this.pageListeners.delete(listener);
         },
         userAgent: () => this.getSession().getUserAgent(),
-        emulateFocus: () =>
-          this.operations.size > 0 && !this.automationRefused(),
+        emulateFocus: (pageId) =>
+          Boolean(pageId && !this.shouldThrottleTab(pageId)) &&
+          !this.automationRefused(),
         onAutomationInput: (pageId, input) => {
           if (input?.pointerDown) this.agentPresses.notePress(pageId);
           if (input?.keyDown) this.agentPresses.noteKey(pageId, input.keyDown);
@@ -1662,7 +1834,7 @@ export class EmbeddedBrowser {
       if (!bridge || !this.operations.has(controller)) return;
       const token = `nestor-claim-${randomUUID()}`;
       const landed = bridge
-        .waitForToken(token, 5_000)
+        .waitForToken(token, 5_000, combined)
         .then((tabId) => {
           if (tabId && this.operations.has(controller)) {
             claim.tabs.add(tabId);
@@ -1675,6 +1847,10 @@ export class EmbeddedBrowser {
             const claimedPage = this.pageMap.get(tabId);
             if (claimedPage && !claimedPage.contents.isDestroyed())
               claimedPage.contents.setBackgroundThrottling(false);
+            if (claimedPage)
+              void this.tabLifecycle
+                .setFrozen(claimedPage.contents, false)
+                .catch(() => undefined);
           }
         })
         .catch(() => undefined)
@@ -1721,6 +1897,7 @@ export class EmbeddedBrowser {
           page.contents.setBackgroundThrottling(
             this.shouldThrottleTab(page.id),
           );
+        this.syncTabLifecycle(page);
       }
       void this.reduceWaitingFormMemory().catch(() => undefined);
       if (this.operations.size === 0)
@@ -1966,6 +2143,7 @@ export class EmbeddedBrowser {
       return pending;
     }
     this.closing = true;
+    this.applicationTabsClosed?.(null);
     this.releasePending = false;
     if (pauseActivity && this.operations.size > 0) this.closedByPerson = true;
     this.abortOperations();
@@ -1993,6 +2171,8 @@ export class EmbeddedBrowser {
       this.parkedTabs.clear();
       this.heldTabs.clear();
       this.ownedTabs.clear();
+      this.preparedForms.clear();
+      this.discardedFormLabels.clear();
       this.releasedOwnedTabs.clear();
       this.closePromise = null;
       this.emit();

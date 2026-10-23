@@ -1,4 +1,5 @@
 import {
+  PreparedApplicationFormSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
   ApplySubmitApprovalSchema,
@@ -68,6 +69,7 @@ import type {
 } from "../repository-types";
 
 export const stateTableNames = {
+  prepared_application_forms: "prepared_application_forms",
   application_authority_envelopes: "application_authority_envelopes",
   application_answer_snapshots: "application_answer_snapshots",
   application_answer_records: "application_answer_records",
@@ -687,6 +689,7 @@ export function writeState(
     }
     initSingletonValue(database, "activity_control", state.activityControl);
     initSingletonValue(database, "intelligence_state", state.intelligence);
+    replaceCollection(database, "prepared_application_forms", state.preparedApplicationForms ?? []);
     replaceCollection(database, "saved_jobs", state.savedJobs);
     replaceCollection(database, "tailored_assets", state.tailoredAssets);
     replaceIndexedCollection(
@@ -1275,6 +1278,7 @@ export function readState(
         orderBySql: APPLY_COLLECTION_ORDER_BY_SQL.application_artifact_refs,
       },
     ),
+    preparedApplicationForms: listValues(database, "prepared_application_forms", PreparedApplicationFormSchema),
     applicationReplayCheckpoints: listCollectionValues(
       database,
       "application_replay_checkpoints",

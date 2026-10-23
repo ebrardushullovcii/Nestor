@@ -1807,7 +1807,9 @@ describe("playwright browser runtime", () => {
         navigationHostnames: ["example.com"],
         siteLabel: "Sign-in Jobs",
         dedicatedPage: true,
-        onAutomationPage: (claimedPage) => claimed.push(claimedPage),
+        onAutomationPage: (claimedPage) => {
+          claimed.push(claimedPage);
+        },
       });
 
       expect(result.agentMetadata?.parkedTab).toEqual({
@@ -1910,7 +1912,9 @@ describe("playwright browser runtime", () => {
           sourceCatalog: [createTestJob()],
           sourceCatalogComplete: true,
           dedicatedPage,
-          onAutomationPage: (claimedPage) => claimed.push(claimedPage),
+          onAutomationPage: (claimedPage) => {
+            claimed.push(claimedPage);
+          },
         });
 
         expect(result.warning).toBeNull();
@@ -1931,7 +1935,9 @@ describe("playwright browser runtime", () => {
           sourceCatalog: [createTestJob()],
           sourceCatalogComplete: true,
           dedicatedPage,
-          onAutomationPage: (claimedPage) => claimed.push(claimedPage),
+          onAutomationPage: (claimedPage) => {
+            claimed.push(claimedPage);
+          },
         });
         expect(repeated.jobs).toEqual(result.jobs);
         expect(repeated.agentMetadata?.steps).toBe(0);

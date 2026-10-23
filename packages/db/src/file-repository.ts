@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import {
+  PreparedApplicationFormSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
   ApplySubmitApprovalSchema,
@@ -1661,6 +1662,7 @@ export async function createFileJobFinderRepository(
             schema: ApplyJobResultSchema,
             orderBySql: APPLY_COLLECTION_ORDER_BY_SQL.apply_job_results,
             filters: [
+              ...(options?.id ? [["id", options.id] as const] : []),
               ...(options?.runId ? [["run_id", options.runId] as const] : []),
               ...(options?.jobId ? [["job_id", options.jobId] as const] : []),
               ...(options?.applicationRecordId
@@ -1675,6 +1677,18 @@ export async function createFileJobFinderRepository(
           }),
         ),
       );
+    },
+    getPreparedApplicationForm(resultId) {
+      const forms = listCollectionValues(database, "prepared_application_forms", PreparedApplicationFormSchema,
+        { orderBySql: "id", whereSql: "id = ?", params: [resultId] });
+      return Promise.resolve(forms[0] ?? null);
+    },
+    upsertPreparedApplicationForm(form) {
+      return context.upsertPersistedValue("prepared_application_forms", PreparedApplicationFormSchema.parse(form));
+    },
+    deletePreparedApplicationForm(resultId) {
+      database.prepare("DELETE FROM prepared_application_forms WHERE id = ?").run(resultId);
+      return secureDatabaseFile(options.filePath);
     },
     upsertApplyJobResult(result) {
       const normalizedResult = ApplyJobResultSchema.parse(cloneValue(result));
