@@ -252,7 +252,7 @@ export interface ApplicationPreparationProgress {
 export interface BrowserSessionRuntime {
   readRenderedPage?(
     url: string,
-    options?: { signal?: AbortSignal; onPage?: (page: Page) => void },
+    options?: { signal?: AbortSignal; onPage?: AutomationPageListener },
   ): Promise<{ html: string; finalUrl: string }>;
   getSessionState(source: JobSource): Promise<BrowserSessionState>;
   openSession(
@@ -419,7 +419,7 @@ export interface BrowserSessionRuntime {
  * browser between runs knows which run a tab belongs to (a person stepping
  * into that tab then stops only that run).
  */
-export type AutomationPageListener = (page: Page) => void;
+export type AutomationPageListener = (page: Page) => void | Promise<void>;
 
 export interface BrowserApplicationExecutionOptions {
   signal?: AbortSignal;

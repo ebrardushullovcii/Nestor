@@ -7,9 +7,10 @@ Status: accepted (2026-10-23).
 The owner chose to release the oldest prepared form when browser capacity is
 needed, then refill it when opened. The former seven-working/fifteen-total
 reservation limits and 768 MiB waiting-form admission gate could stop unrelated
-work for minutes. Five mixed real-board and replica pages measured about
-513 MiB working set and 334 MiB private memory after settling on a 16 GiB PC.
-Replica forms cost about 29 MiB private memory each; real boards varied widely.
+work for minutes. Ten replica forms measured about 1.3 GiB working set and
+265 MiB private memory on a 16 GiB PC. Five mixed real-board and replica pages
+settled at 836 MiB working set and 362 MiB private memory. A real board alone
+used 269 MiB working set; a single per-tab estimate does not describe every site.
 
 ## Decision
 
@@ -17,9 +18,10 @@ Replica forms cost about 29 MiB private memory each; real boards varied widely.
   working tabs and sixty-four total. Waiting forms release working capacity.
   Two GiB of waiting-form working sets is a reclamation target, not an
   admission gate. Unknown process metrics do not block unrelated work.
-- Hidden idle pages freeze without discarding their DOM or files. Reads,
-  automation commands and displaying a page wake it first. Browser commands
-  wait for waking; lifecycle requests are serialized.
+- Hidden retained pages with no active work freeze without discarding their
+  DOM or files. Reads, automation commands and displaying a page wake it first. Browser commands
+  wait for waking; lifecycle requests are serialized. Active work stays
+  load-capable and uses normal background throttling between commands.
 - At the target or near the total limit, try prepared forms oldest first.
   Never evict a page being worked on, displayed, lent, or used by the person.
   Before releasing a form, open a guarded duplicate, refill every supported

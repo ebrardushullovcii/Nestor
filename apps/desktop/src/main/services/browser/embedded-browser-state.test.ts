@@ -636,7 +636,7 @@ test("search pages parked for the person do not use up the waiting-form budget",
   ] as ReturnType<typeof app.getAppMetrics>);
 });
 
-test("hidden work sleeps between model turns and wakes without losing the page", async () => {
+test("hidden work throttles between model turns and wakes without losing the page", async () => {
   vi.useFakeTimers();
   try {
     const { browser, state, pages } = makeBrowser();
@@ -718,4 +718,54 @@ test("tabs without a place stay plain and add the short reference only when they
   expect(
     browser.getState().tabs.find((tab) => tab.id === "failed")?.title,
   ).toBe("def456 · Engineer · Synthetic");
+});
+
+test("pressure reclaims the oldest eligible form and preserves a person's page", async () => {
+  const { browser, state } = makeBrowser();
+  state.ownedTabs.set("person-first", new Set(["person"]));
+  state.ownedTabs.set("old-ready", new Set(["prepared"]));
+  state.ownedTabs.set("new-ready", new Set(["failed"]));
+  state.personTabs.add("person");
+  browser.markPreparedForm("person-first");
+  browser.markPreparedForm("old-ready");
+  browser.markPreparedForm("new-ready");
+  const originalMemory = browser.getWaitingFormMemory();
+  let pressure = true;
+  vi.spyOn(browser, "getWaitingFormMemory").mockImplementation(() => ({
+    ...originalMemory,
+    budgetBytes: pressure ? 1 : originalMemory.budgetBytes,
+  }));
+  const reclaim = vi.fn((_owner: string, canDiscard: () => boolean) => {
+    expect(canDiscard()).toBe(true);
+    pressure = false;
+    return Promise.resolve(true);
+  });
+  browser.setPreparedFormReclaimer(reclaim);
+  await browser.reduceWaitingFormMemory();
+  expect(reclaim).toHaveBeenCalledExactlyOnceWith(
+    "old-ready",
+    expect.any(Function),
+  );
+});
+
+test("only idle retained pages freeze; active source loading stays awake", async () => {
+  const { browser, state, pages } = makeBrowser();
+  state.ownedTabs.set("result", new Set(["prepared"]));
+  const policy = browser as unknown as {
+    syncTabLifecycle(page: {
+      id: string;
+      contents: ReturnType<typeof makeContents>;
+    }): void;
+  };
+  policy.syncTabLifecycle(state.pageMap.get("prepared")!);
+  policy.syncTabLifecycle(state.pageMap.get("search")!);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(pages.get("prepared")!.debugger.sendCommand).toHaveBeenCalledWith(
+    "Page.setWebLifecycleState",
+    { state: "frozen" },
+  );
+  expect(pages.get("search")!.debugger.sendCommand).not.toHaveBeenCalledWith(
+    "Page.setWebLifecycleState",
+    { state: "frozen" },
+  );
 });

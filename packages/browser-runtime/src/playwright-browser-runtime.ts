@@ -1022,7 +1022,7 @@ export async function resolveAutomationPageForContext(
     protectedPages?: readonly Page[];
     preferredPage?: Page | null;
     requireExactTarget?: boolean;
-    onPageResolved?: (page: Page) => void;
+    onPageResolved?: (page: Page) => void | Promise<void>;
   } = {},
 ): Promise<Page> {
   const normalizedTargetUrl =
@@ -1064,7 +1064,7 @@ export async function resolveAutomationPageForContext(
         blankPage ??
         reusableLivePage ??
         (await context.newPage()));
-  options.onPageResolved?.(page);
+  await options.onPageResolved?.(page);
 
   if (options.closeOtherPages && options.reuseExistingPage !== false) {
     await Promise.allSettled(
@@ -1098,7 +1098,7 @@ async function prepareAutomationPageForTarget(
     preferredPage?: Page | null;
     requireExactTarget?: boolean;
     signal?: AbortSignal;
-    onPageResolved?: (page: Page) => void;
+    onPageResolved?: (page: Page) => void | Promise<void>;
   },
 ): Promise<{
   page: Page;
@@ -1958,13 +1958,13 @@ export function createBrowserAgentRuntime(
   async function getAgentRunPage(
     source: JobSource,
     agentOptions: AgentDiscoveryOptions,
-    onPageResolved?: (page: Page) => void,
+    onPageResolved?: (page: Page) => void | Promise<void>,
   ): Promise<Page> {
     if ((agentOptions.sourceCatalog?.length ?? 0) > 0) {
       // Catalog review needs an isolated page only if the agent later chooses
       // to browse. Do not depend on the source landing page being reachable.
       const page = await (await getContext()).newPage();
-      onPageResolved?.(page);
+      await onPageResolved?.(page);
       setSessionState(
         source,
         "ready",
@@ -1978,7 +1978,7 @@ export function createBrowserAgentRuntime(
 
     if (!navigationTarget) {
       const page = await (await getContext()).newPage();
-      onPageResolved?.(page);
+      await onPageResolved?.(page);
       return page;
     }
 
@@ -2444,7 +2444,8 @@ export function createBrowserAgentRuntime(
           guard: recovery.guard,
         });
         if (!duplicate) {
-          recoveryUnavailable.add(key);
+          // A temporary navigation or capacity failure does not establish
+          // that this form can never be restored. Keep it for a later try.
           return false;
         }
         if (
@@ -2885,14 +2886,14 @@ export function createBrowserAgentRuntime(
                     ? { reuseExistingPage: false }
                     : {}),
                   ...(options?.signal ? { signal: options.signal } : {}),
-                  onPageResolved: (page) => {
+                  onPageResolved: async (page) => {
                     releaseReservedTab?.();
                     releaseReservedTab = null;
                     workingPage = page;
                     workingPageOwnedByRun = !pagesBeforeRun.has(page);
                     releaseWorkingPageUse?.();
                     releaseWorkingPageUse = usePage(page);
-                    options?.onAutomationPage?.(page);
+                    await options?.onAutomationPage?.(page);
                     runSentinel.attachPage(page);
                     if (options?.signal?.aborted) {
                       closeWorkingPageOnAbort();
@@ -3373,14 +3374,14 @@ export function createBrowserAgentRuntime(
             hostHasCapacity,
           );
         }
-        page = await getAgentRunPage(source, agentOptions, (resolvedPage) => {
+        page = await getAgentRunPage(source, agentOptions, async (resolvedPage) => {
           releaseReservedTab?.();
           releaseReservedTab = null;
           page = resolvedPage;
           releaseDiscoveryPageUse?.();
           releaseDiscoveryPageUse = usePage(resolvedPage);
-          agentOptions.onAutomationPage?.(resolvedPage);
           pageAbortBinding.onPageResolved(resolvedPage);
+          await agentOptions.onAutomationPage?.(resolvedPage);
         });
 
         const navigationTarget =

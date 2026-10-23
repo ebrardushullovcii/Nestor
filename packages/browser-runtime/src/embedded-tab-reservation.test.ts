@@ -1,6 +1,34 @@
 import type { BrowserContext } from "playwright";
 import { expect, test, vi } from "vitest";
-import { reserveEmbeddedApplicationTab } from "./playwright-browser-runtime";
+import {
+  reserveEmbeddedApplicationTab,
+  resolveAutomationPageForContext,
+} from "./playwright-browser-runtime";
+
+test("page resolution waits for its ownership claim before allowing navigation", async () => {
+  let finish!: () => void;
+  const claim = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const onClaim = vi.fn(() => claim);
+  const page = { isClosed: () => false, url: () => "about:blank" };
+  const context = {
+    pages: () => [],
+    newPage: () => Promise.resolve(page),
+  } as unknown as BrowserContext;
+  let resolved = false;
+  const pending = resolveAutomationPageForContext(context, {
+    bringToFront: false,
+    onPageResolved: onClaim,
+  }).then(() => {
+    resolved = true;
+  });
+  await vi.waitFor(() => expect(onClaim).toHaveBeenCalledOnce());
+  expect(resolved).toBe(false);
+  finish();
+  await pending;
+  expect(resolved).toBe(true);
+});
 
 test("host capacity admits work above the old seven/fifteen limits and counts concurrent reservations", async () => {
   const context = {

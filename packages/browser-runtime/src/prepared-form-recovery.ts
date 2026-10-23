@@ -134,11 +134,21 @@ export async function restorePreparedForm(input: {
   files: readonly RecoveryFile[];
   guard(page: Page): Promise<unknown>;
 }): Promise<Page | null> {
-  const page = await input.context.newPage();
-  const deadline = setTimeout(() => {
-    void page.close({ runBeforeUnload: false }).catch(() => undefined);
-  }, 20_000);
+  const creation = input.context.newPage();
+  let page: Page | null = null;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
+    page = await Promise.race([
+      creation,
+      new Promise<Page>((_resolve, reject) => {
+        deadline = setTimeout(() => {
+          void creation
+            .then((latePage) => latePage.close({ runBeforeUnload: false }))
+            .catch(() => undefined);
+          reject(new Error("Form refill timed out"));
+        }, 20_000);
+      }),
+    ]);
     await input.guard(page);
     await page.goto(input.snapshot.url, {
       waitUntil: "domcontentloaded",
@@ -195,7 +205,7 @@ export async function restorePreparedForm(input: {
       throw new Error("Answers did not restore exactly");
     return page;
   } catch {
-    await page.close({ runBeforeUnload: false }).catch(() => undefined);
+    await page?.close({ runBeforeUnload: false }).catch(() => undefined);
     return null;
   } finally {
     clearTimeout(deadline);

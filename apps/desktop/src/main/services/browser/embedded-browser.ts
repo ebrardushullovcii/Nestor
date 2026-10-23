@@ -351,7 +351,9 @@ export class EmbeddedBrowser {
   private readonly preparedForms = new Map<string, number>();
   private applicationTabsClosed: ((owner: string | null) => void) | null = null;
 
-  setApplicationTabsClosedHandler(handler: (owner: string | null) => void): void {
+  setApplicationTabsClosedHandler(
+    handler: (owner: string | null) => void,
+  ): void {
     this.applicationTabsClosed = handler;
   }
   private readonly discardedFormLabels = new Map<
@@ -769,7 +771,7 @@ export class EmbeddedBrowser {
     if (!page || page.contents.isDestroyed() || page.contents.isLoading())
       return null;
     const url = page.contents.getURL();
-    await this.tabLifecycle.setFrozen(page.contents, false);
+    await this.noteAutomationCommand(tabId, true, false);
     let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
       const value = (await Promise.race([
@@ -784,6 +786,7 @@ export class EmbeddedBrowser {
       return { url, value };
     } finally {
       clearTimeout(deadline);
+      await this.noteAutomationCommand(tabId, false, false);
       this.syncTabLifecycle(page);
     }
   }
@@ -915,15 +918,16 @@ export class EmbeddedBrowser {
   }
 
   private shouldThrottleTab(id: string): boolean {
-    if (this.automationCommands.has(id)) return false;
     return (
-      this.operations.size === 0 ||
-      this.isWaitingTab(id) ||
-      (!this.automationCommands.has(id) && !this.automationIdleTimers.has(id))
+      !this.automationCommands.has(id) && !this.automationIdleTimers.has(id)
     );
   }
 
-  private noteAutomationCommand(id: string, active: boolean): Promise<void> {
+  private noteAutomationCommand(
+    id: string,
+    active: boolean,
+    emulateFocus = true,
+  ): Promise<void> {
     const page = this.pageMap.get(id);
     if (!page || page.contents.isDestroyed()) return Promise.resolve();
     const previousTimer = this.automationIdleTimers.get(id);
@@ -935,11 +939,11 @@ export class EmbeddedBrowser {
     );
     if (count > 0) {
       this.automationCommands.set(id, count);
-      page.contents.setBackgroundThrottling(false);
+      if (emulateFocus) page.contents.setBackgroundThrottling(false);
       return this.tabLifecycle
         .setFrozen(page.contents, false)
         .then(async () => {
-          if (!page.contents.isDestroyed())
+          if (emulateFocus && !page.contents.isDestroyed())
             await page.contents.debugger.sendCommand(
               "Emulation.setFocusEmulationEnabled",
               { enabled: true },
@@ -947,6 +951,12 @@ export class EmbeddedBrowser {
         });
     } else {
       this.automationCommands.delete(id);
+      // Native DOM probes need no animation frames or focus. Once their
+      // result arrives, a waiting form can sleep again immediately.
+      if (!emulateFocus) {
+        page.contents.setBackgroundThrottling(this.shouldThrottleTab(id));
+        return Promise.resolve();
+      }
       // Model requests can take minutes. Ads and page timers do not need to
       // run at foreground speed while no browser command is using this page.
       const timer = setTimeout(() => {
@@ -954,6 +964,12 @@ export class EmbeddedBrowser {
         if (page.contents.isDestroyed()) return;
         if (!page.contents.isDestroyed())
           page.contents.setBackgroundThrottling(this.shouldThrottleTab(id));
+        if (page.contents.debugger.isAttached() && this.shouldThrottleTab(id))
+          void page.contents.debugger
+            .sendCommand("Emulation.setFocusEmulationEnabled", {
+              enabled: false,
+            })
+            .catch(() => undefined);
         this.syncTabLifecycle(page);
       }, 5_000);
       timer.unref();
@@ -970,8 +986,20 @@ export class EmbeddedBrowser {
       this.presentation !== "minimized" &&
       this.viewport.visible &&
       this.activeTabId === page.id;
+    const retained =
+      this.isWaitingTab(page.id) ||
+      this.personTabs.has(page.id) ||
+      this.heldTabs.has(page.id) ||
+      this.finishedTabs.has(page.id);
+    const working = [...this.operationClaims.values()].some((claim) =>
+      claim.tabs.has(page.id),
+    );
     const frozen =
-      !visible && !page.contents.isLoading() && this.shouldThrottleTab(page.id);
+      retained &&
+      !working &&
+      !visible &&
+      !page.contents.isLoading() &&
+      this.shouldThrottleTab(page.id);
     void this.tabLifecycle
       .setFrozen(page.contents, frozen)
       .catch(() => undefined);
@@ -1029,6 +1057,9 @@ export class EmbeddedBrowser {
         const started = Date.now();
         for (const [owner] of oldest) {
           if (!needsReclaim()) break;
+          // Exact refill verification needs a temporary working tab. Wait
+          // for one rather than treating a full browser as an unsafe form.
+          if (!this.hasTabCapacity()) break;
           if (!this.canDiscardPreparedForm(owner)) continue;
           if (Date.now() - started > 5_000) break;
           const label = [...(this.ownedTabs.get(owner) ?? [])]
@@ -1152,6 +1183,9 @@ export class EmbeddedBrowser {
       ...(openerId ? { openerId } : {}),
     };
     this.pageMap.set(page.id, page);
+    // Let navigation and CDP initialization finish before freezing a new
+    // about:blank target; freezing it here can strand context.newPage().
+    void this.noteAutomationCommand(page.id, false);
     beforeAnnounce?.(page.id);
     this.closed = false;
     const selected = this.activeTabId
@@ -1417,7 +1451,7 @@ export class EmbeddedBrowser {
     )
       return { dataUrl: null };
     try {
-      await this.tabLifecycle.setFrozen(page.contents, false);
+      await this.noteAutomationCommand(page.id, true, false);
       const image = await page.contents.capturePage();
       if (image.isEmpty()) return { dataUrl: null };
       return {
@@ -1426,6 +1460,7 @@ export class EmbeddedBrowser {
     } catch {
       return { dataUrl: null };
     } finally {
+      await this.noteAutomationCommand(page.id, false, false);
       this.syncTabLifecycle(page);
     }
   }
@@ -1797,7 +1832,7 @@ export class EmbeddedBrowser {
       if (!bridge || !this.operations.has(controller)) return;
       const token = `nestor-claim-${randomUUID()}`;
       const landed = bridge
-        .waitForToken(token, 5_000)
+        .waitForToken(token, 5_000, combined)
         .then((tabId) => {
           if (tabId && this.operations.has(controller)) {
             claim.tabs.add(tabId);

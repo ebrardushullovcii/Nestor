@@ -89,7 +89,10 @@ export class BrowserCdpBridge {
   private disposed = false;
   private removeCreatedListener: (() => void) | null = null;
   private readonly pendingAttachments = new Set<Promise<void>>();
-  private readonly tokenWaiters = new Map<string, (tabId: string | null) => void>();
+  private readonly tokenWaiters = new Map<
+    string,
+    (tabId: string | null) => void
+  >();
 
   constructor(private readonly host: BrowserCdpHost) {}
 
@@ -99,17 +102,23 @@ export class BrowserCdpBridge {
    * the command passes through here on the way to exactly one tab, so this is
    * how the host learns which tab a run is working in without comparing URLs.
    */
-  waitForToken(token: string, timeoutMs: number): Promise<string | null> {
+  waitForToken(
+    token: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
     return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        this.tokenWaiters.delete(token);
-        resolve(null);
-      }, timeoutMs);
-      this.tokenWaiters.set(token, (tabId) => {
+      const finish = (tabId: string | null) => {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
         this.tokenWaiters.delete(token);
         resolve(tabId);
-      });
+      };
+      const onAbort = () => finish(null);
+      const timer = setTimeout(onAbort, timeoutMs);
+      this.tokenWaiters.set(token, finish);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
     });
   }
 
@@ -649,8 +658,28 @@ export class BrowserCdpBridge {
       }
     }
     const pageId = binding.target.page.id;
+    // Wake for page work. Network continuation and protocol configuration
+    // must pass through while navigation is paused; a focus command may
+    // itself wait for that navigation and deadlock interception setup.
+    const wakePage =
+      method.startsWith("Input.") ||
+      method.startsWith("DOM.") ||
+      method.startsWith("DOMSnapshot.") ||
+      method.startsWith("Accessibility.") ||
+      [
+        "Runtime.evaluate",
+        "Runtime.callFunctionOn",
+        "Runtime.awaitPromise",
+        "Runtime.runScript",
+        "Page.navigate",
+        "Page.reload",
+        "Page.getLayoutMetrics",
+        "Page.captureScreenshot",
+        "Page.printToPDF",
+        "Page.createIsolatedWorld",
+      ].includes(method);
     try {
-      await this.host.onAutomationCommand?.(pageId, true);
+      if (wakePage) await this.host.onAutomationCommand?.(pageId, true);
       const result: unknown =
         await binding.target.page.contents.debugger.sendCommand(
           method,
@@ -659,7 +688,7 @@ export class BrowserCdpBridge {
         );
       return record(result) ? result : {};
     } finally {
-      await this.host.onAutomationCommand?.(pageId, false);
+      if (wakePage) await this.host.onAutomationCommand?.(pageId, false);
     }
   }
 
@@ -683,6 +712,19 @@ export class BrowserCdpBridge {
   }
 
   private async captureScreenshot(
+    binding: SessionBinding,
+    params: Params,
+  ): Promise<Params> {
+    const pageId = binding.target.page.id;
+    try {
+      await this.host.onAutomationCommand?.(pageId, true);
+      return await this.captureAwakeScreenshot(binding, params);
+    } finally {
+      await this.host.onAutomationCommand?.(pageId, false);
+    }
+  }
+
+  private async captureAwakeScreenshot(
     binding: SessionBinding,
     params: Params,
   ): Promise<Params> {

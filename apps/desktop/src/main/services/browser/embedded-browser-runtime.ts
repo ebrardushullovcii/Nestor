@@ -55,7 +55,10 @@ export function withEmbeddedBrowserActivity(
   browser: EmbeddedBrowser,
 ): BrowserSessionRuntime {
   const applicationSources = new Map<string, JobSource>();
-  if (runtime.forgetClosedApplicationPage || runtime.clearApplicationPageRecovery) {
+  if (
+    runtime.forgetClosedApplicationPage ||
+    runtime.clearApplicationPageRecovery
+  ) {
     browser.setApplicationTabsClosedHandler((owner) => {
       if (owner === null) {
         runtime.clearApplicationPageRecovery?.();
@@ -181,12 +184,15 @@ export function withEmbeddedBrowserActivity(
             browser.runAutomation(
               "Reading job listing",
               undefined,
-              (signal, _update, claimPage) =>
+              (signal, _update, claimPage, claimedTabs) =>
                 runtime.readRenderedPage!(url, {
                   signal: options?.signal
                     ? AbortSignal.any([signal, options.signal])
                     : signal,
-                  onPage: claimPage,
+                  onPage: async (page) => {
+                    claimPage(page);
+                    await claimedTabs();
+                  },
                 }),
             ),
         }
@@ -370,7 +376,14 @@ export function withEmbeddedBrowserActivity(
                       ),
                   }),
               },
-              { ...options, signal, onAutomationPage: claimPage },
+              {
+                ...options,
+                signal,
+                onAutomationPage: async (page) => {
+                  claimPage(page);
+                  await claimedTabs();
+                },
+              },
             )
             .then(async (result) => {
               const tabs = await claimedTabs();
@@ -384,7 +397,11 @@ export function withEmbeddedBrowserActivity(
                 );
               if (result.state === "failed" || result.state === "submitted")
                 browser.markFinishedTabs(tabs);
-              if (input.applicationPageBindingKey && result.state === "ready" && browser.markPreparedForm(input.applicationPageBindingKey)) {
+              if (
+                input.applicationPageBindingKey &&
+                result.state === "ready" &&
+                browser.markPreparedForm(input.applicationPageBindingKey)
+              ) {
                 applicationSources.set(input.applicationPageBindingKey, source);
               }
               return flagResult(result, tabs.at(-1) ?? null, input.job.company);
@@ -419,7 +436,10 @@ export function withEmbeddedBrowserActivity(
                   ...options,
                   protectedPages,
                   signal,
-                  onAutomationPage: claimPage,
+                  onAutomationPage: async (page) => {
+                    claimPage(page);
+                    await claimedTabs();
+                  },
                   onWaitingForBrowserTab: () => {
                     _updateActivity(
                       "Browser tab limit reached · Waiting for a free tab",

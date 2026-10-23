@@ -1,8 +1,9 @@
 import type { WaitingFormMemory } from "@nestor/contracts";
 
-// Five mixed replica/real pages settled at ~513 MiB working set (334 MiB
-// private) on a 16 GiB PC. This is a reclamation target, not an admission
-// gate: a waiting form must not consume a new application's working slot.
+// Ten replica forms used ~1.3 GiB working set (265 MiB private) on a 16 GiB
+// PC; a real board reached 269 MiB working set. Keep room above ten ordinary
+// forms and reserve 256 MiB for another. This is a reclamation target, not
+// an admission gate: waiting forms do not consume working slots.
 export const WAITING_FORM_MEMORY_BUDGET = 2 * 1024 * 1024 * 1024;
 const NEXT_FORM_RESERVE = 256 * 1024 * 1024;
 

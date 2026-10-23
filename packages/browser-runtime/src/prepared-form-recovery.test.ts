@@ -21,6 +21,33 @@ const snapshot: PreparedFormSnapshot = {
   ],
 };
 
+test("a stalled page creation times out and closes a page that arrives late", async () => {
+  vi.useFakeTimers();
+  try {
+    let finish!: (page: Page) => void;
+    const creation = new Promise<Page>((resolve) => {
+      finish = resolve;
+    });
+    const close = vi.fn().mockResolvedValue(undefined);
+    const context = { newPage: () => creation } as unknown as BrowserContext;
+    const guard = vi.fn();
+    const pending = restorePreparedForm({
+      context,
+      snapshot,
+      files: [],
+      guard,
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    await expect(pending).resolves.toBeNull();
+    finish({ close } as unknown as Page);
+    await Promise.resolve();
+    expect(close).toHaveBeenCalledOnce();
+    expect(guard).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 function setup(fresh: PreparedFormSnapshot | null, restored = snapshot) {
   const fill = vi.fn().mockResolvedValue(undefined);
   const goto = vi.fn().mockResolvedValue(undefined);

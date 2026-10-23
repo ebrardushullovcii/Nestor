@@ -2,7 +2,11 @@ import { EventEmitter } from "node:events";
 import type { WebContents } from "electron";
 import { WebSocket } from "ws";
 import { afterEach, describe, expect, test } from "vitest";
-import { BrowserCdpBridge, type BrowserCdpPage } from "./browser-cdp-bridge";
+import {
+  BrowserCdpBridge,
+  type BrowserCdpPage,
+  type BrowserCdpHost,
+} from "./browser-cdp-bridge";
 
 type Message = {
   id?: number;
@@ -13,8 +17,48 @@ type Message = {
   error?: { message: string };
 };
 const resources: Array<() => void> = [];
+test("a stopped run does not wait for the page-claim timeout", async () => {
+  const { bridge } = await fixture();
+  const controller = new AbortController();
+  const pending = bridge.waitForToken(
+    "stopped-claim",
+    60_000,
+    controller.signal,
+  );
+  controller.abort();
+  await expect(pending).resolves.toBeNull();
+});
+test("a routed request resumes without waiting on renderer focus", async () => {
+  const { bridge, transport, calls } = await fixture({
+    onAutomationCommand: () => {
+      throw new Error("Renderer is waiting for the paused request");
+    },
+  });
+  const client = await connect(transport);
+  await client.send("Target.setAutoAttach", { autoAttach: true });
+  const session = String(
+    client.messages.find(
+      (message) => message.method === "Target.attachedToTarget",
+    )?.params?.sessionId,
+  );
+  for (const method of [
+    "Fetch.continueRequest",
+    "Fetch.fulfillRequest",
+    "Fetch.failRequest",
+    "Network.setCacheDisabled",
+    "Fetch.enable",
+    "Page.addScriptToEvaluateOnNewDocument",
+    "Page.handleJavaScriptDialog",
+    "Runtime.runIfWaitingForDebugger",
+  ]) {
+    const reply = await client.send(method, {}, session);
+    expect(reply.error).toBeUndefined();
+    expect(calls.some((call) => call.method === method)).toBe(true);
+  }
+  bridge.close();
+});
 test("closing the bridge releases pending page claims immediately", async () => {
-  const {bridge} = await fixture();
+  const { bridge } = await fixture();
   const pending = bridge.waitForToken("synthetic-claim", 60_000);
   bridge.close();
   await expect(pending).resolves.toBeNull();
@@ -23,7 +67,9 @@ afterEach(() => {
   for (const dispose of resources.splice(0).reverse()) dispose();
 });
 
-async function fixture() {
+async function fixture(
+  hostOverrides: Pick<BrowserCdpHost, "onAutomationCommand"> = {},
+) {
   const debuggerEvents = new EventEmitter();
   const calls: Array<{
     method: string;
@@ -78,6 +124,7 @@ async function fixture() {
       pointerDowns.push(input?.pointerDown ?? false);
       keyDowns.push(input?.keyDown ?? null);
     },
+    ...hostOverrides,
   });
   const transport = await bridge.start();
   resources.push(() => bridge.close());
