@@ -587,11 +587,11 @@ export function ReviewQueueScreen(props: {
                       {selectedJobEmployerLocationLine}
                     </p>
                   ) : null
-                ) : (
+                ) : queue.length > 0 ? (
                   <p className="mt-1 truncate text-(length:--text-small) text-foreground-muted">
                     Choose a shortlisted job.
                   </p>
-                )}
+                ) : null}
               </div>
               {selectedItem ? (
                 <StatusBadge
@@ -800,7 +800,9 @@ export function ReviewQueueScreen(props: {
                 </div>
               </div>
             ) : null}
-            {!selectedItem ? (
+            {/* With nothing shortlisted the list already says what to do;
+                "Choose a job" here had nothing to choose from. */}
+            {!selectedItem && queue.length > 0 ? (
               <div className="grid place-items-center p-8">
                 <EmptyState
                   description="Select a shortlisted job to get its resume ready and apply."

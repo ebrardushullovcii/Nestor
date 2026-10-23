@@ -787,7 +787,7 @@ export function ReviewQueueListPanel({
         <div className="flex min-h-0 flex-1 items-center justify-center px-5 pb-5 pt-4">
           <div className="grid w-full max-w-136 justify-items-center gap-4">
             <EmptyState
-              title="No shortlisted jobs in this plan"
+              title="No shortlisted jobs yet"
               description="Shortlist a job from Find jobs. It shows up here, ready for a resume and an application."
             />
             <Button asChild size="lg">

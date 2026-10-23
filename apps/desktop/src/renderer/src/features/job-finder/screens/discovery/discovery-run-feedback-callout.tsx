@@ -4,7 +4,13 @@ import { X } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
 import { OPEN_JOB_FINDER_BROWSER_ACTION } from "@renderer/features/job-finder/lib/job-finder-browser-handoff-copy";
 import { JOB_FINDER_ROUTE_PATHS } from "@renderer/features/job-finder/lib/job-finder-route-hrefs";
-import type { DiscoveryRunFeedback } from "./discovery-run-feedback";
+import {
+  getDiscoveryRunFailureRecovery,
+  type DiscoveryRunFeedback,
+} from "./discovery-run-feedback";
+
+/** The fallback recovery, which explains nothing a note could repeat. */
+const GENERIC_RECOVERY_HEADLINE = getDiscoveryRunFailureRecovery("").headline;
 
 const TONE_CLASS_NAMES: Record<DiscoveryRunFeedback["status"], string> = {
   failed:
@@ -45,11 +51,20 @@ export function DiscoveryRunFeedbackCallout(props: {
   const {
     feedback,
     isRecoveryPending = false,
-    notices = [],
     onDismiss,
     onOpenBrowserSession,
     suppressBrowserRecovery = false,
   } = props;
+  // A run note that is the engine's own wording of the failure the recovery
+  // line already explains ("Agent discovery failed: AI client does not
+  // support tool calling") said the same thing again in internal terms.
+  const notices = (props.notices ?? []).filter(
+    (notice) =>
+      !feedback.recovery ||
+      getDiscoveryRunFailureRecovery(notice).headline !==
+        feedback.recovery.headline ||
+      feedback.recovery.headline === GENERIC_RECOVERY_HEADLINE,
+  );
   // Several run notes fold behind one line so the banner stays short; a
   // single note reads inline. Open by default only while there is little.
   const [notesOpen, setNotesOpen] = useState(false);

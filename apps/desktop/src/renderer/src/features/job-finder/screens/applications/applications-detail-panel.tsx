@@ -620,11 +620,11 @@ export function ApplicationsDetailPanel({
                 </span>
               ) : null}
             </>
-          ) : (
+          ) : hasAnyApplications ? (
             <strong className="text-(length:--text-body) text-muted-foreground">
               Nothing selected
             </strong>
-          )}
+          ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {showNotSubmittedPill ? (
@@ -635,7 +635,9 @@ export function ApplicationsDetailPanel({
               Not sent
             </StatusBadge>
           ) : null}
-          {!showNotSubmittedPill ? (
+          {/* "Nothing selected" as a heading and again as a badge said it
+              twice; the badge is a record's stage, so only a record has one. */}
+          {!showNotSubmittedPill && selectedRecord ? (
             <StatusBadge tone={selectedStage ? selectedStage.tone : "muted"}>
               {headerStatusLabel ?? ""}
             </StatusBadge>

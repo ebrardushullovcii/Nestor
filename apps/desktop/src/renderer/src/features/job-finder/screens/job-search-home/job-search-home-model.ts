@@ -48,7 +48,10 @@ import {
   resolveApplyStatePresentation,
 } from "../applications/apply-state";
 import { buildApplyRunContextReader } from "../applications/applications-recovery-state";
-import { getDiscoveryRunFailureRecovery } from "../discovery/discovery-run-feedback";
+import {
+  getDiscoveryRunFailureRecovery,
+  isAppSideDiscoveryFailure,
+} from "../discovery/discovery-run-feedback";
 import {
   APPLICATION_PREPARATION_BATCH_LIMIT,
   collectInProgressApplicationJobIds,
@@ -951,6 +954,15 @@ export function buildJobSearchHomeModel(
   );
 
   const newestRun = newestDiscoveryRun(workspace);
+  // Every source of the newest search failed for the same reason the app
+  // owns (its AI was unavailable): that is an outage to say once, not a
+  // source to fix.
+  const newestRunFailedWarnings = (newestRun?.targetExecutions ?? [])
+    .filter((execution) => execution.state === "failed")
+    .map((execution) => execution.warning ?? "");
+  const newestRunFailedForTheApp =
+    newestRunFailedWarnings.length > 0 &&
+    newestRunFailedWarnings.every(isAppSideDiscoveryFailure);
   const hasDiscoveryNow = tasks.items.some(
     (item) =>
       item.kind === "discovery" &&
@@ -1119,7 +1131,11 @@ export function buildJobSearchHomeModel(
 
   // Problems: things that are wrong, each with the one place to fix it.
   const problems: HomeProblem[] = [];
-  if (!setupIncomplete && sourcesNeedingAttention.length > 0) {
+  if (
+    !setupIncomplete &&
+    sourcesNeedingAttention.length > 0 &&
+    !newestRunFailedForTheApp
+  ) {
     // Searches carry on with the other sources and the app cannot fix a
     // site, so this is a quiet line the person can hide for good (ADR 0051,
     // issue #50), not a red alarm listing every name. The button opens Job
@@ -1900,7 +1916,14 @@ export function buildJobSearchHomeModel(
       detail:
         retryRequest === null
           ? "The sources it used are no longer enabled. Choose which sources to search."
-          : "Run it again to pick up the openings it missed.",
+          : newestRunFailedForTheApp
+            ? (() => {
+                const recovery = getDiscoveryRunFailureRecovery(
+                  newestRunFailedWarnings[0] ?? "",
+                );
+                return `${recovery.headline} ${recovery.nextStep}`;
+              })()
+            : "Run it again to pick up the openings it missed.",
       primary: searchAgain,
       secondary: [],
     };

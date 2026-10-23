@@ -1416,7 +1416,12 @@ export function DiscoveryResultsPanel({
       getDiscoveryRunPhase(latestRun) === "interrupted"
       ? "Search stopped"
       : failedSourceCount > 0
-        ? `${isSearchInProgress ? "Searching" : "Partial results"} · ${failedSourceCount} ${failedSourceCount === 1 ? "source failed" : "sources failed"}${isSearchInProgress ? " so far" : ""}`
+        ? // "Partial results" over an empty list when every source failed
+          // promised results that were never there.
+          !isSearchInProgress &&
+          failedSourceCount >= latestRun.targetExecutions.length
+          ? "No source could be searched"
+          : `${isSearchInProgress ? "Searching" : "Partial results"} · ${failedSourceCount} ${failedSourceCount === 1 ? "source failed" : "sources failed"}${isSearchInProgress ? " so far" : ""}`
         : "What each source found"
     : null;
   const showsResultsStatusLine = Boolean(

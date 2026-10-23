@@ -303,8 +303,13 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
     props.discoveryRunFeedback.status !== "cancelled" &&
     !failureSupersededByCompletedRun &&
     !missingStartingPageCoveredBySourceFix &&
-    // The next step already names the broken source and where to fix it.
+    // The next step already names the broken source and where to fix it,
+    // or the failed search and why; a banner above it said it again.
     model.next.id !== "source_failed" &&
+    !(
+      model.next.id === "search_failed" &&
+      props.discoveryRunFeedback.recovery?.kind !== "browser_session"
+    ) &&
     model.next.id !== "sources" &&
     // A source to correct is Home's card or problem line, which follow the
     // sources as they are now; this callout kept naming a source the person
