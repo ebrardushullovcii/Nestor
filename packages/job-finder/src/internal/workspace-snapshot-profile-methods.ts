@@ -55,6 +55,7 @@ import {
   type UserActionRequest,
 } from "@nestor/contracts";
 import { reassessSavedJobs } from "./saved-job-reassessment";
+import { createMatchAssessmentContextFingerprint } from "./match-assessment-session";
 import type { JobFinderRepositorySeed } from "@nestor/db";
 import { readSavedJobProjectionChanges } from "@nestor/db";
 import { mergeSortedRowChanges } from "./sorted-row-changes";
@@ -142,6 +143,9 @@ import {
 import { memoizeSortedBySameElements } from "./same-elements-memo";
 import { settleStoredResumeDrafts } from "./resume-settle-stored-drafts";
 import { rebindLegacyFitVerdicts } from "./legacy-fit-fingerprints";
+
+const realSetImmediate = globalThis.setImmediate;
+const nextTurn = () => new Promise<void>((resolve) => realSetImmediate(resolve));
 
 // Each list keeps its own last ordering: a refresh that changed no job reuses
 // it, and one that changed a few merges them in instead of sorting thousands
@@ -615,7 +619,8 @@ export function createWorkspaceSnapshotProfileMethods(
       return;
     }
     rescoreAgain = false;
-    savedJobRescoring = reassessSavedJobs(ctx)
+    savedJobRescoring = nextTurn()
+      .then(() => reassessSavedJobs(ctx))
       .then((changed) => {
         if (changed) ctx.onSavedJobsRescored?.();
       })
@@ -1473,6 +1478,7 @@ export function createWorkspaceSnapshotProfileMethods(
       recoverInterruptedApplyRunsOnLoad(),
       storedResumeDraftSettlement,
     ]);
+    if (borrowValidatedJobs) await nextTurn();
     await reconcileAutomaticBatchSampleReviews(ctx);
 
     // Display reads exclude resume checkpoints before parsing and reuse
@@ -1580,6 +1586,7 @@ export function createWorkspaceSnapshotProfileMethods(
       ctx.repository.getApplyQueue(),
     ]);
     // From the jobs this read already loaded, so it costs no second read.
+    if (borrowValidatedJobs) await nextTurn();
     legacyFitFingerprintRebinding ??= rebindLegacyFitVerdicts(ctx, {
       savedJobs: rawSavedJobs,
       pendingDiscoveryJobs: discovery.pendingDiscoveryJobs,
@@ -2541,13 +2548,17 @@ export function createWorkspaceSnapshotProfileMethods(
         now: new Date().toISOString(),
       });
 
+      await nextTurn();
       if (hasResumeAffectingProfileChange(currentProfile, nextProfile)) {
         await ctx.staleApprovedResumeDrafts(
           "Profile details changed after approval and the resume needs a fresh review.",
+          undefined,
+          { profile: nextProfile },
         );
+      } else {
+        await ctx.repository.saveProfile(nextProfile);
       }
-
-      await ctx.repository.saveProfile(nextProfile);
+      await nextTurn();
       await deriveAndPersistProfileSetupState(ctx, {
         persistedState: nextProfileSetupState,
         profile: nextProfile,
@@ -2555,8 +2566,20 @@ export function createWorkspaceSnapshotProfileMethods(
         latestResumeImportRunId:
           (await ctx.repository.getLatestResumeImportRun())?.id ?? null,
       });
-      rescoreSavedJobsInBackground();
-      return getWorkspaceSnapshot(true);
+      await nextTurn();
+      const snapshot = await getWorkspaceSnapshot(true);
+      if (
+        createMatchAssessmentContextFingerprint(
+          currentProfile,
+          currentSearchPreferences,
+        ) !==
+        createMatchAssessmentContextFingerprint(
+          nextProfile,
+          currentSearchPreferences,
+        )
+      )
+        rescoreSavedJobsInBackground();
+      return snapshot;
     },
     async saveProfileAndSearchPreferences(
       profile: CandidateProfile,
@@ -2597,21 +2620,26 @@ export function createWorkspaceSnapshotProfileMethods(
         now: new Date().toISOString(),
       });
 
-      if (hasResumeAffectingProfileChange(currentProfile, nextProfile)) {
-        await ctx.staleApprovedResumeDrafts(
-          "Profile details changed after approval and the resume needs a fresh review.",
-        );
-      }
-
+      await nextTurn();
       await preserveRemovedSourceLabels(
         currentSearchPreferences,
         nextSearchPreferences,
       );
-      await ctx.repository.saveProfileAndSearchPreferences(
-        nextProfile,
-        nextSearchPreferences,
-      );
+      if (hasResumeAffectingProfileChange(currentProfile, nextProfile)) {
+        await ctx.staleApprovedResumeDrafts(
+          "Profile details changed after approval and the resume needs a fresh review.",
+          undefined,
+          { profile: nextProfile, searchPreferences: nextSearchPreferences },
+        );
+      } else {
+        await ctx.repository.saveProfileAndSearchPreferences(
+          nextProfile,
+          nextSearchPreferences,
+        );
+      }
+      await nextTurn();
       await syncActiveCampaignPreferences(nextSearchPreferences);
+      await nextTurn();
       await deriveAndPersistProfileSetupState(ctx, {
         persistedState: nextProfileSetupState,
         profile: nextProfile,
@@ -2619,9 +2647,20 @@ export function createWorkspaceSnapshotProfileMethods(
         latestResumeImportRunId:
           (await ctx.repository.getLatestResumeImportRun())?.id ?? null,
       });
-      rescoreSavedJobsInBackground();
-
-      return getWorkspaceSnapshot(true);
+      await nextTurn();
+      const snapshot = await getWorkspaceSnapshot(true);
+      if (
+        createMatchAssessmentContextFingerprint(
+          currentProfile,
+          currentSearchPreferences,
+        ) !==
+        createMatchAssessmentContextFingerprint(
+          nextProfile,
+          nextSearchPreferences,
+        )
+      )
+        rescoreSavedJobsInBackground();
+      return snapshot;
     },
     async runResumeImport(input) {
       const baseResume = ResumeSourceDocumentSchema.parse(input.baseResume);

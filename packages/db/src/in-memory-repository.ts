@@ -2170,7 +2170,15 @@ export function createInMemoryJobFinderRepository(
       state.tailoredAssets = nextTailoredAssets;
       return Promise.resolve();
     },
-    staleResumeDrafts({ draftIds, staleReason, updatedAt }) {
+    staleResumeDrafts({ draftIds, staleReason, updatedAt, profileInputs }) {
+      const profile = profileInputs
+        ? CandidateProfileSchema.parse(cloneValue(profileInputs.profile))
+        : null;
+      const preferences = profileInputs?.searchPreferences
+        ? JobSearchPreferencesSchema.parse(
+            cloneValue(profileInputs.searchPreferences),
+          )
+        : null;
       for (const draftId of new Set(draftIds)) {
         const draft = state.resumeDrafts.find((entry) => entry.id === draftId);
         if (!draft) continue;
@@ -2197,6 +2205,11 @@ export function createInMemoryJobFinderRepository(
           });
         }
       }
+      if (profile) {
+        state.profile = profile;
+        profileRevision += 1;
+      }
+      if (preferences) state.searchPreferences = preferences;
       return Promise.resolve();
     },
     listApplicationRecords() {

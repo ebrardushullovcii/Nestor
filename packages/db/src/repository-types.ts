@@ -606,6 +606,11 @@ export interface JobFinderRepository
     draftIds: readonly string[];
     staleReason: string;
     updatedAt: string;
+    /** The explicit profile save and its approval invalidation share a commit. */
+    profileInputs?: {
+      profile: CandidateProfile;
+      searchPreferences?: JobSearchPreferences;
+    };
   }): Promise<void>;
   listApplicationRecords(): Promise<readonly ApplicationRecord[]>;
   upsertApplicationRecord(
