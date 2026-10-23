@@ -26,6 +26,7 @@ import type {
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
   JobFinderApplyQueueControlInput,
+  JobFinderRemoveFromApplyQueueInput,
   JobFinderApproveResumesInput,
   JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
@@ -440,6 +441,10 @@ export interface JobFinderShellActions {
   controlApplyQueue: (
     input: JobFinderApplyQueueControlInput,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  /** Takes waiting jobs out of the Apply queue before they start. */
+  removeFromApplyQueue: (
+    input: JobFinderRemoveFromApplyQueueInput,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   approveApplyRun: (
     input: JobFinderApplyRunActionInput,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
@@ -631,6 +636,8 @@ export interface ActionState {
   actionLink?: { label: string; route: string } | null;
   /** Puts back what a quick action took away; the toast offers Undo. */
   undo?: (() => void) | null;
+  /** The Undo button's words; "Undo all" after a move of many jobs. */
+  undoLabel?: string | null;
 }
 
 /**

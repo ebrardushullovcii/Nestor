@@ -47,6 +47,7 @@ import type {
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
   JobFinderApplyQueueControlInput,
+  JobFinderRemoveFromApplyQueueInput,
   JobFinderApproveResumesInput,
   JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
@@ -666,6 +667,9 @@ declare global {
         ) => Promise<JobFinderWorkspaceSyncResult>;
         controlApplyQueue: (
           input: JobFinderApplyQueueControlInput,
+        ) => Promise<JobFinderWorkspaceSyncResult>;
+        removeFromApplyQueue: (
+          input: JobFinderRemoveFromApplyQueueInput,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         approveApplyRun: (
           input: JobFinderApplyRunActionInput,

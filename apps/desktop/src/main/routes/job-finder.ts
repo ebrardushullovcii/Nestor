@@ -172,6 +172,7 @@ import type {
 } from "@nestor/contracts";
 import {
   JobFinderApplyQueueControlInputSchema,
+  JobFinderRemoveFromApplyQueueInputSchema,
   JobFinderApproveResumesInputSchema,
   JobFinderStartApplyQueueInputSchema,
   type ApplicationAutomationMode,
@@ -3679,6 +3680,22 @@ export function registerJobFinderRouteHandlers(
             publishJobFinderWorkspaceUpdate(event.sender);
         },
       });
+      return workspaceMutationResponse(
+        event.sender,
+        await readWorkspaceProjection(service),
+      );
+    },
+  );
+
+  // Takes waiting jobs out of the queue. Nothing starts or is sent; a job a
+  // run already took stays with that run.
+  ipcMain.handle(
+    "job-finder:remove-from-apply-queue",
+    async (event, payload: unknown) => {
+      const { jobIds } =
+        JobFinderRemoveFromApplyQueueInputSchema.parse(payload);
+      const { service } = await requireApplyQueueRepository();
+      await getApplyQueueRunner().remove(jobIds);
       return workspaceMutationResponse(
         event.sender,
         await readWorkspaceProjection(service),

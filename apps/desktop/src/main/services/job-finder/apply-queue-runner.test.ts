@@ -405,6 +405,50 @@ describe("apply queue runner", () => {
     expect(harness.runs[1]!.jobIds).toEqual(["extra_1"]);
   });
 
+  it("takes a waiting job out so no run starts it; a started job stays", async () => {
+    const harness = createHarness();
+    const runner = createApplyQueueRunner(harness.deps);
+    await runner.start(ids(12), "autonomous_submit");
+    await settle();
+    // job_1 is in the run under way; job_11 and job_12 are still waiting.
+    expect(await runner.remove(["job_1", "job_11"])).toEqual(["job_11"]);
+    expect(harness.queue()?.jobIds).not.toContain("job_11");
+    expect(harness.queue()?.startedJobIds).toContain("job_1");
+    harness.finishRun(0);
+    await settle();
+    expect(harness.runs.map((run) => run.jobIds)).toEqual([
+      ids(10),
+      ["job_12"],
+    ]);
+    expect(harness.cancelled).toEqual([]);
+  });
+
+  it("a paused queue emptied by taking its last jobs out is done", async () => {
+    const harness = createHarness();
+    harness.state.paused = true;
+    const runner = createApplyQueueRunner(harness.deps);
+    await runner.start(ids(2), "autonomous_submit");
+    await settle();
+    await runner.control("pause");
+    expect(await runner.remove(ids(2))).toEqual(ids(2));
+    expect(harness.queue()).toMatchObject({ state: "done", jobIds: [] });
+    expect(harness.runs).toHaveLength(0);
+  });
+
+  it("a job taken out and pressed again goes back in", async () => {
+    const harness = createHarness();
+    harness.state.paused = true;
+    const runner = createApplyQueueRunner(harness.deps);
+    await runner.start(ids(3), "autonomous_submit");
+    await settle();
+    await runner.remove(["job_2"]);
+    await runner.start(["job_2"], "autonomous_submit");
+    harness.state.paused = false;
+    runner.nudge();
+    await settle();
+    expect(harness.runs[0]!.jobIds.sort()).toEqual(ids(3).sort());
+  });
+
   it("orders modes by what they allow", () => {
     expect(leastPermissiveMode("autonomous_submit", "prepare_only")).toBe(
       "prepare_only",

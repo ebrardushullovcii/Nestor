@@ -1753,6 +1753,8 @@ function JobFinderReviewQueueRouteContent() {
         onClaimResumeIdentity={context.onClaimResumeIdentity}
         onKeepResumeIdentity={context.onKeepResumeIdentity}
         onRemoveReviewJob={context.onRemoveReviewJob}
+        onMoveResumesBackToReview={context.onMoveResumesBackToReview}
+        onTakeOutOfApplyQueue={context.onTakeOutOfApplyQueue}
         onReadJobListing={context.onAssessJobListing}
         {...(context.onRemoveReviewJobs
           ? { onRemoveReviewJobs: context.onRemoveReviewJobs }

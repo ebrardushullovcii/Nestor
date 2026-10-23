@@ -93,6 +93,10 @@ interface ReviewQueueListPanelProps {
    * their read is approved as written. One with a line to decide stays.
    */
   onApproveResumes?: (jobIds: readonly string[]) => Promise<unknown>;
+  /** Approved -> To review, as a deliberate move. */
+  onMoveResumesBackToReview?: (jobIds: readonly string[]) => Promise<unknown>;
+  /** Takes waiting jobs out of the Apply queue before a run takes them. */
+  onTakeOutOfApplyQueue?: (jobIds: readonly string[]) => Promise<unknown>;
   onOpenSafeguards?: () => void;
   /** A safeguard holding every application start back, in plain words. */
   safeguardBlocker?: string | null;
@@ -152,6 +156,8 @@ export function ReviewQueueListPanel({
   selectedItem,
   tailoredAssets,
   onApproveResumes,
+  onMoveResumesBackToReview,
+  onTakeOutOfApplyQueue,
 }: ReviewQueueListPanelProps) {
   const view = usePersistedCollectionView("shortlisted", "comfortable");
   const deferredQuery = useDeferredValue(view.query);
@@ -552,6 +558,19 @@ export function ReviewQueueListPanel({
       const approvable = ids.filter((id) => approvableIdSet.has(id));
       const ready = ids.filter((id) => readyIdSet.has(id));
       const eligible = ids.filter((id) => eligibleResumeIds.has(id));
+      const queued = ids.filter((id) => queuedJobIds?.has(id));
+      // An approved resume no application uses yet can go back to To review.
+      const approvedIds = new Set(
+        queue
+          .filter((item) => item.resumeReview.status === "approved")
+          .map((item) => item.jobId),
+      );
+      const approved = ids.filter(
+        (id) =>
+          approvedIds.has(id) &&
+          !preparedJobIds?.has(id) &&
+          !queuedJobIds?.has(id),
+      );
       const count = (n: number, one: string, many: string) =>
         n === 1 ? one : `${many.replace("#", String(n))}`;
       const done = () => {
@@ -606,14 +625,52 @@ export function ReviewQueueListPanel({
               },
             ]
           : []),
-        ...(onRemoveJobs
+        ...(queued.length > 0 && onTakeOutOfApplyQueue
           ? [
               "separator" as const,
               {
+                id: "take-out-of-queue",
+                label: count(
+                  queued.length,
+                  "Take out of the apply queue",
+                  "Take # out of the apply queue",
+                ),
+                run: () => {
+                  void onTakeOutOfApplyQueue(queued).catch(() => undefined);
+                  done();
+                },
+              },
+            ]
+          : []),
+        ...(approved.length > 0 && onMoveResumesBackToReview
+          ? [
+              "separator" as const,
+              {
+                id: "move-back-to-review",
+                label: count(
+                  approved.length,
+                  "Move back to To review",
+                  "Move # back to To review",
+                ),
+                run: () => {
+                  void onMoveResumesBackToReview(approved).catch(
+                    () => undefined,
+                  );
+                  done();
+                },
+              },
+            ]
+          : []),
+        ...(onRemoveJobs
+          ? [
+              ...(approved.length > 0 && onMoveResumesBackToReview
+                ? []
+                : ["separator" as const]),
+              {
                 id: "remove",
                 label: forTicked
-                  ? `Remove ${ids.length} from shortlist`
-                  : "Remove from shortlist",
+                  ? `Move ${ids.length} back to Find jobs`
+                  : "Move back to Find jobs",
                 run: () =>
                   forTicked
                     ? removeSelection()
@@ -759,7 +816,7 @@ export function ReviewQueueListPanel({
           ) : null}
           {onRemoveJobs ? (
             <Button
-              aria-label="Remove from shortlist"
+              aria-label="Move back to Find jobs"
               disabled={isRemovingSelection}
               onClick={() => void removeSelection()}
               pending={isRemovingSelection}

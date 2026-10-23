@@ -19,6 +19,7 @@ import type {
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
   JobFinderApplyQueueControlInput,
+  JobFinderRemoveFromApplyQueueInput,
   JobFinderApproveResumesInput,
   JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
@@ -752,6 +753,10 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       controlApplyQueue: (input: JobFinderApplyQueueControlInput) =>
         runWorkspaceAction(() =>
           window.nestor.jobFinder.controlApplyQueue(input),
+        ),
+      removeFromApplyQueue: (input: JobFinderRemoveFromApplyQueueInput) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.removeFromApplyQueue(input),
         ),
       approveApplyRun: (input: JobFinderApplyRunActionInput) =>
         runWorkspaceAction(() =>

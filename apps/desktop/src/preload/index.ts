@@ -96,6 +96,7 @@ import type {
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
   JobFinderApplyQueueControlInput,
+  JobFinderRemoveFromApplyQueueInput,
   JobFinderApproveResumesInput,
   JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
@@ -1505,6 +1506,11 @@ const desktopApi = {
     controlApplyQueue: (input: JobFinderApplyQueueControlInput) =>
       ipcRenderer.invoke(
         "job-finder:control-apply-queue",
+        input,
+      ) as Promise<JobFinderWorkspaceSyncResult>,
+    removeFromApplyQueue: (input: JobFinderRemoveFromApplyQueueInput) =>
+      ipcRenderer.invoke(
+        "job-finder:remove-from-apply-queue",
         input,
       ) as Promise<JobFinderWorkspaceSyncResult>,
     approveApplyRun: (input: JobFinderApplyRunActionInput) =>

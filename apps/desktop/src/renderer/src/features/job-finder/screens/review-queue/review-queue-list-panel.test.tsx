@@ -226,7 +226,7 @@ describe("ReviewQueueListPanel", () => {
       screen.getByRole("checkbox", { name: "Select Role ready" }),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: "Remove from shortlist" }),
+      screen.getByRole("button", { name: "Move back to Find jobs" }),
     );
     await vi.waitFor(() =>
       expect(onRemoveJobs).toHaveBeenCalledExactlyOnceWith(["one", "ready"]),

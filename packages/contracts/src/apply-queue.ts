@@ -74,6 +74,16 @@ export type JobFinderApplyQueueControlInput = z.infer<
   typeof JobFinderApplyQueueControlInputSchema
 >;
 
+/** Jobs the person takes out of the queue before a run takes them. */
+export const JobFinderRemoveFromApplyQueueInputSchema = z
+  .object({
+    jobIds: z.array(NonEmptyStringSchema).min(1).max(APPLY_QUEUE_MAX_JOBS),
+  })
+  .strict();
+export type JobFinderRemoveFromApplyQueueInput = z.infer<
+  typeof JobFinderRemoveFromApplyQueueInputSchema
+>;
+
 /**
  * The person's press of "Approve N resumes": each named job's current resume
  * is approved as written, as the single Approve does. A resume with a line
