@@ -34,6 +34,12 @@ export class TabLifecycle {
           state: requested ? "frozen" : "active",
         });
         current.frozen = requested;
+      })
+      .catch((error: unknown) => {
+        // A failed command must not be cached as the answer to every later
+        // request for the same state: the next wake has to try again.
+        if (current.requested === requested) current.requested = current.frozen;
+        throw error;
       });
     return current.pending;
   }
