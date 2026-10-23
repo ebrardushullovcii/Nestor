@@ -197,3 +197,32 @@ test("a full listing read nobody waits on runs at the fit-check effort", async (
     "high", // the person pressed "Read and assess listing"
   ]);
 });
+
+test("card and detail extraction preserve the existing page-read effort and its override", async () => {
+  const requests = captureEfforts();
+  for (const overrides of [
+    {},
+    {
+      NESTOR_AI_PAGE_READ_REASONING_EFFORT: "medium",
+      NESTOR_AI_LISTING_READ_REASONING_EFFORT: "medium",
+    },
+  ]) {
+    const client = createJobFinderAiClientFromEnvironment(
+      createEnvironment({ ...ownerEnvironment, ...overrides }),
+    );
+    for (const pageType of ["search_results", "job_detail"] as const) {
+      await client.extractJobsFromPage({
+        pageText: "Analyst at Northwind",
+        pageUrl: "https://jobs.example.test/job/1",
+        pageType,
+        maxJobs: 1,
+      });
+    }
+  }
+  expect(requests.map((request) => request.effort)).toEqual([
+    "low",
+    "low",
+    "medium",
+    "medium",
+  ]);
+});

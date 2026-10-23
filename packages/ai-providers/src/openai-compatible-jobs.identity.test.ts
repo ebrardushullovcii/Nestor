@@ -153,4 +153,92 @@ describe("page extraction instructions", () => {
       }),
     ).toContain("Explicit exclusions always apply");
   });
+
+  test("results cards request only facts and a selection decision, keeping detail reads complete", () => {
+    const results = buildJobsExtractionPrompt({
+      pageHostLabel: "board.example.test",
+      pageType: "search_results",
+      effectiveMaxJobs: 12,
+    });
+    expect(results).toContain(
+      "canonicalUrl, title, company, location, workMode, salaryText (or null), description, postedAt or postedAtText when visible, and searchRejection",
+    );
+    expect(results).toContain(
+      "Preserve visible keySkills, responsibilities, minimumQualifications",
+    );
+    expect(results).toContain(
+      "fit is judged from these facts during the search",
+    );
+    expect(results).toContain("including any requirements or restrictions");
+    expect(results).toContain(
+      "Unknown detail is provisional, not proof of a mismatch",
+    );
+    const detail = buildJobsExtractionPrompt({
+      pageHostLabel: "board.example.test",
+      pageType: "job_detail",
+      effectiveMaxJobs: 1,
+    });
+    expect(detail).toContain("Read the full page body");
+    expect(detail).toContain("description, summary when confidently available");
+    expect(detail).not.toContain("This is a card read");
+  });
+
+  test("sparse card responses preserve facts, URL identity and decisions without inventing listing text", () => {
+    const jobs = normalizeExtractedJobs({
+      payload: {
+        jobs: [
+          {
+            canonicalUrl: "/jobs/1",
+            title: "Platform Engineer",
+            company: "Northwind",
+            location: "Remote, Germany",
+            workMode: ["remote"],
+            description: "Build platforms.",
+            salaryText: "€80,000–100,000",
+            postedAtText: "2 days ago",
+            searchRejection: { category: "place", reason: "Germany only." },
+          },
+          {
+            canonicalUrl: "/jobs/2",
+            applicationUrl: "/apply/2",
+            sourceJobId: "vacancy-2",
+            title: "Platform Engineer",
+            company: "Northwind",
+            location: "Location not stated",
+            workMode: [],
+            description: "Platform Engineer",
+            postedAt: "2026-10-20T00:00:00Z",
+          },
+        ],
+      },
+      pageHostLabel: "board.example.test",
+      pageUrl: "https://board.example.test/jobs",
+      pageType: "search_results",
+      effectiveMaxJobs: 12,
+    });
+    expect(jobs).toHaveLength(2);
+    expect(jobs[0]).toMatchObject({
+      canonicalUrl: "https://board.example.test/jobs/1",
+      title: "Platform Engineer",
+      company: "Northwind",
+      location: "Remote, Germany",
+      workMode: ["remote"],
+      salaryText: "€80,000–100,000",
+      postedAtText: "2 days ago",
+      postedAt: null,
+      searchRejection: { category: "place", reason: "Germany only." },
+    });
+    expect(jobs[1]).toMatchObject({
+      canonicalUrl: "https://board.example.test/jobs/2",
+      applicationUrl: "https://board.example.test/apply/2",
+      sourceJobId: "vacancy-2",
+      postedAt: "2026-10-20T00:00:00.000Z",
+      searchRejection: null,
+      salaryText: null,
+      description: "Platform Engineer",
+      summary: null,
+      keySkills: [],
+      minimumQualifications: [],
+    });
+  });
 });

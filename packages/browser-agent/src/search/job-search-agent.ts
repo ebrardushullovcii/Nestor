@@ -30,7 +30,7 @@ import {
   SEARCH_KEEP_WHOLE_ANSWERS,
   createSearchViewDescriber,
 } from "./search-observation";
-import { mapWithLimit, pagePartsForReading } from "./page-read-parts";
+import { linksInText, mapWithLimit, pagePartsForReading } from "./page-read-parts";
 import type { AgentConfig, AgentProgress, AgentResult } from "../types";
 import type { SearchResultCache } from "./search-result-cache";
 import { createSearchCatalogTools } from "./job-search-catalog-tools";
@@ -281,8 +281,8 @@ const PART_MAX_JOBS = 12;
 const PART_SPLIT_DEPTH = 2;
 const PART_MIN_SPLIT_CHARS = 600;
 const PART_SPLIT_BEFORE_MS = 30_000;
-const PAGE_READ_CONCURRENCY = 4;
-/** New parts one extract_jobs call reads: two rounds, well inside the 90-second tool deadline. */
+const PAGE_READ_CONCURRENCY = 8;
+/** New parts one extract_jobs call reads: one round, well inside the 90-second tool deadline. */
 const PAGE_READ_PARTS_PER_CALL = 8;
 
 /** A posting's own page, read whole: its links first, then its text. */
@@ -395,6 +395,9 @@ export async function runJobSearchAgent(
   // What each part of a results page gave, by its exact text: reading the
   // same words again cannot find anything new, so it is not paid for twice.
   const pageReadCache = new Map<string, ExtractedJobs>();
+  // Different filter routes can show identical cards. Reuse only exact text
+  // and absolute link evidence, with every returned posting linked there.
+  const linkedPartReads = new Map<string, ExtractedJobs>();
   const savedCount = () =>
     collected.filter((job) => !job.searchRejection).length;
   const keep = (job: JobPosting): boolean => {
@@ -1337,6 +1340,20 @@ export async function runJobSearchAgent(
       const key = `${pageUrl}\n${part.text}`;
       const cached = pageReadCache.get(key);
       if (cached) return cached;
+      const partLinks = linksInText(part.window, links, pageUrl);
+      const linkedKey =
+        partLinks.length > 0
+          ? JSON.stringify({
+              origin: new URL(pageUrl).origin,
+              text: part.window,
+              links: partLinks,
+            })
+          : null;
+      const linkedRead = linkedKey ? linkedPartReads.get(linkedKey) : undefined;
+      if (linkedRead) {
+        pageReadCache.set(key, linkedRead);
+        return linkedRead;
+      }
       freshReads += 1;
       let jobs = await read(part.text, PART_MAX_JOBS);
       const full =
@@ -1361,6 +1378,13 @@ export async function runJobSearchAgent(
         }
       }
       pageReadCache.set(key, jobs);
+      if (
+        linkedKey &&
+        jobs.every((job) =>
+          partLinks.some((link) => link.href === job.canonicalUrl),
+        )
+      )
+        linkedPartReads.set(linkedKey, jobs);
       return jobs;
     };
     const parts = pagePartsForReading({ pageText, links, pageUrl });
