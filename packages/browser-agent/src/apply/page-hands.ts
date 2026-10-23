@@ -352,6 +352,9 @@ export function createApplyPageHands(
     setToggle: (ref, checked) => mechanics.setToggle(ref, checked),
     uploadFile: (ref, file) => mechanics.uploadFile(ref, file),
     clickAction: (ref) => mechanics.clickAction(ref),
+    ...(mechanics.canClickAction
+      ? { canClickAction: (ref: string) => mechanics.canClickAction!(ref) }
+      : {}),
     followLink: (ref) => mechanics.followLink(ref),
     ...(mechanics.adoptOpenedTab
       ? { adoptOpenedTab: (index) => mechanics.adoptOpenedTab!(index) }

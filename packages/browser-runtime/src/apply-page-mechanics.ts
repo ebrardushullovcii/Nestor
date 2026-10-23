@@ -14,10 +14,7 @@ import type {
   RawApplyLink,
   RawApplyPage,
 } from "@nestor/contracts";
-import {
-  describeBrowserError,
-  isPageReplacedError,
-} from "@nestor/contracts";
+import { describeBrowserError, isPageReplacedError } from "@nestor/contracts";
 import type { Frame, Locator, Page } from "playwright";
 
 import {
@@ -1517,6 +1514,34 @@ export function createPlaywrightApplyPageMechanics(
           ok: false,
           error: describeWriteFailure(error, "The file would not attach."),
         };
+      }
+    },
+    canClickAction: async (ref) => {
+      const locator = actionLocator(page, ref);
+      if (!locator) return false;
+      try {
+        return await locator.evaluate((element) => {
+          // Centering avoids sticky headers and footers without clicking or
+          // waiting for a pointer-action retry. A modal still fails the hit test.
+          element.scrollIntoView({
+            block: "center",
+            inline: "center",
+            behavior: "instant",
+          });
+          const rect = element.getBoundingClientRect();
+          const left = Math.max(0, rect.left);
+          const right = Math.min(window.innerWidth, rect.right);
+          const top = Math.max(0, rect.top);
+          const bottom = Math.min(window.innerHeight, rect.bottom);
+          if (right <= left || bottom <= top) return false;
+          const root = element.getRootNode();
+          const hit = (
+            root instanceof ShadowRoot ? root : document
+          ).elementFromPoint((left + right) / 2, (top + bottom) / 2);
+          return hit !== null && (hit === element || element.contains(hit));
+        });
+      } catch {
+        return false;
       }
     },
     clickAction: async (ref): Promise<ApplyWriteResult> => {

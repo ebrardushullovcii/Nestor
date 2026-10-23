@@ -167,6 +167,8 @@ export interface ApplyRawPageHands {
   setToggle: (ref: string, checked: boolean) => Promise<ApplyWriteResult>;
   uploadFile: (ref: string, file: ApplyUploadFile) => Promise<ApplyWriteResult>;
   clickAction: (ref: string) => Promise<ApplyWriteResult>;
+  /** Inspect whether a button receives pointer input; never presses it. */
+  canClickAction?: (ref: string) => Promise<boolean>;
   /**
    * Opens what one of the page's links points at, in the same tab.
    *

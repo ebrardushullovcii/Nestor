@@ -60,6 +60,59 @@ describe("reading the choices of lists the page draws itself", () => {
     browser = await chromium.launch({ headless: true });
   }, 60_000);
 
+  test("readiness detects a covered button without clicking it", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(
+        `<button id="send" onclick="this.dataset.pressed='yes'">Send application</button><aside style="position:fixed;inset:0;background:white;z-index:10"><button onclick="this.parentElement.remove()">Use essential only</button></aside>`,
+      );
+      const mechanics = createPlaywrightApplyPageMechanics(page);
+      const raw = await mechanics.readPage();
+      const send = raw.actions.find(
+        (action) => action.label === "Send application",
+      )!;
+      const ref = send.ref ?? `a${send.index}`;
+      expect(await mechanics.canClickAction!(ref)).toBe(false);
+      expect(
+        await page.locator("#send").getAttribute("data-pressed"),
+      ).toBeNull();
+      await page.getByRole("button", { name: "Use essential only" }).click();
+      expect(await mechanics.canClickAction!(ref)).toBe(true);
+      expect(
+        await page.locator("#send").getAttribute("data-pressed"),
+      ).toBeNull();
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("readiness scrolls a button clear of a sticky footer without pressing it", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(
+        `<div style="height:1600px"></div><button id="send" onclick="this.dataset.pressed='yes'">Send application</button><div style="height:1000px"></div><aside style="position:fixed;bottom:0;left:0;right:0;height:120px;background:white;z-index:10">Storage notice</aside>`,
+      );
+      await page
+        .locator("#send")
+        .evaluate((element) =>
+          element.scrollIntoView({ block: "end", behavior: "instant" }),
+        );
+      const mechanics = createPlaywrightApplyPageMechanics(page);
+      const raw = await mechanics.readPage();
+      const send = raw.actions.find(
+        (action) => action.label === "Send application",
+      )!;
+      expect(
+        await mechanics.canClickAction!(send.ref ?? `a${send.index}`),
+      ).toBe(true);
+      expect(
+        await page.locator("#send").getAttribute("data-pressed"),
+      ).toBeNull();
+    } finally {
+      await page.close();
+    }
+  });
+
   test("keeps the outer step legend on a nested skills group", async () => {
     const page = await browser.newPage();
     try {

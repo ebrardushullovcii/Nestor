@@ -50,6 +50,35 @@ function provider(
 }
 
 describe("the letter provider", () => {
+  test("a stopped form cannot render a letter that finishes later", async () => {
+    const controller = new AbortController();
+    let finish: (text: string) => void = () => {};
+    let receivedSignal: AbortSignal | undefined;
+    const renderLetter = vi.fn();
+    const letters = createApplicationLetterProvider({
+      preference: PREFERENCE,
+      application: { jobId: "job_test", applicationId: "application_test" },
+      writeLetter: ({ signal }) => {
+        receivedSignal = signal;
+        return new Promise<string>((resolve) => {
+          finish = resolve;
+        });
+      },
+      renderLetter,
+    });
+    const pending = letters.provide({
+      ...REQUEST,
+      delivery: "file",
+      fileType: "pdf",
+      signal: controller.signal,
+    });
+    controller.abort();
+    finish("A completed letter that arrived after Stop.");
+    expect(await pending).toMatchObject({ ok: false });
+    expect(receivedSignal?.aborted).toBe(true);
+    expect(renderLetter).not.toHaveBeenCalled();
+  });
+
   test("writes once and hands the same words back for the box and the file", async () => {
     const writeLetter = vi.fn(() =>
       Promise.resolve("Dear hiring team, I build platforms."),

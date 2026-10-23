@@ -111,6 +111,8 @@ export interface AgentLoopToolContext {
 
 export interface AgentLoopTool {
   definition: AgentLoopToolDefinition;
+  /** A bounded local task may need longer than an ordinary page operation. */
+  timeoutMs?: number | ((rawArguments: string) => number | undefined);
   /** Only page tools count repeated thrown failures as a dead browser. */
   failureKind?: "browser" | "tool";
   /** Converts a page-library exception into safe, plain words for the model. */
@@ -691,6 +693,12 @@ export async function runAgentLoop(
       }
 
       const toolStartedAt = now().getTime();
+      const deadlineMs = Math.max(
+        1,
+        (typeof tool.timeoutMs === "function"
+          ? tool.timeoutMs(toolCall.function.arguments)
+          : tool.timeoutMs) ?? toolTimeoutMs,
+      );
       let outcome: AgentLoopToolOutcome;
       try {
         outcome = await withToolDeadline(
@@ -698,7 +706,7 @@ export async function runAgentLoop(
             step: steps,
             ...(options.signal ? { signal: options.signal } : {}),
           }),
-          toolTimeoutMs,
+          deadlineMs,
           options.signal,
         );
         if (tool.failureKind === "browser") {
@@ -725,7 +733,7 @@ export async function runAgentLoop(
           // A hung step is reported as a fact and counted like a dead page:
           // three in a row end the run in plain words instead of a freeze.
           consecutiveBrowserFailures += 1;
-          const failure = `That step took longer than ${Math.round(toolTimeoutMs / 1000)} seconds and was given up.`;
+          const failure = `That step took longer than ${Math.round(deadlineMs / 1000)} seconds and was given up.`;
           await note(`${toolCall.function.name} → took too long`);
           if (consecutiveBrowserFailures >= browserFailureLimit) {
             ended = result(
