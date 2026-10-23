@@ -302,7 +302,12 @@ export function useJobFinderPageController() {
           title: resolved.message!,
           tone: resolved.toastTone ?? "success",
           ...(undo
-            ? { action: { label: "Undo", onClick: undo } }
+            ? {
+                action: {
+                  label: resolved.undoLabel ?? "Undo",
+                  onClick: undo,
+                },
+              }
             : link
               ? {
                   action: {

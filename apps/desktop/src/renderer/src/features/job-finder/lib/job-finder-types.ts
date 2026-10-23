@@ -631,6 +631,8 @@ export interface ActionState {
   actionLink?: { label: string; route: string } | null;
   /** Puts back what a quick action took away; the toast offers Undo. */
   undo?: (() => void) | null;
+  /** The Undo button's words; "Undo all" after a move of many jobs. */
+  undoLabel?: string | null;
 }
 
 /**

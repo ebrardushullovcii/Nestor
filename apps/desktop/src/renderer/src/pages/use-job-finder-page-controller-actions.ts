@@ -116,6 +116,13 @@ import { buildJobFinderContextRoute } from "../features/job-finder/lib/job-finde
 import type { ApplyQueueControlAction } from "../features/job-finder/lib/apply-queue-view";
 import { buildResumeWorkspaceRoute } from "@renderer/features/job-finder/lib/resume-workspace-route";
 import {
+  getRecentChangeUndo,
+  markRecentChangeUndone,
+  recordRecentChange,
+  type RecentChange,
+  type RecentChangeInput,
+} from "@renderer/features/job-finder/lib/recent-changes";
+import {
   enqueueResumeApproval,
   forgetResumeReview,
   getResumeReviewSession,
@@ -149,6 +156,8 @@ type ActionOptions = {
   toastTone?: () => "success" | "warning";
   /** Offered as Undo on the success toast. */
   undo?: () => void;
+  /** "Undo all" for a move of many jobs. */
+  undoLabel?: string;
   clearMessageOnStart?: boolean;
   /** A flow that navigates immediately keeps later failures on its destination. */
   statusOwnerPath?: string;
@@ -807,7 +816,12 @@ export function createActionRunners(args: {
             tone: resolvedSuccessMessage ? "success" : null,
             ...(options?.toastTone ? { toastTone: options.toastTone() } : {}),
             ...(options?.undo && resolvedSuccessMessage
-              ? { undo: options.undo }
+              ? {
+                  undo: options.undo,
+                  ...(options.undoLabel
+                    ? { undoLabel: options.undoLabel }
+                    : {}),
+                }
               : {}),
           });
         },
@@ -1103,6 +1117,136 @@ export function createPrimaryPageActions(
     }
     return formatDailyPreparationCapacityReachedText(capacity);
   };
+
+  const jobsAre = (count: number) =>
+    count === 1 ? "1 job is" : `${count} jobs are`;
+  const describeJobForChange = (jobId: string): string => {
+    const current = latestWorkspaceRef.current ?? workspace;
+    const job =
+      current.reviewQueue.find((item) => item.jobId === jobId) ??
+      current.discoveryJobs.find((entry) => entry.id === jobId) ??
+      current.dismissedDiscoveryJobs.find((entry) => entry.id === jobId) ??
+      current.applicationRecords.find((record) => record.jobId === jobId);
+    return job ? `${job.title} at ${job.company}` : "a job";
+  };
+  /** Records a move for Recent changes; the label names its first job. */
+  const recordMove = (
+    input: Omit<RecentChangeInput, "label">,
+  ): RecentChange =>
+    recordRecentChange({
+      ...input,
+      label: describeJobForChange(input.jobIds[0] ?? ""),
+    });
+  // One way back for every move, shared by each toast's Undo and Activity's
+  // Recent changes. A job that moved on since keeps its newer state; the
+  // reason says where it went instead.
+  const undoRecentChange = (change: RecentChange): Promise<boolean> => {
+    const current = latestWorkspaceRef.current ?? workspace;
+    const undo = getRecentChangeUndo(change, {
+      discoveryJobs: current.discoveryJobs,
+      dismissedDiscoveryJobs: current.dismissedDiscoveryJobs,
+      reviewQueue: current.reviewQueue,
+      applicationJobIds: collectPreparedApplicationJobIds(
+        current.applicationRecords,
+      ),
+    });
+    if (!undo.possible) {
+      applyRouteScopedMessage({ message: undo.reason, tone: "failure" });
+      return Promise.resolve(false);
+    }
+    const ids = undo.jobIds;
+    const settle = (
+      action: () => Promise<unknown>,
+      message: string,
+      scope: PendingActionScope,
+    ) =>
+      runAction(action, () => markRecentChangeUndone(change), message, {
+        scope,
+      });
+    switch (change.kind) {
+      case "shortlisted":
+        return settle(
+          async () => {
+            if (actions.removeJobsFromReview)
+              return actions.removeJobsFromReview(ids);
+            for (const id of ids) await actions.removeJobFromReview(id);
+          },
+          `${jobsAre(ids.length)} back in Find jobs.`,
+          jobFinderPendingActions.resumeJob("bulk-remove"),
+        );
+      case "hidden":
+        return settle(
+          async () => {
+            for (const id of ids) await actions.restoreDismissedDiscoveryJob(id);
+          },
+          `${jobsAre(ids.length)} back in Find jobs.`,
+          jobFinderPendingActions.discoveryJob("bulk-dismiss"),
+        );
+      case "shown_again":
+        return settle(
+          async () => {
+            if (actions.dismissDiscoveryJobs)
+              return actions.dismissDiscoveryJobs(ids, []);
+            for (const id of ids)
+              await actions.dismissDiscoveryJob(id, [], "hide_job", null);
+          },
+          `${ids.length === 1 ? "1 job" : `${ids.length} jobs`} hidden again.`,
+          jobFinderPendingActions.discoveryJob("bulk-dismiss"),
+        );
+      case "moved_to_find_jobs":
+        return settle(
+          async () => {
+            if (actions.queueJobsForReview)
+              return actions.queueJobsForReview(ids);
+            for (const id of ids) await actions.queueJobForReview(id);
+          },
+          `${jobsAre(ids.length)} back in Shortlisted.`,
+          jobFinderPendingActions.resumeJob("bulk-remove"),
+        );
+      case "approved":
+        return settle(
+          async () => {
+            for (const id of ids)
+              await actions.clearResumeApproval(
+                id,
+                change.restoreStatus?.[id] ?? "needs_review",
+              );
+            for (const id of ids) forgetResumeReview(id);
+          },
+          ids.length === 1
+            ? "The resume is back under To review."
+            : `${ids.length} resumes are back under To review.`,
+          jobFinderPendingActions.apply(),
+        );
+      case "moved_to_review":
+        return settle(
+          async () => {
+            for (const id of ids)
+              await actions.approveResume(id, change.approvedExportIds![id]!);
+          },
+          ids.length === 1
+            ? "Resume approved again."
+            : `${ids.length} resumes approved again.`,
+          jobFinderPendingActions.apply(),
+        );
+      case "moved_to_shortlisted":
+      case "taken_out_of_queue":
+        return Promise.resolve(false);
+    }
+  };
+  const reviewStatusBeforeApproval = (
+    jobId: string,
+  ): "draft" | "needs_review" =>
+    (latestWorkspaceRef.current ?? workspace).reviewQueue.find(
+      (item) => item.jobId === jobId,
+    )?.resumeReview.status === "draft"
+      ? "draft"
+      : "needs_review";
+  /** The toast's Undo for a move just recorded. */
+  const undoMoveOptions = (change: RecentChange) => ({
+    undo: () => void undoRecentChange(change),
+    ...(change.jobIds.length > 1 ? { undoLabel: "Undo all" } : {}),
+  });
 
   const runDiscoveryAction = (
     targetId?: string,
@@ -1903,24 +2047,43 @@ export function createPrimaryPageActions(
         ? { status: "failed", message: null }
         : { status: "unknown" };
     },
-    onApproveResumes: (jobIds: readonly string[]) =>
-      runAction(
+    onApproveResumes: (jobIds: readonly string[]) => {
+      const restoreStatus = Object.fromEntries(
+        jobIds.map((id) => [id, reviewStatusBeforeApproval(id)]),
+      );
+      let change: RecentChange | null = null;
+      return runAction(
         () => actions.approveResumes({ jobIds: [...jobIds] }),
         () => undefined,
         (snapshot) => {
           const chosen = new Set(jobIds);
-          const approved = (snapshot.reviewQueue ?? []).filter(
-            (item) =>
-              chosen.has(item.jobId) && item.resumeReview.status === "approved",
-          ).length;
+          const approvedIds = (snapshot.reviewQueue ?? [])
+            .filter(
+              (item) =>
+                chosen.has(item.jobId) &&
+                item.resumeReview.status === "approved",
+            )
+            .map((item) => item.jobId);
+          const approved = approvedIds.length;
+          if (approved > 0)
+            change = recordMove({
+              kind: "approved",
+              jobIds: approvedIds,
+              restoreStatus,
+            });
           const left = jobIds.length - approved;
           return `${approved === 1 ? "1 resume approved" : `${approved} resumes approved`}.${left > 0 ? ` ${left} could not be: open ${left === 1 ? "it" : "them"} under To review.` : ""}`;
         },
         {
           scope: jobFinderPendingActions.apply(),
           startMessage: `Approving ${jobIds.length === 1 ? "1 resume" : `${jobIds.length} resumes`}...`,
+          undo: () => {
+            if (change) void undoRecentChange(change);
+          },
+          ...(jobIds.length > 1 ? { undoLabel: "Undo all" } : {}),
         },
-      ),
+      );
+    },
     onControlApplyQueue: (action: ApplyQueueControlAction) =>
       void runAction(
         () => actions.controlApplyQueue({ action }),
@@ -2035,6 +2198,9 @@ export function createPrimaryPageActions(
       expectedNormalizedCompanyName: string | null = null,
       options?: { quiet?: boolean },
     ) => {
+      // Undo shows the job again; excluding the employer is undone where it
+      // was made, so that one keeps its own message.
+      let change: RecentChange | null = null;
       await runAction(
         () =>
           actions.dismissDiscoveryJob(
@@ -2043,15 +2209,25 @@ export function createPrimaryPageActions(
             action,
             expectedNormalizedCompanyName,
           ),
-        () => undefined,
+        () => {
+          if (action === "hide_job")
+            change = recordMove({ kind: "hidden", jobIds: [jobId] });
+        },
         options?.quiet
           ? null
           : action === "hide_and_exclude_employer"
             ? "Job hidden and the exact employer name excluded from future searches. Fit scoring is unchanged."
-            : "Job hidden. Your reasons stay local and do not change fit scoring.",
+            : "Job hidden.",
         {
           rethrowError: true,
           scope: jobFinderPendingActions.discoveryJob(jobId),
+          ...(action === "hide_job"
+            ? {
+                undo: () => {
+                  if (change) void undoRecentChange(change);
+                },
+              }
+            : {}),
         },
       );
     },
@@ -2064,13 +2240,22 @@ export function createPrimaryPageActions(
         "Employer allowed in future searches. The hidden job was not restored.",
         { scope: jobFinderPendingActions.discoveryJob(input.jobId) },
       ),
-    onRestoreDismissedJob: (jobId: string, options?: { quiet?: boolean }) =>
+    onRestoreDismissedJob: (jobId: string, options?: { quiet?: boolean }) => {
+      let change: RecentChange | null = null;
       void runAction(
         () => actions.restoreDismissedDiscoveryJob(jobId),
-        () => undefined,
-        options?.quiet ? null : "Job restored and feedback reset.",
-        { scope: jobFinderPendingActions.discoveryJob(jobId) },
-      ),
+        () => {
+          change = recordMove({ kind: "shown_again", jobIds: [jobId] });
+        },
+        options?.quiet ? null : "Job is back in Find jobs.",
+        {
+          scope: jobFinderPendingActions.discoveryJob(jobId),
+          undo: () => {
+            if (change) void undoRecentChange(change);
+          },
+        },
+      );
+    },
     onEditResumeWorkspace: (jobId: string) => {
       void confirmLeaveDirtyResumeWorkspace("open that resume instead").then(
         (mayLeave) => {
@@ -2121,30 +2306,22 @@ export function createPrimaryPageActions(
               "remove these jobs from Shortlisted",
             );
             if (!mayLeave) return;
-            const queueJobsForReview = actions.queueJobsForReview;
+            let change: RecentChange | null = null;
             await runAction(
               () => actions.removeJobsFromReview!(ids),
-              () => undefined,
+              () => {
+                change = recordMove({ kind: "moved_to_find_jobs", jobIds: ids });
+              },
               options?.quiet
                 ? null
                 : `${ids.length} ${ids.length === 1 ? "job" : "jobs"} moved back to Find jobs.`,
               {
                 rethrowError: true,
                 scope: jobFinderPendingActions.resumeJob("bulk-remove"),
-                ...(queueJobsForReview
-                  ? {
-                      undo: () =>
-                        void runAction(
-                          () => queueJobsForReview(ids),
-                          () => undefined,
-                          `${ids.length} ${ids.length === 1 ? "job is" : "jobs are"} back in Shortlisted.`,
-                          {
-                            scope:
-                              jobFinderPendingActions.resumeJob("bulk-remove"),
-                          },
-                        ),
-                    }
-                  : {}),
+                undo: () => {
+                  if (change) void undoRecentChange(change);
+                },
+                ...(ids.length > 1 ? { undoLabel: "Undo all" } : {}),
               },
             );
           },
@@ -2158,9 +2335,14 @@ export function createPrimaryPageActions(
           return;
         }
 
+        let change: RecentChange | null = null;
         void runAction(
           () => actions.removeJobFromReview(jobId),
           () => {
+            change = recordMove({
+              kind: "moved_to_find_jobs",
+              jobIds: [jobId],
+            });
             clearResumeWorkspaceState();
             const queue = getCampaignReviewQueue();
             const index = queue.findIndex((item) => item.jobId === jobId);
@@ -2169,11 +2351,18 @@ export function createPrimaryPageActions(
             navigate("/job-finder/review-queue", { replace: true });
           },
           "Job moved back to Find jobs.",
-          { scope: jobFinderPendingActions.resumeJob(jobId) },
+          {
+            scope: jobFinderPendingActions.resumeJob(jobId),
+            undo: () => {
+              if (change) void undoRecentChange(change);
+            },
+          },
         );
       });
     },
-    onApproveCurrentResume: (jobId: string) =>
+    onApproveCurrentResume: (jobId: string) => {
+      const restoreStatus = reviewStatusBeforeApproval(jobId);
+      let change: RecentChange | null = null;
       void runResumeWorkspaceAction(
         async () => {
           try {
@@ -2190,11 +2379,22 @@ export function createPrimaryPageActions(
           return approveLatestResumeExport(jobId);
         },
         async () => {
+          change = recordMove({
+            kind: "approved",
+            jobIds: [jobId],
+            restoreStatus: { [jobId]: restoreStatus },
+          });
           await refreshResumeWorkspace(jobId);
         },
         "Resume approved and ready for application preparation.",
-        { scope: jobFinderPendingActions.resumeExport(jobId) },
-      ),
+        {
+          scope: jobFinderPendingActions.resumeExport(jobId),
+          undo: () => {
+            if (change) void undoRecentChange(change);
+          },
+        },
+      );
+    },
     onApproveResumeAndContinue: (
       jobId: string,
       nextJobId: string | null,
@@ -2206,11 +2406,12 @@ export function createPrimaryPageActions(
       // job in "To review" and is named on the review line in the studio.
       // Undo puts the resume back under To review as it was, so it needs
       // the status the approval is about to replace.
-      const restoreStatus =
-        workspace.reviewQueue.find((item) => item.jobId === jobId)
-          ?.resumeReview.status === "draft"
-          ? ("draft" as const)
-          : ("needs_review" as const);
+      const restoreStatus = reviewStatusBeforeApproval(jobId);
+      const change = recordMove({
+        kind: "approved",
+        jobIds: [jobId],
+        restoreStatus: { [jobId]: restoreStatus },
+      });
       markResumeReviewApproving(jobId);
       enqueueResumeApproval(async () => {
         try {
@@ -2251,7 +2452,10 @@ export function createPrimaryPageActions(
               if (getResumeReviewSession().failed.has(jobId)) return;
               await runAction(
                 () => actions.clearResumeApproval(jobId, restoreStatus),
-                () => forgetResumeReview(jobId),
+                () => {
+                  forgetResumeReview(jobId);
+                  markRecentChangeUndone(change);
+                },
                 "The resume is back under To review.",
                 { scope: jobFinderPendingActions.resumeExport(jobId) },
               );
@@ -2324,15 +2528,69 @@ export function createPrimaryPageActions(
         );
       })();
     },
-    onApproveResume: (jobId: string, exportId: string) =>
+    onApproveResume: (jobId: string, exportId: string) => {
+      const restoreStatus = reviewStatusBeforeApproval(jobId);
+      let change: RecentChange | null = null;
       void runResumeWorkspaceAction(
         () => actions.approveResume(jobId, exportId),
         async () => {
+          change = recordMove({
+            kind: "approved",
+            jobIds: [jobId],
+            restoreStatus: { [jobId]: restoreStatus },
+          });
           await refreshResumeWorkspace(jobId);
         },
         "Resume approved for this job.",
-        { scope: jobFinderPendingActions.resumeJob(jobId) },
-      ),
+        {
+          scope: jobFinderPendingActions.resumeJob(jobId),
+          undo: () => {
+            if (change) void undoRecentChange(change);
+          },
+        },
+      );
+    },
+    onMoveResumesBackToReview: (jobIds: readonly string[]) => {
+      // Approved -> To review, on purpose: the approval is cleared and the
+      // resume waits for a read again exactly as before it was approved.
+      // Undo approves the same PDF again.
+      const current = latestWorkspaceRef.current ?? workspace;
+      const approvedExportIds: Record<string, string> = {};
+      for (const item of current.reviewQueue)
+        if (
+          jobIds.includes(item.jobId) &&
+          item.resumeReview.status === "approved"
+        )
+          approvedExportIds[item.jobId] = item.resumeReview.approvedExportId;
+      const ids = Object.keys(approvedExportIds);
+      if (ids.length === 0) return Promise.resolve(false);
+      let change: RecentChange | null = null;
+      return runAction(
+        async () => {
+          for (const id of ids)
+            await actions.clearResumeApproval(id, "needs_review");
+          for (const id of ids) forgetResumeReview(id);
+        },
+        () => {
+          change = recordMove({
+            kind: "moved_to_review",
+            jobIds: ids,
+            approvedExportIds,
+          });
+        },
+        ids.length === 1
+          ? "The resume is back under To review."
+          : `${ids.length} resumes are back under To review.`,
+        {
+          scope: jobFinderPendingActions.apply(),
+          undo: () => {
+            if (change) void undoRecentChange(change);
+          },
+          ...(ids.length > 1 ? { undoLabel: "Undo all" } : {}),
+        },
+      );
+    },
+    onUndoRecentChange: undoRecentChange,
     onSetWorkHistoryReviewAcknowledgment: (
       jobId: string,
       decision: ResumeWorkHistoryDecisionRequest,
@@ -2501,26 +2759,20 @@ export function createPrimaryPageActions(
           onDismissJobs: async (jobIds: readonly string[]) => {
             const ids = [...new Set(jobIds)];
             if (ids.length === 0) return;
+            let change: RecentChange | null = null;
             await runAction(
               () => actions.dismissDiscoveryJobs!(ids, []),
-              () => undefined,
+              () => {
+                change = recordMove({ kind: "hidden", jobIds: ids });
+              },
               `${ids.length} ${ids.length === 1 ? "job" : "jobs"} hidden.`,
               {
                 rethrowError: true,
                 scope: jobFinderPendingActions.discoveryJob("bulk-dismiss"),
-                undo: () =>
-                  void runAction(
-                    async () => {
-                      for (const id of ids)
-                        await actions.restoreDismissedDiscoveryJob(id);
-                    },
-                    () => undefined,
-                    `${ids.length} ${ids.length === 1 ? "job is" : "jobs are"} back in Find jobs.`,
-                    {
-                      scope:
-                        jobFinderPendingActions.discoveryJob("bulk-dismiss"),
-                    },
-                  ),
+                undo: () => {
+                  if (change) void undoRecentChange(change);
+                },
+                ...(ids.length > 1 ? { undoLabel: "Undo all" } : {}),
               },
             );
           },
@@ -2554,18 +2806,14 @@ export function createPrimaryPageActions(
               // of the list, so selecting one there opened Shortlisted on its
               // last page the next time the person went to it. The toast's
               // link opens the first new job instead.
-              const message = `${ids.length} ${ids.length === 1 ? "job added" : "jobs added"} to Shortlisted.`;
+              const message = `Shortlisted ${ids.length === 1 ? "1 job" : `${ids.length} jobs`}.`;
+              const change = recordMove({ kind: "shortlisted", jobIds: ids });
               applyRouteScopedMessage(
                 {
                   message,
                   tone: "success",
-                  actionLink: {
-                    label: "Open Shortlisted",
-                    route: buildJobFinderContextRoute(
-                      "/job-finder/review-queue",
-                      { jobId: ids[0]! },
-                    ),
-                  },
+                  undo: () => void undoRecentChange(change),
+                  undoLabel: ids.length > 1 ? "Undo all" : null,
                 },
                 ownerRoute,
               );
@@ -2607,6 +2855,7 @@ export function createPrimaryPageActions(
         // review collections. Retain the exact clicked id so the refreshed
         // Shortlisted surface cannot silently fall back to another row.
         setSelectedReviewJobId(jobId);
+        const change = recordMove({ kind: "shortlisted", jobIds: [jobId] });
         // A triage pass says each decision on its own bar with Undo; a
         // toast for every one of a hundred shortlists would only stack up.
         if (!options?.quiet)
@@ -2614,10 +2863,7 @@ export function createPrimaryPageActions(
             {
               message: successMessage,
               tone: "success",
-              actionLink: {
-                label: "Open Shortlisted",
-                route: "/job-finder/review-queue",
-              },
+              undo: () => void undoRecentChange(change),
             },
             ownerStartRoute,
           );
