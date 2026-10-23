@@ -331,6 +331,8 @@ export interface JobFinderRepository
       current: BorrowedDiscoveryState,
     ) => readonly SavedJob[];
     update?: (job: SavedJob) => SavedJob;
+    /** Give the updater frozen current rows; it must return a new row for changes. */
+    borrowCurrentJobs?: boolean;
     /**
      * Runs `update` only on these rows (and on stored rows an upsert names);
      * every other row stays as stored without being read. Pass it only when
@@ -656,6 +658,8 @@ export interface JobFinderRepository
     update: (current: JobFinderSettings) => JobFinderSettings,
   ): Promise<JobFinderSettings>;
   getDiscoveryState(): Promise<JobFinderDiscoveryState>;
+  /** Frozen canonical run state, including checkpoints. Never mutate borrowed rows. */
+  readDiscoveryStateForRun?(): Promise<JobFinderDiscoveryState>;
   /**
    * Borrowed immutable display state, reused until discovery changes. Agent
    * checkpoints stay in canonical storage and are null in this projection.

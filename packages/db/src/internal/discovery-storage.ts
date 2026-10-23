@@ -11,6 +11,7 @@ import {
   type JobFinderDiscoveryState,
 } from "@nestor/contracts";
 import { normalizeLegacyDiscoveryState } from "./legacy";
+import { adoptDiscoveryLedgerIndex, discoveryLedgerPatches } from "./discovery-ledger-patch";
 
 // The singleton contains only the small, frequently changed discovery fields.
 // Run activity, target execution/checkpoints, ledger and pending jobs are rows.
@@ -509,6 +510,54 @@ function orderedRanks(keys: readonly string[], previous: Map<string, number>): n
 
 function writeChangedRows<T extends { id: string }>(database: DatabaseSync, table: string, before: readonly T[], after: readonly T[], parser: { parse(value: unknown): T }, aliases: WeakMap<object, object>, runId?: string, positionCache?: PositionCache): T[] {
   if (before === after) return before as T[];
+  const patch =
+    table === "discovery_ledger"
+      ? discoveryLedgerPatches.get(after)
+      : undefined;
+  if (patch?.before === before) {
+    const result = after.slice();
+    let maximum: number | null = null;
+    for (const { index, previousIndex, moveToEnd } of patch.rows) {
+      const row = after[index]!;
+      const old = previousIndex === undefined ? undefined : before[previousIndex];
+      const parsed =
+        old === row || (old && aliases.get(row) === old)
+          ? old
+          : frozen(parser.parse(row));
+      if (old && !moveToEnd && JSON.stringify(old) === JSON.stringify(parsed)) {
+        result[index] = old;
+      } else {
+        let position: number;
+        if (old && !moveToEnd)
+          position = Number(
+            statement(
+              database,
+              "SELECT position FROM discovery_ledger WHERE id = ?",
+            ).get(row.id)?.position,
+          );
+        else {
+          maximum ??= Number(
+            statement(
+              database,
+              "SELECT COALESCE(MAX(position), -1) AS maximum FROM discovery_ledger",
+            ).get()?.maximum,
+          );
+          position = ++maximum;
+        }
+        replaceRow(database, table, [row.id, position], parsed);
+        result[index] = parsed;
+      }
+      frozen(row);
+      aliases.set(row, result[index]);
+    }
+    // Existing ranks did not move. Appends invalidate the generic writer's
+    // position cache; it can rebuild that cache if a later write reorders rows.
+    positionCache?.delete(`${table}\u0000`);
+    Object.freeze(result);
+    adoptDiscoveryLedgerIndex(after, result);
+    return result;
+  }
+  if (before.length === after.length && before.every((row, index) => row === after[index] || aliases.get(after[index]!) === row)) return before as T[];
   const cacheKey = `${table}\u0000${runId ?? ""}`;
   let positions = positionCache?.get(cacheKey);
   if (!positions) {
@@ -700,6 +749,9 @@ export function createDiscoveryStorage(database: DatabaseSync, fallback: JobFind
   const epoch = () => Number(database.prepare("SELECT revision FROM discovery_canonical_epoch").get()?.revision ?? 0);
   const version = () => Number(database.prepare("PRAGMA data_version").get()?.data_version ?? 0);
   return {
+    peek(): JobFinderDiscoveryState | null {
+      return !database.isTransaction && cached && epoch() === cachedEpoch && version() === cachedVersion ? cached : null;
+    },
     read(): JobFinderDiscoveryState {
       const currentEpoch = epoch();
       const currentVersion = version();

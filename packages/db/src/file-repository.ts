@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import {
   ApplyJobResultSchema,
   ApplyRunSchema,
@@ -122,7 +123,10 @@ import type {
   WorkspaceDatabaseRecoveryRequiredDetails,
   WorkspaceDatabaseRecoveryRequiredOutcome,
 } from "./repository-types";
-import { createSavedJobProjectionReader } from "./internal/saved-job-projection";
+import {
+  createSavedJobProjectionReader,
+  freezeProjection,
+} from "./internal/saved-job-projection";
 import { createDiscoveryDisplayProjectionReader } from "./internal/discovery-display-projection";
 import {
   createDiscoveryStorage,
@@ -417,10 +421,33 @@ export async function createFileJobFinderRepository(
     readDisplayCollections = createDisplayCollectionsReader(database, {
       validationStamp: options.rowValidationStamp ?? null,
     });
-    readDiscoveryDisplayProjection = createDiscoveryDisplayProjectionReader(
+    const readDiscoveryDisplay = createDiscoveryDisplayProjectionReader(
       database,
       normalizedSeed.discovery,
     );
+    let sharedDiscovery: Awaited<
+      ReturnType<typeof readDiscoveryDisplay>
+    > | null = null;
+    let sharedFrom: Awaited<ReturnType<typeof readDiscoveryDisplay>> | null =
+      null;
+    readDiscoveryDisplayProjection = async () => {
+      const display = await readDiscoveryDisplay();
+      const canonical = discoveryStorage.peek();
+      if (!canonical) return display;
+      if (
+        sharedFrom === display &&
+        sharedDiscovery?.discoveryLedger === canonical.discoveryLedger &&
+        sharedDiscovery.pendingDiscoveryJobs === canonical.pendingDiscoveryJobs
+      )
+        return sharedDiscovery;
+      sharedFrom = display;
+      sharedDiscovery = Object.freeze({
+        ...display,
+        discoveryLedger: canonical.discoveryLedger,
+        pendingDiscoveryJobs: canonical.pendingDiscoveryJobs,
+      });
+      return sharedDiscovery;
+    };
   } catch (error) {
     closeDatabaseQuietly(database);
     throw error;
@@ -1235,15 +1262,14 @@ export async function createFileJobFinderRepository(
       upsertsFromDiscovery,
       upsertsFromBorrowedDiscovery,
       update,
+      borrowCurrentJobs,
       updateJobIds,
       updateSettings,
       clearResumeApproval,
       updateDiscoveryState,
     }) {
       try {
-        const suppliedUpserts = SavedJobSchema.array().parse(
-          cloneValue([...upserts]),
-        );
+        const suppliedUpserts = SavedJobSchema.array().parse([...upserts]);
         let committedDiscovery: JobFinderDiscoveryState | null = null;
 
         runImmediateTransaction(database, () => {
@@ -1308,7 +1334,11 @@ export async function createFileJobFinderRepository(
             for (const currentJob of currentJobs) {
               existingJobIds.add(currentJob.id);
               const nextJob = SavedJobSchema.parse(
-                cloneValue(update(cloneValue(currentJob))),
+                update(
+                  borrowCurrentJobs
+                    ? freezeProjection(currentJob)
+                    : cloneValue(currentJob),
+                ),
               );
               if (nextJob.id !== currentJob.id) {
                 throw new Error(
@@ -1319,7 +1349,7 @@ export async function createFileJobFinderRepository(
                 previousJobForResumeApproval = currentJob;
                 nextJobForResumeApproval = nextJob;
               }
-              if (JSON.stringify(nextJob) !== JSON.stringify(currentJob)) {
+              if (!isDeepStrictEqual(nextJob, currentJob)) {
                 context.writePersistedValue("saved_jobs", nextJob);
               }
             }
@@ -2329,6 +2359,9 @@ export async function createFileJobFinderRepository(
     readDiscoveryDisplayProjection,
     getDiscoveryState() {
       return Promise.resolve(cloneValue(discoveryStorage.read()));
+    },
+    readDiscoveryStateForRun() {
+      return Promise.resolve(discoveryStorage.read());
     },
     warmDiscoveryState() {
       try {

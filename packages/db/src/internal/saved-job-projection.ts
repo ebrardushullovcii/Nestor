@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import {
   createRowValidationMarks,
@@ -9,6 +10,22 @@ import { listCollectionValues, parsePersistedRowValue } from "./state";
 
 /** Saved jobs parsed per turn of the event loop on a full projection read. */
 const PROJECTION_PAGE_ROWS = 200;
+
+type ProjectionChanges = {
+  before: readonly SavedJob[];
+  rows: readonly SavedJob[];
+  removedIds: readonly string[];
+};
+const projectionChanges = new WeakMap<readonly SavedJob[], ProjectionChanges>();
+
+/** Only the latest adjacent committed display versions have a change hint. */
+export function readSavedJobProjectionChanges(
+  before: readonly SavedJob[],
+  after: readonly SavedJob[],
+): ProjectionChanges | null {
+  const changes = projectionChanges.get(after);
+  return changes?.before === before ? changes : null;
+}
 
 /** Borrowed projection values cannot become an accidental repository write. */
 export function freezeProjection<T>(value: T): T {
@@ -83,8 +100,21 @@ function createValueSharing(): ShareValue {
   };
 }
 
-function toProjectionRow(job: SavedJob, share: ShareValue): SavedJob {
-  return freezeProjection(shareRepeatedValues(job, share));
+function toProjectionRow(
+  job: SavedJob,
+  share: ShareValue,
+  previous?: SavedJob,
+): SavedJob {
+  shareRepeatedValues(job, share);
+  // A timestamp/status change does not need another retained copy of the
+  // listing body, sightings or verdict evidence. Schema parsing owns `job`.
+  if (previous) shareUnchangedFields(job, previous);
+  return freezeProjection(job);
+}
+
+function shareUnchangedFields<T extends object>(next: T, previous: T): void {
+  for (const key of Object.keys(next) as Array<keyof T>)
+    if (isDeepStrictEqual(next[key], previous[key])) next[key] = previous[key];
 }
 
 /**
@@ -132,6 +162,7 @@ export function createSavedJobProjectionReader(
   const share = createValueSharing();
   let jobsById = new Map<string, SavedJob>();
   let snapshot: readonly SavedJob[] | null = null;
+  let hintedSnapshot: readonly SavedJob[] | null = null;
   let externalVersion: number | null = null;
   let pending: Promise<readonly SavedJob[]> | null = null;
   let pendingVersion: number | null = null;
@@ -188,7 +219,9 @@ export function createSavedJobProjectionReader(
   }
 
   async function read(): Promise<readonly SavedJob[]> {
+    const before = snapshot;
     const version = Number(readVersion.get()?.data_version);
+    const incremental = before !== null && version === externalVersion;
     const revision = Number(readRevision.get()?.revision);
     const changes = readChanges.all();
     if (
@@ -209,7 +242,8 @@ export function createSavedJobProjectionReader(
       const next =
         ids.length > PROJECTION_PAGE_ROWS ? new Map(jobsById) : jobsById;
       for (let start = 0; start < ids.length; start += PROJECTION_PAGE_ROWS) {
-        if (start > 0) await new Promise<void>((resolve) => setImmediate(resolve));
+        if (start > 0)
+          await new Promise<void>((resolve) => setImmediate(resolve));
         const pageIds = ids.slice(start, start + PROJECTION_PAGE_ROWS);
         const rows = listCollectionValues(
           database,
@@ -221,8 +255,10 @@ export function createSavedJobProjectionReader(
             orderBySql: "id",
           },
         );
-        for (const id of pageIds) next.delete(id);
-        for (const job of rows) next.set(job.id, toProjectionRow(job, share));
+        const returnedIds = new Set(rows.map((job) => job.id));
+        for (const id of pageIds) if (!returnedIds.has(id)) next.delete(id);
+        for (const job of rows)
+          next.set(job.id, toProjectionRow(job, share, next.get(job.id)));
       }
       jobsById = next;
     }
@@ -236,6 +272,22 @@ export function createSavedJobProjectionReader(
         left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
       ),
     );
+    // Drop the previous hint first: chaining `before` references through a
+    // WeakMap would otherwise retain every historical version of the list.
+    if (hintedSnapshot) projectionChanges.delete(hintedSnapshot);
+    hintedSnapshot = null;
+    if (before && incremental) {
+      const ids = changes.map((row) => String(row.id));
+      projectionChanges.set(snapshot, {
+        before,
+        rows: ids.flatMap((id) => {
+          const job = jobsById.get(id);
+          return job ? [job] : [];
+        }),
+        removedIds: ids.filter((id) => !jobsById.has(id)),
+      });
+      hintedSnapshot = snapshot;
+    }
     return snapshot;
   }
 

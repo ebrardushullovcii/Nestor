@@ -589,6 +589,7 @@ export function createInMemoryJobFinderRepository(
       upsertsFromDiscovery,
       upsertsFromBorrowedDiscovery,
       update,
+      borrowCurrentJobs,
       updateJobIds,
       updateSettings,
       clearResumeApproval,
@@ -640,7 +641,11 @@ export function createInMemoryJobFinderRepository(
               return currentJob;
             }
             const nextJob = SavedJobSchema.parse(
-              cloneValue(update(cloneValue(currentJob))),
+              update(
+                borrowCurrentJobs
+                  ? freezeProjection(currentJob)
+                  : cloneValue(currentJob),
+              ),
             );
             if (nextJob.id !== currentJob.id) {
               throw new Error(
