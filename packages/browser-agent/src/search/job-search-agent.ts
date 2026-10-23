@@ -1261,7 +1261,6 @@ export async function runJobSearchAgent(
     // Page views are long; two older ones in full rarely help the next
     // move, and every turn resends them.
     staleToolResultKeepRecent: SEARCH_KEEP_WHOLE_ANSWERS,
-    staleToolResultBatchSize: 1,
     ceilings: {
       maxSteps: Math.max(config.maxSteps, DEFAULT_MAX_STEPS),
       timeBudgetMs: config.runControl?.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS,
