@@ -81,6 +81,7 @@ function JobSourcesHarness(props: {
   discoveryRuns?: readonly DiscoveryRunRecord[];
   isSourceDebugPending?: (targetId: string) => boolean;
   onRunSourceDebug?: (targetId: string) => void;
+  onSaveNow?: () => void;
   requestedFilter?: string | null;
   targets?: DiscoveryTarget[];
 }) {
@@ -122,6 +123,7 @@ function JobSourcesHarness(props: {
         onOpenBrowserSessionForTarget={() => undefined}
         onRunDiscoveryForTarget={() => undefined}
         onRunSourceDebug={props.onRunSourceDebug ?? (() => undefined)}
+        {...(props.onSaveNow ? { onSaveNow: props.onSaveNow } : {})}
         onSaveSourceInstructionArtifact={() => undefined}
         onVerifySourceInstructions={() => undefined}
         preferencesForm={preferencesForm}
@@ -725,6 +727,17 @@ describe("ProfileJobSourcesTab", () => {
       3,
     );
     expect(screen.getByText("3 sources")).toBeTruthy();
+  });
+
+  it("saves a quick Include in search tick at once", async () => {
+    const onSaveNow = vi.fn();
+    render(
+      <JobSourcesHarness onSaveNow={onSaveNow} targets={createTargets(3)} />,
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Include Company 002 in searches" }),
+    );
+    await vi.waitFor(() => expect(onSaveNow).toHaveBeenCalledTimes(1));
   });
 
   it("supports quick enablement and mounts the full editor only for the opened source", () => {
