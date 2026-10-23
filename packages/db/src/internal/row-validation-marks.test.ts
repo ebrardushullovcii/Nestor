@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ResumeDraftSchema } from "@nestor/contracts";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { createFileJobFinderRepository } from "../file-repository";
 import { createSavedJob } from "../file-repository.test-support";
 import { createSeed } from "../test-fixtures";
@@ -189,7 +189,9 @@ test("the workspace marks the saved jobs and drafts it read; staling a draft unm
       )
       .all()
       .map((row) => String(row.mark));
-  expect(allMarks()).toEqual(["resume_drafts:draft_a", "saved_jobs:job_a"]);
+  await vi.waitFor(() =>
+    expect(allMarks()).toEqual(["resume_drafts:draft_a", "saved_jobs:job_a"]),
+  );
 
   await repository.staleResumeDrafts!({
     draftIds: ["draft_a"],

@@ -351,6 +351,9 @@ export async function createFileJobFinderRepository(
   }
 
   const database = await openWorkspaceDatabaseWithRecovery();
+  // Detail versions are disk-backed, with a bounded SQLite page cache.
+  // Set this before any connection-local projection tables are created.
+  database.exec("PRAGMA temp_store = FILE; PRAGMA temp.cache_size = -2048");
   const stopWalCheckpoints = scheduleWalCheckpoints(database, options.filePath);
 
   // Everything below runs on the open connection. If any step fails, the
@@ -417,6 +420,7 @@ export async function createFileJobFinderRepository(
     );
     readSavedJobsProjection = createSavedJobProjectionReader(database, {
       validationStamp: options.rowValidationStamp ?? null,
+      sqliteDetails: true,
     });
     readIntelligenceProjection = createIntelligenceProjectionReader(database);
     readDisplayCollections = createDisplayCollectionsReader(database, {

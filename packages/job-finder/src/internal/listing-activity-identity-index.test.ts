@@ -28,3 +28,24 @@ test("status-only changes reuse identity resolutions and inventory changes inval
   expect(after).not.toBe(before);
   expect(after.status).toBe("matched");
 });
+
+test("ledger identity indexing never opens listing bodies", async () => {
+  const base = createSeed().savedJobs[0]!;
+  const job = Object.freeze({
+    ...base,
+    get description(): string {
+      throw new Error("detail opened");
+    },
+  });
+  const index = createListingActivityIdentityIndex();
+  await index.warm([job]);
+  expect(
+    index
+      .sync([job])
+      .resolve({
+        source: job.source,
+        sourceJobId: job.sourceJobId,
+        canonicalUrl: job.canonicalUrl,
+      }).status,
+  ).toBe("matched");
+});

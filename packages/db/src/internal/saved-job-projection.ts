@@ -1,12 +1,21 @@
 import type { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
-import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
+import {
+  SavedJobSchema,
+  SavedJobListFactsSchema,
+  type SavedJobListFacts,
+  type SavedJob,
+} from "@nestor/contracts";
 import {
   createRowValidationMarks,
   type ParseMarkedRow,
   type RowValidationStamp,
 } from "./row-validation-marks";
 import { listCollectionValues, parsePersistedRowValue } from "./state";
+import {
+  createSavedJobDetails,
+  savedJobDetailFields,
+} from "./saved-job-details";
 
 /** Saved jobs parsed per turn of the event loop on a full projection read. */
 const PROJECTION_PAGE_ROWS = 200;
@@ -54,6 +63,17 @@ function shareRepeatedValues(job: SavedJob, share: ShareValue): SavedJob {
       facts.summary = job.summary;
     }
   }
+  job.sourceIntelligence = share(job.sourceIntelligence);
+  job.screeningHints = share(job.screeningHints);
+  return shareListValues(job, share);
+}
+
+function shareListValues<
+  T extends Pick<
+    SavedJobListFacts,
+    "planAssessments" | "matchAssessment" | "normalizedCompensation"
+  >,
+>(job: T, share: ShareValue): T {
   const plans = job.planAssessments;
   if (plans) {
     const shared = JSON.stringify(job.matchAssessment);
@@ -66,8 +86,6 @@ function shareRepeatedValues(job: SavedJob, share: ShareValue): SavedJob {
   // Values many jobs hold alike: what a source is known for (84 distinct
   // among 6,284 jobs), pay and screening hints, and the parts of a verdict
   // most rule scores share. One frozen copy serves every job holding it.
-  job.sourceIntelligence = share(job.sourceIntelligence);
-  job.screeningHints = share(job.screeningHints);
   job.normalizedCompensation = share(job.normalizedCompensation);
   // A plan's own verdict rarely repeats its dimensions elsewhere, so only
   // the shared verdict's are worth looking up.
@@ -114,7 +132,11 @@ function toProjectionRow(
 
 function shareUnchangedFields<T extends object>(next: T, previous: T): void {
   for (const key of Object.keys(next) as Array<keyof T>)
-    if (isDeepStrictEqual(next[key], previous[key])) next[key] = previous[key];
+    if (
+      !Object.getOwnPropertyDescriptor(previous, key)?.get &&
+      isDeepStrictEqual(next[key], previous[key])
+    )
+      next[key] = previous[key];
 }
 
 /**
@@ -128,8 +150,16 @@ export function createSavedJobProjectionReader(
   options: {
     /** Who validates rows; rows it already marked skip the schema. */
     validationStamp?: RowValidationStamp;
+    sqliteDetails?: boolean;
   } = {},
 ) {
+  const details = options.sqliteDetails
+    ? createSavedJobDetails(database)
+    : null;
+  const pageRows = details ? 50 : PROJECTION_PAGE_ROWS;
+  let validationError: Error | null = null;
+  let validationStarted = false;
+  let validation: Promise<void> = Promise.resolve();
   const marks = createRowValidationMarks(
     database,
     "saved_jobs",
@@ -179,6 +209,28 @@ export function createSavedJobProjectionReader(
     `SELECT ${marks?.selectSql ?? "id, value FROM saved_jobs"}
       WHERE id > ? ORDER BY id LIMIT ?`,
   );
+  // SQLite strips evidence before it crosses into the JS heap. In addition
+  // to avoiding a large parse, retained strings cannot keep a full raw row's
+  // backing string alive through an implementation-specific substring view.
+  const factsQuery = `SELECT id,
+    CASE WHEN json_valid(saved_jobs.value) THEN json_remove(
+      CASE WHEN json_type(saved_jobs.value, '$.provenance') = 'array'
+        AND NOT EXISTS (SELECT 1 FROM json_each(saved_jobs.value, '$.provenance') WHERE type != 'object')
+      THEN json_set(saved_jobs.value, '$.provenance', json((
+        SELECT json_group_array(json(json_remove(sighting.value, '$.listingFacts')))
+        FROM json_each(saved_jobs.value, '$.provenance') AS sighting
+      ))) ELSE saved_jobs.value END,
+      ${savedJobDetailFields.map((key) => `'$.${key}'`).join(", ")}
+    ) ELSE saved_jobs.value END AS list_value
+    FROM saved_jobs`;
+  const readFactsPage = details
+    ? database.prepare(`${factsQuery}
+    WHERE id > ? ORDER BY id LIMIT ?`)
+    : null;
+  const readChangedFacts = details
+    ? database.prepare(`${factsQuery}
+    WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id`)
+    : null;
 
   /**
    * Every saved job, a page at a time with a turn of the event loop between
@@ -193,8 +245,24 @@ export function createSavedJobProjectionReader(
     const jobs = new Map<string, SavedJob>();
     let after = "";
     const readPageOfJobs = (parse: ParseMarkedRow | null) => {
-      const rows = readPage.all(after, PROJECTION_PAGE_ROWS);
+      const thin = readFactsPage && marks?.current();
+      const rows = (thin ? readFactsPage : readPage).all(after, pageRows);
       for (const row of rows) {
+        if (details && marks?.current()) {
+          const facts = freezeProjection(
+            shareListValues(
+              parsePersistedRowValue({
+                tableName: "saved_jobs",
+                rowId: String(row.id),
+                rawValue: String(row.list_value),
+                schema: SavedJobListFactsSchema,
+              }),
+              share,
+            ),
+          );
+          jobs.set(facts.id, details.project(facts));
+          continue;
+        }
         const job = toProjectionRow(
           parse
             ? parse(row, SavedJobSchema)
@@ -206,13 +274,16 @@ export function createSavedJobProjectionReader(
               }),
           share,
         );
-        jobs.set(job.id, job);
+        jobs.set(
+          job.id,
+          details ? details.project(job, String(row.value)) : job,
+        );
       }
       return rows;
     };
     for (;;) {
       const rows = marks ? marks.read(readPageOfJobs) : readPageOfJobs(null);
-      if (rows.length < PROJECTION_PAGE_ROWS) return jobs;
+      if (rows.length < pageRows) return jobs;
       after = String(rows[rows.length - 1]!.id);
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
@@ -232,6 +303,7 @@ export function createSavedJobProjectionReader(
       return snapshot;
 
     if (snapshot === null || version !== externalVersion) {
+      if (snapshot && version !== externalVersion) validationStarted = false;
       jobsById = await readAllRowsInPages();
     } else {
       // Changed rows a page at a time, like a full read: a search that just
@@ -239,12 +311,33 @@ export function createSavedJobProjectionReader(
       // parsed in one go. The rows are only published once all are read; a
       // write landing between pages keeps its marker for the next read.
       const ids = changes.map((row) => String(row.id));
-      const next =
-        ids.length > PROJECTION_PAGE_ROWS ? new Map(jobsById) : jobsById;
-      for (let start = 0; start < ids.length; start += PROJECTION_PAGE_ROWS) {
+      const next = ids.length > pageRows ? new Map(jobsById) : jobsById;
+      for (let start = 0; start < ids.length; start += pageRows) {
         if (start > 0)
           await new Promise<void>((resolve) => setImmediate(resolve));
-        const pageIds = ids.slice(start, start + PROJECTION_PAGE_ROWS);
+        const pageIds = ids.slice(start, start + pageRows);
+        if (details && readChangedFacts && marks?.current()) {
+          const found = new Set<string>();
+          marks.read(() => {
+            for (const row of readChangedFacts.all(JSON.stringify(pageIds))) {
+              const facts = freezeProjection(
+                shareListValues(
+                  parsePersistedRowValue({
+                    tableName: "saved_jobs",
+                    rowId: String(row.id),
+                    rawValue: String(row.list_value),
+                    schema: SavedJobListFactsSchema,
+                  }),
+                  share,
+                ),
+              );
+              found.add(facts.id);
+              next.set(facts.id, details.project(facts));
+            }
+          });
+          for (const id of pageIds) if (!found.has(id)) next.delete(id);
+          continue;
+        }
         const rows = listCollectionValues(
           database,
           "saved_jobs",
@@ -257,8 +350,15 @@ export function createSavedJobProjectionReader(
         );
         const returnedIds = new Set(rows.map((job) => job.id));
         for (const id of pageIds) if (!returnedIds.has(id)) next.delete(id);
-        for (const job of rows)
-          next.set(job.id, toProjectionRow(job, share, next.get(job.id)));
+        for (const job of rows) {
+          const projected = toProjectionRow(job, share, next.get(job.id));
+          next.set(
+            job.id,
+            details
+              ? details.project(projected, JSON.stringify(job))
+              : projected,
+          );
+        }
       }
       jobsById = next;
     }
@@ -291,7 +391,29 @@ export function createSavedJobProjectionReader(
     return snapshot;
   }
 
+  async function validateInBackground(): Promise<void> {
+    if (!marks) return;
+    const stamp = await marks.settled();
+    if (!stamp) return;
+    const page = database.prepare(`SELECT ${marks.selectSql}
+      WHERE ${"saved_jobs"}.id > ? AND (validated_stamp IS NULL OR validated_stamp != ?)
+      ORDER BY saved_jobs.id LIMIT 5`);
+    let after = "";
+    while (database.isOpen) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (!database.isOpen) return;
+      const ids = marks.read((parse) => {
+        const rows = page.all(after, stamp);
+        for (const row of rows) parse(row, SavedJobSchema);
+        return rows.map((row) => String(row.id));
+      });
+      if (!ids.length) return;
+      after = ids.at(-1)!;
+    }
+  }
+
   function readProjection(): Promise<readonly SavedJob[]> {
+    if (validationError) return Promise.reject(validationError);
     // Transaction reads see their own writes, but neither the cached map nor
     // its change markers may consume them: a rollback can reuse the epoch.
     // Capture this rare read synchronously so it cannot outlive the transaction.
@@ -315,9 +437,22 @@ export function createSavedJobProjectionReader(
     }
     pendingVersion = version;
     pendingRevision = revision;
-    pending = read().finally(() => {
-      pending = null;
-    });
+    pending = read()
+      .then((rows) => {
+        if (details && !validationStarted) {
+          validationStarted = true;
+          validation = validateInBackground();
+          void validation.catch((error: unknown) => {
+            validationError =
+              error instanceof Error ? error : new Error(String(error));
+            console.warn("[Job Finder] Saved-job validation failed.", error);
+          });
+        }
+        return rows;
+      })
+      .finally(() => {
+        pending = null;
+      });
     return pending;
   }
 
@@ -342,5 +477,8 @@ export function createSavedJobProjectionReader(
     }
     return ids;
   }
-  return Object.assign(readProjection, { currentIds });
+  return Object.assign(readProjection, {
+    currentIds,
+    validation: () => validation,
+  });
 }

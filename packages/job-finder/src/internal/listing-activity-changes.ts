@@ -1,5 +1,6 @@
 import type { DiscoveryLedgerEntry, SavedJob } from "@nestor/contracts";
 import { buildJobIdentityAliases, hasSameJobIdentity } from "./job-identity";
+import { listingActivityIdentity } from "./listing-activity-identity-index";
 import {
   inactiveListingLedger,
   type projectDiscoveryJobViews,
@@ -26,7 +27,13 @@ export function createListingActivityChangeResolver(
     const current = inactiveListingLedger(input.ledger);
     const identityChanges = input.changed.filter((row) => {
       const old = input.beforeById.get(row.id);
-      return !old || !hasSameJobIdentity(old, row);
+      return (
+        !old ||
+        !hasSameJobIdentity(
+          listingActivityIdentity(old),
+          listingActivityIdentity(row),
+        )
+      );
     });
     const affected = new Set<DiscoveryLedgerEntry>();
     if (before !== current) {
@@ -61,7 +68,9 @@ export function createListingActivityChangeResolver(
         ...input.removed,
       ];
       for (const row of changedIdentities)
-        for (const alias of buildJobIdentityAliases(row))
+        for (const alias of buildJobIdentityAliases(
+          listingActivityIdentity(row),
+        ))
           for (const entry of byAlias.get(alias.key) ?? []) affected.add(entry);
     }
     const ids = new Set<string>();
