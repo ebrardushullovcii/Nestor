@@ -92,6 +92,25 @@ function SectionCard(props: {
 
 type CompanyDetailJob = JobListRow;
 
+/** Where the job is in the person's own lists, in the lists' own names. */
+function describeJobPlace(status: CompanyDetailJob["status"]): string {
+  switch (status) {
+    case "discovered":
+      return "In Find jobs";
+    case "shortlisted":
+    case "drafting":
+    case "ready_for_review":
+    case "approved":
+      return "Shortlisted";
+    case "submitted":
+      return "Applied";
+    case "archived":
+      return "Hidden";
+    default:
+      return formatStatusLabel(status);
+  }
+}
+
 function JobRow(props: {
   job: CompanyDetailJob;
   onOpen: (jobId: string) => void;
@@ -108,7 +127,7 @@ function JobRow(props: {
           {props.job.title}
         </p>
         <p className="text-(length:--text-tiny) text-foreground-muted">
-          {props.job.location} · Workflow: {formatStatusLabel(props.job.status)}
+          {props.job.location} · {describeJobPlace(props.job.status)}
           {listingDate ? ` · ${listingDate.label} ${listingDate.value}` : ""}
         </p>
         <div className="mt-1 flex min-w-0 flex-wrap items-start gap-2">
