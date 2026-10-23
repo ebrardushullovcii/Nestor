@@ -1133,12 +1133,28 @@ export function createPrimaryPageActions(
       current.applicationRecords.find((record) => record.jobId === jobId);
     return job ? `${job.title} at ${job.company}` : "a job";
   };
-  /** Records a move for Recent changes; the label names its first job. */
-  const recordMove = (input: Omit<RecentChangeInput, "label">): RecentChange =>
-    recordRecentChange({
-      ...input,
-      label: describeJobForChange(input.jobIds[0] ?? ""),
-    });
+  /**
+   * Records a move for Recent changes; the label names its first job. The
+   * move itself already happened, so a record that cannot be written only
+   * costs its Undo and never turns the move into a failure.
+   */
+  const recordMove = (
+    input: Omit<RecentChangeInput, "label">,
+  ): RecentChange | null => {
+    let label = "a job";
+    try {
+      label = describeJobForChange(input.jobIds[0] ?? "");
+    } catch {
+      // A workspace still loading names no job; the move keeps its Undo.
+    }
+    try {
+      return recordRecentChange({ ...input, label });
+    } catch {
+      return null;
+    }
+  };
+  const undoToastFor = (change: RecentChange | null) =>
+    change ? () => void undoRecentChange(change) : null;
   // One way back for every move, shared by each toast's Undo and Activity's
   // Recent changes. A job that moved on since keeps its newer state; the
   // reason says where it went instead.
@@ -2492,7 +2508,7 @@ export function createPrimaryPageActions(
                 () => actions.clearResumeApproval(jobId, restoreStatus),
                 () => {
                   forgetResumeReview(jobId);
-                  markRecentChangeUndone(change);
+                  if (change) markRecentChangeUndone(change);
                 },
                 "The resume is back under To review.",
                 { scope: jobFinderPendingActions.resumeExport(jobId) },
@@ -2842,15 +2858,15 @@ export function createPrimaryPageActions(
               );
               // Shortlisted keeps its own selection: the new jobs join the end
               // of the list, so selecting one there opened Shortlisted on its
-              // last page the next time the person went to it. The toast's
-              // link opens the first new job instead.
+              // last page the next time the person went to it. The toast
+              // offers Undo instead.
               const message = `Shortlisted ${ids.length === 1 ? "1 job" : `${ids.length} jobs`}.`;
               const change = recordMove({ kind: "shortlisted", jobIds: ids });
               applyRouteScopedMessage(
                 {
                   message,
                   tone: "success",
-                  undo: () => void undoRecentChange(change),
+                  undo: undoToastFor(change),
                   undoLabel: ids.length > 1 ? "Undo all" : null,
                 },
                 ownerRoute,
@@ -2901,7 +2917,7 @@ export function createPrimaryPageActions(
             {
               message: successMessage,
               tone: "success",
-              undo: () => void undoRecentChange(change),
+              undo: undoToastFor(change),
             },
             ownerStartRoute,
           );
