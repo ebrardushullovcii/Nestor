@@ -70,11 +70,8 @@ describe("SettingsApplicationDefaultsSection", () => {
     expect(
       screen.getByRole("group", { name: "Default resume template" }),
     ).toBeTruthy();
-    expect(
-      screen.getByRole<HTMLButtonElement>("button", {
-        name: "Save resume look",
-      }).disabled,
-    ).toBe(true);
+    // Nothing to save: no button.
+    expect(screen.queryByRole("button", { name: "Save resume look" })).toBeNull();
   });
 
   it("sends only template and font and reports saved status", async () => {
@@ -141,11 +138,8 @@ describe("SettingsApplicationDefaultsSection", () => {
       />,
     );
 
-    expect(
-      screen.getByRole<HTMLButtonElement>("button", {
-        name: "Save resume look",
-      }).disabled,
-    ).toBe(true);
+    // Nothing to save: no button.
+    expect(screen.queryByRole("button", { name: "Save resume look" })).toBeNull();
     expect(
       screen.queryByText("You have unsaved resume look changes."),
     ).toBeNull();

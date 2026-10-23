@@ -64,15 +64,13 @@ describe("App & device: side menu with the assistant", () => {
     const toggle = screen.getByRole("switch", {
       name: "Collapse the side menu while the assistant is open",
     });
-    const save = screen.getByRole("button", { name: "Save appearance" });
-
     fireEvent.click(toggle);
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     expect(onUpdateWorkspaceBehavior).toHaveBeenCalledWith({
       collapseSideMenuWithAssistant: false,
     });
-    // Nothing is left waiting for Save appearance.
-    expect((save as HTMLButtonElement).disabled).toBe(true);
+    // Nothing is left waiting for a save.
+    expect(screen.queryByRole("button", { name: "Save appearance" })).toBeNull();
     expect(onUpdateAppearanceTheme).not.toHaveBeenCalled();
   });
 

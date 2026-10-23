@@ -265,14 +265,11 @@ function describeResumeApproach(approach: ResumeApproach): string {
   );
 }
 
-function GroupHeading(props: {
-  eyebrow: string;
-  title: string;
-  description: string;
-}) {
+// Title and one line. Each group used to carry an uppercase eyebrow that
+// repeated its own title ("RESUMES" over "Resumes").
+function GroupHeading(props: { title: string; description: string }) {
   return (
     <div className="grid min-w-0 gap-1">
-      <span className="label-mono-xs">{props.eyebrow}</span>
       <h4 className="font-semibold text-(--text-headline)">{props.title}</h4>
       <p className="max-w-[72ch] text-(length:--text-description) leading-5 text-foreground-soft">
         {props.description}
@@ -378,9 +375,7 @@ export function SettingsAiBehaviorSection({
           </h3>
           <p className="text-(length:--text-description) leading-5 text-foreground-soft">
             How it talks, how picky it is when it searches, how far it rewrites
-            your resume, and what it writes when it applies. These change what
-            it does, never what it is allowed to do. Sending follows your
-            Applying choice; signing in and creating accounts stay yours.
+            your resume, and what it writes when it applies.
           </p>
         </div>
         <SettingsSectionSaveControl
@@ -397,7 +392,6 @@ export function SettingsAiBehaviorSection({
         data-testid="settings-ai-profile-assistant"
       >
         <GroupHeading
-          eyebrow="Chat"
           title="Assistant"
           description="The assistant in the side chat. Choose how much it volunteers and how long it talks."
         />
@@ -432,7 +426,6 @@ export function SettingsAiBehaviorSection({
         tabIndex={-1}
       >
         <GroupHeading
-          eyebrow="Find jobs"
           title="Finding jobs"
           description="How picky a search is. Best matches only also drops any job whose title, place, or work mode misses your preferences before it is saved; the other two keep those jobs and explain the gap."
         />
@@ -461,7 +454,6 @@ export function SettingsAiBehaviorSection({
         data-testid="settings-ai-resumes"
       >
         <GroupHeading
-          eyebrow="Resumes"
           title="Resumes"
           description="How far a resume for a job may go from the one you imported. This is the default for jobs you shortlist from now on; you can still pick a level job by job on Shortlisted."
         />
@@ -475,12 +467,16 @@ export function SettingsAiBehaviorSection({
           options={resumeApproachOptions}
           value={draft.resumeApproach}
         />
-        <p
-          className="text-(length:--text-small) leading-5 text-foreground-soft"
-          data-testid="settings-ai-resume-approach-description"
-        >
-          {describeResumeApproach(draft.resumeApproach)}
-        </p>
+        {/* Aggressive gets its fuller warning below instead; printing both
+            explained the same stretch twice. */}
+        {draft.resumeApproach === "aggressive" ? null : (
+          <p
+            className="text-(length:--text-small) leading-5 text-foreground-soft"
+            data-testid="settings-ai-resume-approach-description"
+          >
+            {describeResumeApproach(draft.resumeApproach)}
+          </p>
+        )}
         {draft.resumeApproach === "aggressive" ? (
           <p className="text-sm leading-6 text-(--warning-text)" role="status">
             {STRONG_REWRITE_WARNING}
@@ -493,7 +489,6 @@ export function SettingsAiBehaviorSection({
         data-testid="settings-ai-applying"
       >
         <GroupHeading
-          eyebrow="Apply"
           title="Applying"
           description="What Job Finder writes while it fills in an application. Whether it sends the application is a separate choice, under Applying below."
         />
