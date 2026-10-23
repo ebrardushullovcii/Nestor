@@ -1,12 +1,14 @@
 # ADR 0016: Listing bodies are read over plain HTTP after the scan
 
-Status: accepted (2026-09-05).
+Status: accepted (2026-09-05); collection overlap trial backed out (2026-10-23).
 
 ## Context
 
 Compact discovery (ADR 0013) stops at the target job count after reading listing cards: title, employer, link. It does not open each listing. A card carries none of what the product is for: the fit score checks requirements the card does not state, the "worth opening" band stays empty, and a tailored resume has nothing to be tailored toward. In a live search against a board, every one of fifteen retained jobs was "title match · not yet checked", and the AI draft for a shortlisted one had to fall back to the original wording because there was no listing text.
 
 Opening every listing inside the managed browser during the scan would multiply run time and browser steps, and it is what the bounded agent was designed not to do.
+
+A trial that read and judged listings during source collection reduced search time, but its fit bands differed more than repeated controls on identical inputs. The changed scheduling also changed fit batch composition. Listing reads and reassessment therefore stay after source collection; the trial did not establish that its speed gain preserved quality.
 
 ## Decision
 

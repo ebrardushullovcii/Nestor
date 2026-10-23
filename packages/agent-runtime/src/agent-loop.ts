@@ -176,6 +176,8 @@ export interface AgentLoopOptions {
    * whose answers are long page views can keep fewer.
    */
   staleToolResultKeepRecent?: number;
+  /** Old long answers to collect before shortening them. Defaults to four. */
+  staleToolResultBatchSize?: number;
   /** Output cap for one model turn. Omit to use the provider default. */
   modelMaxOutputTokens?: number;
   parallelToolCalls?: boolean;
@@ -336,6 +338,7 @@ function shortenStaleToolResults(
   openingCount: number,
   maxChars: number,
   keepRecent: number,
+  batchSize: number,
 ): AgentLoopMessage[] {
   const stale: number[] = [];
   let seen = 0;
@@ -350,7 +353,7 @@ function shortenStaleToolResults(
       stale.push(index);
     }
   }
-  if (stale.length < STALE_TOOL_RESULT_BATCH) {
+  if (stale.length < batchSize) {
     return messages;
   }
   const next = [...messages];
@@ -409,6 +412,10 @@ export async function runAgentLoop(
     Math.floor(
       options.staleToolResultKeepRecent ?? STALE_TOOL_RESULT_KEEP_RECENT,
     ),
+  );
+  const staleToolResultBatchSize = Math.max(
+    1,
+    Math.floor(options.staleToolResultBatchSize ?? STALE_TOOL_RESULT_BATCH),
   );
 
   let messages: AgentLoopMessage[] = [...options.messages];
@@ -873,6 +880,7 @@ export async function runAgentLoop(
         openingCount,
         staleToolResultChars,
         staleToolResultKeepRecent,
+        staleToolResultBatchSize,
       );
     }
     const beforeCompaction = messages;
