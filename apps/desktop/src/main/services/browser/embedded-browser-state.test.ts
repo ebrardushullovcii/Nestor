@@ -769,3 +769,21 @@ test("only idle retained pages freeze; active source loading stays awake", async
     { state: "frozen" },
   );
 });
+
+test("a page handed to the person never freezes in the background", async () => {
+  const { browser, state, pages } = makeBrowser();
+  state.ownedTabs.set("result", new Set(["prepared"]));
+  state.personTabs.add("prepared");
+  const policy = browser as unknown as {
+    syncTabLifecycle(page: {
+      id: string;
+      contents: ReturnType<typeof makeContents>;
+    }): void;
+  };
+  policy.syncTabLifecycle(state.pageMap.get("prepared")!);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(pages.get("prepared")!.debugger.sendCommand).not.toHaveBeenCalledWith(
+    "Page.setWebLifecycleState",
+    { state: "frozen" },
+  );
+});

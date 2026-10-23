@@ -972,7 +972,13 @@ export class EmbeddedBrowser {
               enabled: false,
             })
             .catch(() => undefined);
-        this.syncTabLifecycle(page);
+        // Freezing waits past the 10-second window in which a field change
+        // may still save to the employer (ADR 0024), so it never cuts a save
+        // short; a command in between keeps the tab awake.
+        const freeze = setTimeout(() => {
+          if (!page.contents.isDestroyed()) this.syncTabLifecycle(page);
+        }, 10_000);
+        freeze.unref();
       }, 5_000);
       timer.unref();
       this.automationIdleTimers.set(id, timer);
@@ -988,11 +994,14 @@ export class EmbeddedBrowser {
       this.presentation !== "minimized" &&
       this.viewport.visible &&
       this.activeTabId === page.id;
+    // A tab handed to the person is theirs: it is only throttled in the
+    // background, never frozen, so an upload or sign-in they started keeps
+    // going while they look at another tab.
     const retained =
-      this.isWaitingTab(page.id) ||
-      this.personTabs.has(page.id) ||
-      this.heldTabs.has(page.id) ||
-      this.finishedTabs.has(page.id);
+      !this.personTabs.has(page.id) &&
+      (this.isWaitingTab(page.id) ||
+        this.heldTabs.has(page.id) ||
+        this.finishedTabs.has(page.id));
     const working = [...this.operationClaims.values()].some((claim) =>
       claim.tabs.has(page.id),
     );
