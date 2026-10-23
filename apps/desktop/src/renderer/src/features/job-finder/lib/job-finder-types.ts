@@ -627,6 +627,8 @@ export interface ActionState {
   savedFilePath?: string | null;
   /** Where the message's natural next step lives, offered beside it. */
   actionLink?: { label: string; route: string } | null;
+  /** Puts back what a quick action took away; the toast offers Undo. */
+  undo?: (() => void) | null;
 }
 
 /**

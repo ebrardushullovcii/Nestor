@@ -1047,7 +1047,7 @@ export function DiscoveryResultsPanel({
             },
           ]
         : []),
-      ...listingRowMenuEntries(job.canonicalUrl),
+      ...(forTicked ? [] : listingRowMenuEntries(job.canonicalUrl)),
     ];
   };
   // Every job the filters and search match, on every page, that a bulk

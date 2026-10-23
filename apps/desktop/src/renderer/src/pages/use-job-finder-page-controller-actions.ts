@@ -144,6 +144,8 @@ export { COMMAND_PENDING_RELEASE_MS };
 
 type ActionOptions = {
   toastTone?: () => "success" | "warning";
+  /** Offered as Undo on the success toast. */
+  undo?: () => void;
   clearMessageOnStart?: boolean;
   /** A flow that navigates immediately keeps later failures on its destination. */
   statusOwnerPath?: string;
@@ -801,6 +803,9 @@ export function createActionRunners(args: {
             message: resolvedSuccessMessage,
             tone: resolvedSuccessMessage ? "success" : null,
             ...(options?.toastTone ? { toastTone: options.toastTone() } : {}),
+            ...(options?.undo && resolvedSuccessMessage
+              ? { undo: options.undo }
+              : {}),
           });
         },
         options?.releasePendingAfterMs,
@@ -2098,6 +2103,7 @@ export function createPrimaryPageActions(
               "remove these jobs from Shortlisted",
             );
             if (!mayLeave) return;
+            const queueJobsForReview = actions.queueJobsForReview;
             await runAction(
               () => actions.removeJobsFromReview!(ids),
               () => undefined,
@@ -2107,6 +2113,20 @@ export function createPrimaryPageActions(
               {
                 rethrowError: true,
                 scope: jobFinderPendingActions.resumeJob("bulk-remove"),
+                ...(queueJobsForReview
+                  ? {
+                      undo: () =>
+                        void runAction(
+                          () => queueJobsForReview(ids),
+                          () => undefined,
+                          `${ids.length} ${ids.length === 1 ? "job is" : "jobs are"} back in Shortlisted.`,
+                          {
+                            scope:
+                              jobFinderPendingActions.resumeJob("bulk-remove"),
+                          },
+                        ),
+                    }
+                  : {}),
               },
             );
           },
@@ -2438,10 +2458,23 @@ export function createPrimaryPageActions(
             await runAction(
               () => actions.dismissDiscoveryJobs!(ids, []),
               () => undefined,
-              `${ids.length} ${ids.length === 1 ? "job" : "jobs"} hidden. They stay in Not interested, where you can restore them.`,
+              `${ids.length} ${ids.length === 1 ? "job" : "jobs"} hidden.`,
               {
                 rethrowError: true,
                 scope: jobFinderPendingActions.discoveryJob("bulk-dismiss"),
+                undo: () =>
+                  void runAction(
+                    async () => {
+                      for (const id of ids)
+                        await actions.restoreDismissedDiscoveryJob(id);
+                    },
+                    () => undefined,
+                    `${ids.length} ${ids.length === 1 ? "job is" : "jobs are"} back in Find jobs.`,
+                    {
+                      scope:
+                        jobFinderPendingActions.discoveryJob("bulk-dismiss"),
+                    },
+                  ),
               },
             );
           },

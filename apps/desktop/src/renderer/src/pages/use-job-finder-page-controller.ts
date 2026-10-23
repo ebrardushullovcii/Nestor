@@ -291,19 +291,26 @@ export function useJobFinderPageController() {
         latestLocationPathnameRef.current;
       // A finished action on a screen that reports outcomes as toasts. Only a
       // success qualifies; failures stay inline next to what they concern.
-      if (isActionSuccessToast(resolved, ownerPath)) {
+      // An action that can be undone says so in a toast on any screen.
+      if (
+        isActionSuccessToast(resolved, ownerPath) ||
+        (resolved.undo && resolved.tone === "success" && resolved.message)
+      ) {
         const link = resolved.actionLink ?? null;
+        const undo = resolved.undo ?? null;
         showToast({
           title: resolved.message!,
           tone: resolved.toastTone ?? "success",
-          ...(link
-            ? {
-                action: {
-                  label: link.label,
-                  onClick: () => navigate(link.route),
-                },
-              }
-            : {}),
+          ...(undo
+            ? { action: { label: "Undo", onClick: undo } }
+            : link
+              ? {
+                  action: {
+                    label: link.label,
+                    onClick: () => navigate(link.route),
+                  },
+                }
+              : {}),
         });
         actionStateRef.current = { message: null };
         actionMessageOwnerPathRef.current = null;
