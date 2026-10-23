@@ -5,6 +5,7 @@ import {
   createJobIdentityIndex,
   normalizeJobIdentityUrl,
   type JobIdentityInput,
+  rememberPreparedJobIdentity,
 } from "./job-identity";
 
 function identity(overrides: Partial<JobIdentityInput> = {}): JobIdentityInput {
@@ -28,6 +29,51 @@ function identity(overrides: Partial<JobIdentityInput> = {}): JobIdentityInput {
 }
 
 describe("job identity", () => {
+  test("raw and normalized immutable peers reuse only the aliases of their exact facts", () => {
+    const body =
+      "Design and build reliable software with a distributed team and clear engineering practices. ".repeat(
+        30,
+      );
+    const raw = Object.freeze(
+      identity({ location: "Remote, Remote", description: body }),
+    );
+    const normalized = Object.freeze({
+      ...raw,
+      location: "Remote",
+      description: `${body} Apply now`,
+    });
+    const aliases = (input: JobIdentityInput) => {
+      const acrossSources = buildJobIdentityAliases({
+        ...input,
+        matchAcrossSources: true,
+      });
+      return {
+        local: acrossSources.filter(
+          (alias) => alias.kind !== "cross_source_listing_facts",
+        ),
+        acrossSources,
+      };
+    };
+    rememberPreparedJobIdentity(raw, aliases(raw));
+    rememberPreparedJobIdentity(normalized, aliases(normalized));
+    const stored = identity({
+      sourceJobId: "other",
+      canonicalUrl: "https://other.test/job",
+      applicationUrl: "https://other.test/apply",
+      description: body,
+      location: "Remote",
+    });
+    const index = createJobIdentityIndex([stored], (value) => value);
+    const query: JobIdentityInput = {
+      ...normalized,
+      sourceJobId: "query",
+      canonicalUrl: "https://query.test/job",
+      applicationUrl: "https://query.test/apply",
+    };
+    expect(index.find(query)).toBe(stored);
+    query.description = "An unrelated listing with no equivalent body.";
+    expect(index.find(query)).toBeNull();
+  });
   test("cached mutable query facts cannot match after their identity changes", () => {
     const stored = identity();
     const index = createJobIdentityIndex([stored], (value) => value);

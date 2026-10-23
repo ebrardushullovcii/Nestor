@@ -78,19 +78,26 @@ export async function warmDiscoveryInventory(
       [0, 50].map(async (offset) => {
         const page = jobs.slice(start + offset, start + offset + 50);
         if (!page.length) return;
-        const postings = page.map(facts);
+        const postings: DiscoveryInventoryPosting[] = [];
+        for (const [position, job] of page.entries()) {
+          if (position % 5 === 0) await yieldToEventLoop();
+          signal.throwIfAborted();
+          postings.push(facts(job));
+        }
         const prepared = await execute(postings, signal);
         signal.throwIfAborted();
         if (prepared.length !== page.length)
           throw new Error("Incomplete inventory preparation.");
         for (const [position, job] of page.entries()) {
+          if (position % 5 === 0) await yieldToEventLoop();
+          signal.throwIfAborted();
           const row = prepared[position]!;
           rememberMatchAssessmentPostingFingerprint(
             job,
             row.postingFingerprint,
           );
           rememberPreparedListingContent(job.description, row.content);
-        rememberPreparedJobIdentity(job, row.aliases, postings[position]);
+          rememberPreparedJobIdentity(job, row.aliases, postings[position]);
         }
       }),
     );

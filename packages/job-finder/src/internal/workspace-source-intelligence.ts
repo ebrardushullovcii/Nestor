@@ -34,6 +34,7 @@ import {
   buildJobIdentityAliases,
   rememberPreparedJobIdentity,
   hasSameJobIdentity,
+  digestJobIdentityDescription,
 } from "./job-identity";
 import {
   createDiscoveryListingFingerprints,
@@ -1898,6 +1899,9 @@ export async function preparePublicProviderFeed(
         ...posting,
         matchAcrossSources: true,
       });
+      const rawAliases = hasSameJobIdentity(raw, posting)
+        ? acrossSources
+        : buildJobIdentityAliases({ ...raw, matchAcrossSources: true });
       const normalized: Partial<JobPosting> = {};
       for (const field of Object.keys(posting) as Array<keyof JobPosting>) {
         if (!isDeepStrictEqual(raw[field], posting[field]))
@@ -1912,6 +1916,17 @@ export async function preparePublicProviderFeed(
             (alias) => alias.kind !== "cross_source_listing_facts",
           ),
           acrossSources,
+        },
+        descriptionDigest: digestJobIdentityDescription(posting.description),
+        screening: {
+          aliases: {
+            local: rawAliases.filter(
+              (alias) => alias.kind !== "cross_source_listing_facts",
+            ),
+            acrossSources: rawAliases,
+          },
+          fingerprints: createDiscoveryListingFingerprints(raw),
+          descriptionDigest: digestJobIdentityDescription(raw.description),
         },
         screeningContent:
           raw.description === posting.description
@@ -2047,6 +2062,8 @@ export async function collectPublicProviderJobs(input: {
       input.signal?.throwIfAborted();
       const { jobs, preparations } = parsedPublicApiRecords;
       for (const [position, preparation] of preparations.entries()) {
+        if (position % 8 === 0) await yieldToEventLoop();
+        input.signal?.throwIfAborted();
         const raw = jobs[position]!;
         const job = { ...raw, ...preparation.normalized };
         rememberPreparedDiscoveryPosting(raw, job);
@@ -2055,10 +2072,26 @@ export async function collectPublicProviderJobs(input: {
           raw.description,
           preparation.screeningContent,
         );
-        rememberDiscoveryListingFingerprints(job, preparation.fingerprints);
-        if (hasSameJobIdentity(raw, job))
+        if (preparation.screening) {
+          rememberDiscoveryListingFingerprints(
+            raw,
+            preparation.screening.fingerprints,
+          );
+          rememberPreparedJobIdentity(
+            raw,
+            preparation.screening.aliases,
+            raw,
+            preparation.screening.descriptionDigest,
+          );
+        } else if (hasSameJobIdentity(raw, job))
           rememberPreparedJobIdentity(raw, preparation.aliases);
-        rememberPreparedJobIdentity(job, preparation.aliases);
+        rememberDiscoveryListingFingerprints(job, preparation.fingerprints);
+        rememberPreparedJobIdentity(
+          job,
+          preparation.aliases,
+          job,
+          preparation.descriptionDigest,
+        );
       }
 
       return {

@@ -30,6 +30,13 @@ export type DiscoveryPostingPreparation = {
     local: readonly DiscoveryJobIdentityAlias[];
     acrossSources: readonly DiscoveryJobIdentityAlias[];
   };
+  /** Exact raw-card evidence, before provider normalization. Prepared off main. */
+  screening?: {
+    aliases: DiscoveryPostingPreparation["aliases"];
+    fingerprints: DiscoveryListingFingerprints;
+    descriptionDigest: string;
+  };
+  descriptionDigest?: string;
 };
 
 export type DiscoveryJobIdentityAlias = {

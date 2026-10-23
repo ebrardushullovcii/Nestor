@@ -1,4 +1,4 @@
-import { isDeepStrictEqual } from "node:util";
+import { changedSavedJobFields } from "./saved-job-field-changes";
 import type { JobFinderDiscoveryState, SavedJob } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
 import { yieldToEventLoop } from "@nestor/core";
@@ -94,12 +94,16 @@ export function createDiscoverySavedJobWriter(input: {
       committedReferences.set(id, job);
       if (pending.get(id) === job) pending.delete(id);
     };
+    let prepared = 0;
     for (const [id, job] of captured) {
+      // Revalidating a plan can nominate the whole inventory at run start.
+      // Comparing those intended rows must be bounded as well as their writes.
+      if (prepared++ % 20 === 0) await yieldToEventLoop();
       if (committedReferences.get(id) === job) continue;
       const intended = input.toStoredJob(job);
       intendedRows.set(id, intended);
       const baseline = persisted.get(id);
-      if (!baseline || !isDeepStrictEqual(baseline, intended))
+      if (!baseline || changedSavedJobFields(baseline, intended).length > 0)
         changedIds.push(id);
     }
 

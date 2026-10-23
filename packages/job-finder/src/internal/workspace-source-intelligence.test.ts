@@ -15,10 +15,16 @@ import {
   applyDiscoveryTitleTriage,
   buildDiscoveryStartingUrls,
   collectPublicProviderJobs,
+  preparePublicProviderFeed,
   inferSourceIntelligenceFromTarget,
   resolveRouteKindForReuse,
 } from "./workspace-source-intelligence";
 import { setDiscoveryFeedExecutor } from "./discovery-feed-executor";
+import {
+  buildJobIdentityAliases,
+  digestJobIdentityDescription,
+} from "./job-identity";
+import { createDiscoveryListingFingerprints } from "./workspace-discovery-ledger";
 import {
   createSeed,
   createSourceInstructionArtifact,
@@ -328,6 +334,48 @@ async function collectGreenhouseJobs(
 }
 
 describe("collectPublicProviderJobs", () => {
+  test("worker preparation carries exact raw-card aliases and fingerprints beside normalized facts", async () => {
+    const target = createGreenhouseTarget();
+    const intelligence = inferSourceIntelligenceFromTarget({
+      target,
+      currentArtifact: null,
+    });
+    const prepared = await preparePublicProviderFeed({
+      target,
+      intelligence,
+      source: "target_site",
+      prepareForDiscovery: true,
+      payload: JSON.stringify({
+        jobs: [
+          {
+            id: 17,
+            title: "Software Engineer",
+            absolute_url: "https://job-boards.greenhouse.io/remote/jobs/17",
+            location: { name: "Remote, Remote" },
+            content: `<p>${"Build reliable software with a distributed team. ".repeat(40)}</p>`,
+          },
+        ],
+      }),
+    });
+    const raw = prepared.jobs[0]!;
+    const hints = prepared.preparations[0]!;
+    expect(hints.screening?.aliases.acrossSources).toEqual(
+      buildJobIdentityAliases({ ...raw, matchAcrossSources: true }),
+    );
+    expect(hints.screening?.fingerprints).toEqual(
+      createDiscoveryListingFingerprints(raw),
+    );
+    expect(hints.screening?.descriptionDigest).toBe(
+      digestJobIdentityDescription(raw.description),
+    );
+    const normalized = { ...raw, ...hints.normalized };
+    expect(hints.aliases.acrossSources).toEqual(
+      buildJobIdentityAliases({ ...normalized, matchAcrossSources: true }),
+    );
+    expect(hints.descriptionDigest).toBe(
+      digestJobIdentityDescription(normalized.description),
+    );
+  });
   test("reads a feed again on this thread when its reader is lost", async () => {
     const executor = vi.fn(() =>
       Promise.reject(
@@ -348,7 +396,9 @@ describe("collectPublicProviderJobs", () => {
     }
   });
   test("an unreadable feed from a live reader is not fetched again", async () => {
-    setDiscoveryFeedExecutor(() => Promise.reject(new Error("Unreadable feed")));
+    setDiscoveryFeedExecutor(() =>
+      Promise.reject(new Error("Unreadable feed")),
+    );
     try {
       const result = await collectGreenhouseJobs(null);
       expect(globalThis.fetch).toHaveBeenCalledOnce();

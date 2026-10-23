@@ -29,6 +29,34 @@ const now = "2026-08-15T10:00:00.000Z";
 const later = "2026-08-15T11:00:00.000Z";
 const latest = "2026-08-15T12:00:00.000Z";
 
+test("company reconciliation validates immutable ownership facts without opening listing evidence", () => {
+  const job = makeJob({ id: "thin", company: "Acme Inc" });
+  const expected = reconcileCompanies({
+    companies: [],
+    jobs: [job],
+    applicationRecords: [],
+    now,
+    createCompanyId: defaultCreateCompanyId,
+  });
+  Object.defineProperty(job, "description", {
+    enumerable: true,
+    get: () => {
+      throw new Error("Listing detail opened");
+    },
+  });
+  Object.freeze(job.provenance);
+  Object.freeze(job);
+  expect(
+    reconcileCompanies({
+      companies: [],
+      jobs: [job],
+      applicationRecords: [],
+      now,
+      createCompanyId: defaultCreateCompanyId,
+    }),
+  ).toEqual(expected);
+});
+
 test("company reconciliation between turns preserves the synchronous decisions", async () => {
   const input = {
     companies: [makeCompany()],

@@ -1,4 +1,9 @@
-import { createConcurrencyLimiter, yieldToEventLoop } from "@nestor/core";
+import {
+  copyView,
+  createConcurrencyLimiter,
+  yieldToEventLoop,
+} from "@nestor/core";
+import { changedSavedJobFields } from "./saved-job-field-changes";
 import { warmDiscoveryInventory } from "./discovery-inventory-preparation";
 import { isDeepStrictEqual } from "node:util";
 import { patchDiscoveryLedger } from "@nestor/db";
@@ -302,24 +307,19 @@ function applySavedJobDelta(
   intendedJob: SavedJob,
 ): SavedJob {
   const changedFields: Record<string, unknown> = {};
-  for (const key of Object.keys(intendedJob) as Array<keyof SavedJob>) {
-    if (!isDeepStrictEqual(intendedJob[key], baselineJob[key])) {
-      if (key === "planAssessments") {
-        const assessments = { ...currentJob.planAssessments };
-        for (const [planId, assessment] of Object.entries(
-          intendedJob.planAssessments ?? {},
-        )) {
-          if (
-            !isDeepStrictEqual(
-              assessment,
-              baselineJob.planAssessments?.[planId],
-            )
-          )
-            assessments[planId] = assessment;
-        }
-        changedFields[key] = assessments;
-      } else changedFields[key] = intendedJob[key];
-    }
+  for (const key of changedSavedJobFields(baselineJob, intendedJob)) {
+    if (key === "planAssessments") {
+      const assessments = { ...currentJob.planAssessments };
+      for (const [planId, assessment] of Object.entries(
+        intendedJob.planAssessments ?? {},
+      )) {
+        if (
+          !isDeepStrictEqual(assessment, baselineJob.planAssessments?.[planId])
+        )
+          assessments[planId] = assessment;
+      }
+      changedFields[key] = assessments;
+    } else changedFields[key] = intendedJob[key];
   }
 
   // The repository validates this returned row at its write boundary.
@@ -1795,12 +1795,11 @@ export function createWorkspaceDiscoveryMethods(
       const cached = storedJobs.get(job);
       if (cached) return cached;
       const stored = withPlanAssessment(
-        {
-          ...job,
+        copyView(job, {
           matchAssessment:
             originalJobsById.get(job.id)?.matchAssessment ??
             job.matchAssessment,
-        },
+        }),
         assessmentPlanId,
         job.matchAssessment,
       );
@@ -4511,10 +4510,14 @@ export function createWorkspaceDiscoveryMethods(
         // dropped so the row says the pay was not stated rather than stating
         // someone else's.
         const furnitureSalaries = findSiteFurnitureSalaryTexts(
-          retainedRunJobs.map((job) => ({
-            description: job.description,
-            salaryText: job.salaryText,
-          })),
+          await mapInTurns(
+            retainedRunJobs,
+            (job) => ({
+              description: job.description,
+              salaryText: job.salaryText,
+            }),
+            SETUP_JOBS_PER_TURN,
+          ),
         );
         if (furnitureSalaries.size > 0) {
           let droppedSalaryCount = 0;

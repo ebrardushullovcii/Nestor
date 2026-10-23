@@ -636,7 +636,12 @@ function intersectValues<T>(
 /** The inputs `buildJobIdentityAliases` reads, copied so a later change shows. */
 type AliasBasis = readonly (string | boolean | null | undefined)[];
 
-function readAliasBasis(input: JobIdentityInput): AliasBasis {
+function readAliasBasis(
+  input: JobIdentityInput,
+  descriptionDigest?: string,
+  acrossSources = input.matchAcrossSources === true,
+): AliasBasis {
+  const description = input.description;
   return [
     input.source,
     input.sourceJobId,
@@ -650,15 +655,19 @@ function readAliasBasis(input: JobIdentityInput): AliasBasis {
     input.location,
     // The alias memo needs change detection, never another retained listing
     // body. SHA-256 also keeps its keys bounded for very large descriptions.
-    input.description == null
-      ? input.description
-      : createHash("sha256").update(input.description).digest("base64url"),
+    description == null
+      ? description
+      : (descriptionDigest ?? digestJobIdentityDescription(description)),
     input.exactContent?.digest,
     input.postedAt,
     input.postedAtText,
-    input.matchAcrossSources === true,
+    acrossSources,
     ...(input.alternateListingUrls ?? []),
   ];
+}
+
+export function digestJobIdentityDescription(description: string): string {
+  return createHash("sha256").update(description).digest("base64url");
 }
 
 function sameAliasBasis(left: AliasBasis, right: AliasBasis): boolean {
@@ -685,62 +694,101 @@ export function hasSameJobIdentity(
  * Entries go with their values, and a value whose identity fields changed
  * gets its aliases built again.
  */
-const indexedAliasCache = new WeakMap<
-  object,
-  { basis: AliasBasis; aliases: readonly JobIdentityAlias[] }[]
->();
+type IndexedAliases = {
+  basis: AliasBasis;
+  aliases: readonly JobIdentityAlias[];
+  /** Only a frozen data property can prove its description has not changed. */
+  input: WeakRef<JobIdentityInput> | null;
+};
+const indexedAliasCache = new WeakMap<object, IndexedAliases[]>();
 // Different immutable views of one listing have the same aliases. Peers are
 // weak: this hint cannot keep an old job, its body or its run alive.
-const aliasPeers = new Map<string, WeakRef<object>>();
+const aliasPeers = new Map<string, WeakRef<object>[]>();
 const ALIAS_PEER_LIMIT = 20_000;
+
+function immutableAliasInput(
+  input: JobIdentityInput,
+): WeakRef<JobIdentityInput> | null {
+  const description = Object.getOwnPropertyDescriptor(input, "description");
+  return Object.isFrozen(input) && description && "value" in description
+    ? new WeakRef(input)
+    : null;
+}
+
+function rememberAliasPeer(key: string, value: object): void {
+  const peers = (aliasPeers.get(key) ?? []).flatMap((ref) => {
+    const peer = ref.deref();
+    return peer && peer !== value ? [peer] : [];
+  });
+  // Both worker forms remain useful: screening reads the raw card while
+  // canonical merging reads its normalized version. Mutable query copies
+  // must not immediately displace those prepared immutable forms.
+  peers.unshift(value);
+  peers.sort(
+    (left, right) =>
+      Number(Object.isFrozen(right)) - Number(Object.isFrozen(left)),
+  );
+  if (aliasPeers.size >= ALIAS_PEER_LIMIT && !aliasPeers.has(key))
+    aliasPeers.delete(aliasPeers.keys().next().value!);
+  aliasPeers.set(
+    key,
+    peers.slice(0, 4).map((peer) => new WeakRef(peer)),
+  );
+}
 
 /** Aliases were prepared from these exact immutable facts by the feed worker. */
 export function rememberPreparedJobIdentity(
   posting: JobIdentityInput,
   aliases: DiscoveryPostingPreparation["aliases"],
   input: JobIdentityInput = posting,
+  descriptionDigest?: string,
 ): void {
+  const immutable = immutableAliasInput(input);
   indexedAliasCache.set(posting, [
     {
-      basis: readAliasBasis({ ...input, matchAcrossSources: false }),
+      basis: readAliasBasis(input, descriptionDigest, false),
       aliases: aliases.local,
+      input: immutable,
     },
     {
-      basis: readAliasBasis({ ...input, matchAcrossSources: true }),
+      basis: readAliasBasis(input, descriptionDigest, true),
       aliases: aliases.acrossSources,
+      input: immutable,
     },
   ]);
   const peerKey = `${posting.source}\u0000${posting.sourceJobId}\u0000${posting.canonicalUrl}`;
-  if (aliasPeers.size >= ALIAS_PEER_LIMIT)
-    aliasPeers.delete(aliasPeers.keys().next().value!);
-  aliasPeers.set(peerKey, new WeakRef(posting));
+  rememberAliasPeer(peerKey, posting);
 }
 
 function readIndexedAliases(
   value: object,
   input: JobIdentityInput,
 ): readonly JobIdentityAlias[] {
-  const basis = readAliasBasis(input);
   const entries = indexedAliasCache.get(value);
+  const peerKey = `${input.source}\u0000${input.sourceJobId}\u0000${input.canonicalUrl}`;
+  const peers = (aliasPeers.get(peerKey) ?? []).flatMap((ref) => {
+    const peer = ref.deref();
+    return peer ? (indexedAliasCache.get(peer) ?? []) : [];
+  });
+  const description = input.description;
+  const known = [...(entries ?? []), ...peers].find((entry) => {
+    const source = entry.input?.deref();
+    return source && source.description === description;
+  });
+  const basis = readAliasBasis(
+    input,
+    typeof known?.basis[10] === "string" ? known.basis[10] : undefined,
+  );
   const cached = entries?.find((entry) => sameAliasBasis(entry.basis, basis));
   if (cached) return cached.aliases;
-  const peerKey = `${input.source}\u0000${input.sourceJobId}\u0000${input.canonicalUrl}`;
-  const peer = aliasPeers.get(peerKey)?.deref();
-  const peerEntry = peer
-    ? indexedAliasCache
-        .get(peer)
-        ?.find((entry) => sameAliasBasis(entry.basis, basis))
-    : undefined;
+  const peerEntry = peers.find((entry) => sameAliasBasis(entry.basis, basis));
   const aliases = peerEntry?.aliases ?? buildJobIdentityAliases(input);
   // One value is indexed with and without cross-source matching.
   indexedAliasCache.set(value, [
-    { basis, aliases },
+    { basis, aliases, input: immutableAliasInput(input) },
     ...(entries ?? []).slice(0, 1),
   ]);
-  aliasPeers.delete(peerKey);
-  if (aliasPeers.size >= ALIAS_PEER_LIMIT)
-    aliasPeers.delete(aliasPeers.keys().next().value!);
-  aliasPeers.set(peerKey, new WeakRef(value));
+  rememberAliasPeer(peerKey, value);
   return aliases;
 }
 

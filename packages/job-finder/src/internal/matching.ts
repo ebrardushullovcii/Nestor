@@ -1452,7 +1452,7 @@ function uniqueProvenance(
  * listing links its other sources showed.
  */
 export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
-  return {
+  const identity: JobIdentityInput = {
     source: job.source,
     sourceJobId: job.sourceJobId,
     canonicalUrl: job.canonicalUrl,
@@ -1464,7 +1464,6 @@ export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
     seniority: job.seniority,
     company: job.company,
     location: job.location,
-    description: job.description,
     postedAt: job.postedAt,
     postedAtText: job.postedAtText,
     matchAcrossSources: true,
@@ -1474,6 +1473,16 @@ export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
         : [],
     ),
   };
+  // Route/title compatibility checks do not read content. Keep the immutable
+  // SQLite getter until a content comparison actually needs it.
+  return Object.defineProperty(
+    identity,
+    "description",
+    Object.getOwnPropertyDescriptor(job, "description") ?? {
+      enumerable: true,
+      value: job.description,
+    },
+  );
 }
 
 const SIGHTING_ROUTE_FIELDS = [
