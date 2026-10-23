@@ -103,6 +103,8 @@ export interface ConversationTurnCeilings {
 export interface RunConversationTurnOptions {
   model: ConversationModel;
   tools: ConversationTool[];
+  /** Optional lazy catalog; execution still uses the host's validated registry. */
+  getToolDefinitions?: () => readonly AgentLoopToolDefinition[];
   /**
    * Builds the full model input before every call from the turn's own new
    * messages. The caller owns the system prompt, the context block, the
@@ -203,8 +205,7 @@ export function withStatusArgument(
           ...definition.function.parameters.properties,
           [STATUS_ARGUMENT]: {
             type: "string",
-            description:
-              "Optional. A short note (at most 12 words) the person sees while this runs, such as 'Checking which jobs match your target roles'.",
+            description: "Optional activity note, at most 12 words.",
           },
         },
       },
@@ -310,9 +311,6 @@ export async function runConversationTurn(
   const toolsByName = new Map(
     options.tools.map((tool) => [tool.definition.function.name, tool]),
   );
-  const definitions = options.tools.map((tool) =>
-    withStatusArgument(tool.definition),
-  );
   const turnMessages: AgentLoopMessage[] = [];
   const usage = emptyUsage();
   let modelCalls = 0;
@@ -360,6 +358,10 @@ export async function runConversationTurn(
     await readSteering();
 
     const messages = await options.assembleMessages(turnMessages);
+    const definitions = (
+      options.getToolDefinitions?.() ??
+      options.tools.map((tool) => tool.definition)
+    ).map(withStatusArgument);
     modelCalls += 1;
     const call = modelCalls;
     await emit({ type: "model_call_started", call });

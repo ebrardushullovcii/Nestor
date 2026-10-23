@@ -4,6 +4,29 @@ import { ACTION_INVENTORY } from "./action-inventory";
 import { buildAssistantToolCatalog, listAllAssistantToolNames } from "./tools";
 
 describe("assistant action inventory", () => {
+  it("keeps initial screen catalogs below half the full schema payload", () => {
+    const bytes = (tools: ReturnType<typeof buildAssistantToolCatalog>) =>
+      JSON.stringify(
+        tools.map(({ name, description, parameters }) => ({
+          name,
+          description,
+          parameters,
+        })),
+      ).length;
+    const full = bytes(
+      buildAssistantToolCatalog({ mode: "flat", browserAvailable: true }),
+    );
+    for (const screen of ["home", "profile", "discovery"] as const) {
+      const catalog = buildAssistantToolCatalog({
+        mode: "grouped",
+        browserAvailable: true,
+        screen,
+      });
+      expect(bytes(catalog), screen).toBeLessThan(full / 2);
+      expect(catalog.some((tool) => tool.name === "load_tools")).toBe(true);
+    }
+  });
+
   it("exposes guided setup Finish through the profile tool in the setup catalog", () => {
     expect(
       ACTION_INVENTORY.find((entry) => entry.id === "profile.setup_state"),

@@ -82,6 +82,35 @@ function tool(
 }
 
 describe("runConversationTurn", () => {
+  it("refreshes the offered catalog after a tool loads more capabilities", async () => {
+    let loaded = false;
+    const load = tool("load", async () => {
+      loaded = true;
+      return { kind: "ok", content: "Loaded" };
+    });
+    const edit = tool("edit", async () => ({ kind: "ok", content: "Saved" }));
+    const seen: string[][] = [];
+    const responses = scripted([
+      { toolCalls: [call("load1", "load")] },
+      { toolCalls: [call("edit1", "edit")] },
+      { content: "Saved." },
+    ]);
+    const result = await runConversationTurn({
+      model: {
+        chatWithTools(messages, definitions, options) {
+          seen.push(definitions.map((entry) => entry.function.name));
+          return responses.chatWithTools(messages, definitions, options);
+        },
+      },
+      tools: [load, edit],
+      getToolDefinitions: () =>
+        (loaded ? [load, edit] : [load]).map((t) => t.definition),
+      assembleMessages: async (messages) => [...messages],
+    });
+    expect(result.ending).toBe("replied");
+    expect(seen).toEqual([["load"], ["load", "edit"], ["load", "edit"]]);
+  });
+
   it("ends with plain words as the reply and reports usage", async () => {
     const model = scripted([
       { toolCalls: [call("c1", "read_profile")] },
