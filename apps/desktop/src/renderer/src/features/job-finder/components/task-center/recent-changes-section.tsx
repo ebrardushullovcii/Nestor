@@ -46,7 +46,7 @@ export function RecentChangesSection(props: {
       <h3 className="font-semibold text-foreground">Recent changes</h3>
       <ul className="grid gap-1">
         {changes.map((change) => {
-          const undo = getRecentChangeUndo(change, state);
+          const undo = getRecentChangeUndo(change, state, changes);
           const when = formatRelativeTimestamp(change.at, now);
           return (
             <li

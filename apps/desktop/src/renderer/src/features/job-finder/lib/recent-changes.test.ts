@@ -138,4 +138,20 @@ describe("recent changes", () => {
       reason: "Press Apply on the job to queue it again.",
     });
   });
+
+  it("only a job's newest move offers Undo", () => {
+    const older = recordRecentChange({
+      kind: "moved_to_find_jobs",
+      jobIds: ["a", "b"],
+      label: "A at Acme",
+    });
+    recordRecentChange({ kind: "hidden", jobIds: ["b"], label: "B at Beta" });
+    expect(
+      getRecentChangeUndo(
+        older,
+        workspace({ findJobs: ["a"] }),
+        listRecentChanges(),
+      ),
+    ).toEqual({ possible: false, reason: "Changed again since." });
+  });
 });

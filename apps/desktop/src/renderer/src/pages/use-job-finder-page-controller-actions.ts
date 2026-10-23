@@ -120,6 +120,7 @@ import {
 import { buildResumeWorkspaceRoute } from "@renderer/features/job-finder/lib/resume-workspace-route";
 import {
   getRecentChangeUndo,
+  listRecentChanges,
   markRecentChangeUndone,
   recordRecentChange,
   type RecentChange,
@@ -1143,14 +1144,18 @@ export function createPrimaryPageActions(
   // reason says where it went instead.
   const undoRecentChange = (change: RecentChange): Promise<boolean> => {
     const current = latestWorkspaceRef.current ?? workspace;
-    const undo = getRecentChangeUndo(change, {
-      discoveryJobs: current.discoveryJobs,
-      dismissedDiscoveryJobs: current.dismissedDiscoveryJobs,
-      reviewQueue: current.reviewQueue,
-      applicationJobIds: collectPreparedApplicationJobIds(
-        current.applicationRecords,
-      ),
-    });
+    const undo = getRecentChangeUndo(
+      change,
+      {
+        discoveryJobs: current.discoveryJobs,
+        dismissedDiscoveryJobs: current.dismissedDiscoveryJobs,
+        reviewQueue: current.reviewQueue,
+        applicationJobIds: collectPreparedApplicationJobIds(
+          current.applicationRecords,
+        ),
+      },
+      listRecentChanges(),
+    );
     if (!undo.possible) {
       applyRouteScopedMessage({ message: undo.reason, tone: "failure" });
       return Promise.resolve(false);
@@ -1223,8 +1228,13 @@ export function createPrimaryPageActions(
       case "moved_to_review":
         return settle(
           async () => {
-            for (const id of ids)
-              await actions.approveResume(id, change.approvedExportIds![id]!);
+            // Clearing the approval touched the draft, so the old PDF
+            // reads as out of date; a fresh one is built and approved, as
+            // the studio's Approve does.
+            for (const id of ids) {
+              await actions.exportResumePdf(id, "approval");
+              await approveLatestResumeExport(id);
+            }
           },
           ids.length === 1
             ? "Resume approved again."

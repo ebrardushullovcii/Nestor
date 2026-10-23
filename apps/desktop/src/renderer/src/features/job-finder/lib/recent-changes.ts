@@ -233,8 +233,22 @@ export function describeRecentChange(change: RecentChange): string {
 export function getRecentChangeUndo(
   change: RecentChange,
   workspace: RecentChangeWorkspace,
+  /** The list it sits in, newest first: only a job's newest move undoes. */
+  changes: readonly RecentChange[] = [],
 ): RecentChangeUndo {
   if (change.undoneAt) return { possible: false, reason: "Undone." };
+  const index = changes.findIndex((entry) => entry.id === change.id);
+  if (
+    index > 0 &&
+    changes
+      .slice(0, index)
+      .some(
+        (newer) =>
+          !newer.undoneAt &&
+          newer.jobIds.some((id) => change.jobIds.includes(id)),
+      )
+  )
+    return { possible: false, reason: "Changed again since." };
   const shortlisted = new Map(
     workspace.reviewQueue.map((item) => [item.jobId, item]),
   );
