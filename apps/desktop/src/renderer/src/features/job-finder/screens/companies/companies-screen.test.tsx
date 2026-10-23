@@ -77,12 +77,38 @@ describe("CompaniesScreen", () => {
   it("renders an empty state when no companies are reconciled yet", () => {
     renderScreen({ companies: [] });
 
-    expect(screen.getByText("No companies reconciled yet")).toBeTruthy();
+    expect(screen.getByText("No companies yet")).toBeTruthy();
     expect(
-      screen.getByText(
-        /employers from your saved jobs and started applications.*Refresh from jobs and applications/i,
-      ),
+      screen.getByText(/Employers from your saved jobs and applications/i),
     ).toBeTruthy();
+    // No duplicate review card when nothing waits on a decision.
+    expect(screen.queryByText("Duplicate employer review")).toBeNull();
+  });
+
+  it("builds the list itself once when saved jobs exist but no company does", () => {
+    const job = SavedJobSchema.parse({
+      id: "job_1",
+      source: "target_site",
+      sourceJobId: "source-job-1",
+      canonicalUrl: "https://jobs.example.test/1",
+      title: "Engineer",
+      company: "Acme Inc",
+      location: "Remote",
+      workMode: ["remote"],
+      applyPath: "external_redirect",
+      easyApplyEligible: false,
+      discoveredAt: now,
+      salaryText: null,
+      description: "A role.",
+      status: "rejected",
+      matchAssessment: { score: 80, reasons: [], gaps: [] },
+      provenance: [],
+    });
+    const onRefresh = vi.fn(() => new Promise<void>(() => undefined));
+    renderScreen({ companies: [], discoveryJobs: [job], onRefresh });
+
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Listing your employers")).toBeTruthy();
   });
 
   it("hides legacy absence-placeholder company shells from the list", () => {
