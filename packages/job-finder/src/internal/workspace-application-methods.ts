@@ -4481,6 +4481,7 @@ export function createWorkspaceApplicationMethods(
                   ? applyResumeLanguage(
                       assembledPreviewDraft,
                       previewDraft.languagePresentation,
+                      profile.projects.map((project) => project.id),
                     )
                   : assembledPreviewDraft,
                 job,
@@ -4627,7 +4628,11 @@ export function createWorkspaceApplicationMethods(
           language: targetLanguage,
         };
         const resumeDraft = draft.languagePresentation
-          ? applyResumeLanguage(languageDraft, draft.languagePresentation)
+          ? applyResumeLanguage(
+              languageDraft,
+              draft.languagePresentation,
+              profile.projects.map((project) => project.id),
+            )
           : languageDraft;
         reportResumeStage(options, "processing");
         // The final fact check is a model call: it runs before taking one of
