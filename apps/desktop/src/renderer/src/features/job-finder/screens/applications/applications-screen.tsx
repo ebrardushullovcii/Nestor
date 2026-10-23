@@ -1055,6 +1055,7 @@ export function ApplicationsScreen(props: {
               onRaiseLimit={() => props.onRaiseDailyLimit?.()}
               pending={isApplyPending}
               queue={props.applyQueue}
+              results={applyJobResults}
             />
           ) : null}
           {visibleActionMessage ? (

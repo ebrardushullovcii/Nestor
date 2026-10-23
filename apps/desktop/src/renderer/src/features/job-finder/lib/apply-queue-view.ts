@@ -1,6 +1,7 @@
 import {
   listApplyQueueRemainingJobIds,
   type ApplicationAutomationMode,
+  type ApplyJobResult,
   type ApplyQueue,
 } from "@nestor/contracts";
 
@@ -64,6 +65,95 @@ function firstSentence(text: string): string {
   return match ? match[1]! : text.trim();
 }
 
+/** The part of a run result the queue counts by. */
+export type ApplyQueueResult = Pick<
+  ApplyJobResult,
+  "jobId" | "state" | "startedAt" | "updatedAt"
+>;
+
+/** What happened to the queue's jobs, by each started job's latest result. */
+export interface ApplyQueueOutcomes {
+  sent: number;
+  readyForYou: number;
+  needYou: number;
+  failed: number;
+  stillGoing: number;
+  notStarted: number;
+}
+
+/**
+ * A finished queue used to say "Applied to 6 jobs" for six jobs that were
+ * started, though two of them failed. Each started job is counted by what
+ * its latest result in this queue says; a job with no result yet is still
+ * going, and a job left out or never reached is not started.
+ */
+export function countApplyQueueOutcomes(
+  queue: ApplyQueue,
+  results: readonly ApplyQueueResult[],
+): ApplyQueueOutcomes {
+  const latestByJob = new Map<string, ApplyQueueResult>();
+  const started = new Set(queue.startedJobIds);
+  for (const result of results) {
+    if (!started.has(result.jobId)) continue;
+    // Results from before this queue belong to an earlier press.
+    if (result.updatedAt < queue.createdAt) continue;
+    const known = latestByJob.get(result.jobId);
+    if (!known || result.updatedAt > known.updatedAt) {
+      latestByJob.set(result.jobId, result);
+    }
+  }
+  const outcomes: ApplyQueueOutcomes = {
+    sent: 0,
+    readyForYou: 0,
+    needYou: 0,
+    failed: 0,
+    stillGoing: 0,
+    notStarted: queue.jobIds.length - started.size,
+  };
+  for (const jobId of started) {
+    switch (latestByJob.get(jobId)?.state) {
+      case "submitted":
+        outcomes.sent += 1;
+        break;
+      case "awaiting_review":
+        outcomes.readyForYou += 1;
+        break;
+      case "blocked":
+      case "question_capture":
+        outcomes.needYou += 1;
+        break;
+      case "failed":
+        outcomes.failed += 1;
+        break;
+      case "cancelled":
+      case "skipped":
+        outcomes.notStarted += 1;
+        break;
+      default:
+        outcomes.stillGoing += 1;
+    }
+  }
+  return outcomes;
+}
+
+function describeOutcomes(
+  outcomes: ApplyQueueOutcomes,
+  mode: ApplicationAutomationMode,
+): string {
+  return [
+    outcomes.sent > 0 ? `${outcomes.sent} sent` : null,
+    outcomes.readyForYou > 0
+      ? `${outcomes.readyForYou} ${mode === "autonomous_submit" ? "ready for you to send" : "ready for you"}`
+      : null,
+    outcomes.needYou > 0 ? `${outcomes.needYou} need you` : null,
+    outcomes.failed > 0 ? `${outcomes.failed} failed` : null,
+    outcomes.stillGoing > 0 ? `${outcomes.stillGoing} still finishing` : null,
+    outcomes.notStarted > 0 ? `${outcomes.notStarted} not started` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function formatResumeTime(iso: string | null): string {
   if (!iso) return "after midnight";
   const at = new Date(iso);
@@ -75,7 +165,11 @@ function formatResumeTime(iso: string | null): string {
 
 export function describeApplyQueue(
   queue: ApplyQueue | null | undefined,
-  options: { dailyLimit?: number | null } = {},
+  options: {
+    dailyLimit?: number | null;
+    /** Run results, so a finished queue says what happened to each job. */
+    results?: readonly ApplyQueueResult[] | null;
+  } = {},
 ): ApplyQueueView | null {
   if (!queue) return null;
   const total = queue.jobIds.length;
@@ -119,22 +213,49 @@ export function describeApplyQueue(
     case "stopped":
       return {
         title: `Stopped ${verb.doing.toLowerCase()} ${jobs}`,
-        detail: `${started} started · ${toGo} not started${leftOutPart}`,
+        detail: options.results
+          ? describeOutcomes(
+              countApplyQueueOutcomes(queue, options.results),
+              queue.mode,
+            )
+          : `${started} started · ${toGo} not started${leftOutPart}`,
         active: false,
         primary: null,
         secondary: { label: "Dismiss", action: "dismiss" },
       };
-    case "done":
+    case "done": {
+      if (!options.results) {
+        return {
+          title: `${verb.done} ${plural(started, "job", "jobs")}`,
+          detail:
+            leftOut > 0
+              ? `${leftOut} not applied.`
+              : "Check each one in Applications.",
+          active: false,
+          primary: null,
+          secondary: { label: "Dismiss", action: "dismiss" },
+        };
+      }
+      const outcomes = countApplyQueueOutcomes(queue, options.results);
+      // The title counts only what the mode's verb is true of: a sent
+      // application in Send for me, a filled-in one in the other modes.
+      const succeeded =
+        queue.mode === "autonomous_submit"
+          ? outcomes.sent
+          : outcomes.sent + outcomes.readyForYou;
       return {
-        title: `${verb.done} ${plural(started, "job", "jobs")}`,
-        detail:
-          leftOut > 0
-            ? `${leftOut} not applied.`
-            : "Check each one in Applications.",
+        title:
+          succeeded === total
+            ? `${verb.done} ${jobs}`
+            : succeeded === 0
+              ? `Apply queue finished · none ${queue.mode === "autonomous_submit" ? "sent" : "filled in"}`
+              : `${verb.done} ${succeeded} of ${jobs}`,
+        detail: describeOutcomes(outcomes, queue.mode),
         active: false,
         primary: null,
         secondary: { label: "Dismiss", action: "dismiss" },
       };
+    }
     default:
       return null;
   }

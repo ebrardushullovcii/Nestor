@@ -799,8 +799,9 @@ function toHomeQueueButton(
 function buildApplyQueueNowItem(
   queue: JobFinderRendererWorkspaceSnapshot["applyQueue"],
   dailyLimit: number | null,
+  results: JobFinderRendererWorkspaceSnapshot["applyJobResults"],
 ): HomeNowItem | null {
-  const view = describeApplyQueue(queue, { dailyLimit });
+  const view = describeApplyQueue(queue, { dailyLimit, results });
   if (!view) return null;
   return {
     id: "apply-queue",
@@ -1032,6 +1033,7 @@ export function buildJobSearchHomeModel(
     workspace.applyQueue,
     workspace.dashboard?.globalDailyApplicationPreparationCapacity?.limit ??
       null,
+    workspace.applyJobResults,
   );
   const nowItems = [
     ...(queueNow ? [queueNow] : []),

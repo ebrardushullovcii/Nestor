@@ -5,6 +5,7 @@ import { cn } from "@renderer/lib/cn";
 import {
   describeApplyQueue,
   type ApplyQueueControlAction,
+  type ApplyQueueResult,
   type ApplyQueueViewButton,
 } from "../lib/apply-queue-view";
 
@@ -16,12 +17,14 @@ import {
 export function ApplyQueueStrip(props: {
   queue: ApplyQueue | null | undefined;
   dailyLimit: number | null;
+  results?: readonly ApplyQueueResult[] | null;
   pending?: boolean;
   onControl: (action: ApplyQueueControlAction) => void;
   onRaiseLimit: () => void;
 }) {
   const view = describeApplyQueue(props.queue, {
     dailyLimit: props.dailyLimit,
+    results: props.results ?? null,
   });
   if (!view) return null;
   const press = (button: ApplyQueueViewButton) =>
