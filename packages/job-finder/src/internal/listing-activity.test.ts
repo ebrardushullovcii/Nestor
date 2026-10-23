@@ -12,7 +12,33 @@ import { createSeed } from "../workspace-service.test-support";
 import {
   findClosedListingPhrase,
   projectDiscoveryJobViews,
+  inactiveListingLedger,
 } from "./listing-activity";
+
+test("active sightings keep the listing dependency stable and subset projections preserve ambiguous identities", () => {
+  const saved = job();
+  const inactive = Object.freeze(ledger(saved));
+  const before = Object.freeze([inactive]);
+  const after = Object.freeze([
+    inactive,
+    Object.freeze(
+      ledger(saved, { id: "active", latestStatus: "seen", inactiveAt: null }),
+    ),
+  ]);
+  expect(inactiveListingLedger(after)).toBe(inactiveListingLedger(before));
+  const changed = Object.freeze([{ ...inactive, inactiveAt: hour(11) }]);
+  expect(inactiveListingLedger(changed)).not.toBe(
+    inactiveListingLedger(before),
+  );
+  const duplicate = { ...saved, id: "other-id" };
+  const views = projectDiscoveryJobViews({
+    jobs: [saved],
+    identityJobs: [saved, duplicate],
+    discoveryLedger: [inactive],
+    listingSignals: [],
+  });
+  expect(views[0]?.listingActivity.status).toBe("unknown");
+});
 
 const hour = (value: number) =>
   `2026-08-23T${String(value).padStart(2, "0")}:00:00.000Z`;

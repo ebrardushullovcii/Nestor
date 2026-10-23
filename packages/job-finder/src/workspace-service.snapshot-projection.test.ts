@@ -111,6 +111,101 @@ async function fixture(storage: "memory" | "file") {
 
 for (const storage of ["memory", "file"] as const) {
   describe(`${storage} snapshot display projection`, () => {
+    test("company membership edits preserve discovery rows and match canonical company lists", async () => {
+      const { repo, close } = await fixture(storage);
+      try {
+        const workspace = service(repo);
+        await workspace.getWorkspaceProjection();
+        const before = await workspace.getWorkspaceProjection();
+        const intelligence = await repo.getIntelligenceState();
+        const jobs = await repo.listSavedJobs();
+        const chosen = jobs[0]!;
+        const { CompanyEntitySchema } = await import("@nestor/contracts");
+        await repo.saveIntelligenceState({
+          ...intelligence,
+          companies: [
+            CompanyEntitySchema.parse({
+              id: "synthetic_membership",
+              canonicalName: "Synthetic employer",
+              jobIds: [chosen.id],
+              createdAt: "2026-10-23T00:00:00.000Z",
+              updatedAt: "2026-10-23T00:00:00.000Z",
+            }),
+          ],
+        });
+        const after = await workspace.getWorkspaceProjection();
+        const canonical = await workspace.getWorkspaceSnapshot();
+        expect(after.companyJobs.map((job) => job.id)).toEqual([chosen.id]);
+        expect(after.companyJobs).toEqual(canonical.companyJobs);
+        expect(after.discoveryJobs).toEqual(before.discoveryJobs);
+        if (storage === "file")
+          for (const row of after.discoveryJobs)
+            expect(row).toBe(
+              before.discoveryJobs.find((job) => job.id === row.id),
+            );
+      } finally {
+        await close();
+      }
+    });
+
+    test("changed rows and activity converge while display progress never rewrites plans", async () => {
+      const { repo, close } = await fixture(storage);
+      try {
+        const workspace = service(repo);
+        await workspace.getWorkspaceProjection();
+        // Settle adoption before measuring ordinary display reads.
+        await workspace.getWorkspaceProjection();
+        const save = vi.spyOn(repo, "saveCampaignState");
+        const [job] = await repo.listSavedJobs();
+        if (!job) throw new Error("Expected a saved job");
+        const original = await workspace.getWorkspaceProjection();
+        await repo.commitSavedJobDelta({
+          updateJobIds: [job.id],
+          update: (current) => ({
+            ...current,
+            status: "archived",
+            discoveryFeedback: {
+              version: 1,
+              revision: 1,
+              reasons: [],
+              recordedAt: "2026-10-23T00:00:00.000Z",
+              priorStatus: current.status,
+              employerExclusion: null,
+            },
+          }),
+        });
+        const hidden = await workspace.getWorkspaceProjection();
+        expect(hidden.discoveryJobs.some((row) => row.id === job.id)).toBe(
+          false,
+        );
+        expect(
+          hidden.dismissedDiscoveryJobs.some((row) => row.id === job.id),
+        ).toBe(true);
+        const unchanged = await workspace.getWorkspaceProjection();
+        expect(unchanged.campaigns).toEqual(hidden.campaigns);
+        expect(save).not.toHaveBeenCalled();
+        await repo.commitSavedJobDelta({
+          updateJobIds: [job.id],
+          update: (current) => ({
+            ...current,
+            status: job.status,
+            discoveryFeedback: job.discoveryFeedback,
+          }),
+        });
+        const restored = await workspace.getWorkspaceProjection();
+        expect(restored.discoveryJobs.map((row) => row.id)).toEqual(
+          original.discoveryJobs.map((row) => row.id),
+        );
+        expect(restored.dismissedDiscoveryJobs.map((row) => row.id)).toEqual(
+          original.dismissedDiscoveryJobs.map((row) => row.id),
+        );
+        const canonical = await workspace.getWorkspaceSnapshot();
+        expect(restored.discoveryJobs).toEqual(canonical.discoveryJobs);
+        expect(restored.companyJobs).toEqual(canonical.companyJobs);
+      } finally {
+        await close();
+      }
+    });
     test("profile review and copilot mutation callbacks return display metadata while public canonical reads stay owned", async () => {
       const { repo, close } = await fixture(storage);
       try {

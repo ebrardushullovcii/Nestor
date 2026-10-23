@@ -28,6 +28,19 @@ function identity(overrides: Partial<JobIdentityInput> = {}): JobIdentityInput {
 }
 
 describe("job identity", () => {
+  test("cached mutable query facts cannot match after their identity changes", () => {
+    const stored = identity();
+    const index = createJobIdentityIndex([stored], (value) => value);
+    const query = { ...stored };
+    expect(index.find(query)).toBe(stored);
+    query.sourceJobId = "different";
+    query.canonicalUrl = "https://example.test/different";
+    query.applicationUrl = "https://example.test/different/apply";
+    query.title = "Office Administrator";
+    expect(index.find(query)).toBeNull();
+    Object.assign(query, stored);
+    expect(index.find(query)).toBe(stored);
+  });
   test("matches an aggregator listing to its ATS listing through the employer application URL", () => {
     const aggregator = identity();
     const index = createJobIdentityIndex([aggregator], (value) => value);

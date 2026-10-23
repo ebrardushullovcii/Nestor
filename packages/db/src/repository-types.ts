@@ -212,6 +212,8 @@ export interface JobFinderRepository
   close(): Promise<void>;
   reset(seed: JobFinderRepositorySeed): Promise<void>;
   getProfile(): Promise<CandidateProfile>;
+  /** Validated frozen singleton; display readers must not mutate it. */
+  readProfileProjection?(): Promise<CandidateProfile>;
   /**
    * Reads the persisted candidate profile together with the profile
    * singleton's monotonic revision. The revision is the compare-and-swap
@@ -240,6 +242,7 @@ export interface JobFinderRepository
     options?: { expectedRevision?: number },
   ): Promise<ProfileCommitOutcome>;
   getSearchPreferences(): Promise<JobSearchPreferences>;
+  readSearchPreferencesProjection?(): Promise<JobSearchPreferences>;
   /**
    * Persists search preferences and advances the shared profile revision
    * epoch, so concurrent compare-and-swap commits that captured preferences
@@ -328,6 +331,8 @@ export interface JobFinderRepository
       current: BorrowedDiscoveryState,
     ) => readonly SavedJob[];
     update?: (job: SavedJob) => SavedJob;
+    /** Give the updater frozen current rows; it must return a new row for changes. */
+    borrowCurrentJobs?: boolean;
     /**
      * Runs `update` only on these rows (and on stored rows an upsert names);
      * every other row stays as stored without being read. Pass it only when
@@ -367,6 +372,8 @@ export interface JobFinderRepository
     update: (
       current: DiscoveryFeedbackCommitCurrent,
     ) => DiscoveryFeedbackCommitNext<TResult>,
+    /** Borrow frozen transaction-current singletons; replace changed values. */
+    options?: { borrowUnchangedState: boolean },
   ): Promise<TResult>;
   /**
    * Destructively replaces the complete saved-job collection. The caller must
@@ -651,6 +658,8 @@ export interface JobFinderRepository
     update: (current: JobFinderSettings) => JobFinderSettings,
   ): Promise<JobFinderSettings>;
   getDiscoveryState(): Promise<JobFinderDiscoveryState>;
+  /** Frozen canonical run state, including checkpoints. Never mutate borrowed rows. */
+  readDiscoveryStateForRun?(): Promise<JobFinderDiscoveryState>;
   /**
    * Borrowed immutable display state, reused until discovery changes. Agent
    * checkpoints stay in canonical storage and are null in this projection.
@@ -684,6 +693,7 @@ export interface JobFinderRepository
     ) => JobFinderDiscoveryState["sessions"],
   ): Promise<JobFinderDiscoveryState["sessions"]>;
   getCampaignState(): Promise<JobSearchCampaignCollection | null>;
+  readCampaignProjection?(): Promise<JobSearchCampaignCollection | null>;
   saveCampaignState(campaignState: JobSearchCampaignCollection): Promise<void>;
   /**
    * Applies a campaign collection and its corresponding global preferences

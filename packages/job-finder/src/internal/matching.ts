@@ -1121,6 +1121,10 @@ const visibleRankCache = new WeakMap<
   readonly SavedJob[],
   ReadonlyMap<string, number>
 >();
+const mergeInventories = new WeakMap<
+  readonly SavedJob[],
+  Map<string, SavedJob>
+>();
 
 function buildVisibleDiscoveryRankById(
   jobs: readonly SavedJob[],
@@ -1177,6 +1181,8 @@ export function mergeDiscoveredPostings(
      * while its assessment did not, cost seconds per board.
      */
     recordRankOnlyAudits?: boolean;
+    /** Search merges hand their result straight to the next merge. */
+    reuseInventory?: boolean;
   },
 ): MergeDiscoveryResult {
   // Check if already aborted
@@ -1187,13 +1193,20 @@ export function mergeDiscoveredPostings(
   const identityIndex =
     options?.identityIndex ??
     createJobIdentityIndex(savedJobs, toSightingIdentityInput);
-  const previousJobsById = new Map(savedJobs.map((job) => [job.id, job]));
+  const reuseInventory =
+    options?.reuseInventory === true && options.recordRankOnlyAudits === false;
+  const previousJobsById = reuseInventory
+    ? new Map<string, SavedJob>()
+    : new Map(savedJobs.map((job) => [job.id, job]));
   const newJobIds = new Set<string>();
   let validatedCount = 0;
   let duplicatesMerged = 0;
   let invalidSkipped = 0;
 
-  const nextJobsById = new Map(savedJobs.map((job) => [job.id, job]));
+  const nextJobsById =
+    (reuseInventory ? mergeInventories.get(savedJobs) : undefined) ??
+    new Map(savedJobs.map((job) => [job.id, job]));
+  if (reuseInventory) mergeInventories.delete(savedJobs);
 
   for (const posting of discoveredPostings) {
     // Check for cancellation periodically
@@ -1222,6 +1235,13 @@ export function mergeDiscoveredPostings(
     validatedCount += 1;
     const existingJob =
       identityIndex.find({ ...posting, matchAcrossSources: true }) ?? undefined;
+    if (
+      reuseInventory &&
+      existingJob &&
+      !newJobIds.has(existingJob.id) &&
+      !previousJobsById.has(existingJob.id)
+    )
+      previousJobsById.set(existingJob.id, existingJob);
 
     // Enrich before assessing so the stored assessment fingerprint describes
     // exactly the content this merge persists. Enrichment derives fields the
@@ -1317,12 +1337,13 @@ export function mergeDiscoveredPostings(
           JSON.stringify(previous) !== JSON.stringify(job.matchAssessment)
         );
       }));
-  const previousRankById = auditsAny
-    ? buildVisibleDiscoveryRankById(savedJobs)
-    : null;
-  const currentRankById = auditsAny
-    ? buildVisibleDiscoveryRankById(jobsBeforeAudit)
-    : null;
+  const recordRanks = options?.recordRankOnlyAudits !== false;
+  const previousRankById =
+    auditsAny && recordRanks ? buildVisibleDiscoveryRankById(savedJobs) : null;
+  const currentRankById =
+    auditsAny && recordRanks
+      ? buildVisibleDiscoveryRankById(jobsBeforeAudit)
+      : null;
   const auditRecordedAt = selectLatestDiscoveryTimestamp(discoveredPostings);
   const mergedJobs = !auditsAny
     ? jobsBeforeAudit
@@ -1331,6 +1352,15 @@ export function mergeDiscoveredPostings(
         if (!previousJob || !isAudited(job.id)) {
           return job;
         }
+        // Only changed merge rows need an assessment audit. Re-parsing an
+        // untouched inventory row copied its listing, provenance and verdicts.
+        if (
+          options?.recordRankOnlyAudits === false &&
+          (previousJob === job ||
+            JSON.stringify(previousJob.matchAssessment) ===
+              JSON.stringify(job.matchAssessment))
+        )
+          return job;
 
         const audit = createMatchAssessmentChangeAudit({
           previous: previousJob.matchAssessment,
@@ -1340,16 +1370,26 @@ export function mergeDiscoveredPostings(
           recordedAt: auditRecordedAt,
         });
 
-        return SavedJobSchema.parse({
+        const latestMatchAssessmentAudit = hasMeaningfulMatchAssessmentChange(
+          audit,
+        )
+          ? audit
+          : previousJob.latestMatchAssessmentAudit;
+        if (latestMatchAssessmentAudit === job.latestMatchAssessmentAudit)
+          return job;
+        // Both the job and audit have already crossed their schema boundaries.
+        const audited = {
           ...job,
-          latestMatchAssessmentAudit: hasMeaningfulMatchAssessmentChange(audit)
-            ? audit
-            : previousJob.latestMatchAssessmentAudit,
-        });
+          latestMatchAssessmentAudit,
+        };
+        identityIndex.replace(job, audited);
+        nextJobsById.set(audited.id, audited);
+        return audited;
       });
   // An audit never moves a job in the order, so the merged list ranks as
   // the list before it; the next merge starts from this list.
   if (currentRankById) visibleRankCache.set(mergedJobs, currentRankById);
+  if (reuseInventory) mergeInventories.set(mergedJobs, nextJobsById);
 
   return {
     mergedJobs,

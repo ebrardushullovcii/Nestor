@@ -114,6 +114,10 @@ const workspaceAliases = {
 };
 
 const mainWorkspaceAliases = {
+  "@nestor/job-finder/discovery-cpu": path.resolve(
+    currentDir,
+    "../../packages/job-finder/src/discovery-cpu.ts",
+  ),
   ...workspaceAliases,
   "@nestor/job-finder/application-submission-runtime-main":
     jobFinderApplicationSubmissionRuntimeMainPath,
@@ -125,6 +129,13 @@ const mainConfig = {
   },
   build: {
     rollupOptions: {
+      input: {
+        index: path.resolve(currentDir, "src/main/index.ts"),
+        "discovery-cpu-worker": path.resolve(
+          currentDir,
+          "src/main/services/job-finder/discovery-cpu-worker.ts",
+        ),
+      },
       external: [
         "playwright",
         "playwright-core",

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { transferRowChanges } from "@nestor/core";
 import {
   TailoredAssetSummarySchema,
   ApplyJobResultListRowSchema,
@@ -323,6 +324,7 @@ function toRendererJobs(jobs: DiscoveryJobView[]): JobListRow[] {
   if (reusable) {
     Object.freeze(rows);
     jobCollections.set(jobs, rows);
+    transferRowChanges(jobs, rows, toRendererJob);
   }
   return rows;
 }

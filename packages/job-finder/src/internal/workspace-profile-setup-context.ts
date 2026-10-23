@@ -206,19 +206,42 @@ async function syncLatestResumeImportCandidatesWithSetupState(
 export function createWorkspaceProfileSetupContextHelpers(
   ctx: WorkspaceServiceContext,
 ) {
-  async function getCurrentSetupStateContext() {
+  function freezeDisplayValue(value: unknown): void {
+    if (value === null || typeof value !== "object" || Object.isFrozen(value))
+      return;
+    for (const child of Object.values(value)) freezeDisplayValue(child);
+    Object.freeze(value);
+  }
+  const normalizedPreferences = new WeakMap<
+    object,
+    ReturnType<typeof normalizeSearchPreferences>
+  >();
+  async function getCurrentSetupStateContext(borrowValidated = false) {
     const [
       persistedProfile,
       rawSearchPreferences,
       persistedState,
       persistedLatestResumeImportRun,
     ] = await Promise.all([
-      ctx.repository.getProfile(),
-      ctx.repository.getSearchPreferences(),
+      borrowValidated && ctx.repository.readProfileProjection
+        ? ctx.repository.readProfileProjection()
+        : ctx.repository.getProfile(),
+      borrowValidated && ctx.repository.readSearchPreferencesProjection
+        ? ctx.repository.readSearchPreferencesProjection()
+        : ctx.repository.getSearchPreferences(),
       ctx.repository.getProfileSetupState(),
       ctx.repository.getLatestResumeImportRun(),
     ]);
-    const searchPreferences = normalizeSearchPreferences(rawSearchPreferences);
+    let searchPreferences = Object.isFrozen(rawSearchPreferences)
+      ? normalizedPreferences.get(rawSearchPreferences)
+      : undefined;
+    if (!searchPreferences) {
+      searchPreferences = normalizeSearchPreferences(rawSearchPreferences);
+      if (Object.isFrozen(rawSearchPreferences)) {
+        freezeDisplayValue(searchPreferences);
+        normalizedPreferences.set(rawSearchPreferences, searchPreferences);
+      }
+    }
     const latestResumeImportRun = persistedLatestResumeImportRun
       ? recoverInterruptedTextImportRun({
           run: recoverInterruptedDeferredVisionRun({

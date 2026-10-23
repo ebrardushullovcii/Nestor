@@ -1225,13 +1225,28 @@ function normalizeDetailQualityText(value: string): string {
 }
 
 function countDetailQualityWords(value: string): number {
-  return value.trim().split(/\s+/u).filter(Boolean).length;
+  // All decisions use thresholds at or below 70. Count only that prefix;
+  // splitting a full listing allocated thousands of strings each time it
+  // passed through normalization, capture and assessment.
+  const words = /\S+/gu;
+  let count = 0;
+  while (count < ENRICHED_DESCRIPTION_WORD_FLOOR && words.test(value))
+    count += 1;
+  return count;
 }
 
-function isSyntheticDescription(input: JobPostingDetailQualityInput): boolean {
-  const description = normalizeDetailQualityText(input.description);
+function isSyntheticDescription(
+  input: JobPostingDetailQualityInput,
+  descriptionWords: number,
+): boolean {
   const title = normalizeDetailQualityText(input.title);
   const company = normalizeDetailQualityText(input.company);
+  if (
+    descriptionWords >
+    countDetailQualityWords(title) + countDetailQualityWords(company) + 3
+  )
+    return false;
+  const description = normalizeDetailQualityText(input.description);
 
   return (
     description === title ||
@@ -1257,7 +1272,10 @@ export function assessJobPostingDetailQuality(
     (total, entry) => total + entry.length,
     0,
   );
-  const syntheticDescription = isSyntheticDescription(input);
+  const syntheticDescription = isSyntheticDescription(
+    input,
+    descriptionWordCount,
+  );
 
   if (
     (!syntheticDescription &&

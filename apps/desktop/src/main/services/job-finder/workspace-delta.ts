@@ -4,6 +4,7 @@ import type {
   JobFinderWorkspaceSyncResult,
   WorkspaceRevision,
 } from "@nestor/contracts";
+import { readRowChanges } from "@nestor/core";
 
 type EntitySlice<T> = {
   upserts: T[];
@@ -126,7 +127,10 @@ function sameRowAcrossProcesses(left: unknown, right: unknown): boolean {
  * its index is kept with it instead of being built again for thousands of
  * jobs. `getId` must be the same for a given list.
  */
-const rowsByIdOfList = new WeakMap<readonly object[], ReadonlyMap<string, unknown>>();
+const rowsByIdOfList = new WeakMap<
+  readonly object[],
+  ReadonlyMap<string, unknown>
+>();
 
 function indexRowsById<T>(
   rows: readonly T[],
@@ -140,13 +144,24 @@ function indexRowsById<T>(
   return byId;
 }
 
-function buildEntitySlice<T>(
+function buildEntitySlice<T extends object>(
   previous: readonly T[],
   current: readonly T[],
   getId: (value: T) => string,
   same: (left: T, right: T) => boolean = sameValue,
 ): EntitySlice<T> {
   if (previous === current) return { upserts: [], removedIds: [] };
+  const changes = readRowChanges(previous, current);
+  if (changes) {
+    const upserts: T[] = [];
+    const removedIds: string[] = [];
+    for (const { id, before, after } of changes) {
+      if (after) {
+        if (!before || !same(before, after)) upserts.push(after);
+      } else if (before) removedIds.push(id);
+    }
+    return { upserts, removedIds };
+  }
   const previousById = indexRowsById(previous, getId);
   const currentById = indexRowsById(current, getId);
 

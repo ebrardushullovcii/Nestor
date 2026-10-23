@@ -1,4 +1,5 @@
 import { clearResumeBatchLiveness } from "./internal/resume-batch-checkpoint";
+import { createListingActivityIdentityIndex } from "./internal/listing-activity-identity-index";
 import type {
   BrowserSessionRuntime,
   OpenBrowserSessionOptions,
@@ -426,6 +427,7 @@ export function createJobFinderWorkspaceService(
     ...(exportFileVerifier ? { exportFileVerifier } : {}),
     repository,
     listingAssessmentJobIds: new Set<string>(),
+    listingActivityIdentityIndex: createListingActivityIdentityIndex(),
     listingAssessmentGenerationRef: { current: 0 },
     listingAssessmentAbortControllerRef: { current: new AbortController() },
     isWorkspaceClosing: () =>
@@ -985,14 +987,7 @@ export function createJobFinderWorkspaceService(
     options: { nestedUserActionRecovery?: boolean } = {},
   ) {
     await requireDiscoverySafeguardClearance();
-    // Only read here, to fingerprint each job's sightings before the run:
-    // the cached display rows serve that without parsing and copying every
-    // job and run again (seconds of the main process at the press of Search).
-    let [campaignState, savedJobs, discoveryState] = await Promise.all([
-      repository.getCampaignState(),
-      repository.readSavedJobsProjection(),
-      repository.readDiscoveryDisplayProjection(),
-    ]);
+    let campaignState = await repository.getCampaignState();
     if (!campaignState && requestedCampaignId) {
       throw new Error("This search plan was removed; run the plan again");
     }
@@ -1009,10 +1004,6 @@ export function createJobFinderWorkspaceService(
           searchPreferences: await repository.getSearchPreferences(),
         });
       });
-      [savedJobs, discoveryState] = await Promise.all([
-        repository.readSavedJobsProjection(),
-        repository.readDiscoveryDisplayProjection(),
-      ]);
     }
     const campaignId = requestedCampaignId ?? campaignState.activeCampaignId;
     const campaign = campaignState.campaigns.find(
@@ -1041,12 +1032,6 @@ export function createJobFinderWorkspaceService(
       ctx: context,
       campaignId,
       beforeCampaignJobIds: campaign.jobIds,
-      beforeJobProvenanceFingerprints: new Map(
-        [...savedJobs, ...discoveryState.pendingDiscoveryJobs].map((job) => [
-          job.id,
-          JSON.stringify(job.provenance),
-        ]),
-      ),
     });
     await yieldToEventLoop();
     if (options.nestedUserActionRecovery) {

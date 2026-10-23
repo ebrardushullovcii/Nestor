@@ -39,6 +39,7 @@ import {
   type SetCompanyPreferenceInput,
 } from "@nestor/contracts";
 
+import { yieldToEventLoop } from "@nestor/core";
 import { buildJobIdentityAliases, type JobIdentityInput } from "./job-identity";
 // ---------------------------------------------------------------------------
 // Normalization
@@ -1123,7 +1124,7 @@ function applyNearConflictCandidates(
  * placeholder/generic shells are purged. New companies receive caller-provided
  * ids and the caller-provided `now` timestamp.
  */
-export function reconcileCompanies(input: {
+type ReconcileCompaniesInput = {
   companies: readonly CompanyEntity[];
   jobs: readonly SavedJob[];
   applicationRecords: readonly ApplicationRecord[];
@@ -1132,7 +1133,37 @@ export function reconcileCompanies(input: {
     normalizedName: string;
     normalizedDomain: string | null;
   }) => string;
-}): ReconcileCompaniesResult {
+};
+
+export function reconcileCompanies(
+  input: ReconcileCompaniesInput,
+): ReconcileCompaniesResult {
+  const steps = reconcileCompanySteps(input);
+  let step = steps.next();
+  while (!step.done) step = steps.next();
+  return step.value;
+}
+
+/** The same ownership decisions, without holding main for the full inventory. */
+export async function reconcileCompaniesInTurns(
+  input: ReconcileCompaniesInput,
+): Promise<ReconcileCompaniesResult> {
+  await yieldToEventLoop();
+  const steps = reconcileCompanySteps(input);
+  let started = performance.now();
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+    if (performance.now() - started >= 8) {
+      await yieldToEventLoop();
+      started = performance.now();
+    }
+  }
+}
+
+function* reconcileCompanySteps(
+  input: ReconcileCompaniesInput,
+): Generator<void, ReconcileCompaniesResult, void> {
   const nowResult = IsoDateTimeSchema.safeParse(input.now);
   if (!nowResult.success) {
     return {
@@ -1159,6 +1190,7 @@ export function reconcileCompanies(input: {
   }
   const jobs: CompanyJobEvidence[] = [];
   for (const job of input.jobs) {
+    yield;
     const result = readCompanyJobEvidence(job);
     if (!result.ok)
       return {
@@ -1172,6 +1204,7 @@ export function reconcileCompanies(input: {
   }
   const records: CompanyApplicationEvidence[] = [];
   for (const record of input.applicationRecords) {
+    yield;
     const result = readCompanyApplicationEvidence(record);
     if (!result.ok)
       return {
@@ -1188,6 +1221,7 @@ export function reconcileCompanies(input: {
 
   const seenIds = new Set<string>();
   for (const company of working) {
+    yield;
     if (seenIds.has(company.id)) {
       return {
         ok: false,
@@ -1206,6 +1240,7 @@ export function reconcileCompanies(input: {
 
   const jobSourceById = new Map<string, string>();
   for (const job of jobs) {
+    yield;
     if (!jobSourceById.has(job.id)) jobSourceById.set(job.id, job.source);
   }
 
@@ -1352,10 +1387,12 @@ export function reconcileCompanies(input: {
   try {
     const currentJobOwnerById = new Map<string, string | null>();
     for (const job of jobs) {
+      yield;
       currentJobOwnerById.set(job.id, processEvidence({ kind: "job", job }));
     }
     const currentApplicationOwnerById = new Map<string, string | null>();
     for (const record of records) {
+      yield;
       const relatedJobOwner = currentJobOwnerById.get(record.jobId);
       if (relatedJobOwner === undefined) {
         summary.unresolvableEvidenceCount += 1;
@@ -1369,6 +1406,7 @@ export function reconcileCompanies(input: {
     }
 
     for (let index = 0; index < working.length; index += 1) {
+      yield;
       const company = working[index]!;
       const jobIds = company.jobIds.filter((jobId) => {
         const owner = currentJobOwnerById.get(jobId);

@@ -136,6 +136,12 @@ export function createInMemoryJobFinderRepository(
   const savedProjectionRows = new WeakMap<SavedJob, SavedJob>();
   const displayCollections = new WeakMap<object, readonly object[]>();
   const displayRows = new WeakMap<object, object>();
+  let campaignProjection: {
+    campaigns: typeof state.campaigns;
+    active: typeof state.activeCampaignId;
+    notifications: typeof state.campaignNotifications;
+    value: ReturnType<typeof JobSearchCampaignCollectionSchema.parse>;
+  } | null = null;
   function borrowDisplayRows<T extends object>(
     source: readonly T[],
     order: (rows: readonly T[]) => readonly T[] = (rows) => rows,
@@ -351,6 +357,9 @@ export function createInMemoryJobFinderRepository(
     getProfile() {
       return Promise.resolve(cloneValue(state.profile));
     },
+    readProfileProjection() {
+      return Promise.resolve(borrowDisplayRows([state.profile])[0]!);
+    },
     getProfileWithRevision() {
       return Promise.resolve(readProfileWithRevision());
     },
@@ -372,6 +381,9 @@ export function createInMemoryJobFinderRepository(
     },
     getSearchPreferences() {
       return Promise.resolve(cloneValue(state.searchPreferences));
+    },
+    readSearchPreferencesProjection() {
+      return Promise.resolve(borrowDisplayRows([state.searchPreferences])[0]!);
     },
     getProfileSetupState() {
       return Promise.resolve(cloneValue(state.profileSetupState));
@@ -577,6 +589,7 @@ export function createInMemoryJobFinderRepository(
       upsertsFromDiscovery,
       upsertsFromBorrowedDiscovery,
       update,
+      borrowCurrentJobs,
       updateJobIds,
       updateSettings,
       clearResumeApproval,
@@ -628,7 +641,11 @@ export function createInMemoryJobFinderRepository(
               return currentJob;
             }
             const nextJob = SavedJobSchema.parse(
-              cloneValue(update(cloneValue(currentJob))),
+              update(
+                borrowCurrentJobs
+                  ? freezeProjection(currentJob)
+                  : cloneValue(currentJob),
+              ),
             );
             if (nextJob.id !== currentJob.id) {
               throw new Error(
@@ -739,8 +756,12 @@ export function createInMemoryJobFinderRepository(
         );
       }
     },
-    commitDiscoveryFeedbackUpdate(jobId, update) {
+    commitDiscoveryFeedbackUpdate(jobId, update, feedbackOptions) {
       try {
+        const singleton = <T>(value: T): T =>
+          feedbackOptions?.borrowUnchangedState
+            ? freezeProjection(cloneValue(value))
+            : cloneValue(value);
         const pendingJob =
           state.discovery.pendingDiscoveryJobs.find(
             (job) => job.id === jobId,
@@ -750,18 +771,18 @@ export function createInMemoryJobFinderRepository(
         const next = update({
           job: cloneValue(pendingJob ?? savedJob),
           jobIsPending: pendingJob !== null,
-          searchPreferences: cloneValue(state.searchPreferences),
+          searchPreferences: singleton(state.searchPreferences),
           campaignState:
             state.campaigns.length === 0 || !state.activeCampaignId
               ? null
-              : cloneValue(
+              : singleton(
                   JobSearchCampaignCollectionSchema.parse({
                     campaigns: state.campaigns,
                     activeCampaignId: state.activeCampaignId,
                     notifications: state.campaignNotifications,
                   }),
                 ),
-          intelligenceState: cloneValue(state.intelligence),
+          intelligenceState: singleton(state.intelligence),
           discoveryState: freezeProjection(cloneValue(state.discovery)),
         });
         const nextSearchPreferences = JobSearchPreferencesSchema.parse(
@@ -2383,6 +2404,30 @@ export function createInMemoryJobFinderRepository(
           }),
         ),
       );
+    },
+    readCampaignProjection() {
+      if (state.campaigns.length === 0 || !state.activeCampaignId)
+        return Promise.resolve(null);
+      if (
+        campaignProjection?.campaigns === state.campaigns &&
+        campaignProjection.active === state.activeCampaignId &&
+        campaignProjection.notifications === state.campaignNotifications
+      )
+        return Promise.resolve(campaignProjection.value);
+      const value = freezeProjection(
+        JobSearchCampaignCollectionSchema.parse({
+          campaigns: state.campaigns,
+          activeCampaignId: state.activeCampaignId,
+          notifications: state.campaignNotifications,
+        }),
+      );
+      campaignProjection = {
+        campaigns: state.campaigns,
+        active: state.activeCampaignId,
+        notifications: state.campaignNotifications,
+        value,
+      };
+      return Promise.resolve(value);
     },
     saveCampaignState(campaignState) {
       const normalized = JobSearchCampaignCollectionSchema.parse(

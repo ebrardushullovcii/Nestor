@@ -9,6 +9,7 @@ import {
 import { describe, expect, test, vi } from "vitest";
 import { cleanupTempDirectoryWithRetry, createSavedJob, createTempRepository } from "./file-repository.test-support";
 import { createDiscoveryStorage } from "./internal/discovery-storage";
+import { createDiscoveryDisplayProjectionReader } from "./internal/discovery-display-projection";
 import { createSeed } from "./test-fixtures";
 
 function ledger(id: string) {
@@ -61,6 +62,38 @@ function activity(runId: string, index: number) {
 }
 
 describe("normalized discovery storage", () => {
+  test("prunes complete run rows atomically without reporting every retired child as a display edit", async () => {
+    const temp = await createTempRepository("nestor-discovery-retirement-");
+    try {
+      const repo = await temp.createRepository();
+      try {
+        const old = { ...run("retired", 1), activity: Array.from({ length: 300 }, (_, index) => activity("retired", index)) };
+        await repo.commitDiscoveryStateUpdate((current) => ({ ...current, recentRuns: [old] }));
+        const rows = new DatabaseSync(temp.filePath);
+        try {
+          const storage = createDiscoveryStorage(rows, createSeed().discovery);
+          const readDisplay = createDiscoveryDisplayProjectionReader(rows, createSeed().discovery);
+          const before = storage.read();
+          await readDisplay();
+          rows.exec("BEGIN IMMEDIATE");
+          storage.update({ ...before, recentRuns: [] }, before);
+          rows.exec("ROLLBACK");
+          expect(storage.read()).toEqual(before);
+          expect((await readDisplay()).recentRuns).toHaveLength(1);
+          rows.exec("BEGIN IMMEDIATE");
+          const after = storage.update({ ...before, recentRuns: [] }, before);
+          rows.exec("COMMIT");
+          storage.publish(after);
+          expect(rows.prepare("SELECT COUNT(*) AS n FROM discovery_display_changes WHERE run_id = ?").get("retired")?.n).toBe(0);
+          expect((await readDisplay()).recentRuns).toEqual([]);
+          for (const table of ["discovery_run_targets", "discovery_run_checkpoints", "discovery_run_activity"])
+            expect(rows.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE run_id = ?`).get("retired")?.n).toBe(0);
+        } finally { rows.close(); }
+        expect((await repo.getDiscoveryState()).recentRuns).toEqual([]);
+      } finally { await repo.close(); }
+    } finally { await cleanupTempDirectoryWithRetry(temp.tempDirectory); }
+  });
+
   test("pairs saved job, ledger, counters and checkpoint writes and rolls all of them back on failure", async () => {
     const temp = await createTempRepository("nestor-discovery-paired-rows-");
     try {

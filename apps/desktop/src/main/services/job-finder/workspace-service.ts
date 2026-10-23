@@ -1,4 +1,5 @@
 import { JobFinderWorkspaceSnapshotSchema } from "@nestor/contracts";
+import { shutdownDiscoveryFeedWorkers } from "./discovery-cpu";
 import { createJobFinderWorkspaceServiceAsync } from "./create-workspace-service";
 import { toRendererWorkspaceSnapshot } from "./renderer-workspace-view";
 import {
@@ -106,6 +107,7 @@ export async function shutdownJobFinderWorkspaceService(
       error,
     );
   });
+  await shutdownDiscoveryFeedWorkers();
   if (options.saveStartupView) {
     writeStartupWorkspaceView(closedCleanly ? startupView : null);
   }

@@ -1,14 +1,11 @@
-import { enrichSearchPreferencesFromProfile } from "./workspace-helpers";
-import { withSavedJobSearchBehavior } from "./job-search-behavior";
 import {
   personPickedJob,
   readPlanAssessment,
   withPlanAssessment,
 } from "./plan-assessment";
-import { createMatchAssessmentSession } from "./match-assessment-session";
-import { createMatchAssessment } from "./matching";
-import { jobNeedsFitJudgment } from "./fit-judgment";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { yieldToEventLoop } from "@nestor/core";
 
 import {
   CampaignNotificationSchema,
@@ -19,7 +16,6 @@ import {
   describeDiscoveryRunFailureReason,
   DiscoveryRunReportSchema,
   formatDiscoveryAccounting,
-  DiscoveryRunRecordSchema,
   JobSearchCampaignCollectionSchema,
   JobSearchCampaignSchema,
   MarkAllCampaignNotificationsReadInputSchema,
@@ -28,7 +24,6 @@ import {
   RunCampaignNowInputSchema,
   SaveCampaignRuleRouteInputSchema,
   SaveJobSearchCampaignInputSchema,
-  SavedJobSchema,
   ToggleCampaignRuleInputSchema,
   type CampaignRule,
   type CampaignRuleEffect,
@@ -297,9 +292,9 @@ async function persistCampaignRuleChange(input: {
 }
 
 /** Plan candidates scored per turn of the event loop at a run's end. */
-const CANDIDATES_PER_TURN = 250;
+
 /** Saved jobs whose plan membership one transaction rewrites. */
-const MEMBERSHIP_ROWS_PER_COMMIT = 250;
+const MEMBERSHIP_ROWS_PER_COMMIT = 12;
 
 /**
  * Atomically commits the terminal discovery run for a campaign: campaign
@@ -313,7 +308,7 @@ const MEMBERSHIP_ROWS_PER_COMMIT = 250;
 export async function commitCampaignRunTerminal(input: {
   ctx: WorkspaceServiceContext;
   campaignId: string;
-  beforeJobProvenanceFingerprints: ReadonlyMap<string, string>;
+  beforeJobProvenanceFingerprints?: ReadonlyMap<string, string>;
   beforeCampaignJobIds?: readonly string[];
   now: string;
   /**
@@ -343,7 +338,8 @@ export async function commitCampaignRunTerminal(input: {
       input.ctx.repository.getCampaignState(),
       // Read-only below; the cached display rows spare a full parse.
       input.ctx.repository.readSavedJobsProjection(),
-      input.ctx.repository.getDiscoveryState(),
+      input.ctx.repository.readDiscoveryStateForRun?.() ??
+        input.ctx.repository.getDiscoveryState(),
       display?.resumeDrafts ?? input.ctx.repository.listResumeDrafts(),
       display?.tailoredAssets ?? input.ctx.repository.listTailoredAssets(),
       display?.applyRuns ?? input.ctx.repository.listApplyRuns(),
@@ -378,7 +374,7 @@ export async function commitCampaignRunTerminal(input: {
     );
     if (!campaign) return;
     const sourceOutcome = deriveDiscoverySourceOutcome(recordedRun);
-    const latestRun = DiscoveryRunRecordSchema.parse({
+    const latestRun: DiscoveryRunRecord = {
       ...recordedRun,
       summary: {
         ...recordedRun.summary,
@@ -387,7 +383,7 @@ export async function commitCampaignRunTerminal(input: {
         // and Find jobs stop reporting a failed source inside "3 of 3".
         targetsCompleted: sourceOutcome.completed,
       },
-    });
+    };
 
     const outcome = classifyCampaignRunOutcome({
       state: latestRun.state,
@@ -461,51 +457,11 @@ export async function commitCampaignRunTerminal(input: {
     const candidates = availableJobs
       .filter((job) => candidateJobIds.has(job.id) && job.status !== "archived")
       .map((job) => readPlanAssessment(job, campaign.id));
-    const profile = await input.ctx.repository.getProfile();
-    const preferences = withSavedJobSearchBehavior(
-      enrichSearchPreferencesFromProfile(
-        searchPreferencesForCampaignRun(campaign),
-        profile,
-      ),
-      await input.ctx.repository.getSettings(),
+    // Discovery already revalidated the inventory and persisted this plan's
+    // verdicts. Closing the run only consumes them; it never scores again.
+    const candidateJobs = candidates.map((job) =>
+      readPlanAssessment(withPlanAssessment(job, campaign.id), campaign.id),
     );
-    const session = createMatchAssessmentSession({
-      profile,
-      searchPreferences: preferences,
-      calculate: createMatchAssessment,
-    });
-    // Discovery judges all eligible jobs before taking this commit lock.
-    // Do not make another model request while plan edits are waiting for it.
-    // Thousands of candidates are scored a slice per turn of the event loop,
-    // so the end of a search does not hold the window for seconds.
-    const planId = campaign.id;
-    const assessCandidate = (job: SavedJob): SavedJob => {
-      // A verdict from another plan cannot say this job fits the current one.
-      // This plan's own verdict stands even when the profile or goals changed
-      // since: it is the best answer until the job is judged again (ADR 0041).
-      // Dropping it made one search after a profile edit wipe every verdict
-      // of the plan (6,200 on the owner's data), each then bought again.
-      const ownVerdict = job.planAssessments?.[planId]?.judgment;
-      const assessment =
-        ownVerdict ||
-        !jobNeedsFitJudgment(
-          job,
-          session.verdictFingerprint,
-          session.contextFingerprint,
-        )
-          ? job.matchAssessment
-          : session.assess({ ...job, matchAssessment: null });
-      return readPlanAssessment(
-        withPlanAssessment(job, planId, assessment),
-        planId,
-      );
-    };
-    const candidateJobs: SavedJob[] = [];
-    for (const [position, job] of candidates.entries()) {
-      if (position > 0 && position % CANDIDATES_PER_TURN === 0)
-        await new Promise<void>((resolve) => setImmediate(resolve));
-      candidateJobs.push(assessCandidate(job));
-    }
     const assessedById = new Map(candidateJobs.map((job) => [job.id, job]));
     const measuredAt = latestRun.completedAt ?? latestRun.startedAt;
     const evaluatedRules = evaluateCampaignRules({
@@ -743,23 +699,22 @@ export async function commitCampaignRunTerminal(input: {
     // before the write, so a job changed meanwhile is judged as it is now.
     const currentSavedJobs =
       await input.ctx.repository.readSavedJobsProjection();
-    const changedSavedJobIds = currentSavedJobs
-      .filter((job) => {
-        if (
-          JSON.stringify(nextCampaignIds(job)) !==
-          JSON.stringify(job.campaignIds ?? [])
-        )
-          return true;
-        const assessed = assessedById.get(job.id);
-        return (
-          assessed?.planAssessments !== undefined &&
-          JSON.stringify(job.planAssessments?.[campaign.id]) !==
-            JSON.stringify(assessed.matchAssessment)
-        );
-      })
-      .map((job) => job.id);
+    const changedSavedJobIds: string[] = [];
+    for (const [position, job] of currentSavedJobs.entries()) {
+      if (position % 80 === 0) await yieldToEventLoop();
+      const assessed = assessedById.get(job.id);
+      if (
+        !isDeepStrictEqual(nextCampaignIds(job), job.campaignIds ?? []) ||
+        (assessed?.planAssessments !== undefined &&
+          !isDeepStrictEqual(
+            job.planAssessments?.[campaign.id],
+            assessed.matchAssessment,
+          ))
+      )
+        changedSavedJobIds.push(job.id);
+    }
     const updateCampaignMembership = (job: SavedJob): SavedJob => {
-      return SavedJobSchema.parse({
+      return {
         ...job,
         campaignIds: nextCampaignIds(job),
         ...(assessedById.get(job.id)?.planAssessments
@@ -770,7 +725,7 @@ export async function commitCampaignRunTerminal(input: {
               },
             }
           : {}),
-      });
+      };
     };
     // Thousands of jobs can join or leave the plan at once (the first search
     // of a large plan). Written in one transaction that held main for tens
@@ -792,12 +747,14 @@ export async function commitCampaignRunTerminal(input: {
     const lastMembershipPart = membershipParts.pop() ?? [];
     for (const part of membershipParts) {
       await input.ctx.repository.commitSavedJobDelta({
+        borrowCurrentJobs: true,
         update: updateCampaignMembership,
         updateJobIds: part,
       });
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await yieldToEventLoop();
     }
     await input.ctx.repository.commitSavedJobDelta({
+      borrowCurrentJobs: true,
       update: updateCampaignMembership,
       updateJobIds: lastMembershipPart,
       updateDiscoveryState: (current) => ({
@@ -805,26 +762,26 @@ export async function commitCampaignRunTerminal(input: {
         activeRun:
           current.activeRun && current.activeRun.id === latestRun.id
             ? applyDiscoveryRunRetentionCounts(
-                DiscoveryRunRecordSchema.parse({
+                {
                   ...current.activeRun,
                   summary: {
                     ...current.activeRun.summary,
                     targetsCompleted: sourceOutcome.completed,
                   },
-                }),
+                },
                 retentionCounts,
               )
             : current.activeRun,
         recentRuns: current.recentRuns.map((run) =>
           run.id === latestRun.id
             ? applyDiscoveryRunRetentionCounts(
-                DiscoveryRunRecordSchema.parse({
+                {
                   ...run,
                   summary: {
                     ...run.summary,
                     targetsCompleted: sourceOutcome.completed,
                   },
-                }),
+                },
                 retentionCounts,
               )
             : run,
@@ -868,13 +825,12 @@ export async function commitCampaignRunTerminal(input: {
 export async function recordCampaignDiscoveryResult(input: {
   ctx: WorkspaceServiceContext;
   campaignId: string;
-  beforeJobProvenanceFingerprints: ReadonlyMap<string, string>;
+  beforeJobProvenanceFingerprints?: ReadonlyMap<string, string>;
   beforeCampaignJobIds?: readonly string[];
 }): Promise<void> {
   await commitCampaignRunTerminal({
     ctx: input.ctx,
     campaignId: input.campaignId,
-    beforeJobProvenanceFingerprints: input.beforeJobProvenanceFingerprints,
     ...(input.beforeCampaignJobIds
       ? { beforeCampaignJobIds: input.beforeCampaignJobIds }
       : {}),
@@ -1072,17 +1028,6 @@ async function executeCampaignRun(input: {
   onActivity?: (event: DiscoveryActivityEvent) => void;
   trigger: "manual" | "scheduled";
 }): Promise<void> {
-  // Only fingerprinted below; the cached display rows serve that.
-  const [beforeSavedJobs, beforeDiscovery] = await Promise.all([
-    input.ctx.repository.readSavedJobsProjection(),
-    input.ctx.repository.readDiscoveryDisplayProjection(),
-  ]);
-  const beforeJobProvenanceFingerprints = new Map(
-    [...beforeSavedJobs, ...beforeDiscovery.pendingDiscoveryJobs].map((job) => [
-      job.id,
-      JSON.stringify(job.provenance),
-    ]),
-  );
   try {
     await input.runCampaignDiscovery(
       {
@@ -1098,7 +1043,6 @@ async function executeCampaignRun(input: {
       await commitCampaignRunTerminal({
         ctx: input.ctx,
         campaignId: input.campaign.id,
-        beforeJobProvenanceFingerprints,
         beforeCampaignJobIds: input.campaign.jobIds,
         now: input.now,
         trigger: input.trigger,
@@ -1109,7 +1053,6 @@ async function executeCampaignRun(input: {
   await commitCampaignRunTerminal({
     ctx: input.ctx,
     campaignId: input.campaign.id,
-    beforeJobProvenanceFingerprints,
     beforeCampaignJobIds: input.campaign.jobIds,
     now: input.now,
     trigger: input.trigger,

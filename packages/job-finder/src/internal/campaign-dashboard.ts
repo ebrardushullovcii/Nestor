@@ -106,9 +106,7 @@ function startOfLocalDay(value: Date): number {
 // found is worked out once. Every refresh parsed each sighting's date of
 // every job (20,000 jobs, about 25 ms) to count today's finds.
 const latestSightingByJob = new WeakMap<object, number>();
-function latestSightingTime(
-  job: Pick<SavedJob, "provenance">,
-): number {
+function latestSightingTime(job: Pick<SavedJob, "provenance">): number {
   let latest = latestSightingByJob.get(job);
   if (latest === undefined) {
     latest = Number.NEGATIVE_INFINITY;
@@ -256,9 +254,7 @@ export function reconcileCampaignState(input: {
   now: string;
 }): JobSearchCampaignCollection | null {
   const savedJobIds = input.savedJobs.map((job) => job.id);
-  const searchPreferences = parseSearchPreferencesOnce(
-    input.searchPreferences,
-  );
+  const searchPreferences = parseSearchPreferencesOnce(input.searchPreferences);
   const serializedSearchPreferences = JSON.stringify(searchPreferences);
   const enabledSourceTargetIds = searchPreferences.discovery.targets
     .filter((target) => target.enabled)
@@ -354,12 +350,24 @@ export function reconcileCampaignState(input: {
   });
 }
 
+const reconciledDisplayCampaigns = new WeakMap<
+  JobSearchCampaignCollection,
+  {
+    preferences: JobSearchPreferences;
+    jobIds: readonly string[];
+  }
+>();
+
 export async function ensureCampaignState(input: {
   repository: JobFinderRepository;
   searchPreferences: JobSearchPreferences;
   now?: string;
+  borrowValidated?: boolean;
 }): Promise<JobSearchCampaignCollection> {
-  const existing = await input.repository.getCampaignState();
+  const existing = await (input.borrowValidated &&
+  input.repository.readCampaignProjection
+    ? input.repository.readCampaignProjection()
+    : input.repository.getCampaignState());
   const now = input.now ?? new Date().toISOString();
   if (!existing) {
     const campaign = createDefaultCampaign(
@@ -378,15 +386,31 @@ export async function ensureCampaignState(input: {
 
   // Every snapshot runs this, and only the ids matter: parsing every saved
   // job here doubled the cost of each workspace refresh.
+  const jobIds = await input.repository.listSavedJobIds();
+  const previous = reconciledDisplayCampaigns.get(existing);
+  if (
+    input.borrowValidated &&
+    Object.isFrozen(existing) &&
+    previous?.preferences === input.searchPreferences &&
+    (previous.jobIds === jobIds || sameStringValues(previous.jobIds, jobIds))
+  )
+    return existing;
   const reconciled = reconcileCampaignState({
     state: existing,
-    savedJobs: (await input.repository.listSavedJobIds()).map((id) => ({
+    savedJobs: jobIds.map((id) => ({
       id,
     })),
     searchPreferences: input.searchPreferences,
     now,
   });
-  if (!reconciled) return existing;
+  if (!reconciled) {
+    if (input.borrowValidated && Object.isFrozen(existing))
+      reconciledDisplayCampaigns.set(existing, {
+        preferences: input.searchPreferences,
+        jobIds,
+      });
+    return existing;
+  }
   await input.repository.saveCampaignState(reconciled);
   return reconciled;
 }

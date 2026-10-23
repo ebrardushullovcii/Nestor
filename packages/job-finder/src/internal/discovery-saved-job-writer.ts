@@ -1,10 +1,11 @@
 import { isDeepStrictEqual } from "node:util";
 import type { JobFinderDiscoveryState, SavedJob } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
+import { yieldToEventLoop } from "@nestor/core";
 
-type DiscoveryUpdate = (
+type DiscoveryUpdate = ((
   current: JobFinderDiscoveryState,
-) => JobFinderDiscoveryState;
+) => JobFinderDiscoveryState) & { committed?: () => void };
 
 /**
  * Saved jobs written per transaction. A source of hundreds of new jobs saved
@@ -13,10 +14,7 @@ type DiscoveryUpdate = (
  * discovery update going with the last part so the run never counts a job
  * before it is stored.
  */
-const ROWS_PER_COMMIT = 60;
-
-const yieldToEventLoop = () =>
-  new Promise<void>((resolve) => setImmediate(resolve));
+const ROWS_PER_COMMIT = 12;
 
 /**
  * Discovery updates that carry the whole working state as it stood when they
@@ -42,7 +40,11 @@ function composeUpdates(
     if (supersedingUpdates.has(update)) start = index;
   const applied = updates.slice(start);
   if (applied.length <= 1) return applied[0];
-  return (current) => applied.reduce((state, update) => update(state), current);
+  return Object.assign(
+    (current: JobFinderDiscoveryState) =>
+      applied.reduce((state, update) => update(state), current),
+    { committed: () => applied.forEach((update) => update.committed?.()) },
+  );
 }
 
 /** Tracks immutable working rows, so a checkpoint only visits its changed jobs. */
@@ -121,6 +123,7 @@ export function createDiscoverySavedJobWriter(input: {
         else updates.set(id, { baseline, intended });
       }
       await input.commit({
+        borrowCurrentJobs: true,
         upserts,
         updateJobIds: [...updates.keys()],
         update: (current) => {
@@ -135,6 +138,7 @@ export function createDiscoverySavedJobWriter(input: {
     }
 
     for (const [id, job] of captured) settled(id, job);
+    updateDiscoveryState?.committed?.();
   };
 
   const enqueue = (run: () => Promise<void>): Promise<void> => {

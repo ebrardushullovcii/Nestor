@@ -11,6 +11,7 @@ import {
   createDiscoveryFreshnessDigest,
   createDiscoveryLedgerIndex,
   createDiscoveryListingFingerprints,
+  rememberDiscoveryListingFingerprints,
   findDiscoveryLedgerEntry,
   formatDiscoveryFreshnessDigest,
   recordDiscoveredPostingInLedger,
@@ -85,6 +86,26 @@ function createLedgerEntry(
 }
 
 describe("workspace-discovery-ledger", () => {
+  test("reuses worker fingerprints across copies, but changing any material input computes a new digest", () => {
+    const worker = createPosting();
+    const fingerprints = createDiscoveryListingFingerprints(worker);
+    rememberDiscoveryListingFingerprints(worker, fingerprints);
+    const copy = JobPostingSchema.parse(worker);
+    expect(createDiscoveryListingFingerprints(copy)).toEqual(fingerprints);
+    const owned = createDiscoveryListingFingerprints(copy);
+    owned.card = "caller-owned";
+    expect(createDiscoveryListingFingerprints(copy)).toEqual(fingerprints);
+    copy.description += " A changed description.";
+    expect(createDiscoveryListingFingerprints(copy).detail).not.toBe(
+      fingerprints.detail,
+    );
+    copy.description = worker.description;
+    copy.workMode.push("hybrid");
+    expect(createDiscoveryListingFingerprints(copy).card).not.toBe(
+      fingerprints.card,
+    );
+    expect(worker.workMode).toEqual(["remote"]);
+  });
   test("classifies new, unchanged, changed, and reactivated listings", () => {
     const unchanged = createPosting();
     const changed = createPosting({
@@ -420,9 +441,9 @@ describe("workspace-discovery-ledger", () => {
     expect(result.map((entry) => entry.id)).toEqual(
       expect.arrayContaining([first.id, second.id]),
     );
-    expect(result.find((entry) => entry.company === "Gamma")?.canonicalUrl).toBe(
-      incoming.canonicalUrl,
-    );
+    expect(
+      result.find((entry) => entry.company === "Gamma")?.canonicalUrl,
+    ).toBe(incoming.canonicalUrl);
   });
 
   test("keeps a live ledger index collision-safe as entries are recorded", () => {
@@ -471,9 +492,9 @@ describe("workspace-discovery-ledger", () => {
     });
 
     expect(ledger).toHaveLength(2);
-    expect(
-      ledger.find((entry) => entry.company === "Beta")?.title,
-    ).toBe("Senior Software Engineer");
+    expect(ledger.find((entry) => entry.company === "Beta")?.title).toBe(
+      "Senior Software Engineer",
+    );
     expect(index.find(first)?.company).toBe("Acme");
     expect(index.find(second)?.title).toBe("Senior Software Engineer");
   });

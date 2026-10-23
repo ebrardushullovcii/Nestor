@@ -20,6 +20,7 @@ import type {
   UserActionRequest,
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
+import type { createListingActivityIdentityIndex } from "./listing-activity-identity-index";
 import type {
   CandidateAssetResolver,
   JobFinderDocumentManager,
@@ -74,6 +75,9 @@ export interface WorkspaceServiceContext {
   researchAdapter?: ResumeResearchAdapter;
   repository: JobFinderRepository;
   listingAssessmentJobIds?: Set<string>;
+  listingActivityIdentityIndex?: ReturnType<
+    typeof createListingActivityIdentityIndex
+  >;
   listingAssessmentGenerationRef?: MutableRef<number>;
   listingAssessmentAbortControllerRef?: MutableRef<AbortController>;
   withListingAssessmentSlot?: <T>(
