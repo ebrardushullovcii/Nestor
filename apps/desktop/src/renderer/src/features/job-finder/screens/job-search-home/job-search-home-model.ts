@@ -1122,10 +1122,11 @@ export function buildJobSearchHomeModel(
           route: profileSourcesNeedingAttentionRoute,
         },
       },
-      dismissKey: sourcesNeedingAttention
-        .map((target) => target.id)
-        .sort()
-        .join(","),
+      // Hidden for good once dismissed (ADR 0051). Keyed by the set of
+      // sources it came back every time one more of ~900 sources failed, so
+      // a person with many sources never got rid of it. Job sources keeps
+      // the Needs attention filter for anyone who goes looking.
+      dismissKey: "dismissed",
     });
   } else if (!setupIncomplete && !searchRunning) {
     const newestSettledRun = selectNewestSettledDiscoveryRun(
@@ -1156,14 +1157,18 @@ export function buildJobSearchHomeModel(
       ? null
       : formatDiscoveryRunSourceProblemSummary(settledRun);
     if (summary) {
+      // The app retries these sources on the next search by itself; the
+      // line is a quiet note that can be hidden for good, like the one
+      // above, not a warning to act on.
       problems.push({
         id: "source-problems",
-        tone: "warning",
+        tone: null,
         text: summary,
         button: {
           label: "Open job sources",
           action: { kind: "navigate", route: profileSourcesRoute },
         },
+        dismissKey: "dismissed",
       });
     }
   }

@@ -700,8 +700,8 @@ describe("buildJobSearchHomeModel · after a search", () => {
     ];
     const model = build(ws);
     expect(model.problems).toHaveLength(1);
-    // A quiet line hidden for good until the set of sources changes, not a
-    // red alarm (issue #50). Its words and count are the Job sources filter's,
+    // A quiet line hidden for good once dismissed, not a red alarm (issue
+    // #50, ADR 0051). Its words and count are the Job sources filter's,
     // and its button opens that filter.
     expect(model.problems[0]).toMatchObject({
       id: "failing-sources",
@@ -715,7 +715,7 @@ describe("buildJobSearchHomeModel · after a search", () => {
             "/job-finder/profile?section=sources&focus=job-sources&show=needs_attention#profile-job-sources",
         },
       },
-      dismissKey: ws.searchPreferences.discovery.targets[0]!.id,
+      dismissKey: "dismissed",
     });
     // A broken source is a warning, not the next step, while work remains.
     expect(model.next.id).toBe("look_through");
