@@ -22,7 +22,10 @@ export {
   createStubBrowserSessionRuntime,
 } from "./catalog-browser-session-runtime";
 
-export { applicationSiteKey } from "./application-preparation-scheduler";
+export {
+  applicationSiteKey,
+  applicationPreparationConcurrency,
+} from "./application-preparation-scheduler";
 
 export {
   ApplicationNavigationError,

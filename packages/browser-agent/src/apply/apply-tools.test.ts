@@ -93,3 +93,18 @@ test("stored fact references survive single-field and batch parsing", () => {
     });
   }
 });
+
+test("finishing a fill batch is explicit and cannot also advance a step", () => {
+  const fields = [{ tool: "type", ref: "c0", text: "Robin Ashford" }];
+  expect(
+    parseFillFields(JSON.stringify({ fields, finishWhenReady: true })),
+  ).toEqual({ ok: true, fields, finishWhenReady: true });
+  expect(
+    parseFillFields(JSON.stringify({ fields, finishWhenReady: "true" })).ok,
+  ).toBe(false);
+  expect(
+    parseFillFields(
+      JSON.stringify({ fields, finishWhenReady: true, thenContinue: "a0" }),
+    ).ok,
+  ).toBe(false);
+});

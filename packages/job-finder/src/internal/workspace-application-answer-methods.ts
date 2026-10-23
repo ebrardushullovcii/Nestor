@@ -197,10 +197,80 @@ export function createWorkspaceApplicationAnswerMethods(
   getApplyRunDetails: (
     runId: string,
     jobId: string,
+    applicationRecordId?: string | null,
   ) => Promise<ApplyRunDetails>,
   performUserAction?: (command: UserActionCommand) => Promise<unknown>,
 ) {
   const mutationFlights = new Map<string, Promise<ApplyRunDetails>>();
+
+  async function reuseAnswerInBatch(command: SaveApplicationAnswerCommand) {
+    if (
+      command.saveScope !== "reusable_profile" ||
+      command.value.type === "asset_ref"
+    )
+      return;
+    const details = await getApplyRunDetails(command.runId, command.jobId);
+    const source = details.questionRecords.find(
+      (question) => question.id === command.questionId,
+    );
+    if (!source) return;
+    const job = await readSavedJob(ctx.repository, command.jobId);
+    const questions = await ctx.repository.listApplicationQuestionRecords({
+      runId: command.runId,
+    });
+    for (const question of questions) {
+      if (
+        question.jobId === command.jobId ||
+        !question.applicationRecordId ||
+        question.status !== "detected" ||
+        question.selectedAnswerId ||
+        question.kind !== source.kind ||
+        question.answerControlType !== source.answerControlType ||
+        normalizeAnswerQuestion(question.prompt) !==
+          normalizeAnswerQuestion(source.prompt) ||
+        JSON.stringify([...question.answerOptions].sort()) !==
+          JSON.stringify([...source.answerOptions].sort())
+      )
+        continue;
+      // Country-dependent facts never spread to a different hiring context.
+      if (
+        source.kind === "work_authorization" ||
+        source.kind === "visa_sponsorship"
+      ) {
+        // Conditional permits still need the ordinary per-job interpretation.
+        const profile = await ctx.repository.getProfile();
+        if (profile.workEligibility.limitedWorkPermissions?.length) continue;
+        const peerJob = await readSavedJob(ctx.repository, question.jobId);
+        if (!job?.location?.trim() || peerJob?.location !== job.location)
+          continue;
+      }
+      const peer = await getApplyRunDetails(
+        command.runId,
+        question.jobId,
+        question.applicationRecordId,
+      );
+      const latest = getLatestQuestionAnswer(peer, question.id);
+      if (
+        peer.result?.id !== question.resultId ||
+        !["blocked", "awaiting_review"].includes(peer.result.state) ||
+        (latest &&
+          (latest.sourceKind === "user" || latest.status !== "suggested"))
+      )
+        continue;
+      const reused: SaveApplicationAnswerCommand = {
+        ...command,
+        commandId: `${command.commandId}_reuse_${question.id}`,
+        jobId: question.jobId,
+        resultId: question.resultId,
+        questionId: question.id,
+        expectedAnswerRevision: latest?.revision ?? 0,
+        saveScope: "application_once",
+      };
+      await runSingleFlight(reused.commandId, () =>
+        saveApplicationAnswerOnce(reused),
+      );
+    }
+  }
 
   async function continueAnsweredStep(command: SaveApplicationAnswerCommand) {
     if (!performUserAction) return;
@@ -305,6 +375,7 @@ export function createWorkspaceApplicationAnswerMethods(
         (answer) => answer.id === `application_answer_${command.commandId}`,
       )
     ) {
+      await reuseAnswerInBatch(command);
       await continueAnsweredStep(command);
       return getApplyRunDetails(command.runId, command.jobId);
     }
@@ -404,6 +475,7 @@ export function createWorkspaceApplicationAnswerMethods(
         "This answer changed in another view. Reload the application before replacing it.",
       );
     }
+    await reuseAnswerInBatch(command);
     await continueAnsweredStep(command);
     return getApplyRunDetails(command.runId, command.jobId);
   }

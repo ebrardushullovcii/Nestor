@@ -278,6 +278,125 @@ test("prose instructions separate candidate evidence from job requirements", () 
   expect(prompt).toContain("Single-field tools remain available");
 });
 
+test("a final fill batch finishes in one turn after the live readiness checks", async () => {
+  const source = page({ controls: [{ ...nameControl(), value: "" }] });
+  const model = scriptedModel([
+    {
+      name: "fill_fields",
+      args: {
+        fields: [
+          {
+            tool: "type",
+            ref: "c0",
+            text: "Robin Ashford",
+            storedFactId: "profile.fullName",
+          },
+        ],
+        finishWhenReady: true,
+      },
+    },
+  ]);
+  const chat = vi.spyOn(model, "chatWithTools");
+  const result = await runApplyAgent(config(source), model);
+  expect(result.outcome).toBe("prepared");
+  expect(source.controls[0].value).toBe("Robin Ashford");
+  expect(chat).toHaveBeenCalledTimes(1);
+});
+
+test("a final fill batch cannot mark an incomplete wizard ready", async () => {
+  const source = page({
+    controls: [{ ...nameControl(), value: "" }],
+    stepLabel: "Step 1 of 2",
+    actions: [{ index: 0, label: "Continue", visible: true, disabled: false }],
+  });
+  const model = scriptedModel([
+    {
+      name: "fill_fields",
+      args: {
+        fields: [
+          {
+            tool: "type",
+            ref: "c0",
+            text: "Robin Ashford",
+            storedFactId: "profile.fullName",
+          },
+        ],
+        finishWhenReady: true,
+      },
+    },
+    {
+      name: "finish",
+      args: {
+        reason: "The next step needs the person.",
+        stuck: true,
+        needsPerson: true,
+      },
+    },
+  ]);
+  const result = await runApplyAgent(config(source), model);
+  expect(result.outcome).not.toBe("prepared");
+  expect(result.readyToSend).toBeNull();
+});
+
+test("an application sees an answer saved in another open application on its next turn", async () => {
+  const source = page({
+    controls: [{ ...nameControl(), label: "Team preference", value: "" }],
+  });
+  const input = config(source);
+  let shared: ApplyAgentConfig["sources"]["reusableAnswers"] = [];
+  input.readReusableAnswers = () => Promise.resolve(shared);
+  input.hands.wait = () => {
+    shared = [
+      {
+        id: "answer_memory_team",
+        label: "Team preference",
+        question: "Team preference",
+        answer: "Platform team",
+        kind: "other",
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+      {
+        id: "private-pay",
+        kind: "salary_expectation",
+        label: "Expected salary",
+        question: "Expected salary",
+        answer: "PRIVATE_PAY_987654321",
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
+    return Promise.resolve();
+  };
+  const model = scriptedModel([
+    { name: "wait", args: { milliseconds: 1 } },
+    {
+      name: "fill_fields",
+      args: {
+        fields: [
+          {
+            tool: "type",
+            ref: "c0",
+            text: "Platform team",
+            storedFactId: "answerLibrary.answer_memory_team",
+          },
+        ],
+        finishWhenReady: true,
+      },
+    },
+  ]);
+  const chat = vi.spyOn(model, "chatWithTools");
+  const result = await runApplyAgent(input, model);
+  expect(result.outcome).toBe("prepared");
+  expect(JSON.stringify(chat.mock.calls[1]?.[0])).toContain(
+    "answerLibrary.answer_memory_team",
+  );
+  expect(JSON.stringify(chat.mock.calls[1]?.[0])).not.toContain(
+    "PRIVATE_PAY_987654321",
+  );
+  expect(source.controls[0].value).toBe("Platform team");
+});
+
 test("a retained form receives current exact answers and only named corrections replace entered values", () => {
   const input = config(page(), {
     application: {
