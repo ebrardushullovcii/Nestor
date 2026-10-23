@@ -631,7 +631,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
       const payload = await fetchModelJson(
         "assessJobFit",
         [
-          "You assess how well a job matches a candidate profile.",
+          "You assess how well a job fits the person whose profile is given.",
           buildFitEvidenceInstructions(),
           "Return JSON only.",
           "Use a 0-100 score, 1-3 reasons, and up to 3 gaps.",

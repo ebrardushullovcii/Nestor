@@ -19,12 +19,15 @@ import {
   APPLICATION_SKIPPED_BY_PERSON_LABEL,
   PREPARED_PAGE_CLOSED_SUMMARY,
   WITHDRAWAL_UNDONE_SUMMARY,
+  type ApplicationPageState,
   type JobFinderRendererWorkspaceSnapshot,
 } from "@nestor/contracts";
+import { pageNeedsPreparing } from "../../hooks/use-application-page-states";
 import {
   JOB_FINDER_BROWSER_NAME,
   OPEN_JOB_FINDER_BROWSER_ACTION,
 } from "../../lib/job-finder-browser-handoff-copy";
+import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import {
   applyResultIsServiceWorkerBlocked,
   applyResultNeedsManualFieldFinish,
@@ -282,6 +285,18 @@ export const FILLING_IN_THE_FORM_STATUS = "Job Finder is filling in the form";
 /** The label every retry control on the Applications screen carries. */
 export const TRY_AGAIN_ACTION = "Try again";
 
+/** A new run on a job already tried, in Send for me: it can end in a send. */
+export const APPLY_AGAIN_ACTION = "Apply again";
+
+/**
+ * The label of a control that starts another run on a job. In Send for me
+ * that run sends the application, so the label says Apply; "Prepare again"
+ * there read as harmless. The fill-only modes keep their own words.
+ */
+export function runAgainLabel(mode: ApplyMode, fillOnlyLabel: string): string {
+  return mode === "apply_for_me" ? APPLY_AGAIN_ACTION : fillOnlyLabel;
+}
+
 /** The label for a stop a retry cannot change. */
 export const OPEN_LISTING_ACTION = `Open the listing in ${JOB_FINDER_BROWSER_NAME}`;
 
@@ -416,7 +431,9 @@ export function applyResultStoppedStructurally(result: ApplyResult): boolean {
  * to resolve themselves outranks it, because a spinner beside "finish this in
  * the browser" tells the reader to wait for something that will never happen.
  */
-export function resolveApplicationRecoveryPresentation(input: {
+type ApplicationRecoveryInput = {
+  /** The mode saved in Settings, which a retry runs in and is named for. */
+  applyMode?: ApplyMode;
   canOpenSafeguards: boolean;
   /** The page the run finished on, used to recognise a login page by its URL. */
   destinationUrl?: string | null;
@@ -439,8 +456,36 @@ export function resolveApplicationRecoveryPresentation(input: {
   personSendReceiptSummary?: string | null;
   /** What the result's run is doing; a planned job means nothing without it. */
   run?: ApplyRunContext | null;
+  /** Whether the filled-in form is open, can be reopened, or is gone. */
+  applicationPageState?: ApplicationPageState | null;
   visibleApplyResult: ApplyResult;
-}): ApplicationRecoveryPresentation {
+};
+
+/** The one control for a filled-in form whose tab is gone but can come back. */
+export const OPEN_PREPARED_FORM_ACTION = "Open";
+
+export function resolveApplicationRecoveryPresentation(
+  input: ApplicationRecoveryInput,
+): ApplicationRecoveryPresentation {
+  const presentation = resolveRecoveryForRun(input);
+  if (presentation.primaryAction !== "try_again") return presentation;
+  const mode = input.applyMode ?? "fill_only";
+  const label = presentation.primaryActionLabel;
+  return {
+    ...presentation,
+    // The heading that repeats the button's words follows it.
+    statusLine:
+      presentation.statusLine === label
+        ? runAgainLabel(mode, presentation.statusLine)
+        : presentation.statusLine,
+    primaryActionLabel: label === null ? null : runAgainLabel(mode, label),
+  };
+}
+
+function resolveRecoveryForRun(
+  input: ApplicationRecoveryInput,
+): ApplicationRecoveryPresentation {
+  const sends = input.applyMode === "apply_for_me";
   const {
     canOpenSafeguards,
     destinationUrl = null,
@@ -459,9 +504,11 @@ export function resolveApplicationRecoveryPresentation(input: {
     return {
       state: "retry",
       statusLine: "Skipped at your request",
-      reasonSentence: "Nothing was sent. Apply again if you change your mind.",
+      reasonSentence: sends
+        ? "Nothing was sent. Apply again if you change your mind."
+        : "Nothing was sent. Prepare again if you change your mind.",
       primaryAction: "try_again",
-      primaryActionLabel: "Apply again",
+      primaryActionLabel: "Prepare again",
     };
   }
   const isServiceWorkerBlocked =
@@ -555,8 +602,9 @@ export function resolveApplicationRecoveryPresentation(input: {
     return {
       state: "retry",
       statusLine: "Prepare again",
-      reasonSentence:
-        "The prepared form is no longer open. Prepare it again using your saved answers and files.",
+      reasonSentence: sends
+        ? "The tab with this form was closed. Apply again opens the page, fills it in from your saved answers and files, and sends it."
+        : "The tab with this form was closed. Prepare again opens the page and fills it in from your saved answers and files.",
       primaryAction: "try_again",
       primaryActionLabel: "Prepare again",
     };
@@ -869,6 +917,42 @@ export function resolveApplicationRecoveryPresentation(input: {
   // The form was worked to the end and nothing stopped it: the person reads
   // it over and sends it. This used to fall through to "stopped before
   // finishing" with a Try again button under a row that said Ready to send.
+  if (
+    visibleApplyResult?.state === "awaiting_review" &&
+    !visibleApplyResult.blockerReason &&
+    pageNeedsPreparing(input.applicationPageState ?? undefined)
+  ) {
+    return {
+      state: "retry",
+      statusLine: "Prepare again",
+      reasonSentence:
+        input.applicationPageState?.reason === "attachment_unavailable"
+          ? sends
+            ? "A file on this form changed since it was filled in. Apply again fills it in with your current files and sends it."
+            : "A file on this form changed since it was filled in. Prepare again fills it in with your current files."
+          : sends
+            ? "This form cannot be brought back as it was. Apply again opens the page, fills it in from your saved answers and files, and sends it."
+            : "This form cannot be brought back as it was. Prepare again opens the page and fills it in from your saved answers and files.",
+      primaryAction: "try_again",
+      primaryActionLabel: "Prepare again",
+    };
+  }
+
+  if (
+    visibleApplyResult?.state === "awaiting_review" &&
+    !visibleApplyResult.blockerReason &&
+    input.applicationPageState?.state === "reopenable"
+  ) {
+    return {
+      state: "finish_in_browser",
+      statusLine: "Ready for you to read over and send",
+      reasonSentence:
+        "Its tab was closed. Open brings the form back filled in, ready for you to send.",
+      primaryAction: "open_browser",
+      primaryActionLabel: OPEN_PREPARED_FORM_ACTION,
+    };
+  }
+
   if (
     visibleApplyResult?.state === "awaiting_review" &&
     !visibleApplyResult.blockerReason

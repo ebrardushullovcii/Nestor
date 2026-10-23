@@ -7,6 +7,7 @@ import {
   getResumeIdentityTargetId,
   getResumeSectionBulletTargetId,
   getResumeSectionTextTargetId,
+  getResumeValidationIssueSeverity,
   isBlockingResumeValidationIssue,
 } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
@@ -25,8 +26,9 @@ export function orderResumeValidationIssues(
     .map((issue, index) => ({ issue, index }))
     .sort(
       (left, right) =>
-        severityRank[left.issue.severity] -
-          severityRank[right.issue.severity] || left.index - right.index,
+        severityRank[getResumeValidationIssueSeverity(left.issue)] -
+          severityRank[getResumeValidationIssueSeverity(right.issue)] ||
+        left.index - right.index,
     )
     .map(({ issue }) => issue);
 }
@@ -388,8 +390,12 @@ function ResumeValidationIssueRow(props: {
       tabIndex={-1}
     >
       <span className="grid min-w-0 max-w-prose items-start gap-1.5 text-left">
-        <StatusBadge tone={getIssueSeverityTone(props.issue.severity)}>
-          {getIssueSeverityLabel(props.issue.severity)}
+        <StatusBadge
+          tone={getIssueSeverityTone(
+            getResumeValidationIssueSeverity(props.issue),
+          )}
+        >
+          {getIssueSeverityLabel(getResumeValidationIssueSeverity(props.issue))}
         </StatusBadge>
         <span className="min-w-0 text-(length:--text-small) leading-5 text-(--text-headline)">
           {props.issue.message}

@@ -1,4 +1,5 @@
 import type {
+  ApplicationPageState,
   GlobalDailyApplicationPreparationCapacity,
   JobFinderExactApplicationTarget,
   JobFinderRendererWorkspaceSnapshot,
@@ -6,6 +7,7 @@ import type {
 import type { QueueEntry } from "./applications-detail-panel-helpers";
 import type { ApplicationAnswerStep } from "./applications-answer-step";
 import type { ApplyRunContext } from "./applications-recovery-state";
+import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import {
   ApplicationsDetailPanelRecoveryActionsSection,
   type ConfirmFinishedInBrowserStatus,
@@ -19,6 +21,8 @@ import {
  */
 export function ApplicationsDetailPanelRecoverySections(props: {
   progressNow?: number | undefined;
+  /** The mode saved in Settings; a retry runs in it. */
+  applyMode?: ApplyMode;
   canRestageAutoRun: boolean;
   canRestageQueueRun: boolean;
   dailyPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
@@ -56,6 +60,7 @@ export function ApplicationsDetailPanelRecoverySections(props: {
   selectedRun: JobFinderRendererWorkspaceSnapshot["applyRuns"][number] | null;
   /** What the visible result's run is doing (a planned job's standing). */
   visibleApplyRunContext?: ApplyRunContext | null;
+  applicationPageState?: ApplicationPageState | null;
   visibleApplyResult:
     | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
     | null;
@@ -97,6 +102,7 @@ export function ApplicationsDetailPanelRecoverySections(props: {
   return (
     <ApplicationsDetailPanelRecoveryActionsSection
       progressNow={props.progressNow}
+      {...(props.applyMode ? { applyMode: props.applyMode } : {})}
       canRestageAutoRun={canRestageAutoRun}
       canRestageQueueRun={canRestageQueueRun}
       dailyPreparationCapacity={dailyPreparationCapacity}
@@ -132,6 +138,7 @@ export function ApplicationsDetailPanelRecoverySections(props: {
       selectedRecordJobId={selectedRecordJobId}
       selectedRun={selectedRun}
       visibleApplyRunContext={visibleApplyRunContext}
+      applicationPageState={props.applicationPageState ?? null}
       visibleApplyResult={visibleApplyResult}
     />
   );

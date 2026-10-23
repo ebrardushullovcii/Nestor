@@ -486,6 +486,12 @@ function ProfileSetupScreenerAnswersSection(props: {
                   <ProfileRecordCard
                     id={fieldIdPrefix}
                     key={entry.fieldKey}
+                    // A just-added, empty answer opens so it can be filled in.
+                    defaultOpen={
+                      !props.profileForm.getValues(
+                        `answerBank.customAnswers.${index}.question`,
+                      )
+                    }
                     summary={
                       props.profileForm.watch(
                         `answerBank.customAnswers.${index}.question`,

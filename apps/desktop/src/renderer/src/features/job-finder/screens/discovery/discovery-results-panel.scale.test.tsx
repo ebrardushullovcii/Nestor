@@ -303,7 +303,7 @@ describe("DiscoveryResultsPanel workspace scale", () => {
     expect(row.textContent).toContain("Overall fit: not judged yet");
   });
 
-  it("wraps unbroken result labels and exposes their full names", () => {
+  it("cuts unbroken result labels to one line and exposes their full names", () => {
     const [job] = createJobs(1);
     const longTitle = "SeniorProductDesignerWithoutAnyWordBreaks";
     const longCompany = "CompanyWithoutAnyWordBreaksEither";
@@ -325,9 +325,9 @@ describe("DiscoveryResultsPanel workspace scale", () => {
       `[data-testid="discovery-result-employer-${longJob.id}"]`,
     );
     expect(result?.className).toContain("min-w-0");
-    expect(title?.className).toContain("break-words");
+    expect(title?.className).toContain("truncate");
     expect(title?.getAttribute("title")).toBe(longTitle);
-    expect(company?.className).toContain("break-words");
+    expect(company?.className).toContain("truncate");
     expect(company?.getAttribute("title")).toContain(longCompany);
   });
 

@@ -66,18 +66,29 @@ export function SettingsSectionSaveControl({
       ? `Retry ${subject}`
       : `Save ${subject}`;
 
+  // A section with nothing to save shows no button at all. Five greyed
+  // "Save …" buttons down the page read as five chores; the button now
+  // appears beside the section the moment something in it changes.
+  if (!isOutstanding && !isSavePending && !hasFailed && !hasSaved) {
+    return null;
+  }
+
   return (
     <div className="grid min-w-0 max-w-full justify-items-end gap-1.5">
-      <Button
-        aria-describedby={isSavePending ? undefined : feedbackId}
-        disabled={!isOutstanding || isSavePending || isSaveDisabled}
-        onClick={onSave}
-        pending={isSavePending}
-        type="button"
-        variant="primary"
-      >
-        {buttonLabel}
-      </Button>
+      {/* Once saved, the confirmation alone stands; a greyed button beside
+          it said nothing more. */}
+      {hasSaved && !isOutstanding ? null : (
+        <Button
+          aria-describedby={isSavePending ? undefined : feedbackId}
+          disabled={!isOutstanding || isSavePending || isSaveDisabled}
+          onClick={onSave}
+          pending={isSavePending}
+          type="button"
+          variant="primary"
+        >
+          {buttonLabel}
+        </Button>
+      )}
       {isSavePending ? null : hasFailed ? (
         <p
           className="min-w-0 max-w-80 break-words text-right text-xs leading-4 text-destructive"

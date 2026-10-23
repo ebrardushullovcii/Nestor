@@ -435,7 +435,7 @@ describe("buildMissionPanelState", () => {
       label: "Review the resume",
     });
     expect(state.readinessDescription).toBe(
-      "Aggressive resumes stretch a little past your saved evidence. Read it through, then approve it.",
+      "Read the resume through, then approve it.",
     );
   });
 

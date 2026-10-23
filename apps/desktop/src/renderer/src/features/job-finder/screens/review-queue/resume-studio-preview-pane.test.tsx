@@ -233,7 +233,28 @@ describe("ResumeStudioPreviewPane", () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it("announces an explicit preview refresh while pending and after completion", () => {
+  it("refreshes on its own, so a ready preview offers no refresh button", () => {
+    render(
+      <ResumeStudioPreviewPane
+        isDirty={false}
+        isPending={false}
+        onRetry={vi.fn()}
+        onSelectTarget={vi.fn()}
+        preview={preview}
+        previewError={null}
+        previewStatus="ready"
+        selectedEntryId={null}
+        selectedSectionId={null}
+        selectedTargetId={null}
+        templateLabel="Chronology Classic"
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /refresh preview/i }),
+    ).toBeNull();
+  });
+
+  it("announces a preview retry while pending and after completion", () => {
     const onRetry = vi.fn();
     const baseProps = {
       isDirty: false,
@@ -248,10 +269,14 @@ describe("ResumeStudioPreviewPane", () => {
       templateLabel: "Chronology Classic",
     };
     const rendered = render(
-      <ResumeStudioPreviewPane {...baseProps} previewStatus="ready" />,
+      <ResumeStudioPreviewPane
+        {...baseProps}
+        previewError="Preview rendering failed in desktop test mode."
+        previewStatus="error"
+      />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /refresh preview/i }));
+    fireEvent.click(screen.getByRole("button", { name: /retry preview/i }));
     expect(
       rendered.container.querySelector("[data-resume-preview-refresh-status]")
         ?.textContent,
@@ -292,10 +317,9 @@ describe("ResumeStudioPreviewPane", () => {
       />,
     );
 
-    const refreshWhileLoading = screen.getByRole("button", {
-      name: /refresh preview/i,
-    });
-    expect(refreshWhileLoading.hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.queryByRole("button", { name: /refresh preview|retry preview/i }),
+    ).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
     loadingRender.unmount();
 
@@ -1329,9 +1353,9 @@ describe("ResumeStudioPreviewPane locked-pane ownership", () => {
     expect(arrowDown.defaultPrevented).toBe(true);
     expect(region.scrollTop).toBe(40);
 
-    const refreshButton = screen.getByRole("button", {
-      name: /refresh preview/i,
+    const suggestionsButton = screen.getByRole("button", {
+      name: /suggestion/i,
     });
-    expect(fireEvent.keyDown(refreshButton, { key: " " })).toBe(true);
+    expect(fireEvent.keyDown(suggestionsButton, { key: " " })).toBe(true);
   });
 });

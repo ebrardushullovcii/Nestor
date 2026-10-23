@@ -73,7 +73,7 @@ it("shows an older record's duplicated confirmation once and keeps other history
   expect(
     screen.getAllByText("The site confirmed receipt. Reference: SYN-42."),
   ).toHaveLength(1);
-  expect(screen.getByText("Activity history (2)")).toBeTruthy();
+  expect(screen.getByText("Activity")).toBeTruthy();
   expect(events).toHaveLength(3);
 });
 
@@ -104,7 +104,7 @@ it("shows one confirmation when an older record worded the same send two ways", 
   ];
   render(<ApplicationsDetailPanelTimelineSection events={events} />);
   expect(screen.getAllByText("Application submitted")).toHaveLength(1);
-  expect(screen.getByText("Activity history (2)")).toBeTruthy();
+  expect(screen.getByText("Activity")).toBeTruthy();
   expect(
     screen.getAllByText("Job Finder filled the form and is waiting for you."),
   ).toHaveLength(1);

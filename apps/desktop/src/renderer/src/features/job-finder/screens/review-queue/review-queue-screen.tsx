@@ -574,11 +574,11 @@ export function ReviewQueueScreen(props: {
               away the job title or its state. */}
           <header className="sticky top-0 z-10 grid shrink-0 gap-1 border-b border-(--surface-panel-border) bg-(--surface-panel) px-5 pb-3 pt-4 xl:static">
             {/* Title and place on the left, the status on the right: the
-                same header Applications uses. With wrapping on, a long title
-                pushed the badge under the employer line. */}
+                same header Applications and Find jobs use. A long title wraps
+                instead of being cut off; the badge stays beside it. */}
             <div className="flex min-w-0 items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <h2 className="truncate text-(--text-headline)">
+                <h2 className="min-w-0 break-words font-semibold tracking-tight text-(--text-headline)">
                   {selectedJob?.title ?? "Job"}
                 </h2>
                 {selectedJob ? (
@@ -587,11 +587,11 @@ export function ReviewQueueScreen(props: {
                       {selectedJobEmployerLocationLine}
                     </p>
                   ) : null
-                ) : (
+                ) : queue.length > 0 ? (
                   <p className="mt-1 truncate text-(length:--text-small) text-foreground-muted">
                     Choose a shortlisted job.
                   </p>
-                )}
+                ) : null}
               </div>
               {selectedItem ? (
                 <StatusBadge
@@ -800,7 +800,9 @@ export function ReviewQueueScreen(props: {
                 </div>
               </div>
             ) : null}
-            {!selectedItem ? (
+            {/* With nothing shortlisted the list already says what to do;
+                "Choose a job" here had nothing to choose from. */}
+            {!selectedItem && queue.length > 0 ? (
               <div className="grid place-items-center p-8">
                 <EmptyState
                   description="Select a shortlisted job to get its resume ready and apply."

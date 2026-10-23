@@ -55,7 +55,11 @@ import type {
 import {
   AiBehaviorPreferenceSchema,
   ApplicationCrmSettingsSchema,
+  type ApplicationPageReopenProgress,
+  type ApplicationPageState,
 } from "@nestor/contracts";
+import { REOPEN_FAILED_REASON } from "@renderer/features/job-finder/lib/job-finder-browser-handoff-copy";
+import { notifyApplicationPageStatesChanged } from "@renderer/features/job-finder/hooks/use-application-page-states";
 import { isListableCompanyName } from "@nestor/contracts";
 import { countActiveSafeguardBlockers } from "@renderer/features/job-finder/lib/safeguards-blocker-count";
 import { ApplicationsScreen } from "@renderer/features/job-finder/screens/applications/applications-screen";
@@ -1908,6 +1912,7 @@ export function JobFinderResumeWorkspaceRoute() {
         }
         onSaveDraft={context.onSaveResumeDraft}
         onSaveDraftAndThen={context.onSaveResumeDraftAndThen}
+        onAutosaveDraft={context.onAutosaveResumeDraft}
         onSendAssistantMessage={context.onSendResumeAssistantMessage}
         onResolveAssistantProposal={context.onResolveResumeAssistantProposal}
         reviewFlow={reviewFlow}
@@ -1975,6 +1980,18 @@ export async function runJobFinderApplicationBrowserHandoff(input: {
   onPerformUserAction: (
     command: UserActionCommandInput,
   ) => void | Promise<boolean>;
+  /**
+   * Reads whether the form is open, can be brought back from what was saved,
+   * or is gone, and brings it back. Without them the page is focused as is.
+   */
+  readApplicationPageState?: (
+    resultId: string,
+  ) => Promise<ApplicationPageState | undefined>;
+  onReopenApplicationPage?: (
+    resultId: string,
+    onProgress: (progress: ApplicationPageReopenProgress) => void,
+  ) => Promise<ApplicationPageState>;
+  onReopenProgress?: (phase: ApplicationPageReopenProgress["phase"]) => void;
   requests: JobFinderRendererWorkspaceSnapshot["userActionRequests"];
   target: FinishInBrowserInput;
 }): Promise<FinishInBrowserOutcome> {
@@ -2012,6 +2029,27 @@ export async function runJobFinderApplicationBrowserHandoff(input: {
     }
 
     return { kind: "opened_application_page" };
+  }
+
+  // A filled-in form whose tab closed comes back from what was saved, filled
+  // in again and checked, before it is handed to the person. Reopening never
+  // sends; the focus below hands the page over as it always did.
+  if (input.readApplicationPageState && input.onReopenApplicationPage) {
+    const state = await input
+      .readApplicationPageState(input.target.resultId)
+      .catch(() => undefined);
+    if (state?.state === "reopenable") {
+      const reopened = await input
+        .onReopenApplicationPage(input.target.resultId, (progress) =>
+          input.onReopenProgress?.(progress.phase),
+        )
+        .catch(() => null);
+      notifyApplicationPageStatesChanged();
+      // A passing failure keeps the saved form for another try.
+      if (!reopened || reopened.state === "reopenable") {
+        return { kind: "failed", reason: REOPEN_FAILED_REASON };
+      }
+    }
   }
 
   try {
@@ -2339,6 +2377,16 @@ export function JobFinderApplicationsRoute() {
         const startingJob = discoveryJobs.find(
           (job) => job.id === navigationContext.jobId,
         );
+        // Prepare again starts a job that is already listed; saying it
+        // "will appear in this list" pointed at a row that was right there.
+        const alreadyListed = applicationRecords.some(
+          (record) => record.jobId === navigationContext.jobId,
+        );
+        if (alreadyListed) {
+          return startingJob
+            ? `Starting ${startingJob.title} at ${startingJob.company} again.`
+            : "Starting the application again.";
+        }
         return startingJob
           ? `Starting the application for ${startingJob.title} at ${startingJob.company}. It will appear in this list in a moment.`
           : "Starting the application. It will appear in this list in a moment.";
@@ -2605,7 +2653,7 @@ export function JobFinderApplicationsRoute() {
             },
           });
         }}
-        onFinishInBrowser={(input) =>
+        onFinishInBrowser={(input, onReopenProgress) =>
           runJobFinderApplicationBrowserHandoff({
             // `rethrowError` is passed HERE and nowhere else. Every other
             // caller of these two actions fires and forgets, and keeps the
@@ -2622,6 +2670,18 @@ export function JobFinderApplicationsRoute() {
               }),
             onPerformUserAction: (command) =>
               context.onPerformUserAction(command, { rethrowError: true }),
+            readApplicationPageState: async (resultId) =>
+              (
+                await window.nestor.jobFinder.getApplicationPageStates([
+                  resultId,
+                ])
+              )[0],
+            onReopenApplicationPage: (resultId, onProgress) =>
+              window.nestor.jobFinder.reopenApplicationPage(
+                { resultId },
+                onProgress,
+              ),
+            ...(onReopenProgress ? { onReopenProgress } : {}),
             requests: context.workspace.userActionRequests,
             target: input,
           })
@@ -2747,6 +2807,12 @@ export function JobFinderActionsRoute() {
       workspace={context.workspace}
     >
       <ActionsScreen
+        applyMode={
+          context.workspace.settings?.applicationAutomationMode ===
+          "autonomous_submit"
+            ? "apply_for_me"
+            : "fill_only"
+        }
         selectedApplicationRecordId={
           readJobFinderNavigationContext(searchParams).applicationRecordId
         }

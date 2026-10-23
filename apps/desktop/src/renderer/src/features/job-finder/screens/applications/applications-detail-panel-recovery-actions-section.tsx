@@ -1,4 +1,6 @@
 import type {
+  ApplicationPageReopenProgress,
+  ApplicationPageState,
   GlobalDailyApplicationPreparationCapacity,
   JobFinderExactApplicationTarget,
   JobFinderRendererWorkspaceSnapshot,
@@ -17,15 +19,18 @@ import {
 import {
   CONFIRM_STEP_DONE_ACTION,
   CONFIRM_STEP_DONE_PENDING_LABEL,
+  describeReopenPhase,
   formatJobFinderBrowserHandoffFailedStatus,
   JOB_FINDER_BROWSER_NAME,
   JOB_FINDER_BROWSER_OPENED_WITHOUT_PAGE_STATUS,
   JOB_FINDER_BROWSER_UNAVAILABLE_NOTE,
   OPEN_JOB_FINDER_BROWSER_ACTION,
+  REOPEN_FAILED_REASON,
   REOPEN_JOB_FINDER_BROWSER_ACTION,
   RUN_PREPARATION_AGAIN_ACTION,
 } from "../../lib/job-finder-browser-handoff-copy";
 import { resolveApplyStatePresentation } from "./apply-state";
+import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import { StatusBadge } from "../../components/status-badge";
 import { APPLICATION_SIGN_IN_CONTINUES_NOTE } from "../../lib/application-sign-in-handoff";
 import {
@@ -78,6 +83,8 @@ export type FinishInBrowserOutcome =
  */
 export type FinishInBrowserHandler = (
   input: FinishInBrowserInput,
+  /** Each step while a closed form is brought back, filled in and checked. */
+  onReopenProgress?: (phase: ApplicationPageReopenProgress["phase"]) => void,
 ) => FinishInBrowserOutcome | void | Promise<FinishInBrowserOutcome | void>;
 
 /**
@@ -142,6 +149,8 @@ const READY_PAGE_OPENED_STATUS =
 
 export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   progressNow?: number | undefined;
+  /** The mode saved in Settings; a retry runs in it and is named for it. */
+  applyMode?: ApplyMode;
   canRestageAutoRun: boolean;
   canRestageQueueRun: boolean;
   dailyPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
@@ -206,6 +215,8 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   selectedRun: JobFinderRendererWorkspaceSnapshot["applyRuns"][number] | null;
   /** What the visible result's run is doing (a planned job's standing). */
   visibleApplyRunContext?: ApplyRunContext | null;
+  /** Whether the visible result's filled-in form is open, reopenable or gone. */
+  applicationPageState?: ApplicationPageState | null;
   visibleApplyResult:
     | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
     | null;
@@ -246,6 +257,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   // can no longer show a "Try again" pair beside a third automation button.
   const presentation = resolveApplicationRecoveryPresentation({
     ...(props.progressNow === undefined ? {} : { now: props.progressNow }),
+    ...(props.applyMode ? { applyMode: props.applyMode } : {}),
     canOpenSafeguards: Boolean(onOpenSafeguards),
     destinationUrl: getApplyResultDestinationUrl(
       visibleApplyResult?.privacyReceipt,
@@ -259,6 +271,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
       : {}),
     pausedQuestionCount: pausedQuestionCount ?? null,
     run: visibleApplyRunContext,
+    applicationPageState: props.applicationPageState ?? null,
     visibleApplyResult,
   });
   const { primaryAction } = presentation;
@@ -354,21 +367,33 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
    */
   const hasHandedOffToBrowser =
     finishInBrowserOutcome?.kind === "opened_application_page";
+  // The step a closed form is at while it comes back, for this result only.
+  const [reopenProgress, setReopenProgress] = useState<{
+    resultId: string;
+    phase: ApplicationPageReopenProgress["phase"];
+  } | null>(null);
+  const reopenPhaseLabel =
+    reopenProgress && reopenProgress.resultId === visibleApplyResult?.id
+      ? describeReopenPhase(reopenProgress.phase)
+      : null;
   const finishInBrowserStatus =
     finishInBrowserOutcome === null
       ? null
-      : finishInBrowserOutcome.kind === "opened_application_page"
-        ? browserStepContinuesOnItsOwn
-          ? APPLICATION_SIGN_IN_CONTINUES_NOTE
-          : presentation.state === "finish_in_browser" &&
-              visibleApplyResult?.state === "awaiting_review"
-            ? READY_PAGE_OPENED_STATUS
-            : FINISH_IN_BROWSER_OPENED_STATUS
-        : finishInBrowserOutcome.kind === "opened_browser_only"
-          ? JOB_FINDER_BROWSER_OPENED_WITHOUT_PAGE_STATUS
-          : formatJobFinderBrowserHandoffFailedStatus(
-              finishInBrowserOutcome.reason,
-            );
+      : finishInBrowserOutcome.kind === "failed" &&
+          finishInBrowserOutcome.reason === REOPEN_FAILED_REASON
+        ? `${REOPEN_FAILED_REASON}. Nothing was sent.`
+        : finishInBrowserOutcome.kind === "opened_application_page"
+          ? browserStepContinuesOnItsOwn
+            ? APPLICATION_SIGN_IN_CONTINUES_NOTE
+            : presentation.state === "finish_in_browser" &&
+                visibleApplyResult?.state === "awaiting_review"
+              ? READY_PAGE_OPENED_STATUS
+              : FINISH_IN_BROWSER_OPENED_STATUS
+          : finishInBrowserOutcome.kind === "opened_browser_only"
+            ? JOB_FINDER_BROWSER_OPENED_WITHOUT_PAGE_STATUS
+            : formatJobFinderBrowserHandoffFailedStatus(
+                finishInBrowserOutcome.reason,
+              );
   const finishInBrowserUnavailableNoteId = useId();
   const canFinishInBrowser = Boolean(onFinishInBrowser && visibleApplyResult);
   const handleFinishInBrowser = () => {
@@ -377,22 +402,30 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
     }
 
     const resultId = visibleApplyResult.id;
+    // Said at once: the state read before the reopen takes a moment.
+    if (props.applicationPageState?.state === "reopenable") {
+      setReopenProgress({ resultId, phase: "opening" });
+    }
     const reportOutcome = (outcome: FinishInBrowserOutcome | void) => {
+      setReopenProgress(null);
       if (outcome?.kind === "opened_application_page") {
         void window.nestor?.browser?.command({ type: "open" });
       }
       setFinishInBrowserReport(outcome ? { resultId, outcome } : null);
     };
-    const outcome = onFinishInBrowser({
-      jobId: visibleApplyResult.jobId,
-      resultId,
-      runId: visibleApplyResult.runId,
-      applicationRecordId:
-        visibleApplyResult.applicationRecordId ?? selectedApplicationRecordId,
-      destinationUrl: getApplyResultDestinationUrl(
-        visibleApplyResult.privacyReceipt,
-      ),
-    });
+    const outcome = onFinishInBrowser(
+      {
+        jobId: visibleApplyResult.jobId,
+        resultId,
+        runId: visibleApplyResult.runId,
+        applicationRecordId:
+          visibleApplyResult.applicationRecordId ?? selectedApplicationRecordId,
+        destinationUrl: getApplyResultDestinationUrl(
+          visibleApplyResult.privacyReceipt,
+        ),
+      },
+      (phase) => setReopenProgress({ resultId, phase }),
+    );
 
     if (isFinishInBrowserOutcomePromise(outcome)) {
       // Nothing is claimed while the hand-off is still running, and any status
@@ -530,6 +563,22 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
             </div>
           ) : null}
         </div>
+        {primaryAction === "try_again" && !rejectedFormat && isApplyPending ? (
+          // The press is answered in place while the run starts, before the
+          // run's own state replaces this block.
+          <p
+            aria-live="polite"
+            className="flex min-w-0 items-center gap-2 text-(length:--text-small) leading-6 text-foreground-soft"
+            data-testid="applications-recovery-starting"
+            role="status"
+          >
+            <span
+              aria-hidden="true"
+              className="size-4 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none"
+            />
+            <span>Opening the page…</span>
+          </p>
+        ) : null}
         {showPreparingState ? (
           <p
             aria-live="polite"
@@ -622,8 +671,9 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
                       : RECOVERY_PRIMARY_ACTION_CLASS_NAME
                   }
                   data-testid="applications-recovery-primary-action-button"
-                  disabled={!canFinishInBrowser}
+                  disabled={!canFinishInBrowser || reopenPhaseLabel !== null}
                   onClick={handleFinishInBrowser}
+                  pending={reopenPhaseLabel !== null}
                   type="button"
                   variant={
                     hasHandedOffToBrowser && showConfirmFinishedAction
@@ -631,7 +681,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
                       : "primary"
                   }
                 >
-                  {browserActionLabel}
+                  {reopenPhaseLabel ?? browserActionLabel}
                 </Button>
               ) : null}
               {primaryAction === "allow_site_saves" ? (
@@ -672,12 +722,18 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
                 <Button
                   className={RECOVERY_PRIMARY_ACTION_CLASS_NAME}
                   data-testid="applications-recovery-primary-action-button"
-                  disabled={isDailyCapacityExhausted}
+                  disabled={
+                    isDailyCapacityExhausted ||
+                    (!rejectedFormat && isApplyPending)
+                  }
                   onClick={
                     rejectedFormat
                       ? () => onReviewResumePdf?.(selectedRecordJobId)
                       : startFreshRun
                   }
+                  // The press shows at once; the status above turns to
+                  // "Filling this application" when the run starts.
+                  pending={!rejectedFormat && isApplyPending}
                   type="button"
                   variant="primary"
                 >

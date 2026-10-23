@@ -123,20 +123,42 @@ export function getAssistantSavedSearch(snapshot: JobFinderWorkspaceSnapshot) {
     .sort(
       (left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt),
     )[0];
-  return latest
-    ? {
-        id: latest.id,
-        startedAt: latest.startedAt,
-        completedAt: latest.completedAt,
-        state: latest.state,
-        sourceIds: latest.targetIds,
-        historicalCounts: latest.summary.report ?? latest.summary.changeDigest,
-        summaryReport: latest.summary.report,
-        availabilitySinceSearch: "not checked by this saved report",
-        changesSinceLastVisit: "unknown; no visit comparison snapshot",
-      }
-    : null;
+  if (!latest) return null;
+  // This rides on every message. With hundreds of sources the run's id list
+  // and per-source rows (twice) came to ~300 KB, past the model's window
+  // before the first tool call, so only totals and a short digest go here.
+  const { sources: perSource, ...reportTotals } = latest.summary.report ?? {};
+  const report = latest.summary.report ? reportTotals : undefined;
+  const productive = (perSource ?? []).filter((source) => source.saved > 0);
+  return {
+    id: latest.id,
+    startedAt: latest.startedAt,
+    completedAt: latest.completedAt,
+    state: latest.state,
+    sourceCount: latest.targetIds.length,
+    ...(latest.targetIds.length <= SAVED_SEARCH_SOURCE_ID_LIMIT
+      ? { sourceIds: latest.targetIds }
+      : {}),
+    ...(perSource
+      ? {
+          sourcesWithSavedJobs: productive.length,
+          topSourcesBySaved: [...productive]
+            .sort((left, right) => right.saved - left.saved)
+            .slice(0, 5)
+            .map((source) => ({
+              sourceId: source.targetId,
+              saved: source.saved,
+            })),
+        }
+      : {}),
+    historicalCounts: report ?? latest.summary.changeDigest,
+    summaryReport: report,
+    availabilitySinceSearch: "not checked by this saved report",
+    changesSinceLastVisit: "unknown; no visit comparison snapshot",
+  };
 }
+
+const SAVED_SEARCH_SOURCE_ID_LIMIT = 20;
 
 export function buildProfileDigest(
   snapshot: JobFinderWorkspaceSnapshot,

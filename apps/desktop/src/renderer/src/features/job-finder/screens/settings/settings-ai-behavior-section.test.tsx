@@ -92,13 +92,8 @@ describe("SettingsAiBehaviorSection", () => {
         .getByRole("switch", { name: "Count remote jobs as any location" })
         .getAttribute("aria-checked"),
     ).toBe("true");
-    // Permissions stay the person's whatever is chosen here.
-    expect(screen.getByText(/never what it is allowed to do/)).toBeTruthy();
-    expect(
-      screen.getByRole<HTMLButtonElement>("button", {
-        name: "Save AI behavior",
-      }).disabled,
-    ).toBe(true);
+    // Nothing to save: no button.
+    expect(screen.queryByRole("button", { name: "Save AI behavior" })).toBeNull();
   });
 
   it("commits the whole section in one save with the full input", async () => {
@@ -213,11 +208,6 @@ it("explains default background-check consent and sending without contradicting 
   expect(
     screen.getByText(
       "Ticks background or reference check consent on forms for you. Turn it off to be asked each time.",
-    ),
-  ).toBeTruthy();
-  expect(
-    screen.getByText(
-      /Sending follows your Applying choice; signing in and creating accounts stay yours/,
     ),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("radio", { name: /^Aggressive/ }));

@@ -29,7 +29,7 @@ const INTERNAL_DETAIL_PATTERNS = [
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i,
   /\b(?:apply_run|discovery_run|job|draft|record|result|target)_[0-9a-f]{6,}\b/i,
   /\bSQLITE_[A-Z]+\b/,
-  /\bE(?:NOTFOUND|CONNREFUSED|CONNRESET|TIMEDOUT|AI_AGAIN)\b/,
+  /\bE(?:NOTFOUND|CONNREFUSED|CONNRESET|TIMEDOUT|AI_AGAIN|NOENT|ACCES|PERM)\b/,
   /\bat [\w$.[\]]+ \([^)]*:\d+:\d+\)/,
   /\b(?:undefined is not|cannot read propert(?:y|ies)|is not a function)\b/i,
   /\bModel returned (?:a non-JSON response|invalid JSON)\b/i,

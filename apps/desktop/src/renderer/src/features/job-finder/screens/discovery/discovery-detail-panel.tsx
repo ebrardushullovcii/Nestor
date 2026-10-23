@@ -35,6 +35,7 @@ import {
 import { EmptyState } from "../../components/empty-state";
 import { ExternalUrlLink } from "../../components/open-outside-links";
 import { PreferenceList } from "../../components/preference-list";
+import { Chip } from "@renderer/components/ui/chip";
 import { StatusBadge } from "../../components/status-badge";
 import { MatchEvidenceMatrix } from "../../components/match-evidence-matrix";
 import { jobDescriptionToText } from "../../lib/job-description-text";
@@ -1135,7 +1136,7 @@ export function DiscoveryDetailPanel({
                         aria-keyshortcuts="X"
                         disabled={isSelectedJobPending || !triage.onNotInterested}
                         onClick={() => triage.onNotInterested?.()}
-                        title="Hide this job and open the next one (X). To say why, use Not interested because… below."
+                        title="Hide this job and open the next one (X)"
                         type="button"
                         variant="outline"
                       >
@@ -1451,15 +1452,29 @@ export function DiscoveryDetailPanel({
                       </strong>
                     </div>
                   ) : null}
+                  {/* A card like the two above it, and skills in their own
+                      spelling ("Node.js", not "NODE.JS"). */}
+                  {selectedJob.keySkills.length > 0 ? (
+                    <div
+                      className="surface-card-tint min-w-0 rounded-(--radius-field) border border-(--surface-panel-border) p-4 sm:col-span-2"
+                      data-testid="discovery-detail-skills"
+                    >
+                      <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-soft">
+                        Skills mentioned
+                      </span>
+                      <div className="mt-2 flex min-w-0 flex-wrap gap-1.5">
+                        {selectedJob.keySkills.map((skill) => (
+                          <Chip
+                            className="font-sans text-(length:--text-small) normal-case tracking-normal"
+                            key={skill}
+                          >
+                            {skill}
+                          </Chip>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-
-                {selectedJob.keySkills.length > 0 ? (
-                  <PreferenceList
-                    compact
-                    label="Skills mentioned"
-                    values={selectedJob.keySkills}
-                  />
-                ) : null}
 
                 {selectedJob.screeningHints.remoteGeographies.length > 0 ? (
                   <PreferenceList
@@ -1810,9 +1825,10 @@ export function DiscoveryDetailPanel({
             ) : null}
             {/* Opening the listing, a dismissal and a link copy are secondary
                 work: they keep their natural width on one left-aligned row
-                instead of stacked full-width bars under the primary decision.
-                The open and copy actions stay available while the feedback
-                form is open. */}
+                instead of stacked full-width bars under the primary decision,
+                all in the one secondary style (the row used to mix filled,
+                ghost and outlined buttons). The open and copy actions stay
+                available while the feedback form is open. */}
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               {onAssessJobListing ? (
                 <Button
@@ -1839,7 +1855,7 @@ export function DiscoveryDetailPanel({
                   }}
                   size="sm"
                   type="button"
-                  variant="secondary"
+                  variant="outline"
                 >
                   {assessingJobId === selectedJob.id
                     ? "Reading the listing… about a minute"
@@ -1861,7 +1877,7 @@ export function DiscoveryDetailPanel({
                   onClick={() => onOpenListing(selectedJob.canonicalUrl)}
                   size="sm"
                   type="button"
-                  variant="secondary"
+                  variant="outline"
                 >
                   Open listing
                 </Button>
@@ -1872,18 +1888,23 @@ export function DiscoveryDetailPanel({
                   onClick={() => {
                     employerExclusionPreviewRequestRef.current += 1;
                     setFeedbackJobId(selectedJob.id);
-                    setFeedbackReasons([]);
+                    setFeedbackReasons(triage ? ["company"] : []);
                     setFeedbackAction("hide_job");
                     setEmployerExclusionPreview(null);
                     setEmployerExclusionPreviewPending(false);
                     setEmployerExclusionPreviewError(null);
                     setDismissError(null);
+                    if (triage) previewEmployerExclusion(selectedJob.id);
                   }}
                   size="sm"
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                 >
-                  {triage ? "Not interested because…" : "Not interested"}
+                  {/* The triage bar above already offers Not interested; the
+                      second "Not interested because…" here read as a
+                      different action. What only this form adds is leaving
+                      the employer out of future searches. */}
+                  {triage ? "Hide this employer…" : "Not interested"}
                 </Button>
               )}
               <Button

@@ -56,7 +56,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   createContext,
   memo,
-  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -69,13 +68,14 @@ import {
 import type { CSSProperties, ReactNode } from "react";
 import type { DesktopWindowControlsState } from "@nestor/contracts";
 import { createPortal } from "react-dom";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useDismissToastsOnScreenChange } from "@renderer/components/ui/toast";
 import { buildJobFinderStartupDatabaseRecoveryBlockedDetail } from "../../../shared/job-finder-startup-db-recovery";
 import { WorkspaceStateScreen } from "./job-finder-page-routes";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
 import { JobFinderUnsavedChangesDialog } from "./job-finder-unsaved-changes-dialog";
 import { JobFinderWindowCloseGuard } from "./job-finder-window-close-guard";
+import { JobFinderKeptRoutesOutlet } from "./job-finder-kept-routes";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import {
   type ApplyCopilotVisualCheckpointRequest,
@@ -1148,17 +1148,16 @@ function JobFinderPageOutlet() {
   const location = useLocation();
 
   return (
-    <Suspense
+    <JobFinderKeptRoutesOutlet
+      context={context}
       fallback={
         <RouteSkeleton
           panes={getRouteSkeletonPanes(location.pathname)}
           title={getOpeningRouteLabel(location.pathname)}
         />
       }
-    >
-      <Outlet context={context} />
-      <JobFinderRouteReadyMarker />
-    </Suspense>
+      readyMarker={<JobFinderRouteReadyMarker />}
+    />
   );
 }
 

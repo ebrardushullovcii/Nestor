@@ -18,6 +18,7 @@ import { CampaignNotificationCenter } from "../../components/campaign-notificati
 import { buildJobFinderTaskCenterModel } from "../../components/task-center/job-finder-task-center-model";
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
 import { listApplicationsAwaitingUser } from "../../lib/needs-you-count";
+import { useApplicationPageStates } from "../../hooks/use-application-page-states";
 import { DiscoveryRunFeedbackCallout } from "../discovery/discovery-run-feedback-callout";
 import type { DiscoveryRunFeedback } from "../discovery/discovery-run-feedback";
 import type { ActionState } from "../../lib/job-finder-types";
@@ -261,9 +262,13 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
   // would not open, a source that needs sign-in) keeps its own callout with
   // its own corrective action. A finished search is a status fact and reads
   // as the line under the title instead.
+  const applicationPageStates = useApplicationPageStates(
+    props.workspace.applyJobResults,
+  );
   const model = buildJobSearchHomeModel({
     now,
     workspace: props.workspace,
+    applicationPageStates,
     tasks,
     tailoredDraftPreparation: props.tailoredDraftPreparation,
     discoveryRunPending: props.discoveryRunPending ?? false,
@@ -303,8 +308,13 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
     props.discoveryRunFeedback.status !== "cancelled" &&
     !failureSupersededByCompletedRun &&
     !missingStartingPageCoveredBySourceFix &&
-    // The next step already names the broken source and where to fix it.
+    // The next step already names the broken source and where to fix it,
+    // or the failed search and why; a banner above it said it again.
     model.next.id !== "source_failed" &&
+    !(
+      model.next.id === "search_failed" &&
+      props.discoveryRunFeedback.recovery?.kind !== "browser_session"
+    ) &&
     model.next.id !== "sources" &&
     // A source to correct is Home's card or problem line, which follow the
     // sources as they are now; this callout kept naming a source the person

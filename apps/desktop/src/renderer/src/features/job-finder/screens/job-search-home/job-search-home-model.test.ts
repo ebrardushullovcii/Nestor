@@ -689,6 +689,32 @@ describe("buildJobSearchHomeModel · after a search", () => {
     expect(model.statusLine).toBe("Last search failed 2 hours ago.");
   });
 
+  it("says once that search needs the AI, and blames no source, when the AI was out", () => {
+    const ws = workspace();
+    ws.recentDiscoveryRuns = [
+      {
+        ...completedRun({ found: 0, new: 0 }),
+        state: "failed",
+        targetExecutions: [
+          {
+            targetId: "target-1",
+            adapterKind: "auto",
+            state: "failed",
+            warning:
+              "Agent discovery failed: AI client does not support tool calling. Cannot run agent discovery.",
+          },
+        ],
+      },
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["recentDiscoveryRuns"];
+    const model = build(ws);
+    expect(model.next.id).toBe("search_failed");
+    expect(model.next.detail).toContain("Live search needs AI");
+    expect(model.next.detail).not.toContain("openings it missed");
+    expect(
+      model.problems.some((problem) => problem.id === "failing-sources"),
+    ).toBe(false);
+  });
+
   it("flags a failing enabled source with the one place to fix it", () => {
     const ws = withJobs(workspace(), 2);
     ws.searchPreferences.discovery.targets = [
@@ -700,8 +726,8 @@ describe("buildJobSearchHomeModel · after a search", () => {
     ];
     const model = build(ws);
     expect(model.problems).toHaveLength(1);
-    // A quiet line hidden for good until the set of sources changes, not a
-    // red alarm (issue #50). Its words and count are the Job sources filter's,
+    // A quiet line hidden for good once dismissed, not a red alarm (issue
+    // #50, ADR 0051). Its words and count are the Job sources filter's,
     // and its button opens that filter.
     expect(model.problems[0]).toMatchObject({
       id: "failing-sources",
@@ -715,7 +741,7 @@ describe("buildJobSearchHomeModel · after a search", () => {
             "/job-finder/profile?section=sources&focus=job-sources&show=needs_attention#profile-job-sources",
         },
       },
-      dismissKey: ws.searchPreferences.discovery.targets[0]!.id,
+      dismissKey: "dismissed",
     });
     // A broken source is a warning, not the next step, while work remains.
     expect(model.next.id).toBe("look_through");
@@ -915,7 +941,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     });
     expect(
       model.next.secondary.map((button) => button.label).slice(0, 2),
-    ).toEqual(["Create the resume", "Apply to 1 ready job"]);
+    ).toEqual(["Create the missing resume", "Apply to 1 ready job"]);
   });
 
   it("leads with Create when most shortlisted jobs still need a resume, with Apply beside it", () => {
@@ -957,9 +983,51 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     const model = build(ws);
     expect(model.next).toMatchObject({ id: "apply", title: "Apply to 2 ready jobs" });
     expect(model.next.secondary[0]).toMatchObject({
-      label: "Create the resume",
+      label: "Create the missing resume",
       action: { kind: "create_resumes" },
     });
+  });
+
+  it("counts a ready form that cannot come back as closed, and one that reopens as ready", () => {
+    const ws = withShortlist(withJobs(workspace(), 2), []);
+    ws.applicationRecords = [0, 1].map((index) => ({
+      id: `record-${index}`,
+      jobId: `job_${index}`,
+      title: `Job ${index}`,
+      company: "Employer",
+      status: "ready_for_review",
+      lastAttemptState: "ready",
+      automationMode: "prepare_only",
+      questionSummary: { total: 0, answered: 0 },
+      lastActionLabel: "Filled in",
+      lastUpdatedAt: "2026-08-15T11:00:00.000Z",
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
+    ws.applyJobResults = [0, 1].map((index) => ({
+      id: `result-${index}`,
+      runId: "apply-1",
+      jobId: `job_${index}`,
+      applicationRecordId: `record-${index}`,
+      state: "awaiting_review",
+      blockerReason: null,
+      updatedAt: "2026-08-15T11:00:00.000Z",
+    })) as unknown as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
+    const model = build(ws, {
+      applicationPageStates: new Map([
+        [
+          "result-0",
+          { resultId: "result-0", state: "reopenable", reason: null },
+        ],
+        [
+          "result-1",
+          {
+            resultId: "result-1",
+            state: "needs_preparing",
+            reason: "form_changed",
+          },
+        ],
+      ]),
+    });
+    expect(model.stages?.[2]?.detail).toBe("1 ready to send · 1 form closed");
   });
 
   it("sends the person to Applications when forms are filled in and ready to send", () => {
@@ -1657,6 +1725,9 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
       "Try again for all 2",
       "Search again",
     ]);
+    // In Send for me those runs send, so the same press says Apply.
+    const sending = build(ws, { applicationAutomationMode: "autonomous_submit" });
+    expect(sending.next.secondary[0]?.label).toBe("Apply again for all 2");
     expect(model.next.secondary[0]?.action).toEqual({
       kind: "apply_all",
       jobIds: ["job_1", "job_2"],
@@ -2317,7 +2388,7 @@ describe("buildJobSearchHomeModel · applications the person stopped or may have
       primary: { action: { kind: "navigate" } },
     });
     expect(model.next.detail).toContain("Prepare again");
-    expect(model.stages?.[2]?.detail).toBe("1 needs Prepare again");
+    expect(model.stages?.[2]?.detail).toBe("1 form closed");
 
   });
 

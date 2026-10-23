@@ -26,6 +26,8 @@ export interface ApplicationAnswerStep {
   questions: readonly ApplicationAttemptQuestion[];
   isPending: boolean;
   waitingForTurn?: boolean;
+  /** The run was started in Send for me, so answering can lead to a send. */
+  runSends?: boolean;
   onCommand: (command: UserActionCommandInput) => void | Promise<void>;
 }
 
@@ -81,6 +83,7 @@ export function ApplicationAnswerStepCard(props: {
         }}
         questions={questions}
         requestId={request.id}
+        {...(props.step.runSends ? { submitLabel: "Answer and apply" } : {})}
       />
       <Button
         type="button"

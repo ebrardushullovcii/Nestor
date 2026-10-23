@@ -36,14 +36,27 @@ function authorityApi(): AuthorityApi | null {
   return window.nestor?.jobFinder ?? null;
 }
 
+/** "eurotechjobs.com" rather than "https://www.eurotechjobs.com". */
+function siteName(origin: string): string {
+  try {
+    return new URL(origin).hostname.replace(/^www\./u, "");
+  } catch {
+    return origin;
+  }
+}
+
 function describeEnvelope(envelope: ApplicationAuthorityEnvelope): string {
   const origins =
     envelope.allowedOrigins.length > 0
-      ? envelope.allowedOrigins.join(", ")
+      ? envelope.allowedOrigins.map(siteName).join(", ")
       : "no site";
   const expiry = envelope.expiresAt
-    ? `expires ${new Date(envelope.expiresAt).toLocaleString()}`
-    : "no expiry set";
+    ? `until ${new Date(envelope.expiresAt).toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })}`
+    : "no end date";
   return `${origins} · ${expiry}`;
 }
 

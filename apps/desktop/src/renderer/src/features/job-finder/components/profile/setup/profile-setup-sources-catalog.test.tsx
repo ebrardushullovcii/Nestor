@@ -630,7 +630,8 @@ describe("ProfileSetupTargetingStep guided source catalog", () => {
     expect(cards).toHaveLength(12);
     for (const [index, url] of urls.entries())
       expect(cards[index]?.textContent).toContain(new URL(url).host);
-    expect(screen.getByText("12 of 12 sources enabled for search")).toBeTruthy();
+    // Every site is on, so no "12 of 12 enabled" line repeats it.
+    expect(screen.queryByText(/sources enabled for search/)).toBeNull();
   });
 
   it("rejects a multiline paste containing an invalid address", () => {

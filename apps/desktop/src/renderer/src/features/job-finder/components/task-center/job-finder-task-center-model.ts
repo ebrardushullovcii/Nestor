@@ -308,7 +308,10 @@ function buildSourceCheckTask(
             : run.state === "failed"
               ? "failed"
               : "interrupted";
-  const canResume = status === "paused" || status === "failed";
+  // A check that stopped on its own is the app's to retry, not a chore for
+  // the person (ADR 0051); only a check paused on them stays in Activity.
+  if (status === "failed" || status === "interrupted") return null;
+  const canResume = status === "paused";
 
   return {
     id: run.id,
@@ -321,9 +324,7 @@ function buildSourceCheckTask(
         ? "Check completed"
         : status === "cancelled"
           ? "Check stopped"
-          : status === "failed"
-            ? "Check needs attention"
-            : "Check interrupted",
+          : "Waiting for you",
     sourceLabel: run.targetLabel,
     countLabel: `${run.phaseSummaries?.length ?? 0} checks finished`,
     historyEstimateLabel: null,
@@ -941,7 +942,11 @@ function buildApplyRunTask(
     resumeActionLabel: awaitingDecision
       ? "Resolve what needs you"
       : canPrepareRemaining
-        ? "Prepare remaining jobs"
+        ? // In Send for me the new runs send, so the press says Apply.
+          input.workspace.settings?.applicationAutomationMode ===
+          "autonomous_submit"
+          ? "Apply to remaining jobs"
+          : "Prepare remaining jobs"
         : needsReview || canRestage
           ? "Open Applications"
           : null,

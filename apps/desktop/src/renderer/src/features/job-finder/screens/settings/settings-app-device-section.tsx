@@ -97,6 +97,29 @@ export function SettingsAppDeviceSection({
     [],
   );
 
+  const saveTheme = (theme: AppearanceTheme) => {
+    void runSectionSave({
+      execute: async () => {
+        try {
+          const saved = await onUpdateAppearanceTheme(theme);
+          if (saved === false) {
+            // The persisted theme is still the old one; showing the new one
+            // would be the app lying about what it stored.
+            revertThemePreview();
+          }
+          return saved;
+        } catch (error) {
+          revertThemePreview();
+          throw error;
+        }
+      },
+      failedMessage:
+        "Appearance was not saved. Retry before leaving this page.",
+      savedMessage: "Appearance saved.",
+    });
+  };
+  // A theme is one click: it shows and saves at once, like the switch below.
+  // Picking one used to wait for a separate Save appearance press.
   const updateSelectedTheme = (theme: AppearanceTheme) => {
     if (isSavePending) {
       return;
@@ -105,6 +128,7 @@ export function SettingsAppDeviceSection({
     applyAppearancePreference(theme, getSystemPrefersDark());
     resetSectionSave();
     onSettingsDraftEdited?.();
+    if (theme !== settings.appearanceTheme) saveTheme(theme);
   };
   // A switch acts when flipped: this layout choice saves at once instead of
   // waiting for Save appearance, and goes back if the save fails.
@@ -127,29 +151,12 @@ export function SettingsAppDeviceSection({
       revert();
     }
   };
+  // Retry after a failed save.
   const saveAppearanceTheme = () => {
     if (!hasUnsavedChanges || isSavePending) {
       return;
     }
-    void runSectionSave({
-      execute: async () => {
-        try {
-          const saved = await onUpdateAppearanceTheme(selectedTheme);
-          if (saved === false) {
-            // The persisted theme is still the old one; showing the new one
-            // would be the app lying about what it stored.
-            revertThemePreview();
-          }
-          return saved;
-        } catch (error) {
-          revertThemePreview();
-          throw error;
-        }
-      },
-      failedMessage:
-        "Appearance was not saved. Retry before leaving this page.",
-      savedMessage: "Appearance saved. Job Finder now uses this theme.",
-    });
+    saveTheme(selectedTheme);
   };
 
   useRegisterSettingsDirtySection({

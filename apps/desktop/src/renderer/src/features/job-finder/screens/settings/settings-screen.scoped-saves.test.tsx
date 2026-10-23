@@ -159,13 +159,10 @@ describe("SettingsScreen scoped section saves", () => {
     const view = renderScreen(parseSettings(), callbacks);
 
     const appDevice = screen.getByRole("region", { name: "App & device" });
-    const appearanceSave = within(appDevice).getByRole<HTMLButtonElement>(
-      "button",
-      {
-        name: "Save appearance",
-      },
-    );
-    expect(appearanceSave.disabled).toBe(true);
+    // Nothing to save yet: no button.
+    expect(
+      within(appDevice).queryByRole("button", { name: "Save appearance" }),
+    ).toBeNull();
 
     // The three themes are one segmented control of ordinary buttons with
     // aria-pressed, so they are addressable by role "button" and their
@@ -186,17 +183,25 @@ describe("SettingsScreen scoped section saves", () => {
     expect(within(appDevice).queryByRole("radiogroup")).toBeNull();
     expect(within(appDevice).queryAllByRole("radio")).toHaveLength(0);
 
+    // A theme saves on click.
     fireEvent.click(within(appDevice).getByRole("button", { name: "Light" }));
     expect(
       within(appDevice)
         .getByRole("button", { name: "Light" })
         .getAttribute("aria-pressed"),
     ).toBe("true");
+    await waitFor(() =>
+      expect(callbacks.onUpdateAppearanceTheme).toHaveBeenCalledWith("light"),
+    );
+    await waitFor(() =>
+      expect(
+        within(appDevice)
+          .getByRole<HTMLButtonElement>("button", { name: "Dark" })
+          .disabled,
+      ).toBe(false),
+    );
 
     fireEvent.click(within(appDevice).getByRole("button", { name: "Dark" }));
-    expect(appearanceSave.disabled).toBe(false);
-    fireEvent.click(appearanceSave);
-
     await waitFor(() =>
       expect(callbacks.onUpdateAppearanceTheme).toHaveBeenCalledWith("dark"),
     );
@@ -212,23 +217,13 @@ describe("SettingsScreen scoped section saves", () => {
     });
 
     expect(
-      within(resumeLook).getByRole<HTMLButtonElement>("button", {
-        name: "Save resume look",
-      }).disabled,
-    ).toBe(true);
+      within(resumeLook).queryByRole("button", { name: "Save resume look" }),
+    ).toBeNull();
 
+    // The switch saves when flipped, with only the fields it owns.
     const keepBrowserSwitch = within(workspace).getAllByRole("switch")[0]!;
     fireEvent.click(keepBrowserSwitch);
     expect(keepBrowserSwitch.getAttribute("aria-checked")).toBe("true");
-
-    const workspaceSave = within(workspace).getByRole<HTMLButtonElement>(
-      "button",
-      {
-        name: "Save browser & saved jobs",
-      },
-    );
-    expect(workspaceSave.disabled).toBe(false);
-    fireEvent.click(workspaceSave);
 
     await waitFor(() =>
       expect(callbacks.onUpdateWorkspaceBehavior).toHaveBeenCalledWith({
@@ -276,10 +271,10 @@ describe("SettingsScreen scoped section saves", () => {
         ?.getAttribute("aria-checked"),
     ).toBe("true");
     expect(
-      within(refreshedWorkspaceRegion).getByRole<HTMLButtonElement>("button", {
+      within(refreshedWorkspaceRegion).queryByRole("button", {
         name: "Save browser & saved jobs",
-      }).disabled,
-    ).toBe(true);
+      }),
+    ).toBeNull();
 
     const aiSave = within(refreshedAiRegion).getByRole<HTMLButtonElement>(
       "button",
@@ -403,12 +398,8 @@ describe("SettingsScreen scoped section saves", () => {
     const view = renderScreen(parseSettings(), callbacks);
 
     const appDevice = screen.getByRole("region", { name: "App & device" });
+    // The click itself starts the save.
     fireEvent.click(within(appDevice).getByRole("button", { name: "Dark" }));
-    fireEvent.click(
-      within(appDevice).getByRole<HTMLButtonElement>("button", {
-        name: "Save appearance",
-      }),
-    );
 
     // The pending state must last for the IPC promise, not end early.
     expect(
@@ -505,26 +496,11 @@ describe("SettingsScreen scoped section saves", () => {
     const workspace = screen.getByRole("region", {
       name: WORKSPACE_BEHAVIOR_LABEL,
     });
+    // Flipping the switch starts its save at once.
     fireEvent.click(within(workspace).getAllByRole("switch")[0]!);
-    fireEvent.click(
-      within(workspace).getByRole<HTMLButtonElement>("button", {
-        name: "Save browser & saved jobs",
-      }),
-    );
-
+    expect(callbacks.onUpdateWorkspaceBehavior).toHaveBeenCalledTimes(1);
     expect(
-      within(workspace)
-        .getByRole<HTMLButtonElement>("button", {
-          name: "Saving browser & saved jobs",
-        })
-        .hasAttribute("disabled"),
-    ).toBe(false);
-    expect(
-      within(workspace)
-        .getByRole<HTMLButtonElement>("button", {
-          name: "Saving browser & saved jobs",
-        })
-        .getAttribute("aria-disabled"),
+      within(workspace).getAllByRole("switch")[0]!.getAttribute("aria-checked"),
     ).toBe("true");
 
     await act(() => {
@@ -623,12 +599,13 @@ describe("SettingsScreen scoped section saves", () => {
       }),
     );
 
+    // Saved: the button goes away and nothing offers a retry.
     await waitFor(() =>
       expect(
-        within(tracker).getByRole<HTMLButtonElement>("button", {
+        within(tracker).queryByRole("button", {
           name: "Save tracker settings",
-        }).disabled,
-      ).toBe(true),
+        }),
+      ).toBeNull(),
     );
     expect(
       within(tracker).queryByRole("button", { name: "Retry tracker settings" }),

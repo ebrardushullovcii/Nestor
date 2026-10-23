@@ -1,4 +1,7 @@
-import { JOB_FINDER_BROWSER_LABEL } from "@nestor/contracts";
+import {
+  JOB_FINDER_BROWSER_LABEL,
+  type ApplicationPageReopenProgress,
+} from "@nestor/contracts";
 import { isEmployerAbsenceLabel } from "./job-employer-location-display";
 
 /**
@@ -51,6 +54,26 @@ const JOB_FINDER_BROWSER_IS_IN_THE_APP = `${JOB_FINDER_BROWSER_NAME_SENTENCE_STA
 
 /** Opens or focuses that window on the paused application page. */
 export const OPEN_JOB_FINDER_BROWSER_ACTION = `Open ${JOB_FINDER_BROWSER_NAME}`;
+
+/** What bringing a saved form back is doing, on the control that started it. */
+export function describeReopenPhase(
+  phase: ApplicationPageReopenProgress["phase"],
+): string | null {
+  switch (phase) {
+    case "opening":
+      return "Opening the page…";
+    case "refilling":
+      return "Filling it in…";
+    case "verifying":
+      return "Checking it…";
+    default:
+      return null;
+  }
+}
+
+/** A saved form that did not come back this time; it is kept for another try. */
+export const REOPEN_FAILED_REASON =
+  "The saved form did not come back this time. It is still saved, so Open can try again";
 
 /**
  * The same control after the hand-off has already happened. The window is

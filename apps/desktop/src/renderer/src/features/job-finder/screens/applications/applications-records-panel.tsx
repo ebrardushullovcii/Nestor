@@ -32,6 +32,10 @@ import {
 } from "./applications-crm-model";
 import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import { resolveApplyStatePresentation } from "./apply-state";
+import {
+  pageNeedsPreparing,
+  useApplicationPageStates,
+} from "../../hooks/use-application-page-states";
 import type { ApplyRunContext } from "./applications-recovery-state";
 import { Input } from "@renderer/components/ui/input";
 import { matchesCollectionSearch } from "../../components/collection-search-toolbar";
@@ -116,7 +120,7 @@ interface ApplicationsRecordsPanelProps {
   readApplyRunContext?: (
     result: ApplyJobResultListRow | null,
   ) => ApplyRunContext | null;
-  /** The mode chosen in Settings; decides what a finished fill means. */
+  /** The mode chosen in Settings; a retry runs in it and is named for it. */
   applyMode?: ApplyMode;
   onFilterChange: (filter: ApplicationsViewFilter) => void;
   onSelectRecord: (recordId: string) => void;
@@ -136,12 +140,18 @@ export function ApplicationsRecordsPanel({
   liveRunLinesByJobId,
   latestApplyResultByRecordId,
   readApplyRunContext,
+  applyMode,
   onFilterChange,
   onSelectRecord,
   selectedRecord,
 }: ApplicationsRecordsPanelProps) {
   const [query, setQuery] = useState("");
   const [pipelineStage, setPipelineStage] = useState("all");
+  const latestResults = useMemo(
+    () => [...(latestApplyResultByRecordId?.values() ?? [])],
+    [latestApplyResultByRecordId],
+  );
+  const pageStates = useApplicationPageStates(latestResults);
   function stateFor(record: ApplicationRecord) {
     const result = latestApplyResultByRecordId?.get(record.id) ?? null;
     return result
@@ -153,6 +163,7 @@ export function ApplicationsRecordsPanel({
               : "fill_only",
           result,
           run: readApplyRunContext?.(result) ?? null,
+          pageNeedsPreparing: pageNeedsPreparing(pageStates.get(result.id)),
           recordCrm: record.crm,
           recordLatestBlocker: record.latestBlocker,
           recordLastActionLabel: record.lastActionLabel,
@@ -308,15 +319,11 @@ export function ApplicationsRecordsPanel({
   );
 
   return (
-    // `xl:h-full` left a short list as a tall empty bordered rectangle beside
-    // a scrolling detail pane. Capping instead of filling lets the panel end
-    // where its content ends while a long list still scrolls inside it, and
-    // `sticky`/`self-start` keep it pinned to the top of its column instead of
-    // riding away with any surrounding scroll and leaving a dead half-screen.
-    // The column is sized by its content and capped by the viewport, not
-    // stretched to it: a 470x780 panel holding one 100px card left ~670px of
-    // empty space beside a detail pane that needed the room.
-    <section className="surface-panel-shell @container/tracker relative flex min-w-0 flex-col overflow-hidden rounded-(--radius-field) border border-(--surface-panel-border) xl:sticky xl:top-0 xl:max-h-full xl:min-h-0 xl:self-start">
+    // The list fills its column like Find jobs and Shortlisted, so the three
+    // list screens have the same frame and the pager sits in the same place.
+    // A panel that ended under its last row made Applications look like a
+    // different kind of page.
+    <section className="surface-panel-shell @container/tracker relative flex min-w-0 flex-col overflow-hidden rounded-(--radius-field) border border-(--surface-panel-border) xl:h-full xl:min-h-0">
       {/* One toolbar row. The page title and the "All" chip already say what
           this list is and how many it holds, so the panel repeats neither.
           A narrow column wraps the chips onto a second, shorter line. */}
@@ -455,8 +462,12 @@ export function ApplicationsRecordsPanel({
                     record.automationMode === "autonomous_submit"
                       ? "apply_for_me"
                       : "fill_only",
+                  ...(applyMode ? { nextRunMode: applyMode } : {}),
                   result: latestResult,
                   run: readApplyRunContext?.(latestResult) ?? null,
+                  pageNeedsPreparing: pageNeedsPreparing(
+                    pageStates.get(latestResult.id),
+                  ),
                   pendingQuestionCount:
                     record.questionSummary.total -
                     record.questionSummary.answered,

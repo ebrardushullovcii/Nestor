@@ -11,6 +11,7 @@ import type {
   JobFinderRendererWorkspaceSnapshot,
   ProfileCopilotMessage,
   ResumeAssistantMessage,
+  ResumeDraft,
   ResumeImportProgressEvent,
 } from "@nestor/contracts";
 import { useJobFinderWorkspace } from "@renderer/features/job-finder/hooks/use-job-finder-workspace";
@@ -238,6 +239,9 @@ export function composeResumeWorkspaceLeaveConfirmation(
     reasons: ["Unsaved edits in Resume Studio"],
   };
 }
+
+/** Quiet time after the last autosave before the open resume reloads. */
+const RESUME_AUTOSAVE_REFRESH_DELAY_MS = 8000;
 
 export function useJobFinderPageController() {
   const location = useLocation();
@@ -1019,6 +1023,40 @@ export function useJobFinderPageController() {
     [actions, isCurrentResumeWorkspaceJob, applyResumeWorkspaceSnapshot],
   );
 
+  // After an autosave the studio already holds the saved text; the full
+  // reload waits until no save has come for a few seconds.
+  const autosaveRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const adoptAutosavedResumeDraft = useCallback(
+    (draft: ResumeDraft) => {
+      applyResumeWorkspaceSnapshot((current) =>
+        current && current.draft.id === draft.id
+          ? { ...current, draft }
+          : current,
+      );
+      if (autosaveRefreshTimerRef.current)
+        clearTimeout(autosaveRefreshTimerRef.current);
+      autosaveRefreshTimerRef.current = setTimeout(() => {
+        autosaveRefreshTimerRef.current = null;
+        if (!isCurrentResumeWorkspaceJob(draft.jobId)) return;
+        void refreshResumeWorkspace(draft.jobId).catch(() => undefined);
+      }, RESUME_AUTOSAVE_REFRESH_DELAY_MS);
+    },
+    [
+      applyResumeWorkspaceSnapshot,
+      isCurrentResumeWorkspaceJob,
+      refreshResumeWorkspace,
+    ],
+  );
+  useEffect(
+    () => () => {
+      if (autosaveRefreshTimerRef.current)
+        clearTimeout(autosaveRefreshTimerRef.current);
+    },
+    [],
+  );
+
   // The assistant (or any background work) can change the open resume.
   // Follow workspace updates so the studio shows the saved draft instead of a
   // stale copy that a later Save would be refused for (ADR 0037).
@@ -1324,6 +1362,7 @@ export function useJobFinderPageController() {
         setApplyCopilotVisualCheckpointRequest(request);
       },
       refreshResumeWorkspace,
+      adoptAutosavedResumeDraft,
       resumeAssistantRequestTokenRef,
       selectedApplicationAttempt,
       selectedApplicationRecord,
@@ -1391,6 +1430,7 @@ export function useJobFinderPageController() {
     saveState,
     importResumeGuardMessage,
     refreshResumeWorkspace,
+    adoptAutosavedResumeDraft,
     selectedApplicationAttempt,
     selectedApplicationRecord,
     selectedDiscoveryJob,

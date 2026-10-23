@@ -94,13 +94,11 @@ describe("ReviewQueueListPanel", () => {
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Select Role ready" }),
     );
-    // No dead "Create 0 resumes" control; the line says why there is none.
+    // No dead "Create 0 resumes" control, and no line refusing it either.
     expect(
       screen.queryByRole("button", { name: /^Create \d+ resumes?$/ }),
     ).toBe(null);
-    expect(
-      screen.getByText("The selected job already has a resume."),
-    ).toBeTruthy();
+    expect(screen.queryByText(/already ha(s|ve) a resume/)).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Role two" }));
     expect(screen.getByText("2 selected")).toBeTruthy();
     expect(
@@ -556,15 +554,15 @@ describe("ReviewQueueListPanel", () => {
       .getByText("Role job_failed")
       .closest("[data-collection-item-id]")!.parentElement!;
 
-    expect(within(restoredRow).getByText("Review resume")).toBeTruthy();
+    expect(within(restoredRow).getByText("To review")).toBeTruthy();
     expect(within(restoredRow).queryByText("Resume failed")).toBeNull();
     expect(within(failedRow).getByText("Resume failed")).toBeTruthy();
-    expect(within(failedRow).queryByText("Review resume")).toBeNull();
+    expect(within(failedRow).queryByText("To review")).toBeNull();
 
     // The selected-detail status helper agrees with each rendered row badge.
     expect(
       getReviewQueueWorkflowStatus(restoredItem, restoredAsset),
-    ).toMatchObject({ label: "Review resume" });
+    ).toMatchObject({ label: "To review" });
     expect(getReviewQueueWorkflowStatus(failedItem, failedAsset)).toMatchObject(
       { label: "Resume failed" },
     );

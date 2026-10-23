@@ -408,6 +408,8 @@ export interface JobFinderRepository
   listResumeDraftRevisions(
     draftId?: string,
   ): Promise<readonly ResumeDraftRevision[]>;
+  /** The id `listResumeDraftRevisions(draftId)[0]` would have, read alone. */
+  getLatestResumeDraftRevisionId(draftId: string): Promise<string | null>;
   upsertResumeDraftRevision(revision: ResumeDraftRevision): Promise<void>;
   listResumeExportArtifacts(options?: {
     jobId?: string;

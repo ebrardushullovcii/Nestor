@@ -197,6 +197,11 @@ type BaseActionArgs = {
       updateAssistantMessages?: boolean;
     },
   ) => Promise<boolean>;
+  /**
+   * Puts an autosaved draft into the open resume at once and reloads the rest
+   * (checks, history) only once the edits settle.
+   */
+  adoptAutosavedResumeDraft: (draft: ResumeDraft) => void;
   resumeAssistantRequestTokenRef: MutableRefObject<number>;
   setActionState: Dispatch<SetStateAction<ActionState>>;
   setLiveDiscoveryEvents: Dispatch<SetStateAction<DiscoveryActivityEvent[]>>;
@@ -1010,6 +1015,7 @@ export function createPrimaryPageActions(
     profileSetupState,
     profileCopilotRequestTokenRef,
     refreshResumeWorkspace,
+    adoptAutosavedResumeDraft,
     resumeAssistantRequestTokenRef,
     runAction,
     runResumeWorkspaceAction,
@@ -3124,6 +3130,47 @@ export function createPrimaryPageActions(
         scope: jobFinderPendingActions.resumeJob(draft.jobId),
         surface: "resume",
       }),
+    // Resume Studio saves edits by itself a moment after the last one. It is
+    // quiet: no "Saving…" line, no toast, no pending scope that would lock
+    // the fields, and it stays out of the save coordinator so leaving the
+    // page mid-save asks nothing. The editor shows its own state and keeps
+    // the edits marked unsaved only when this fails.
+    onAutosaveResumeDraft: async (
+      draft: ResumeDraft,
+      onSaved: (updatedAt: string) => void,
+    ): Promise<{ saved: true } | { saved: false; message: string }> => {
+      try {
+        const snapshot = await actions.saveResumeDraft(draft);
+        const savedDraft = snapshot.resumeDrafts.find(
+          (entry) => entry.id === draft.id,
+        );
+        if (savedDraft) {
+          onSaved(savedDraft.updatedAt);
+          // Not a reload of the whole resume (~0.3 s of main-process work
+          // after every pause in typing): the save's own fields go on the
+          // text that was sent, and the checks and history follow later.
+          adoptAutosavedResumeDraft({
+            ...draft,
+            status: savedDraft.status,
+            approvedAt: savedDraft.approvedAt,
+            approvedExportId: savedDraft.approvedExportId,
+            staleReason: savedDraft.staleReason,
+            updatedAt: savedDraft.updatedAt,
+          });
+        } else {
+          await refreshResumeWorkspace(draft.jobId);
+        }
+        return { saved: true };
+      } catch (error) {
+        return {
+          saved: false,
+          message: getJobFinderErrorMessage(
+            error,
+            "Your latest resume edits were not saved.",
+          ),
+        };
+      }
+    },
     onSaveResumeDraftAndThen: (
       draft: ResumeDraft,
       next: () => void | Promise<void>,

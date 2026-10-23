@@ -1,5 +1,6 @@
 import type { ApplyJobResultListRow, ApplyRunSummary } from "@nestor/contracts";
 import { useEffect, useMemo, useState } from "react";
+import { cn } from "@renderer/lib/cn";
 import type {
   JobDiscoveryTarget,
   JobSearchCampaign,
@@ -456,6 +457,8 @@ export function OutcomeAnalyticsScreen(props: {
         effectiveScope.campaignId);
 
   const hasAnyEvents = props.events.length > 0;
+  // One search plan: "All search plans" and that plan are the same choice.
+  const hasScopeChoice = props.campaigns.length > 1;
   const scopeHasEvents = scopedEvents.length > 0;
   const hasNoMatch =
     hasAnyEvents && visibleBuckets.length === 0 && normalizeQuery(query) !== "";
@@ -506,22 +509,26 @@ export function OutcomeAnalyticsScreen(props: {
         title="Outcomes"
       />
 
-      <div aria-label="Application funnel" className="grid gap-2 text-sm">
-        <p>
-          <strong>{funnel.sent} sent</strong> · {funnel.responses} employer{" "}
-          {funnel.responses === 1 ? "response" : "responses"} ·{" "}
-          {funnel.responseRate === null
-            ? "No response rate yet"
-            : `${Math.round(funnel.responseRate * 100)}% response rate`}
-        </p>
-        <p>
-          Sent counts come from employer receipts. Outcomes below are those you
-          recorded.
-          {funnel.sent > 0 && funnel.smallSample
-            ? " This is a small sample; the rate may change quickly."
-            : ""}
-        </p>
-      </div>
+      {/* Before anything is sent or recorded, the empty state below says it
+          all; a row of zeros and a scope picker over nothing said it again. */}
+      {funnel.sent > 0 || hasAnyEvents ? (
+        <div aria-label="Application funnel" className="grid gap-2 text-sm">
+          <p>
+            <strong>{funnel.sent} sent</strong> · {funnel.responses} employer{" "}
+            {funnel.responses === 1 ? "response" : "responses"} ·{" "}
+            {funnel.responseRate === null
+              ? "No response rate yet"
+              : `${Math.round(funnel.responseRate * 100)}% response rate`}
+          </p>
+          <p>
+            Sent counts come from employer receipts. Outcomes below are those
+            you recorded.
+            {funnel.sent > 0 && funnel.smallSample
+              ? " This is a small sample; the rate may change quickly."
+              : ""}
+          </p>
+        </div>
+      ) : null}
       {props.actionMessage ? (
         <p
           aria-atomic="true"
@@ -533,64 +540,75 @@ export function OutcomeAnalyticsScreen(props: {
         </p>
       ) : null}
 
-      <div className="grid gap-2 rounded-(--radius-field) border border-(--surface-panel-border) bg-(--surface-panel-tint) p-4 sm:grid-cols-[minmax(14rem,0.8fr)_repeat(3,minmax(0,1fr))] sm:items-end">
-        <label className="grid gap-1.5 text-sm font-medium text-foreground">
-          Search plan scope
-          <select
-            className="h-11 w-full rounded-(--radius-field) border border-(--field-border) bg-(--field) px-3.5 text-(length:--text-field) text-foreground outline-none focus-visible:border-(--field-focus-border) focus-visible:bg-(--field-strong) focus-visible:shadow-[var(--field-focus-shadow)]"
-            onChange={(event) => {
-              const value = event.target.value;
-              setScope(
-                value === "__all__"
-                  ? { kind: "all" }
-                  : { kind: "campaign", campaignId: value },
-              );
-            }}
-            value={
-              effectiveScope.kind === "all"
-                ? "__all__"
-                : effectiveScope.campaignId
-            }
-          >
-            <option value="__all__">All search plans</option>
-            {props.campaigns.map((campaign) => (
-              <option key={campaign.id} value={campaign.id}>
-                {campaign.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="rounded-(--radius-field) border border-border/50 bg-background/40 p-3">
-          <p className="label-mono-xs">Scope</p>
-          <p className="mt-1 text-sm font-semibold text-foreground">
-            {scopeLabel}
-          </p>
-          <p className="mt-1 text-(length:--text-small) leading-5 text-muted-foreground">
-            {scopedEventCount} outcome{" "}
-            {scopedEventCount === 1 ? "event" : "events"} in scope
-          </p>
+      {hasAnyEvents ? (
+        <div
+          className={cn(
+            "grid gap-2 rounded-(--radius-field) border border-(--surface-panel-border) bg-(--surface-panel-tint) p-4 sm:items-end",
+            hasScopeChoice
+              ? "sm:grid-cols-[minmax(14rem,0.8fr)_repeat(3,minmax(0,1fr))]"
+              : "sm:grid-cols-3",
+          )}
+        >
+          {hasScopeChoice ? (
+            <label className="grid gap-1.5 text-sm font-medium text-foreground">
+              Search plan scope
+              <select
+                className="h-11 w-full rounded-(--radius-field) border border-(--field-border) bg-(--field) px-3.5 text-(length:--text-field) text-foreground outline-none focus-visible:border-(--field-focus-border) focus-visible:bg-(--field-strong) focus-visible:shadow-[var(--field-focus-shadow)]"
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setScope(
+                    value === "__all__"
+                      ? { kind: "all" }
+                      : { kind: "campaign", campaignId: value },
+                  );
+                }}
+                value={
+                  effectiveScope.kind === "all"
+                    ? "__all__"
+                    : effectiveScope.campaignId
+                }
+              >
+                <option value="__all__">All search plans</option>
+                {props.campaigns.map((campaign) => (
+                  <option key={campaign.id} value={campaign.id}>
+                    {campaign.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <div className="rounded-(--radius-field) border border-border/50 bg-background/40 p-3">
+            <p className="label-mono-xs">Scope</p>
+            <p className="mt-1 text-sm font-semibold text-foreground">
+              {scopeLabel}
+            </p>
+            <p className="mt-1 text-(length:--text-small) leading-5 text-muted-foreground">
+              {scopedEventCount} outcome{" "}
+              {scopedEventCount === 1 ? "event" : "events"} in scope
+            </p>
+          </div>
+          <div className="rounded-(--radius-field) border border-border/50 bg-background/40 p-3">
+            <p className="label-mono-xs">Outcome log</p>
+            <p className="mt-1 text-sm font-semibold text-foreground">
+              {totalEventCount} recorded
+            </p>
+            <p className="mt-1 text-(length:--text-small) leading-5 text-muted-foreground">
+              {activeCampaignName
+                ? `Active search plan: ${activeCampaignName}`
+                : "No active search plan"}
+            </p>
+          </div>
+          <div className="rounded-(--radius-field) border border-border/50 bg-background/40 p-3">
+            <p className="label-mono-xs">Suggestions</p>
+            <p className="mt-1 text-sm font-semibold text-foreground">
+              {enabledSuggestionCount} active
+            </p>
+            <p className="mt-1 text-(length:--text-small) leading-5 text-muted-foreground">
+              Shown only with enough data
+            </p>
+          </div>
         </div>
-        <div className="rounded-(--radius-field) border border-border/50 bg-background/40 p-3">
-          <p className="label-mono-xs">Outcome log</p>
-          <p className="mt-1 text-sm font-semibold text-foreground">
-            {totalEventCount} recorded
-          </p>
-          <p className="mt-1 text-(length:--text-small) leading-5 text-muted-foreground">
-            {activeCampaignName
-              ? `Active search plan: ${activeCampaignName}`
-              : "No active search plan"}
-          </p>
-        </div>
-        <div className="rounded-(--radius-field) border border-border/50 bg-background/40 p-3">
-          <p className="label-mono-xs">Suggestions</p>
-          <p className="mt-1 text-sm font-semibold text-foreground">
-            {enabledSuggestionCount} active
-          </p>
-          <p className="mt-1 text-(length:--text-small) leading-5 text-muted-foreground">
-            Shown only with enough data
-          </p>
-        </div>
-      </div>
+      ) : null}
 
       {!hasAnyEvents ? (
         <div className="grid gap-3">

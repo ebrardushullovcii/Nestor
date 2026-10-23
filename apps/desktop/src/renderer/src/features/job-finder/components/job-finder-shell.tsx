@@ -2085,12 +2085,13 @@ export function JobFinderShell({
               usesLockedScreenLayout ? "h-full min-h-0" : "min-h-full",
             )}
             data-job-finder-route-container
-            key={location.pathname}
             // One rhythm token for every route root, declared by the wrapper
             // that owns the route rather than picked per screen.
             style={SHELL_ROUTE_SECTION_GAP_STYLE}
           >
-            <StartupResetRecoveryBanner />
+            {/* Each screen mounts fresh per path inside the outlet, except
+                the kept lists, so the container itself is not keyed. */}
+            <StartupResetRecoveryBanner key={location.pathname} />
             {children}
           </div>
         </main>

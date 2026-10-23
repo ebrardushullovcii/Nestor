@@ -633,13 +633,14 @@ export function ReviewQueueListPanel({
   ) : null;
   const bulkNoteLines = (
     <>
-      {isSelecting && selectedEligibleIds.length < selectedJobIds.size ? (
+      {/* Only when Create covers part of the selection: a selection with
+          nothing to create offers no Create button, and saying so read like
+          a refusal of something the person never asked for. */}
+      {isSelecting &&
+      selectedEligibleIds.length > 0 &&
+      selectedEligibleIds.length < selectedJobIds.size ? (
         <p className="m-0 text-xs text-foreground-muted">
-          {selectedEligibleIds.length === 0
-            ? selectedJobIds.size === 1
-              ? "The selected job already has a resume."
-              : "The selected jobs already have resumes."
-            : `${selectedEligibleIds.length} of the selected jobs need a resume; the others keep theirs.`}
+          {`${selectedEligibleIds.length} of the selected jobs need a resume; the others keep theirs.`}
         </p>
       ) : null}
       {showsAllJobsRow &&
@@ -786,7 +787,7 @@ export function ReviewQueueListPanel({
         <div className="flex min-h-0 flex-1 items-center justify-center px-5 pb-5 pt-4">
           <div className="grid w-full max-w-136 justify-items-center gap-4">
             <EmptyState
-              title="No shortlisted jobs in this plan"
+              title="No shortlisted jobs yet"
               description="Shortlist a job from Find jobs. It shows up here, ready for a resume and an application."
             />
             <Button asChild size="lg">

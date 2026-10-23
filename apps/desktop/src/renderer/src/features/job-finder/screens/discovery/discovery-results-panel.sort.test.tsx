@@ -9,6 +9,7 @@ import {
 } from "@nestor/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resetDiscoveryAutoJudgeForTests } from "./discovery-assessment-continuation";
 import { DiscoveryResultsPanel } from "./discovery-results-panel";
 
 const browserSession = {
@@ -106,9 +107,9 @@ afterEach(() => {
 });
 
 describe("DiscoveryResultsPanel result sorting", () => {
-  it("keeps both assessment controls in the toolbar on every results page", () => {
-    const onJudge = vi.fn(() => Promise.resolve());
-    const onAssess = vi.fn(() => Promise.resolve());
+  it("judges unscored jobs on its own and reports it in the toolbar", () => {
+    resetDiscoveryAutoJudgeForTests();
+    const onJudge = vi.fn(() => new Promise<void>(() => undefined));
     render(
       <DiscoveryResultsPanel
         browserSession={browserSession}
@@ -117,25 +118,14 @@ describe("DiscoveryResultsPanel result sorting", () => {
         selectedJob={null}
         onSelectJob={vi.fn()}
         onJudgeUnjudgedJobs={onJudge}
-        onAssessJobListing={onAssess}
       />,
     );
-    const all = screen.getByRole("button", { name: "Judge fit for all 60" });
-    const next = screen.getByRole("button", {
-      name: "Assess next 20 listings",
-    });
-    expect(all.closest("header")).toBe(next.closest("header"));
-    expect(all.closest("header")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(onJudge).toHaveBeenCalledOnce();
     expect(
-      screen
-        .getByRole("button", { name: "Judge fit for all 60" })
-        .closest("header"),
-    ).not.toBeNull();
+      screen.queryByRole("button", { name: /Judge fit|Assess next/ }),
+    ).toBeNull();
     expect(
-      screen
-        .getByRole("button", { name: "Assess next 20 listings" })
-        .closest("header"),
+      screen.getByText("Judging fit for 60 jobs").closest("header"),
     ).not.toBeNull();
   });
   it("shows a compact source line with the full configured name available to assistive technology", () => {

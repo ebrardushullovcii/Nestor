@@ -12,8 +12,10 @@ import { cn } from "@renderer/lib/utils";
 // inherited untested, and fell to 2.86:1 (light --primary) against its own
 // tint. The alpha is a theme token (--badge-border-alpha: 75% light, 40%
 // dark; see status-badge.tsx). Both are pinned by styles/globals.test.ts.
+// Sentence case at the small text size: uppercase tracked labels stacked
+// down every row read as shouting and took twice the width.
 const badgeVariants = cva(
-  "inline-flex w-fit max-w-full min-w-0 shrink truncate items-center justify-center gap-1 overflow-hidden border px-2 py-0.5 text-(length:--text-tiny) font-bold uppercase tracking-[0.08em] whitespace-nowrap rounded-(--radius-badge) transition-[color,box-shadow] motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&>svg]:pointer-events-none [&>svg]:size-3",
+  "inline-flex w-fit max-w-full min-w-0 shrink truncate items-center justify-center gap-1 overflow-hidden border px-2 py-0.5 text-(length:--text-small) font-medium leading-4 whitespace-nowrap rounded-(--radius-badge) transition-[color,box-shadow] motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&>svg]:pointer-events-none [&>svg]:size-3",
   {
     variants: {
       variant: {

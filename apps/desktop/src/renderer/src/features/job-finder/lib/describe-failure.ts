@@ -34,6 +34,7 @@ export type FailureKind =
   | "assistant_unavailable"
   | "invalid_details"
   | "unusable_resume"
+  | "file_missing"
   | "paused"
   | "unknown";
 
@@ -63,6 +64,8 @@ export const FAILURE_SENTENCES = {
   unknown: "Something went wrong and this did not finish. Try again.",
   unusable_resume:
     "No resume details were found in this file. Choose another file.",
+  file_missing:
+    "The file is no longer where it was, so Job Finder could not open it. Add it again.",
 } as const satisfies Record<FailureKind, string>;
 
 /**
@@ -173,6 +176,13 @@ const CHANGED_ELSEWHERE_PATTERNS = [
   /\bout of date\b/i,
 ];
 
+/** A file on disk that was moved, deleted or cannot be opened. */
+const FILE_MISSING_PATTERNS = [
+  /\bENOENT\b/,
+  /\bno such file or directory\b/i,
+  /\bE(?:ACCES|PERM)\b.*\b(?:open|read|stat|copyfile)\b/,
+];
+
 const NOT_FOUND_PATTERNS = [
   /\bunknown Job Finder\b/i,
   /\bnot found\b/i,
@@ -227,6 +237,7 @@ const KIND_PATTERNS: readonly (readonly [
   ["site_blocked", SITE_BLOCKED_PATTERNS],
   ["timed_out", TIMEOUT_PATTERNS],
   ["offline", OFFLINE_PATTERNS],
+  ["file_missing", FILE_MISSING_PATTERNS],
   ["not_found", NOT_FOUND_PATTERNS],
   ["assistant_unavailable", ASSISTANT_UNAVAILABLE_PATTERNS],
   ["unusable_resume", [/No resume details were found in this file/i]],

@@ -244,6 +244,14 @@ const AI_TOOL_CALLING_FAILURE_RE =
   /does not support tool calling|chatWithTools|tool calling|Cannot run agent discovery/i;
 
 /**
+ * The search failed for the app's own reason (its AI was unavailable), not
+ * because of a source: nothing about the person's sources needs a look.
+ */
+export function isAppSideDiscoveryFailure(detail: string): boolean {
+  return AI_TOOL_CALLING_FAILURE_RE.test(detail);
+}
+
+/**
  * Maps a classified discovery failure to the exact corrective action using
  * source-generic wording only. The service message itself stays verbatim in
  * `detail`; this mapping never invents a different failure cause.

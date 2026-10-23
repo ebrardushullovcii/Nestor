@@ -164,6 +164,9 @@ describe("OutcomeAnalyticsScreen", () => {
         "Response and interview rates from your recorded outcomes.",
       ).textContent.length,
     ).toBeLessThanOrEqual(90);
+    // Nothing sent or recorded: no row of zeros or scope picker above it.
+    expect(screen.queryByLabelText("Application funnel")).toBeNull();
+    expect(screen.queryByLabelText("Search plan scope")).toBeNull();
   });
 
   it("links the all-time empty state to the Applications Tracker", () => {
@@ -473,7 +476,8 @@ describe("OutcomeAnalyticsScreen", () => {
   });
 
   it("styles the campaign scope select with canonical field tokens and focus hierarchy", () => {
-    const { container } = renderScreen({});
+    // The scope picker shows once there is something recorded to scope.
+    const { container } = renderScreen({ events: [event()] });
 
     const select = screen.getByLabelText("Search plan scope");
     for (const className of [

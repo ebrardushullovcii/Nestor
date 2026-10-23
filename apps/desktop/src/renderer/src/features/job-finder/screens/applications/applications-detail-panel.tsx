@@ -51,6 +51,10 @@ import type {
 } from "./applications-detail-panel-recovery-actions-section";
 import { ApplicationsDetailPanelRecoverySections } from "./applications-detail-panel-recovery-sections";
 import {
+  pageNeedsPreparing,
+  useApplicationPageStates,
+} from "../../hooks/use-application-page-states";
+import {
   ApplicationsDetailPanelSubmitApprovalSection,
   isAwaitingPreparationApproval,
   preparationApprovalActionLabel,
@@ -193,6 +197,7 @@ interface ApplicationsDetailPanelProps {
 
 export function ApplicationsDetailPanel({
   progressNow,
+  applyMode,
   activeFilter,
   customStages,
   readApplyRunContext,
@@ -246,6 +251,14 @@ export function ApplicationsDetailPanel({
   onPrepareApplicationAgain,
 }: ApplicationsDetailPanelProps) {
   const visibleApplyResult = effectiveSelectedApplyResult;
+  const pageStateResults = useMemo(
+    () => (visibleApplyResult ? [visibleApplyResult] : []),
+    [visibleApplyResult],
+  );
+  const applicationPageState =
+    useApplicationPageStates(pageStateResults).get(
+      visibleApplyResult?.id ?? "",
+    ) ?? null;
   const pendingQuestions = selectedRecord
     ? listPendingApplicationQuestions({
         applicationAttempts,
@@ -283,6 +296,7 @@ export function ApplicationsDetailPanel({
           draftRestored: answerDraftRestored ?? false,
           jobLocation: selectedRecordJob?.location,
           questions: pendingQuestions,
+          runSends: selectedRecord?.automationMode === "autonomous_submit",
           isPending: isUserActionPending?.(answerRequest.id) ?? false,
           waitingForTurn: selectedRecordJob
             ? isSameSiteApplicationActive(
@@ -454,6 +468,7 @@ export function ApplicationsDetailPanel({
   const recoverySection = selectedRecord ? (
     <ApplicationsDetailPanelRecoverySections
       progressNow={progressNow}
+      {...(applyMode ? { applyMode } : {})}
       canRestageAutoRun={canRestageAutoRun}
       canRestageQueueRun={canRestageQueueRun}
       dailyPreparationCapacity={dailyPreparationCapacity}
@@ -505,6 +520,7 @@ export function ApplicationsDetailPanel({
       }
       selectedRun={selectedRun}
       visibleApplyRunContext={readApplyRunContext?.(visibleApplyResult) ?? null}
+      applicationPageState={applicationPageState}
       visibleApplyResult={visibleApplyResult}
     />
   ) : null;
@@ -617,11 +633,11 @@ export function ApplicationsDetailPanel({
                 </span>
               ) : null}
             </>
-          ) : (
+          ) : hasAnyApplications ? (
             <strong className="text-(length:--text-body) text-muted-foreground">
               Nothing selected
             </strong>
-          )}
+          ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {showNotSubmittedPill ? (
@@ -632,7 +648,9 @@ export function ApplicationsDetailPanel({
               Not sent
             </StatusBadge>
           ) : null}
-          {!showNotSubmittedPill ? (
+          {/* "Nothing selected" as a heading and again as a badge said it
+              twice; the badge is a record's stage, so only a record has one. */}
+          {!showNotSubmittedPill && selectedRecord ? (
             <StatusBadge tone={selectedStage ? selectedStage.tone : "muted"}>
               {headerStatusLabel ?? ""}
             </StatusBadge>
@@ -707,12 +725,16 @@ export function ApplicationsDetailPanel({
           {applyPresentation?.state === "awaiting_your_review"
             ? null
             : documentsSection}
+          {/* Same spacing as the sections above: History and details sat
+              flush against Activity, with a wide gap before them. */}
           <div
+            className="grid min-w-0 gap-5"
             data-application-review-target
             ref={reviewTargetRef}
             tabIndex={-1}
           >
             <ApplicationsDetailPanelActivitySections
+              {...(applyMode ? { applyMode } : {})}
               applyRunDetailsError={applyRunDetailsError}
               applyRunDetailsStatus={applyRunDetailsStatus}
               applyRunHistory={applyRunHistory}
@@ -730,21 +752,26 @@ export function ApplicationsDetailPanel({
                 : {})}
               onOpenApplicationPage={
                 onFinishInBrowser && visibleApplyResult
-                  ? async () => {
-                      const outcome = await onFinishInBrowser({
-                        jobId: visibleApplyResult.jobId,
-                        resultId: visibleApplyResult.id,
-                        runId: visibleApplyResult.runId,
-                        applicationRecordId: selectedRecord.id,
-                        destinationUrl:
-                          selectedApplyRunDetails?.reviewCard?.pageUrl ??
-                          getApplyResultDestinationUrl(
-                            visibleApplyResult.privacyReceipt,
-                          ),
-                      });
+                  ? async (onReopenProgress) => {
+                      const outcome = await onFinishInBrowser(
+                        {
+                          jobId: visibleApplyResult.jobId,
+                          resultId: visibleApplyResult.id,
+                          runId: visibleApplyResult.runId,
+                          applicationRecordId: selectedRecord.id,
+                          destinationUrl:
+                            selectedApplyRunDetails?.reviewCard?.pageUrl ??
+                            getApplyResultDestinationUrl(
+                              visibleApplyResult.privacyReceipt,
+                            ),
+                        },
+                        onReopenProgress,
+                      );
                       if (outcome?.kind !== "opened_application_page")
                         throw new Error(
-                          "The application page could not be opened. Prepare it again.",
+                          outcome?.kind === "failed" && outcome.reason
+                            ? outcome.reason
+                            : "The application page could not be opened. Prepare it again.",
                         );
                       // The page is focused, but the browser may be minimized:
                       // show it, as Open the Job Finder browser does.
@@ -759,7 +786,8 @@ export function ApplicationsDetailPanel({
                 ? { onPrepareApplicationAgain }
                 : {})}
               applicationPageClosed={
-                selectedRecord?.nextActionLabel === "Prepare again"
+                selectedRecord?.nextActionLabel === "Prepare again" ||
+                pageNeedsPreparing(applicationPageState ?? undefined)
               }
               selectedApplyRunDetails={selectedApplyRunDetails}
               selectedApplyRunId={selectedApplyRunId}

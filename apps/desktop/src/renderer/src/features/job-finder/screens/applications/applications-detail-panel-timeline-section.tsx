@@ -5,6 +5,7 @@ import {
   getEventTone,
 } from "@renderer/features/job-finder/lib/job-finder-utils";
 import { getCustomerFacingApplyText } from "./applications-detail-panel-helpers";
+import { ApplicationsDisclosureSummary } from "./applications-disclosure-summary";
 
 export function ApplicationsDetailPanelTimelineSection(props: {
   events: ApplicationRecord["events"];
@@ -39,9 +40,9 @@ export function ApplicationsDetailPanelTimelineSection(props: {
 
   return (
     <details className="group min-w-0">
-      <summary className="cursor-pointer list-none text-(length:--text-small) font-semibold text-primary outline-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-ring">
-        Activity history ({events.length})
-      </summary>
+      <ApplicationsDisclosureSummary count={events.length}>
+        Activity
+      </ApplicationsDisclosureSummary>
       <div className="mt-2 grid gap-0">
         {[...events]
           .sort((left, right) => Date.parse(right.at) - Date.parse(left.at))

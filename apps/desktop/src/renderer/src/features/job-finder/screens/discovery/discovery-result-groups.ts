@@ -62,6 +62,35 @@ export function isDiscoveryAlsoFoundResult(job: JobListRow): boolean {
   return group === "weaker" || group === "mismatches";
 }
 
+// Not "shortlisted": taking a job off Shortlisted writes that status, and the
+// job is back to waiting on a decision. Being in Shortlisted is the review
+// queue, which the caller passes in.
+const DECIDED_JOB_STATUSES: ReadonlySet<JobListRow["status"]> = new Set([
+  "drafting",
+  "ready_for_review",
+  "approved",
+  "submitted",
+  "assessment",
+  "interview",
+  "rejected",
+  "offer",
+  "withdrawn",
+]);
+
+/**
+ * A job the person already decided on: in Shortlisted or applied to. Find
+ * jobs is the list of jobs still waiting on a decision, so these leave it the
+ * way a hidden job does. With 200 shortlisted, the first four pages were rows
+ * whose checkbox could not be ticked, and the list, the badge, "Select all"
+ * and the triage progress each printed a different number.
+ */
+export function isDiscoveryDecidedJob(
+  job: JobListRow,
+  shortlistedJobIds: ReadonlySet<string>,
+): boolean {
+  return shortlistedJobIds.has(job.id) || DECIDED_JOB_STATUSES.has(job.status);
+}
+
 /**
  * How many results the Results view lists by default — the recommended band
  * plus the unchecked band. Only the also-found pool sits behind the reveal,
