@@ -237,6 +237,9 @@ export function createWorkspaceApplicationAnswerMethods(
         source.kind === "work_authorization" ||
         source.kind === "visa_sponsorship"
       ) {
+        // Conditional permits still need the ordinary per-job interpretation.
+        const profile = await ctx.repository.getProfile();
+        if (profile.workEligibility.limitedWorkPermissions?.length) continue;
         const peerJob = await readSavedJob(ctx.repository, question.jobId);
         if (!job?.location?.trim() || peerJob?.location !== job.location)
           continue;
