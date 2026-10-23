@@ -128,6 +128,10 @@ import {
   type RowMenuEntry,
 } from "../../lib/row-context-menu";
 import {
+  isNewSinceVisit,
+  useSinceLastVisit,
+} from "../../hooks/use-since-last-visit";
+import {
   DISCOVERY_OFFLINE_RUNTIME_LABEL,
   DISCOVERY_OFFLINE_SETUP_NOTICE,
   getDiscoveryRuntimeProjection,
@@ -860,8 +864,21 @@ export function DiscoveryResultsPanel({
   // the sorted list, which keeps its order.
   const sortedJobs = sortDiscoveryResults(jobs, sortField, sortDirection);
   const normalizedQuery = normalizeCollectionSearch(deferredQuery);
+  // Jobs first seen since the person last left Find jobs: a dot on the row
+  // and one press to see only them.
+  const previousVisitEnd = useSinceLastVisit("discovery");
+  const newJobCount = useMemo(
+    () =>
+      previousVisitEnd
+        ? jobs.filter((job) => isNewSinceVisit(job, previousVisitEnd)).length
+        : 0,
+    [jobs, previousVisitEnd],
+  );
+  const [newOnlyRequested, setNewOnly] = useState(false);
+  const newOnly = newOnlyRequested && newJobCount > 0;
   const filteredJobs = useMemo(() => {
     if (
+      !newOnly &&
       normalizedQuery === "" &&
       recommendationFilters.size === 0 &&
       sourceFilters.size === 0 &&
@@ -889,11 +906,14 @@ export function DiscoveryResultsPanel({
         (workModeFilters.size === 0 ||
           workModes.some((workMode) => workModeFilters.has(workMode))) &&
         (activityFilters.size === 0 || activityFilters.has(activity.status)) &&
+        (!newOnly || isNewSinceVisit(job, previousVisitEnd)) &&
         matchesDiscoveryJobSearch(job, normalizedQuery)
       );
     });
   }, [
     activityFilters,
+    newOnly,
+    previousVisitEnd,
     normalizedQuery,
     recommendationFilters,
     sortedJobs,
@@ -1676,6 +1696,35 @@ export function DiscoveryResultsPanel({
               ) : null}
             </details>
           ) : null}
+          {newJobCount > 0 ? (
+            <button
+              aria-pressed={newOnly}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1.5 rounded-(--radius-small) px-1.5 text-(length:--text-small) tabular-nums outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring",
+                newOnly
+                  ? "bg-secondary font-medium text-foreground"
+                  : "text-foreground-soft",
+              )}
+              data-testid="discovery-new-since-visit"
+              onClick={() => {
+                setNewOnly(!newOnly);
+                moveToPage(0);
+              }}
+              title={
+                newOnly
+                  ? "Show every job again"
+                  : "Show only the jobs found since you last looked"
+              }
+              type="button"
+            >
+              <span
+                aria-hidden="true"
+                className="size-2 rounded-full bg-(--info-text)"
+              />
+              {newJobCount} new
+              {newOnly ? <X aria-hidden="true" className="size-3" /> : null}
+            </button>
+          ) : null}
           {hiddenJobsControl}
           {onJudgeUnjudgedJobs ? (
             <DiscoveryAssessmentContinuation
@@ -2200,6 +2249,15 @@ export function DiscoveryResultsPanel({
                               className={jobFinderListRowTitleClassName}
                               title={job.title}
                             >
+                              {isNewSinceVisit(job, previousVisitEnd) ? (
+                                <span
+                                  className="mr-1.5 inline-block size-2 rounded-full bg-(--info-text) align-middle"
+                                  data-new-since-visit
+                                  title="New since your last visit"
+                                >
+                                  <span className="sr-only">New: </span>
+                                </span>
+                              ) : null}
                               {job.title}
                             </strong>
                             {/* One slot, one verdict: the fit and, when it is
