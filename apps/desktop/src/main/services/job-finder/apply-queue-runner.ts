@@ -39,7 +39,10 @@ export interface ApplyQueueRunnerDeps {
 }
 
 export interface ApplyQueueRunner {
-  /** One Apply press over many jobs. Adds to a queue that is still going. */
+  /**
+   * One Apply press over many jobs. Adds to a queue that is still going and
+   * returns once its first run is going or refused.
+   */
   start(
     jobIds: readonly string[],
     mode: ApplicationAutomationMode,
@@ -291,7 +294,10 @@ export function createApplyQueueRunner(
       }
       await save(queue);
       pump();
-      return ApplyQueueSchema.parse(queue);
+      // The press returns once the first run is going or refused, as one
+      // Apply to all always did; the rest goes on in the background.
+      await pumping;
+      return ApplyQueueSchema.parse((await deps.loadQueue()) ?? queue);
     },
     async control(action) {
       const queue = await deps.loadQueue();
