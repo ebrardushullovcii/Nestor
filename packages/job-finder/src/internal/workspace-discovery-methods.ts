@@ -2147,6 +2147,11 @@ export function createWorkspaceDiscoveryMethods(
     const listingReadJobIds = new Set<string>();
     const olderFitJobIds = new Set<string>();
     const olderFitCandidateIds = new Set<string>();
+    const olderFitAllowance = Math.min(
+      OLDER_JOB_FIT_JUDGMENTS_PER_RUN,
+      OLDER_JOB_FIT_JUDGMENTS_PER_SOURCE *
+        Math.max(1, activeRun.targetIds.length),
+    );
     let searchFitClosed = false;
     let searchFitJudged = 0;
     // Whether a kept job still needs a verdict: a job found again with a
@@ -2321,9 +2326,16 @@ export function createWorkspaceDiscoveryMethods(
         const job = byId.get(jobId);
         if (!job) continue;
         if (needsSearchFit(job)) {
+          const countsAsOlder =
+            !runRetainedJobIds.has(jobId) && !personSuppliedJob(job);
+          if (
+            countsAsOlder &&
+            !olderFitJobIds.has(jobId) &&
+            olderFitJobIds.size >= olderFitAllowance
+          )
+            continue;
           searchFitConsidered.set(jobId, fitPostingFingerprint(job));
-          if (!runRetainedJobIds.has(jobId) && !personSuppliedJob(job))
-            olderFitJobIds.add(jobId);
+          if (countsAsOlder) olderFitJobIds.add(jobId);
           toJudge.push(jobId);
         }
       }
@@ -2445,10 +2457,7 @@ export function createWorkspaceDiscoveryMethods(
       listingQueue.enqueue(older.map((job) => job.id));
       // The same capped older queue the final stage would judge can use
       // otherwise idle capacity now. Jobs awaiting a listing still wait for it.
-      let olderFitsLeft = Math.min(
-        OLDER_JOB_FIT_JUDGMENTS_PER_RUN,
-        OLDER_JOB_FIT_JUDGMENTS_PER_SOURCE * runSourceCount,
-      );
+      let olderFitsLeft = olderFitAllowance;
       for (const job of allJobs()
         .filter(belongsToSearchPlan)
         .map((job) => readPlanAssessment(storedJob(job), assessmentPlanId))
@@ -4490,11 +4499,7 @@ export function createWorkspaceDiscoveryMethods(
       // per search. A job it does not answer for stays unjudged until the
       // next search.
       if (!executionSignal.aborted && ctx.aiClient.judgeJobFits) {
-        let olderJobsLeft =
-          Math.min(
-            OLDER_JOB_FIT_JUDGMENTS_PER_RUN,
-            OLDER_JOB_FIT_JUDGMENTS_PER_SOURCE * runSourceCount,
-          ) - olderFitJobIds.size;
+        let olderJobsLeft = olderFitAllowance - olderFitJobIds.size;
         const toJudge = mergeSavedJobs(workingSavedJobs, workingPendingJobs)
           .filter(belongsToSearchPlan)
           .map((job) => readPlanAssessment(storedJob(job), assessmentPlanId))

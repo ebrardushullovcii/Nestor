@@ -230,6 +230,62 @@ test("reads and judges full listings before collection ends, and reuses both on 
 }, 30_000);
 
 describe("discovery checkpoint incremental persistence", () => {
+  test("overlapping older listing and fit queues share the per-source fit allowance", async () => {
+    const { seed } = createHarness();
+    const template = createSeed().savedJobs[0]!;
+    seed.savedJobs = Array.from({ length: 60 }, (_, index) => ({
+      ...template,
+      id: `older_${index}`,
+      sourceJobId: `older_${index}`,
+      canonicalUrl: `https://example.com/jobs/older_${index}`,
+      discoveredAt: new Date(
+        Date.UTC(2026, 0, 1) + index * 86_400_000,
+      ).toISOString(),
+      status: "discovered" as const,
+      personSupplied: false,
+      provenance: [],
+      detailQuality: "card_only" as const,
+      listingDetailFetch: null,
+      matchAssessment: { ...template.matchAssessment, judgment: null },
+    }));
+    const fullText =
+      "Own product design, research and design systems with the engineering team.\n".repeat(
+        15,
+      );
+    const asked = new Set<string>();
+    const fetchListingHtml = vi.fn((url: string) =>
+      Promise.resolve({
+        status: 200,
+        html: `<html><body>${fullText}</body></html>`,
+        finalUrl: url,
+      }),
+    );
+    const { workspaceService } = createWorkspaceServiceHarness({
+      seed,
+      browserRuntime: createAgentBrowserRuntime([]),
+      fetchListingHtml,
+      aiClient: {
+        ...createAgentAiClient(),
+        extractJobsFromPage: (input) =>
+          Promise.resolve([
+            {
+              ...seed.savedJobs.find(
+                (job) => job.canonicalUrl === input.pageUrl,
+              )!,
+              description: fullText,
+            },
+          ]),
+        judgeJobFits: (input) => {
+          for (const job of input.jobs) asked.add(job.jobId);
+          return Promise.resolve([]);
+        },
+      },
+    });
+    await workspaceService.runAgentDiscovery();
+    expect(fetchListingHtml).toHaveBeenCalledTimes(6);
+    expect(asked.size).toBe(10);
+  });
+
   test("keeps checkpoint jobs and records a blocked source even when detail retrieval returns partial jobs", async () => {
     const job = createCollectedJob({ token: "before_bot_check" });
     let reportedBlock = false;
