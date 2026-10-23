@@ -1320,23 +1320,24 @@ export async function createFileJobFinderRepository(
           > | null = null;
 
           if (update) {
-            const currentJobs = updateJobIds
-              ? listCollectionValues(database, "saved_jobs", SavedJobSchema, {
-                  whereSql: "id IN (SELECT value FROM json_each(?))",
-                  params: [
-                    JSON.stringify([
-                      ...new Set([
-                        ...updateJobIds,
-                        ...normalizedUpserts.map((job) => job.id),
-                        ...(clearResumeApproval
-                          ? [clearResumeApproval.jobId]
-                          : []),
-                      ]),
-                    ]),
-                  ],
-                  orderBySql: "id",
-                })
-              : listValues(database, "saved_jobs", SavedJobSchema);
+            const selectedJobIds = updateJobIds
+              ? [
+                  ...new Set([
+                    ...updateJobIds,
+                    ...normalizedUpserts.map((job) => job.id),
+                    ...(clearResumeApproval ? [clearResumeApproval.jobId] : []),
+                  ]),
+                ]
+              : undefined;
+            const currentJobs = borrowCurrentJobs
+              ? readSavedJobsProjection.readCurrentForMutation(selectedJobIds)
+              : selectedJobIds
+                ? listCollectionValues(database, "saved_jobs", SavedJobSchema, {
+                    whereSql: "id IN (SELECT value FROM json_each(?))",
+                    params: [JSON.stringify(selectedJobIds)],
+                    orderBySql: "id",
+                  })
+                : listValues(database, "saved_jobs", SavedJobSchema);
             for (const currentJob of currentJobs) {
               existingJobIds.add(currentJob.id);
               const nextJob = SavedJobSchema.parse(
@@ -1684,15 +1685,24 @@ export async function createFileJobFinderRepository(
       );
     },
     getPreparedApplicationForm(resultId) {
-      const forms = listCollectionValues(database, "prepared_application_forms", PreparedApplicationFormSchema,
-        { orderBySql: "id", whereSql: "id = ?", params: [resultId] });
+      const forms = listCollectionValues(
+        database,
+        "prepared_application_forms",
+        PreparedApplicationFormSchema,
+        { orderBySql: "id", whereSql: "id = ?", params: [resultId] },
+      );
       return Promise.resolve(forms[0] ?? null);
     },
     upsertPreparedApplicationForm(form) {
-      return context.upsertPersistedValue("prepared_application_forms", PreparedApplicationFormSchema.parse(form));
+      return context.upsertPersistedValue(
+        "prepared_application_forms",
+        PreparedApplicationFormSchema.parse(form),
+      );
     },
     deletePreparedApplicationForm(resultId) {
-      database.prepare("DELETE FROM prepared_application_forms WHERE id = ?").run(resultId);
+      database
+        .prepare("DELETE FROM prepared_application_forms WHERE id = ?")
+        .run(resultId);
       return secureDatabaseFile(options.filePath);
     },
     upsertApplyJobResult(result) {

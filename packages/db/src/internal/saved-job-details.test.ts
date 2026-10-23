@@ -63,6 +63,41 @@ test("held projection details survive edits, deletion and cache eviction", async
   expect(JSON.parse(JSON.stringify(first[0]))).toEqual(firstJob);
 });
 
+test("full detail reads reuse only this build's mark for byte-identical canonical rows", async () => {
+  const db = database();
+  db.exec("CREATE TABLE saved_jobs (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  const put = db.prepare("INSERT OR REPLACE INTO saved_jobs VALUES (?, ?)");
+  const job = createSavedJob({
+    id: "marked",
+    description: "Validated listing",
+  });
+  put.run(job.id, JSON.stringify(job));
+  for (let i = 0; i < 17; i++) {
+    const other = createSavedJob({ id: `other_${i}` });
+    put.run(other.id, JSON.stringify(other));
+  }
+  const read = createSavedJobProjectionReader(db, {
+    sqliteDetails: true,
+    validationStamp: "build",
+  });
+  const rows = await read();
+  await read.validation();
+  const parse = vi.spyOn(SavedJobSchema, "parse");
+  expect(rows[0]!.keySkills).toEqual(job.keySkills);
+  expect(parse).not.toHaveBeenCalled();
+  for (const row of rows.slice(1)) void row.keySkills;
+  // An old TEMP row cannot borrow a newer row's mark, even for the same id.
+  put.run(
+    job.id,
+    JSON.stringify({ ...job, description: "Updated canonical listing" }),
+  );
+  db.prepare(
+    "INSERT OR REPLACE INTO row_validations VALUES ('saved_jobs', ?, 'build')",
+  ).run(job.id);
+  expect(rows[0]!.keySkills).toEqual(job.keySkills);
+  expect(parse).toHaveBeenCalledOnce();
+});
+
 test("a new build publishes list facts before background validation and marks full rows", async () => {
   const db = database();
   db.exec("CREATE TABLE saved_jobs (id TEXT PRIMARY KEY, value TEXT NOT NULL)");

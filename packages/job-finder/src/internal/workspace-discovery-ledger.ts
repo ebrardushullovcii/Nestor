@@ -16,6 +16,7 @@ import {
   createJobIdentityIndex,
   normalizeJobIdentityUrl,
   type JobIdentityInput,
+  copyPreparedJobIdentity,
 } from "./job-identity";
 
 const normalizeLedgerUrl = normalizeJobIdentityUrl;
@@ -126,6 +127,33 @@ export function rememberDiscoveryListingFingerprints(
   preparedFingerprints.set(posting, fingerprints);
   if (preparedPostings.size >= 2_000) preparedPostings.clear();
   preparedPostings.set(posting.canonicalUrl, new WeakRef(posting));
+}
+
+/** Schema/triage copies keep their worker preparation only for identical facts. */
+export function reuseDiscoveryPostingPreparation(
+  before: JobPosting,
+  after: JobPosting,
+): JobPosting {
+  const fingerprints = preparedFingerprints.get(before);
+  if (
+    !fingerprints ||
+    !fingerprintFields.every((field) =>
+      isDeepStrictEqual(before[field], after[field]),
+    )
+  )
+    return after;
+  rememberDiscoveryListingFingerprints(after, fingerprints);
+  const routeFields = [
+    "source",
+    "sourceJobId",
+    "canonicalUrl",
+    "providerKey",
+    "providerBoardToken",
+    "providerIdentifier",
+  ] as const;
+  if (routeFields.every((field) => before[field] === after[field]))
+    copyPreparedJobIdentity(before, after);
+  return after;
 }
 
 export function createDiscoveryListingFingerprints(

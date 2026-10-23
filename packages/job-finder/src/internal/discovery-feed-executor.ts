@@ -5,6 +5,7 @@ import type {
   DiscoveryInventoryPosting,
   DiscoveryInventoryPreparation,
 } from "@nestor/contracts";
+import { reuseDiscoveryPostingPreparation } from "./workspace-discovery-ledger";
 
 export type DiscoveryFeedExecutor = (
   task: DiscoveryFeedTask,
@@ -48,11 +49,14 @@ export function carryPreparedDiscoveryPosting(
 ): JobPosting {
   const prepared = preparedPostings.get(before);
   if (prepared)
-    preparedPostings.set(after, {
-      ...prepared,
-      searchRejection: after.searchRejection,
-    });
-  return after;
+    preparedPostings.set(
+      after,
+      reuseDiscoveryPostingPreparation(prepared, {
+        ...prepared,
+        searchRejection: after.searchRejection,
+      }),
+    );
+  return reuseDiscoveryPostingPreparation(before, after);
 }
 
 /** Desktop installs its bounded pool; other hosts retain the same pure reader. */

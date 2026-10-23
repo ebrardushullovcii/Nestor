@@ -159,6 +159,7 @@ for (const storage of ["memory", "file"] as const) {
         const [job] = await repo.listSavedJobs();
         if (!job) throw new Error("Expected a saved job");
         const original = await workspace.getWorkspaceProjection();
+        const originalRows = JSON.stringify(original.discoveryJobs);
         await repo.commitSavedJobDelta({
           updateJobIds: [job.id],
           update: (current) => ({
@@ -175,6 +176,8 @@ for (const storage of ["memory", "file"] as const) {
           }),
         });
         const hidden = await workspace.getWorkspaceProjection();
+        const hiddenRows = JSON.stringify(hidden.dismissedDiscoveryJobs);
+        expect(JSON.stringify(original.discoveryJobs)).toBe(originalRows);
         expect(hidden.discoveryJobs.some((row) => row.id === job.id)).toBe(
           false,
         );
@@ -193,6 +196,8 @@ for (const storage of ["memory", "file"] as const) {
           }),
         });
         const restored = await workspace.getWorkspaceProjection();
+        expect(JSON.stringify(original.discoveryJobs)).toBe(originalRows);
+        expect(JSON.stringify(hidden.dismissedDiscoveryJobs)).toBe(hiddenRows);
         expect(restored.discoveryJobs.map((row) => row.id)).toEqual(
           original.discoveryJobs.map((row) => row.id),
         );

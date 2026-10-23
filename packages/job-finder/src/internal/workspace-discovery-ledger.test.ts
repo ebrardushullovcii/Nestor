@@ -12,6 +12,7 @@ import {
   createDiscoveryLedgerIndex,
   createDiscoveryListingFingerprints,
   rememberDiscoveryListingFingerprints,
+  reuseDiscoveryPostingPreparation,
   findDiscoveryLedgerEntry,
   formatDiscoveryFreshnessDigest,
   recordDiscoveredPostingInLedger,
@@ -47,6 +48,26 @@ function createPosting(overrides: Partial<JobPosting> = {}): JobPosting {
     ...overrides,
   });
 }
+
+test("schema and triage copies reuse prepared fingerprints only while all fingerprint inputs match", () => {
+  const source = createPosting();
+  const expected = createDiscoveryListingFingerprints(source);
+  rememberDiscoveryListingFingerprints(source, expected);
+  const copy = JobPostingSchema.parse({
+    ...source,
+    titleTriageOutcome: "skip_title",
+  });
+  expect(reuseDiscoveryPostingPreparation(source, copy)).toBe(copy);
+  expect(Object.isFrozen(copy)).toBe(true);
+  expect(createDiscoveryListingFingerprints(copy)).toEqual(expected);
+  const edited = JobPostingSchema.parse({
+    ...source,
+    description: "A changed listing with new requirements.",
+  });
+  reuseDiscoveryPostingPreparation(source, edited);
+  expect(Object.isFrozen(edited)).toBe(false);
+  expect(createDiscoveryListingFingerprints(edited)).not.toEqual(expected);
+});
 
 function createLedgerEntry(
   overrides: Partial<DiscoveryLedgerEntry> = {},

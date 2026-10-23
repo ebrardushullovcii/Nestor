@@ -294,7 +294,7 @@ async function persistCampaignRuleChange(input: {
 /** Plan candidates scored per turn of the event loop at a run's end. */
 
 /** Saved jobs whose plan membership one transaction rewrites. */
-const MEMBERSHIP_ROWS_PER_COMMIT = 12;
+const MEMBERSHIP_ROWS_PER_COMMIT = 4;
 
 /**
  * Atomically commits the terminal discovery run for a campaign: campaign

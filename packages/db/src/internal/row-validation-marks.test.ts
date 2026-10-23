@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { ResumeDraftSchema } from "@nestor/contracts";
+import { ResumeDraftSchema, SavedJobSchema } from "@nestor/contracts";
 import { afterEach, expect, test, vi } from "vitest";
 import { createFileJobFinderRepository } from "../file-repository";
 import { createSavedJob } from "../file-repository.test-support";
@@ -48,6 +48,36 @@ function marks(db: DatabaseSync): string[] {
     .all()
     .map((row) => `${String(row.id)}:${String(row.stamp)}`);
 }
+
+test("borrowed mutation reads stay owned and validate transaction-local changes before and after rollback", async () => {
+  const file = workspaceFile();
+  const { db, read } = start(file, "build");
+  const job = createSavedJob({ id: "mutation_current" });
+  put(db, job);
+  await read();
+  const parse = vi.spyOn(SavedJobSchema, "parse");
+  db.exec("BEGIN IMMEDIATE");
+  const current = read.readCurrentForMutation([job.id]);
+  expect(current).toEqual([job]);
+  expect(parse).not.toHaveBeenCalled();
+  current[0]!.title = "Owned copy";
+  expect(
+    db
+      .prepare(
+        "SELECT json_extract(value, '$.title') AS title FROM saved_jobs WHERE id=?",
+      )
+      .get(job.id)?.title,
+  ).toBe(job.title);
+  const corrupt = { ...job, description: 17 };
+  put(db, corrupt);
+  expect(() => read.readCurrentForMutation([job.id])).toThrow(
+    "Corrupted persisted row",
+  );
+  db.exec("ROLLBACK");
+  parse.mockClear();
+  expect(read.readCurrentForMutation([job.id])).toEqual([job]);
+  expect(parse).not.toHaveBeenCalled();
+});
 
 /** A row an older build wrote, before keySkills had a default. */
 function olderRow(id: string) {

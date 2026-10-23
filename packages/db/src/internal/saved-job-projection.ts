@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
 import {
   SavedJobSchema,
@@ -154,7 +154,7 @@ export function createSavedJobProjectionReader(
   } = {},
 ) {
   const details = options.sqliteDetails
-    ? createSavedJobDetails(database)
+    ? createSavedJobDetails(database, () => marks?.current() ?? null)
     : null;
   const pageRows = details ? 50 : PROJECTION_PAGE_ROWS;
   let validationError: Error | null = null;
@@ -477,8 +477,34 @@ export function createSavedJobProjectionReader(
     }
     return ids;
   }
+  let mutationAll: StatementSync | null = null;
+  let mutationSelected: StatementSync | null = null;
+  /** Complete owned transaction-current rows, using the existing build marks. */
+  function readCurrentForMutation(ids?: readonly string[]): SavedJob[] {
+    const select = marks?.selectSql ?? "id, value FROM saved_jobs";
+    const selected = ids !== undefined;
+    const statement = selected
+      ? (mutationSelected ??= database.prepare(`SELECT ${select}
+          WHERE saved_jobs.id IN (SELECT value FROM json_each(?)) ORDER BY saved_jobs.id`))
+      : (mutationAll ??= database.prepare(
+          `SELECT ${select} ORDER BY saved_jobs.id`,
+        ));
+    const read = (parse?: ParseMarkedRow) =>
+      statement.all(...(selected ? [JSON.stringify(ids)] : [])).map((row) =>
+        parse
+          ? parse(row, SavedJobSchema)
+          : parsePersistedRowValue({
+              tableName: "saved_jobs",
+              rowId: String(row.id),
+              rawValue: String(row.value),
+              schema: SavedJobSchema,
+            }),
+      );
+    return marks ? marks.read((parse) => read(parse)) : read();
+  }
   return Object.assign(readProjection, {
     currentIds,
+    readCurrentForMutation,
     validation: () => validation,
   });
 }

@@ -738,24 +738,32 @@ function immutableAliasInput(
 }
 
 function rememberAliasPeer(key: string, value: object): void {
-  const peers = (aliasPeers.get(key) ?? []).flatMap((ref) => {
+  const existing = aliasPeers.get(key) ?? [];
+  if (existing.some((ref) => ref.deref() === value)) return;
+  if (
+    !Object.isFrozen(value) &&
+    existing.some((ref) => {
+      const peer = ref.deref();
+      return peer && Object.isFrozen(peer);
+    })
+  )
+    return;
+  const peers = existing.filter((ref) => {
     const peer = ref.deref();
-    return peer && peer !== value ? [peer] : [];
+    return peer !== undefined;
   });
   // Both worker forms remain useful: screening reads the raw card while
   // canonical merging reads its normalized version. Mutable query copies
   // must not immediately displace those prepared immutable forms.
-  peers.unshift(value);
+  peers.unshift(new WeakRef(value));
   peers.sort(
     (left, right) =>
-      Number(Object.isFrozen(right)) - Number(Object.isFrozen(left)),
+      Number(Object.isFrozen(right.deref())) -
+      Number(Object.isFrozen(left.deref())),
   );
   if (aliasPeers.size >= ALIAS_PEER_LIMIT && !aliasPeers.has(key))
     aliasPeers.delete(aliasPeers.keys().next().value!);
-  aliasPeers.set(
-    key,
-    peers.slice(0, 4).map((peer) => new WeakRef(peer)),
-  );
+  aliasPeers.set(key, peers.slice(0, 4));
 }
 
 /** Aliases were prepared from these exact immutable facts by the feed worker. */

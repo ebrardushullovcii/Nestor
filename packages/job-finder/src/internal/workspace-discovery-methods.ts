@@ -131,6 +131,7 @@ import {
 import { createDiscoveryRefreshDecision } from "./workspace-discovery-refresh-schedule";
 import {
   createDiscoveryFreshnessDigestInTurns,
+  reuseDiscoveryPostingPreparation,
   createDiscoveryListingFingerprints,
   warmDiscoveryLedgerIndex,
 } from "./workspace-discovery-ledger";
@@ -2682,7 +2683,10 @@ export function createWorkspaceDiscoveryMethods(
             }
 
             checkpointState.inspectedCount += 1;
-            const posting = JobPostingSchema.parse(rawPosting);
+            const posting = reuseDiscoveryPostingPreparation(
+              rawPosting,
+              JobPostingSchema.parse(rawPosting),
+            );
             const knownInspection = inspectionIdentityIndex.find({
               ...posting,
               matchAcrossSources: true,
@@ -2701,6 +2705,7 @@ export function createWorkspaceDiscoveryMethods(
                 profile,
                 runJudgments.get(toSavedJobId(posting)) ?? null,
               );
+            reuseDiscoveryPostingPreparation(posting, triagedPosting);
 
             if (triagedPosting.titleTriageOutcome !== "pass") {
               sourceCounts.rejected += 1;

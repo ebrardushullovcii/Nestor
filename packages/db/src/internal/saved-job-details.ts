@@ -5,7 +5,11 @@ import {
   type SavedJob,
   type SavedJobListFacts,
 } from "@nestor/contracts";
-import { parsePersistedRowValue, validatePersistedRowValue } from "./state";
+import {
+  parsePersistedRowJson,
+  parsePersistedRowValue,
+  validatePersistedRowValue,
+} from "./state";
 
 const DETAIL_LIMIT = 16;
 export const savedJobDetailFields = [
@@ -27,7 +31,10 @@ export const savedJobDetailFields = [
  * external commit. GC retires it only after its last borrowed row is released.
  * Ordinary canonical repository reads never use this store.
  */
-export function createSavedJobDetails(database: DatabaseSync) {
+export function createSavedJobDetails(
+  database: DatabaseSync,
+  validationStamp?: () => string | null,
+) {
   database.exec(`CREATE TEMP TABLE saved_job_details (
     version INTEGER PRIMARY KEY, id TEXT NOT NULL, value TEXT NOT NULL
   )`);
@@ -38,6 +45,7 @@ export function createSavedJobDetails(database: DatabaseSync) {
   const get = database.prepare(
     "SELECT id, value FROM saved_job_details WHERE version = ?",
   );
+  let getMarked: StatementSync | null = null;
   const getDescription = database.prepare(`SELECT id,
     json_extract(value, '$.description') AS description
     FROM saved_job_details WHERE version = ?`);
@@ -59,14 +67,29 @@ export function createSavedJobDetails(database: DatabaseSync) {
       cache.set(version, cached);
       return cached;
     }
-    const row = get.get(version);
+    const stamp = validationStamp?.();
+    const row = stamp
+      ? (getMarked ??= database.prepare(`SELECT details.id, details.value,
+          CASE WHEN current.value = details.value THEN validation.validated_stamp END AS validated_stamp
+          FROM saved_job_details AS details
+          LEFT JOIN main.saved_jobs AS current ON current.id = details.id
+          LEFT JOIN main.row_validations AS validation
+            ON validation.validated_table = 'saved_jobs' AND validation.validated_row_id = current.id
+          WHERE details.version = ?`)).get(version)
+      : get.get(version);
     if (!row) throw new Error("The saved-job projection has been closed.");
-    const job = parsePersistedRowValue({
+    const stored = {
       tableName: "saved_jobs",
       rowId: String(row.id),
       rawValue: String(row.value),
-      schema: SavedJobSchema,
-    });
+    };
+    // A validation mark covers this TEMP version only while the current
+    // canonical text is byte-identical. Historical versions still validate
+    // after a write, reset or external commit (ADRs 0054/0057).
+    const job =
+      stamp && row.validated_stamp === stamp
+        ? (parsePersistedRowJson(stored) as SavedJob)
+        : parsePersistedRowValue({ ...stored, schema: SavedJobSchema });
     freeze(job);
     cache.set(version, job);
     if (cache.size > DETAIL_LIMIT) cache.delete(cache.keys().next().value!);
