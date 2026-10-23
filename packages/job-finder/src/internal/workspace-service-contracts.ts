@@ -565,7 +565,12 @@ export interface JobFinderWorkspaceService {
     jobId: string,
     exportId: string,
   ): Promise<JobFinderWorkspaceSnapshot>;
-  clearResumeApproval(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
+  /** Same export/approval gates, reusing a current PDF without a full snapshot. */
+  approveCurrentResume(jobId: string): Promise<void>;
+  clearResumeApproval(
+    jobId: string,
+    options?: { restoreStatus?: "draft" | "needs_review" },
+  ): Promise<JobFinderWorkspaceSnapshot>;
   /**
    * Acknowledges or removes one server-owned work-history review decision as
    * a real draft mutation. The command validates the exact projected
@@ -920,6 +925,8 @@ export interface CandidateAssetResolver {
 }
 
 export interface CreateJobFinderWorkspaceServiceOptions {
+  /** Host acknowledgement that the first display transfer has finished. */
+  backgroundWorkReady?: PromiseLike<void>;
   resumeDraftProcessor?: ResumeDraftProcessor;
   onFitJudgmentProgress?: () => void;
   aiClient: JobFinderAiClient;

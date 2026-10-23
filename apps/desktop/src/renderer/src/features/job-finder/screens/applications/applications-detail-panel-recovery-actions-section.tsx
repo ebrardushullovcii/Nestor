@@ -1,11 +1,10 @@
 import type {
-  ApplicationPageReopenProgress,
   ApplicationPageState,
   GlobalDailyApplicationPreparationCapacity,
   JobFinderExactApplicationTarget,
   JobFinderRendererWorkspaceSnapshot,
 } from "@nestor/contracts";
-import { useId, useState } from "react";
+import { useId } from "react";
 import {
   ApplicationAnswerStepCard,
   type ApplicationAnswerStep,
@@ -19,22 +18,17 @@ import {
 import {
   CONFIRM_STEP_DONE_ACTION,
   CONFIRM_STEP_DONE_PENDING_LABEL,
-  describeReopenPhase,
-  formatJobFinderBrowserHandoffFailedStatus,
   JOB_FINDER_BROWSER_NAME,
-  JOB_FINDER_BROWSER_OPENED_WITHOUT_PAGE_STATUS,
   JOB_FINDER_BROWSER_UNAVAILABLE_NOTE,
   OPEN_JOB_FINDER_BROWSER_ACTION,
-  REOPEN_FAILED_REASON,
   REOPEN_JOB_FINDER_BROWSER_ACTION,
   RUN_PREPARATION_AGAIN_ACTION,
 } from "../../lib/job-finder-browser-handoff-copy";
 import { resolveApplyStatePresentation } from "./apply-state";
 import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import { StatusBadge } from "../../components/status-badge";
-import { APPLICATION_SIGN_IN_CONTINUES_NOTE } from "../../lib/application-sign-in-handoff";
+import { APPLICATION_WORK_PAUSED_REASON } from "../../lib/application-work-paused";
 import {
-  FINISH_IN_BROWSER_OPENED_STATUS,
   getApplyResultDestinationUrl,
   getCustomerFacingApplyText,
   getQueueRecoveryTone,
@@ -48,81 +42,20 @@ import {
   type ApplyRunContext,
 } from "./applications-recovery-state";
 
-/**
- * Exact lineage handed to the page route so it can open or focus the managed
- * Job Finder browser on the paused application (the same browser-owned
- * "open page" step Needs you exposes for this result's pending request).
- */
-export type FinishInBrowserInput = {
-  jobId: string;
-  resultId: string;
-  runId: string;
-  applicationRecordId: string;
-  destinationUrl: string | null;
-};
+import {
+  describeFormOpenOutcome,
+  formOpenPhaseLabel,
+  openApplicationForm,
+  useApplicationFormOpenState,
+  type FinishInBrowserHandler,
+  type FinishInBrowserInput,
+} from "./application-form-open";
 
-/**
- * What the hand-off actually did. The status used to be set optimistically and
- * unconditionally, so a fall-back that opened nothing but a bare browser — and
- * an open that errored outright — both still claimed "Opened in the Job Finder
- * browser. Switch to that window to finish the step", sending the user to a
- * window that never showed the step.
- */
-export type FinishInBrowserOutcome =
-  | { kind: "opened_application_page" }
-  | { kind: "opened_browser_only" }
-  | { kind: "failed"; reason?: string | null };
-
-/**
- * The hand-off itself. It is asynchronous in production — opening the window
- * or sending the "open browser step" command is an IPC round trip — so the
- * outcome is a promise, and the status beside the control is written only once
- * that promise has settled. A synchronous outcome (or none) is still accepted
- * so a handler that reports nothing gets no status at all rather than an
- * unearned success claim.
- */
-export type FinishInBrowserHandler = (
-  input: FinishInBrowserInput,
-  /** Each step while a closed form is brought back, filled in and checked. */
-  onReopenProgress?: (phase: ApplicationPageReopenProgress["phase"]) => void,
-) => FinishInBrowserOutcome | void | Promise<FinishInBrowserOutcome | void>;
-
-/**
- * True when the hand-off handed back work that has not finished yet. Checked
- * structurally rather than with `instanceof Promise` so a handler returning any
- * thenable — including one from another realm, as a test double or a preload
- * bridge can be — is still awaited instead of being written straight into the
- * status as an outcome object.
- */
-function isFinishInBrowserOutcomePromise(
-  outcome:
-    | FinishInBrowserOutcome
-    | void
-    | Promise<FinishInBrowserOutcome | void>,
-): outcome is Promise<FinishInBrowserOutcome | void> {
-  return (
-    typeof outcome === "object" &&
-    outcome !== null &&
-    typeof (outcome as { then?: unknown }).then === "function"
-  );
-}
-
-/**
- * The cause carried into the failed status when the hand-off rejects. An
- * unreadable rejection reports no cause rather than inventing one; the status
- * sentence is truthful about the failure either way.
- */
-function getFinishInBrowserFailureReason(error: unknown): string | null {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-
-  return null;
-}
+export type {
+  FinishInBrowserHandler,
+  FinishInBrowserInput,
+  FinishInBrowserOutcome,
+} from "./application-form-open";
 
 /**
  * Resolution state of the "I finished this step" verification, derived from
@@ -143,10 +76,6 @@ const RECOVERY_ACTION_CLASS_NAME =
   "h-auto min-h-11 w-fit min-w-0 max-w-full whitespace-normal px-4 py-2.5 text-(length:--text-body) leading-5";
 const RECOVERY_PRIMARY_ACTION_CLASS_NAME = `${RECOVERY_ACTION_CLASS_NAME} font-semibold`;
 
-/** Said once a filled-in form is open for the person to send themselves. */
-const READY_PAGE_OPENED_STATUS =
-  "Opened in the Job Finder browser. Read the form over and press the site's own send button there.";
-
 export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   progressNow?: number | undefined;
   /** The mode saved in Settings; a retry runs in it and is named for it. */
@@ -156,6 +85,8 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   dailyPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
   excludedQueueRecoveryEntries: QueueEntry[];
   isApplyPending: boolean;
+  /** All work is paused: nothing here may start an application. */
+  applicationWorkPaused?: boolean;
   onStartApplyCopilot: (input: JobFinderExactApplicationTarget) => void;
   onReviewResumePdf?: (jobId: string) => void;
   onStartAutoApplyQueue: (jobIds: string[]) => void;
@@ -226,6 +157,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
     canRestageQueueRun,
     dailyPreparationCapacity,
     isApplyPending,
+    applicationWorkPaused = false,
     onStartApplyCopilot,
     onReviewResumePdf,
     onStartAutoApplyQueue,
@@ -301,6 +233,8 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   const isDailyCapacityExhausted = isDailyPreparationCapacityExhausted(
     dailyPreparationCapacity,
   );
+  // The pause holds every start the same way the spent day does.
+  const isStartBlocked = isDailyCapacityExhausted || applicationWorkPaused;
   const dailyCapacityReachedText =
     dailyPreparationCapacity && isDailyCapacityExhausted
       ? formatDailyPreparationCapacityReachedText(dailyPreparationCapacity)
@@ -332,7 +266,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
     presentation.state !== "preparing" &&
     presentation.state !== "verify_outcome" &&
     presentation.state !== "structural_stop" &&
-    !isDailyCapacityExhausted;
+    !isStartBlocked;
   // The site-saves state keeps the browser hand-off as its secondary way out,
   // for a person who would rather finish it there than grant the permission.
   const showSecondaryOpenBrowser =
@@ -344,17 +278,16 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
     showQueueRecoveryAction ||
     showSecondaryOpenBrowser;
 
-  // What the Job Finder browser hand-off reported for the exact result it ran
-  // for; reset whenever a different result is selected.
-  const [finishInBrowserReport, setFinishInBrowserReport] = useState<{
-    resultId: string;
-    outcome: FinishInBrowserOutcome;
-  } | null>(null);
+  // Opening this result's form, wherever it was pressed (this panel, its
+  // review card or the row in the list): the step while it opens, then what
+  // the hand-off did.
+  const formOpenState = useApplicationFormOpenState(visibleApplyResult?.id);
   const finishInBrowserOutcome =
     visibleApplyResult &&
     presentation.state !== "submitted" &&
-    finishInBrowserReport?.resultId === visibleApplyResult.id
-      ? finishInBrowserReport.outcome
+    formOpenState &&
+    "outcome" in formOpenState
+      ? formOpenState.outcome
       : null;
   /**
    * True once this exact result's application page has actually been opened
@@ -367,33 +300,16 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
    */
   const hasHandedOffToBrowser =
     finishInBrowserOutcome?.kind === "opened_application_page";
-  // The step a closed form is at while it comes back, for this result only.
-  const [reopenProgress, setReopenProgress] = useState<{
-    resultId: string;
-    phase: ApplicationPageReopenProgress["phase"];
-  } | null>(null);
-  const reopenPhaseLabel =
-    reopenProgress && reopenProgress.resultId === visibleApplyResult?.id
-      ? describeReopenPhase(reopenProgress.phase)
-      : null;
+  const reopenPhaseLabel = formOpenPhaseLabel(formOpenState);
   const finishInBrowserStatus =
     finishInBrowserOutcome === null
       ? null
-      : finishInBrowserOutcome.kind === "failed" &&
-          finishInBrowserOutcome.reason === REOPEN_FAILED_REASON
-        ? `${REOPEN_FAILED_REASON}. Nothing was sent.`
-        : finishInBrowserOutcome.kind === "opened_application_page"
-          ? browserStepContinuesOnItsOwn
-            ? APPLICATION_SIGN_IN_CONTINUES_NOTE
-            : presentation.state === "finish_in_browser" &&
-                visibleApplyResult?.state === "awaiting_review"
-              ? READY_PAGE_OPENED_STATUS
-              : FINISH_IN_BROWSER_OPENED_STATUS
-          : finishInBrowserOutcome.kind === "opened_browser_only"
-            ? JOB_FINDER_BROWSER_OPENED_WITHOUT_PAGE_STATUS
-            : formatJobFinderBrowserHandoffFailedStatus(
-                finishInBrowserOutcome.reason,
-              );
+      : describeFormOpenOutcome(finishInBrowserOutcome, {
+          continuesOnItsOwn: browserStepContinuesOnItsOwn,
+          readyToSend:
+            presentation.state === "finish_in_browser" &&
+            visibleApplyResult?.state === "awaiting_review",
+        });
   const finishInBrowserUnavailableNoteId = useId();
   const canFinishInBrowser = Boolean(onFinishInBrowser && visibleApplyResult);
   const handleFinishInBrowser = () => {
@@ -401,47 +317,16 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
       return;
     }
 
-    const resultId = visibleApplyResult.id;
-    // Said at once: the state read before the reopen takes a moment.
-    if (props.applicationPageState?.state === "reopenable") {
-      setReopenProgress({ resultId, phase: "opening" });
-    }
-    const reportOutcome = (outcome: FinishInBrowserOutcome | void) => {
-      setReopenProgress(null);
-      if (outcome?.kind === "opened_application_page") {
-        void window.nestor?.browser?.command({ type: "open" });
-      }
-      setFinishInBrowserReport(outcome ? { resultId, outcome } : null);
-    };
-    const outcome = onFinishInBrowser(
-      {
-        jobId: visibleApplyResult.jobId,
-        resultId,
-        runId: visibleApplyResult.runId,
-        applicationRecordId:
-          visibleApplyResult.applicationRecordId ?? selectedApplicationRecordId,
-        destinationUrl: getApplyResultDestinationUrl(
-          visibleApplyResult.privacyReceipt,
-        ),
-      },
-      (phase) => setReopenProgress({ resultId, phase }),
-    );
-
-    if (isFinishInBrowserOutcomePromise(outcome)) {
-      // Nothing is claimed while the hand-off is still running, and any status
-      // left from a previous attempt is dropped rather than left standing as
-      // this attempt's answer.
-      setFinishInBrowserReport(null);
-      void outcome.then(reportOutcome, (error: unknown) => {
-        reportOutcome({
-          kind: "failed",
-          reason: getFinishInBrowserFailureReason(error),
-        });
-      });
-      return;
-    }
-
-    reportOutcome(outcome);
+    void openApplicationForm(onFinishInBrowser, {
+      jobId: visibleApplyResult.jobId,
+      resultId: visibleApplyResult.id,
+      runId: visibleApplyResult.runId,
+      applicationRecordId:
+        visibleApplyResult.applicationRecordId ?? selectedApplicationRecordId,
+      destinationUrl: getApplyResultDestinationUrl(
+        visibleApplyResult.privacyReceipt,
+      ),
+    });
   };
   const canConfirmFinished = Boolean(
     onConfirmFinishedInBrowser &&
@@ -723,8 +608,13 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
                   className={RECOVERY_PRIMARY_ACTION_CLASS_NAME}
                   data-testid="applications-recovery-primary-action-button"
                   disabled={
-                    isDailyCapacityExhausted ||
+                    (!rejectedFormat && isStartBlocked) ||
                     (!rejectedFormat && isApplyPending)
+                  }
+                  title={
+                    !rejectedFormat && applicationWorkPaused
+                      ? APPLICATION_WORK_PAUSED_REASON
+                      : undefined
                   }
                   onClick={
                     rejectedFormat
@@ -864,7 +754,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
                     type="button"
                     variant="secondary"
                     disabled={
-                      isDailyCapacityExhausted ||
+                      isStartBlocked ||
                       selectedQueueRecoveryExceedsDailyRemaining
                     }
                   >
@@ -910,6 +800,16 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
             id={queueRecoveryExceedsNoteId}
           >
             {dailyQueueRecoveryExceedsRemainingReason}
+          </p>
+        ) : null}
+        {applicationWorkPaused &&
+        ((primaryAction === "try_again" && !rejectedFormat) ||
+          showQueueRecoveryAction) ? (
+          <p
+            className="text-(length:--text-small) leading-6 text-foreground-soft"
+            data-testid="application-work-paused-note"
+          >
+            {APPLICATION_WORK_PAUSED_REASON}
           </p>
         ) : null}
         {dailyCapacityReachedText ? (

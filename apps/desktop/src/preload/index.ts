@@ -52,6 +52,8 @@ import type {
   EditApplicationDocumentInput,
   ExportApplicationDocumentInput,
   DesktopPlatformPing,
+  DesktopContextMenuInput,
+  DesktopContextMenuResult,
   DesktopWindowCloseGuardState,
   DesktopWindowCloseResolution,
   DesktopWindowCloseRequest,
@@ -93,6 +95,10 @@ import type {
   JobFinderApplyConsentActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
+  JobFinderApplyQueueControlInput,
+  JobFinderRemoveFromApplyQueueInput,
+  JobFinderApproveResumesInput,
+  JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
   JobFinderApplicationStartTarget,
   JobFinderPreparedApplicationPageInput,
@@ -365,6 +371,11 @@ const desktopApi = {
   ping: () => ipcRenderer.invoke("system:ping") as Promise<DesktopPlatformPing>,
   window: {
     close: () => ipcRenderer.invoke("window:close") as Promise<{ ok: true }>,
+    showContextMenu: (input: DesktopContextMenuInput) =>
+      ipcRenderer.invoke(
+        "window:show-context-menu",
+        input,
+      ) as Promise<DesktopContextMenuResult>,
     getControlsState: () =>
       ipcRenderer.invoke(
         "window:get-controls-state",
@@ -718,6 +729,17 @@ const desktopApi = {
       ipcRenderer.on("job-finder:workspace-updated", handler);
       return () => {
         ipcRenderer.removeListener("job-finder:workspace-updated", handler);
+      };
+    },
+    // A clicked "Search finished" notice opens the screen it is about.
+    onOpenRoute: (listener: (route: string) => void) => {
+      const handler = (_event: unknown, route: unknown) => {
+        if (typeof route === "string" && route.startsWith("/job-finder/"))
+          listener(route);
+      };
+      ipcRenderer.on("job-finder:open-route", handler);
+      return () => {
+        ipcRenderer.removeListener("job-finder:open-route", handler);
       };
     },
     mutateWorkspaceEntities: (input: JobFinderWorkspaceEntityMutationInput) =>
@@ -1353,9 +1375,13 @@ const desktopApi = {
         jobId,
         exportId,
       }) as Promise<JobFinderWorkspaceSyncResult>,
-    clearResumeApproval: (jobId: string) =>
+    clearResumeApproval: (
+      jobId: string,
+      restoreStatus?: "draft" | "needs_review",
+    ) =>
       ipcRenderer.invoke("job-finder:clear-resume-approval", {
         jobId,
+        ...(restoreStatus ? { restoreStatus } : {}),
       }) as Promise<JobFinderWorkspaceSyncResult>,
     setWorkHistoryReviewAcknowledgment: (
       input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,
@@ -1467,6 +1493,26 @@ const desktopApi = {
         jobIds,
         ...(applicationAutomationMode ? { applicationAutomationMode } : {}),
       }) as Promise<JobFinderWorkspaceSyncResult>,
+    startApplyQueue: (input: JobFinderStartApplyQueueInput) =>
+      ipcRenderer.invoke(
+        "job-finder:start-apply-queue",
+        input,
+      ) as Promise<JobFinderWorkspaceSyncResult>,
+    approveResumes: (input: JobFinderApproveResumesInput) =>
+      ipcRenderer.invoke(
+        "job-finder:approve-resumes",
+        input,
+      ) as Promise<JobFinderWorkspaceSyncResult>,
+    controlApplyQueue: (input: JobFinderApplyQueueControlInput) =>
+      ipcRenderer.invoke(
+        "job-finder:control-apply-queue",
+        input,
+      ) as Promise<JobFinderWorkspaceSyncResult>,
+    removeFromApplyQueue: (input: JobFinderRemoveFromApplyQueueInput) =>
+      ipcRenderer.invoke(
+        "job-finder:remove-from-apply-queue",
+        input,
+      ) as Promise<JobFinderWorkspaceSyncResult>,
     approveApplyRun: (input: JobFinderApplyRunActionInput) =>
       ipcRenderer.invoke(
         "job-finder:approve-apply-run",

@@ -25,6 +25,7 @@ import {
   withResumeBatchLiveness,
 } from "./resume-batch-checkpoint";
 import { checkSameCompanySends } from "./same-company-sends";
+import { SameCompanyApplicationConflictError } from "../application-run-refusal";
 import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import { withPlanAssessment } from "./plan-assessment";
 import {
@@ -390,6 +391,7 @@ type WorkspaceApplicationMethods = Omit<
     | "regenerateResumeSection"
     | "exportResumePdf"
     | "approveResume"
+    | "approveCurrentResume"
     | "clearResumeApproval"
     | "applyResumePatch"
     | "setWorkHistoryReviewAcknowledgment"
@@ -1100,7 +1102,7 @@ export function createWorkspaceApplicationMethods(
               ),
               posting,
               signal,
-              // Only "Read and assess listing" waits on this read.
+              // Only "Judge fit" waits on this read.
               { background: !options.throwOnFailure },
             );
             return session.remember(posting, assessed);
@@ -4479,6 +4481,7 @@ export function createWorkspaceApplicationMethods(
                   ? applyResumeLanguage(
                       assembledPreviewDraft,
                       previewDraft.languagePresentation,
+                      profile.projects.map((project) => project.id),
                     )
                   : assembledPreviewDraft,
                 job,
@@ -4625,7 +4628,11 @@ export function createWorkspaceApplicationMethods(
           language: targetLanguage,
         };
         const resumeDraft = draft.languagePresentation
-          ? applyResumeLanguage(languageDraft, draft.languagePresentation)
+          ? applyResumeLanguage(
+              languageDraft,
+              draft.languagePresentation,
+              profile.projects.map((project) => project.id),
+            )
           : languageDraft;
         reportResumeStage(options, "processing");
         // The final fact check is a model call: it runs before taking one of
@@ -5344,6 +5351,301 @@ export function createWorkspaceApplicationMethods(
     );
   }
 
+  // The public single-resume methods keep returning a full snapshot. Bulk
+  // approval shares their exact checks and writes without reading the entire
+  // workspace twice per job.
+  async function exportResumeArtifact(
+    jobId: string,
+    outputPath?: string | null,
+  ) {
+    const {
+      draft,
+      job,
+      profile,
+      profileRevision,
+      settings,
+      tailoredAsset,
+      templates,
+    } = await ensureResumeDraft(ctx, jobId);
+    // The persisted draft is the single render input: validation, content
+    // hash binding, PDF rendering, and approval all describe this exact
+    // draft. Persisted drafts are saved sanitized, so sanitization must be
+    // content-neutral here; otherwise grounding drifted after the last
+    // save and exporting would bind claims the PDF does not contain.
+    const exportDraft = await sanitizeAndCheckResumeDraft(ctx, {
+      draft,
+      job,
+      profile,
+    });
+    if (
+      buildResumeDraftContentHash(exportDraft) !==
+      buildResumeDraftContentHash(draft)
+    ) {
+      throw new Error(
+        "This saved resume draft no longer matches its grounded, sanitized content because candidate evidence changed after the last save. Review and save the draft before exporting.",
+      );
+    }
+    const preExportValidation = await (
+      ctx.resumeDraftProcessor?.validate ?? validateResumeDraft
+    )({
+      draft: exportDraft,
+      job,
+      profile,
+    });
+    if (
+      hasBlockingResumeClaimAssessment({
+        validation: preExportValidation,
+        draft: exportDraft,
+      })
+    ) {
+      const previousValidation =
+        (await ctx.repository.listResumeValidationResults(draft.id))[0] ?? null;
+      const visibleValidation = preserveWorkHistoryReviewGuidance({
+        validation: preExportValidation,
+        previousValidation,
+        draft: exportDraft,
+      });
+      await assertResumeDraftCurrent(draft);
+      await assertCurrentResumeProfile(
+        ctx,
+        profileRevision,
+        "saving export validation",
+      );
+      await ctx.repository.saveResumeDraftWithValidation({
+        draft: exportDraft,
+        validation: visibleValidation,
+        tailoredAsset,
+      });
+      throw new Error(
+        "Some lines in this resume still need your decision before it can be exported. Open the resume: they are listed under Lines to confirm.",
+      );
+    }
+    await assertCurrentResumeProfile(
+      ctx,
+      profileRevision,
+      "rendering this resume export",
+    );
+    const renderedArtifact = await renderDraftToPdf(ctx, {
+      job,
+      profile,
+      settings,
+      draft: exportDraft,
+      outputPath: outputPath ?? null,
+    });
+
+    await assertCurrentResumeProfile(
+      ctx,
+      profileRevision,
+      "completing this resume export",
+    );
+
+    if (!renderedArtifact.storagePath) {
+      throw new Error(
+        `Resume export failed for '${job.title}' at '${job.company}'.`,
+      );
+    }
+
+    const exportedAt = new Date().toISOString();
+    const exportArtifact = buildResumeExportArtifact({
+      draft: exportDraft,
+      job,
+      filePath: renderedArtifact.storagePath,
+      format: renderedArtifact.format,
+      sha256: renderedArtifact.sha256 ?? null,
+      pageCount: renderedArtifact.pageCount ?? null,
+      exportedAt,
+    });
+    const validation = await (
+      ctx.resumeDraftProcessor?.validate ?? validateResumeDraft
+    )({
+      draft: exportDraft,
+      job,
+      profile,
+      pageCount: renderedArtifact.pageCount ?? null,
+      validatedAt: exportedAt,
+    });
+    const previousValidation =
+      (await ctx.repository.listResumeValidationResults(draft.id))[0] ?? null;
+    const validationWithReviewGuidance = preserveWorkHistoryReviewGuidance({
+      validation,
+      previousValidation,
+      draft: exportDraft,
+    });
+    // Any export of an approved draft (Download PDF) is the same content
+    // in another file. The job's resume stays the approved file;
+    // re-pointing it at the new export made Shortlisted say the approved
+    // resume no longer matched and ask for a review of an unchanged resume.
+    const keepsApprovedFile = Boolean(
+      exportDraft.approvedExportId && tailoredAsset?.storagePath,
+    );
+    const nextAsset = buildTailoredAssetBridge({
+      draft: exportDraft,
+      job,
+      profile,
+      existingAsset: tailoredAsset,
+      storagePath: keepsApprovedFile
+        ? (tailoredAsset?.storagePath ?? null)
+        : renderedArtifact.storagePath,
+      pageCount: renderedArtifact.pageCount ?? null,
+      templates,
+      notes: uniqueStrings([
+        ...(renderedArtifact.fileName
+          ? [`Generated PDF resume artifact ${renderedArtifact.fileName}.`]
+          : []),
+        ...(renderedArtifact.intermediateFileName
+          ? [
+              `Saved HTML debug render ${renderedArtifact.intermediateFileName}.`,
+            ]
+          : []),
+        ...(renderedArtifact.warnings ?? []),
+      ]),
+    });
+
+    await assertResumeDraftCurrent(draft);
+    await assertCurrentResumeProfile(
+      ctx,
+      profileRevision,
+      "saving this resume export",
+    );
+    await ctx.repository.upsertResumeExportArtifact(exportArtifact);
+    await assertResumeDraftCurrent(draft);
+    await assertCurrentResumeProfile(
+      ctx,
+      profileRevision,
+      "saving this exported resume draft",
+    );
+    await ctx.repository.saveResumeDraftWithValidation({
+      draft: exportDraft,
+      validation: validationWithReviewGuidance,
+      tailoredAsset: nextAsset,
+    });
+    return exportArtifact;
+  }
+
+  async function approveResumeArtifact(jobId: string, exportId: string) {
+    const { draft, job, profile, profileRevision, tailoredAsset, templates } =
+      await ensureResumeDraft(ctx, jobId);
+    const [exports, validations] = await Promise.all([
+      ctx.repository.listResumeExportArtifacts({ jobId }),
+      ctx.repository.listResumeValidationResults(draft.id),
+    ]);
+    const targetExport = exports.find((artifact) => artifact.id === exportId);
+    const latestValidation = validations[0] ?? null;
+
+    if (!targetExport) {
+      throw new Error(`Unable to approve unknown resume export '${exportId}'.`);
+    }
+
+    if (targetExport.draftId !== draft.id) {
+      throw new Error(
+        `Resume export '${exportId}' does not belong to the current draft and cannot be approved.`,
+      );
+    }
+
+    if (
+      new Date(targetExport.exportedAt).getTime() <
+      new Date(draft.updatedAt).getTime()
+    ) {
+      throw new Error(
+        `Resume export '${exportId}' is older than the current draft and cannot be approved. Export a fresh PDF first.`,
+      );
+    }
+
+    if (
+      !latestValidation ||
+      latestValidation.draftContentHash !== buildResumeDraftContentHash(draft)
+    ) {
+      throw new Error(
+        `Resume export '${exportId}' does not have a current claim-grounding assessment. Export a fresh PDF before approval.`,
+      );
+    }
+
+    if (
+      hasBlockingResumeClaimAssessment({
+        validation: latestValidation,
+        draft,
+      })
+    ) {
+      throw new Error(
+        "Some lines in this resume still need your decision before it can be approved. They are listed under Lines to confirm.",
+      );
+    }
+
+    if (latestValidation.issues.some(isBlockingResumeValidationIssue)) {
+      throw new Error(
+        `Resume export '${exportId}' still has blocking validation errors and cannot be approved yet.`,
+      );
+    }
+
+    // Hidden roles are the person's choice, not a blocker: a role left
+    // hidden is simply off this resume. The studio still lists them so
+    // any can be added back.
+
+    const template =
+      templates.find((entry) => entry.id === draft.templateId) ?? null;
+
+    if (!template || !isResumeTemplateApprovalEligible(template)) {
+      throw new Error(
+        `Resume export '${exportId}' uses a share-ready template and cannot be approved for apply-safe flows. Choose an apply-safe template and export a fresh PDF instead.`,
+      );
+    }
+
+    if (
+      ctx.exportFileVerifier &&
+      !(await ctx.exportFileVerifier.exists(targetExport.filePath))
+    ) {
+      throw new Error(
+        `Resume export '${exportId}' is missing on disk and cannot be approved. Export a fresh file first.`,
+      );
+    }
+    const verifiedSha256 = await verifyResumeFileIntegrity({
+      expectedSha256: targetExport.sha256,
+      filePath: targetExport.filePath,
+      label: "The resume export",
+    });
+
+    const approvedAt = new Date().toISOString();
+    const approvedDraft = await (
+      ctx.resumeDraftProcessor?.parse ??
+      ((input: unknown) => ResumeDraftSchema.parse(input))
+    )({
+      ...draft,
+      status: "approved",
+      approvedAt,
+      approvedExportId: targetExport.id,
+      staleReason: null,
+      updatedAt: approvedAt,
+    });
+    const nextAsset = buildTailoredAssetBridge({
+      draft: approvedDraft,
+      job,
+      profile,
+      existingAsset: tailoredAsset,
+      storagePath: targetExport.filePath,
+      pageCount: targetExport.pageCount,
+      templates,
+    });
+
+    await assertResumeDraftCurrent(draft);
+    await assertCurrentResumeProfile(
+      ctx,
+      profileRevision,
+      "approving this resume export",
+    );
+    await ctx.repository.approveResumeExport({
+      draft: approvedDraft,
+      exportArtifact: {
+        ...targetExport,
+        sha256: verifiedSha256,
+        isApproved: true,
+      },
+      validation: latestValidation,
+      tailoredAsset: nextAsset,
+    });
+
+    await clearStaleMissingResumeBlockerForJob(jobId);
+  }
+
   return {
     resumeApplicationUserAction,
     async resumeParkedApplyRuns(control, onFinished) {
@@ -5783,7 +6085,11 @@ export function createWorkspaceApplicationMethods(
         ? await ctx.resumeDraftProcessor.parse(draft)
         : ResumeDraftSchema.parse(draft);
       return withResumeDraftTransition(parsedDraft.jobId, async () => {
-        const state = await loadResumeWorkspaceState(ctx, parsedDraft.jobId, true);
+        const state = await loadResumeWorkspaceState(
+          ctx,
+          parsedDraft.jobId,
+          true,
+        );
         const {
           job,
           profile,
@@ -5793,9 +6099,10 @@ export function createWorkspaceApplicationMethods(
         } = state.draft
           ? { ...state, draft: state.draft }
           : await ensureResumeDraft(ctx, parsedDraft.jobId);
-        const stateHash = (value: ResumeDraft) => ctx.resumeDraftProcessor
-          ? ctx.resumeDraftProcessor.stateHash(value)
-          : buildResumeDraftStateHash(value);
+        const stateHash = (value: ResumeDraft) =>
+          ctx.resumeDraftProcessor
+            ? ctx.resumeDraftProcessor.stateHash(value)
+            : buildResumeDraftStateHash(value);
         const parsedStateHash = await stateHash(parsedDraft);
         const currentStateHash = await stateHash(currentDraft);
         if (
@@ -6168,314 +6475,78 @@ export function createWorkspaceApplicationMethods(
     },
     async exportResumePdf(jobId, outputPath) {
       return withResumeDraftTransition(jobId, async () => {
-        const {
-          draft,
-          job,
-          profile,
-          profileRevision,
-          settings,
-          tailoredAsset,
-          templates,
-        } = await ensureResumeDraft(ctx, jobId);
-        // The persisted draft is the single render input: validation, content
-        // hash binding, PDF rendering, and approval all describe this exact
-        // draft. Persisted drafts are saved sanitized, so sanitization must be
-        // content-neutral here; otherwise grounding drifted after the last
-        // save and exporting would bind claims the PDF does not contain.
-        const exportDraft = await sanitizeAndCheckResumeDraft(ctx, {
-          draft,
-          job,
-          profile,
-        });
-        if (
-          buildResumeDraftContentHash(exportDraft) !==
-          buildResumeDraftContentHash(draft)
-        ) {
-          throw new Error(
-            "This saved resume draft no longer matches its grounded, sanitized content because candidate evidence changed after the last save. Review and save the draft before exporting.",
-          );
-        }
-        const preExportValidation = validateResumeDraft({
-          draft: exportDraft,
-          job,
-          profile,
-        });
-        if (
-          hasBlockingResumeClaimAssessment({
-            validation: preExportValidation,
-            draft: exportDraft,
-          })
-        ) {
-          const previousValidation =
-            (await ctx.repository.listResumeValidationResults(draft.id))[0] ??
-            null;
-          const visibleValidation = preserveWorkHistoryReviewGuidance({
-            validation: preExportValidation,
-            previousValidation,
-            draft: exportDraft,
-          });
-          await assertResumeDraftCurrent(draft);
-          await assertCurrentResumeProfile(
-            ctx,
-            profileRevision,
-            "saving export validation",
-          );
-          await ctx.repository.saveResumeDraftWithValidation({
-            draft: exportDraft,
-            validation: visibleValidation,
-            tailoredAsset,
-          });
-          throw new Error(
-            "Some lines in this resume still need your decision before it can be exported. Open the resume: they are listed under Lines to confirm.",
-          );
-        }
-        await assertCurrentResumeProfile(
-          ctx,
-          profileRevision,
-          "rendering this resume export",
-        );
-        const renderedArtifact = await renderDraftToPdf(ctx, {
-          job,
-          profile,
-          settings,
-          draft: exportDraft,
-          outputPath: outputPath ?? null,
-        });
-
-        await assertCurrentResumeProfile(
-          ctx,
-          profileRevision,
-          "completing this resume export",
-        );
-
-        if (!renderedArtifact.storagePath) {
-          throw new Error(
-            `Resume export failed for '${job.title}' at '${job.company}'.`,
-          );
-        }
-
-        const exportedAt = new Date().toISOString();
-        const exportArtifact = buildResumeExportArtifact({
-          draft: exportDraft,
-          job,
-          filePath: renderedArtifact.storagePath,
-          format: renderedArtifact.format,
-          sha256: renderedArtifact.sha256 ?? null,
-          pageCount: renderedArtifact.pageCount ?? null,
-          exportedAt,
-        });
-        const validation = validateResumeDraft({
-          draft: exportDraft,
-          job,
-          profile,
-          pageCount: renderedArtifact.pageCount ?? null,
-          validatedAt: exportedAt,
-        });
-        const previousValidation =
-          (await ctx.repository.listResumeValidationResults(draft.id))[0] ??
-          null;
-        const validationWithReviewGuidance = preserveWorkHistoryReviewGuidance({
-          validation,
-          previousValidation,
-          draft: exportDraft,
-        });
-        // Any export of an approved draft (Download PDF) is the same content
-        // in another file. The job's resume stays the approved file;
-        // re-pointing it at the new export made Shortlisted say the approved
-        // resume no longer matched and ask for a review of an unchanged resume.
-        const keepsApprovedFile = Boolean(
-          exportDraft.approvedExportId && tailoredAsset?.storagePath,
-        );
-        const nextAsset = buildTailoredAssetBridge({
-          draft: exportDraft,
-          job,
-          profile,
-          existingAsset: tailoredAsset,
-          storagePath: keepsApprovedFile
-            ? (tailoredAsset?.storagePath ?? null)
-            : renderedArtifact.storagePath,
-          pageCount: renderedArtifact.pageCount ?? null,
-          templates,
-          notes: uniqueStrings([
-            ...(renderedArtifact.fileName
-              ? [`Generated PDF resume artifact ${renderedArtifact.fileName}.`]
-              : []),
-            ...(renderedArtifact.intermediateFileName
-              ? [
-                  `Saved HTML debug render ${renderedArtifact.intermediateFileName}.`,
-                ]
-              : []),
-            ...(renderedArtifact.warnings ?? []),
-          ]),
-        });
-
-        await assertResumeDraftCurrent(draft);
-        await assertCurrentResumeProfile(
-          ctx,
-          profileRevision,
-          "saving this resume export",
-        );
-        await ctx.repository.upsertResumeExportArtifact(exportArtifact);
-        await assertResumeDraftCurrent(draft);
-        await assertCurrentResumeProfile(
-          ctx,
-          profileRevision,
-          "saving this exported resume draft",
-        );
-        await ctx.repository.saveResumeDraftWithValidation({
-          draft: exportDraft,
-          validation: validationWithReviewGuidance,
-          tailoredAsset: nextAsset,
-        });
-
+        await exportResumeArtifact(jobId, outputPath);
         return ctx.getWorkspaceSnapshot();
       });
     },
     async approveResume(jobId, exportId) {
       return withResumeDraftTransition(jobId, async () => {
-        const {
-          draft,
-          job,
-          profile,
-          profileRevision,
-          tailoredAsset,
-          templates,
-        } = await ensureResumeDraft(ctx, jobId);
-        const [exports, validations] = await Promise.all([
-          ctx.repository.listResumeExportArtifacts({ jobId }),
-          ctx.repository.listResumeValidationResults(draft.id),
-        ]);
-        const targetExport = exports.find(
-          (artifact) => artifact.id === exportId,
-        );
-        const latestValidation = validations[0] ?? null;
-
-        if (!targetExport) {
-          throw new Error(
-            `Unable to approve unknown resume export '${exportId}'.`,
-          );
-        }
-
-        if (targetExport.draftId !== draft.id) {
-          throw new Error(
-            `Resume export '${exportId}' does not belong to the current draft and cannot be approved.`,
-          );
-        }
-
-        if (
-          new Date(targetExport.exportedAt).getTime() <
-          new Date(draft.updatedAt).getTime()
-        ) {
-          throw new Error(
-            `Resume export '${exportId}' is older than the current draft and cannot be approved. Export a fresh PDF first.`,
-          );
-        }
-
-        if (
-          !latestValidation ||
-          latestValidation.draftContentHash !==
-            buildResumeDraftContentHash(draft)
-        ) {
-          throw new Error(
-            `Resume export '${exportId}' does not have a current claim-grounding assessment. Export a fresh PDF before approval.`,
-          );
-        }
-
-        if (
-          hasBlockingResumeClaimAssessment({
-            validation: latestValidation,
-            draft,
-          })
-        ) {
-          throw new Error(
-            "Some lines in this resume still need your decision before it can be approved. They are listed under Lines to confirm.",
-          );
-        }
-
-        if (latestValidation.issues.some(isBlockingResumeValidationIssue)) {
-          throw new Error(
-            `Resume export '${exportId}' still has blocking validation errors and cannot be approved yet.`,
-          );
-        }
-
-        // Hidden roles are the person's choice, not a blocker: a role left
-        // hidden is simply off this resume. The studio still lists them so
-        // any can be added back.
-
-        const template =
-          templates.find((entry) => entry.id === draft.templateId) ?? null;
-
-        if (!template || !isResumeTemplateApprovalEligible(template)) {
-          throw new Error(
-            `Resume export '${exportId}' uses a share-ready template and cannot be approved for apply-safe flows. Choose an apply-safe template and export a fresh PDF instead.`,
-          );
-        }
-
-        if (
-          ctx.exportFileVerifier &&
-          !(await ctx.exportFileVerifier.exists(targetExport.filePath))
-        ) {
-          throw new Error(
-            `Resume export '${exportId}' is missing on disk and cannot be approved. Export a fresh file first.`,
-          );
-        }
-        const verifiedSha256 = await verifyResumeFileIntegrity({
-          expectedSha256: targetExport.sha256,
-          filePath: targetExport.filePath,
-          label: "The resume export",
-        });
-
-        const approvedAt = new Date().toISOString();
-        const approvedDraft = ResumeDraftSchema.parse({
-          ...draft,
-          status: "approved",
-          approvedAt,
-          approvedExportId: targetExport.id,
-          staleReason: null,
-          updatedAt: approvedAt,
-        });
-        const nextAsset = buildTailoredAssetBridge({
-          draft: approvedDraft,
-          job,
-          profile,
-          existingAsset: tailoredAsset,
-          storagePath: targetExport.filePath,
-          pageCount: targetExport.pageCount,
-          templates,
-        });
-
-        await assertResumeDraftCurrent(draft);
-        await assertCurrentResumeProfile(
-          ctx,
-          profileRevision,
-          "approving this resume export",
-        );
-        await ctx.repository.approveResumeExport({
-          draft: approvedDraft,
-          exportArtifact: {
-            ...targetExport,
-            sha256: verifiedSha256,
-            isApproved: true,
-          },
-          validation: latestValidation,
-          tailoredAsset: nextAsset,
-        });
-
-        await clearStaleMissingResumeBlockerForJob(jobId);
-
+        await approveResumeArtifact(jobId, exportId);
         return ctx.getWorkspaceSnapshot();
       });
     },
-    async clearResumeApproval(jobId) {
+    async approveCurrentResume(jobId) {
+      await withResumeDraftTransition(jobId, async () => {
+        const { draft } = await ensureResumeDraft(ctx, jobId);
+        const exports = await ctx.repository.listResumeExportArtifacts({
+          jobId,
+        });
+        const alreadyApproved = exports.find(
+          (artifact) =>
+            draft.status === "approved" &&
+            artifact.id === draft.approvedExportId &&
+            artifact.draftId === draft.id &&
+            artifact.isApproved,
+        );
+        if (
+          alreadyApproved &&
+          (!ctx.exportFileVerifier ||
+            (await ctx.exportFileVerifier.exists(alreadyApproved.filePath)))
+        ) {
+          await verifyResumeFileIntegrity({
+            expectedSha256: alreadyApproved.sha256,
+            filePath: alreadyApproved.filePath,
+            label: "The resume export",
+          });
+          await assertResumeDraftCurrent(draft);
+          return;
+        }
+        const reusable = exports
+          .filter(
+            (artifact) =>
+              artifact.draftId === draft.id &&
+              artifact.templateId === draft.templateId &&
+              artifact.format === "pdf" &&
+              artifact.sha256 &&
+              Date.parse(artifact.exportedAt) >= Date.parse(draft.updatedAt),
+          )
+          .sort((a, b) => b.exportedAt.localeCompare(a.exportedAt))[0];
+        const artifact =
+          reusable &&
+          ctx.exportFileVerifier &&
+          (await ctx.exportFileVerifier.exists(reusable.filePath))
+            ? reusable
+            : await exportResumeArtifact(jobId);
+        // Includes current validation, profile/draft race checks and the hash
+        // of the actual PDF bytes, just as the single Approve does.
+        await approveResumeArtifact(jobId, artifact.id);
+      });
+    },
+    async clearResumeApproval(jobId, options) {
       return withResumeDraftTransition(jobId, async () => {
         const { draft, job, profile, tailoredAsset, templates } =
           await ensureResumeDraft(ctx, jobId);
+        const restoreStatus = options?.restoreStatus ?? null;
         const nextDraft = ResumeDraftSchema.parse({
           ...draft,
-          status: "stale",
+          // Undo of an approval puts back the status it replaced; any other
+          // clear asks for a fresh review.
+          status: restoreStatus ?? "stale",
           approvedAt: null,
           approvedExportId: null,
-          staleReason: "Resume approval was cleared and needs a fresh review.",
+          staleReason: restoreStatus
+            ? null
+            : "Resume approval was cleared and needs a fresh review.",
           updatedAt: new Date().toISOString(),
         });
         const nextAsset = buildTailoredAssetBridge({
@@ -6490,7 +6561,9 @@ export function createWorkspaceApplicationMethods(
         await assertResumeDraftCurrent(draft);
         await ctx.repository.clearResumeApproval({
           draft: nextDraft,
-          staleReason: nextDraft.staleReason ?? "Resume approval cleared.",
+          staleReason: restoreStatus
+            ? null
+            : (nextDraft.staleReason ?? "Resume approval cleared."),
           tailoredAsset: nextAsset,
         });
 
@@ -8720,12 +8793,23 @@ export function createWorkspaceApplicationMethods(
         scopedSettings.applicationAutomationMode ??
         "prepare_only";
       if (effectiveApplicationAutomationMode === "autonomous_submit") {
+        const refused = new Map<string, string>();
         const overlap = await checkSameCompanySends({
           repository: ctx.repository,
           jobIds: uniqueJobIds,
           transition: ctx.withIntelligenceTransition.bind(ctx),
+          onRefusedJob: (jobId, reason) => {
+            if (!refused.has(jobId)) refused.set(jobId, reason);
+          },
         });
-        if (overlap) throw new Error(overlap);
+        if (overlap)
+          throw new SameCompanyApplicationConflictError(
+            overlap,
+            [...refused].map(([jobId, reason]) => ({
+              jobId,
+              reason: reason.slice(0, 500),
+            })),
+          );
       }
       const capturedCampaignId = await ctx.getActiveCampaignId();
       const runId = createUniqueId("apply_run");

@@ -39,11 +39,22 @@ export const FALLBACK_DAILY_APPLICATION_PREPARATION_LIMIT = 20;
  * truthful by naming the safeguard maximum; an exhausted day says when more
  * room arrives instead of formatting a reset time.
  */
+/**
+ * Above this a day's limit is not one a person reaches ("0 of 10000" was
+ * noise), so the summary says only what was started, and nothing at zero.
+ */
+export const UNREACHABLE_DAILY_PREPARATION_LIMIT = 100;
+
 export function formatDailyPreparationCapacitySummaryText(
   capacity: GlobalDailyApplicationPreparationCapacity | null | undefined,
-): string {
+): string | null {
   if (!capacity) {
     return `Preparations today: up to ${FALLBACK_DAILY_APPLICATION_PREPARATION_LIMIT} per day`;
+  }
+  if (capacity.limit > UNREACHABLE_DAILY_PREPARATION_LIMIT) {
+    return capacity.used > 0
+      ? `${capacity.used} ${capacity.used === 1 ? "application" : "applications"} started today`
+      : null;
   }
 
   const legacySuffix =

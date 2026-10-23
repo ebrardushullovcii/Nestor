@@ -25,7 +25,6 @@ import type {
   TailoredAssetSummary,
 } from "@nestor/contracts";
 import {
-  APPLICATION_PREPARATION_BATCH_LIMIT,
   collectInProgressApplicationJobIds,
   getResumeRunState,
   getReviewQueueWorkflowStatus,
@@ -59,6 +58,11 @@ import { ReviewQueueMissionPanel } from "./review-queue-mission-panel";
 import { useAssistantContextSource } from "../../assistant/assistant-provider";
 import { buildListContext } from "../../assistant/assistant-context-capture";
 import { describeApplyAllOutcome } from "./review-queue-mission-panel-helpers";
+import {
+  describeApplyQueue,
+  isApplyQueueOngoing,
+  listApplyQueueWaitingJobIds,
+} from "../../lib/apply-queue-view";
 import { ReviewQueuePreviewPanel } from "./review-queue-preview-panel";
 import type { TailoredDraftPreparationViewState } from "./review-queue-status";
 
@@ -103,6 +107,8 @@ export function ReviewQueueScreen(props: {
   campaignId: string;
   draftPreparation: TailoredDraftPreparationViewState;
   resumeBatchCheckpoint?: JobFinderRendererWorkspaceSnapshot["intelligence"]["resumeBatchCheckpoint"];
+  /** The Apply queue, so its jobs are not offered again and its state shows. */
+  applyQueue?: JobFinderRendererWorkspaceSnapshot["applyQueue"];
   globalDailyApplicationPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
   isApplyPending: boolean;
   /**
@@ -128,12 +134,22 @@ export function ReviewQueueScreen(props: {
   onOpenBrowserSession: () => void;
   onOpenJobDetails: (jobId: string) => void;
   onOpenApplication?: (recordId: string) => void;
+  onOpenApplications?: () => void;
+  onApproveResumes?: (jobIds: readonly string[]) => Promise<unknown>;
   onOpenProfile: () => void;
   onOpenSafeguards?: () => void;
   safeguardBlocker?: string | null;
+  /** All work is paused: Apply controls wait for Continue. */
+  applicationWorkPaused?: boolean;
   onClaimResumeIdentity?: () => void;
   onKeepResumeIdentity?: () => void;
   onRemoveReviewJob: (jobId: string) => void;
+  /** Approved -> To review, as a deliberate move. */
+  onMoveResumesBackToReview?: (jobIds: readonly string[]) => Promise<unknown>;
+  /** Takes waiting jobs out of the Apply queue. */
+  onTakeOutOfApplyQueue?: (jobIds: readonly string[]) => Promise<unknown>;
+  /** The listing's address, for a row's Open listing and Copy link. */
+  listingUrlForJob?: (jobId: string) => string | null;
   /** Moves the selected jobs back to Find jobs in one request. */
   onRemoveReviewJobs?: (jobIds: readonly string[]) => Promise<void>;
   /** Reads a job's listing again when the search kept only its card. */
@@ -173,13 +189,17 @@ export function ReviewQueueScreen(props: {
     onOpenBrowserSession,
     onOpenJobDetails,
     onOpenApplication,
+    onOpenApplications,
     onOpenProfile,
     onOpenSafeguards,
     safeguardBlocker,
+    applicationWorkPaused = false,
     onClaimResumeIdentity,
     onKeepResumeIdentity,
     onRemoveReviewJob,
     onRemoveReviewJobs,
+    onMoveResumesBackToReview,
+    onTakeOutOfApplyQueue,
     onReadJobListing,
     onSetJobResumeApplicationMode,
     onSelectItem,
@@ -362,48 +382,70 @@ export function ReviewQueueScreen(props: {
     return () => window.clearInterval(timer);
   }, [isSelectedJobPreparing, selectedJobId, operationStartedAt]);
 
-  // "Apply to all ready jobs": every job whose resume is ready, in list
-  // order, up to the per-run cap. Jobs already in Applications and jobs whose
-  // application is running are left alone (ADR 0022's "Apply to all").
+  // Apply to the selected jobs, this page or all ready jobs: one press
+  // queues them all, ten at a time inside the daily limit (ADR 0058). Jobs
+  // already in Applications, running, or in the queue are left alone.
   const [applyAllPending, setApplyAllPending] = useState(false);
-  const applicationBatchLimit = Math.min(
-    APPLICATION_PREPARATION_BATCH_LIMIT,
-    Math.max(
-      0,
-      globalDailyApplicationPreparationCapacity?.remaining ??
-        Number.POSITIVE_INFINITY,
-    ),
+  const queuedJobIds = useMemo(
+    () => new Set(listApplyQueueWaitingJobIds(props.applyQueue)),
+    [props.applyQueue],
   );
-  const handleApplyToAllReady = useCallback(() => {
-    const unavailable = new Set([
-      ...preparedJobIds,
-      ...applicationPreparingJobIds,
-    ]);
-    const readyJobIds = queue
-      .filter(
-        (item) =>
-          !isJobPending(item.jobId) && isQueueStageReady(item, unavailable),
-      )
-      .map((item) => item.jobId)
-      .slice(0, applicationBatchLimit);
-    if (readyJobIds.length === 0) {
-      return;
-    }
-    setApplyAllPending(true);
-    void onStartAutoApplyQueue(readyJobIds, applicationAutomationMode).finally(
-      () => {
+  const handleApplyToJobs = useCallback(
+    (jobIds: readonly string[]) => {
+      const unavailable = new Set([
+        ...preparedJobIds,
+        ...applicationPreparingJobIds,
+      ]);
+      const chosen = new Set(jobIds);
+      const readyJobIds = queue
+        .filter(
+          (item) =>
+            chosen.has(item.jobId) &&
+            !queuedJobIds.has(item.jobId) &&
+            !isJobPending(item.jobId) &&
+            isQueueStageReady(item, unavailable),
+        )
+        .map((item) => item.jobId);
+      if (readyJobIds.length === 0) {
+        return;
+      }
+      setApplyAllPending(true);
+      void onStartAutoApplyQueue(
+        readyJobIds,
+        applicationAutomationMode,
+      ).finally(() => {
         setApplyAllPending(false);
-      },
-    );
-  }, [
-    applicationBatchLimit,
-    applicationPreparingJobIds,
-    applicationAutomationMode,
-    onStartAutoApplyQueue,
-    isJobPending,
-    preparedJobIds,
-    queue,
-  ]);
+      });
+    },
+    [
+      applicationPreparingJobIds,
+      applicationAutomationMode,
+      onStartAutoApplyQueue,
+      isJobPending,
+      preparedJobIds,
+      queue,
+      queuedJobIds,
+    ],
+  );
+  const applyQueueView = describeApplyQueue(props.applyQueue, {
+    dailyLimit: globalDailyApplicationPreparationCapacity?.limit ?? null,
+  });
+  const applyQueueStatusItem: PageStatusItem | null =
+    applyQueueView && isApplyQueueOngoing(props.applyQueue)
+      ? {
+          id: "apply-queue",
+          text: `${applyQueueView.title} · ${applyQueueView.detail}`,
+          ...(onOpenApplications
+            ? {
+                action: {
+                  kind: "link" as const,
+                  label: "Open Applications",
+                  onClick: onOpenApplications,
+                },
+              }
+            : {}),
+        }
+      : null;
 
   // Both entry points publish their batch receipt to the workspace.
   const runningBatch =
@@ -534,9 +576,10 @@ export function ReviewQueueScreen(props: {
           title="Shortlisted"
           subnav={props.scopeControl}
           description="Pick a resume level, get the resume ready, then apply."
-          statusItems={
-            interruptedBatchStatusItem ? [interruptedBatchStatusItem] : []
-          }
+          statusItems={[
+            ...(applyQueueStatusItem ? [applyQueueStatusItem] : []),
+            ...(interruptedBatchStatusItem ? [interruptedBatchStatusItem] : []),
+          ]}
         />
       }
     >
@@ -552,14 +595,31 @@ export function ReviewQueueScreen(props: {
           campaignId={props.campaignId}
           draftPreparation={visibleDraftPreparation}
           isApplyToAllPending={applyAllPending || isApplyPending}
-          applicationBatchLimit={applicationBatchLimit}
           isJobPending={isJobPending}
-          onApplyToAllReady={handleApplyToAllReady}
-          applyAllOutcome={describeApplyAllOutcome(applicationAutomationMode)}
+          onApplyToJobs={handleApplyToJobs}
+          {...(props.listingUrlForJob
+            ? { listingUrlForJob: props.listingUrlForJob }
+            : {})}
+          queuedJobIds={queuedJobIds}
+          {...(props.onApproveResumes
+            ? { onApproveResumes: props.onApproveResumes }
+            : {})}
+          applyVerb={
+            applicationAutomationMode === "autonomous_submit"
+              ? "Apply to"
+              : "Prepare"
+          }
+          applyAllOutcome={describeApplyAllOutcome(
+            applicationAutomationMode,
+            globalDailyApplicationPreparationCapacity?.limit ?? null,
+          )}
           onPrepareTailoredDrafts={onPrepareTailoredDrafts}
           {...(onRemoveReviewJobs ? { onRemoveJobs: onRemoveReviewJobs } : {})}
+          {...(onMoveResumesBackToReview ? { onMoveResumesBackToReview } : {})}
+          {...(onTakeOutOfApplyQueue ? { onTakeOutOfApplyQueue } : {})}
           {...(onOpenSafeguards ? { onOpenSafeguards } : {})}
           safeguardBlocker={safeguardBlocker ?? null}
+          applicationWorkPaused={applicationWorkPaused}
           onSelectItem={selectItemAndRevealWorkspace}
           onShowItem={onSelectItem}
           onStopTailoredDraftPreparation={stopVisibleBatch}
@@ -644,6 +704,14 @@ export function ReviewQueueScreen(props: {
                 {...(onClaimResumeIdentity ? { onClaimResumeIdentity } : {})}
                 {...(onKeepResumeIdentity ? { onKeepResumeIdentity } : {})}
                 onRemoveReviewJob={onRemoveReviewJob}
+                {...(onMoveResumesBackToReview
+                  ? { onMoveResumesBackToReview }
+                  : {})}
+                {...(onTakeOutOfApplyQueue &&
+                selectedItem &&
+                queuedJobIds.has(selectedItem.jobId)
+                  ? { onTakeOutOfApplyQueue }
+                  : {})}
                 onSetJobResumeApplicationMode={onSetJobResumeApplicationMode}
                 originalResume={originalResume}
                 {...(profile ? { profile } : {})}
@@ -689,7 +757,7 @@ export function ReviewQueueScreen(props: {
                     the pane's right edge. */}
                 <div className="grid min-w-0 max-w-3xl gap-6">
                   <section className="grid min-w-0 gap-2 border-t border-(--surface-panel-border) pt-5">
-                    <span className="label-mono-xs text-foreground-muted">
+                    <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-muted">
                       About this job
                     </span>
                     {/* An echoed title under a heading looks like a bug; the
@@ -705,8 +773,10 @@ export function ReviewQueueScreen(props: {
                           <span className="delayed-appear">
                             Loading job details…
                           </span>
-                        ) : (selectedDetail.error ??
-                            "The listing text was not captured. Open the full job details to read it.")}
+                        ) : (
+                          (selectedDetail.error ??
+                          "The listing text was not captured. Open the full job details to read it.")
+                        )}
                         {selectedDetail.error ? (
                           <Button onClick={selectedDetail.retry}>Retry</Button>
                         ) : null}

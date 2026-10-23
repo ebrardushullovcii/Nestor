@@ -67,6 +67,13 @@ import {
 } from "../review-queue/review-queue-status";
 import { buildResumeWorkspaceRoute } from "../../lib/resume-workspace-route";
 import {
+  describeApplyQueue,
+  isApplyQueueOngoing,
+  listApplyQueueWaitingJobIds,
+  type ApplyQueueControlAction,
+  type ApplyQueueViewButton,
+} from "../../lib/apply-queue-view";
+import {
   formatDiscoveryRunSourceProblemSummary,
   selectNewestSettledDiscoveryRun,
   summarizeDiscoveryRunSourceProblems,
@@ -90,6 +97,7 @@ export type HomeAction =
   | { kind: "send_prepared"; jobIds: readonly string[] }
   | { kind: "stop_search"; runId: string }
   | { kind: "stop_apply"; runId: string }
+  | { kind: "apply_queue"; action: ApplyQueueControlAction }
   | { kind: "stop_resumes" }
   | { kind: "pause_activity" }
   | { kind: "resume_activity" };
@@ -154,6 +162,8 @@ interface HomeNowItem {
   detail: string;
   stop: HomeButton | null;
   open: HomeButton | null;
+  /** False for work that waits (paused, or until tomorrow): no pulse. */
+  active?: boolean;
 }
 
 interface HomeProblem {
@@ -772,6 +782,37 @@ function countShortlist(
   };
 }
 
+function toHomeQueueButton(
+  button: ApplyQueueViewButton | null,
+): HomeButton | null {
+  if (!button) return null;
+  return {
+    label: button.label,
+    action:
+      button.action === "raise_limit"
+        ? { kind: "navigate", route: applyingSettingsRoute }
+        : { kind: "apply_queue", action: button.action },
+  };
+}
+
+/** The Apply queue, first in Happening now, with its two controls. */
+function buildApplyQueueNowItem(
+  queue: JobFinderRendererWorkspaceSnapshot["applyQueue"],
+  dailyLimit: number | null,
+  results: JobFinderRendererWorkspaceSnapshot["applyJobResults"],
+): HomeNowItem | null {
+  const view = describeApplyQueue(queue, { dailyLimit, results });
+  if (!view) return null;
+  return {
+    id: "apply-queue",
+    title: view.title,
+    detail: view.detail,
+    active: view.active,
+    open: toHomeQueueButton(view.primary),
+    stop: toHomeQueueButton(view.secondary),
+  };
+}
+
 function buildNowItem(
   item: JobFinderTaskCenterItem,
   showPausedApply: boolean,
@@ -988,24 +1029,35 @@ export function buildJobSearchHomeModel(
       item.kind === "discovery" &&
       (item.status === "active" || item.status === "stopping"),
   );
-  const nowItems = tasks.items
-    .map((item) =>
-      buildNowItem(
-        item,
-        workspace.activityControl.paused &&
-          workspace.activityControl.pauseBehavior === "finish_current",
-      ),
-    )
-    .filter((item): item is HomeNowItem => item !== null);
+  const queueNow = buildApplyQueueNowItem(
+    workspace.applyQueue,
+    workspace.dashboard?.globalDailyApplicationPreparationCapacity?.limit ??
+      null,
+    workspace.applyJobResults,
+  );
+  const nowItems = [
+    ...(queueNow ? [queueNow] : []),
+    ...tasks.items
+      .map((item) =>
+        buildNowItem(
+          item,
+          workspace.activityControl.paused &&
+            workspace.activityControl.pauseBehavior === "finish_current",
+        ),
+      )
+      .filter((item): item is HomeNowItem => item !== null),
+  ];
   const searchRunning = hasDiscoveryNow || input.discoveryRunPending;
   const resumesWriting = tasks.items.some(
     (item) => item.kind === "tailored_drafts" && item.status === "active",
   );
-  const applyRunning = tasks.items.some(
-    (item) =>
-      item.kind === "apply" &&
-      (item.status === "active" || item.status === "stopping"),
-  );
+  const applyRunning =
+    isApplyQueueOngoing(workspace.applyQueue) ||
+    tasks.items.some(
+      (item) =>
+        item.kind === "apply" &&
+        (item.status === "active" || item.status === "stopping"),
+    );
 
   if (input.discoveryRunPending && !hasDiscoveryNow) {
     nowItems.unshift({
@@ -1075,10 +1127,11 @@ export function buildJobSearchHomeModel(
     workspace.dashboard?.globalDailyApplicationPreparationCapacity?.remaining ??
       Number.POSITIVE_INFINITY,
   );
-  // One press starts at most one batch, and never more than today's limit.
-  const pressLimit = Math.min(
-    APPLICATION_PREPARATION_BATCH_LIMIT,
-    dailyPreparationRemaining,
+  // One press queues every job: the Apply queue keeps to ten at a time and
+  // to the daily limit by itself (ADR 0058).
+  const pressLimit = Number.POSITIVE_INFINITY;
+  const queuedJobIds = new Set(
+    listApplyQueueWaitingJobIds(workspace.applyQueue),
   );
   // A job its batch never reached goes first when a press covers only some:
   // it has no failed attempt behind it, and it was the one left stranded.
@@ -1089,11 +1142,12 @@ export function buildJobSearchHomeModel(
     ...applications.retryJobIds.filter(
       (jobId) => !applications.notStartedJobIds.includes(jobId),
     ),
-  ].slice(0, pressLimit);
-  const readyJobIdsWithinDailyLimit = shortlist.readyJobIds.slice(
-    0,
-    pressLimit,
-  );
+  ]
+    .filter((jobId) => !queuedJobIds.has(jobId))
+    .slice(0, pressLimit);
+  const readyJobIdsWithinDailyLimit = shortlist.readyJobIds
+    .filter((jobId) => !queuedJobIds.has(jobId))
+    .slice(0, pressLimit);
   /** Why a press covers fewer jobs than are waiting, or null when it covers all. */
   const describePartialPress = (
     n: number,
@@ -1473,9 +1527,11 @@ export function buildJobSearchHomeModel(
       title: "Work is paused",
       detail:
         needsYouCount > 0
-          ? `Resume to continue or start work. ${needsYouCount === 1 ? "1 thing needs" : `${needsYouCount} things need`} you meanwhile.`
-          : "Resume to continue or start work.",
-      primary: { label: "Resume", action: { kind: "resume_activity" } },
+          ? `Continue to start new work again. ${needsYouCount === 1 ? "1 thing needs" : `${needsYouCount} things need`} you meanwhile.`
+          : "Continue to start new work again.",
+      // "Continue", as on the Apply queue: in an app about resumes, a
+      // "Resume" button read as the document.
+      primary: { label: "Continue", action: { kind: "resume_activity" } },
       // The pause holds new work, not the person's answers.
       secondary:
         needsYouCount > 0
@@ -2096,15 +2152,13 @@ export function buildJobSearchHomeModel(
     };
   }
   const paused = workspace.activityControl.paused;
+  // One running item is the Happening now card right under this line, so the
+  // line says what it would say otherwise (the last search, the setup) rather
+  // than the card's title a second time.
   let statusLine: string;
   if (paused) {
     statusLine =
       "Paused. New searches and applications will not start until you resume.";
-  } else if (nowItems.length === 1 && nowItems[0]) {
-    statusLine = `${nowItems[0].title} · ${nowItems[0].detail}`.replace(
-      /\.?$/,
-      ".",
-    );
   } else if (nowItems.length > 1) {
     // "Nothing needs you yet" stood beside a card saying "2 things need you".
     statusLine = `${nowItems.length} things are running. ${

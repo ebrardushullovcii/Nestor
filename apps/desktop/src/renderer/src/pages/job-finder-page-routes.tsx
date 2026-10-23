@@ -755,6 +755,7 @@ export function JobFinderHomeRoute() {
           void context.onSelectCampaign(campaignId);
         }}
         onStopApply={stopApplyRun}
+        onControlApplyQueue={context.onControlApplyQueue}
         onStopResumes={context.onStopTailoredDraftPreparation}
         {...(context.onCancelDiscovery
           ? {
@@ -1661,6 +1662,7 @@ function JobFinderReviewQueueRouteContent() {
       workspace={context.workspace}
     >
       <ReviewQueueScreen
+        applicationWorkPaused={context.workspace.activityControl?.paused ?? false}
         // One plan has nothing to choose between; a picker with one entry
         // was just another row above the list.
         scopeControl={
@@ -1696,6 +1698,11 @@ function JobFinderReviewQueueRouteContent() {
         resumeBatchCheckpoint={
           context.workspace.intelligence.resumeBatchCheckpoint
         }
+        applyQueue={context.workspace.applyQueue}
+        listingUrlForJob={(jobId) =>
+          context.workspace.discoveryJobs.find((job) => job.id === jobId)
+            ?.canonicalUrl ?? null
+        }
         globalDailyApplicationPreparationCapacity={
           context.workspace.dashboard
             ?.globalDailyApplicationPreparationCapacity ?? null
@@ -1721,6 +1728,10 @@ function JobFinderReviewQueueRouteContent() {
           context.onSelectApplicationRecord(recordId);
           context.onNavigateSafely("/job-finder/applications");
         }}
+        onOpenApplications={() =>
+          context.onNavigateSafely("/job-finder/applications")
+        }
+        onApproveResumes={context.onApproveResumes}
         onOpenProfile={context.onOpenProfile}
         {...(() => {
           // A safeguard that has paused the plan refuses every preparation
@@ -1742,6 +1753,8 @@ function JobFinderReviewQueueRouteContent() {
         onClaimResumeIdentity={context.onClaimResumeIdentity}
         onKeepResumeIdentity={context.onKeepResumeIdentity}
         onRemoveReviewJob={context.onRemoveReviewJob}
+        onMoveResumesBackToReview={context.onMoveResumesBackToReview}
+        onTakeOutOfApplyQueue={context.onTakeOutOfApplyQueue}
         onReadJobListing={context.onAssessJobListing}
         {...(context.onRemoveReviewJobs
           ? { onRemoveReviewJobs: context.onRemoveReviewJobs }
@@ -2638,6 +2651,13 @@ export function JobFinderApplicationsRoute() {
         onStartAutoApplyQueue={(jobIds, applicationAutomationMode) => {
           void context.onStartAutoApplyQueue(jobIds, applicationAutomationMode);
         }}
+        applyQueue={context.workspace.applyQueue}
+        onControlApplyQueue={context.onControlApplyQueue}
+        onRaiseDailyLimit={() =>
+          context.onNavigateSafely(
+            "/job-finder/settings#settings-application-authority",
+          )
+        }
         onStartApplyCopilot={context.onStartApplyCopilot}
         onReviewResumePdf={context.onReviewResumePdf}
         onSelectRecord={handleSelectRecord}

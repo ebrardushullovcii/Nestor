@@ -13,6 +13,7 @@ import {
 import { quarantineAgentAnswers } from "../agent-answer-migration";
 import { migrateDiscoveryStorage } from "./discovery-storage";
 import { ensureTailoredAssetJobIndex } from "./tailored-asset-storage";
+import { ensureResumeApprovalState } from "./resume-approval-state";
 
 /**
  * Exact column shape every application-authority table must have. The assert
@@ -2081,6 +2082,7 @@ export function runMigrations(database: DatabaseSync): void {
     ensurePreparedApplicationForms();
     migrateDiscoveryStorage(database);
     ensureTailoredAssetJobIndex(database);
+    ensureResumeApprovalState(database);
     return;
   }
 
@@ -2351,4 +2353,5 @@ export function runMigrations(database: DatabaseSync): void {
   ensurePreparedApplicationForms();
   migrateDiscoveryStorage(database);
   ensureTailoredAssetJobIndex(database);
+  ensureResumeApprovalState(database);
 }

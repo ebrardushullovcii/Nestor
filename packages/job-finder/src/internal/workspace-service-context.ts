@@ -76,6 +76,7 @@ export interface WorkspaceServiceContext {
   exportFileVerifier?: ResumeExportFileVerifier;
   researchAdapter?: ResumeResearchAdapter;
   repository: JobFinderRepository;
+  backgroundWorkReady?: PromiseLike<void>;
   listingAssessmentJobIds?: Set<string>;
   listingActivityIdentityIndex?: ReturnType<
     typeof createListingActivityIdentityIndex
@@ -178,6 +179,9 @@ export interface WorkspaceServiceContext {
   staleApprovedResumeDrafts: (
     staleReason: string,
     jobIds?: readonly string[],
+    profileInputs?: Parameters<
+      NonNullable<JobFinderRepository["staleResumeDrafts"]>
+    >[0]["profileInputs"],
   ) => Promise<void>;
   openRunBrowserSession: (
     source: JobSource,

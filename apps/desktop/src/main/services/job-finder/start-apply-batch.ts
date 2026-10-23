@@ -124,12 +124,12 @@ export async function startApplyBatch(input: {
   onBackgroundSettled: () => void;
   pollMs?: number;
   startTimeoutMs?: number;
-}): Promise<{ startedJobIds: string[] }> {
+}): Promise<{ startedJobIds: string[]; runId: string | null }> {
   const pollMs = input.pollMs ?? 150;
   const timeoutMs = input.startTimeoutMs ?? 20_000;
   const jobIds = await listJobsNotInProgress(input.runs, input.jobIds);
   if (jobIds.length === 0) {
-    return { startedJobIds: [] };
+    return { startedJobIds: [], runId: null };
   }
 
   const knownRunIds = new Set(
@@ -174,10 +174,11 @@ export async function startApplyBatch(input: {
     timeoutMs,
   });
   if (!started.result.ok) throw started.result.error;
+  const runId = (await findNewBatch().catch(() => null))?.id ?? null;
   void work
     .catch((error: unknown) => {
       console.error("Apply to all stopped.", error);
     })
     .finally(input.onBackgroundSettled);
-  return { startedJobIds: jobIds };
+  return { startedJobIds: jobIds, runId };
 }

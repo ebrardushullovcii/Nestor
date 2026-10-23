@@ -403,9 +403,8 @@ describe("buildJobSearchHomeModel · while something runs", () => {
       },
     });
     expect(model.next.id).toBe("wait_search");
-    expect(model.statusLine.startsWith("Searching Replica board · ")).toBe(
-      true,
-    );
+    // The card right under the line says it; the line does not repeat it.
+    expect(model.statusLine).not.toContain("Searching Replica board");
   });
 
   it("shows a search that was just requested before the run is recorded", () => {
@@ -562,7 +561,7 @@ describe("buildJobSearchHomeModel · while something runs", () => {
     expect(model.statusLine.startsWith("Paused.")).toBe(true);
     expect(model.next).toMatchObject({
       id: "paused",
-      primary: { label: "Resume", action: { kind: "resume_activity" } },
+      primary: { label: "Continue", action: { kind: "resume_activity" } },
     });
   });
 });
@@ -1412,7 +1411,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     );
   });
 
-  it("starts only the ready applications that fit today's remaining capacity", () => {
+  it("queues every ready application whatever today's limit has left (ADR 0058)", () => {
     const ready = (id: string) =>
       queueItem(id, {
         assetStatus: "ready",
@@ -1429,27 +1428,20 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       ]),
       2,
     );
-    expect(build(ws).next).toMatchObject({
+    const all = {
       id: "apply",
-      title: "Apply to 2 of 3 ready jobs",
+      title: "Apply to 3 ready jobs",
       primary: {
-        label: "Apply to 2",
-        action: { kind: "apply_all", jobIds: ["job_0", "job_1"] },
+        label: "Apply to all 3",
+        action: { kind: "apply_all", jobIds: ["job_0", "job_1", "job_2"] },
       },
-    });
-    expect(build(withDailyPreparationRemaining(ws, 0)).next).toMatchObject({
-      id: "daily_limit",
-      primary: {
-        label: "Open Applying settings",
-        action: {
-          kind: "navigate",
-          route: "/job-finder/settings#settings-application-authority",
-        },
-      },
-    });
+    };
+    expect(build(ws).next).toMatchObject(all);
+    // The queue waits for tomorrow by itself; the press is the same.
+    expect(build(withDailyPreparationRemaining(ws, 0)).next).toMatchObject(all);
   });
 
-  it("offers a partial retry batch and a Settings step when the daily limit is reached", () => {
+  it("retries every failed application with one press, at any daily limit", () => {
     const ws = withJobs(workspace(), 4);
     ws.applicationRecords = Array.from({ length: 4 }, (_unused, index) => ({
       id: `record-${index}`,
@@ -1473,30 +1465,25 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       updatedAt: "2026-08-15T11:00:00.000Z",
     })) as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
 
-    const partial = build(withDailyPreparationRemaining(ws, 2));
-    expect(partial.next).toMatchObject({
+    const retryAll = {
       id: "retry",
-      title: "Try again for 2 of 4 applications",
       primary: {
-        label: "Try again for 2",
-        action: { kind: "apply_all", jobIds: ["job_0", "job_1"] },
+        label: "Try again for all 4",
+        action: {
+          kind: "apply_all",
+          jobIds: ["job_0", "job_1", "job_2", "job_3"],
+        },
       },
-    });
+    };
+    const partial = build(withDailyPreparationRemaining(ws, 2));
+    expect(partial.next).toMatchObject(retryAll);
     expect(partial.stages?.[2]).toMatchObject({
       count: 4,
       detail: "4 could not apply",
     });
-    expect(build(withDailyPreparationRemaining(ws, 0)).next).toMatchObject({
-      id: "daily_limit",
-      title: "Today's preparation limit is reached",
-      primary: {
-        label: "Open Applying settings",
-        action: {
-          kind: "navigate",
-          route: "/job-finder/settings#settings-application-authority",
-        },
-      },
-    });
+    expect(build(withDailyPreparationRemaining(ws, 0)).next).toMatchObject(
+      retryAll,
+    );
   });
 
   it("puts Needs you ahead of everything else and counts it like the badge", () => {
@@ -1656,35 +1643,68 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
     return ws;
   }
 
-  it("counts all 11 ready jobs and caps only the press at one batch", () => {
+  it("queues all 11 ready jobs with one press", () => {
     const ids = Array.from({ length: 11 }, (_u, i) => `job_${i}`);
     const ws = withShortlist(withJobs(workspace(), 11), ids.map(readyItem));
     const model = build(ws);
     expect(model.stages?.[1]?.detail).toBe("11 ready to apply");
     expect(model.next).toMatchObject({
       id: "apply",
-      title: "Apply to 10 of 11 ready jobs",
-      primary: { label: "Apply to 10" },
+      title: "Apply to 11 ready jobs",
+      primary: { label: "Apply to all 11" },
     });
     expect(
       model.next.primary.action.kind === "apply_all" &&
         model.next.primary.action.jobIds,
-    ).toEqual(ids.slice(0, 10));
-    expect(model.next.detail).toContain(
-      "Job Finder works through 10 at a time. The other 1 stays in Shortlisted for the next press.",
-    );
+    ).toEqual(ids);
   });
 
-  it("counts every retryable application and caps only the press", () => {
+  it("retries every retryable application with one press", () => {
     const ids = Array.from({ length: 12 }, (_u, i) => `job_${i}`);
     const ws = failedApplications(withJobs(workspace(), 12), ids);
     const model = build(ws);
     expect(model.stages?.[2]?.detail).toBe("12 could not apply");
     expect(model.next).toMatchObject({
       id: "retry",
-      title: "Try again for 10 of 12 applications",
-      primary: { label: "Try again for 10" },
+      primary: { label: "Try again for all 12" },
     });
+  });
+
+  it("shows the Apply queue first in Happening now and offers no second Apply", () => {
+    const ids = Array.from({ length: 30 }, (_u, i) => `job_${i}`);
+    const ws = withShortlist(withJobs(workspace(), 30), ids.map(readyItem));
+    ws.applyQueue = {
+      id: "queue_1",
+      mode: "autonomous_submit",
+      state: "waiting_for_tomorrow",
+      jobIds: ids,
+      startedJobIds: ids.slice(0, 20),
+      skipped: [],
+      activeRunId: null,
+      pausedReason: null,
+      resumesAt: new Date(2026, 9, 24, 0, 0, 0).toISOString(),
+      createdAt: "2026-10-23T10:00:00.000Z",
+      updatedAt: "2026-10-23T12:00:00.000Z",
+    };
+    const model = build(withDailyPreparationRemaining(ws, 0));
+    expect(model.now[0]).toMatchObject({
+      id: "apply-queue",
+      title: "Applying to 30 jobs",
+      detail: "Today's limit of 20 is reached · 10 continue after midnight",
+      active: false,
+      open: {
+        label: "Raise the limit",
+        action: {
+          kind: "navigate",
+          route: "/job-finder/settings#settings-application-authority",
+        },
+      },
+      stop: { label: "Stop", action: { kind: "apply_queue", action: "stop" } },
+    });
+    expect(model.next.id).not.toBe("apply");
+    // The card holds the title and the detail; the line does not repeat it.
+    expect(model.now).toHaveLength(1);
+    expect(model.statusLine).not.toContain("Applying to 30 jobs");
   });
 
   it("keeps Try again for all one press away while a form waits to be sent", () => {
@@ -2031,17 +2051,8 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
     const model = build(ws);
     expect(model.next.id).toBe("send");
     expect(model.next.secondary[0]).toEqual({
-      label: "Try again for 1 of 3",
-      action: { kind: "apply_all", jobIds: ["job_1"] },
-    });
-    // With nothing left today, the limit is named instead of silence.
-    const spent = build(withDailyPreparationRemaining(ws, 0));
-    expect(spent.next.secondary[0]).toEqual({
-      label: "Change today's limit",
-      action: {
-        kind: "navigate",
-        route: "/job-finder/settings#settings-application-authority",
-      },
+      label: "Try again for all 3",
+      action: { kind: "apply_all", jobIds: ["job_1", "job_2", "job_3"] },
     });
   });
 });
@@ -2154,10 +2165,11 @@ describe("buildJobSearchHomeModel · planned jobs of a stopped or paused batch",
       blockerReason: "unexpected_navigation",
     } as JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
     const model = build(withDailyPreparationRemaining(ws, 1));
-    expect(model.next).toMatchObject({
-      id: "retry",
-      primary: { action: { kind: "apply_all", jobIds: ["job_1"] } },
-    });
+    expect(model.next).toMatchObject({ id: "retry" });
+    expect(
+      model.next.primary.action.kind === "apply_all" &&
+        model.next.primary.action.jobIds[0],
+    ).toBe("job_1");
   });
 
   it("says a job of a running batch is waiting, not filling in", () => {

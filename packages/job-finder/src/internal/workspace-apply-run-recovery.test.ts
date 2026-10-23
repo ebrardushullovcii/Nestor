@@ -297,7 +297,7 @@ describe("selectReusableBatchApproval", () => {
       describeUnstartedBatchReason(
         "Browser and application activity is paused. Press Resume background work on the Job Finder Home screen before starting new work.",
       ),
-    ).toContain("background work is paused");
+    ).toContain("all work is paused");
     expect(
       describeUnstartedBatchReason(
         "The global daily preparation safeguard allows at most 20 begun employer applications per local day.",

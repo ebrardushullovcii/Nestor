@@ -244,7 +244,7 @@ export function SourceDiagnostics(props: {
             key={`${summary.title}_${summaryIndex}`}
             className="grid gap-2 rounded-(--radius-field) border border-(--surface-panel-border) p-4"
           >
-            <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
+            <p className="text-(length:--text-small) font-semibold leading-5 text-foreground-muted">
               {summary.title}
             </p>
             <dl className="grid gap-2 text-(length:--text-small) leading-6 text-foreground-soft">
@@ -1298,7 +1298,7 @@ export function DiscoveryDetailPanel({
                   className="grid min-w-0 gap-2"
                   data-testid="discovery-detail-listing-text"
                 >
-                  <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-soft">
+                  <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-soft">
                     About this job
                   </span>
                   <p className="min-w-0 max-w-[78ch] text-(length:--text-body) leading-7 text-foreground-soft">
@@ -1328,7 +1328,7 @@ export function DiscoveryDetailPanel({
                     data-job-fact-grid
                   >
                     <div className="surface-card-tint min-w-0 rounded-(--radius-field) border border-(--surface-panel-border) p-4">
-                      <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-soft">
+                      <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-soft">
                         Salary
                       </span>
                       <strong className="mt-2 block text-(length:--text-body) text-(--text-headline)">
@@ -1341,7 +1341,7 @@ export function DiscoveryDetailPanel({
                       ) : null}
                     </div>
                     <div className="surface-card-tint min-w-0 rounded-(--radius-field) border border-(--surface-panel-border) p-4">
-                      <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-soft">
+                      <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-soft">
                         Location and work mode
                       </span>
                       <strong className="mt-2 block text-(length:--text-body) text-(--text-headline)">
@@ -1428,7 +1428,7 @@ export function DiscoveryDetailPanel({
                     data-testid="discovery-detail-listing-activity"
                   >
                     <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                      <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-soft">
+                      <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-soft">
                         Listing status
                       </span>
                       <StatusBadge
@@ -1444,7 +1444,7 @@ export function DiscoveryDetailPanel({
                   </div>
                   {listingDate ? (
                     <div className="surface-card-tint rounded-(--radius-field) border border-(--surface-panel-border) p-4 sm:col-span-2">
-                      <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-soft">
+                      <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-soft">
                         {listingDate.label}
                       </span>
                       <strong className="mt-2 block text-(length:--text-body) text-(--text-headline)">
@@ -1459,7 +1459,7 @@ export function DiscoveryDetailPanel({
                       className="surface-card-tint min-w-0 rounded-(--radius-field) border border-(--surface-panel-border) p-4 sm:col-span-2"
                       data-testid="discovery-detail-skills"
                     >
-                      <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-soft">
+                      <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-soft">
                         Skills mentioned
                       </span>
                       <div className="mt-2 flex min-w-0 flex-wrap gap-1.5">
@@ -1485,7 +1485,7 @@ export function DiscoveryDetailPanel({
                 ) : null}
                 {selectedJob.screeningHints.sponsorshipText ? (
                   <div className="grid gap-2">
-                    <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
+                    <p className="text-(length:--text-small) font-semibold leading-5 text-foreground-muted">
                       Screening hint
                     </p>
                     <p className="text-(length:--text-small) leading-6 text-foreground-soft">
@@ -1495,7 +1495,7 @@ export function DiscoveryDetailPanel({
                 ) : null}
                 {selectedJob.screeningHints.relocationText ? (
                   <div className="grid gap-2">
-                    <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
+                    <p className="text-(length:--text-small) font-semibold leading-5 text-foreground-muted">
                       Relocation
                     </p>
                     <p className="text-(length:--text-small) leading-6 text-foreground-soft">
@@ -1505,7 +1505,7 @@ export function DiscoveryDetailPanel({
                 ) : null}
                 {selectedJob.screeningHints.travelText ? (
                   <div className="grid gap-2">
-                    <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
+                    <p className="text-(length:--text-small) font-semibold leading-5 text-foreground-muted">
                       Travel
                     </p>
                     <p className="text-(length:--text-small) leading-6 text-foreground-soft">
@@ -1516,7 +1516,7 @@ export function DiscoveryDetailPanel({
                 {selectedJob.screeningHints.requiresSecurityClearance ===
                 true ? (
                   <div className="grid gap-2">
-                    <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
+                    <p className="text-(length:--text-small) font-semibold leading-5 text-foreground-muted">
                       Security clearance
                     </p>
                     <p className="text-(length:--text-small) leading-6 text-foreground-soft">
@@ -1559,7 +1559,7 @@ export function DiscoveryDetailPanel({
                     />
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="surface-card-tint min-w-0 rounded-(--radius-field) border border-(--surface-panel-border) p-4 sm:col-span-2">
-                        <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-soft">
+                        <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-soft">
                           Original listing
                         </span>
                         <strong className="mt-2 block break-all text-(length:--text-small) text-(--text-headline)">
@@ -1582,7 +1582,7 @@ export function DiscoveryDetailPanel({
                       selectedJob.applicationUrl !==
                         selectedJob.canonicalUrl ? (
                         <div className="surface-card-tint rounded-(--radius-field) border border-(--surface-panel-border) p-4 sm:col-span-2">
-                          <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-soft">
+                          <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-soft">
                             Application route
                           </span>
                           <strong className="mt-2 block break-all text-(length:--text-small) text-(--text-headline)">
@@ -1592,7 +1592,7 @@ export function DiscoveryDetailPanel({
                       ) : null}
                       {selectedJob.atsProvider ? (
                         <div className="surface-card-tint rounded-(--radius-field) border border-(--surface-panel-border) p-4 sm:col-span-2">
-                          <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-soft">
+                          <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-soft">
                             Applications handled by
                           </span>
                           <strong className="mt-2 block text-(length:--text-body) text-(--text-headline)">
@@ -1616,7 +1616,7 @@ export function DiscoveryDetailPanel({
                     />
                     {selectedJob.employerWebsiteUrl ? (
                       <div className="grid gap-2">
-                        <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
+                        <p className="text-(length:--text-small) font-semibold leading-5 text-foreground-muted">
                           Company site
                         </p>
                         <p className="text-(length:--text-small) leading-6 text-foreground-soft">
@@ -1859,7 +1859,7 @@ export function DiscoveryDetailPanel({
                 >
                   {assessingJobId === selectedJob.id
                     ? "Reading the listing… about a minute"
-                    : "Read and assess listing"}
+                    : "Judge fit"}
                 </Button>
               ) : null}
               {assessmentErrorJobId === selectedJob.id ? (

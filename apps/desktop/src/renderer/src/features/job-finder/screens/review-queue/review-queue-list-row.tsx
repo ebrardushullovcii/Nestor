@@ -1,4 +1,4 @@
-import { memo, type KeyboardEvent } from "react";
+import { memo, type KeyboardEvent, type MouseEvent } from "react";
 import {
   ProgressBar,
   SelectableRow,
@@ -47,6 +47,8 @@ export interface ReviewQueueRowProps {
   possibleDuplicate: boolean;
   jobId: string;
   onSelect: (jobId: string) => void;
+  /** Right-click (or the menu key) on the row. */
+  onOpenMenu?: (event: MouseEvent<HTMLElement>, jobId: string) => void;
   onSelectionKeyDown: (
     event: KeyboardEvent<HTMLButtonElement>,
     jobId: string,
@@ -75,6 +77,7 @@ function ReviewQueueRowComponent({
   possibleDuplicate,
   jobId,
   onSelect,
+  onOpenMenu,
   onSelectionKeyDown,
   resumePolicyCaption,
   selected,
@@ -105,6 +108,9 @@ function ReviewQueueRowComponent({
       <SelectableRow
         as="div"
         className={cn(jobFinderListRowClassName, "text-foreground")}
+        onContextMenu={
+          onOpenMenu ? (event) => onOpenMenu(event, jobId) : undefined
+        }
         selected={selected}
       >
         <button

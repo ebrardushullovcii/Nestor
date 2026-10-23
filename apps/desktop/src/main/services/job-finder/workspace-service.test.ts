@@ -11,9 +11,11 @@ vi.mock("./create-workspace-service", () => ({
 
 import {
   getJobFinderWorkspaceService,
+  beginJobFinderWorkspaceShutdown,
   setJobFinderWorkspaceServiceTestEnv,
   shutdownJobFinderWorkspaceService,
 } from "./workspace-service";
+import * as startupView from "./startup-workspace-view";
 
 function deferredService(label: string) {
   let resolveService: (service: {
@@ -36,7 +38,7 @@ function deferredService(label: string) {
 }
 
 beforeEach(async () => {
-  await shutdownJobFinderWorkspaceService();
+  await setJobFinderWorkspaceServiceTestEnv(null);
 });
 
 afterEach(async () => {
@@ -45,6 +47,35 @@ afterEach(async () => {
 });
 
 describe("getJobFinderWorkspaceService", () => {
+  test("quit cancels startup waiting on the window without constructing a late workspace", async () => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const wait = vi
+      .spyOn(startupView, "waitForSavedStartupWorkspace")
+      .mockReturnValue(ready);
+    const finish = vi
+      .spyOn(startupView, "releaseStartupWorkspaceHydration")
+      .mockImplementation(release);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const opening = getJobFinderWorkspaceService();
+      const cancelled = expect(opening).rejects.toThrow(
+        "closed before startup finished",
+      );
+      beginJobFinderWorkspaceShutdown();
+      await expect(getJobFinderWorkspaceService()).rejects.toThrow("closing");
+      await shutdownJobFinderWorkspaceService();
+      await cancelled;
+      expect(mockCreateJobFinderWorkspaceServiceAsync).not.toHaveBeenCalled();
+    } finally {
+      wait.mockRestore();
+      finish.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
   test("keeps a rejected initialization from staying memoized forever", async () => {
     const service = deferredService("retry-success");
     mockCreateJobFinderWorkspaceServiceAsync

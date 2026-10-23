@@ -186,6 +186,30 @@ describe("ReviewQueueListPanel", () => {
     expect(onSelectItem).toHaveBeenCalledWith("one");
   });
 
+  it("drops the ticks of approved resumes once the approval lands", async () => {
+    const toReview = (jobId: string) =>
+      ({
+        ...createReadyItem(jobId),
+        resumeTailoringMode: "aggressive",
+        resumeReview: { status: "not_started" },
+      }) as unknown as ReviewQueueItem;
+    const onApproveResumes = vi.fn(() => Promise.resolve());
+    renderPanel({
+      onApproveResumes,
+      onPrepareTailoredDrafts: vi.fn(),
+      queue: [toReview("one"), toReview("two"), createEligibleItem("three")],
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Role one" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Role two" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Select Role three" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Approve 2 resumes" }));
+    expect(onApproveResumes).toHaveBeenCalledExactlyOnceWith(["one", "two"]);
+    // The job that still needs a resume keeps its tick.
+    await vi.waitFor(() => expect(screen.getByText("1 selected")).toBeTruthy());
+  });
+
   it("removes the ticked jobs from the shortlist in one request", async () => {
     const onRemoveJobs = vi.fn(() => Promise.resolve());
     renderPanel({
@@ -202,7 +226,7 @@ describe("ReviewQueueListPanel", () => {
       screen.getByRole("checkbox", { name: "Select Role ready" }),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: "Remove from shortlist" }),
+      screen.getByRole("button", { name: "Move back to Find jobs" }),
     );
     await vi.waitFor(() =>
       expect(onRemoveJobs).toHaveBeenCalledExactlyOnceWith(["one", "ready"]),
@@ -291,9 +315,9 @@ describe("ReviewQueueListPanel", () => {
 
   it("offers one press to create every missing resume and one to apply to every ready job", () => {
     const onPrepareTailoredDrafts = vi.fn();
-    const onApplyToAllReady = vi.fn();
+    const onApplyToJobs = vi.fn();
     renderPanel({
-      onApplyToAllReady,
+      onApplyToJobs,
       onPrepareTailoredDrafts,
       queue: [
         createEligibleItem("job_a"),
@@ -311,7 +335,7 @@ describe("ReviewQueueListPanel", () => {
     fireEvent.click(
       within(row).getByRole("button", { name: "Apply to the 1 ready job" }),
     );
-    expect(onApplyToAllReady).toHaveBeenCalledWith(1);
+    expect(onApplyToJobs).toHaveBeenCalledWith(["job_c"]);
     // The reassurance is the button's tooltip, not a paragraph under it.
     expect(
       within(row)
@@ -327,19 +351,19 @@ describe("ReviewQueueListPanel", () => {
 
   it("says under Apply to all which saved mode the batch runs in", () => {
     renderPanel({
-      applyAllOutcome: describeApplyAllOutcome("autonomous_submit"),
-      onApplyToAllReady: vi.fn(),
+      applyAllOutcome: describeApplyAllOutcome("autonomous_submit", 20),
+      onApplyToJobs: vi.fn(),
       queue: [createReadyItem("job_a"), createReadyItem("job_b")],
     });
 
     expect(screen.getByTestId("apply-all-outcome").textContent).toBe(
-      "Apply to all fills in and sends each application, and stops only for one that needs you.",
+      "Sends each application for you and stops only for one that needs you. Ten at a time, up to 20 a day, with no more presses.",
     );
   });
 
   it("leaves a job already in Applications out of the ready count", () => {
     renderPanel({
-      onApplyToAllReady: vi.fn(),
+      onApplyToJobs: vi.fn(),
       preparedJobIds: new Set(["job_done"]),
       queue: [createReadyItem("job_done"), createReadyItem("job_ready")],
     });
@@ -436,7 +460,7 @@ describe("ReviewQueueListPanel", () => {
   it("replaces Apply to all with Open Safeguards while a safeguard holds, without internal codes", () => {
     const onOpenSafeguards = vi.fn();
     renderPanel({
-      onApplyToAllReady: vi.fn(),
+      onApplyToJobs: vi.fn(),
       onOpenSafeguards,
       queue: [createReadyItem("job_a"), createReadyItem("job_b")],
       safeguardBlocker:
@@ -458,8 +482,8 @@ describe("ReviewQueueListPanel", () => {
 
     // Each row says its status once: the badge. A caption that only
     // repeated it ("No resume yet" under "Needs a resume", "Resume
-    // approved" under "Ready to apply") is gone. The badge uses the status
-    // tab's own words.
+    // approved" under "Ready to apply") is gone. The badge says the status
+    // in full; its tab uses a shorter name.
     expect(screen.queryByText("No resume yet")).toBeNull();
     expect(
       screen
@@ -610,7 +634,7 @@ it("excludes a locally pending rewrite from the bulk ready count", () => {
   renderPanel({
     queue: items,
     isJobPending: (jobId) => jobId === "pending",
-    onApplyToAllReady: vi.fn(),
+    onApplyToJobs: vi.fn(),
   });
   expect(
     screen.getByRole("button", { name: "Apply to the 1 ready job" }),
@@ -666,7 +690,7 @@ it("counts a job whose resume is being written under Writing, as its row says", 
     ],
     onPrepareTailoredDrafts: vi.fn(),
   });
-  expect(screen.getByRole("button", { name: "Needs a resume: 1 jobs" }))
+  expect(screen.getByRole("button", { name: "No resume: 1 jobs" }))
     .toBeTruthy();
   expect(screen.getByRole("button", { name: "Writing: 1 jobs" })).toBeTruthy();
   expect(
@@ -680,7 +704,7 @@ it("says nothing about the filter when every job the button covers is shown", ()
     queue: [createEligibleItem("one"), createEligibleItem("two"), ready],
     onPrepareTailoredDrafts: vi.fn(),
   });
-  fireEvent.click(screen.getByRole("button", { name: /^Needs a resume: 2/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^No resume: 2/ }));
   expect(screen.getByRole("button", { name: "Create 2 missing resumes" }))
     .toBeTruthy();
   expect(screen.queryByTestId("shortlist-bulk-filter-scope")).toBeNull();
@@ -698,7 +722,7 @@ it("opens the first job of a status tab when the open job is not in it, and keep
     onShowItem,
     selectedItem: ready,
   });
-  fireEvent.click(screen.getByRole("button", { name: /^Needs a resume: 2/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^No resume: 2/ }));
   expect(onShowItem).toHaveBeenCalledExactlyOnceWith("first");
   expect(onSelectItem).not.toHaveBeenCalled();
   view.unmount();
@@ -709,24 +733,57 @@ it("opens the first job of a status tab when the open job is not in it, and keep
     onShowItem,
     selectedItem: second,
   });
-  fireEvent.click(screen.getByRole("button", { name: /^Needs a resume: 2/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^No resume: 2/ }));
   expect(onShowItem).not.toHaveBeenCalled();
 });
 
-it("explains the next ten out of 53 ready applications before starting", () => {
-  const onApplyToAllReady = vi.fn();
+it("queues all 53 ready applications with one press, or just this page", () => {
+  const onApplyToJobs = vi.fn();
   renderPanel({
     queue: Array.from({ length: 53 }, (_, i) => createReadyItem(`ready_${i}`)),
-    applicationBatchLimit: 10,
-    onApplyToAllReady,
+    onApplyToJobs,
+  });
+  expect(screen.queryByText(/start now/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Apply to all 53 ready" }));
+  expect(onApplyToJobs).toHaveBeenLastCalledWith(
+    Array.from({ length: 53 }, (_, i) => `ready_${i}`),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Apply to these 50" }));
+  expect(onApplyToJobs.mock.lastCall?.[0]).toHaveLength(50);
+});
+
+it("leaves jobs an Apply queue already holds out of the ready count", () => {
+  renderPanel({
+    queue: [createReadyItem("queued"), createReadyItem("free")],
+    queuedJobIds: new Set(["queued"]),
+    onApplyToJobs: vi.fn(),
   });
   expect(
-    screen.getByText(/53 ready jobs. 10 start now; 43 remain after this batch/),
+    screen.getByRole("button", { name: "Apply to the 1 ready job" }),
   ).toBeTruthy();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Apply to next 10 ready jobs" }),
+});
+
+it("applies to the ticked ready jobs and says how many still need a resume", () => {
+  const onApplyToJobs = vi.fn();
+  renderPanel({
+    queue: [
+      createReadyItem("ready_a"),
+      createReadyItem("ready_b"),
+      createEligibleItem("missing_a"),
+    ],
+    onApplyToJobs,
+    applyVerb: "Prepare",
+  });
+  for (const checkbox of screen.getAllByRole("checkbox").slice(1)) {
+    fireEvent.click(checkbox);
+  }
+  expect(screen.getByTestId("apply-selected-not-ready").textContent).toBe(
+    "1 of the selected needs its resume first; Create 1 resume writes the missing ones.",
   );
-  expect(onApplyToAllReady).toHaveBeenCalledWith(10);
+  fireEvent.click(screen.getByRole("button", { name: "Prepare 2 selected" }));
+  expect(onApplyToJobs).toHaveBeenCalledWith(
+    expect.arrayContaining(["ready_a", "ready_b"]),
+  );
 });
 
 it("names all 33 missing resumes in one control", () => {
@@ -761,7 +818,7 @@ it("filters by resume status with counts while Create missing resumes stays plan
     within(filters).getByRole("button", { name: "All: 103 jobs" }),
   ).toBeTruthy();
   fireEvent.click(
-    within(filters).getByRole("button", { name: "Ready to apply: 2 jobs" }),
+    within(filters).getByRole("button", { name: "Ready: 2 jobs" }),
   );
   expect(screen.getByText("Role page-50")).toBeTruthy();
   expect(screen.queryByText("Role page-0")).toBeNull();

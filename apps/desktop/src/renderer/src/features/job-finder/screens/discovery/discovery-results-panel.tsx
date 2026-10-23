@@ -123,6 +123,15 @@ import type { DiscoveryLatestRunVerdict } from "./discovery-run-feedback";
 import { useAssistantContextSource } from "../../assistant/assistant-provider";
 import { buildListContext } from "../../assistant/assistant-context-capture";
 import {
+  listingRowMenuEntries,
+  openRowContextMenu,
+  type RowMenuEntry,
+} from "../../lib/row-context-menu";
+import {
+  isNewSinceVisit,
+  useSinceLastVisit,
+} from "../../hooks/use-since-last-visit";
+import {
   DISCOVERY_OFFLINE_RUNTIME_LABEL,
   DISCOVERY_OFFLINE_SETUP_NOTICE,
   getDiscoveryRuntimeProjection,
@@ -855,8 +864,21 @@ export function DiscoveryResultsPanel({
   // the sorted list, which keeps its order.
   const sortedJobs = sortDiscoveryResults(jobs, sortField, sortDirection);
   const normalizedQuery = normalizeCollectionSearch(deferredQuery);
+  // Jobs first seen since the person last left Find jobs: a dot on the row
+  // and one press to see only them.
+  const previousVisitEnd = useSinceLastVisit("discovery", jobs);
+  const newJobCount = useMemo(
+    () =>
+      previousVisitEnd
+        ? jobs.filter((job) => isNewSinceVisit(job, previousVisitEnd)).length
+        : 0,
+    [jobs, previousVisitEnd],
+  );
+  const [newOnlyRequested, setNewOnly] = useState(false);
+  const newOnly = newOnlyRequested && newJobCount > 0;
   const filteredJobs = useMemo(() => {
     if (
+      !newOnly &&
       normalizedQuery === "" &&
       recommendationFilters.size === 0 &&
       sourceFilters.size === 0 &&
@@ -884,11 +906,14 @@ export function DiscoveryResultsPanel({
         (workModeFilters.size === 0 ||
           workModes.some((workMode) => workModeFilters.has(workMode))) &&
         (activityFilters.size === 0 || activityFilters.has(activity.status)) &&
+        (!newOnly || isNewSinceVisit(job, previousVisitEnd)) &&
         matchesDiscoveryJobSearch(job, normalizedQuery)
       );
     });
   }, [
     activityFilters,
+    newOnly,
+    previousVisitEnd,
     normalizedQuery,
     recommendationFilters,
     sortedJobs,
@@ -1001,6 +1026,49 @@ export function DiscoveryResultsPanel({
       shortlistInFlight.current = false;
       setIsShortlisting(false);
     }
+  };
+  // Right-click: a ticked row acts for every ticked job, like a file list;
+  // any other row acts for itself.
+  const rowMenuFor = (job: JobListRow): RowMenuEntry[] => {
+    const forTicked =
+      bulkSelectedJobIds.has(job.id) && bulkSelectedJobIds.size > 1;
+    const shortlistable = forTicked
+      ? selectedShortlistableJobs.map((candidate) => candidate.id)
+      : selectablePageJobIds.includes(job.id)
+        ? [job.id]
+        : [];
+    const hideCount = forTicked ? bulkSelectedJobIds.size : 1;
+    return [
+      ...(onShortlistJobs
+        ? [
+            {
+              id: "shortlist",
+              label: forTicked
+                ? `Shortlist ${shortlistable.length} ticked`
+                : "Shortlist",
+              enabled: shortlistable.length > 0 && !isShortlisting,
+              run: () =>
+                forTicked
+                  ? shortlistSelected()
+                  : onShortlistJobs(shortlistable),
+            },
+          ]
+        : []),
+      ...(onDismissJobs
+        ? [
+            {
+              id: "hide",
+              label: forTicked ? `Hide ${hideCount} ticked` : "Hide",
+              enabled: !isShortlisting,
+              run: () =>
+                forTicked
+                  ? dismissSelected()
+                  : onDismissJobs([job.id]).catch(() => undefined),
+            },
+          ]
+        : []),
+      ...(forTicked ? [] : listingRowMenuEntries(job.canonicalUrl)),
+    ];
   };
   // Every job the filters and search match, on every page, that a bulk
   // action can still act on.
@@ -1519,7 +1587,7 @@ export function DiscoveryResultsPanel({
               view.setQuery(query);
               moveToPage(0);
             }}
-            placeholder="Search results"
+            placeholder="Search jobs"
             placement="panel"
             query={view.query}
             totalCount={jobs.length}
@@ -1627,6 +1695,35 @@ export function DiscoveryResultsPanel({
                 </div>
               ) : null}
             </details>
+          ) : null}
+          {newJobCount > 0 ? (
+            <button
+              aria-pressed={newOnly}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1.5 rounded-(--radius-small) px-1.5 text-(length:--text-small) tabular-nums outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring",
+                newOnly
+                  ? "bg-secondary font-medium text-foreground"
+                  : "text-foreground-soft",
+              )}
+              data-testid="discovery-new-since-visit"
+              onClick={() => {
+                setNewOnly(!newOnly);
+                moveToPage(0);
+              }}
+              title={
+                newOnly
+                  ? "Show every job again"
+                  : "Show only the jobs found since you last looked"
+              }
+              type="button"
+            >
+              <span
+                aria-hidden="true"
+                className="size-2 rounded-full bg-(--info-text)"
+              />
+              {newJobCount} new
+              {newOnly ? <X aria-hidden="true" className="size-3" /> : null}
+            </button>
           ) : null}
           {hiddenJobsControl}
           {onJudgeUnjudgedJobs ? (
@@ -2116,6 +2213,9 @@ export function DiscoveryResultsPanel({
                         className={baseButtonClasses}
                         aria-keyshortcuts="ArrowUp ArrowDown Home End"
                         data-collection-item-id={job.id}
+                        onContextMenu={(event) =>
+                          openRowContextMenu(event, rowMenuFor(job))
+                        }
                         onClick={(event) => {
                           if (
                             onShortlistJobs &&
@@ -2149,6 +2249,15 @@ export function DiscoveryResultsPanel({
                               className={jobFinderListRowTitleClassName}
                               title={job.title}
                             >
+                              {isNewSinceVisit(job, previousVisitEnd) ? (
+                                <span
+                                  className="mr-1.5 inline-block size-2 rounded-full bg-(--info-text) align-middle"
+                                  data-new-since-visit
+                                  title="New since your last visit"
+                                >
+                                  <span className="sr-only">New: </span>
+                                </span>
+                              ) : null}
                               {job.title}
                             </strong>
                             {/* One slot, one verdict: the fit and, when it is

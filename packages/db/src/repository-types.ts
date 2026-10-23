@@ -19,6 +19,7 @@ import type {
   CandidateProfile,
   JobFinderDiscoveryState,
   JobFinderActivityControl,
+  ApplyQueue,
   JobFinderRepositoryState,
   JobFinderIntelligenceState,
   JobFinderSettings,
@@ -591,20 +592,27 @@ export interface JobFinderRepository
   }): Promise<void>;
   clearResumeApproval(input: {
     draft: ResumeDraft;
-    staleReason: string;
+    /** Null when an undo puts the draft back as it was. */
+    staleReason: string | null;
     tailoredAsset?: TailoredAsset | null;
   }): Promise<void>;
   /**
    * Marks stored drafts stale in one transaction, as clearResumeApproval
    * does for one: status, reason and time, no approval, the job's exports
    * unapproved, and the job's first tailored asset without its file. Only
-   * those fields change, so whole drafts (often most of a megabyte each)
-   * are not read, validated and written again. Unknown ids are skipped.
+   * those fields change in the commit; the file repository then folds them
+   * into the bodies in bounded background slices for older builds. Whole
+   * drafts are not read or validated by the save. Unknown ids are skipped.
    */
   staleResumeDrafts?(input: {
     draftIds: readonly string[];
     staleReason: string;
     updatedAt: string;
+    /** The explicit profile save and its approval invalidation share a commit. */
+    profileInputs?: {
+      profile: CandidateProfile;
+      searchPreferences?: JobSearchPreferences;
+    };
   }): Promise<void>;
   listApplicationRecords(): Promise<readonly ApplicationRecord[]>;
   upsertApplicationRecord(
@@ -733,6 +741,9 @@ export interface JobFinderRepository
   ): Promise<JobFinderIntelligenceState>;
   getActivityControl(): Promise<JobFinderActivityControl>;
   saveActivityControl(activityControl: JobFinderActivityControl): Promise<void>;
+  /** The one saved Apply queue (Apply to selected, this page or all), or null. */
+  getApplyQueue(): Promise<ApplyQueue | null>;
+  saveApplyQueue(queue: ApplyQueue | null): Promise<void>;
 }
 
 export interface AutomaticWorkspaceBackupOptions {
@@ -848,6 +859,8 @@ export interface FileJobFinderRepositoryOptions {
    * reads. Omitted or null validates every row.
    */
   rowValidationStamp?: PromiseLike<string | null> | string | null;
+  /** Let the initial display finish before validating unopened full job rows. */
+  backgroundValidationReady?: PromiseLike<void>;
 }
 
 export type StateTableKey =
@@ -858,7 +871,8 @@ export type StateTableKey =
   | "discovery_state"
   | "campaign_state"
   | "intelligence_state"
-  | "activity_control";
+  | "activity_control"
+  | "apply_queue";
 
 export interface SchemaParser<TValue> {
   parse: (value: unknown) => TValue;

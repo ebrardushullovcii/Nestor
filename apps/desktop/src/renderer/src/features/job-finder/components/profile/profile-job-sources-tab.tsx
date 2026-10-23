@@ -10,6 +10,7 @@ import type {
 } from "@nestor/contracts";
 import { StatusBadge } from "../status-badge";
 import { Button } from "@renderer/components/ui/button";
+import { PageNavigation } from "../page-navigation";
 import {
   isSourceCheckQueueActive,
   startSourceCheckQueue,
@@ -184,7 +185,7 @@ export function filterJobSources(
 
 interface SourcePagerProps {
   "aria-label": string;
-  children: ReactNode;
+  children?: ReactNode;
   className: string;
   currentPage: number;
   moveToPage: (nextPage: number) => void;
@@ -193,34 +194,19 @@ interface SourcePagerProps {
   previousAriaLabel?: string;
 }
 
+/** The same numbered pager the three lists use, with this list's range. */
 function SourcePager(props: SourcePagerProps) {
   return (
     <nav aria-label={props["aria-label"]} className={props.className}>
-      <Button
-        {...(props.previousAriaLabel
-          ? { "aria-label": props.previousAriaLabel }
-          : {})}
-        disabled={props.currentPage === 0}
-        onClick={() => props.moveToPage(Math.max(0, props.currentPage - 1))}
-        size="sm"
-        type="button"
-        variant="outline"
-      >
-        Previous
-      </Button>
       {props.children}
-      <Button
-        {...(props.nextAriaLabel ? { "aria-label": props.nextAriaLabel } : {})}
-        disabled={props.currentPage >= props.pageCount - 1}
-        onClick={() =>
-          props.moveToPage(Math.min(props.pageCount - 1, props.currentPage + 1))
-        }
-        size="sm"
-        type="button"
-        variant="outline"
-      >
-        Next
-      </Button>
+      <PageNavigation
+        nextLabel={props.nextAriaLabel ?? "Next"}
+        onPageChange={(nextPage) => props.moveToPage(nextPage - 1)}
+        page={props.currentPage + 1}
+        pageCount={props.pageCount}
+        pending={false}
+        previousLabel={props.previousAriaLabel ?? "Previous"}
+      />
     </nav>
   );
 }
@@ -450,12 +436,18 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
     }
   };
 
+  // A tick is the whole act too, like a Settings switch: it saves at once
+  // instead of turning the page's footer to "Unsaved changes".
   const toggleTarget = (targetId: string, enabled: boolean) => {
     updateDiscoveryTargets(
       discoveryTargets.map((target) =>
         target.id === targetId ? { ...target, enabled } : target,
       ),
     );
+    if (props.onSaveNow) {
+      const saveNow = props.onSaveNow;
+      window.setTimeout(() => saveNow(), 0);
+    }
   };
 
   const moveToPage = (nextPage: number) => {
@@ -646,11 +638,7 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
                 nextAriaLabel="Next source page (top of list)"
                 pageCount={pageCount}
                 previousAriaLabel="Previous source page (top of list)"
-              >
-                <span className="text-(length:--text-small) text-foreground-muted">
-                  Page {currentPage + 1} of {pageCount}
-                </span>
-              </SourcePager>
+              />
             ) : null}
           </div>
         </div>
@@ -846,12 +834,9 @@ export function ProfileJobSourcesTab(props: ProfileJobSourcesTabProps) {
                               toggleTarget(target.id, checked === true)
                             }
                           />
-                          <span>
-                            Include in search
-                            <span className="ml-1.5 text-(length:--text-tiny) uppercase tracking-(--tracking-mono) text-foreground-muted">
-                              {target.enabled ? "On" : "Off"}
-                            </span>
-                          </span>
+                          {/* The tick says on or off; a word beside it
+                              said it again. */}
+                          <span>Include in search</span>
                         </label>
                         <Button
                           aria-label={`Check ${displayName}`}

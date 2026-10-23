@@ -11,6 +11,108 @@ import {
   resolveJobLocationDisplay,
 } from "./job-employer-location-display";
 
+/**
+ * Every screen, so "set" then Enter opens Settings. The extra words are what
+ * a person might type for it.
+ */
+function screen(
+  id: string,
+  title: string,
+  subtitle: string,
+  href: string,
+  words: readonly string[],
+): JobFinderGlobalSearchEntry {
+  return {
+    href,
+    id: `screen:${id}`,
+    kind: "screen",
+    metadata: words,
+    subtitle,
+    title,
+  };
+}
+
+const SCREEN_ENTRIES: readonly JobFinderGlobalSearchEntry[] = [
+  screen("home", "Home", "Your next step", "/job-finder/home", ["start"]),
+  screen(
+    "profile",
+    "Profile",
+    "Experience and documents",
+    JOB_FINDER_ROUTE_PATHS.profile,
+    ["resume", "experience"],
+  ),
+  screen(
+    "job-sources",
+    "Job sources",
+    "Profile",
+    JOB_FINDER_ROUTE_PATHS.profileSources,
+    ["sites", "boards", "feeds"],
+  ),
+  screen(
+    "discovery",
+    "Find jobs",
+    "Search and triage",
+    JOB_FINDER_ROUTE_PATHS.discovery,
+    ["discover", "search now"],
+  ),
+  screen(
+    "review-queue",
+    "Shortlisted",
+    "Resumes and applying",
+    JOB_FINDER_ROUTE_PATHS.reviewQueue,
+    ["review", "approve"],
+  ),
+  screen(
+    "applications",
+    "Applications",
+    "Where each application stands",
+    JOB_FINDER_ROUTE_PATHS.applications,
+    ["tracker", "interviews"],
+  ),
+  screen(
+    "campaigns",
+    "Search plans",
+    "Roles, places and sources",
+    JOB_FINDER_ROUTE_PATHS.campaigns,
+    ["plans"],
+  ),
+  screen(
+    "companies",
+    "Companies",
+    "Employers in your jobs",
+    "/job-finder/companies",
+    ["employers"],
+  ),
+  screen(
+    "analytics",
+    "Outcomes",
+    "Replies and interviews",
+    "/job-finder/analytics",
+    ["stats"],
+  ),
+  screen(
+    "safeguards",
+    "Safeguards",
+    "Limits and checks",
+    "/job-finder/safeguards",
+    ["limits"],
+  ),
+  screen(
+    "settings",
+    "Settings",
+    "Applying, AI, appearance",
+    JOB_FINDER_ROUTE_PATHS.settings,
+    ["preferences", "options"],
+  ),
+  screen(
+    "settings-applying",
+    "Applying settings",
+    "Settings",
+    `${JOB_FINDER_ROUTE_PATHS.settings}#settings-application-authority`,
+    ["send for me", "daily limit", "fill in"],
+  ),
+];
+
 export function buildJobFinderGlobalSearchEntries(
   workspace: JobFinderRendererWorkspaceSnapshot,
 ): readonly JobFinderGlobalSearchEntry[] {
@@ -175,6 +277,7 @@ export function buildJobFinderGlobalSearchEntries(
   );
 
   return [
+    ...SCREEN_ENTRIES,
     ...campaignEntries,
     ...jobEntries,
     ...applicationEntries,

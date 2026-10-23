@@ -31,7 +31,11 @@ Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
   configurable: true,
   value: vi.fn(),
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // The list remembers its search and stage; each test starts without them.
+  window.localStorage.clear();
+});
 
 describe("ApplicationsRecordsPanel", () => {
   it("removes stale preparing guidance from a failed row", () => {
@@ -349,9 +353,12 @@ describe("ApplicationsRecordsPanel", () => {
     const firstRowAction = screen.getByRole("button", {
       name: "View details for Product Engineer 1 at Acme",
     });
-    // The row IS the action now (the shared SelectableRow primitive), rather
-    // than an absolutely positioned overlay button on top of the content.
-    expect(firstRowAction.getAttribute("data-slot")).toBe("selectable-row");
+    // The details action fills the shared SelectableRow, as on Shortlisted,
+    // rather than an absolutely positioned overlay button on top of the
+    // content; the row's Open form button sits beside it, not inside it.
+    expect(
+      firstRowAction.parentElement?.getAttribute("data-slot"),
+    ).toBe("selectable-row");
     expect(firstRowAction.className).toContain("w-full");
     expect(firstRowAction.className).not.toContain("absolute");
     fireEvent.click(firstRowAction);
@@ -460,7 +467,9 @@ describe("ApplicationsRecordsPanel", () => {
     // list's own two-column grid. `list-row.test.tsx` pins that the three
     // panels agree; this pins what the Applications row itself renders.
     const rowLines = rowAction?.firstElementChild;
-    expect(rowLines?.className).toBe(jobFinderListRowLinesClassName);
+    expect(
+      rowLines?.className.startsWith(jobFinderListRowLinesClassName),
+    ).toBe(true);
     const rowTitleLine = rowLines?.firstElementChild;
     expect(rowTitleLine?.className).toBe(jobFinderListRowTitleLineClassName);
     const rowBadgeSlot = rowTitleLine?.lastElementChild;

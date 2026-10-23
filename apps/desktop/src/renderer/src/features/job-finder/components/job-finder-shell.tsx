@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import type { RecentChange } from "../lib/recent-changes";
 import { BrowserPeek } from "./browser-peek";
 import { AssistantSidebar } from "../assistant/assistant-sidebar";
 import { AssistantToggle } from "../assistant/assistant-toggle";
@@ -92,6 +93,7 @@ import {
 import { isImeComposingEvent } from "../lib/job-finder-shortcuts";
 import { useJobFinderOverlayOwnership } from "../lib/job-finder-overlay-ownership";
 import { useJobFinderShellShortcuts } from "../lib/use-job-finder-shell-shortcuts";
+import { useHistoryNavigationShortcuts } from "../lib/use-history-navigation-shortcuts";
 import { getDefaultProfileRoute } from "../lib/job-finder-utils";
 import { JobFinderShellBrand } from "./job-finder-shell-brand";
 import {
@@ -117,6 +119,7 @@ interface JobFinderShellProps {
   onPrepareRemainingJobs?: (
     jobIds: readonly string[],
   ) => void | Promise<unknown>;
+  onUndoRecentChange?: (change: RecentChange) => Promise<boolean>;
   onRetrySave?: () => void;
   onStopTailoredDraftPreparation?: () => void;
   platform: "darwin" | "linux" | "win32";
@@ -548,6 +551,7 @@ export function JobFinderShell({
   onDismissSavedStatus,
   onNavigate,
   onPrepareRemainingJobs,
+  onUndoRecentChange,
   onRetrySave,
   onStopTailoredDraftPreparation,
   platform,
@@ -560,6 +564,12 @@ export function JobFinderShell({
   const isWindows = platform === "win32";
   const location = useLocation();
   const navigate = useNavigate();
+  const stepHistory = useCallback(
+    (step: -1 | 1) => {
+      void navigate(step);
+    },
+    [navigate],
+  );
   const mainRef = useRef<HTMLElement | null>(null);
   const dragRegionStyle = { WebkitAppRegion: "drag" } as CSSProperties;
   const noDragRegionStyle = { WebkitAppRegion: "no-drag" } as CSSProperties;
@@ -1237,6 +1247,13 @@ export function JobFinderShell({
     ...(assistant ? { onToggleAssistant: assistant.toggle } : {}),
     onToggleSidebar: toggleSidebar,
   });
+  useHistoryNavigationShortcuts(stepHistory);
+  useEffect(
+    // A clicked "Search finished" notice opens the screen it is about.
+    () =>
+      window.nestor?.jobFinder?.onOpenRoute?.((route) => void navigate(route)),
+    [navigate],
+  );
 
   return (
     <div
@@ -1829,6 +1846,7 @@ export function JobFinderShell({
                 }
               }}
               onPrepareRemainingJobs={onPrepareRemainingJobs}
+              onUndoRecentChange={onUndoRecentChange}
               onStopTailoredDraftPreparation={onStopTailoredDraftPreparation}
               resumeImportProgress={resumeImportProgress}
               tailoredDraftPreparation={tailoredDraftPreparation}

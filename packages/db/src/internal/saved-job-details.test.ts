@@ -118,3 +118,30 @@ test("invalid unopened detail fails background validation and the next list read
     0,
   );
 });
+
+test("startup can defer full validation while opened details still validate immediately", async () => {
+  const db = database();
+  db.exec("CREATE TABLE saved_jobs (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  const invalid = { ...createSavedJob({ id: "a" }), description: 17 };
+  db.prepare("INSERT INTO saved_jobs VALUES (?, ?)").run(
+    "a",
+    JSON.stringify(invalid),
+  );
+  let finishDisplay!: () => void;
+  const backgroundValidationReady = new Promise<void>((resolve) => {
+    finishDisplay = resolve;
+  });
+  const read = createSavedJobProjectionReader(db, {
+    sqliteDetails: true,
+    validationStamp: "new-build",
+    backgroundValidationReady,
+  });
+  const parse = vi.spyOn(SavedJobSchema, "parse");
+  const [row] = await read();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(parse).not.toHaveBeenCalled();
+  expect(() => row!.keySkills).toThrow("Corrupted persisted row");
+  finishDisplay();
+  await expect(read.validation()).rejects.toThrow("Corrupted persisted row");
+  await expect(read()).rejects.toThrow("Corrupted persisted row");
+});

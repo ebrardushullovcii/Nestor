@@ -524,13 +524,17 @@ export type ModelReasoningTask = (typeof modelReasoningTasks)[number];
  * form turns are short "what next / what is on this page" decisions: low.
  * Fit batches and fact checks are verdicts that stand without a rule
  * recomputing them (ADR 0041): medium. A full listing read keeps the main
- * effort unless its own variable says otherwise. The writer has no variable
- * of its own: it is `NESTOR_AI_REASONING_EFFORT`.
+ * effort unless its own variable says otherwise. Muse resume writing uses
+ * medium unless its task effort is explicitly overridden.
  */
 const TASK_REASONING_EFFORT_SETTINGS: Record<
-  Exclude<ModelReasoningTask, "resume_writer">,
+  ModelReasoningTask,
   { env: string; fallback: ModelReasoningEffort | null }
 > = {
+  resume_writer: {
+    env: "NESTOR_AI_RESUME_WRITER_REASONING_EFFORT",
+    fallback: null,
+  },
   listing_read: {
     env: "NESTOR_AI_LISTING_READ_REASONING_EFFORT",
     fallback: null,
@@ -557,7 +561,7 @@ export function resolveTaskReasoningEffortsFromEnvironment(
   for (const [task, setting] of Object.entries(
     TASK_REASONING_EFFORT_SETTINGS,
   ) as [
-    Exclude<ModelReasoningTask, "resume_writer">,
+    ModelReasoningTask,
     { env: string; fallback: ModelReasoningEffort | null },
   ][]) {
     const effort =

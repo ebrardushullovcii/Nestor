@@ -55,6 +55,7 @@ import {
   type UserActionRequest,
 } from "@nestor/contracts";
 import { reassessSavedJobs } from "./saved-job-reassessment";
+import { createMatchAssessmentContextFingerprint } from "./match-assessment-session";
 import type { JobFinderRepositorySeed } from "@nestor/db";
 import { readSavedJobProjectionChanges } from "@nestor/db";
 import { mergeSortedRowChanges } from "./sorted-row-changes";
@@ -142,6 +143,9 @@ import {
 import { memoizeSortedBySameElements } from "./same-elements-memo";
 import { settleStoredResumeDrafts } from "./resume-settle-stored-drafts";
 import { rebindLegacyFitVerdicts } from "./legacy-fit-fingerprints";
+
+const realSetImmediate = globalThis.setImmediate;
+const nextTurn = () => new Promise<void>((resolve) => realSetImmediate(resolve));
 
 // Each list keeps its own last ordering: a refresh that changed no job reuses
 // it, and one that changed a few merges them in instead of sorting thousands
@@ -576,6 +580,7 @@ export function createWorkspaceSnapshotProfileMethods(
   // whole-profile fingerprint are re-bound before any edit can strand them.
   let legacyFitFingerprintRebinding: Promise<unknown> | null = null;
   let lastNoResponseAutomationRunAt: number | null = null;
+  let ledgerWarmup: Promise<void> | null = null;
   const normalizedDraftRows = new WeakMap<
     object,
     {
@@ -614,7 +619,8 @@ export function createWorkspaceSnapshotProfileMethods(
       return;
     }
     rescoreAgain = false;
-    savedJobRescoring = reassessSavedJobs(ctx)
+    savedJobRescoring = nextTurn()
+      .then(() => reassessSavedJobs(ctx))
       .then((changed) => {
         if (changed) ctx.onSavedJobsRescored?.();
       })
@@ -1472,6 +1478,7 @@ export function createWorkspaceSnapshotProfileMethods(
       recoverInterruptedApplyRunsOnLoad(),
       storedResumeDraftSettlement,
     ]);
+    if (borrowValidatedJobs) await nextTurn();
     await reconcileAutomaticBatchSampleReviews(ctx);
 
     // Display reads exclude resume checkpoints before parsing and reuse
@@ -1543,6 +1550,7 @@ export function createWorkspaceSnapshotProfileMethods(
       userActionEvents,
       activityControl,
       rawIntelligence,
+      applyQueue,
     ] = await Promise.all([
       getCurrentSetupStateContext(borrowValidatedJobs),
       borrowValidatedJobs
@@ -1575,8 +1583,10 @@ export function createWorkspaceSnapshotProfileMethods(
       borrowValidatedJobs && ctx.repository.readIntelligenceProjection
         ? ctx.repository.readIntelligenceProjection()
         : ctx.repository.getIntelligenceState(),
+      ctx.repository.getApplyQueue(),
     ]);
     // From the jobs this read already loaded, so it costs no second read.
+    if (borrowValidatedJobs) await nextTurn();
     legacyFitFingerprintRebinding ??= rebindLegacyFitVerdicts(ctx, {
       savedJobs: rawSavedJobs,
       pendingDiscoveryJobs: discovery.pendingDiscoveryJobs,
@@ -1736,12 +1746,6 @@ export function createWorkspaceSnapshotProfileMethods(
       inactiveListingLedger(discovery.discoveryLedger).length > 0
     )
       await jobViewIdentityIndex.warm?.(rawSavedJobs);
-    if (!lastJobViews) {
-      const canonical = await ctx.repository.readDiscoveryStateForRun?.();
-      await warmDiscoveryLedgerIndex(
-        canonical?.discoveryLedger ?? discovery.discoveryLedger,
-      );
-    }
     const {
       savedJobs,
       discoveryJobs,
@@ -2074,10 +2078,24 @@ export function createWorkspaceSnapshotProfileMethods(
       campaignNotifications: campaignState.notifications,
       dashboard,
       activityControl,
+      applyQueue,
       intelligence: listableIntelligence,
     };
     if (!borrowValidatedJobs)
       return JobFinderWorkspaceSnapshotSchema.parse(snapshot);
+    // The window only needs display evidence. Keep the canonical feedback
+    // cache warm for triage after the first full view has reached the window.
+    ledgerWarmup ??= (async () => {
+      await ctx.backgroundWorkReady;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (ctx.isWorkspaceClosing?.()) return;
+      const canonical = await ctx.repository.readDiscoveryStateForRun?.();
+      await warmDiscoveryLedgerIndex(
+        canonical?.discoveryLedger ?? discovery.discoveryLedger,
+      );
+    })().catch((error: unknown) => {
+      console.warn("[Job Finder] Warming triage history failed", error);
+    });
     // Rows were validated on entering the immutable repository projection.
     // Re-parsing the same jobs in three lists deep-copied every listing again
     // on each progress update. Only display callers borrow these values; IPC
@@ -2128,6 +2146,7 @@ export function createWorkspaceSnapshotProfileMethods(
       existingCampaignState,
       userActionRequests,
       activityControl,
+      applyQueue,
     ] = await Promise.all([
       getCurrentSetupStateContext(),
       ctx.repository.getSettings(),
@@ -2135,6 +2154,7 @@ export function createWorkspaceSnapshotProfileMethods(
       ctx.repository.getCampaignState(),
       ctx.repository.listUserActionRequests(),
       ctx.repository.getActivityControl(),
+      ctx.repository.getApplyQueue(),
     ]);
     const availableResumeTemplates = ctx.documentManager.listResumeTemplates();
     const settings = normalizeJobFinderSettings(
@@ -2266,6 +2286,7 @@ export function createWorkspaceSnapshotProfileMethods(
       campaignNotifications: bootstrapCampaignState.notifications,
       dashboard,
       activityControl,
+      applyQueue,
       intelligence: {},
       userActionRequests: bootstrapUserActionRequests,
       userActionEvents: [],
@@ -2527,13 +2548,17 @@ export function createWorkspaceSnapshotProfileMethods(
         now: new Date().toISOString(),
       });
 
+      await nextTurn();
       if (hasResumeAffectingProfileChange(currentProfile, nextProfile)) {
         await ctx.staleApprovedResumeDrafts(
           "Profile details changed after approval and the resume needs a fresh review.",
+          undefined,
+          { profile: nextProfile },
         );
+      } else {
+        await ctx.repository.saveProfile(nextProfile);
       }
-
-      await ctx.repository.saveProfile(nextProfile);
+      await nextTurn();
       await deriveAndPersistProfileSetupState(ctx, {
         persistedState: nextProfileSetupState,
         profile: nextProfile,
@@ -2541,8 +2566,20 @@ export function createWorkspaceSnapshotProfileMethods(
         latestResumeImportRunId:
           (await ctx.repository.getLatestResumeImportRun())?.id ?? null,
       });
-      rescoreSavedJobsInBackground();
-      return getWorkspaceSnapshot(true);
+      await nextTurn();
+      const snapshot = await getWorkspaceSnapshot(true);
+      if (
+        createMatchAssessmentContextFingerprint(
+          currentProfile,
+          currentSearchPreferences,
+        ) !==
+        createMatchAssessmentContextFingerprint(
+          nextProfile,
+          currentSearchPreferences,
+        )
+      )
+        rescoreSavedJobsInBackground();
+      return snapshot;
     },
     async saveProfileAndSearchPreferences(
       profile: CandidateProfile,
@@ -2583,21 +2620,26 @@ export function createWorkspaceSnapshotProfileMethods(
         now: new Date().toISOString(),
       });
 
-      if (hasResumeAffectingProfileChange(currentProfile, nextProfile)) {
-        await ctx.staleApprovedResumeDrafts(
-          "Profile details changed after approval and the resume needs a fresh review.",
-        );
-      }
-
+      await nextTurn();
       await preserveRemovedSourceLabels(
         currentSearchPreferences,
         nextSearchPreferences,
       );
-      await ctx.repository.saveProfileAndSearchPreferences(
-        nextProfile,
-        nextSearchPreferences,
-      );
+      if (hasResumeAffectingProfileChange(currentProfile, nextProfile)) {
+        await ctx.staleApprovedResumeDrafts(
+          "Profile details changed after approval and the resume needs a fresh review.",
+          undefined,
+          { profile: nextProfile, searchPreferences: nextSearchPreferences },
+        );
+      } else {
+        await ctx.repository.saveProfileAndSearchPreferences(
+          nextProfile,
+          nextSearchPreferences,
+        );
+      }
+      await nextTurn();
       await syncActiveCampaignPreferences(nextSearchPreferences);
+      await nextTurn();
       await deriveAndPersistProfileSetupState(ctx, {
         persistedState: nextProfileSetupState,
         profile: nextProfile,
@@ -2605,9 +2647,20 @@ export function createWorkspaceSnapshotProfileMethods(
         latestResumeImportRunId:
           (await ctx.repository.getLatestResumeImportRun())?.id ?? null,
       });
-      rescoreSavedJobsInBackground();
-
-      return getWorkspaceSnapshot(true);
+      await nextTurn();
+      const snapshot = await getWorkspaceSnapshot(true);
+      if (
+        createMatchAssessmentContextFingerprint(
+          currentProfile,
+          currentSearchPreferences,
+        ) !==
+        createMatchAssessmentContextFingerprint(
+          nextProfile,
+          nextSearchPreferences,
+        )
+      )
+        rescoreSavedJobsInBackground();
+      return snapshot;
     },
     async runResumeImport(input) {
       const baseResume = ResumeSourceDocumentSchema.parse(input.baseResume);

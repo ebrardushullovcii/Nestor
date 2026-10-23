@@ -121,5 +121,6 @@ it("points to the persistent text enlargement controls", () => {
     />,
   );
   expect(screen.getByText("Text size")).toBeTruthy();
-  expect(screen.getByText(/View → Zoom In/)).toBeTruthy();
+  // No menu bar on Windows: the keys themselves are named.
+  expect(screen.getByText(/Ctrl \+ and Ctrl − make text bigger/)).toBeTruthy();
 });

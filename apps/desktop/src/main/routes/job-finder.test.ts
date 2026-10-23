@@ -197,6 +197,7 @@ import {
 } from "../services/job-finder/workspace-updates";
 import {
   RETIRED_CHAT_MESSAGE,
+  approveApplicationResumes,
   registerJobFinderRouteHandlers,
   syncApplicationAuthorityForSavedMode,
 } from "./job-finder";
@@ -1745,6 +1746,36 @@ describe("job-finder Apply to all with a resume that waits on the person", () =>
       "Nothing was started. The resume for 'Cedar Engineer' has a line waiting for your decision.",
     );
     expect(startAutoApplyQueueRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("bulk resume approval", () => {
+  it("bounds concurrent approvals, deduplicates jobs and keeps failures local", async () => {
+    const jobs = ["one", "two", "three", "four"].map(id => ({ id, title: id }));
+    mockGetJobFinderRepositoryForWorkspaceService.mockReturnValue({
+      listSavedJobs: () => Promise.resolve(jobs),
+      getSettings: () => Promise.resolve({}),
+      getSearchPreferences: () => Promise.resolve({tailoringMode: "aggressive"}),
+    } as never);
+    let active = 0;
+    let maximum = 0;
+    const approve = vi.fn(async (id: string) => {
+      maximum = Math.max(maximum, ++active);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      active--;
+      if (id === "two") throw new Error("Some lines still need your decision.");
+    });
+    const service = {
+      getResumeWorkspace: () => Promise.resolve({ draft: {id: "draft", status: "needs_review"}, exports: [] }),
+      approveCurrentResume: approve,
+    };
+    const progress = vi.fn<(done: number) => void>();
+    const heldBack = await approveApplicationResumes(service as never,
+      [...jobs.map(j=>j.id), "one"], {personApproved:true,onProgress:progress});
+    expect(maximum).toBe(2);
+    expect(approve).toHaveBeenCalledTimes(4);
+    expect(heldBack).toEqual([{jobId:"two",title:"two",reason: "The resume for 'two' has a line waiting for your decision."}]);
+    expect(progress.mock.calls.map(c=>c[0])).toEqual([1,2,3,4]);
   });
 });
 

@@ -123,6 +123,7 @@ async function renderLetterDocx(text: string): Promise<Buffer> {
 
 interface CreateLocalJobFinderDocumentManagerOptions {
   renderResumeHtml?: ResumeDraftProcessor["render"];
+  inspectPdf?: ResumeDraftProcessor["inspectPdf"];
   outputDirectory: string;
   previewTestMode?: "ok" | "fail_once";
 }
@@ -154,6 +155,7 @@ async function renderPdfFromHtml(
     const exportWindow = new BrowserWindow({
       show: false,
       webPreferences: {
+        backgroundThrottling: false,
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
@@ -452,7 +454,15 @@ export function createLocalJobFinderDocumentManager(
       );
       const htmlFileName = `${artifactBaseName}.html`;
       const htmlPath = path.join(artifactDirectory, htmlFileName);
-      const html = renderResumeTemplateHtml(input);
+      const html = options.renderResumeHtml
+        ? (
+            await options.renderResumeHtml({
+              renderDocument: input.renderDocument,
+              settings: input.settings,
+              templateId: input.templateId,
+            })
+          ).exportHtml
+        : renderResumeTemplateHtml(input);
 
       const requestedFormat =
         input.settings.resumeFormat === "html" ? "html" : "pdf";
@@ -489,10 +499,17 @@ export function createLocalJobFinderDocumentManager(
         input.signal,
         input.onQueueWait,
       );
-      const pageCount = await getPdfPageCount(pdfPath);
-      const sha256 = createHash("sha256")
-        .update(await readFile(pdfPath))
-        .digest("hex");
+      // Chromium's sandboxed renderer processes do layout/printing (at most
+      // two). HTML generation and PDF parsing/hash work use the document
+      // worker too, leaving main to coordinate files and approval writes.
+      const { pageCount, sha256 } = options.inspectPdf
+        ? await options.inspectPdf(pdfPath)
+        : {
+            pageCount: await getPdfPageCount(pdfPath),
+            sha256: createHash("sha256")
+              .update(await readFile(pdfPath))
+              .digest("hex"),
+          };
 
       return {
         fileName: outputFileName,

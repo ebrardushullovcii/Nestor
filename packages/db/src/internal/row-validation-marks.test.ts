@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { ResumeDraftSchema } from "@nestor/contracts";
+import { ResumeDraftSchema, SavedJobListFactsSchema } from "@nestor/contracts";
 import { afterEach, expect, test, vi } from "vitest";
 import { createFileJobFinderRepository } from "../file-repository";
 import { createSavedJob } from "../file-repository.test-support";
@@ -25,10 +25,20 @@ function workspaceFile(): string {
 }
 
 /** One start of the app: a connection and a reader for one build. */
-function start(filePath: string, validationStamp: string | null) {
+function start(
+  filePath: string,
+  validationStamp: string | null,
+  sqliteDetails = false,
+) {
   const db = new DatabaseSync(filePath);
   cleanups.push(() => db.isOpen && db.close());
-  return { db, read: createSavedJobProjectionReader(db, { validationStamp }) };
+  return {
+    db,
+    read: createSavedJobProjectionReader(db, {
+      validationStamp,
+      sqliteDetails,
+    }),
+  };
 }
 
 function put(db: DatabaseSync, value: object & { id: string }): void {
@@ -115,6 +125,34 @@ test("only the build that marked a row skips its schema", async () => {
   expect(validated?.keySkills).toEqual([]);
 });
 
+test("a full unchanged validation also proves list facts, until a write or a new build", async () => {
+  const filePath = workspaceFile();
+  const first = start(filePath, "build-1", true);
+  put(first.db, createSavedJob({ id: "a" }));
+  await first.read();
+  await first.read.validation();
+  expect(marks(first.db)).toEqual(["a:build-1"]);
+  first.db.close();
+
+  const parse = vi.spyOn(SavedJobListFactsSchema, "parse");
+  try {
+    const sameBuild = start(filePath, "build-1", true);
+    expect((await sameBuild.read())[0]!.title).toBe("Lead Designer");
+    expect(parse).not.toHaveBeenCalled();
+    put(sameBuild.db, createSavedJob({ id: "a", title: "Edited" }));
+    expect((await sameBuild.read())[0]!.title).toBe("Edited");
+    expect(parse).toHaveBeenCalledTimes(1);
+    sameBuild.db.close();
+
+    const nextBuild = start(filePath, "build-2", true);
+    expect((await nextBuild.read())[0]!.title).toBe("Edited");
+    expect(parse).toHaveBeenCalledTimes(2);
+    await nextBuild.read.validation();
+  } finally {
+    parse.mockRestore();
+  }
+});
+
 test("a missing trigger drops every mark before the next read", async () => {
   const filePath = workspaceFile();
   const first = start(filePath, "build-1");
@@ -158,25 +196,29 @@ test("the workspace marks the saved jobs and drafts it read; staling a draft unm
   });
   cleanups.push(() => repository.close());
   await repository.commitSavedJobDelta({
-    upserts: [createSavedJob({ id: "job_a" })],
+    upserts: [
+      createSavedJob({ id: "job_a" }),
+      createSavedJob({ id: "job_b" }),
+    ],
   });
-  await repository.upsertResumeDraft(
+  const draft = (id: string, jobId: string, approved: boolean) =>
     ResumeDraftSchema.parse({
-      id: "draft_a",
-      jobId: "job_a",
-      status: "approved",
+      id,
+      jobId,
+      status: approved ? "approved" : "needs_review",
       templateId: "classic_ats",
       identity: null,
       sections: [],
       targetPageCount: 2,
       generationMethod: "manual",
-      approvedAt: "2026-07-30T10:00:00.000Z",
+      approvedAt: approved ? "2026-07-30T10:00:00.000Z" : null,
       approvedExportId: null,
       staleReason: null,
       createdAt: "2026-07-30T10:00:00.000Z",
       updatedAt: "2026-07-30T10:00:00.000Z",
-    }),
-  );
+    });
+  await repository.upsertResumeDraft(draft("draft_a", "job_a", true));
+  await repository.upsertResumeDraft(draft("draft_b", "job_b", false));
   await repository.readSavedJobsProjection();
   await repository.readDisplayCollections!();
   const db = new DatabaseSync(filePath, { readOnly: true });
@@ -190,16 +232,30 @@ test("the workspace marks the saved jobs and drafts it read; staling a draft unm
       .all()
       .map((row) => String(row.mark));
   await vi.waitFor(() =>
-    expect(allMarks()).toEqual(["resume_drafts:draft_a", "saved_jobs:job_a"]),
+    expect(allMarks()).toEqual([
+      "resume_drafts:draft_a",
+      "resume_drafts:draft_b",
+      "saved_jobs:job_a",
+      "saved_jobs:job_b",
+    ]),
   );
 
   await repository.staleResumeDrafts!({
-    draftIds: ["draft_a"],
+    draftIds: ["draft_a", "draft_b"],
     staleReason: "Profile details changed.",
     updatedAt: "2026-07-31T09:00:00.000Z",
   });
-  expect(allMarks()).toEqual(["saved_jobs:job_a"]);
+  // An approved body is rewritten in the same commit so an older build never
+  // reads it as approved (ADR 0059); that unmarks it. A draft with nothing to
+  // un-approve keeps its validated body and its mark.
+  expect(allMarks()).toEqual([
+    "resume_drafts:draft_b",
+    "saved_jobs:job_a",
+    "saved_jobs:job_b",
+  ]);
   const { resumeDrafts } = await repository.readDisplayCollections!();
-  expect(resumeDrafts.map((draft) => draft.status)).toEqual(["stale"]);
-  expect(allMarks()).toEqual(["resume_drafts:draft_a", "saved_jobs:job_a"]);
+  expect(resumeDrafts.map((draft) => draft.status)).toEqual([
+    "stale",
+    "stale",
+  ]);
 });

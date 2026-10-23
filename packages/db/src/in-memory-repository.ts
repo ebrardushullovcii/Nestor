@@ -12,6 +12,8 @@ import {
   ApplicationReplayCheckpointSchema,
   CandidateProfileSchema,
   JobFinderActivityControlSchema,
+  ApplyQueueSchema,
+  type ApplyQueue,
   JobFinderDiscoveryStateSchema,
   JobFinderIntelligenceStateSchema,
   JobFinderRepositoryStateSchema,
@@ -130,6 +132,7 @@ export function createInMemoryJobFinderRepository(
 ): JobFinderRepository {
   const state = JobFinderRepositoryStateSchema.parse(cloneValue(seed));
   assertAtMostOneActiveApplicationAuthority(state);
+  let applyQueue: ApplyQueue | null = null;
   let profileRevision = 1;
   let discoveryProjectionSource: typeof state.discovery | null = null;
   let discoveryProjection: DiscoveryDisplayProjection | null = null;
@@ -292,6 +295,7 @@ export function createInMemoryJobFinderRepository(
         cloneValue(nextSeed),
       );
       assertAtMostOneActiveApplicationAuthority(normalizedSeed);
+      applyQueue = null;
 
       // The reset replaces the whole workspace, but the compare-and-swap epoch
       // only ever moves forward — mirroring `initSingletonValue` in the SQLite
@@ -2166,7 +2170,15 @@ export function createInMemoryJobFinderRepository(
       state.tailoredAssets = nextTailoredAssets;
       return Promise.resolve();
     },
-    staleResumeDrafts({ draftIds, staleReason, updatedAt }) {
+    staleResumeDrafts({ draftIds, staleReason, updatedAt, profileInputs }) {
+      const profile = profileInputs
+        ? CandidateProfileSchema.parse(cloneValue(profileInputs.profile))
+        : null;
+      const preferences = profileInputs?.searchPreferences
+        ? JobSearchPreferencesSchema.parse(
+            cloneValue(profileInputs.searchPreferences),
+          )
+        : null;
       for (const draftId of new Set(draftIds)) {
         const draft = state.resumeDrafts.find((entry) => entry.id === draftId);
         if (!draft) continue;
@@ -2193,6 +2205,11 @@ export function createInMemoryJobFinderRepository(
           });
         }
       }
+      if (profile) {
+        state.profile = profile;
+        profileRevision += 1;
+      }
+      if (preferences) state.searchPreferences = preferences;
       return Promise.resolve();
     },
     listApplicationRecords() {
@@ -2587,6 +2604,13 @@ export function createInMemoryJobFinderRepository(
       state.activityControl = JobFinderActivityControlSchema.parse(
         cloneValue(activityControl),
       );
+      return Promise.resolve();
+    },
+    getApplyQueue() {
+      return Promise.resolve(applyQueue ? cloneValue(applyQueue) : null);
+    },
+    saveApplyQueue(queue) {
+      applyQueue = queue ? ApplyQueueSchema.parse(cloneValue(queue)) : null;
       return Promise.resolve();
     },
   };

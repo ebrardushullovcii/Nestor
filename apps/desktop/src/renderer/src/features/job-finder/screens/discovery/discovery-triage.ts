@@ -5,7 +5,7 @@ import { prefetchJobDetail } from "../../hooks/use-job-detail";
 import { hasOpenJobFinderOverlays } from "../../lib/job-finder-overlay-ownership";
 import { isImeComposingEvent } from "../../lib/job-finder-shortcuts";
 import { isDiscoveryAlsoFoundResult } from "./discovery-result-groups";
-import { useKeptRouteHidden } from "../../lib/kept-route-visibility";
+import { useEffectWhileKeptRouteShown } from "../../lib/kept-route-visibility";
 
 /**
  * A pass through Find jobs, one job at a time: Shortlist, Not interested, or
@@ -236,10 +236,8 @@ export function useDiscoveryTriage(input: {
   handlersRef.current = { shortlist, notInterested, skip, back, undo };
   const enabled = input.enabled;
   // Find jobs stays mounted behind other screens; its keys are off there.
-  const hiddenBehindAnotherScreen = useKeptRouteHidden();
-  const keysEnabled = enabled && !hiddenBehindAnotherScreen;
-  useEffect(() => {
-    if (!keysEnabled) return undefined;
+  useEffectWhileKeptRouteShown(() => {
+    if (!enabled) return undefined;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
@@ -280,7 +278,7 @@ export function useDiscoveryTriage(input: {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [keysEnabled]);
+  }, [enabled]);
 
   // Read the next job while this one is being read.
   const nextRow = nextId ? (jobsById.get(nextId) ?? null) : null;

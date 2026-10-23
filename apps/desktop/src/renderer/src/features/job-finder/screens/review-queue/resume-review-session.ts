@@ -84,6 +84,17 @@ export function markResumeReviewFailed(jobId: string, reason: string): void {
   });
 }
 
+/** An undone approval: the resume counts as not reviewed again. */
+export function forgetResumeReview(jobId: string): void {
+  const approving = new Set(state.approving);
+  approving.delete(jobId);
+  const approved = new Set(state.approved);
+  approved.delete(jobId);
+  const failed = new Map(state.failed);
+  failed.delete(jobId);
+  update({ approving, approved, failed });
+}
+
 /** For tests: forget the session. */
 export function resetResumeReviewSession(): void {
   update({ approving: new Set(), approved: new Set(), failed: new Map() });

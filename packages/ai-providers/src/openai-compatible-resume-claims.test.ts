@@ -22,6 +22,127 @@ const input = {
 };
 
 describe("resume claim checks", () => {
+  test("the evidence keeps checks on one routing session across jobs and client restarts", async () => {
+    const sessions: Array<string | null> = [];
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((_url, init) => {
+        sessions.push(new Headers(init?.headers).get("x-opencode-session"));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: { content: '{"checks":[]}' },
+                  finish_reason: "stop",
+                },
+              ],
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+        );
+      });
+    const client = () =>
+      createJobFinderAiClientFromEnvironment(
+        createEnvironment({
+          NESTOR_AI_BASE_URL: "https://opencode.ai/zen/go/v1",
+        }),
+      );
+    try {
+      await client().checkResumeClaims!(input);
+      await client().checkResumeClaims!({
+        ...input,
+        job: { ...input.job, title: "Other role" },
+      });
+      await client().checkResumeClaims!({
+        ...input,
+        evidence: [{ id: "changed", text: "Different saved evidence." }],
+      });
+      expect(sessions[0]).toMatch(/^ses_[a-z0-9]{26}$/);
+      expect(sessions[1]).toBe(sessions[0]);
+      expect(sessions[2]).not.toBe(sessions[0]);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+  test("shortens citation keys, keeps source identities, and restores every valid citation", async () => {
+    const evidence = [
+      {
+        id: "profile:experience:opaque-record:achievement:1",
+        text: "Earlier fact. ".repeat(700),
+      },
+      {
+        id: "profile:experience:other-record:achievement:1",
+        text: "A different role's complete fact.",
+      },
+    ];
+    let sent: unknown;
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((_url, init) => {
+        const body = JSON.parse(
+          typeof init?.body === "string" ? init.body : "{}",
+        ) as {
+          messages: Array<{ role: string; content: string }>;
+        };
+        sent = JSON.parse(
+          body.messages.find((message) => message.role === "user")!.content,
+        );
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: JSON.stringify({
+                      checks: [
+                        {
+                          id: "a",
+                          verdict: "stretch",
+                          reason: "Keep the scope clear.",
+                          evidenceIds: ["2", "1", "made-up", evidence[0]!.id],
+                          style: "Keep this as a complete sentence.",
+                          fix: "Built SQL dashboards.",
+                        },
+                      ],
+                    }),
+                  },
+                  finish_reason: "stop",
+                },
+              ],
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+        );
+      });
+    try {
+      const client =
+        createJobFinderAiClientFromEnvironment(createEnvironment());
+      const checks = await client.checkResumeClaims!({ ...input, evidence });
+      expect(sent).toMatchObject({
+        evidence: evidence.map((entry, index) => ({
+          id: String(index + 1),
+          text: entry.text,
+          sourceId: entry.id,
+        })),
+        claims: input.claims,
+        tailoringStrength: input.tailoringStrength,
+        job: input.job,
+      });
+      expect(checks).toEqual([
+        {
+          id: "a",
+          verdict: "stretch",
+          reason: "Keep the scope clear.",
+          evidenceIds: [evidence[1]!.id, evidence[0]!.id],
+          style: "Keep this as a complete sentence.",
+          fix: "Built SQL dashboards.",
+        },
+      ]);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
   test("keeps Aggressive validation on its dedicated provider and other levels on primary", async () => {
     const models: string[] = [];
     const fetchMock = vi

@@ -2873,13 +2873,12 @@ export function recoverInterruptedDiscoveryRun(
  * failure.
  */
 /**
- * What the service says when background work is paused and something tried to
- * start anyway. It names the control the person can actually press: the app
- * has no "command center", it has a "Resume background work" button in the
- * header of the Job Finder Home screen.
+ * What the service says when all work is paused and an application tried to
+ * start anyway. It names the control the person can actually press: Continue,
+ * on Home and in the header.
  */
 export const ACTIVITY_PAUSED_MESSAGE =
-  "Browser and application activity is paused. Press Resume background work on the Job Finder Home screen before starting new work.";
+  "All work is paused, so this did not start. Press Continue on Home to start work again.";
 
 export const DISCOVERY_RUN_ALREADY_ACTIVE_MESSAGE =
   "A search is already running for this plan.";

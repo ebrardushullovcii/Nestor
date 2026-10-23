@@ -26,6 +26,14 @@ const appearanceThemeOptions: ReadonlyArray<{
   { label: "Dark", value: "dark" },
 ];
 
+function zoomKeysSentence(): string {
+  const mod =
+    typeof navigator !== "undefined" && /mac/i.test(navigator.platform)
+      ? "⌘"
+      : "Ctrl";
+  return `${mod} + and ${mod} − make text bigger or smaller; ${mod} 0 sets it back.`;
+}
+
 interface SettingsAppDeviceSectionProps {
   /** Reports staged theme edits so a stale shell save retry is retired. */
   onSettingsDraftEdited?: () => void;
@@ -223,7 +231,9 @@ export function SettingsAppDeviceSection({
       <div className="grid gap-1">
         <h4 className="font-medium">Text size</h4>
         <p className="text-sm text-foreground-soft">
-          View → Zoom In or Zoom Out. Nestor keeps the size you pick.
+          {/* The window has no menu bar on Windows, so the keys are named
+              rather than a View menu nobody can open. */}
+          {zoomKeysSentence()} Nestor keeps the size you pick.
         </p>
       </div>
       {onUpdateWorkspaceBehavior ? (

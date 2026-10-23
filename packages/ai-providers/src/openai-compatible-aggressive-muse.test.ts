@@ -8,7 +8,7 @@ import {
   createSettings,
 } from "./test-fixtures";
 
-test("Aggressive Muse writing and claim checks use Responses; the writer at xhigh, the check at the check effort", async () => {
+test("Aggressive Muse writing and claim checks use Responses at their task efforts", async () => {
   const requests: Array<{
     url: string;
     body: {
@@ -62,7 +62,7 @@ test("Aggressive Muse writing and claim checks use Responses; the writer at xhig
                         id: "line_1",
                         verdict: "supported",
                         reason: "Matches the synthetic evidence",
-                        evidenceIds: ["baseResume:text"],
+                        evidenceIds: ["1"],
                       },
                     ],
                   }),
@@ -119,6 +119,7 @@ test("Aggressive Muse writing and claim checks use Responses; the writer at xhig
       claims: [{ id: "line_1", section: "Summary", text: resumeText }],
     });
     expect(checks?.[0]?.verdict).toBe("supported");
+    expect(checks?.[0]?.evidenceIds).toEqual(["baseResume:text"]);
     expect(requests).toHaveLength(2);
     for (const request of requests) {
       expect(request.url).toBe("https://example.com/v1/responses");
@@ -127,7 +128,7 @@ test("Aggressive Muse writing and claim checks use Responses; the writer at xhig
       expect(request.body.messages).toBeUndefined();
     }
     expect(requests.map((request) => request.body.reasoning?.effort)).toEqual([
-      "xhigh",
+      "medium",
       "medium",
     ]);
   } finally {

@@ -69,6 +69,10 @@ interface ReviewQueueMissionPanelProps {
   onClaimResumeIdentity?: () => void;
   onKeepResumeIdentity?: () => void;
   onRemoveReviewJob: (jobId: string) => void;
+  /** Approved -> To review, as a deliberate move. */
+  onMoveResumesBackToReview?: (jobIds: readonly string[]) => Promise<unknown>;
+  /** Set while the job waits in the Apply queue: takes it out. */
+  onTakeOutOfApplyQueue?: (jobIds: readonly string[]) => Promise<unknown>;
   onSetJobResumeApplicationMode: (
     jobId: string,
     resumeApplicationMode: ResumeApplicationMode,
@@ -164,6 +168,8 @@ export function ReviewQueueMissionPanel({
   applyJobResults = [],
   safeguardBlocker = null,
   onRemoveReviewJob,
+  onMoveResumesBackToReview,
+  onTakeOutOfApplyQueue,
   onSetJobResumeApplicationMode,
   originalResume,
   selectedAsset,
@@ -427,7 +433,7 @@ export function ReviewQueueMissionPanel({
     ) : null
   ) : null;
   const resumeLevelLabel = (
-    <span className="shrink-0 text-xs font-semibold uppercase tracking-(--tracking-heading) text-foreground-soft">
+    <span className="shrink-0 text-(length:--text-small) font-semibold text-foreground-soft">
       Resume level
     </span>
   );
@@ -442,7 +448,10 @@ export function ReviewQueueMissionPanel({
         {selectedItem.resumeReview.status === "approved" ? (
           // Approved work is destructive to change, so the control is parked
           // behind a deliberate reveal that states the cost first.
-          <details className="group grid min-w-0 gap-2" data-resume-choice-disclosure>
+          <details
+            className="group grid min-w-0 gap-2"
+            data-resume-choice-disclosure
+          >
             <summary className="flex w-fit cursor-pointer list-none items-center gap-3 text-(length:--text-small) font-semibold text-foreground outline-none marker:hidden focus-visible:ring-[3px] focus-visible:ring-ring/40 [&::-webkit-details-marker]:hidden">
               {resumeLevelLabel}
               <span className="inline-flex items-center gap-1.5">
@@ -695,6 +704,39 @@ export function ReviewQueueMissionPanel({
             >
               Open the listing
             </Button>
+            {onTakeOutOfApplyQueue ? (
+              <Button
+                className={quietActionClassName}
+                onClick={() =>
+                  void onTakeOutOfApplyQueue([selectedItem.jobId]).catch(
+                    () => undefined,
+                  )
+                }
+                size="compact"
+                type="button"
+                variant="link"
+              >
+                Take out of the apply queue
+              </Button>
+            ) : null}
+            {onMoveResumesBackToReview &&
+            !existingApplication &&
+            !onTakeOutOfApplyQueue &&
+            selectedItem.resumeReview.status === "approved" ? (
+              <Button
+                className={quietActionClassName}
+                onClick={() =>
+                  void onMoveResumesBackToReview([selectedItem.jobId]).catch(
+                    () => undefined,
+                  )
+                }
+                size="compact"
+                type="button"
+                variant="link"
+              >
+                Move back to To review
+              </Button>
+            ) : null}
             <Button
               className={quietActionClassName}
               onClick={() => onRemoveReviewJob(selectedItem.jobId)}
@@ -702,7 +744,7 @@ export function ReviewQueueMissionPanel({
               type="button"
               variant="link"
             >
-              Remove from shortlist
+              Move back to Find jobs
             </Button>
           </span>
         </div>
@@ -726,6 +768,7 @@ export function ReviewQueueMissionPanel({
         {/* Quiet capacity fact below the actions, and only where it can
             change a decision. */}
         {!existingApplication &&
+        dailyCapacityDescription &&
         (primaryApplicationAction.kind === "start_apply" ||
           dailyCapacityExhausted) ? (
           <p

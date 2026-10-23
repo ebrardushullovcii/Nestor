@@ -14,6 +14,10 @@ import { Popover } from "@renderer/components/ui/popover";
 import { SegmentedControl } from "@renderer/components/ui/segmented-control";
 import { cn } from "@renderer/lib/cn";
 import { isImeComposingEvent } from "../lib/job-finder-shortcuts";
+import {
+  handleListSearchEscape,
+  LIST_SEARCH_ATTRIBUTE,
+} from "../lib/list-search-focus";
 import { useJobFinderOverlayOwnership } from "../lib/job-finder-overlay-ownership";
 import { useBoundedFloatingSurface } from "./bounded-floating-surface";
 import { EmptyState } from "./empty-state";
@@ -193,10 +197,15 @@ export function CollectionSearchToolbar(props: {
           )}
           id={inputId}
           onChange={(event) => props.onQueryChange(event.target.value)}
+          onKeyDown={(event) =>
+            handleListSearchEscape(event, props.query, props.onQueryChange)
+          }
           placeholder={props.placeholder}
           size="toolbar"
+          title="Search this list (/)"
           type="search"
           value={props.query}
+          {...{ [LIST_SEARCH_ATTRIBUTE]: "" }}
         />
         {props.query ? (
           <Button

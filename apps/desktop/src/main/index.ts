@@ -14,6 +14,7 @@ import {
 } from "./setup/user-data-directory";
 import { resolveBrandIconPaths } from "./setup/brand-icons";
 import { createMainWindow } from "./setup/window-shell";
+import { registerFinishedWorkWindow } from "./setup/finished-work-notifier-instance";
 import { runShutdownWithTimeout } from "./setup/shutdown-with-timeout";
 import { createDeferredBackgroundInitController } from "./setup/deferred-background-init";
 import { getMainWindowCloseGuard } from "./setup/main-window-close-guard";
@@ -196,6 +197,7 @@ function createMainWindowSafely(): BrowserWindow | null {
   try {
     const window = createMainWindow(currentDir);
     getEmbeddedBrowser().attachWindow(window);
+    registerFinishedWorkWindow(window);
     return window;
   } catch (error) {
     recordStartupDiagnostic("main window creation failed", error);
@@ -348,6 +350,12 @@ function startCampaignScheduler(
   powerMonitor.on("suspend", onPowerSuspend);
   powerMonitor.on("resume", onPowerResume);
   campaignScheduler.start();
+  // An Apply queue that was running or waiting for tomorrow carries on.
+  void import("./routes/job-finder")
+    .then((routes) => routes.resumeApplyQueueAfterRestart())
+    .catch((error: unknown) => {
+      console.error("Could not carry on the Apply queue.", error);
+    });
 }
 
 async function stopCampaignScheduler(): Promise<void> {
@@ -427,11 +435,19 @@ app.on("before-quit", (event) => {
   jobFinderShutdownInFlight = true;
   event.preventDefault();
   void runShutdownWithTimeout(
-    () =>
-      Promise.all([
+    async () => {
+      // The assistant or scheduler may itself be waiting for the opening view.
+      // Cancel that wait before awaiting either service's shutdown.
+      if (jobFinderServicesPromise) {
+        const { beginJobFinderWorkspaceShutdown } =
+          await jobFinderServicesPromise;
+        beginJobFinderWorkspaceShutdown();
+      }
+      await Promise.all([
         stopCampaignScheduler().then(shutdownJobFinderServicesIfLoaded),
         shutdownLiveAssistantIfLoaded(),
-      ]).then(() => undefined),
+      ]);
+    },
     jobFinderShutdownTimeoutMs,
     () => {
       console.warn(

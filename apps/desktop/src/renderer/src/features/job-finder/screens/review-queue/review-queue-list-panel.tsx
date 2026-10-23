@@ -1,3 +1,4 @@
+import { APPLICATION_WORK_PAUSED_REASON } from "../../lib/application-work-paused";
 import { estimateResumeBatchMinutesLeft } from "@nestor/contracts";
 import type { ReviewQueueItem, TailoredAssetSummary } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui";
@@ -11,6 +12,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type MouseEvent,
 } from "react";
 import {
   CollectionPagination,
@@ -26,6 +28,11 @@ import { formatJobEmployerLocationLine } from "../../lib/job-employer-location-d
 import { jobFinderListRegionClassName } from "../../components/list-row";
 import { usePersistedCollectionView } from "../../hooks/use-persisted-collection-view";
 import { useStableCallback } from "../../hooks/use-stable-callback";
+import { useRememberedString } from "../../hooks/use-remembered-string";
+import {
+  listingRowMenuEntries,
+  openRowContextMenu,
+} from "../../lib/row-context-menu";
 import { ReviewQueueRow } from "./review-queue-list-row";
 import {
   applySelectionRange,
@@ -41,7 +48,6 @@ import {
 import { Link } from "react-router-dom";
 import { buildJobFinderContextRoute } from "../../lib/job-finder-context-navigation";
 import {
-  APPLICATION_PREPARATION_BATCH_LIMIT,
   describeQueueItemResumeLevel,
   describeTailoredDraftPreparationBlocker,
   getReviewQueueResumePolicyCaption,
@@ -50,12 +56,19 @@ import {
   findPossibleDuplicateJobIds,
   getShortlistStatusFilter,
   getTailoredDraftPreparationResultMessage,
+  countResumeLinesToDecide,
   isQueueStageReady,
   isTailoredDraftPreparationEligible,
+  needsPersonResumeReview,
   SHORTLIST_STATUS_FILTER_LABELS,
   type ShortlistStatusFilter,
   type TailoredDraftPreparationViewState,
 } from "./review-queue-status";
+
+const isShortlistStatusFilter = (
+  value: string,
+): value is ShortlistStatusFilter =>
+  Object.hasOwn(SHORTLIST_STATUS_FILTER_LABELS, value);
 
 interface ReviewQueueListPanelProps {
   campaignId?: string;
@@ -63,15 +76,32 @@ interface ReviewQueueListPanelProps {
   isJobPending: (jobId: string) => boolean;
   /** Writes missing first resumes for the chosen jobs, or all eligible jobs. */
   onPrepareTailoredDrafts?: (jobIds?: readonly string[]) => void;
-  /** Starts the application for every job whose resume is ready. */
-  onApplyToAllReady?: (readyCount: number) => void;
-  /** What Apply to all does in the mode saved in Settings, in one sentence. */
+  /**
+   * Queues applications for the given ready jobs: all of them, the page or
+   * the ticked ones. The queue goes ten at a time inside the daily limit.
+   */
+  onApplyToJobs?: (jobIds: readonly string[]) => void;
+  /** What Apply does in the mode saved in Settings, in one sentence. */
   applyAllOutcome?: string | null;
+  /** "Apply to" in Send for me; "Prepare" when the person sends. */
+  applyVerb?: string;
   isApplyToAllPending?: boolean;
-  applicationBatchLimit?: number;
+  /** Jobs an Apply queue already holds; they are not offered again. */
+  queuedJobIds?: ReadonlySet<string>;
+  /**
+   * The person's "Approve N resumes" press: each resume waiting only for
+   * their read is approved as written. One with a line to decide stays.
+   */
+  onApproveResumes?: (jobIds: readonly string[]) => Promise<unknown>;
+  /** Approved -> To review, as a deliberate move. */
+  onMoveResumesBackToReview?: (jobIds: readonly string[]) => Promise<unknown>;
+  /** Takes waiting jobs out of the Apply queue before a run takes them. */
+  onTakeOutOfApplyQueue?: (jobIds: readonly string[]) => Promise<unknown>;
   onOpenSafeguards?: () => void;
   /** A safeguard holding every application start back, in plain words. */
   safeguardBlocker?: string | null;
+  /** All work is paused: Apply waits for Continue and says so. */
+  applicationWorkPaused?: boolean;
   onSelectItem: (jobId: string) => void;
   /**
    * Opens a job without scrolling to it, for when a status tab or the search
@@ -80,6 +110,8 @@ interface ReviewQueueListPanelProps {
   onShowItem?: (jobId: string) => void;
   /** Moves the given jobs back to Find jobs. */
   onRemoveJobs?: (jobIds: readonly string[]) => Promise<void>;
+  /** The listing's address, for a row's Open listing and Copy link. */
+  listingUrlForJob?: (jobId: string) => string | null;
   onStopTailoredDraftPreparation?: () => void;
   /**
    * Jobs whose application is already prepared. They stop counting as ready
@@ -105,21 +137,27 @@ export function ReviewQueueListPanel({
   },
   isJobPending,
   onPrepareTailoredDrafts = () => undefined,
-  onApplyToAllReady,
+  onApplyToJobs,
   applyAllOutcome = null,
+  applyVerb = "Apply to",
   isApplyToAllPending = false,
-  applicationBatchLimit = APPLICATION_PREPARATION_BATCH_LIMIT,
+  queuedJobIds,
   onOpenSafeguards,
   safeguardBlocker = null,
+  applicationWorkPaused = false,
   onSelectItem,
   onShowItem = onSelectItem,
   onRemoveJobs,
+  listingUrlForJob,
   onStopTailoredDraftPreparation = () => undefined,
   preparedJobIds,
   applicationPreparingJobIds,
   queue,
   selectedItem,
   tailoredAssets,
+  onApproveResumes,
+  onMoveResumesBackToReview,
+  onTakeOutOfApplyQueue,
 }: ReviewQueueListPanelProps) {
   const view = usePersistedCollectionView("shortlisted", "comfortable");
   const deferredQuery = useDeferredValue(view.query);
@@ -206,8 +244,11 @@ export function ReviewQueueListPanel({
     }
     return counts;
   }, [searchedQueue, statusByJobId]);
-  const [requestedStatusFilter, setStatusFilter] =
-    useState<ShortlistStatusFilter>("all");
+  const [requestedStatusFilter, setStatusFilter] = useRememberedString(
+    "shortlisted.status",
+    "all",
+    isShortlistStatusFilter,
+  );
   // A filter whose last job moved on falls back to All instead of showing an
   // empty list the person did not ask for.
   const statusFilter =
@@ -379,18 +420,68 @@ export function ReviewQueueListPanel({
           .filter(
             (item) =>
               !isJobPending(item.jobId) &&
+              !queuedJobIds?.has(item.jobId) &&
               isQueueStageReady(item, unavailableApplicationJobIds),
           )
           .map((item) => item.jobId),
       ),
     ],
-    [isJobPending, queue, unavailableApplicationJobIds],
+    [isJobPending, queue, queuedJobIds, unavailableApplicationJobIds],
   );
-  const totalReadyToApplyCount = readyToApplyJobIds.length;
-  const readyToApplyCount = Math.min(
-    totalReadyToApplyCount,
-    applicationBatchLimit,
+  // Resumes that wait only for the person's read (an Aggressive draft with
+  // no line to decide). Choosing Aggressive accepted its stretches (ADR
+  // 0051); the press approves each exact resume, as one Approve does.
+  const approvableResumeIds: string[] = [];
+  let resumesWithLineToDecide = 0;
+  for (const item of queue) {
+    if (
+      isJobPending(item.jobId) ||
+      unavailableApplicationJobIds.has(item.jobId) ||
+      item.assetStatus !== "ready" ||
+      !needsPersonResumeReview(item, assetsByJobId.get(item.jobId) ?? null)
+    )
+      continue;
+    if (countResumeLinesToDecide(item) > 0) resumesWithLineToDecide += 1;
+    else approvableResumeIds.push(item.jobId);
+  }
+  const approvableIdSet = new Set(approvableResumeIds);
+  const selectedApprovableIds = [...selectedJobIds].filter((id) =>
+    approvableIdSet.has(id),
   );
+  const [isApprovingResumes, setIsApprovingResumes] = useState(false);
+  const approveResumes = (jobIds: readonly string[]) => {
+    if (!onApproveResumes || jobIds.length === 0) return;
+    setIsApprovingResumes(true);
+    // Approved jobs leave To review, so their ticks go too: "2 selected" over
+    // rows the tab no longer shows read as a selection nobody could see.
+    void onApproveResumes(jobIds)
+      .then(() =>
+        setResumeSelection((current) => {
+          if (!current) return current;
+          const approved = new Set(jobIds);
+          const jobIdsLeft = current.jobIds.filter((id) => !approved.has(id));
+          return jobIdsLeft.length > 0
+            ? { ...current, jobIds: jobIdsLeft }
+            : null;
+        }),
+      )
+      .finally(() => setIsApprovingResumes(false));
+  };
+  // One press queues every chosen job; the queue keeps to ten at a time and
+  // to the daily limit by itself (ADR 0058).
+  const readyToApplyCount = readyToApplyJobIds.length;
+  const readyIdSet = new Set(readyToApplyJobIds);
+  const pageReadyIds = pageJobIds.filter((id) => readyIdSet.has(id));
+  const selectedReadyIds = [...selectedJobIds].filter((id) =>
+    readyIdSet.has(id),
+  );
+  // Ticked jobs that cannot go yet and are not in an application already.
+  const selectedWaitingOnResume = [...selectedJobIds].filter(
+    (id) =>
+      !readyIdSet.has(id) &&
+      !unavailableApplicationJobIds.has(id) &&
+      !queuedJobIds?.has(id),
+  ).length;
   const safeguardBlockerSentence = safeguardBlocker?.trim()
     ? stripInternalCodeParenthetical(safeguardBlocker)
     : null;
@@ -425,8 +516,12 @@ export function ReviewQueueListPanel({
   const visibleJobIds = new Set(filteredJobIds);
   const showsApplyAllButton =
     readyToApplyCount > 0 &&
-    Boolean(onApplyToAllReady) &&
+    Boolean(onApplyToJobs) &&
     !safeguardBlockerSentence;
+  const showsApplyPageButton =
+    showsApplyAllButton &&
+    pageReadyIds.length > 0 &&
+    pageReadyIds.length < readyToApplyCount;
   const bulkActionsReachHiddenJobs =
     (draftEligibleCount > 0 &&
       [...eligibleResumeIds].some((id) => !visibleJobIds.has(id))) ||
@@ -454,6 +549,139 @@ export function ReviewQueueListPanel({
       setPendingFocusId(nextId);
     },
   );
+  // Right-click: a ticked row acts for every ticked job; any other row
+  // acts for itself. Same actions and words as the bar above the list.
+  const openRowMenu = useStableCallback(
+    (event: MouseEvent<HTMLElement>, jobId: string) => {
+      const forTicked = selectedJobIds.has(jobId) && selectedJobIds.size > 1;
+      const ids = forTicked ? [...selectedJobIds] : [jobId];
+      const approvable = ids.filter((id) => approvableIdSet.has(id));
+      const ready = ids.filter((id) => readyIdSet.has(id));
+      const eligible = ids.filter((id) => eligibleResumeIds.has(id));
+      const queued = ids.filter((id) => queuedJobIds?.has(id));
+      // An approved resume no application uses yet can go back to To review.
+      const approvedIds = new Set(
+        queue
+          .filter((item) => item.resumeReview.status === "approved")
+          .map((item) => item.jobId),
+      );
+      const approved = ids.filter(
+        (id) =>
+          approvedIds.has(id) &&
+          !preparedJobIds?.has(id) &&
+          !queuedJobIds?.has(id),
+      );
+      const count = (n: number, one: string, many: string) =>
+        n === 1 ? one : `${many.replace("#", String(n))}`;
+      const done = () => {
+        if (forTicked) clearSelection();
+      };
+      openRowContextMenu(event, [
+        ...(!forTicked
+          ? [{ id: "open", label: "Open", run: () => selectItem(jobId) }]
+          : []),
+        ...(approvable.length > 0 && onApproveResumes
+          ? [
+              {
+                id: "approve",
+                label: count(
+                  approvable.length,
+                  "Approve resume",
+                  "Approve # resumes",
+                ),
+                enabled: !isApprovingResumes,
+                run: () => approveResumes(approvable),
+              },
+            ]
+          : []),
+        ...(ready.length > 0 && onApplyToJobs && !safeguardBlockerSentence
+          ? [
+              {
+                id: "apply",
+                label: forTicked
+                  ? `${applyVerb} ${ready.length} selected`
+                  : applyVerb.replace(/\s+to$/u, ""),
+                enabled: !isApplyToAllPending && !applicationWorkPaused,
+                run: () => {
+                  onApplyToJobs(ready);
+                  done();
+                },
+              },
+            ]
+          : []),
+        ...(eligible.length > 0 && !isDraftPreparationRunning
+          ? [
+              {
+                id: "create-resume",
+                label: count(
+                  eligible.length,
+                  "Create resume",
+                  "Create # resumes",
+                ),
+                run: () => {
+                  onPrepareTailoredDrafts(eligible);
+                  done();
+                },
+              },
+            ]
+          : []),
+        ...(queued.length > 0 && onTakeOutOfApplyQueue
+          ? [
+              "separator" as const,
+              {
+                id: "take-out-of-queue",
+                label: count(
+                  queued.length,
+                  "Take out of the apply queue",
+                  "Take # out of the apply queue",
+                ),
+                run: () => {
+                  void onTakeOutOfApplyQueue(queued).catch(() => undefined);
+                  done();
+                },
+              },
+            ]
+          : []),
+        ...(approved.length > 0 && onMoveResumesBackToReview
+          ? [
+              "separator" as const,
+              {
+                id: "move-back-to-review",
+                label: count(
+                  approved.length,
+                  "Move back to To review",
+                  "Move # back to To review",
+                ),
+                run: () => {
+                  void onMoveResumesBackToReview(approved).catch(
+                    () => undefined,
+                  );
+                  done();
+                },
+              },
+            ]
+          : []),
+        ...(onRemoveJobs
+          ? [
+              ...(approved.length > 0 && onMoveResumesBackToReview
+                ? []
+                : ["separator" as const]),
+              {
+                id: "remove",
+                label: forTicked
+                  ? `Move ${ids.length} back to Find jobs`
+                  : "Move back to Find jobs",
+                run: () =>
+                  forTicked
+                    ? removeSelection()
+                    : onRemoveJobs([jobId]).catch(() => undefined),
+              },
+            ]
+          : []),
+        ...(forTicked ? [] : listingRowMenuEntries(listingUrlForJob?.(jobId))),
+      ]);
+    },
+  );
   const selectItem = useStableCallback((jobId: string) => {
     onSelectItem(jobId);
   });
@@ -466,6 +694,7 @@ export function ReviewQueueListPanel({
       isDraftPreparationRunning ||
       draftEligibleCount > 0 ||
       readyToApplyCount > 0 ||
+      (approvableResumeIds.length > 0 && Boolean(onApproveResumes)) ||
       visibleDraftPreparationResult !== null);
 
   const showsSelectionBar = queue.length > 1 && visibleQueue.length > 0;
@@ -531,6 +760,45 @@ export function ReviewQueueListPanel({
           </span>
           {/* A "Create 0 resumes" button that can never be pressed
                         is a dead end; the note below says why there is none. */}
+          {selectedApprovableIds.length > 0 && onApproveResumes ? (
+            <Button
+              data-testid="approve-selected-resumes"
+              disabled={isApprovingResumes}
+              onClick={() => approveResumes(selectedApprovableIds)}
+              pending={isApprovingResumes}
+              size="toolbar"
+              title="Approves each resume as it is written. A resume with a line to decide stays for you."
+              type="button"
+              variant="secondary"
+            >
+              {selectedApprovableIds.length === 1
+                ? "Approve 1 resume"
+                : `Approve ${selectedApprovableIds.length} resumes`}
+            </Button>
+          ) : null}
+          {selectedReadyIds.length > 0 &&
+          onApplyToJobs &&
+          !safeguardBlockerSentence ? (
+            <Button
+              data-testid="apply-selected"
+              disabled={isApplyToAllPending || applicationWorkPaused}
+              title={
+                applicationWorkPaused
+                  ? APPLICATION_WORK_PAUSED_REASON
+                  : undefined
+              }
+              onClick={() => {
+                onApplyToJobs(selectedReadyIds);
+                clearSelection();
+              }}
+              pending={isApplyToAllPending}
+              size="toolbar"
+              type="button"
+              variant="secondary"
+            >
+              {`${applyVerb} ${selectedReadyIds.length} selected`}
+            </Button>
+          ) : null}
           {selectedEligibleIds.length > 0 ? (
             <Button
               onClick={() => {
@@ -548,6 +816,7 @@ export function ReviewQueueListPanel({
           ) : null}
           {onRemoveJobs ? (
             <Button
+              aria-label="Move back to Find jobs"
               disabled={isRemovingSelection}
               onClick={() => void removeSelection()}
               pending={isRemovingSelection}
@@ -555,7 +824,7 @@ export function ReviewQueueListPanel({
               type="button"
               variant="outline"
             >
-              Remove from shortlist
+              Remove
             </Button>
           ) : null}
           {filteredJobIds.some((id) => !selectedJobIds.has(id)) ? (
@@ -598,7 +867,23 @@ export function ReviewQueueListPanel({
                 : `Create ${draftRunCount} missing resumes`}
             </Button>
           ) : null}
-          {readyToApplyCount > 0 && onApplyToAllReady ? (
+          {approvableResumeIds.length > 0 && onApproveResumes ? (
+            <Button
+              data-testid="approve-all-resumes"
+              disabled={isApprovingResumes}
+              onClick={() => approveResumes(approvableResumeIds)}
+              pending={isApprovingResumes}
+              size="toolbar"
+              title="Approves each resume as it is written; open one first to change it. A resume with a line to decide stays for you."
+              type="button"
+              variant="secondary"
+            >
+              {approvableResumeIds.length === 1
+                ? "Approve the resume to review"
+                : `Approve ${approvableResumeIds.length} resumes`}
+            </Button>
+          ) : null}
+          {readyToApplyCount > 0 && onApplyToJobs ? (
             safeguardBlockerSentence ? (
               <Button
                 data-testid="apply-all-safeguards"
@@ -610,21 +895,39 @@ export function ReviewQueueListPanel({
                 Open Safeguards
               </Button>
             ) : (
-              <Button
-                data-testid="apply-all-ready"
-                disabled={isApplyToAllPending}
-                onClick={() => onApplyToAllReady(readyToApplyCount)}
-                pending={isApplyToAllPending}
-                size="toolbar"
-                type="button"
-                variant="secondary"
-              >
-                {readyToApplyCount === 1
-                  ? "Apply to the 1 ready job"
-                  : totalReadyToApplyCount > readyToApplyCount
-                    ? `Apply to next ${readyToApplyCount} ready jobs`
-                    : `Apply to all ${readyToApplyCount} ready jobs`}
-              </Button>
+              <>
+                <Button
+                  data-testid="apply-all-ready"
+                  disabled={isApplyToAllPending || applicationWorkPaused}
+                  title={
+                    applicationWorkPaused
+                      ? APPLICATION_WORK_PAUSED_REASON
+                      : undefined
+                  }
+                  onClick={() => onApplyToJobs(readyToApplyJobIds)}
+                  pending={isApplyToAllPending}
+                  size="toolbar"
+                  type="button"
+                  variant="secondary"
+                >
+                  {readyToApplyCount === 1
+                    ? `${applyVerb} the 1 ready job`
+                    : `${applyVerb} all ${readyToApplyCount} ready`}
+                </Button>
+                {showsApplyPageButton ? (
+                  <Button
+                    data-testid="apply-page-ready"
+                    disabled={isApplyToAllPending || applicationWorkPaused}
+                    onClick={() => onApplyToJobs(pageReadyIds)}
+                    size="toolbar"
+                    title="The ready jobs on this page of the list."
+                    type="button"
+                    variant="ghost"
+                  >
+                    {`${applyVerb} these ${pageReadyIds.length}`}
+                  </Button>
+                ) : null}
+              </>
             )
           ) : null}
         </>
@@ -637,8 +940,18 @@ export function ReviewQueueListPanel({
           nothing to create offers no Create button, and saying so read like
           a refusal of something the person never asked for. */}
       {isSelecting &&
-      selectedEligibleIds.length > 0 &&
-      selectedEligibleIds.length < selectedJobIds.size ? (
+      onApplyToJobs &&
+      selectedReadyIds.length > 0 &&
+      selectedWaitingOnResume > 0 ? (
+        <p
+          className="m-0 text-xs text-foreground-muted"
+          data-testid="apply-selected-not-ready"
+        >
+          {`${selectedWaitingOnResume} of the selected ${selectedWaitingOnResume === 1 ? "needs its resume" : "need their resumes"} first${selectedEligibleIds.length > 0 ? `; Create ${selectedEligibleIds.length === 1 ? "1 resume" : `${selectedEligibleIds.length} resumes`} writes the missing ones` : ""}.`}
+        </p>
+      ) : isSelecting &&
+        selectedEligibleIds.length > 0 &&
+        selectedEligibleIds.length < selectedJobIds.size ? (
         <p className="m-0 text-xs text-foreground-muted">
           {`${selectedEligibleIds.length} of the selected jobs need a resume; the others keep theirs.`}
         </p>
@@ -656,15 +969,6 @@ export function ReviewQueueListPanel({
             : "This button acts on all shortlisted jobs, not just the ones shown."}
         </p>
       ) : null}
-      {showsAllJobsRow &&
-      !isDraftPreparationRunning &&
-      !isSelecting &&
-      totalReadyToApplyCount > readyToApplyCount ? (
-        <p className="m-0 text-xs text-foreground-muted">
-          {totalReadyToApplyCount} ready jobs. {readyToApplyCount} start now;{" "}
-          {totalReadyToApplyCount - readyToApplyCount} remain after this batch.
-        </p>
-      ) : null}
 
       {/* Apply to all can send applications, so what it does in the saved
           mode stays in view beside it rather than in a tooltip. */}
@@ -672,13 +976,15 @@ export function ReviewQueueListPanel({
       !isSelecting &&
       !safeguardBlockerSentence &&
       readyToApplyCount > 0 &&
-      onApplyToAllReady &&
+      onApplyToJobs &&
       applyAllOutcome ? (
         <p
           className="m-0 text-xs text-foreground-muted"
           data-testid="apply-all-outcome"
         >
-          {applyAllOutcome}
+          {applicationWorkPaused
+            ? APPLICATION_WORK_PAUSED_REASON
+            : applyAllOutcome}
         </p>
       ) : null}
       {!isSelecting && safeguardBlockerSentence && readyToApplyCount > 0 ? (
@@ -687,6 +993,20 @@ export function ReviewQueueListPanel({
           data-testid="apply-all-blocker"
         >
           {safeguardBlockerSentence}
+        </p>
+      ) : null}
+      {!isSelecting &&
+      !isDraftPreparationRunning &&
+      onApproveResumes &&
+      approvableResumeIds.length > 0 &&
+      resumesWithLineToDecide > 0 ? (
+        <p
+          className="m-0 text-xs text-foreground-muted"
+          data-testid="approve-resumes-lines-left"
+        >
+          {resumesWithLineToDecide === 1
+            ? "1 resume has a line to decide first; it stays under To review."
+            : `${resumesWithLineToDecide} resumes have a line to decide first; they stay under To review.`}
         </p>
       ) : null}
       {visibleDraftPreparationResult && !isDraftPreparationRunning ? (
@@ -868,6 +1188,7 @@ export function ReviewQueueListPanel({
                   jobId={item.jobId}
                   key={item.jobId}
                   onSelect={selectItem}
+                  onOpenMenu={openRowMenu}
                   onSelectionKeyDown={handleListKeyDown}
                   resumePolicyCaption={getReviewQueueRowCaption(
                     statusLabel,

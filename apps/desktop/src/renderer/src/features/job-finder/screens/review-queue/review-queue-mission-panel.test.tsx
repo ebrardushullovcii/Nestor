@@ -193,7 +193,7 @@ describe("ReviewQueueMissionPanel", () => {
       screen.getByRole("button", { name: "Open the listing" }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Remove from shortlist" }),
+      screen.getByRole("button", { name: "Move back to Find jobs" }),
     ).toBeTruthy();
   });
 
@@ -585,7 +585,7 @@ it("explains that changing a written level starts a draft before the click", () 
 it("lets a person remove a job during writing and explains remaining AI work", () => {
   const props = renderPanel({ isJobPending: () => true });
   fireEvent.click(
-    screen.getByRole("button", { name: "Remove from shortlist" }),
+    screen.getByRole("button", { name: "Move back to Find jobs" }),
   );
   expect(props.onRemoveReviewJob).toHaveBeenCalledWith("job_1");
   expect(screen.getByText(/Removing this job stops the draft/)).toBeTruthy();

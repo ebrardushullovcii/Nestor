@@ -72,7 +72,7 @@ describe("startApplyBatch", () => {
         onBackgroundSettled,
         pollMs: 5,
       }),
-    ).resolves.toEqual({ startedJobIds: ["job_1", "job_2"] });
+    ).resolves.toEqual({ startedJobIds: ["job_1", "job_2"], runId: "staged" });
     expect(h.service.approveApplyRun).toHaveBeenCalledWith("staged");
     expect(onBackgroundSettled).not.toHaveBeenCalled();
     finish();
@@ -171,7 +171,7 @@ describe("startApplyBatch", () => {
         onBackgroundSettled: vi.fn(),
         pollMs: 5,
       }),
-    ).resolves.toEqual({ startedJobIds: [] });
+    ).resolves.toEqual({ startedJobIds: [], runId: null });
     expect(h.service.startAutoApplyQueueRun).not.toHaveBeenCalled();
   });
 

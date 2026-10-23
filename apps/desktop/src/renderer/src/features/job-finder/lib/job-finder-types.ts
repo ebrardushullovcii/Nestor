@@ -25,6 +25,10 @@ import type {
   JobFinderApplyCopilotActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
+  JobFinderApplyQueueControlInput,
+  JobFinderRemoveFromApplyQueueInput,
+  JobFinderApproveResumesInput,
+  JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
   JobFinderApplicationStartTarget,
   JobFinderPreparedApplicationPageInput,
@@ -108,6 +112,7 @@ export type JobFinderAutoApplyQueueStartOutcome =
       status: "refused";
       reason:
         | "daily_capacity_exhausted"
+        | "work_paused"
         | "empty_selection"
         | "cancelled_stayed_in_workspace";
       message: string | null;
@@ -387,6 +392,7 @@ export interface JobFinderShellActions {
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   clearResumeApproval: (
     jobId: string,
+    restoreStatus?: "draft" | "needs_review",
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   setWorkHistoryReviewAcknowledgment: (
     input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,
@@ -423,6 +429,21 @@ export interface JobFinderShellActions {
   startAutoApplyQueueRun: (
     jobIds: JobFinderApplyQueueActionInput["jobIds"],
     applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  /** One Apply press over many jobs: a saved queue of runs of ten. */
+  startApplyQueue: (
+    input: JobFinderStartApplyQueueInput,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  /** The person's "Approve N resumes" press. */
+  approveResumes: (
+    input: JobFinderApproveResumesInput,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  controlApplyQueue: (
+    input: JobFinderApplyQueueControlInput,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  /** Takes waiting jobs out of the Apply queue before they start. */
+  removeFromApplyQueue: (
+    input: JobFinderRemoveFromApplyQueueInput,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   approveApplyRun: (
     input: JobFinderApplyRunActionInput,
@@ -613,6 +634,10 @@ export interface ActionState {
   savedFilePath?: string | null;
   /** Where the message's natural next step lives, offered beside it. */
   actionLink?: { label: string; route: string } | null;
+  /** Puts back what a quick action took away; the toast offers Undo. */
+  undo?: (() => void) | null;
+  /** The Undo button's words; "Undo all" after a move of many jobs. */
+  undoLabel?: string | null;
 }
 
 /**

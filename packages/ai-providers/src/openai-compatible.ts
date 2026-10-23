@@ -298,6 +298,14 @@ export function createOpenAiCompatibleJobFinderAiClient(
     if (!task) return agentReasoningEffort;
     const configured = validatedOptions?.taskReasoningEfforts?.[task];
     if (configured) return configured;
+    // Muse already has the complete evidence and proposal shape. Keep its
+    // writing effort separate from full listing reads and the agent loop;
+    // the independent claim check and repairs still run at their own effort.
+    if (
+      task === "resume_writer" &&
+      validatedOptions?.model === DEFAULT_TEXT_MODEL
+    )
+      return "medium";
     return task === "resume_writer" || task === "listing_read"
       ? validatedOptions?.reasoningEffort
       : agentReasoningEffort;
@@ -726,17 +734,41 @@ export function createOpenAiCompatibleJobFinderAiClient(
       if (rest.claims.length === 0) {
         return [];
       }
+      // These are reference keys, not candidate facts. Short request-local
+      // IDs avoid making the checker read and repeat hundreds of opaque
+      // persistence IDs. Keep their source identity alongside the complete
+      // text, and restore the original IDs before any verdict is stored.
+      const evidenceIds = new Map(
+        rest.evidence.map((entry, index) => [String(index + 1), entry.id]),
+      );
+      const modelInput = {
+        ...rest,
+        evidence: rest.evidence.map((entry, index) => ({
+          ...entry,
+          id: String(index + 1),
+          sourceId: entry.id,
+        })),
+      };
       const payload = await fetchModelJson(
         "checkResumeClaims",
         buildResumeClaimCheckPrompt(),
-        buildResumeClaimCheckPayload(rest),
+        buildResumeClaimCheckPayload(modelInput),
         {
+          conversationKey: modelConversationKeys.resumeClaimChecking(
+            rest.evidence,
+          ),
           ...(timeoutMs !== undefined ? { timeoutMs } : {}),
           ...(signal ? { signal } : {}),
           reasoningEffort: reasoningEffortFor("claim_check"),
         },
       );
-      return normalizeResumeClaimChecks(payload, rest);
+      return normalizeResumeClaimChecks(payload, modelInput).map((check) => ({
+        ...check,
+        evidenceIds: check.evidenceIds.flatMap((id) => {
+          const original = evidenceIds.get(id);
+          return original === undefined ? [] : [original];
+        }),
+      }));
     },
     async extractJobsFromPage(input) {
       const maxJobs = Math.max(0, Math.floor(input.maxJobs));
