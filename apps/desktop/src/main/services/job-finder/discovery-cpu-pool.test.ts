@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { createDiscoveryCpuPool } from "./discovery-cpu-pool";
-import type { DiscoveryFeedTask } from "@nestor/contracts";
+import {
+  DISCOVERY_READER_LOST_ERROR,
+  type DiscoveryFeedTask,
+} from "@nestor/contracts";
 
 const entry = new URL(
   `data:text/javascript,${encodeURIComponent(`
@@ -80,9 +83,13 @@ describe("discovery CPU reader pool", () => {
   });
   test("replaces a crashed reader and rejects all outstanding work at shutdown", async () => {
     const p = pool();
-    await expect(p.run(task("crash"))).rejects.toThrow(
-      "Feed reader exited (2)",
-    );
+    await expect(p.run(task("crash"))).rejects.toMatchObject({
+      name: DISCOVERY_READER_LOST_ERROR,
+      message: "Feed reader exited (2).",
+    });
+    await expect(p.run(task("error"))).rejects.not.toMatchObject({
+      name: DISCOVERY_READER_LOST_ERROR,
+    });
     expect((await p.run(task("7"))).skippedMalformedCount).toBe(7);
     const pending = expect(p.run(task("wait"))).rejects.toMatchObject({
       name: "AbortError",

@@ -1,14 +1,15 @@
 import { Worker } from "node:worker_threads";
 import { availableParallelism } from "node:os";
-import type {
-  DiscoveryCpuRequest,
-  DiscoveryCpuResponse,
-  DiscoveryFeedTask,
-  DiscoveryFeedResult,
-  DiscoveryCpuTask,
-  DiscoveryCpuResult,
-  DiscoveryInventoryPosting,
-  DiscoveryInventoryPreparation,
+import {
+  DISCOVERY_READER_LOST_ERROR,
+  type DiscoveryCpuRequest,
+  type DiscoveryCpuResponse,
+  type DiscoveryFeedTask,
+  type DiscoveryFeedResult,
+  type DiscoveryCpuTask,
+  type DiscoveryCpuResult,
+  type DiscoveryInventoryPosting,
+  type DiscoveryInventoryPreparation,
 } from "@nestor/contracts";
 
 type Work = {
@@ -34,6 +35,8 @@ export function createDiscoveryCpuPool(
   let sequence = 0;
   let closed = false;
   const abortError = () => new DOMException("Aborted", "AbortError");
+  const lost = (error: Error) =>
+    Object.assign(error, { name: DISCOVERY_READER_LOST_ERROR });
 
   const fail = (slot: Slot, error: Error) => {
     if (!slots.delete(slot)) return;
@@ -70,9 +73,9 @@ export function createDiscoveryCpuPool(
         slot.idle.unref();
       }
     });
-    worker.on("error", (error: Error) => fail(slot, error));
+    worker.on("error", (error: Error) => fail(slot, lost(error)));
     worker.on("exit", (code) =>
-      fail(slot, new Error(`Feed reader exited (${code}).`)),
+      fail(slot, lost(new Error(`Feed reader exited (${code}).`))),
     );
     worker.unref();
     return slot;

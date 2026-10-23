@@ -6,6 +6,12 @@ import type {
 } from "./discovery";
 import type { SourceIntelligenceArtifact } from "./source-debug";
 
+/**
+ * A feed reader that crashed or exited took its transferred bytes with it;
+ * the caller may read that one feed again on its own thread.
+ */
+export const DISCOVERY_READER_LOST_ERROR = "DiscoveryReaderLostError";
+
 /** Pure work only: no repositories, browser handles or execution authority. */
 export type DiscoveryFeedTask = {
   payload: string | Uint8Array;

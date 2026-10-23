@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
+  DISCOVERY_READER_LOST_ERROR,
   JobPostingSchema,
   type JobDiscoveryTarget,
   type JobSearchPreferences,
@@ -17,6 +18,7 @@ import {
   inferSourceIntelligenceFromTarget,
   resolveRouteKindForReuse,
 } from "./workspace-source-intelligence";
+import { setDiscoveryFeedExecutor } from "./discovery-feed-executor";
 import {
   createSeed,
   createSourceInstructionArtifact,
@@ -326,6 +328,36 @@ async function collectGreenhouseJobs(
 }
 
 describe("collectPublicProviderJobs", () => {
+  test("reads a feed again on this thread when its reader is lost", async () => {
+    const executor = vi.fn(() =>
+      Promise.reject(
+        Object.assign(new Error("Feed reader exited (1)."), {
+          name: DISCOVERY_READER_LOST_ERROR,
+        }),
+      ),
+    );
+    setDiscoveryFeedExecutor(executor);
+    try {
+      const result = await collectGreenhouseJobs(null);
+      expect(executor).toHaveBeenCalledOnce();
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+      expect(result.warning).toBeNull();
+      expect(result.jobs.map((job) => job.sourceJobId)).toEqual(["4622190"]);
+    } finally {
+      setDiscoveryFeedExecutor(null);
+    }
+  });
+  test("an unreadable feed from a live reader is not fetched again", async () => {
+    setDiscoveryFeedExecutor(() => Promise.reject(new Error("Unreadable feed")));
+    try {
+      const result = await collectGreenhouseJobs(null);
+      expect(globalThis.fetch).toHaveBeenCalledOnce();
+      expect(result.jobs).toEqual([]);
+      expect(result.warning).not.toBeNull();
+    } finally {
+      setDiscoveryFeedExecutor(null);
+    }
+  });
   test("decodes escaped provider markup before summarizing the job", async () => {
     const result = await collectGreenhouseJobs(
       null,

@@ -18,7 +18,11 @@ import {
 import { matchesExcludedLocation } from "./matching";
 import { isExplicitSearchProbeDisproof } from "./source-instruction-evidence";
 import { normalizeText, uniqueStrings } from "./shared";
-import type { DiscoveryFeedTask, DiscoveryFeedResult } from "@nestor/contracts";
+import {
+  DISCOVERY_READER_LOST_ERROR,
+  type DiscoveryFeedTask,
+  type DiscoveryFeedResult,
+} from "@nestor/contracts";
 import {
   getDiscoveryFeedExecutor,
   rememberPreparedDiscoveryPosting,
@@ -2016,18 +2020,30 @@ export async function collectPublicProviderJobs(input: {
       }
 
       const execute = getDiscoveryFeedExecutor() ?? preparePublicProviderFeed;
-      const parsing = execute(
-        {
-          payload,
-          target: input.target,
-          intelligence: input.artifact.intelligence,
-          source: input.source,
-          prepareForDiscovery: input.prepareForDiscovery ?? false,
-        },
-        input.signal,
-      );
+      const feed = {
+        target: input.target,
+        intelligence: input.artifact.intelligence,
+        source: input.source,
+        prepareForDiscovery: input.prepareForDiscovery ?? false,
+      };
+      const parsing = execute({ ...feed, payload }, input.signal);
       payload = new Uint8Array(0);
-      const parsedPublicApiRecords = await parsing;
+      let parsedPublicApiRecords: DiscoveryFeedResult;
+      try {
+        parsedPublicApiRecords = await parsing;
+      } catch (error) {
+        if (
+          input.signal?.aborted ||
+          !(error instanceof Error) ||
+          error.name !== DISCOVERY_READER_LOST_ERROR
+        )
+          throw error;
+        // The lost reader took the transferred bytes; read this feed here.
+        parsedPublicApiRecords = await preparePublicProviderFeed({
+          ...feed,
+          payload: await requestFeed(),
+        });
+      }
       input.signal?.throwIfAborted();
       const { jobs, preparations } = parsedPublicApiRecords;
       for (const [position, preparation] of preparations.entries()) {
