@@ -131,7 +131,6 @@ import {
 interface DiscoveryResultsPanelProps {
   hiddenJobsControl?: React.ReactNode;
   planName?: string | null;
-  onAssessJobListing?: (jobId: string) => Promise<void>;
   onJudgeUnjudgedJobs?: () => Promise<void>;
   fitJudgmentProgress?: FitJudgmentProgress | null;
   alsoFoundCount?: number;
@@ -660,7 +659,6 @@ const isRowScoreWithheld = createPerObjectCache(
 export function DiscoveryResultsPanel({
   hiddenJobsControl,
   planName = null,
-  onAssessJobListing,
   onJudgeUnjudgedJobs,
   fitJudgmentProgress,
   alsoFoundCount = 0,
@@ -1585,17 +1583,13 @@ export function DiscoveryResultsPanel({
             </details>
           ) : null}
           {hiddenJobsControl}
-          {onJudgeUnjudgedJobs || onAssessJobListing ? (
+          {onJudgeUnjudgedJobs ? (
             <DiscoveryAssessmentContinuation
               className="ml-auto"
               jobs={jobs}
-              preferredJobs={visibleJobs}
               isSearchRunning={isSearchInProgress}
               fitJudgmentProgress={fitJudgmentProgress ?? null}
-              {...(onJudgeUnjudgedJobs
-                ? { onJudgeAll: onJudgeUnjudgedJobs }
-                : {})}
-              {...(onAssessJobListing ? { onAssess: onAssessJobListing } : {})}
+              onJudgeAll={onJudgeUnjudgedJobs}
             />
           ) : null}
         </div>

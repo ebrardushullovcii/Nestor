@@ -181,10 +181,11 @@ describe("buildJobFinderGlobalSearchEntries", () => {
     expect(lastJob?.subtitle).toContain(
       "Saved on this device, not in this search plan",
     );
-    expect(countDiscoveryVisibleJobs(workspace)).toBe(50);
+    // Every job of the plan is shortlisted, so none waits in Find jobs.
+    expect(countDiscoveryVisibleJobs(workspace)).toBe(0);
     expect(countShortlistedJobs(workspace)).toBe(50);
     const planless = { ...workspace, activeCampaignId: "missing" };
-    expect(countDiscoveryVisibleJobs(planless)).toBe(3003);
+    expect(countDiscoveryVisibleJobs(planless)).toBe(3003 - 75);
     expect(countShortlistedJobs(planless)).toBe(75);
     expect(jobs[3002]).not.toHaveProperty("description");
   });

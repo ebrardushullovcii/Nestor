@@ -483,7 +483,7 @@ describe("JobSearchHomeScreen", () => {
     const pipeline = screen.getByTestId("home-pipeline");
     const tiles = within(pipeline).getAllByRole("button");
     expect(tiles.map((tile) => tile.textContent)).toEqual([
-      "Find jobs1",
+      "Find jobs0",
       "Shortlisted11 ready to apply",
       "Applications0",
     ]);

@@ -24,6 +24,7 @@ import type {
 import {
   countApplicationRecords,
   countDiscoveryVisibleJobs,
+  countDiscoveryWeakerJobs,
   countNeedsYou,
   countSafeguardBlockers,
   countShortlistedJobs,
@@ -47,7 +48,6 @@ import {
   resolveApplyStatePresentation,
 } from "../applications/apply-state";
 import { buildApplyRunContextReader } from "../applications/applications-recovery-state";
-import { isDiscoveryAlsoFoundResult } from "../discovery/discovery-result-groups";
 import { getDiscoveryRunFailureRecovery } from "../discovery/discovery-run-feedback";
 import {
   APPLICATION_PREPARATION_BATCH_LIMIT,
@@ -976,12 +976,7 @@ export function buildJobSearchHomeModel(
   }
 
   const visibleJobs = countDiscoveryVisibleJobs(workspace, jobIds);
-  const hiddenWeaker = (workspace.discoveryJobs ?? []).filter(
-    (job) =>
-      jobIds.has(job.id) &&
-      !job.discoveryFeedback &&
-      isDiscoveryAlsoFoundResult(job),
-  ).length;
+  const hiddenWeaker = countDiscoveryWeakerJobs(workspace, jobIds);
   const shortlisted = countShortlistedJobs(workspace, jobIds);
   const shortlist = countShortlist(queue, workspace);
   const resumeBatch =
