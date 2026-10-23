@@ -8,6 +8,7 @@ import type {
 } from "@nestor/contracts";
 
 import { createJobIdentityIndex, type JobIdentityIndex } from "./job-identity";
+import { copyView } from "@nestor/core";
 
 type ActivityCandidate = Exclude<ListingActivity, { status: "unknown" }>;
 const projectedActivityJobs = new WeakMap<
@@ -273,7 +274,7 @@ export function projectDiscoveryJobViews(input: {
     };
     const activityKey = JSON.stringify(listingActivity);
     if (previous?.activityKey === activityKey) return previous.view;
-    const view = { ...job, listingActivity };
+    const view = copyView(job, { listingActivity });
     // Only immutable repository rows are safe to reuse across display reads.
     if (Object.isFrozen(job)) {
       Object.freeze(listingActivity);

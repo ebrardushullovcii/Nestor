@@ -2,6 +2,8 @@
 
 Status: accepted (2026-10-21).
 
+Amended by [ADR 0055](0055-saved-job-details-stay-in-sqlite.md) on 2026-10-23: saved-job lists validate their facts first, with full unopened rows validated in background slices. The marking and invalidation rules below remain in force.
+
 ## Context
 
 Every start read each saved job and resume draft through its schema. With 20,000 saved jobs that was about 3 s of main-process CPU before the workspace could answer, and the 27 large resume drafts of the owner's workspace (18 MB) cost about 0.3 s in one block on every start. Almost every row is stored exactly as the schema returns it, because the app writes what the schema produced.

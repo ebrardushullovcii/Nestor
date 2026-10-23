@@ -1635,21 +1635,41 @@ type SavedJobInput = z.input<typeof JobPostingSchema> & {
     | undefined;
 };
 
+const SavedJobObjectSchema = JobPostingSchema.extend({
+  id: NonEmptyStringSchema,
+  campaignIds: z.array(NonEmptyStringSchema).default([]),
+  personSupplied: z.boolean().optional(),
+  planAssessments: z.record(MatchAssessmentSchema).optional(),
+  status: ApplicationStatusSchema,
+  matchAssessment: MatchAssessmentSchema,
+  provenance: z.array(SavedJobDiscoveryProvenanceSchema).default([]),
+  discoveryFeedback: DiscoveryFeedbackSchema.nullable().default(null),
+  resumeApplicationMode: ResumeApplicationModeSchema.nullable().default(null),
+  resumeTailoringMode: TailoringModeSchema.nullable().default(null),
+  latestMatchAssessmentAudit:
+    MatchAssessmentChangeAuditSchema.nullable().default(null),
+});
 export const SavedJobSchema: z.ZodType<SavedJob, z.ZodTypeDef, SavedJobInput> =
-  JobPostingSchema.extend({
-    id: NonEmptyStringSchema,
-    campaignIds: z.array(NonEmptyStringSchema).default([]),
-    personSupplied: z.boolean().optional(),
-    planAssessments: z.record(MatchAssessmentSchema).optional(),
-    status: ApplicationStatusSchema,
-    matchAssessment: MatchAssessmentSchema,
-    provenance: z.array(SavedJobDiscoveryProvenanceSchema).default([]),
-    discoveryFeedback: DiscoveryFeedbackSchema.nullable().default(null),
-    resumeApplicationMode: ResumeApplicationModeSchema.nullable().default(null),
-    resumeTailoringMode: TailoringModeSchema.nullable().default(null),
-    latestMatchAssessmentAudit:
-      MatchAssessmentChangeAuditSchema.nullable().default(null),
-  });
+  SavedJobObjectSchema;
+
+/** Main's retained list facts; listing bodies remain behind repository reads. */
+export const SavedJobListFactsSchema = SavedJobObjectSchema.omit({
+  description: true,
+  summary: true,
+  keySkills: true,
+  responsibilities: true,
+  minimumQualifications: true,
+  preferredQualifications: true,
+  benefits: true,
+  sourceIntelligence: true,
+  screeningHints: true,
+  keywordSignals: true,
+}).extend({
+  provenance: z
+    .array(SavedJobDiscoveryProvenanceSchema.omit({ listingFacts: true }))
+    .default([]),
+});
+export type SavedJobListFacts = z.infer<typeof SavedJobListFactsSchema>;
 
 export const ListingActivitySchema = z.discriminatedUnion("status", [
   z

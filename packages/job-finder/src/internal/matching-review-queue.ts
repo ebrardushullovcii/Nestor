@@ -413,6 +413,8 @@ export function isLikelyUtilityShortlistJob(
 
   if (
     job.company !== undefined &&
+    (job.company.trim().length === 0 ||
+      ABSENT_EMPLOYER_PATTERN.test(job.company.trim())) &&
     job.description !== undefined &&
     isLikelyEmptyNonDetailPosting({
       canonicalUrl,
@@ -767,7 +769,7 @@ export async function warmDiscoveryJobChecks(
       await new Promise<void>((resolve) => setImmediate(resolve));
   }
 }
-const UTILITY_CHECKS_PER_TURN = 1_000;
+const UTILITY_CHECKS_PER_TURN = 100;
 /** Which view (plan) each frozen row was last warmed for. */
 const warmedRows = new WeakMap<SavedJob, string | null>();
 

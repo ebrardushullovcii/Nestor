@@ -16,10 +16,30 @@ const fields = [
   "seniority",
   "company",
   "location",
-  "description",
   "postedAt",
   "postedAtText",
 ] as const;
+
+/** Ledger observations have no listing body, so their queries cannot use a
+ * content alias. Retain only the identity fields those observations carry. */
+export function listingActivityIdentity(job: SavedJob): ListingIdentity {
+  return {
+    id: job.id,
+    source: job.source,
+    sourceJobId: job.sourceJobId,
+    canonicalUrl: job.canonicalUrl,
+    applicationUrl: job.applicationUrl,
+    providerKey: job.providerKey,
+    providerBoardToken: job.providerBoardToken,
+    providerIdentifier: job.providerIdentifier,
+    title: job.title,
+    seniority: job.seniority,
+    company: job.company,
+    location: job.location,
+    postedAt: job.postedAt,
+    postedAtText: job.postedAtText,
+  };
+}
 
 /** Status/fit changes leave listing identity and cached ambiguity results alone. */
 export function createListingActivityIdentityIndex() {
@@ -62,23 +82,7 @@ export function createListingActivityIdentityIndex() {
       const identity =
         cached && fields.every((field) => cached[field] === job[field])
           ? cached
-          : Object.freeze({
-              id: job.id,
-              source: job.source,
-              sourceJobId: job.sourceJobId,
-              canonicalUrl: job.canonicalUrl,
-              applicationUrl: job.applicationUrl,
-              providerKey: job.providerKey,
-              providerBoardToken: job.providerBoardToken,
-              providerIdentifier: job.providerIdentifier,
-              title: job.title,
-              seniority: job.seniority,
-              company: job.company,
-              location: job.location,
-              description: job.description,
-              postedAt: job.postedAt,
-              postedAtText: job.postedAtText,
-            });
+          : Object.freeze(listingActivityIdentity(job));
       if (Object.isFrozen(job)) byRow.set(job, identity);
       next.set(job.id, identity);
       return identity;

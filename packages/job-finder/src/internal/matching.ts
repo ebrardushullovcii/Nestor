@@ -33,6 +33,7 @@ import { canonicalizeLocationAliases } from "./location-normalization";
 import {
   createJobIdentityDigest,
   createJobIdentityIndex,
+  type JobIdentityInput,
   hasEquivalentListingContentIdentity,
   type JobIdentityIndex,
 } from "./job-identity";
@@ -1450,12 +1451,22 @@ function uniqueProvenance(
  * A saved job's identity for matching new sightings: its own fields plus the
  * listing links its other sources showed.
  */
-export function toSightingIdentityInput(job: SavedJob): SavedJob & {
-  alternateListingUrls: string[];
-  matchAcrossSources: true;
-} {
+export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
   return {
-    ...job,
+    source: job.source,
+    sourceJobId: job.sourceJobId,
+    canonicalUrl: job.canonicalUrl,
+    applicationUrl: job.applicationUrl,
+    providerKey: job.providerKey,
+    providerBoardToken: job.providerBoardToken,
+    providerIdentifier: job.providerIdentifier,
+    title: job.title,
+    seniority: job.seniority,
+    company: job.company,
+    location: job.location,
+    description: job.description,
+    postedAt: job.postedAt,
+    postedAtText: job.postedAtText,
     matchAcrossSources: true,
     alternateListingUrls: job.provenance.flatMap((entry) =>
       entry.listingUrl && entry.listingUrl !== job.canonicalUrl

@@ -648,7 +648,11 @@ function readAliasBasis(input: JobIdentityInput): AliasBasis {
     input.title,
     input.company,
     input.location,
-    input.description,
+    // The alias memo needs change detection, never another retained listing
+    // body. SHA-256 also keeps its keys bounded for very large descriptions.
+    input.description == null
+      ? input.description
+      : createHash("sha256").update(input.description).digest("base64url"),
     input.exactContent?.digest,
     input.postedAt,
     input.postedAtText,

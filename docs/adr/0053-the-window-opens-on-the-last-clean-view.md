@@ -2,6 +2,8 @@
 
 Status: accepted (2026-10-21).
 
+Amended by [ADR 0055](0055-saved-job-details-stay-in-sqlite.md) on 2026-10-23: compatible clean views also survive a main-process update. The original decision below records the initial build restriction.
+
 ## Context
 
 On the owner's workspace (6,284 saved jobs, 897 sources, a 210 MB database) the window showed Home after about 3.3 s and finished loading after 6.3–6.9 s. Most of that was the main process reading and validating every saved job and search record, then sending one 35 MB snapshot. Each start also ran a full SQLite integrity check (about 0.3 s), even when the file was exactly as the last clean close left it.

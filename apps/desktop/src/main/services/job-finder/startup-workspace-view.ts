@@ -6,7 +6,6 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -26,8 +25,8 @@ import {
  * window gets them at once instead of waiting seconds for every job to load;
  * the real workspace replaces them a moment later through the ordinary delta
  * sync. They are used only when the database is byte-for-byte the file that
- * clean close left and the main-process build is the one that wrote them, so
- * the view cannot describe different data. Each saved view is used once.
+ * clean close left and the view format is compatible. Each saved view is used
+ * once; a new main build revalidates the rows independently in the background.
  */
 export type StartupWorkspaceView = {
   bootstrap: JobFinderRendererWorkspaceSnapshot;
@@ -40,12 +39,13 @@ export type StartupWorkspaceView = {
  */
 type StoredStartupWorkspaceView = {
   format: number;
-  build: { stamp: string; contents: string };
   database: string;
   bootstrap: Uint8Array;
   snapshot: Uint8Array;
 };
 
+// Bump when the renderer's saved-view contract changes incompatibly. Main's
+// validation digest is intentionally independent from this display format.
 const FORMAT = 3;
 
 function viewPath(): string {
@@ -61,30 +61,6 @@ function bundleFiles(): string[] {
     .filter((name) => name.endsWith(".cjs") || name.endsWith(".js"))
     .sort()
     .map((name) => path.join(directory, name));
-}
-
-/** The main-process build by its files' names, sizes and times: instant. */
-function buildStamp(): string {
-  const hash = createHash("sha1");
-  for (const file of bundleFiles()) {
-    const { size, mtimeMs } = statSync(file);
-    hash.update(`${path.basename(file)}:${size}:${mtimeMs}\n`);
-  }
-  return hash.digest("hex");
-}
-
-/**
- * The build by its files' contents. `pnpm desktop:dev` rewrites unchanged
- * files on every start, so their times change while the build does not.
- * Opening the bundle costs about 0.3 s on Windows, so only then.
- */
-function buildContents(): string {
-  const hash = createHash("sha1");
-  for (const file of bundleFiles()) {
-    hash.update(`${path.basename(file)}\n`);
-    hash.update(readFileSync(file));
-  }
-  return hash.digest("hex");
 }
 
 let buildDigest: Promise<string | null> | null = null;
@@ -147,12 +123,7 @@ function loadStartupWorkspaceView() {
     const stored = deserialize(
       readFileSync(viewPath()),
     ) as StoredStartupWorkspaceView;
-    if (
-      stored.format === FORMAT &&
-      stored.database === startupDatabase &&
-      (stored.build.stamp === buildStamp() ||
-        stored.build.contents === buildContents())
-    ) {
+    if (stored.format === FORMAT && stored.database === startupDatabase) {
       loaded = { bootstrap: stored.bootstrap, snapshot: stored.snapshot };
     }
   } catch {
@@ -209,7 +180,6 @@ export function writeStartupWorkspaceView(
     }
     const stored: StoredStartupWorkspaceView = {
       format: FORMAT,
-      build: { stamp: buildStamp(), contents: buildContents() },
       database,
       bootstrap: serialize(view.bootstrap),
       snapshot: serialize(view.snapshot),
