@@ -1,4 +1,5 @@
 import type {
+  PreparedApplicationForm,
   ApplyJobResult,
   ApplyJobResultInput,
   ApplyRun,
@@ -462,11 +463,15 @@ export interface JobFinderRepository
   listApplyRuns(options?: { id?: string }): Promise<readonly ApplyRun[]>;
   upsertApplyRun(run: ApplyRun): Promise<void>;
   listApplyJobResults(options?: {
+    id?: string;
     runId?: string;
     jobId?: string;
     applicationRecordId?: string;
   }): Promise<readonly ApplyJobResult[]>;
   upsertApplyJobResult(result: ApplyJobResultInput): Promise<void>;
+  getPreparedApplicationForm(resultId: string): Promise<PreparedApplicationForm | null>;
+  upsertPreparedApplicationForm(form: PreparedApplicationForm): Promise<void>;
+  deletePreparedApplicationForm(resultId: string): Promise<void>;
   markApplicationPreparationStarted(input: {
     resultId: string;
     runId: string;

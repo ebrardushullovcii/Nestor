@@ -1,3 +1,4 @@
+import { PreparedApplicationFormSchema } from "./prepared-application-form";
 import { z } from "zod";
 
 import {
@@ -958,6 +959,7 @@ const PersistedDiscoveryStateSchema: z.ZodType<
 > = JobFinderDiscoveryStateSchema;
 
 const JobFinderRepositoryStateShape = {
+  preparedApplicationForms: z.array(PreparedApplicationFormSchema).optional(),
   profile: CandidateProfileSchema,
   searchPreferences: JobSearchPreferencesSchema,
   profileSetupState: ProfileSetupStateSchema.default({}),

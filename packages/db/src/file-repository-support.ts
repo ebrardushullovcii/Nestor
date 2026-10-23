@@ -482,6 +482,7 @@ export const INDEXED_COLLECTION_CONFIGS = {
 } as const;
 
 export type PersistedTableName =
+  | "prepared_application_forms"
   | "application_answer_snapshots"
   | "application_authority_envelopes"
   | "apply_runs"

@@ -1,4 +1,8 @@
 import type {
+  ApplicationPageState,
+  ApplicationPageReopenProgress,
+  PreparedApplicationForm,
+  PreparedFormAttachment,
   AgentDiscoveryProgress,
   ApplicationAttestationKind,
   ApplicationAuthorityEnvelope,
@@ -42,6 +46,13 @@ import type {
   ExecuteExactlyOneFinalActionInput,
   ObserveApplicationFormOptions,
 } from "./application-submission-browser-hands";
+
+export interface PreparedApplicationFormStore {
+  get(key: string): Promise<PreparedApplicationForm | null>;
+  save(form: PreparedApplicationForm): Promise<void>;
+  delete(key: string): Promise<void>;
+  loadAttachment(file: PreparedFormAttachment): Promise<Uint8Array>;
+}
 
 export interface OpenBrowserSessionOptions {
   /** Automation setup must not steal focus from a user-minimized browser. */
@@ -252,7 +263,7 @@ export interface ApplicationPreparationProgress {
 export interface BrowserSessionRuntime {
   readRenderedPage?(
     url: string,
-    options?: { signal?: AbortSignal; onPage?: (page: Page) => void },
+    options?: { signal?: AbortSignal; onPage?: AutomationPageListener },
   ): Promise<{ html: string; finalUrl: string }>;
   getSessionState(source: JobSource): Promise<BrowserSessionState>;
   openSession(
@@ -294,6 +305,22 @@ export interface BrowserSessionRuntime {
     source: JobSource,
     pageBindingKey: string,
   ): Promise<boolean>;
+  getApplicationPageState?(source: JobSource, key: string): Promise<ApplicationPageState>;
+  reopenApplicationPage?(source: JobSource, key: string,
+    onProgress?: (progress: ApplicationPageReopenProgress) => void): Promise<ApplicationPageState>;
+  /** Discard a ready form only after an exact guarded refill has been verified. */
+  hibernateApplicationPageBinding?(
+    source: JobSource,
+    pageBindingKey: string,
+    canDiscard: () => boolean,
+  ): Promise<boolean>;
+  /** Browser Close ends ephemeral recovery as well as live pages. */
+  clearApplicationPageRecovery?(): void;
+  /** Native destruction differs from a CDP detach during person handoff. */
+  forgetClosedApplicationPage?(
+    source: JobSource,
+    pageBindingKey: string,
+  ): boolean;
   /** Bring the exact retained application page to the person without URL matching. */
   focusApplicationPageBinding?(
     source: JobSource,
@@ -406,7 +433,7 @@ export interface BrowserSessionRuntime {
  * browser between runs knows which run a tab belongs to (a person stepping
  * into that tab then stops only that run).
  */
-export type AutomationPageListener = (page: Page) => void;
+export type AutomationPageListener = (page: Page) => void | Promise<void>;
 
 export interface BrowserApplicationExecutionOptions {
   signal?: AbortSignal;

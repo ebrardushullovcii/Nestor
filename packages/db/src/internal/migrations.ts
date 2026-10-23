@@ -240,6 +240,13 @@ function readLegacyDiscoveryRuns(
 }
 
 export function runMigrations(database: DatabaseSync): void {
+  function ensurePreparedApplicationForms(): void {
+    database.exec(`CREATE TABLE IF NOT EXISTS prepared_application_forms (
+      id TEXT PRIMARY KEY, value TEXT NOT NULL
+    )`);
+    database.prepare("INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)")
+      .run(21, "durable_prepared_application_forms");
+  }
   function hasTable(tableName: string): boolean {
     return Boolean(
       database
@@ -2071,6 +2078,7 @@ export function runMigrations(database: DatabaseSync): void {
       assertApplicationAnswerSnapshotTableShape();
     }
 
+    ensurePreparedApplicationForms();
     migrateDiscoveryStorage(database);
     ensureTailoredAssetJobIndex(database);
     return;
@@ -2331,6 +2339,7 @@ export function runMigrations(database: DatabaseSync): void {
     }
 
     if (currentVersion < 19) confirmLegacyAgentAnswers();
+
     assertApplicationAuthorityTableShape();
     assertApplicationAnswerSnapshotTableShape();
 
@@ -2339,6 +2348,7 @@ export function runMigrations(database: DatabaseSync): void {
     database.exec("ROLLBACK");
     throw error;
   }
+  ensurePreparedApplicationForms();
   migrateDiscoveryStorage(database);
   ensureTailoredAssetJobIndex(database);
 }

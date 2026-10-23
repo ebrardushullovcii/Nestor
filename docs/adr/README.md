@@ -61,6 +61,7 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0052](0052-nestor-rebrand.md) | accepted | Nordri becomes Nestor; the newest old workspace, browser sign-ins and preferences move once |
 | [0053](0053-the-window-opens-on-the-last-clean-view.md) | accepted | A clean quit saves the window's view; the next start shows it at once and converges by delta, and skips the integrity check on an untouched file |
 | [0054](0054-a-build-skips-validating-rows-it-already-validated.md) | accepted | Saved jobs and resume drafts a build validated unchanged are marked; the same build's next start reads them without the schema |
+| [0055](0055-reclaim-verified-prepared-forms.md) | accepted | Idle tabs freeze; the oldest prepared forms give way only after an exact guarded refill is verified |
 
 ## Policy
 

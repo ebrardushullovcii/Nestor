@@ -1,4 +1,5 @@
 export * from "./base";
+export * from "./prepared-application-form";
 export * from "./desktop-browser";
 export * from "./apply-form-mechanics";
 export * from "./browser-errors";
