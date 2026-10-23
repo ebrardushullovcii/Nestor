@@ -25,6 +25,7 @@ import {
   JobFinderWindowCloseGuard,
   applyJobFinderWindowCloseGuard,
   getJobFinderWindowCloseConfirmation,
+  setPendingCloseSave,
 } from "./job-finder-window-close-guard";
 import { JobFinderUnsavedChangesDialog } from "./job-finder-unsaved-changes-dialog";
 import { JobFinderPage } from "./job-finder-page";
@@ -160,6 +161,59 @@ describe("JobFinderWindowCloseGuard subscription lifecycle", () => {
 });
 
 describe("JobFinderWindowCloseGuard decisions", () => {
+  it("saves an edit typed a moment ago, then closes without asking", async () => {
+    const bridge = installCloseBridgeMock();
+    const key = Symbol("pending");
+    let finishSave: (saved: boolean) => void = () => undefined;
+    const save = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    setPendingCloseSave(key, save);
+    expect(bridge.guardStates.at(-1)).toEqual({ blocked: true });
+
+    render(<JobFinderWindowCloseGuard />);
+    act(() => {
+      bridge.emitCloseRequest("req_pending");
+    });
+
+    expect(save).toHaveBeenCalledTimes(1);
+    // The close waits for the save; protection is not dropped meanwhile.
+    act(() => setPendingCloseSave(key, null));
+    expect(bridge.resolutions).toEqual([]);
+    expect(bridge.guardStates.at(-1)).toEqual({ blocked: true });
+
+    await act(async () => {
+      finishSave(true);
+    });
+    await waitFor(() => {
+      expect(bridge.resolutions).toEqual([
+        { requestId: "req_pending", decision: "proceed" },
+      ]);
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("asks only when the pending edit could not be saved", async () => {
+    const bridge = installCloseBridgeMock();
+    const key = Symbol("pending");
+    setPendingCloseSave(key, () => Promise.resolve(false));
+
+    render(<JobFinderWindowCloseGuard />);
+    act(() => {
+      bridge.emitCloseRequest("req_failed_save");
+    });
+
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(
+      screen.getByText("Your latest resume edits could not be saved"),
+    ).toBeTruthy();
+    expect(bridge.resolutions).toEqual([]);
+    setPendingCloseSave(key, null);
+  });
+
   it("auto-proceeds a clean close without showing any dialog", async () => {
     const bridge = installCloseBridgeMock();
     expect(getJobFinderWindowCloseConfirmation()).toBeNull();

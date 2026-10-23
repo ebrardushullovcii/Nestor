@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ResumeDraft } from "@nestor/contracts";
+import { setPendingCloseSave } from "../../../../pages/job-finder-window-close-guard";
 
 export type ResumeAutosave = (
   draft: ResumeDraft,
@@ -19,7 +20,7 @@ export type ResumeAutosaveStatus = "saved" | "saving" | "failed";
  * draft, saves what is pending at once.
  *
  * The fields are never locked: the save has its own state here instead of
- * the job's pending scope.
+ * the job's pending scope. Closing the window saves a pending edit first.
  */
 export function useResumeAutosave(input: {
   draft: ResumeDraft | null;
@@ -128,6 +129,36 @@ export function useResumeAutosave(input: {
     },
     [draftId],
   );
+
+  // Closing the window within the delay saves the edit before it closes.
+  const saveBeforeClose = useCallback(async (): Promise<boolean> => {
+    if (inFlight.current) await inFlight.current;
+    const { draft: current, unsaved: pending, save } = latest.current;
+    if (!save || !current || !pending) return true;
+    let saved = false;
+    const run = save(current, (updatedAt) =>
+      latest.current.onSaved(current, updatedAt),
+    ).then(
+      (result) => {
+        saved = result.saved;
+      },
+      () => undefined,
+    );
+    inFlight.current = run.finally(() => {
+      inFlight.current = null;
+      if (mounted.current) setRound((value) => value + 1);
+    });
+    await inFlight.current;
+    return saved;
+  }, []);
+  const closeSaveKey = useRef(Symbol("resume-autosave"));
+  const hasPendingSave =
+    enabled && (unsaved || saving) && !failedOnThisContent;
+  useEffect(() => {
+    const key = closeSaveKey.current;
+    setPendingCloseSave(key, hasPendingSave ? saveBeforeClose : null);
+    return () => setPendingCloseSave(key, null);
+  }, [hasPendingSave, saveBeforeClose]);
 
   const retry = useCallback(() => {
     const { draft: current, contentKey: key } = latest.current;
