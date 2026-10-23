@@ -338,6 +338,52 @@ test("a final fill batch cannot mark an incomplete wizard ready", async () => {
   expect(result.readyToSend).toBeNull();
 });
 
+test("an application sees an answer saved in another open application on its next turn", async () => {
+  const source = page({
+    controls: [{ ...nameControl(), label: "Team preference", value: "" }],
+  });
+  const input = config(source);
+  let shared: ApplyAgentConfig["sources"]["reusableAnswers"] = [];
+  input.readReusableAnswers = () => Promise.resolve(shared);
+  input.hands.wait = async () => {
+    shared = [
+      {
+        id: "answer_memory_team",
+        label: "Team preference",
+        question: "Team preference",
+        answer: "Platform team",
+        kind: "other",
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
+  };
+  const model = scriptedModel([
+    { name: "wait", args: { milliseconds: 1 } },
+    {
+      name: "fill_fields",
+      args: {
+        fields: [
+          {
+            tool: "type",
+            ref: "c0",
+            text: "Platform team",
+            storedFactId: "answerLibrary.answer_memory_team",
+          },
+        ],
+        finishWhenReady: true,
+      },
+    },
+  ]);
+  const chat = vi.spyOn(model, "chatWithTools");
+  const result = await runApplyAgent(input, model);
+  expect(result.outcome).toBe("prepared");
+  expect(JSON.stringify(chat.mock.calls[1]?.[0])).toContain(
+    "answerLibrary.answer_memory_team",
+  );
+  expect(source.controls[0].value).toBe("Platform team");
+});
+
 test("a retained form receives current exact answers and only named corrections replace entered values", () => {
   const input = config(page(), {
     application: {
