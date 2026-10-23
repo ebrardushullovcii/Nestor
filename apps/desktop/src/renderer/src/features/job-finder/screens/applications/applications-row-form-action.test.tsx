@@ -55,6 +55,7 @@ function renderPanel(
     onFinishInBrowser?: FinishInBrowserHandler;
     onStartApplyCopilot?: () => void;
     isApplyPending?: boolean;
+    applyMode?: "fill_only" | "apply_for_me";
   },
 ) {
   return render(
@@ -166,6 +167,37 @@ describe("Open form on an Applications row", () => {
       </MemoryRouter>,
     );
     expect(screen.getByText("Opening the page…")).toBeTruthy();
+  });
+
+  it("tries a failed application again from its row, named for the mode", () => {
+    const { record, result } = fixture("failed", "The page did not load");
+    const onStartApplyCopilot = vi.fn();
+    const view = renderPanel(record, result, {
+      onFinishInBrowser: vi.fn(),
+      onStartApplyCopilot,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onStartApplyCopilot).toHaveBeenCalledWith({
+      jobId: record.jobId,
+      applicationRecordId: record.id,
+    });
+    view.unmount();
+
+    renderPanel(record, result, {
+      onFinishInBrowser: vi.fn(),
+      onStartApplyCopilot,
+      applyMode: "apply_for_me",
+    });
+    expect(screen.getByRole("button", { name: "Apply again" })).toBeTruthy();
+  });
+
+  it("offers no retry on a row the person cancelled", () => {
+    const { record, result } = fixture("cancelled", "Cancelled");
+    renderPanel(record, result, {
+      onFinishInBrowser: vi.fn(),
+      onStartApplyCopilot: vi.fn(),
+    });
+    expect(screen.queryByTestId("applications-row-form-action")).toBeNull();
   });
 
   it("offers nothing on a row whose state has no form to open", () => {

@@ -230,8 +230,10 @@ export const OPEN_FORM_ROW_ACTION = "Open form";
 
 /**
  * A row offers the form itself: Open form while a filled-in form waits on the
- * person, or the state's own Prepare again (Apply again in Send for me) once
- * that form is gone. Every other state keeps its action in the detail panel.
+ * person, or the state's own run-again label (Prepare again or Try again;
+ * Apply again in Send for me) once that form is gone or the run failed in a
+ * way a fresh run can change. A run the person stopped keeps its action in
+ * the detail panel, like every other state.
  */
 export function resolveRowFormAction(input: {
   result: Pick<
@@ -240,15 +242,19 @@ export function resolveRowFormAction(input: {
   >;
   applyState: Pick<
     ApplyStatePresentation,
-    "action" | "actionLabel" | "formClosed"
+    "kind" | "action" | "actionLabel" | "formClosed" | "cancelledByPerson"
   >;
   canOpen: boolean;
   canPrepare: boolean;
 }): RowFormAction | null {
   const { applyState } = input;
-  if (applyState.formClosed && applyState.action === "try_again") {
-    return input.canPrepare
-      ? { kind: "prepare", label: applyState.actionLabel ?? "Prepare again" }
+  if (
+    applyState.action === "try_again" &&
+    (applyState.formClosed ||
+      (applyState.kind === "could_not_apply" && !applyState.cancelledByPerson))
+  ) {
+    return input.canPrepare && applyState.actionLabel
+      ? { kind: "prepare", label: applyState.actionLabel }
       : null;
   }
   if (
