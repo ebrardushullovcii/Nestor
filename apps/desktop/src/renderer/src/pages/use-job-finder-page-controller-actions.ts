@@ -2469,7 +2469,7 @@ export function createPrimaryPageActions(
           });
           await refreshResumeWorkspace(jobId);
         },
-        "Resume approved and ready for application preparation.",
+        "Resume approved.",
         {
           scope: jobFinderPendingActions.resumeExport(jobId),
           undo: () => {
