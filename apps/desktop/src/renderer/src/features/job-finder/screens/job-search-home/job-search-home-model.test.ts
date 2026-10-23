@@ -1703,6 +1703,9 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
       stop: { label: "Stop", action: { kind: "apply_queue", action: "stop" } },
     });
     expect(model.next.id).not.toBe("apply");
+    // The card holds the detail; the status line keeps to the title.
+    expect(model.now).toHaveLength(1);
+    expect(model.statusLine).toBe("Applying to 30 jobs.");
   });
 
   it("keeps Try again for all one press away while a form waits to be sent", () => {

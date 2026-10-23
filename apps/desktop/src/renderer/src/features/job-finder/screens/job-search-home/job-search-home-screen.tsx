@@ -452,7 +452,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
     // the 20px grid gap that would double it.
     // Home is one column: at 1920 its card and tiles ran 1600px wide around
     // a 68-character sentence. It keeps a readable width instead.
-    <section className="grid min-w-0 max-w-[76rem] gap-5 pb-8 [&>[data-page-header-stack]]:-mb-2">
+    <section className="grid min-w-0 max-w-[76rem] grid-cols-[minmax(0,1fr)] gap-5 pb-8 [&>[data-page-header-stack]]:-mb-2">
       <PageHeaderStack
         actions={
           // While paused the next-step card below offers Resume; the header

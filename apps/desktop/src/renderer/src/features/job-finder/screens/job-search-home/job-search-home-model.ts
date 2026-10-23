@@ -2153,7 +2153,11 @@ export function buildJobSearchHomeModel(
     statusLine =
       "Paused. New searches and applications will not start until you resume.";
   } else if (nowItems.length === 1 && nowItems[0]) {
-    statusLine = `${nowItems[0].title} · ${nowItems[0].detail}`.replace(
+    // The queue's detail can be a whole pause reason; Happening now says it
+    // under the title, so the line keeps to the title.
+    const item = nowItems[0];
+    const detail = item.id === "apply-queue" ? "" : item.detail;
+    statusLine = (detail ? `${item.title} · ${detail}` : item.title).replace(
       /\.?$/,
       ".",
     );
