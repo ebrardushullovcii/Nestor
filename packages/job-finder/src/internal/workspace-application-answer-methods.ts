@@ -241,11 +241,17 @@ export function createWorkspaceApplicationAnswerMethods(
         if (!job?.location?.trim() || peerJob?.location !== job.location)
           continue;
       }
-      const peer = await getApplyRunDetails(command.runId, question.jobId, question.applicationRecordId);
+      const peer = await getApplyRunDetails(
+        command.runId,
+        question.jobId,
+        question.applicationRecordId,
+      );
+      const latest = getLatestQuestionAnswer(peer, question.id);
       if (
         peer.result?.id !== question.resultId ||
         !["blocked", "awaiting_review"].includes(peer.result.state) ||
-        getLatestQuestionAnswer(peer, question.id)
+        (latest &&
+          (latest.sourceKind === "user" || latest.status !== "suggested"))
       )
         continue;
       const reused: SaveApplicationAnswerCommand = {
@@ -254,7 +260,7 @@ export function createWorkspaceApplicationAnswerMethods(
         jobId: question.jobId,
         resultId: question.resultId,
         questionId: question.id,
-        expectedAnswerRevision: 0,
+        expectedAnswerRevision: latest?.revision ?? 0,
         saveScope: "application_once",
       };
       await runSingleFlight(reused.commandId, () =>

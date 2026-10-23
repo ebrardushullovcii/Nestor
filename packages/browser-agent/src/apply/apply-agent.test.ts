@@ -345,7 +345,7 @@ test("an application sees an answer saved in another open application on its nex
   const input = config(source);
   let shared: ApplyAgentConfig["sources"]["reusableAnswers"] = [];
   input.readReusableAnswers = () => Promise.resolve(shared);
-  input.hands.wait = async () => {
+  input.hands.wait = () => {
     shared = [
       {
         id: "answer_memory_team",
@@ -356,7 +356,17 @@ test("an application sees an answer saved in another open application on its nex
         roleFamilies: [],
         proofEntryIds: [],
       },
+      {
+        id: "private-pay",
+        kind: "salary_expectation",
+        label: "Expected salary",
+        question: "Expected salary",
+        answer: "PRIVATE_PAY_987654321",
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
     ];
+    return Promise.resolve();
   };
   const model = scriptedModel([
     { name: "wait", args: { milliseconds: 1 } },
@@ -380,6 +390,9 @@ test("an application sees an answer saved in another open application on its nex
   expect(result.outcome).toBe("prepared");
   expect(JSON.stringify(chat.mock.calls[1]?.[0])).toContain(
     "answerLibrary.answer_memory_team",
+  );
+  expect(JSON.stringify(chat.mock.calls[1]?.[0])).not.toContain(
+    "PRIVATE_PAY_987654321",
   );
   expect(source.controls[0].value).toBe("Platform team");
 });

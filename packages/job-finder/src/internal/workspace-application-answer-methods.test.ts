@@ -117,20 +117,35 @@ function saveCommand(commandId: string, expectedAnswerRevision: number) {
 }
 
 describe("workspace application answer methods", () => {
-  it.each(["reusable_profile", "application_once"] as const)(
-    "%s answers respect reuse across open applications",
-    async (saveScope) => {
+  it.each([
+    ["reusable_profile", "none"],
+    ["reusable_profile", "prior_answer"],
+    ["reusable_profile", "user"],
+    ["application_once", "none"],
+    ["application_once", "prior_answer"],
+    ["application_once", "user"],
+  ] as const)(
+    "%s answers respect reuse across open applications with an existing %s answer",
+    async (saveScope, existingSource) => {
       const { job, repository, methods } = createHarness({
         questionKind: "other",
       });
       const peerJob = { ...job, id: "job-peer" };
       await repository.commitSavedJobDelta({ upserts: [peerJob] });
       const run = (await repository.listApplyRuns())[0]!;
-      await repository.upsertApplyRun({ ...run, jobIds: [job.id, peerJob.id], totalJobs: 2 });
+      await repository.upsertApplyRun({
+        ...run,
+        jobIds: [job.id, peerJob.id],
+        totalJobs: 2,
+      });
       const result = (await repository.listApplyJobResults())[0]!;
       const question = (await repository.listApplicationQuestionRecords())[0]!;
       const record = (await repository.listApplicationRecords())[0]!;
-      await repository.upsertApplicationRecord({ ...record, id: "record-peer", jobId: peerJob.id });
+      await repository.upsertApplicationRecord({
+        ...record,
+        id: "record-peer",
+        jobId: peerJob.id,
+      });
       await repository.upsertApplyJobResult({
         ...result,
         id: "result-peer",
@@ -144,6 +159,24 @@ describe("workspace application answer methods", () => {
         resultId: "result-peer",
         applicationRecordId: "record-peer",
       });
+      if (existingSource !== "none")
+        await repository.upsertApplicationAnswerRecord(
+          ApplicationAnswerRecordSchema.parse({
+            id: "peer-suggestion",
+            runId: run.id,
+            jobId: peerJob.id,
+            resultId: "result-peer",
+            applicationRecordId: "record-peer",
+            questionId: "question-peer",
+            status: "suggested",
+            revision: 1,
+            text: "Yes",
+            value: { type: "single_choice", value: "Yes" },
+            sourceKind: existingSource,
+            sourceId: "previous",
+            createdAt: "2026-08-10T10:00:00.000Z",
+          }),
+        );
       await methods.saveApplicationAnswer({
         ...saveCommand("save-batch", 0),
         jobId: job.id,
@@ -152,11 +185,16 @@ describe("workspace application answer methods", () => {
       const peerAnswers = await repository.listApplicationAnswerRecords({
         questionId: "question-peer",
       });
+      const reused =
+        saveScope === "reusable_profile" && existingSource !== "user";
       expect(peerAnswers).toHaveLength(
-        saveScope === "reusable_profile" ? 1 : 0,
+        (existingSource === "none" ? 0 : 1) + (reused ? 1 : 0),
       );
-      if (saveScope === "reusable_profile")
-        expect(peerAnswers[0]?.text).toBe("No");
+      expect(
+        peerAnswers.find((answer) =>
+          answer.sourceId?.startsWith("save-batch_reuse"),
+        )?.text,
+      ).toBe(reused ? "No" : undefined);
     },
   );
 
