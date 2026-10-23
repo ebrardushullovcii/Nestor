@@ -605,7 +605,7 @@ describe("a planned job's standing in its batch", () => {
 });
 
 describe("a job the person asked to skip", () => {
-  it("reads as skipped with Apply again, not as an unfinished application", () => {
+  it("reads as skipped with Prepare again, not as an unfinished application", () => {
     const presentation = resolveApplicationRecoveryPresentation({
       canOpenSafeguards: false,
       isApplyPending: false,
@@ -614,8 +614,54 @@ describe("a job the person asked to skip", () => {
     });
     expect(presentation).toMatchObject({
       statusLine: "Skipped at your request",
+      primaryActionLabel: "Prepare again",
+    });
+  });
+});
+
+describe("a retry in Send for me", () => {
+  it("says Apply again, because the new run sends", () => {
+    const sendForMe = resolveApplicationRecoveryPresentation({
+      applyMode: "apply_for_me",
+      canOpenSafeguards: false,
+      isApplyPending: false,
+      visibleApplyResult: buildResult({
+        state: "failed",
+        summary: PREPARED_PAGE_CLOSED_SUMMARY,
+      }),
+    });
+    expect(sendForMe).toMatchObject({
+      statusLine: "Apply again",
+      primaryAction: "try_again",
       primaryActionLabel: "Apply again",
     });
+    expect(sendForMe.reasonSentence).toContain("sends it");
+
+    const fillOnly = resolveApplicationRecoveryPresentation({
+      applyMode: "fill_only",
+      canOpenSafeguards: false,
+      isApplyPending: false,
+      visibleApplyResult: buildResult({
+        state: "failed",
+        summary: PREPARED_PAGE_CLOSED_SUMMARY,
+      }),
+    });
+    expect(fillOnly.primaryActionLabel).toBe("Prepare again");
+    expect(fillOnly.reasonSentence).not.toContain("sends");
+  });
+
+  it("renames Try again too", () => {
+    const presentation = resolveApplicationRecoveryPresentation({
+      applyMode: "apply_for_me",
+      canOpenSafeguards: false,
+      isApplyPending: false,
+      visibleApplyResult: buildResult({
+        state: "cancelled",
+        summary: "Cancelled by you",
+        detail: "Nothing was sent.",
+      }),
+    });
+    expect(presentation.primaryActionLabel).toBe("Apply again");
   });
 });
 

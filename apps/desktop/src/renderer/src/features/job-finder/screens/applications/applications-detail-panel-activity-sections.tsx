@@ -14,6 +14,7 @@ import { ApplicationsDetailPanelAttemptSection } from "./applications-detail-pan
 import { ApplicationsDetailPanelPrivacyReceiptSection } from "./applications-detail-panel-privacy-receipt-section";
 import { ApplicationsDetailPanelReviewDataSection } from "./applications-detail-panel-review-data-section";
 import { ApplicationsReviewCard } from "./applications-review-card";
+import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import { ApplicationsDetailPanelRunHistorySection } from "./applications-detail-panel-run-history-section";
 import { ApplicationsDetailPanelTimelineSection } from "./applications-detail-panel-timeline-section";
 
@@ -49,6 +50,8 @@ export function ApplicationsDetailPanelActivitySections(props: {
   onSubmitPreparedApplication?: (jobId: string) => Promise<void>;
   /** Prepares the application again when its page is no longer open. */
   onPrepareApplicationAgain?: (jobId: string) => Promise<void>;
+  /** The mode saved in Settings; preparing again runs in it. */
+  applyMode?: ApplyMode;
   /** True when this application is filled in and waiting on their decision. */
   awaitsYourReview?: boolean;
   onOpenApplicationPage?: (() => Promise<void>) | undefined;
@@ -134,6 +137,7 @@ export function ApplicationsDetailPanelActivitySections(props: {
               }
             : {})}
           pageClosed={applicationPageClosed}
+          applyMode={props.applyMode}
         />
       ) : null}
       <details

@@ -941,7 +941,11 @@ function buildApplyRunTask(
     resumeActionLabel: awaitingDecision
       ? "Resolve what needs you"
       : canPrepareRemaining
-        ? "Prepare remaining jobs"
+        ? // In Send for me the new runs send, so the press says Apply.
+          input.workspace.settings?.applicationAutomationMode ===
+          "autonomous_submit"
+          ? "Apply to remaining jobs"
+          : "Prepare remaining jobs"
         : needsReview || canRestage
           ? "Open Applications"
           : null,

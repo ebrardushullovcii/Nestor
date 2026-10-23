@@ -116,7 +116,7 @@ interface ApplicationsRecordsPanelProps {
   readApplyRunContext?: (
     result: ApplyJobResultListRow | null,
   ) => ApplyRunContext | null;
-  /** The mode chosen in Settings; decides what a finished fill means. */
+  /** The mode chosen in Settings; a retry runs in it and is named for it. */
   applyMode?: ApplyMode;
   onFilterChange: (filter: ApplicationsViewFilter) => void;
   onSelectRecord: (recordId: string) => void;
@@ -136,6 +136,7 @@ export function ApplicationsRecordsPanel({
   liveRunLinesByJobId,
   latestApplyResultByRecordId,
   readApplyRunContext,
+  applyMode,
   onFilterChange,
   onSelectRecord,
   selectedRecord,
@@ -451,6 +452,7 @@ export function ApplicationsRecordsPanel({
                     record.automationMode === "autonomous_submit"
                       ? "apply_for_me"
                       : "fill_only",
+                  ...(applyMode ? { nextRunMode: applyMode } : {}),
                   result: latestResult,
                   run: readApplyRunContext?.(latestResult) ?? null,
                   pendingQuestionCount:

@@ -52,7 +52,11 @@ import {
   getApplicationNextStepLabel,
   listPendingApplicationQuestions,
 } from "../applications/applications-status";
-import { formatQuestionPrompt } from "../applications/applications-recovery-state";
+import {
+  formatQuestionPrompt,
+  runAgainLabel,
+} from "../applications/applications-recovery-state";
+import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import { describeFailure } from "../../lib/describe-failure";
 import {
   CollectionNoMatches,
@@ -265,6 +269,8 @@ function TaskLocalCredentialsForm(props: {
   isPending: boolean;
   onCommand: (command: UserActionCommandInput) => void | Promise<void>;
   request: UserActionRequest;
+  /** The run this sign-in belongs to sends the application when it is done. */
+  runSends?: boolean;
 }) {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -326,7 +332,7 @@ function TaskLocalCredentialsForm(props: {
           type="submit"
           variant="secondary"
         >
-          Sign in once and continue
+          {props.runSends ? "Sign in once and apply" : "Sign in once and continue"}
         </Button>
       </form>
     </details>
@@ -414,9 +420,20 @@ function ActionCard(props: {
    * checked step waits for it (one application per site at a time).
    */
   sameSiteApplicationActive?: boolean;
+  /**
+   * The run this step belongs to was started in Send for me: carrying it on
+   * can send the application, so its continue controls say Apply.
+   */
+  runSends?: boolean;
+  /** The mode saved in Settings, which starting over runs in. */
+  applyMode?: ApplyMode;
 }) {
   const { isPending, jobLabel, onCommand, onOpenScope, questions, request } =
     props;
+  const startOverLabel = runAgainLabel(
+    props.applyMode ?? "fill_only",
+    "Prepare it again",
+  );
   const isVerifying = request.state === "verifying";
   const checkingMinutes = useMinutesSince(
     isVerifying ? request.updatedAt : null,
@@ -571,7 +588,7 @@ function ActionCard(props: {
                     waitsForSameSite && !checkingStalled
                     ? "Waiting for the other application on this site to finish. It carries on by itself after that; nothing is needed from you."
                     : checkingStalled
-                      ? `This check has not finished after ${checkingMinutes} minutes, so Job Finder has probably lost track of it. Nothing was sent. Prepare it again to start this application afresh with your answers.`
+                      ? `This check has not finished after ${checkingMinutes} minutes, so Job Finder has probably lost track of it. Nothing was sent. ${props.applyMode === "apply_for_me" ? "Apply again starts this application afresh with your answers and sends it." : "Prepare it again to start this application afresh with your answers."}`
                       : checkingWaits
                         ? request.scope.type === "application"
                           ? `Still checking after ${checkingMinutes} minutes. Another application on the same site is probably ahead of it; it carries on by itself when that one finishes.`
@@ -680,6 +697,7 @@ function ActionCard(props: {
             jobLocation={props.jobLocation}
             questions={answerQuestions}
             requestId={request.id}
+            {...(props.runSends ? { submitLabel: "Answer and apply" } : {})}
           />
         </div>
       ) : null}
@@ -691,6 +709,7 @@ function ActionCard(props: {
           isPending={isPending}
           onCommand={onCommand}
           request={request}
+          runSends={props.runSends ?? false}
         />
       ) : null}
       {/* The boxed treatment framed the boundary as fine print and repeated
@@ -738,7 +757,7 @@ function ActionCard(props: {
             size="compact"
             type="button"
           >
-            Prepare it again
+            {startOverLabel}
           </Button>
         ) : null}
         {waitsForFile && props.onOpenFiles ? (
@@ -844,8 +863,8 @@ function ActionCard(props: {
         <p className="text-xs leading-5 text-muted-foreground" role="status">
           Job Finder checked {request.maxAttempts} times and still saw the same
           page. Finish the step in {JOB_FINDER_BROWSER_NAME}, then open the
-          application and choose Run preparation again, or cancel this step to
-          stop working on this job.
+          application and start it again, or cancel this step to stop working
+          on this job.
         </p>
       ) : null}
     </article>
@@ -1172,6 +1191,8 @@ export function ActionsScreen(props: {
   selectedRequestId?: string | null;
   selectedDecisionId?: string | null;
   selectedApplicationRecordId?: string | null;
+  /** The mode saved in Settings; starting an application over runs in it. */
+  applyMode?: ApplyMode;
 }) {
   const { answerDrafts, restoredApplications, updateAnswerDraft } =
     useQuestionAnswerDrafts(props);
@@ -1564,8 +1585,19 @@ export function ActionsScreen(props: {
                           : [];
                         const draftKey = request.id;
                         const answerDraft = answerDrafts.current.get(draftKey);
+                        const runSends =
+                          applicationScope !== null &&
+                          props.applicationRecords?.find(
+                            (record) =>
+                              record.id ===
+                              applicationScope.applicationRecordId,
+                          )?.automationMode === "autonomous_submit";
                         return (
                           <ActionCard
+                            runSends={runSends}
+                            {...(props.applyMode
+                              ? { applyMode: props.applyMode }
+                              : {})}
                             isGroupedProjectPending={
                               props.isGroupedProjectPending ?? (() => false)
                             }
@@ -1678,6 +1710,8 @@ export function QuestionAnswerForm(props: {
   ) => void | Promise<void>;
   questions: readonly ApplicationAttemptQuestion[];
   requestId: string;
+  /** "Answer and apply" when the run carries on to send the application. */
+  submitLabel?: string;
 }) {
   const { isPending, onAnswer, questions, requestId } = props;
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(
@@ -2052,7 +2086,7 @@ export function QuestionAnswerForm(props: {
           size="compact"
           type="submit"
         >
-          Answer and continue
+          {props.submitLabel ?? "Answer and continue"}
         </Button>
         {working ? (
           <p

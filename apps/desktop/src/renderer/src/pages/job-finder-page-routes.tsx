@@ -2757,6 +2757,12 @@ export function JobFinderActionsRoute() {
       workspace={context.workspace}
     >
       <ActionsScreen
+        applyMode={
+          context.workspace.settings.applicationAutomationMode ===
+          "autonomous_submit"
+            ? "apply_for_me"
+            : "fill_only"
+        }
         selectedApplicationRecordId={
           readJobFinderNavigationContext(searchParams).applicationRecordId
         }

@@ -27,6 +27,7 @@ import {
   looksLikeSignInWall,
   PAUSED_BEFORE_APPLICATION_SENTENCE,
   resolvePlannedApplyStanding,
+  runAgainLabel,
   TRY_AGAIN_ACTION,
   WAITING_FOR_BROWSER_TAB_SUMMARY,
   type ApplyRunContext,
@@ -115,8 +116,14 @@ export function describeNotSentResult(
  * and stopped short of sending is the person's to finish too — Job Finder
  * never claims a submission it did not verify.
  */
-export function resolveApplyStatePresentation(input: {
+type ApplyStateInput = {
+  /** The mode the result's run used. */
   mode: ApplyMode;
+  /**
+   * The mode saved in Settings now, which any new run uses. It names the
+   * retry button; defaults to `mode`.
+   */
+  nextRunMode?: ApplyMode;
   now?: number;
   pendingQuestionCount?: number;
   recordFailure?: {
@@ -134,7 +141,26 @@ export function resolveApplyStatePresentation(input: {
   /** The record's tracker, where the person may have recorded the send. */
   recordCrm?: ApplicationRecord["crm"] | undefined;
   recordLatestBlocker?: ApplicationRecord["latestBlocker"];
-}): ApplyStatePresentation {
+};
+
+export function resolveApplyStatePresentation(
+  input: ApplyStateInput,
+): ApplyStatePresentation {
+  const presentation = resolveApplyStateForRun(input);
+  return presentation.action === "try_again" && presentation.actionLabel
+    ? {
+        ...presentation,
+        actionLabel: runAgainLabel(
+          input.nextRunMode ?? input.mode,
+          presentation.actionLabel,
+        ),
+      }
+    : presentation;
+}
+
+function resolveApplyStateForRun(
+  input: ApplyStateInput,
+): ApplyStatePresentation {
   const { mode, now = Date.now(), pendingQuestionCount = 0, result } = input;
   const questionsLeftLabel = formatQuestionsLeft(pendingQuestionCount);
   const reason = getApplicationStopReasonSentence(result);
@@ -183,7 +209,7 @@ export function resolveApplyStatePresentation(input: {
       title: "Skipped",
       sentence: "You asked to skip this one. Nothing was sent.",
       action: "try_again",
-      actionLabel: "Apply again",
+      actionLabel: "Prepare again",
       questionsLeftLabel: null,
     };
   }
@@ -325,7 +351,9 @@ export function resolveApplyStatePresentation(input: {
       kind: "could_not_apply",
       title: "Form closed",
       sentence:
-        "The filled-in form closed before Job Finder saw it sent. If you sent it yourself, set the stage to Applied; otherwise prepare it again with your saved answers and files.",
+        (input.nextRunMode ?? mode) === "apply_for_me"
+          ? "The filled-in form closed before Job Finder saw it sent. If you sent it yourself, set the stage to Applied; otherwise Apply again fills it in from your saved answers and files and sends it."
+          : "The filled-in form closed before Job Finder saw it sent. If you sent it yourself, set the stage to Applied; otherwise prepare it again with your saved answers and files.",
       action: "try_again",
       actionLabel: "Prepare again",
       questionsLeftLabel: null,

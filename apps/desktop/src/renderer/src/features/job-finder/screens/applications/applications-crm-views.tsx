@@ -805,7 +805,7 @@ export function ApplicationsCrmViews(props: {
         ...(closedStep
           ? {
               description:
-                "Closed steps stay closed. Prepare again to reopen the form.",
+                "Closed steps stay closed. Start the application again from its row to reopen the form.",
             }
           : {}),
       });

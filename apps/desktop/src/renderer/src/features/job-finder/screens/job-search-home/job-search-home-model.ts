@@ -386,17 +386,30 @@ function describeHeldForResumeReview(count: number): string | null {
     : `${count} others wait until you approve their changed Aggressive resumes; open them in Applications.`;
 }
 
+/**
+ * The word on a press that runs applications again. In Send for me those runs
+ * send, so it says Apply; "Try again" there read as harmless.
+ */
+function retryWord(mode: ApplicationAutomationMode): string {
+  return mode === "autonomous_submit" ? "Apply again" : "Try again";
+}
+
 /** The in-place press named with its count, for use beside another card. */
-function describeSecondaryPress(step: HomeNextStep, total: number): string {
+function describeSecondaryPress(
+  step: HomeNextStep,
+  total: number,
+  mode: ApplicationAutomationMode,
+): string {
   const action = step.primary.action;
   if (action.kind !== "apply_all") return step.primary.label;
   const n = action.jobIds.length;
   if (step.id === "retry") {
+    const again = retryWord(mode);
     return n < total
-      ? `Try again for ${n} of ${total}`
+      ? `${again} for ${n} of ${total}`
       : n === 1
-        ? "Try again for 1 application"
-        : `Try again for all ${n}`;
+        ? `${again} for 1 application`
+        : `${again} for all ${n}`;
   }
   return n < total
     ? `Apply to ${n} of ${total}`
@@ -1207,7 +1220,7 @@ export function buildJobSearchHomeModel(
           const partial = describePartialPress(n, total, "Applications");
           return {
             id: "retry",
-            title: `Try again for ${n < total ? `${n} of ${total} applications` : plural(n, "application")}`,
+            title: `${retryWord(input.applicationAutomationMode)} for ${n < total ? `${n} of ${total} applications` : plural(n, "application")}`,
             detail: [
               partial ??
                 describeRetryReason(
@@ -1226,10 +1239,10 @@ export function buildJobSearchHomeModel(
             primary: {
               label:
                 n === 1
-                  ? "Try again"
+                  ? retryWord(input.applicationAutomationMode)
                   : n < total
-                    ? `Try again for ${n}`
-                    : `Try again for all ${n}`,
+                    ? `${retryWord(input.applicationAutomationMode)} for ${n}`
+                    : `${retryWord(input.applicationAutomationMode)} for all ${n}`,
               action: {
                 kind: "apply_all",
                 jobIds: retryJobIdsWithinDailyLimit,
@@ -1357,6 +1370,7 @@ export function buildJobSearchHomeModel(
           nextInPlaceStep.id === "retry"
             ? applications.retryJobIds.length
             : shortlist.readyToApply,
+          input.applicationAutomationMode,
         ),
       }
     : retryNext?.id === "daily_limit" || applyNext?.id === "daily_limit"
@@ -1592,6 +1606,7 @@ export function buildJobSearchHomeModel(
                     label: describeSecondaryPress(
                       retryNext,
                       applications.retryJobIds.length,
+                      input.applicationAutomationMode,
                     ),
                   },
                 ]
@@ -1641,7 +1656,7 @@ export function buildJobSearchHomeModel(
     const heldBack =
       applyNext?.id === "apply" && shortlist.readyToApply > 0
         ? only
-          ? ` "${describeSecondaryPress(applyNext, shortlist.readyToApply)}" starts ${pressCount < shortlist.readyToApply ? `${pressCount} of the ${shortlist.readyToApply} ready jobs` : pressCount === 1 ? "the ready one" : "the others"}; ${only.title} waits for this.${pressCount < shortlist.readyToApply ? ` ${describePartialPress(pressCount, shortlist.readyToApply, "Shortlisted") ?? ""}`.trimEnd() : ""}`
+          ? ` "${describeSecondaryPress(applyNext, shortlist.readyToApply, input.applicationAutomationMode)}" starts ${pressCount < shortlist.readyToApply ? `${pressCount} of the ${shortlist.readyToApply} ready jobs` : pressCount === 1 ? "the ready one" : "the others"}; ${only.title} waits for this.${pressCount < shortlist.readyToApply ? ` ${describePartialPress(pressCount, shortlist.readyToApply, "Shortlisted") ?? ""}`.trimEnd() : ""}`
           : ` The ready jobs can start now; these ${n} wait for their review.`
         : "";
     const closedCount = applyRunning
@@ -1684,6 +1699,7 @@ export function buildJobSearchHomeModel(
                 label: describeSecondaryPress(
                   retryNext,
                   applications.retryJobIds.length,
+                  input.applicationAutomationMode,
                 ),
               },
             ]
@@ -1696,6 +1712,7 @@ export function buildJobSearchHomeModel(
                 label: describeSecondaryPress(
                   applyNext,
                   shortlist.readyToApply,
+                  input.applicationAutomationMode,
                 ),
               },
             ]
@@ -1708,8 +1725,8 @@ export function buildJobSearchHomeModel(
                 id: "check_closed",
                 text:
                   closedCount === 1
-                    ? "1 application's form closed before it was sent: check it, then mark it Applied or prepare it again."
-                    : `${closedCount} applications' forms closed before they were sent: check them, then mark each Applied or prepare it again.`,
+                    ? `1 application's form closed before it was sent: check it, then mark it Applied or ${input.applicationAutomationMode === "autonomous_submit" ? "apply again" : "prepare it again"}.`
+                    : `${closedCount} applications' forms closed before they were sent: check them, then mark each Applied or ${input.applicationAutomationMode === "autonomous_submit" ? "apply again" : "prepare it again"}.`,
                 link: {
                   label: "Open Applications",
                   action: { kind: "navigate", route: applicationsRoute },
@@ -1731,8 +1748,8 @@ export function buildJobSearchHomeModel(
       title: `Check ${plural(n, "application")} whose form closed`,
       detail:
         n === 1
-          ? "Job Finder filled this one in, but its form closed before Job Finder saw it sent. If you sent it yourself, set its tracker stage to Applied. If not, choose Prepare again on it in Applications."
-          : "Job Finder filled these in, but their forms closed before Job Finder saw them sent. If you sent any yourself, set its tracker stage to Applied. Choose Prepare again on the others in Applications.",
+          ? `Job Finder filled this one in, but its form closed before Job Finder saw it sent. If you sent it yourself, set its tracker stage to Applied. If not, choose ${input.applicationAutomationMode === "autonomous_submit" ? "Apply again" : "Prepare again"} on it in Applications.`
+          : `Job Finder filled these in, but their forms closed before Job Finder saw them sent. If you sent any yourself, set its tracker stage to Applied. Choose ${input.applicationAutomationMode === "autonomous_submit" ? "Apply again" : "Prepare again"} on the others in Applications.`,
       primary: {
         label: "Open Applications",
         action: { kind: "navigate", route: applicationsRoute },
@@ -1771,7 +1788,7 @@ export function buildJobSearchHomeModel(
       secondary: [
         {
           ...applyNext.primary,
-          label: describeSecondaryPress(applyNext, shortlist.readyToApply),
+          label: describeSecondaryPress(applyNext, shortlist.readyToApply, input.applicationAutomationMode),
         },
         ...createNext.secondary,
       ],

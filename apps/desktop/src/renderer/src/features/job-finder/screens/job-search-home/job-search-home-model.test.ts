@@ -1657,6 +1657,9 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
       "Try again for all 2",
       "Search again",
     ]);
+    // In Send for me those runs send, so the same press says Apply.
+    const sending = build(ws, { applicationAutomationMode: "autonomous_submit" });
+    expect(sending.next.secondary[0]?.label).toBe("Apply again for all 2");
     expect(model.next.secondary[0]?.action).toEqual({
       kind: "apply_all",
       jobIds: ["job_1", "job_2"],

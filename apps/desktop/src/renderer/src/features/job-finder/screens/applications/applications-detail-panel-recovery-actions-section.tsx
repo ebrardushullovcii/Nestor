@@ -26,6 +26,7 @@ import {
   RUN_PREPARATION_AGAIN_ACTION,
 } from "../../lib/job-finder-browser-handoff-copy";
 import { resolveApplyStatePresentation } from "./apply-state";
+import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import { StatusBadge } from "../../components/status-badge";
 import { APPLICATION_SIGN_IN_CONTINUES_NOTE } from "../../lib/application-sign-in-handoff";
 import {
@@ -142,6 +143,8 @@ const READY_PAGE_OPENED_STATUS =
 
 export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   progressNow?: number | undefined;
+  /** The mode saved in Settings; a retry runs in it and is named for it. */
+  applyMode?: ApplyMode;
   canRestageAutoRun: boolean;
   canRestageQueueRun: boolean;
   dailyPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
@@ -246,6 +249,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   // can no longer show a "Try again" pair beside a third automation button.
   const presentation = resolveApplicationRecoveryPresentation({
     ...(props.progressNow === undefined ? {} : { now: props.progressNow }),
+    ...(props.applyMode ? { applyMode: props.applyMode } : {}),
     canOpenSafeguards: Boolean(onOpenSafeguards),
     destinationUrl: getApplyResultDestinationUrl(
       visibleApplyResult?.privacyReceipt,

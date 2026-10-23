@@ -193,6 +193,7 @@ interface ApplicationsDetailPanelProps {
 
 export function ApplicationsDetailPanel({
   progressNow,
+  applyMode,
   activeFilter,
   customStages,
   readApplyRunContext,
@@ -283,6 +284,7 @@ export function ApplicationsDetailPanel({
           draftRestored: answerDraftRestored ?? false,
           jobLocation: selectedRecordJob?.location,
           questions: pendingQuestions,
+          runSends: selectedRecord?.automationMode === "autonomous_submit",
           isPending: isUserActionPending?.(answerRequest.id) ?? false,
           waitingForTurn: selectedRecordJob
             ? isSameSiteApplicationActive(
@@ -454,6 +456,7 @@ export function ApplicationsDetailPanel({
   const recoverySection = selectedRecord ? (
     <ApplicationsDetailPanelRecoverySections
       progressNow={progressNow}
+      {...(applyMode ? { applyMode } : {})}
       canRestageAutoRun={canRestageAutoRun}
       canRestageQueueRun={canRestageQueueRun}
       dailyPreparationCapacity={dailyPreparationCapacity}
@@ -713,6 +716,7 @@ export function ApplicationsDetailPanel({
             tabIndex={-1}
           >
             <ApplicationsDetailPanelActivitySections
+              {...(applyMode ? { applyMode } : {})}
               applyRunDetailsError={applyRunDetailsError}
               applyRunDetailsStatus={applyRunDetailsStatus}
               applyRunHistory={applyRunHistory}
