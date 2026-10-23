@@ -689,6 +689,32 @@ describe("buildJobSearchHomeModel · after a search", () => {
     expect(model.statusLine).toBe("Last search failed 2 hours ago.");
   });
 
+  it("says once that search needs the AI, and blames no source, when the AI was out", () => {
+    const ws = workspace();
+    ws.recentDiscoveryRuns = [
+      {
+        ...completedRun({ found: 0, new: 0 }),
+        state: "failed",
+        targetExecutions: [
+          {
+            targetId: "target-1",
+            adapterKind: "auto",
+            state: "failed",
+            warning:
+              "Agent discovery failed: AI client does not support tool calling. Cannot run agent discovery.",
+          },
+        ],
+      },
+    ] as unknown as JobFinderRendererWorkspaceSnapshot["recentDiscoveryRuns"];
+    const model = build(ws);
+    expect(model.next.id).toBe("search_failed");
+    expect(model.next.detail).toContain("Live search needs AI");
+    expect(model.next.detail).not.toContain("openings it missed");
+    expect(
+      model.problems.some((problem) => problem.id === "failing-sources"),
+    ).toBe(false);
+  });
+
   it("flags a failing enabled source with the one place to fix it", () => {
     const ws = withJobs(workspace(), 2);
     ws.searchPreferences.discovery.targets = [

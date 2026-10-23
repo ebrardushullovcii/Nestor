@@ -191,7 +191,10 @@ interface JobSearchHomeModel {
 export interface BuildJobSearchHomeModelInput {
   workspace: JobFinderRendererWorkspaceSnapshot;
   tasks: JobFinderTaskCenterModel;
-  tailoredDraftPreparation?: TailoredDraftPreparationViewState | null | undefined;
+  tailoredDraftPreparation?:
+    | TailoredDraftPreparationViewState
+    | null
+    | undefined;
   /** A search request is in flight but the run has not been recorded yet. */
   discoveryRunPending: boolean;
   /** Whether Home may start a search itself. */
@@ -342,8 +345,8 @@ function describeRetryReason(
   const notSentReasons = retryJobIds.flatMap((jobId) =>
     closedFilledFormJobIds.includes(jobId)
       ? []
-      : [notSentRetryReasons.get(jobId)].filter(
-          (reason): reason is string => Boolean(reason),
+      : [notSentRetryReasons.get(jobId)].filter((reason): reason is string =>
+          Boolean(reason),
         ),
   );
   const notSent = notSentReasons.length;
@@ -1157,7 +1160,7 @@ export function buildJobSearchHomeModel(
       // the Needs attention filter for anyone who goes looking.
       dismissKey: "dismissed",
     });
-  } else if (!setupIncomplete && !searchRunning) {
+  } else if (!setupIncomplete && !searchRunning && !newestRunFailedForTheApp) {
     const newestSettledRun = selectNewestSettledDiscoveryRun(
       workspace.recentDiscoveryRuns ?? [],
     );
@@ -1631,18 +1634,18 @@ export function buildJobSearchHomeModel(
           ],
         }
       : {
-            id: "send",
-            title: `Send ${plural(n, "application")}`,
-            detail:
-              input.applicationAutomationMode === "confirm_before_submit"
-                ? "The forms are filled in. Look each one over and give the go-ahead."
-                : "The forms are filled in and the resume is attached. Press Send on each one in the browser.",
-            primary: {
-              label: "Open Applications",
-              action: { kind: "navigate", route: applicationsRoute },
-            },
-            secondary: nextInPlaceAction ? [nextInPlaceAction] : [],
-          };
+          id: "send",
+          title: `Send ${plural(n, "application")}`,
+          detail:
+            input.applicationAutomationMode === "confirm_before_submit"
+              ? "The forms are filled in. Look each one over and give the go-ahead."
+              : "The forms are filled in and the resume is attached. Press Send on each one in the browser.",
+          primary: {
+            label: "Open Applications",
+            action: { kind: "navigate", route: applicationsRoute },
+          },
+          secondary: nextInPlaceAction ? [nextInPlaceAction] : [],
+        };
   } else if (shortlist.reviewResumes > 0) {
     // Reading the resumes is what lets the person apply, so with resumes
     // waiting it is the next step; a failed batch to retry and forms that
@@ -1675,9 +1678,7 @@ export function buildJobSearchHomeModel(
           ? ` "${describeSecondaryPress(applyNext, shortlist.readyToApply, input.applicationAutomationMode)}" starts ${pressCount < shortlist.readyToApply ? `${pressCount} of the ${shortlist.readyToApply} ready jobs` : pressCount === 1 ? "the ready one" : "the others"}; ${only.title} waits for this.${pressCount < shortlist.readyToApply ? ` ${describePartialPress(pressCount, shortlist.readyToApply, "Shortlisted") ?? ""}`.trimEnd() : ""}`
           : ` The ready jobs can start now; these ${n} wait for their review.`
         : "";
-    const closedCount = applyRunning
-      ? 0
-      : applications.pageClosedJobIds.length;
+    const closedCount = applyRunning ? 0 : applications.pageClosedJobIds.length;
     next = {
       id: "review_resumes",
       title: only ? "Review the resume" : `Review ${plural(n, "resume")}`,
@@ -1804,7 +1805,11 @@ export function buildJobSearchHomeModel(
       secondary: [
         {
           ...applyNext.primary,
-          label: describeSecondaryPress(applyNext, shortlist.readyToApply, input.applicationAutomationMode),
+          label: describeSecondaryPress(
+            applyNext,
+            shortlist.readyToApply,
+            input.applicationAutomationMode,
+          ),
         },
         ...createNext.secondary,
       ],
@@ -1818,10 +1823,7 @@ export function buildJobSearchHomeModel(
       createNext && applyNext.id === "apply"
         ? {
             ...applyNext,
-            secondary: [
-              createNext.primary,
-              ...applyNext.secondary,
-            ],
+            secondary: [createNext.primary, ...applyNext.secondary],
           }
         : applyNext;
   } else if (createNext) {
@@ -1993,7 +1995,11 @@ export function buildJobSearchHomeModel(
     // up" beside an overdue reminder was not true.
     const parts = [
       trackerDue.overdue > 0
-        ? plural(trackerDue.overdue, "follow-up is overdue", "follow-ups are overdue")
+        ? plural(
+            trackerDue.overdue,
+            "follow-up is overdue",
+            "follow-ups are overdue",
+          )
         : null,
       trackerDue.interviewsSoon > 0
         ? `${plural(trackerDue.interviewsSoon, "interview")} in the next two days`
@@ -2143,13 +2149,9 @@ export function buildJobSearchHomeModel(
             label: "Shortlisted",
             count: shortlisted,
             detail: joinParts([
-              untouchedResumes > 0
-                ? `${untouchedResumes} need a resume`
-                : null,
+              untouchedResumes > 0 ? `${untouchedResumes} need a resume` : null,
               queuedResumes > 0 ? `${queuedResumes} queued` : null,
-              activeResumes > 0
-                ? `${activeResumes} being written`
-                : null,
+              activeResumes > 0 ? `${activeResumes} being written` : null,
               shortlist.reviewResumes > 0
                 ? `${shortlist.reviewResumes} to review`
                 : null,
