@@ -391,6 +391,7 @@ export interface JobFinderShellActions {
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   clearResumeApproval: (
     jobId: string,
+    restoreStatus?: "draft" | "needs_review",
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   setWorkHistoryReviewAcknowledgment: (
     input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,

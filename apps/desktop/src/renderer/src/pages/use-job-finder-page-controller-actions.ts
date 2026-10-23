@@ -117,6 +117,8 @@ import type { ApplyQueueControlAction } from "../features/job-finder/lib/apply-q
 import { buildResumeWorkspaceRoute } from "@renderer/features/job-finder/lib/resume-workspace-route";
 import {
   enqueueResumeApproval,
+  forgetResumeReview,
+  getResumeReviewSession,
   markResumeReviewApproved,
   markResumeReviewApproving,
   markResumeReviewFailed,
@@ -2202,6 +2204,13 @@ export function createPrimaryPageActions(
       // has read this resume and approved it, so the next one opens now and
       // the approval finishes behind it, one at a time. A failure keeps the
       // job in "To review" and is named on the review line in the studio.
+      // Undo puts the resume back under To review as it was, so it needs
+      // the status the approval is about to replace.
+      const restoreStatus =
+        workspace.reviewQueue.find((item) => item.jobId === jobId)
+          ?.resumeReview.status === "draft"
+          ? ("draft" as const)
+          : ("needs_review" as const);
       markResumeReviewApproving(jobId);
       enqueueResumeApproval(async () => {
         try {
@@ -2225,10 +2234,31 @@ export function createPrimaryPageActions(
         }
       });
       setSelectedReviewJobId(nextJobId ?? jobId);
-      navigate(
-        nextJobId
-          ? buildResumeWorkspaceRoute(nextJobId)
-          : "/job-finder/review-queue",
+      const destination = nextJobId
+        ? buildResumeWorkspaceRoute(nextJobId)
+        : "/job-finder/review-queue";
+      navigate(destination);
+      let undone = false;
+      applyRouteScopedMessage(
+        {
+          message: "Resume approved.",
+          tone: "success",
+          undo: () => {
+            if (undone) return;
+            undone = true;
+            // After the approval itself, which may still be building.
+            enqueueResumeApproval(async () => {
+              if (getResumeReviewSession().failed.has(jobId)) return;
+              await runAction(
+                () => actions.clearResumeApproval(jobId, restoreStatus),
+                () => forgetResumeReview(jobId),
+                "The resume is back under To review.",
+                { scope: jobFinderPendingActions.resumeExport(jobId) },
+              );
+            });
+          },
+        },
+        destination,
       );
     },
     onApproveResumeAndApply: (jobId: string) => {

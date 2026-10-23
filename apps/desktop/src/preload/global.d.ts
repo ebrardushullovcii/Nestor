@@ -607,6 +607,7 @@ declare global {
         ) => Promise<JobFinderWorkspaceSyncResult>;
         clearResumeApproval: (
           jobId: string,
+          restoreStatus?: "draft" | "needs_review",
         ) => Promise<JobFinderWorkspaceSyncResult>;
         setWorkHistoryReviewAcknowledgment: (
           input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,

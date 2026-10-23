@@ -87,6 +87,7 @@ import {
   JobFinderExportResumePdfInputSchema,
   JobFinderResumePdfExportOutcomeSchema,
   JobFinderJobActionInputSchema,
+  JobFinderClearResumeApprovalInputSchema,
   JobFinderSendPreparedApplicationsInputSchema,
   JobFinderPreparedApplicationPageInputSchema,
   RevealSavedFileInputSchema,
@@ -3378,10 +3379,13 @@ export function registerJobFinderRouteHandlers(
   ipcMain.handle(
     "job-finder:clear-resume-approval",
     async (event, payload: unknown) => {
-      const { jobId } = JobFinderJobActionInputSchema.parse(payload);
+      const { jobId, restoreStatus } =
+        JobFinderClearResumeApprovalInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const snapshot =
-        await jobFinderWorkspaceService.clearResumeApproval(jobId);
+      const snapshot = await jobFinderWorkspaceService.clearResumeApproval(
+        jobId,
+        restoreStatus ? { restoreStatus } : undefined,
+      );
 
       return workspaceMutationResponse(event.sender, snapshot);
     },

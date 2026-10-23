@@ -1374,9 +1374,13 @@ const desktopApi = {
         jobId,
         exportId,
       }) as Promise<JobFinderWorkspaceSyncResult>,
-    clearResumeApproval: (jobId: string) =>
+    clearResumeApproval: (
+      jobId: string,
+      restoreStatus?: "draft" | "needs_review",
+    ) =>
       ipcRenderer.invoke("job-finder:clear-resume-approval", {
         jobId,
+        ...(restoreStatus ? { restoreStatus } : {}),
       }) as Promise<JobFinderWorkspaceSyncResult>,
     setWorkHistoryReviewAcknowledgment: (
       input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,

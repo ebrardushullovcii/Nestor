@@ -592,7 +592,8 @@ export interface JobFinderRepository
   }): Promise<void>;
   clearResumeApproval(input: {
     draft: ResumeDraft;
-    staleReason: string;
+    /** Null when an undo puts the draft back as it was. */
+    staleReason: string | null;
     tailoredAsset?: TailoredAsset | null;
   }): Promise<void>;
   /**

@@ -679,9 +679,12 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         runWorkspaceAction(() =>
           window.nestor.jobFinder.approveResume(jobId, exportId),
         ),
-      clearResumeApproval: (jobId: string) =>
+      clearResumeApproval: (
+        jobId: string,
+        restoreStatus?: "draft" | "needs_review",
+      ) =>
         runWorkspaceAction(() =>
-          window.nestor.jobFinder.clearResumeApproval(jobId),
+          window.nestor.jobFinder.clearResumeApproval(jobId, restoreStatus),
         ),
       setWorkHistoryReviewAcknowledgment: (
         input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,
