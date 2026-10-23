@@ -18,6 +18,7 @@ export * from "./profile-setup";
 export * from "./resume-import";
 export * from "./resume";
 export * from "./resume-batch";
+export * from "./apply-queue";
 export * from "./resume-preview-targets";
 export * from "./agent-compaction";
 export * from "./agent-task";

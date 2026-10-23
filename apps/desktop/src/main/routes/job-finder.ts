@@ -169,11 +169,24 @@ import type {
   JobFinderResumePdfExportReply,
 } from "@nestor/contracts";
 import {
+  JobFinderApplyQueueControlInputSchema,
+  JobFinderStartApplyQueueInputSchema,
+  type ApplicationAutomationMode,
+  type ApplyQueueSkippedJob,
+} from "@nestor/contracts";
+import {
+  MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
+  deriveGlobalDailyApplicationPreparationCapacity,
   recordApplicationAuthoritySuccessor,
   resolveApplicationAuthoritySuccessorId,
   resolveTailoredAssetLabel,
   withApplicationAuthorityGate,
 } from "@nestor/job-finder";
+import {
+  createApplyQueueRunner,
+  type ApplyQueueRunner,
+  type ApplyQueueStartedRun,
+} from "../services/job-finder/apply-queue-runner";
 import {
   buildJobFinderDiagnosticExport,
   buildPersonalWorkspaceExport,
@@ -740,6 +753,142 @@ export async function startSavedModeApplyBatch(
   });
 }
 
+/**
+ * One run of an Apply queue: the same start as "Apply to all" (resumes
+ * approved, the mode's permission issued, the press returns once the run is
+ * going). Jobs that cannot go now are named with the reason instead of
+ * stopping the run: a resume that waits on the person, or one whose PDF
+ * could not be made.
+ */
+async function startApplyQueueRun(
+  jobIds: readonly string[],
+  mode: ApplicationAutomationMode,
+): Promise<ApplyQueueStartedRun> {
+  const service = await getJobFinderWorkspaceService();
+  const repository = getJobFinderRepositoryForWorkspaceService(service);
+  if (!repository) {
+    throw new Error(
+      "Job Finder could not open the application workspace, so nothing was started.",
+    );
+  }
+  const pendingIds = await listJobsNotInProgress(repository, jobIds);
+  const skipped: ApplyQueueSkippedJob[] = [];
+  let heldBack: Awaited<ReturnType<typeof approveApplicationResumes>>;
+  try {
+    heldBack = await approveApplicationResumes(service, pendingIds, {
+      holdBackResumesAwaitingPerson: true,
+    });
+  } catch {
+    // One job's resume failed the whole call; find which one by itself.
+    heldBack = [];
+    for (const jobId of pendingIds) {
+      try {
+        heldBack.push(
+          ...(await approveApplicationResumes(service, [jobId], {
+            holdBackResumesAwaitingPerson: true,
+          })),
+        );
+      } catch (error: unknown) {
+        skipped.push({
+          jobId,
+          reason: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+        });
+      }
+    }
+  }
+  skipped.push(
+    ...heldBack.map((entry) => ({
+      jobId: entry.jobId,
+      reason: entry.reason.slice(0, 500),
+    })),
+  );
+  const notGoing = new Set(skipped.map((entry) => entry.jobId));
+  const ids = pendingIds.filter((jobId) => !notGoing.has(jobId));
+  if (ids.length === 0) {
+    return { runId: null, startedJobIds: [], skipped, settled: Promise.resolve() };
+  }
+  await syncApplicationAuthorityForSavedMode(service, ids, mode);
+  let markSettled!: () => void;
+  const settled = new Promise<void>((resolve) => {
+    markSettled = resolve;
+  });
+  const started = await startApplyBatch({
+    service,
+    runs: repository,
+    jobIds: ids,
+    applicationAutomationMode: mode,
+    onBackgroundSettled: () => {
+      publishJobFinderWorkspaceUpdate();
+      markSettled();
+    },
+  });
+  if (started.startedJobIds.length === 0) markSettled();
+  return {
+    runId: started.runId,
+    startedJobIds: started.startedJobIds,
+    skipped,
+    settled,
+  };
+}
+
+async function requireApplyQueueRepository() {
+  const service = await getJobFinderWorkspaceService();
+  const repository = getJobFinderRepositoryForWorkspaceService(service);
+  if (!repository) {
+    throw new Error("Job Finder could not open the application workspace.");
+  }
+  return { service, repository };
+}
+
+let applyQueueRunner: ApplyQueueRunner | null = null;
+
+/** The one Apply queue (Apply to selected, this page or all ready). */
+export function getApplyQueueRunner(): ApplyQueueRunner {
+  applyQueueRunner ??= createApplyQueueRunner({
+    loadQueue: async () =>
+      (await requireApplyQueueRepository()).repository.getApplyQueue(),
+    saveQueue: async (queue) =>
+      (await requireApplyQueueRepository()).repository.saveApplyQueue(queue),
+    readDailyCapacity: async () => {
+      const { repository } = await requireApplyQueueRepository();
+      const [applyRuns, applyJobResults, applicationRecords, settings] =
+        await Promise.all([
+          repository.listApplyRuns(),
+          repository.listApplyJobResults(),
+          repository.listApplicationRecords(),
+          repository.getSettings(),
+        ]);
+      const capacity = deriveGlobalDailyApplicationPreparationCapacity({
+        applyRuns,
+        applyJobResults,
+        applicationRecords,
+        limit:
+          settings.maxApplicationsPerLocalDay ??
+          MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
+      });
+      return { remaining: capacity.remaining, resetsAt: capacity.resetsAt };
+    },
+    readSavedMode: async () =>
+      (await (await requireApplyQueueRepository()).repository.getSettings())
+        .applicationAutomationMode ?? "prepare_only",
+    isActivityPaused: async () =>
+      (await (await requireApplyQueueRepository()).repository.getActivityControl())
+        .paused,
+    startRun: startApplyQueueRun,
+    cancelRun: async (runId) => {
+      const { service } = await requireApplyQueueRepository();
+      await service.cancelApplyRun(runId);
+    },
+    publish: () => publishJobFinderWorkspaceUpdate(),
+  });
+  return applyQueueRunner;
+}
+
+/** At launch: a queue that was running or waiting for tomorrow carries on. */
+export async function resumeApplyQueueAfterRestart(): Promise<void> {
+  await getApplyQueueRunner().resumeAfterRestart();
+}
+
 function parseOptionalRequestId(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") {
     return null;
@@ -1303,7 +1452,9 @@ export function registerJobFinderRouteHandlers(
     async (event, payload: unknown) => {
       const input = SetJobFinderActivityControlInputSchema.parse(payload);
       const service = await getJobFinderWorkspaceService();
-      return workspaceMutationResponse(event.sender, await service.setActivityControl(input));
+      const snapshot = await service.setActivityControl(input);
+      applyQueueRunner?.nudge();
+      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 
@@ -1521,6 +1672,8 @@ export function registerJobFinderRouteHandlers(
       const settings = JobFinderSettingsSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot = await jobFinderWorkspaceService.saveSettings(settings);
+      // A raised daily limit lets a waiting Apply queue go on today.
+      applyQueueRunner?.nudge();
 
       return workspaceMutationResponse(event.sender, snapshot);
     },
@@ -1533,6 +1686,7 @@ export function registerJobFinderRouteHandlers(
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot =
         await jobFinderWorkspaceService.updateApplicationDefaults(input);
+      applyQueueRunner?.nudge();
 
       return workspaceMutationResponse(event.sender, snapshot);
     },
@@ -3364,6 +3518,39 @@ export function registerJobFinderRouteHandlers(
 
       return workspaceMutationResponse(event.sender, 
         await readWorkspaceProjection(jobFinderWorkspaceService),
+      );
+    },
+  );
+
+  // One Apply press over many jobs (ADR 0058): runs of ten back to back,
+  // inside the daily limit, carried on after a restart.
+  ipcMain.handle(
+    "job-finder:start-apply-queue",
+    async (event, payload: unknown) => {
+      const { jobIds, applicationAutomationMode } =
+        JobFinderStartApplyQueueInputSchema.parse(payload);
+      const { service, repository } = await requireApplyQueueRepository();
+      const mode =
+        applicationAutomationMode ??
+        (await repository.getSettings()).applicationAutomationMode ??
+        "prepare_only";
+      await getApplyQueueRunner().start(jobIds, mode);
+      return workspaceMutationResponse(
+        event.sender,
+        await readWorkspaceProjection(service),
+      );
+    },
+  );
+
+  ipcMain.handle(
+    "job-finder:control-apply-queue",
+    async (event, payload: unknown) => {
+      const { action } = JobFinderApplyQueueControlInputSchema.parse(payload);
+      const { service } = await requireApplyQueueRepository();
+      await getApplyQueueRunner().control(action);
+      return workspaceMutationResponse(
+        event.sender,
+        await readWorkspaceProjection(service),
       );
     },
   );

@@ -660,6 +660,10 @@ export function writeState(
   database: DatabaseSync,
   state: JobFinderRepositoryState,
 ): void {
+  // A reset or restore ends any Apply queue; it is not part of the seed.
+  database
+    .prepare(`DELETE FROM ${stateTableNames.singleton_state} WHERE key = ?`)
+    .run("apply_queue");
   assertPersistableCampaignPointer(state);
   const activeAuthorityCount = state.applicationAuthorityEnvelopes.filter(
     (envelope) => envelope.status === "active",

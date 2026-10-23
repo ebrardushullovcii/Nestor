@@ -15,6 +15,7 @@ import {
   ApprovedApplicationAnswerSnapshotSchema,
   CandidateProfileSchema,
   JobFinderActivityControlSchema,
+  ApplyQueueSchema,
   JobFinderDiscoveryStateSchema,
   JobFinderIntelligenceStateSchema,
   JobFinderRepositoryStateSchema,
@@ -2603,6 +2604,31 @@ export async function createFileJobFinderRepository(
       );
       runImmediateTransaction(database, () => {
         saveSingletonValue(database, "activity_control", normalized);
+      });
+      return secureDatabaseFile(options.filePath);
+    },
+    getApplyQueue() {
+      return Promise.resolve(
+        getSingletonValue(database, "apply_queue", ApplyQueueSchema, {
+          onInvalid: "fallback",
+        }),
+      );
+    },
+    saveApplyQueue(queue) {
+      runImmediateTransaction(database, () => {
+        if (queue === null) {
+          database
+            .prepare(
+              `DELETE FROM ${stateTableNames.singleton_state} WHERE key = ?`,
+            )
+            .run("apply_queue");
+          return;
+        }
+        saveSingletonValue(
+          database,
+          "apply_queue",
+          ApplyQueueSchema.parse(cloneValue(queue)),
+        );
       });
       return secureDatabaseFile(options.filePath);
     },

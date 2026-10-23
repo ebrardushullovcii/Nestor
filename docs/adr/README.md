@@ -64,6 +64,7 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0055](0055-reclaim-verified-prepared-forms.md) | accepted | Idle tabs freeze; the oldest prepared forms give way only after an exact guarded refill is verified |
 | [0056](0056-resume-autosave-history-groups.md) | accepted | Consecutive Resume Studio autosaves share a history step |
 | [0057](0057-saved-job-details-stay-in-sqlite.md) | accepted | Saved listing details stay in SQLite behind bounded caches; compatible clean views survive updates while unopened saved jobs validate in background slices |
+| [0058](0058-one-apply-press-queues-the-whole-choice.md) | accepted | One Apply press over selected, page or all ready jobs is a saved queue of ten-job runs inside the daily limit; it waits for midnight and carries on after a restart |
 
 ## Policy
 

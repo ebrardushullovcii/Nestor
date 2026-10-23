@@ -46,6 +46,8 @@ import type {
   JobFinderApplyCopilotActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
+  JobFinderApplyQueueControlInput,
+  JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
   JobFinderApplicationStartTarget,
   JobFinderPreparedApplicationPageInput,
@@ -647,6 +649,12 @@ declare global {
         startAutoApplyQueueRun: (
           jobIds: JobFinderApplyQueueActionInput["jobIds"],
           applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
+        ) => Promise<JobFinderWorkspaceSyncResult>;
+        startApplyQueue: (
+          input: JobFinderStartApplyQueueInput,
+        ) => Promise<JobFinderWorkspaceSyncResult>;
+        controlApplyQueue: (
+          input: JobFinderApplyQueueControlInput,
         ) => Promise<JobFinderWorkspaceSyncResult>;
         approveApplyRun: (
           input: JobFinderApplyRunActionInput,

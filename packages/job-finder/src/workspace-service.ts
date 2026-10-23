@@ -204,6 +204,7 @@ import { readSavedJob } from "./internal/read-saved-job";
 export {
   MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
   MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN,
+  deriveGlobalDailyApplicationPreparationCapacity,
 } from "./internal/application-preparation-capacity";
 
 type PreparationCapacityState = {

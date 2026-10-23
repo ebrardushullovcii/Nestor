@@ -1543,6 +1543,7 @@ export function createWorkspaceSnapshotProfileMethods(
       userActionEvents,
       activityControl,
       rawIntelligence,
+      applyQueue,
     ] = await Promise.all([
       getCurrentSetupStateContext(borrowValidatedJobs),
       borrowValidatedJobs
@@ -1575,6 +1576,7 @@ export function createWorkspaceSnapshotProfileMethods(
       borrowValidatedJobs && ctx.repository.readIntelligenceProjection
         ? ctx.repository.readIntelligenceProjection()
         : ctx.repository.getIntelligenceState(),
+      ctx.repository.getApplyQueue(),
     ]);
     // From the jobs this read already loaded, so it costs no second read.
     legacyFitFingerprintRebinding ??= rebindLegacyFitVerdicts(ctx, {
@@ -2074,6 +2076,7 @@ export function createWorkspaceSnapshotProfileMethods(
       campaignNotifications: campaignState.notifications,
       dashboard,
       activityControl,
+      applyQueue,
       intelligence: listableIntelligence,
     };
     if (!borrowValidatedJobs)
@@ -2128,6 +2131,7 @@ export function createWorkspaceSnapshotProfileMethods(
       existingCampaignState,
       userActionRequests,
       activityControl,
+      applyQueue,
     ] = await Promise.all([
       getCurrentSetupStateContext(),
       ctx.repository.getSettings(),
@@ -2135,6 +2139,7 @@ export function createWorkspaceSnapshotProfileMethods(
       ctx.repository.getCampaignState(),
       ctx.repository.listUserActionRequests(),
       ctx.repository.getActivityControl(),
+      ctx.repository.getApplyQueue(),
     ]);
     const availableResumeTemplates = ctx.documentManager.listResumeTemplates();
     const settings = normalizeJobFinderSettings(
@@ -2266,6 +2271,7 @@ export function createWorkspaceSnapshotProfileMethods(
       campaignNotifications: bootstrapCampaignState.notifications,
       dashboard,
       activityControl,
+      applyQueue,
       intelligence: {},
       userActionRequests: bootstrapUserActionRequests,
       userActionEvents: [],

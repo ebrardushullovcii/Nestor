@@ -125,6 +125,7 @@ import {
   ResumeStrategyRecommendationSourceSchema,
   ResumeStrategySkillsPolicySchema,
 } from "./job-finder-intelligence";
+import { ApplyQueueSchema } from "./apply-queue";
 
 export const JobFinderJobActionInputSchema = z.object({
   jobId: NonEmptyStringSchema,
@@ -1476,6 +1477,7 @@ const WorkspaceSnapshotCoreSchema = z.object({
   campaignNotifications: z.array(CampaignNotificationSchema).default([]),
   dashboard: JobFinderDashboardSummarySchema,
   activityControl: JobFinderActivityControlSchema.default({}),
+  applyQueue: ApplyQueueSchema.nullable().default(null),
 });
 const SnapshotIntelligenceSchema = JobFinderIntelligenceStateSchema.default({});
 const WorkspaceSnapshotBaseSchema: z.ZodObject<

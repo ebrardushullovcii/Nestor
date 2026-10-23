@@ -12,6 +12,8 @@ import {
   ApplicationReplayCheckpointSchema,
   CandidateProfileSchema,
   JobFinderActivityControlSchema,
+  ApplyQueueSchema,
+  type ApplyQueue,
   JobFinderDiscoveryStateSchema,
   JobFinderIntelligenceStateSchema,
   JobFinderRepositoryStateSchema,
@@ -130,6 +132,7 @@ export function createInMemoryJobFinderRepository(
 ): JobFinderRepository {
   const state = JobFinderRepositoryStateSchema.parse(cloneValue(seed));
   assertAtMostOneActiveApplicationAuthority(state);
+  let applyQueue: ApplyQueue | null = null;
   let profileRevision = 1;
   let discoveryProjectionSource: typeof state.discovery | null = null;
   let discoveryProjection: DiscoveryDisplayProjection | null = null;
@@ -292,6 +295,7 @@ export function createInMemoryJobFinderRepository(
         cloneValue(nextSeed),
       );
       assertAtMostOneActiveApplicationAuthority(normalizedSeed);
+      applyQueue = null;
 
       // The reset replaces the whole workspace, but the compare-and-swap epoch
       // only ever moves forward — mirroring `initSingletonValue` in the SQLite
@@ -2587,6 +2591,13 @@ export function createInMemoryJobFinderRepository(
       state.activityControl = JobFinderActivityControlSchema.parse(
         cloneValue(activityControl),
       );
+      return Promise.resolve();
+    },
+    getApplyQueue() {
+      return Promise.resolve(applyQueue ? cloneValue(applyQueue) : null);
+    },
+    saveApplyQueue(queue) {
+      applyQueue = queue ? ApplyQueueSchema.parse(cloneValue(queue)) : null;
       return Promise.resolve();
     },
   };

@@ -19,6 +19,7 @@ import type {
   CandidateProfile,
   JobFinderDiscoveryState,
   JobFinderActivityControl,
+  ApplyQueue,
   JobFinderRepositoryState,
   JobFinderIntelligenceState,
   JobFinderSettings,
@@ -733,6 +734,9 @@ export interface JobFinderRepository
   ): Promise<JobFinderIntelligenceState>;
   getActivityControl(): Promise<JobFinderActivityControl>;
   saveActivityControl(activityControl: JobFinderActivityControl): Promise<void>;
+  /** The one saved Apply queue (Apply to selected, this page or all), or null. */
+  getApplyQueue(): Promise<ApplyQueue | null>;
+  saveApplyQueue(queue: ApplyQueue | null): Promise<void>;
 }
 
 export interface AutomaticWorkspaceBackupOptions {
@@ -858,7 +862,8 @@ export type StateTableKey =
   | "discovery_state"
   | "campaign_state"
   | "intelligence_state"
-  | "activity_control";
+  | "activity_control"
+  | "apply_queue";
 
 export interface SchemaParser<TValue> {
   parse: (value: unknown) => TValue;

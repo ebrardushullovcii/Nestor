@@ -93,6 +93,8 @@ import type {
   JobFinderApplyConsentActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
+  JobFinderApplyQueueControlInput,
+  JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
   JobFinderApplicationStartTarget,
   JobFinderPreparedApplicationPageInput,
@@ -1467,6 +1469,16 @@ const desktopApi = {
         jobIds,
         ...(applicationAutomationMode ? { applicationAutomationMode } : {}),
       }) as Promise<JobFinderWorkspaceSyncResult>,
+    startApplyQueue: (input: JobFinderStartApplyQueueInput) =>
+      ipcRenderer.invoke(
+        "job-finder:start-apply-queue",
+        input,
+      ) as Promise<JobFinderWorkspaceSyncResult>,
+    controlApplyQueue: (input: JobFinderApplyQueueControlInput) =>
+      ipcRenderer.invoke(
+        "job-finder:control-apply-queue",
+        input,
+      ) as Promise<JobFinderWorkspaceSyncResult>,
     approveApplyRun: (input: JobFinderApplyRunActionInput) =>
       ipcRenderer.invoke(
         "job-finder:approve-apply-run",
