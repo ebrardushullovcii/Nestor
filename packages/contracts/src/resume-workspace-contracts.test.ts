@@ -12,6 +12,7 @@ import {
   ResumeExportArtifactSchema,
   ResumeQualityBenchmarkReportSchema,
   ResumeValidationResultSchema,
+  getResumeValidationIssueSeverity,
   isBlockingResumeValidationIssue,
   WorkHistoryReviewAcknowledgmentSchema,
   WorkHistoryReviewSuggestionSchema,
@@ -44,6 +45,28 @@ describe("contracts resume workspace schemas", () => {
       false,
     );
     expect(isBlockingResumeValidationIssue({ severity: "info" })).toBe(false);
+  });
+
+  test("page length never blocks, even when an older check saved it as an error", () => {
+    // ADR 0051: length is a quiet note.
+    expect(
+      isBlockingResumeValidationIssue({
+        severity: "error",
+        category: "page_overflow",
+      }),
+    ).toBe(false);
+    expect(
+      getResumeValidationIssueSeverity({
+        severity: "error",
+        category: "page_overflow",
+      }),
+    ).toBe("info");
+    expect(
+      isBlockingResumeValidationIssue({
+        severity: "error",
+        category: "unsupported_claim",
+      }),
+    ).toBe(true);
   });
 
   test("parses a structured resume workspace payload", () => {
