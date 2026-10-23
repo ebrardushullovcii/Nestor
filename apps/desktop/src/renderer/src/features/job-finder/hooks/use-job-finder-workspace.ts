@@ -632,9 +632,9 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         window.nestor.jobFinder.getResumeWorkspace(jobId),
       previewResumeDraft: (draft: ResumeDraft, requestId?: string) =>
         window.nestor.jobFinder.previewResumeDraft(draft, requestId),
-      saveResumeDraft: (draft: ResumeDraft) =>
+      saveResumeDraft: (draft: ResumeDraft, autosaveSessionId?: string) =>
         runWorkspaceAction(() =>
-          window.nestor.jobFinder.saveResumeDraft(draft),
+          window.nestor.jobFinder.saveResumeDraft(draft, autosaveSessionId),
         ),
       regenerateResumeDraft: (jobId: string) =>
         runWorkspaceAction(() =>

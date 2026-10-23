@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
+    "./resume-computation": "./src/resume-computation.ts",
     ".": "./src/index.ts",
     "./assistant-attention": "./src/assistant/attention.ts",
     "./discovery-ordering": "./src/discovery-ordering.ts",

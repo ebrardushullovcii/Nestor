@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { BrowserWindow } from "electron";
+import type { ResumeDraftProcessor } from "@nestor/contracts";
 import { createConcurrencyLimiter } from "@nestor/core";
 import type { JobFinderDocumentManager } from "@nestor/job-finder";
 import JSZip from "jszip";
@@ -121,6 +122,7 @@ async function renderLetterDocx(text: string): Promise<Buffer> {
 }
 
 interface CreateLocalJobFinderDocumentManagerOptions {
+  renderResumeHtml?: ResumeDraftProcessor["render"];
   outputDirectory: string;
   previewTestMode?: "ok" | "fail_once";
 }
@@ -318,13 +320,21 @@ export function createLocalJobFinderDocumentManager(
         throw new Error("Preview rendering failed in desktop test mode.");
       }
 
-      const html = renderResumeTemplateHtml(input, { mode: "preview" });
+      const rendered = options.renderResumeHtml
+        ? await options.renderResumeHtml({
+            renderDocument: input.renderDocument,
+            settings: input.settings,
+            templateId: input.templateId,
+          })
+        : {
+            previewHtml: renderResumeTemplateHtml(input, { mode: "preview" }),
+            exportHtml: renderResumeTemplateHtml(input),
+          };
+      throwIfPreviewAborted(signal);
+      const html = rendered.previewHtml;
       let pageCount: number | null = null;
       try {
-        pageCount = await countPreviewPages(
-          renderResumeTemplateHtml(input),
-          signal,
-        );
+        pageCount = await countPreviewPages(rendered.exportHtml, signal);
       } catch {
         throwIfPreviewAborted(signal);
       }

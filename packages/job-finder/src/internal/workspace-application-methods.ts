@@ -213,6 +213,7 @@ import {
   buildResumeWorkspace,
   buildWorkHistoryReviewSuggestionsFromValidation,
   ensureResumeDraft,
+  loadResumeWorkspaceState,
   fetchAndPersistResearch,
   previewResumeDraft,
   renderDraftToPdf,
@@ -540,6 +541,15 @@ export function createWorkspaceApplicationMethods(
   ctx: WorkspaceServiceContext,
 ): WorkspaceApplicationMethods {
   const removedResumeJobIds = new Set<string>();
+  const autosaveGroups = new Map<
+    string,
+    {
+      sessionId: string;
+      revision: ReturnType<typeof buildResumeDraftRevision>;
+      savedUpdatedAt: string;
+      lastSavedAt: number;
+    }
+  >();
   async function reviewCardForFreshPreparation(
     applicationRecordId: string,
     current: ApplicationReviewCard | null,
@@ -5750,21 +5760,31 @@ export function createWorkspaceApplicationMethods(
       return buildResumeWorkspace(ctx, jobId);
     },
     async previewResumeDraft(draft, signal) {
-      return previewResumeDraft(ctx, ResumeDraftSchema.parse(draft), signal);
+      const parsed = ctx.resumeDraftProcessor
+        ? await ctx.resumeDraftProcessor.parse(draft)
+        : ResumeDraftSchema.parse(draft);
+      return previewResumeDraft(ctx, parsed, signal);
     },
-    async saveResumeDraft(draft) {
-      const parsedDraft = ResumeDraftSchema.parse(draft);
+    async saveResumeDraft(draft, autosaveSessionId) {
+      const parsedDraft = ctx.resumeDraftProcessor
+        ? await ctx.resumeDraftProcessor.parse(draft)
+        : ResumeDraftSchema.parse(draft);
       return withResumeDraftTransition(parsedDraft.jobId, async () => {
-        const { job, profile, tailoredAsset, templates } =
-          await ensureResumeDraft(ctx, parsedDraft.jobId);
-        const currentDraft = await ctx.repository.getResumeDraftByJobId(
-          parsedDraft.jobId,
-        );
-        if (!currentDraft) {
-          throw new Error(`Unable to find resume draft '${parsedDraft.id}'.`);
-        }
-        const parsedStateHash = buildResumeDraftStateHash(parsedDraft);
-        const currentStateHash = buildResumeDraftStateHash(currentDraft);
+        const state = await loadResumeWorkspaceState(ctx, parsedDraft.jobId, true);
+        const {
+          job,
+          profile,
+          tailoredAsset,
+          templates,
+          draft: currentDraft,
+        } = state.draft
+          ? { ...state, draft: state.draft }
+          : await ensureResumeDraft(ctx, parsedDraft.jobId);
+        const stateHash = (value: ResumeDraft) => ctx.resumeDraftProcessor
+          ? ctx.resumeDraftProcessor.stateHash(value)
+          : buildResumeDraftStateHash(value);
+        const parsedStateHash = await stateHash(parsedDraft);
+        const currentStateHash = await stateHash(currentDraft);
         if (
           parsedDraft.updatedAt !== currentDraft.updatedAt &&
           parsedStateHash !== currentStateHash
@@ -5810,7 +5830,9 @@ export function createWorkspaceApplicationMethods(
           job,
           profile,
         });
-        const validation = validateResumeDraft({
+        const validation = await (
+          ctx.resumeDraftProcessor?.validate ?? validateResumeDraft
+        )({
           draft: sanitizedDraft,
           job,
           profile,
@@ -5834,15 +5856,31 @@ export function createWorkspaceApplicationMethods(
           templates,
         });
 
-        if (currentStateHash !== buildResumeDraftStateHash(sanitizedDraft)) {
-          const revision = buildResumeDraftRevision({
-            draft: currentDraft,
+        if (currentStateHash !== (await stateHash(sanitizedDraft))) {
+          const latestRevisionId = await getLatestResumeRevisionId(
+            ctx,
+            currentDraft.id,
+          );
+          const group = autosaveGroups.get(currentDraft.id);
+          const coalescing = Boolean(
+            autosaveSessionId &&
+            group?.sessionId === autosaveSessionId &&
+            !languageChanged &&
+            currentDraft.templateId === sanitizedDraft.templateId &&
+            group.savedUpdatedAt === currentDraft.updatedAt &&
+            group.revision.id === latestRevisionId &&
+            group.revision.afterHash === currentStateHash &&
+            Date.now() - group.lastSavedAt < 120_000,
+          );
+          const revision = await (
+            ctx.resumeDraftProcessor?.revision ?? buildResumeDraftRevision
+          )({
+            draft: coalescing ? group!.revision.snapshotDraft! : currentDraft,
             resultingDraft: sanitizedDraft,
-            createdAt: now,
-            parentRevisionId: await getLatestResumeRevisionId(
-              ctx,
-              currentDraft.id,
-            ),
+            createdAt: coalescing ? group!.revision.createdAt : now,
+            parentRevisionId: coalescing
+              ? group!.revision.parentRevisionId
+              : latestRevisionId,
             actor: "user",
             mutationKind: "manual_save",
             reason:
@@ -5850,14 +5888,46 @@ export function createWorkspaceApplicationMethods(
                 ? "Changed resume template"
                 : "Saved resume draft edits",
           });
+          if (coalescing) revision.id = group!.revision.id;
           await ctx.repository.applyResumePatchWithRevision({
+            ...(coalescing
+              ? {
+                  coalesceRevision: {
+                    id: group!.revision.id,
+                    afterHash: group!.revision.afterHash!,
+                  },
+                }
+              : {}),
             expectedDraftUpdatedAt: currentDraft.updatedAt,
             draft: sanitizedDraft,
             revision,
             validation: validationWithReviewGuidance,
             tailoredAsset: nextAsset,
           });
+          autosaveGroups.delete(currentDraft.id);
+          if (
+            autosaveSessionId &&
+            !languageChanged &&
+            currentDraft.templateId === sanitizedDraft.templateId
+          ) {
+            autosaveGroups.set(currentDraft.id, {
+              sessionId: autosaveSessionId,
+              revision,
+              savedUpdatedAt: sanitizedDraft.updatedAt,
+              lastSavedAt: Date.now(),
+            });
+            if (autosaveGroups.size > 8)
+              autosaveGroups.delete(autosaveGroups.keys().next().value!);
+          }
         } else {
+          const group = autosaveGroups.get(currentDraft.id);
+          if (
+            autosaveSessionId &&
+            group?.sessionId === autosaveSessionId &&
+            group.savedUpdatedAt === currentDraft.updatedAt
+          ) {
+            group.savedUpdatedAt = sanitizedDraft.updatedAt;
+          } else autosaveGroups.delete(currentDraft.id);
           await ctx.repository.saveResumeDraftWithValidation({
             draft: sanitizedDraft,
             validation: validationWithReviewGuidance,
@@ -5865,7 +5935,11 @@ export function createWorkspaceApplicationMethods(
           });
         }
 
-        return ctx.getWorkspaceSnapshot();
+        // Autosave should not restart unrelated application recovery on
+        // every pause in typing. It still returns the full display contract.
+        return autosaveSessionId && ctx.readWorkspaceProjection
+          ? ctx.readWorkspaceProjection()
+          : ctx.getWorkspaceSnapshot();
       });
     },
     async restoreResumeDraftRevision(jobId, revisionId) {

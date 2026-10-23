@@ -8,6 +8,7 @@ import type {
 } from "@nestor/browser-runtime";
 import type {
   ApplyJobResult,
+  ResumeDraftProcessor,
   JobFinderDiscoveryState,
   FitJudgmentProgress,
   JobFinderWorkspaceSnapshot,
@@ -69,6 +70,7 @@ export interface WorkspaceServiceContext {
   visionProvider?: ResumeVisionProvider;
   browserRuntime: BrowserSessionRuntime;
   documentManager: JobFinderDocumentManager;
+  resumeDraftProcessor?: ResumeDraftProcessor;
   candidateAssetResolver?: CandidateAssetResolver;
   exportFileVerifier?: ResumeExportFileVerifier;
   researchAdapter?: ResumeResearchAdapter;

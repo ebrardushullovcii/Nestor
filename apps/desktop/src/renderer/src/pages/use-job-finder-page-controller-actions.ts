@@ -3138,9 +3138,13 @@ export function createPrimaryPageActions(
     onAutosaveResumeDraft: async (
       draft: ResumeDraft,
       onSaved: (updatedAt: string) => void,
+      autosaveSessionId?: string,
     ): Promise<{ saved: true } | { saved: false; message: string }> => {
       try {
-        const snapshot = await actions.saveResumeDraft(draft);
+        const snapshot = await actions.saveResumeDraft(
+          draft,
+          autosaveSessionId,
+        );
         const savedDraft = snapshot.resumeDrafts.find(
           (entry) => entry.id === draft.id,
         );

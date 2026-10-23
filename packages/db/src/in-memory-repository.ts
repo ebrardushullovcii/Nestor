@@ -99,7 +99,10 @@ import {
   sortValidationResults,
   upsertById,
 } from "./in-memory-repository-utils";
-import { retainResumeDraftRevisions } from "./resume-draft-revision-retention";
+import {
+  assertResumeRevisionCoalescing,
+  retainResumeDraftRevisions,
+} from "./resume-draft-revision-retention";
 import {
   applyProfileCopilotMessagePatchFlags,
   findProfileCopilotMessageByPatchGroup,
@@ -1934,6 +1937,7 @@ export function createInMemoryJobFinderRepository(
       return Promise.resolve();
     },
     applyResumePatchWithRevision({
+      coalesceRevision,
       expectedDraftUpdatedAt,
       draft,
       revision,
@@ -1989,6 +1993,20 @@ export function createInMemoryJobFinderRepository(
       }
 
       const nextResumeDrafts = upsertById(state.resumeDrafts, normalizedDraft);
+      if (coalesceRevision) {
+        const previous = [...state.resumeDraftRevisions]
+          .filter((entry) => entry.draftId === normalizedDraft.id)
+          .sort(
+            (a, b) =>
+              b.createdAt.localeCompare(a.createdAt) ||
+              a.id.localeCompare(b.id),
+          )[0];
+        assertResumeRevisionCoalescing(
+          previous,
+          normalizedRevision,
+          coalesceRevision,
+        );
+      }
       const nextResumeExportArtifacts = clearApprovedResumeExportsForJob(
         state.resumeExportArtifacts,
         normalizedDraft.jobId,

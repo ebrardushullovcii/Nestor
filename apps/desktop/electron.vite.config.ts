@@ -114,6 +114,10 @@ const workspaceAliases = {
 };
 
 const mainWorkspaceAliases = {
+  "@nestor/job-finder/resume-computation": path.resolve(
+    currentDir,
+    "../../packages/job-finder/src/resume-computation.ts",
+  ),
   ...workspaceAliases,
   "@nestor/job-finder/application-submission-runtime-main":
     jobFinderApplicationSubmissionRuntimeMainPath,
@@ -125,6 +129,13 @@ const mainConfig = {
   },
   build: {
     rollupOptions: {
+      input: {
+        index: path.resolve(currentDir, "src/main/index.ts"),
+        "resume-computation-worker": path.resolve(
+          currentDir,
+          "src/main/adapters/resume-computation-worker.ts",
+        ),
+      },
       external: [
         "playwright",
         "playwright-core",

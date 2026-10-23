@@ -47,6 +47,7 @@ import {
   createJobFinderWorkspaceService,
 } from "@nestor/job-finder";
 import { createLocalJobFinderDocumentManager } from "../../adapters/job-finder-document-manager";
+import { createResumeDraftProcessor } from "../../adapters/resume-draft-processor";
 import { createLocalResumeExportFileVerifier } from "../../adapters/job-finder-export-file-verifier";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { createDesktopResumeResearchAdapter } from "../../adapters/job-finder-research-adapter";
@@ -640,7 +641,9 @@ export async function createJobFinderWorkspaceServiceAsync(
     aiClient,
     desktopTestApiEnabled,
   });
+  const resumeDraftProcessor = createResumeDraftProcessor();
   const documentManager = createLocalJobFinderDocumentManager({
+    renderResumeHtml: (input) => resumeDraftProcessor.render(input),
     outputDirectory: getGeneratedResumeDocumentsDirectory(),
     previewTestMode: desktopTestApiEnabled
       ? getResumePreviewTestMode(env)
@@ -661,6 +664,7 @@ export async function createJobFinderWorkspaceServiceAsync(
     publishJobFinderWorkspaceUpdate(),
   );
   const workspaceService = createJobFinderWorkspaceService({
+    resumeDraftProcessor,
     aiClient,
     visionProvider,
     documentManager,
