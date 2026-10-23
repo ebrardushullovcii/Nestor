@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import type { RecentChange } from "../lib/recent-changes";
 import { BrowserPeek } from "./browser-peek";
 import { AssistantSidebar } from "../assistant/assistant-sidebar";
 import { AssistantToggle } from "../assistant/assistant-toggle";
@@ -118,6 +119,7 @@ interface JobFinderShellProps {
   onPrepareRemainingJobs?: (
     jobIds: readonly string[],
   ) => void | Promise<unknown>;
+  onUndoRecentChange?: (change: RecentChange) => Promise<boolean>;
   onRetrySave?: () => void;
   onStopTailoredDraftPreparation?: () => void;
   platform: "darwin" | "linux" | "win32";
@@ -549,6 +551,7 @@ export function JobFinderShell({
   onDismissSavedStatus,
   onNavigate,
   onPrepareRemainingJobs,
+  onUndoRecentChange,
   onRetrySave,
   onStopTailoredDraftPreparation,
   platform,
@@ -1843,6 +1846,7 @@ export function JobFinderShell({
                 }
               }}
               onPrepareRemainingJobs={onPrepareRemainingJobs}
+              onUndoRecentChange={onUndoRecentChange}
               onStopTailoredDraftPreparation={onStopTailoredDraftPreparation}
               resumeImportProgress={resumeImportProgress}
               tailoredDraftPreparation={tailoredDraftPreparation}

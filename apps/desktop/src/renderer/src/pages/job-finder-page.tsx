@@ -77,6 +77,7 @@ import { JobFinderUnsavedChangesDialog } from "./job-finder-unsaved-changes-dial
 import { JobFinderWindowCloseGuard } from "./job-finder-window-close-guard";
 import { JobFinderKeptRoutesOutlet } from "./job-finder-kept-routes";
 import type { JobFinderPageContext } from "./job-finder-page-context";
+import type { RecentChange } from "@renderer/features/job-finder/lib/recent-changes";
 import {
   type ApplyCopilotVisualCheckpointRequest,
   useJobFinderPageController,
@@ -1251,6 +1252,12 @@ export function JobFinderPage() {
       latestShellState.current.context?.onStartAutoApplyQueue([...jobIds]),
     [],
   );
+  const onUndoRecentChange = useCallback(
+    (change: RecentChange) =>
+      latestShellState.current.context?.onUndoRecentChange(change) ??
+      Promise.resolve(false),
+    [],
+  );
   const onStopTailoredDraftPreparation = useCallback(
     () => latestShellState.current.context?.onStopTailoredDraftPreparation(),
     [],
@@ -1349,6 +1356,7 @@ export function JobFinderPage() {
             onDismissSavedStatus={dismissSavedStatus}
             onNavigate={navigateFromShell}
             onPrepareRemainingJobs={onPrepareRemainingJobs}
+            onUndoRecentChange={onUndoRecentChange}
             onRetrySave={retryLastSave}
             onStopTailoredDraftPreparation={onStopTailoredDraftPreparation}
             platform={platform}

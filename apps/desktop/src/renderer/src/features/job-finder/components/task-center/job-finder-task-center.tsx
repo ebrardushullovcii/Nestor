@@ -7,6 +7,8 @@ import type {
 import { ListChecks, X } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
 import { StatusBadge } from "../status-badge";
+import type { RecentChange } from "../../lib/recent-changes";
+import { RecentChangesSection } from "./recent-changes-section";
 import { isImeComposingEvent } from "../../lib/job-finder-shortcuts";
 import { useJobFinderOverlayOwnership } from "../../lib/job-finder-overlay-ownership";
 import type { TailoredDraftPreparationViewState } from "../../screens/review-queue/review-queue-status";
@@ -38,6 +40,8 @@ interface JobFinderTaskCenterProps {
   onPrepareRemainingJobs?:
     | ((jobIds: readonly string[]) => void | Promise<unknown>)
     | undefined;
+  /** Puts back one of the person's recent moves. */
+  onUndoRecentChange?: ((change: RecentChange) => Promise<boolean>) | undefined;
 }
 
 const CLEARED_ACTIVITY_STORAGE_KEY = "nestor.job-finder.cleared-activity.v1";
@@ -501,6 +505,12 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
             })}
           </div>
         )}
+        {props.onUndoRecentChange ? (
+          <RecentChangesSection
+            onUndo={props.onUndoRecentChange}
+            workspace={props.workspace}
+          />
+        ) : null}
       </section>
     </details>
   );
