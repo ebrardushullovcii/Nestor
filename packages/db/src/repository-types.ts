@@ -212,6 +212,8 @@ export interface JobFinderRepository
   close(): Promise<void>;
   reset(seed: JobFinderRepositorySeed): Promise<void>;
   getProfile(): Promise<CandidateProfile>;
+  /** Validated frozen singleton; display readers must not mutate it. */
+  readProfileProjection?(): Promise<CandidateProfile>;
   /**
    * Reads the persisted candidate profile together with the profile
    * singleton's monotonic revision. The revision is the compare-and-swap
@@ -240,6 +242,7 @@ export interface JobFinderRepository
     options?: { expectedRevision?: number },
   ): Promise<ProfileCommitOutcome>;
   getSearchPreferences(): Promise<JobSearchPreferences>;
+  readSearchPreferencesProjection?(): Promise<JobSearchPreferences>;
   /**
    * Persists search preferences and advances the shared profile revision
    * epoch, so concurrent compare-and-swap commits that captured preferences
@@ -367,6 +370,8 @@ export interface JobFinderRepository
     update: (
       current: DiscoveryFeedbackCommitCurrent,
     ) => DiscoveryFeedbackCommitNext<TResult>,
+    /** Borrow frozen transaction-current singletons; replace changed values. */
+    options?: { borrowUnchangedState: boolean },
   ): Promise<TResult>;
   /**
    * Destructively replaces the complete saved-job collection. The caller must
@@ -684,6 +689,7 @@ export interface JobFinderRepository
     ) => JobFinderDiscoveryState["sessions"],
   ): Promise<JobFinderDiscoveryState["sessions"]>;
   getCampaignState(): Promise<JobSearchCampaignCollection | null>;
+  readCampaignProjection?(): Promise<JobSearchCampaignCollection | null>;
   saveCampaignState(campaignState: JobSearchCampaignCollection): Promise<void>;
   /**
    * Applies a campaign collection and its corresponding global preferences

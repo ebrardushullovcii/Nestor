@@ -25,6 +25,22 @@ const row = (id: string): Row => ({
 });
 
 describe("createSyncedJobIdentityIndex", () => {
+  test("invalidates frozen identity resolutions when the inventory changes", () => {
+    const synced = createSyncedJobIdentityIndex<Row>((value) => value);
+    const identity = Object.freeze(row("a"));
+    const first = row("a");
+    const index = synced.sync([first]);
+    const matched = index.resolve(identity);
+    expect(index.resolve(identity)).toBe(matched);
+    const replacement = { ...first, title: "Updated" };
+    synced.sync([replacement]);
+    expect(index.resolve(identity)).toMatchObject({
+      status: "matched",
+      value: replacement,
+    });
+    index.remove(replacement);
+    expect(index.resolve(identity).status).toBe("none");
+  });
   test("follows the working list by identity and the merges made through it", () => {
     const synced = createSyncedJobIdentityIndex<Row>((value) => value);
     const a = row("a");

@@ -430,6 +430,33 @@ function rowsByKey<T extends { id: string }>(rows: readonly T[]): ReadonlyMap<st
 /** Keep the largest already-ordered subsequence at its persisted ranks. */
 function orderedRanks(keys: readonly string[], previous: Map<string, number>): number[] {
   const known = keys.map((key) => previous.get(key));
+  // The usual feedback/checkpoint moves a few sightings to the end. Its
+  // ordered prefix already has valid ranks; finding an LIS for every one of
+  // 37,000 untouched rows adds work without changing the chosen anchors.
+  let prefix = 0;
+  let previousRank = -Infinity;
+  while (prefix < known.length) {
+    const rank = known[prefix];
+    if (rank === undefined || !(rank > previousRank)) break;
+    previousRank = rank;
+    prefix += 1;
+  }
+  if (prefix === known.length) return known as number[];
+  if (known.length >= 256 && prefix >= known.length * 0.9 && known.length - prefix <= 2_048 &&
+      known.slice(prefix).every((rank) => rank === undefined || rank <= previousRank)) {
+    let maximum = previousRank;
+    for (const rank of previous.values()) maximum = Math.max(maximum, rank);
+    const ranks = known.slice(0, prefix) as number[];
+    for (let index = prefix; index < known.length; index += 1)
+      ranks.push(maximum + index - prefix + 1);
+    if (
+      ranks.every(
+        (rank, index) =>
+          Number.isFinite(rank) && (index === 0 || rank > ranks[index - 1]!),
+      )
+    )
+      return ranks;
+  }
   const tails: number[] = [];
   // Each index's predecessor in the subsequence (-1: none), and the anchors.
   const links = new Int32Array(keys.length).fill(-1);

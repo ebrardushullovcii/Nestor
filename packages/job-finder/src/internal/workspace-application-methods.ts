@@ -813,6 +813,7 @@ export function createWorkspaceApplicationMethods(
     const ids = [...new Set(jobIds)];
     if (ids.length === 0) return;
     const requested = new Set(ids);
+    const display = await ctx.repository.readDisplayCollections?.();
     const [
       discovery,
       settings,
@@ -824,11 +825,13 @@ export function createWorkspaceApplicationMethods(
     ] = await Promise.all([
       ctx.repository.readDiscoveryDisplayProjection(),
       ctx.repository.getSettings(),
-      ctx.repository.getSearchPreferences(),
+      ctx.repository.readSearchPreferencesProjection?.() ??
+        ctx.repository.getSearchPreferences(),
       ctx.repository.listSavedJobsByIds(ids),
-      ctx.repository.getIntelligenceState(),
-      ctx.repository.listTailoredAssets(),
-      ctx.repository.listApplicationAttempts(),
+      ctx.repository.readIntelligenceProjection?.() ??
+        ctx.repository.getIntelligenceState(),
+      display?.tailoredAssets ?? ctx.repository.listTailoredAssets(),
+      display?.applicationAttempts ?? ctx.repository.listApplicationAttempts(),
     ]);
     const selectedPending = discovery.pendingDiscoveryJobs.filter((job) =>
       requested.has(job.id),
@@ -850,7 +853,11 @@ export function createWorkspaceApplicationMethods(
         ]
       : [...selected.values()];
     const views = projectDiscoveryJobViews({
-      jobs: activityJobs,
+      jobs: [...selected.values()],
+      identityJobs: activityJobs,
+      ...(ctx.listingActivityIdentityIndex
+        ? { identityIndex: ctx.listingActivityIdentityIndex }
+        : {}),
       discoveryLedger: discovery.discoveryLedger,
       listingSignals: intelligence.safeguards.listingSignals,
       applicationAttempts: attempts,
@@ -5262,6 +5269,7 @@ export function createWorkspaceApplicationMethods(
           },
         };
       },
+      { borrowUnchangedState: true },
     );
     await releaseFinishedApplicationPages({
       ...ctx,
@@ -5276,51 +5284,55 @@ export function createWorkspaceApplicationMethods(
   ): Promise<void> {
     assertCurrent();
     const requestedAt = new Date().toISOString();
-    await ctx.repository.commitDiscoveryFeedbackUpdate(jobId, (current) => {
-      assertCurrent();
-      const targetJob = current.job;
-      if (
-        !targetJob ||
-        current.jobIsPending ||
-        targetJob.status !== "archived"
-      ) {
-        throw new Error(
-          "Unable to restore unknown hidden job '" + jobId + "'.",
-        );
-      }
-      const recordedAt = targetJob.discoveryFeedback?.recordedAt ?? null;
-      if (recordedAt && Date.parse(recordedAt) > Date.parse(requestedAt)) {
-        throw new Error(
-          "The hidden-job decision changed while it was being restored.",
-        );
-      }
-      const feedbackPriorStatus =
-        targetJob.discoveryFeedback?.priorStatus ?? null;
-      const restoredJob = SavedJobSchema.parse({
-        ...targetJob,
-        status:
-          feedbackPriorStatus && feedbackPriorStatus !== "archived"
-            ? feedbackPriorStatus
-            : "discovered",
-        discoveryFeedback: null,
-      });
-      return {
-        result: null,
-        savedJob: restoredJob,
-        searchPreferences: current.searchPreferences,
-        campaignState: current.campaignState,
-        discoveryState: {
-          ...current.discoveryState,
-          discoveryLedger: markSavedJobStatusInLedger({
-            ledger: current.discoveryState.discoveryLedger,
-            job: restoredJob,
-            status: "seen",
-            occurredAt: requestedAt,
-            skipReason: null,
-          }),
-        },
-      };
-    });
+    await ctx.repository.commitDiscoveryFeedbackUpdate(
+      jobId,
+      (current) => {
+        assertCurrent();
+        const targetJob = current.job;
+        if (
+          !targetJob ||
+          current.jobIsPending ||
+          targetJob.status !== "archived"
+        ) {
+          throw new Error(
+            "Unable to restore unknown hidden job '" + jobId + "'.",
+          );
+        }
+        const recordedAt = targetJob.discoveryFeedback?.recordedAt ?? null;
+        if (recordedAt && Date.parse(recordedAt) > Date.parse(requestedAt)) {
+          throw new Error(
+            "The hidden-job decision changed while it was being restored.",
+          );
+        }
+        const feedbackPriorStatus =
+          targetJob.discoveryFeedback?.priorStatus ?? null;
+        const restoredJob = SavedJobSchema.parse({
+          ...targetJob,
+          status:
+            feedbackPriorStatus && feedbackPriorStatus !== "archived"
+              ? feedbackPriorStatus
+              : "discovered",
+          discoveryFeedback: null,
+        });
+        return {
+          result: null,
+          savedJob: restoredJob,
+          searchPreferences: current.searchPreferences,
+          campaignState: current.campaignState,
+          discoveryState: {
+            ...current.discoveryState,
+            discoveryLedger: markSavedJobStatusInLedger({
+              ledger: current.discoveryState.discoveryLedger,
+              job: restoredJob,
+              status: "seen",
+              occurredAt: requestedAt,
+              skipReason: null,
+            }),
+          },
+        };
+      },
+      { borrowUnchangedState: true },
+    );
   }
 
   return {

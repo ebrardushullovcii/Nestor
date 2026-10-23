@@ -3,6 +3,7 @@ import {
   createJobIdentityIndex,
   type JobIdentityIndex,
   type JobIdentityInput,
+  type JobIdentityResolution,
 } from "./job-identity";
 import {
   applyInactiveLedgerMarks,
@@ -29,24 +30,39 @@ export function createSyncedJobIdentityIndex<T extends object>(
   const inner = createJobIdentityIndex<T>([], selectIdentity);
   const members = new Set<T>();
   let syncedWith: readonly T[] | null = null;
+  let resolutions = new WeakMap<object, JobIdentityResolution<T>>();
+  const invalidate = () => {
+    resolutions = new WeakMap();
+  };
   const index: JobIdentityIndex<T> = {
     add(value) {
+      invalidate();
       syncedWith = null;
       members.add(value);
       inner.add(value);
     },
     remove(value) {
+      invalidate();
       syncedWith = null;
       members.delete(value);
       inner.remove(value);
     },
     replace(previous, next) {
+      invalidate();
       syncedWith = null;
       members.delete(previous);
       members.add(next);
       inner.replace(previous, next);
     },
-    resolve: (identity) => inner.resolve(identity),
+    resolve: (identity) => {
+      if (!Object.isFrozen(identity)) return inner.resolve(identity);
+      let result = resolutions.get(identity);
+      if (!result) {
+        result = inner.resolve(identity);
+        resolutions.set(identity, result);
+      }
+      return result;
+    },
     find: (identity) => inner.find(identity),
   };
   return {
@@ -55,12 +71,14 @@ export function createSyncedJobIdentityIndex<T extends object>(
       const wanted = new Set(values);
       for (const value of members) {
         if (!wanted.has(value)) {
+          invalidate();
           members.delete(value);
           inner.remove(value);
         }
       }
       for (const value of wanted) {
         if (!members.has(value)) {
+          invalidate();
           members.add(value);
           inner.add(value);
         }

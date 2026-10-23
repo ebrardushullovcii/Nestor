@@ -1,4 +1,5 @@
 import { clearResumeBatchLiveness } from "./internal/resume-batch-checkpoint";
+import { createListingActivityIdentityIndex } from "./internal/listing-activity-identity-index";
 import type {
   BrowserSessionRuntime,
   OpenBrowserSessionOptions,
@@ -426,6 +427,7 @@ export function createJobFinderWorkspaceService(
     ...(exportFileVerifier ? { exportFileVerifier } : {}),
     repository,
     listingAssessmentJobIds: new Set<string>(),
+    listingActivityIdentityIndex: createListingActivityIdentityIndex(),
     listingAssessmentGenerationRef: { current: 0 },
     listingAssessmentAbortControllerRef: { current: new AbortController() },
     isWorkspaceClosing: () =>

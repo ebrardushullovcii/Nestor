@@ -130,6 +130,9 @@ import {
 } from "./internal/discovery-storage";
 import { createIntelligenceProjectionReader } from "./internal/intelligence-projection";
 import { createDisplayCollectionsReader } from "./internal/display-collections";
+import { createSingletonProjectionReader } from "./internal/singleton-projection";
+
+const nullableCampaignSchema = JobSearchCampaignCollectionSchema.nullable();
 
 /**
  * Thrown by createFileJobFinderRepository when the workspace database could
@@ -357,6 +360,9 @@ export async function createFileJobFinderRepository(
     typeof createIntelligenceProjectionReader
   >;
   let readDisplayCollections: ReturnType<typeof createDisplayCollectionsReader>;
+  let readSingletonProjection: ReturnType<
+    typeof createSingletonProjectionReader
+  >;
   let readDiscoveryDisplayProjection: ReturnType<
     typeof createDiscoveryDisplayProjectionReader
   >;
@@ -399,6 +405,7 @@ export async function createFileJobFinderRepository(
       database,
       filePath: options.filePath,
     });
+    readSingletonProjection = createSingletonProjectionReader(database);
     discoveryStorage = createDiscoveryStorage(
       database,
       normalizedSeed.discovery,
@@ -902,6 +909,15 @@ export async function createFileJobFinderRepository(
           cloneValue(normalizedSeed.profile),
       );
     },
+    readProfileProjection() {
+      return Promise.resolve(
+        readSingletonProjection(
+          "profile",
+          CandidateProfileSchema,
+          normalizedSeed.profile,
+        ),
+      );
+    },
     getProfileWithRevision() {
       const persisted = getSingletonValueWithRevision(
         database,
@@ -975,6 +991,15 @@ export async function createFileJobFinderRepository(
           "search_preferences",
           JobSearchPreferencesSchema,
         ) ?? cloneValue(normalizedSeed.searchPreferences),
+      );
+    },
+    readSearchPreferencesProjection() {
+      return Promise.resolve(
+        readSingletonProjection(
+          "search_preferences",
+          JobSearchPreferencesSchema,
+          normalizedSeed.searchPreferences,
+        ),
       );
     },
     getProfileSetupState() {
@@ -1390,7 +1415,7 @@ export async function createFileJobFinderRepository(
 
       return secureDatabaseFile(options.filePath);
     },
-    commitDiscoveryFeedbackUpdate(jobId, update) {
+    commitDiscoveryFeedbackUpdate(jobId, update, feedbackOptions) {
       try {
         let committedDiscovery: JobFinderDiscoveryState | null = null;
         const result = runImmediateTransaction(database, () => {
@@ -1406,38 +1431,61 @@ export async function createFileJobFinderRepository(
                 params: [jobId],
                 orderBySql: "id",
               })[0] ?? null);
-          const searchPreferences =
-            getSingletonValue(
-              database,
-              "search_preferences",
-              JobSearchPreferencesSchema,
-            ) ?? normalizedSeed.searchPreferences;
-          const campaignState = getSingletonValue(
-            database,
-            "campaign_state",
-            JobSearchCampaignCollectionSchema,
-          );
-          const intelligenceState =
-            getSingletonValue(
-              database,
-              "intelligence_state",
-              JobFinderIntelligenceStateSchema,
-            ) ?? normalizedSeed.intelligence;
+          const searchPreferences = feedbackOptions?.borrowUnchangedState
+            ? readSingletonProjection(
+                "search_preferences",
+                JobSearchPreferencesSchema,
+                normalizedSeed.searchPreferences,
+              )
+            : (getSingletonValue(
+                database,
+                "search_preferences",
+                JobSearchPreferencesSchema,
+              ) ?? normalizedSeed.searchPreferences);
+          const campaignState = feedbackOptions?.borrowUnchangedState
+            ? readSingletonProjection(
+                "campaign_state",
+                nullableCampaignSchema,
+                null,
+              )
+            : getSingletonValue(
+                database,
+                "campaign_state",
+                JobSearchCampaignCollectionSchema,
+              );
+          const intelligenceState = feedbackOptions?.borrowUnchangedState
+            ? readSingletonProjection(
+                "intelligence_state",
+                JobFinderIntelligenceStateSchema,
+                normalizedSeed.intelligence,
+              )
+            : (getSingletonValue(
+                database,
+                "intelligence_state",
+                JobFinderIntelligenceStateSchema,
+              ) ?? normalizedSeed.intelligence);
           const next = update({
             job: cloneValue(pendingJob ?? savedJob),
             jobIsPending: pendingJob !== null,
-            searchPreferences: cloneValue(searchPreferences),
-            campaignState: cloneValue(campaignState),
-            intelligenceState: cloneValue(intelligenceState),
+            searchPreferences: feedbackOptions?.borrowUnchangedState
+              ? searchPreferences
+              : cloneValue(searchPreferences),
+            campaignState: feedbackOptions?.borrowUnchangedState
+              ? campaignState
+              : cloneValue(campaignState),
+            intelligenceState: feedbackOptions?.borrowUnchangedState
+              ? intelligenceState
+              : cloneValue(intelligenceState),
             discoveryState,
           });
           // Most feedback (hiding a job) leaves the preferences and plans as
           // they were. Validating and rewriting both (about 1 MB with 900
           // sources) on every hide was most of its cost, so an unchanged
           // value is left alone; only the profile epoch is ever compared.
-          const searchPreferencesTouched =
-            JSON.stringify(next.searchPreferences) !==
-            JSON.stringify(searchPreferences);
+          const searchPreferencesTouched = feedbackOptions?.borrowUnchangedState
+            ? next.searchPreferences !== searchPreferences
+            : JSON.stringify(next.searchPreferences) !==
+              JSON.stringify(searchPreferences);
           const nextSearchPreferences = searchPreferencesTouched
             ? JobSearchPreferencesSchema.parse(
                 cloneValue(next.searchPreferences),
@@ -1445,7 +1493,10 @@ export async function createFileJobFinderRepository(
             : null;
           const nextCampaignState =
             next.campaignState === null ||
-            JSON.stringify(next.campaignState) === JSON.stringify(campaignState)
+            (feedbackOptions?.borrowUnchangedState
+              ? next.campaignState === campaignState
+              : JSON.stringify(next.campaignState) ===
+                JSON.stringify(campaignState))
               ? null
               : JobSearchCampaignCollectionSchema.parse(
                   cloneValue(next.campaignState),
@@ -2331,6 +2382,11 @@ export async function createFileJobFinderRepository(
           "campaign_state",
           JobSearchCampaignCollectionSchema,
         ),
+      );
+    },
+    readCampaignProjection() {
+      return Promise.resolve(
+        readSingletonProjection("campaign_state", nullableCampaignSchema, null),
       );
     },
     saveCampaignState(campaignState) {
