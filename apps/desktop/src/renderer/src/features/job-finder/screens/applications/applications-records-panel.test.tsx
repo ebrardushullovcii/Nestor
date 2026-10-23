@@ -31,7 +31,11 @@ Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
   configurable: true,
   value: vi.fn(),
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // The list remembers its search and stage; each test starts without them.
+  window.localStorage.clear();
+});
 
 describe("ApplicationsRecordsPanel", () => {
   it("removes stale preparing guidance from a failed row", () => {

@@ -27,6 +27,7 @@ import { formatJobEmployerLocationLine } from "../../lib/job-employer-location-d
 import { jobFinderListRegionClassName } from "../../components/list-row";
 import { usePersistedCollectionView } from "../../hooks/use-persisted-collection-view";
 import { useStableCallback } from "../../hooks/use-stable-callback";
+import { useRememberedString } from "../../hooks/use-remembered-string";
 import {
   listingRowMenuEntries,
   openRowContextMenu,
@@ -62,6 +63,11 @@ import {
   type ShortlistStatusFilter,
   type TailoredDraftPreparationViewState,
 } from "./review-queue-status";
+
+const isShortlistStatusFilter = (
+  value: string,
+): value is ShortlistStatusFilter =>
+  Object.hasOwn(SHORTLIST_STATUS_FILTER_LABELS, value);
 
 interface ReviewQueueListPanelProps {
   campaignId?: string;
@@ -228,8 +234,11 @@ export function ReviewQueueListPanel({
     }
     return counts;
   }, [searchedQueue, statusByJobId]);
-  const [requestedStatusFilter, setStatusFilter] =
-    useState<ShortlistStatusFilter>("all");
+  const [requestedStatusFilter, setStatusFilter] = useRememberedString(
+    "shortlisted.status",
+    "all",
+    isShortlistStatusFilter,
+  );
   // A filter whose last job moved on falls back to All instead of showing an
   // empty list the person did not ask for.
   const statusFilter =

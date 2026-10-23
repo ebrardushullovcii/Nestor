@@ -50,6 +50,12 @@ import {
   APPLICATION_FILTERS,
   type ApplicationsViewFilter,
 } from "./applications-filters";
+import { useRememberedString } from "../../hooks/use-remembered-string";
+
+const isApplicationsViewFilter = (
+  value: string,
+): value is ApplicationsViewFilter =>
+  (APPLICATION_FILTERS as readonly string[]).includes(value);
 import {
   getLatestApplicationAttemptForRecord,
   matchesApplicationsFilter,
@@ -251,8 +257,11 @@ export function ApplicationsScreen(props: {
     selectedAttempt,
     selectedRecord,
   } = props;
-  const [activeFilter, setActiveFilter] =
-    useState<ApplicationsViewFilter>("all");
+  const [activeFilter, setActiveFilter] = useRememberedString(
+    "applications.filter",
+    "all",
+    isApplicationsViewFilter,
+  );
   // Preparation is the product; the stage tracker is a deferred power surface
   // reached explicitly, not a peer tab that splits one application into two
   // competing screens. The route owns the mode so the tracker keeps a link.

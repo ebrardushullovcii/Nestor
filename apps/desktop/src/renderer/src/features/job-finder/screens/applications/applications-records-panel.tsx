@@ -75,6 +75,10 @@ import {
   listingRowMenuEntries,
   openRowContextMenu,
 } from "../../lib/row-context-menu";
+import {
+  isAnyString,
+  useRememberedString,
+} from "../../hooks/use-remembered-string";
 import { getAttemptLabel } from "../../lib/job-finder-utils";
 import {
   formatApplicationEmployerAriaLabel,
@@ -153,8 +157,17 @@ export function ApplicationsRecordsPanel({
   onSelectRecord,
   selectedRecord,
 }: ApplicationsRecordsPanelProps) {
-  const [query, setQuery] = useState("");
-  const [pipelineStage, setPipelineStage] = useState("all");
+  // Kept when moving to another screen and back, and after a restart.
+  const [query, setQuery] = useRememberedString(
+    "applications.query",
+    "",
+    isAnyString,
+  );
+  const [pipelineStage, setPipelineStage] = useRememberedString(
+    "applications.stage",
+    "all",
+    isAnyString,
+  );
   const latestResults = useMemo(
     () => [...(latestApplyResultByRecordId?.values() ?? [])],
     [latestApplyResultByRecordId],
