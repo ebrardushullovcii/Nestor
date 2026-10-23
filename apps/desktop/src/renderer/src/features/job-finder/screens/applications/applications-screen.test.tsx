@@ -2045,9 +2045,8 @@ describe("ApplicationsScreen", () => {
         "listitem",
       ),
     ).toHaveLength(1);
-    // Association is proven by the run entry itself; the recovery section no
-    // longer repeats a saved-run count above its one action.
-    expect(screen.getAllByTitle("apply_run_legacy").length).toBeGreaterThan(0);
+    // Association is proven by the run's own sentence below; the recovery
+    // section no longer repeats a saved-run count above its one action.
     expect(screen.queryByText(/runs? saved/i)).toBeNull();
     expect(
       screen.getByText("Legacy attempt prepared every required answer."),
@@ -2828,15 +2827,12 @@ describe("ApplicationsScreen", () => {
       ).toHaveLength(0);
     }
 
-    // The list column stays pinned to the top of its column instead of riding
-    // away with the detail scroll and leaving a dead half-screen behind it.
+    // The list fills its column, the same frame as Find jobs and Shortlisted.
     const listPanel = screen
       .getByRole("list", { name: "Applications" })
       .closest("section");
-    expect(listPanel?.className).toContain("xl:sticky");
-    expect(listPanel?.className).toContain("xl:top-0");
-    expect(listPanel?.className).toContain("xl:self-start");
-    expect(listPanel?.className).not.toContain("xl:h-full");
+    expect(listPanel?.className).toContain("xl:h-full");
+    expect(listPanel?.className).not.toContain("xl:sticky");
   });
 
   it("reveals the stacked detail panel after selecting an application at compact width", () => {

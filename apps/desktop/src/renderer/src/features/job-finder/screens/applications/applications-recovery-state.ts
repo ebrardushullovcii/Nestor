@@ -556,7 +556,7 @@ export function resolveApplicationRecoveryPresentation(input: {
       state: "retry",
       statusLine: "Prepare again",
       reasonSentence:
-        "The prepared form is no longer open. Prepare it again using your saved answers and files.",
+        "The tab with this form was closed. Prepare again opens the page and fills it in from your saved answers and files.",
       primaryAction: "try_again",
       primaryActionLabel: "Prepare again",
     };

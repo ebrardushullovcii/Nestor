@@ -85,12 +85,20 @@ export function ApplicationsDetailPanelActivitySections(props: {
   } = props;
   // A live consent decision or an unresolved manual answer lives inside the
   // review data, so the collapsed block opens itself while one is waiting.
+  // A run that already ended (failed, closed, cancelled, sent) has no live
+  // decision left: its leftover request is history and stays folded.
+  const visibleRunEnded =
+    visibleApplyResult?.state === "failed" ||
+    visibleApplyResult?.state === "cancelled" ||
+    visibleApplyResult?.state === "skipped" ||
+    visibleApplyResult?.state === "submitted";
   const hasPendingReviewDecision =
-    (visibleApplyResult?.pendingConsentRequestCount ?? 0) > 0 ||
-    (selectedApplyRunDetails?.consentRequests.some(
-      (request) => request.status === "pending",
-    ) ??
-      false);
+    !visibleRunEnded &&
+    ((visibleApplyResult?.pendingConsentRequestCount ?? 0) > 0 ||
+      (selectedApplyRunDetails?.consentRequests.some(
+        (request) => request.status === "pending",
+      ) ??
+        false));
 
   // What the run that filled this in actually recorded, rather than a later
   // reconstruction from the individual records.
@@ -134,7 +142,7 @@ export function ApplicationsDetailPanelActivitySections(props: {
         {...(hasPendingReviewDecision ? { open: true } : {})}
       >
         <ApplicationsDisclosureSummary data-testid="applications-technical-details-summary">
-          Run details and history
+          History and details
         </ApplicationsDisclosureSummary>
         <div className="mt-3 grid min-w-0 gap-4">
           <ApplicationsDetailPanelRunHistorySection

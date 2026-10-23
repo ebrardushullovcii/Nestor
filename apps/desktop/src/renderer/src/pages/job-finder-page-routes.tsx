@@ -2339,6 +2339,16 @@ export function JobFinderApplicationsRoute() {
         const startingJob = discoveryJobs.find(
           (job) => job.id === navigationContext.jobId,
         );
+        // Prepare again starts a job that is already listed; saying it
+        // "will appear in this list" pointed at a row that was right there.
+        const alreadyListed = applicationRecords.some(
+          (record) => record.jobId === navigationContext.jobId,
+        );
+        if (alreadyListed) {
+          return startingJob
+            ? `Starting ${startingJob.title} at ${startingJob.company} again.`
+            : "Starting the application again.";
+        }
         return startingJob
           ? `Starting the application for ${startingJob.title} at ${startingJob.company}. It will appear in this list in a moment.`
           : "Starting the application. It will appear in this list in a moment.";

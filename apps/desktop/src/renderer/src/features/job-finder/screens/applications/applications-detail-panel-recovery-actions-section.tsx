@@ -530,6 +530,22 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
             </div>
           ) : null}
         </div>
+        {primaryAction === "try_again" && !rejectedFormat && isApplyPending ? (
+          // The press is answered in place while the run starts, before the
+          // run's own state replaces this block.
+          <p
+            aria-live="polite"
+            className="flex min-w-0 items-center gap-2 text-(length:--text-small) leading-6 text-foreground-soft"
+            data-testid="applications-recovery-starting"
+            role="status"
+          >
+            <span
+              aria-hidden="true"
+              className="size-4 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none"
+            />
+            <span>Opening the page…</span>
+          </p>
+        ) : null}
         {showPreparingState ? (
           <p
             aria-live="polite"
@@ -672,12 +688,18 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
                 <Button
                   className={RECOVERY_PRIMARY_ACTION_CLASS_NAME}
                   data-testid="applications-recovery-primary-action-button"
-                  disabled={isDailyCapacityExhausted}
+                  disabled={
+                    isDailyCapacityExhausted ||
+                    (!rejectedFormat && isApplyPending)
+                  }
                   onClick={
                     rejectedFormat
                       ? () => onReviewResumePdf?.(selectedRecordJobId)
                       : startFreshRun
                   }
+                  // The press shows at once; the status above turns to
+                  // "Filling this application" when the run starts.
+                  pending={!rejectedFormat && isApplyPending}
                   type="button"
                   variant="primary"
                 >

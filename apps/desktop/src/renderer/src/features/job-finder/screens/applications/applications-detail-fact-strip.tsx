@@ -26,8 +26,10 @@ import type { PlannedApplyStanding } from "./applications-recovery-state";
 // The eyebrow token, not a literal `text-xs`: at 12px these labels sat between
 // the 11px eyebrow floor and the neighbouring `.label-mono-xs` labels in the
 // same panel, so the detail pane had two label sizes with no rule behind them.
+// Sentence case, like the rest of the panel: the detail used to read as a
+// stack of tracked uppercase eyebrows, one per block.
 export const APPLICATION_DETAIL_FACT_LABEL_CLASS =
-  "text-(length:--text-eyebrow) font-semibold uppercase leading-4 tracking-(--tracking-badge) text-muted-foreground";
+  "text-(length:--text-small) font-semibold leading-5 text-foreground-soft";
 
 interface DetailFact {
   content: ReactNode;
