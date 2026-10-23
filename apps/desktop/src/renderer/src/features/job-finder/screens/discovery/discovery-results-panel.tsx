@@ -1587,7 +1587,7 @@ export function DiscoveryResultsPanel({
               view.setQuery(query);
               moveToPage(0);
             }}
-            placeholder="Search results"
+            placeholder="Search jobs"
             placement="panel"
             query={view.query}
             totalCount={jobs.length}
