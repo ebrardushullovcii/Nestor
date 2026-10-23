@@ -565,6 +565,8 @@ export interface JobFinderWorkspaceService {
     jobId: string,
     exportId: string,
   ): Promise<JobFinderWorkspaceSnapshot>;
+  /** Same export/approval gates, reusing a current PDF without a full snapshot. */
+  approveCurrentResume(jobId: string): Promise<void>;
   clearResumeApproval(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
   /**
    * Acknowledges or removes one server-owned work-history review decision as

@@ -21,7 +21,7 @@ describe("describeApplyQueue", () => {
   it("says what a running queue is doing, with Pause and Stop", () => {
     expect(describeApplyQueue(base)).toMatchObject({
       title: "Applying to 4 jobs",
-      detail: "1 started · 2 to go · ten at a time · 1 left out",
+      detail: "1 started · 2 to go · ten at a time · 1 not applied",
       active: true,
       primary: { action: "pause" },
       secondary: { action: "stop" },
@@ -44,7 +44,7 @@ describe("describeApplyQueue", () => {
       }),
     ).toMatchObject({
       title: "Applying to 4 jobs · paused",
-      detail: "Too many application attempts failed, so this plan paused.",
+      detail: "Too many application attempts failed, so this plan paused. · 1 not applied",
       primary: { label: "Continue", action: "continue" },
     });
   });

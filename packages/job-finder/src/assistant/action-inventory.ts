@@ -892,6 +892,7 @@ export const SERVICE_METHOD_COVERAGE: Record<
   regenerateResumeSection: "generate_resumes",
   exportResumePdf: "export_resume",
   approveResume: "export_resume",
+  approveCurrentResume: "internal (bulk resume approval)",
   clearResumeApproval: "internal",
   setWorkHistoryReviewAcknowledgment: "internal",
   setResumeClaimConfirmation: "confirm_resume_line",

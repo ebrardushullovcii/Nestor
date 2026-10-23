@@ -28,6 +28,7 @@ import {
 } from "../services/job-finder/paths";
 import path from "node:path";
 import { access } from "node:fs/promises";
+import { createConcurrencyLimiter } from "@nestor/core";
 import { app, BrowserWindow, clipboard, dialog, shell } from "electron";
 import type {
   IpcMain,
@@ -618,6 +619,9 @@ export interface HeldBackApplicationResume {
   reason: string;
 }
 
+// Shared by bulk presses: overlapping presses cannot multiply print workers.
+const resumeApprovals = createConcurrencyLimiter(2);
+
 export async function approveApplicationResumes(
   workspaceService: Awaited<ReturnType<typeof getJobFinderWorkspaceService>>,
   jobIds: readonly string[],
@@ -657,8 +661,8 @@ export async function approveApplicationResumes(
   ]);
 
   const uniqueJobIds = [...new Set(jobIds)];
-  for (const [index, jobId] of uniqueJobIds.entries()) {
-    options?.onProgress?.(index);
+  let completed = 0;
+  async function approveSelected(jobId: string) {
     const job = jobs.find((candidate) => candidate.id === jobId) ?? null;
     if (!job) {
       throw new Error(
@@ -675,9 +679,17 @@ export async function approveApplicationResumes(
           reason: error instanceof Error ? error.message : String(error),
         });
       }
-      continue;
+      options?.onProgress?.(++completed);
+      return;
     }
     await approveOneApplicationResume(job, {});
+  }
+  if (options?.personApproved) {
+    await Promise.all(uniqueJobIds.map((jobId) =>
+      resumeApprovals.run(() => approveSelected(jobId)),
+    ));
+  } else {
+    for (const jobId of uniqueJobIds) await approveSelected(jobId);
   }
   return heldBack;
 
@@ -691,6 +703,18 @@ export async function approveApplicationResumes(
         settings.resumeApplicationMode ??
         "tailored_per_job") === "original_resume";
     if (usesOriginalResume) return;
+
+    if (approval.personApproved) {
+      try {
+        await workspaceService.approveCurrentResume(jobId);
+      } catch (error: unknown) {
+        if (error instanceof Error && /still need your decision/iu.test(error.message)) {
+          throw new Error(`The resume for '${job.title}' has a line waiting for your decision.`);
+        }
+        throw error;
+      }
+      return;
+    }
 
     const workspace = await workspaceService.getResumeWorkspace(jobId);
     const approvedExport = workspace.exports.find(
@@ -715,8 +739,7 @@ export async function approveApplicationResumes(
       job.resumeTailoringMode ?? searchPreferences.tailoringMode;
     if (
       tailoringMode === "aggressive" &&
-      !alreadyApproved &&
-      !approval.personApproved
+      !alreadyApproved
     ) {
       holdBack(
         job,
@@ -732,11 +755,6 @@ export async function approveApplicationResumes(
         error instanceof Error &&
         /still need your decision/iu.test(error.message)
       ) {
-        if (approval.personApproved) {
-          throw new Error(
-            `The resume for '${job.title}' has a line waiting for your decision.`,
-          );
-        }
         holdBack(
           job,
           `The resume for '${job.title}' has a line waiting for your decision. Open it, keep or change the line, then apply.`,
