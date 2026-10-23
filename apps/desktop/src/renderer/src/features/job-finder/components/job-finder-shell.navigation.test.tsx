@@ -14,7 +14,14 @@ import {
   within,
 } from "@testing-library/react";
 import { lazy, Suspense } from "react";
-import { Link, MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
+import {
+  Link,
+  MemoryRouter,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -25,6 +32,16 @@ import {
   SHELL_SCROLLING_ROUTE_TOP_GUTTER_PX,
 } from "../lib/job-finder-shell-gutters";
 import { COMPACT_NAV_PILL_CLASS, JobFinderShell } from "./job-finder-shell";
+
+/** What the app's outlet does for a cold route: one boundary per path. */
+function PerPathSuspenseOutlet() {
+  const { pathname } = useLocation();
+  return (
+    <Suspense fallback={<div>Opening screen</div>} key={pathname}>
+      <Outlet />
+    </Suspense>
+  );
+}
 
 const windowControlsState = {
   isClosable: true,
@@ -253,9 +270,7 @@ describe("JobFinderShell section navigation", () => {
           <Route
             element={
               <JobFinderShell platform="win32" workspace={createWorkspace()}>
-                <Suspense fallback={<div>Opening screen</div>}>
-                  <Outlet />
-                </Suspense>
+                <PerPathSuspenseOutlet />
               </JobFinderShell>
             }
           >
@@ -272,8 +287,9 @@ describe("JobFinderShell section navigation", () => {
       name: "Job Finder sidebar destinations",
     });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Home" }));
-    // The route container is keyed, so a cold lazy route shows its opening
-    // surface while the new screen loads rather than keeping the old page.
+    // The outlet keys its Suspense boundary by path, so a cold lazy route
+    // shows its opening surface while the new screen loads rather than
+    // keeping the old page.
     expect(await screen.findByText("Opening screen")).toBeTruthy();
     act(() => {
       finish();

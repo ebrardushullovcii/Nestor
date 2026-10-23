@@ -2758,7 +2758,7 @@ export function JobFinderActionsRoute() {
     >
       <ActionsScreen
         applyMode={
-          context.workspace.settings.applicationAutomationMode ===
+          context.workspace.settings?.applicationAutomationMode ===
           "autonomous_submit"
             ? "apply_for_me"
             : "fill_only"

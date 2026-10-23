@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useLocation } from "react-router-dom";
+import { useKeptRouteHidden } from "../lib/kept-route-visibility";
 import type {
   AssistantAttachment,
   AssistantContextReference,
@@ -350,12 +351,14 @@ export function useAssistantContextSource(
   options: { priority?: number } = {},
 ): void {
   const assistant = useAssistant();
+  // A screen kept mounted behind the one shown is not what the person sees.
+  const hidden = useKeptRouteHidden();
   const priority = options.priority ?? 0;
   const getterRef = useRef(getter);
   getterRef.current = getter;
   useEffect(() => {
-    if (!assistant) return undefined;
+    if (!assistant || hidden) return undefined;
     return assistant.registerContext(id, () => getterRef.current(), priority);
     // The registry holds a stable wrapper; only the id and priority matter.
-  }, [assistant?.registerContext, id, priority]);
+  }, [assistant?.registerContext, hidden, id, priority]);
 }
