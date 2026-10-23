@@ -551,7 +551,7 @@ export const assessJobListingTool = defineTool({
   name: "assess_job_listing",
   group: "jobs",
   description:
-    "Runs Read and assess listing for a saved job, exactly as its detail button does. Reads the listing, saves the model assessment and returns the current saved fit evidence. Use before ranking an unassessed job; never invent a score.",
+    "Runs Judge fit for a saved job, exactly as its detail button does. Reads the listing, saves the model assessment and returns the current saved fit evidence. Use before ranking an unassessed job; never invent a score.",
   parameters: json.object({ jobId: json.string() }, ["jobId"]),
   input: z.object({ jobId: Id }),
   label: () => "Reading and assessing the listing",

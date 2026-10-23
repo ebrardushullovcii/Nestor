@@ -975,7 +975,7 @@ export function createMatchAssessment<
 }
 
 const NOT_JUDGED_EXPLANATION =
-  "Not judged yet. The AI judges this job against your profile and goals after a search, or when you choose Read and assess listing.";
+  "Not judged yet. The AI judges this job against your profile and goals after a search, or when you choose Judge fit.";
 
 export async function createMatchAssessmentAsync(
   aiClient: JobFinderAiClient,

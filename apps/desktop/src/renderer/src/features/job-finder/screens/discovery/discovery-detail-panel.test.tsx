@@ -1797,7 +1797,7 @@ describe("requested listing assessment", () => {
       </MemoryRouter>,
     );
     fireEvent.click(
-      screen.getByRole("button", { name: "Read and assess listing" }),
+      screen.getByRole("button", { name: "Judge fit" }),
     );
     await waitFor(() =>
       expect(

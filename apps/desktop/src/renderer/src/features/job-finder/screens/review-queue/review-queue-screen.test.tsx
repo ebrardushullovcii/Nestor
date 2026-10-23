@@ -716,7 +716,7 @@ describe("ReviewQueueScreen job details honesty", () => {
     // full assessment with the job detail.
     expect(
       await screen.findAllByText(
-        "The AI judges each job against your profile and goals after a search. Choose Read and assess listing to judge this one now.",
+        "The AI judges each job against your profile and goals after a search. Choose Judge fit to do this one now.",
       ),
     ).toHaveLength(1);
     expect(

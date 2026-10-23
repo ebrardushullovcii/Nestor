@@ -23,7 +23,7 @@ NESTOR_AI_BASE_URL=https://opencode.ai/zen/go/v1
 NESTOR_AI_MODEL=muse-spark-1.3-contributor
 NESTOR_AI_API_MODE=responses
 NESTOR_AI_REASONING_EFFORT=xhigh
-# Resume writing and "Read and assess" (a full listing read) use the effort
+# Resume writing and "Judge fit" (a full listing read) use the effort
 # above. Work that runs many times per search or form thinks less; each has
 # its own variable (code defaults shown).
 # Search and source-check turns:
@@ -38,7 +38,7 @@ NESTOR_AI_CLAIM_CHECK_REASONING_EFFORT=medium
 # form values (a date, a number, a chosen option) that are not about
 # eligibility, pay or a declaration:
 NESTOR_AI_APPLY_REASONING_EFFORT=low
-# "Read and assess"; unset means NESTOR_AI_REASONING_EFFORT:
+# "Judge fit"; unset means NESTOR_AI_REASONING_EFFORT:
 # NESTOR_AI_LISTING_READ_REASONING_EFFORT=high
 # Other tool-calling work (resume import sections, the profile and resume
 # assistants, letters). It does not change the tasks above.

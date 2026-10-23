@@ -305,7 +305,7 @@ describe("MatchEvidenceMatrix", () => {
     expect(view.queryByText("Strong fit")).toBeNull();
     // The hedge itself still appears exactly once, at the top.
     expect(view.getByTestId("fit-title-only-note").textContent).toBe(
-      "The AI judges each job against your profile and goals after a search. Choose Read and assess listing to judge this one now.",
+      "The AI judges each job against your profile and goals after a search. Choose Judge fit to do this one now.",
     );
     expect(view.getByText("Score and evidence")).toBeTruthy();
     expect(
