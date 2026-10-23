@@ -266,10 +266,30 @@ export function createWorkspaceApplicationAnswerMethods(
         expectedAnswerRevision: latest?.revision ?? 0,
         saveScope: "application_once",
       };
+      // The person's own answer is already saved. Another application's
+      // write or continuation must not fail or hold up their Save.
       await runSingleFlight(reused.commandId, () =>
-        saveApplicationAnswerOnce(reused),
-      );
+        saveApplicationAnswerOnce(reused, { continueInBackground: true }),
+      ).catch((error: unknown) => {
+        console.error(
+          "Job Finder could not reuse an answer on another application.",
+          error,
+        );
+      });
     }
+  }
+
+  async function continueAfterSave(
+    command: SaveApplicationAnswerCommand,
+    continueInBackground: boolean,
+  ) {
+    if (!continueInBackground) return continueAnsweredStep(command);
+    void continueAnsweredStep(command).catch((error: unknown) => {
+      console.error(
+        "Job Finder could not continue another application after reusing an answer.",
+        error,
+      );
+    });
   }
 
   async function continueAnsweredStep(command: SaveApplicationAnswerCommand) {
@@ -365,6 +385,7 @@ export function createWorkspaceApplicationAnswerMethods(
 
   async function saveApplicationAnswerOnce(
     command: SaveApplicationAnswerCommand,
+    { continueInBackground = false } = {},
   ): Promise<ApplyRunDetails> {
     const existingDetails = await getApplyRunDetails(
       command.runId,
@@ -376,7 +397,7 @@ export function createWorkspaceApplicationAnswerMethods(
       )
     ) {
       await reuseAnswerInBatch(command);
-      await continueAnsweredStep(command);
+      await continueAfterSave(command, continueInBackground);
       return getApplyRunDetails(command.runId, command.jobId);
     }
 
@@ -476,7 +497,7 @@ export function createWorkspaceApplicationAnswerMethods(
       );
     }
     await reuseAnswerInBatch(command);
-    await continueAnsweredStep(command);
+    await continueAfterSave(command, continueInBackground);
     return getApplyRunDetails(command.runId, command.jobId);
   }
 
