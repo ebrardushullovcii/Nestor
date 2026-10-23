@@ -33,7 +33,7 @@ export interface BrowserCdpHost {
   selectPage(id: string): void;
   onPageCreated(listener: (page: BrowserCdpPage) => void): () => void;
   userAgent(): string;
-  emulateFocus?(): boolean;
+  emulateFocus?(pageId?: string): boolean;
   /**
    * Automation is about to send keyboard or pointer input to this page.
    * `pointerDown` is set for a pressed pointer button, which the page then
@@ -48,7 +48,7 @@ export interface BrowserCdpHost {
     },
   ): void;
   /** Keep hidden pages awake only while browser commands need them. */
-  onAutomationCommand?(pageId: string, active: boolean): void;
+  onAutomationCommand?(pageId: string, active: boolean): void | Promise<void>;
 }
 interface AttachedPage {
   page: BrowserCdpPage;
@@ -89,7 +89,7 @@ export class BrowserCdpBridge {
   private disposed = false;
   private removeCreatedListener: (() => void) | null = null;
   private readonly pendingAttachments = new Set<Promise<void>>();
-  private readonly tokenWaiters = new Map<string, (tabId: string) => void>();
+  private readonly tokenWaiters = new Map<string, (tabId: string | null) => void>();
 
   constructor(private readonly host: BrowserCdpHost) {}
 
@@ -278,7 +278,7 @@ export class BrowserCdpBridge {
     const debuggerApi = page.contents.debugger;
     if (!debuggerApi.isAttached()) debuggerApi.attach("1.3");
     await debuggerApi.sendCommand("Emulation.setFocusEmulationEnabled", {
-      enabled: this.host.emulateFocus?.() ?? false,
+      enabled: this.host.emulateFocus?.(page.id) ?? false,
     });
     const native: unknown = await debuggerApi.sendCommand(
       "Target.getTargetInfo",
@@ -611,7 +611,7 @@ export class BrowserCdpBridge {
     // host (see syncFocusEmulation), never by the automation client.
     if (request.method === "Emulation.setFocusEmulationEnabled") {
       return this.forward(binding, request.method, {
-        enabled: this.host.emulateFocus?.() ?? false,
+        enabled: this.host.emulateFocus?.(binding.target.page.id) ?? false,
       });
     }
     if (
@@ -649,8 +649,8 @@ export class BrowserCdpBridge {
       }
     }
     const pageId = binding.target.page.id;
-    this.host.onAutomationCommand?.(pageId, true);
     try {
+      await this.host.onAutomationCommand?.(pageId, true);
       const result: unknown =
         await binding.target.page.contents.debugger.sendCommand(
           method,
@@ -659,7 +659,7 @@ export class BrowserCdpBridge {
         );
       return record(result) ? result : {};
     } finally {
-      this.host.onAutomationCommand?.(pageId, false);
+      await this.host.onAutomationCommand?.(pageId, false);
     }
   }
 
@@ -669,13 +669,14 @@ export class BrowserCdpBridge {
    * while automation drives a tab the user is not looking at.
    */
   async syncFocusEmulation(): Promise<void> {
-    const enabled = this.host.emulateFocus?.() ?? false;
     await Promise.all(
       [...this.targets.values()]
         .filter((target) => !target.page.contents.isDestroyed())
         .map((target) =>
           target.page.contents.debugger
-            .sendCommand("Emulation.setFocusEmulationEnabled", { enabled })
+            .sendCommand("Emulation.setFocusEmulationEnabled", {
+              enabled: this.host.emulateFocus?.(target.page.id) ?? false,
+            })
             .catch(() => undefined),
         ),
     );
@@ -768,6 +769,8 @@ export class BrowserCdpBridge {
   close(): void {
     if (this.disposed) return;
     this.disposed = true;
+    for (const resolve of [...this.tokenWaiters.values()]) resolve(null);
+    this.tokenWaiters.clear();
     this.removeCreatedListener?.();
     this.removeCreatedListener = null;
     this.socket?.terminate();

@@ -13,6 +13,12 @@ type Message = {
   error?: { message: string };
 };
 const resources: Array<() => void> = [];
+test("closing the bridge releases pending page claims immediately", async () => {
+  const {bridge} = await fixture();
+  const pending = bridge.waitForToken("synthetic-claim", 60_000);
+  bridge.close();
+  await expect(pending).resolves.toBeNull();
+});
 afterEach(() => {
   for (const dispose of resources.splice(0).reverse()) dispose();
 });

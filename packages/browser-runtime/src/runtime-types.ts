@@ -294,6 +294,19 @@ export interface BrowserSessionRuntime {
     source: JobSource,
     pageBindingKey: string,
   ): Promise<boolean>;
+  /** Discard a ready form only after an exact guarded refill has been verified. */
+  hibernateApplicationPageBinding?(
+    source: JobSource,
+    pageBindingKey: string,
+    canDiscard: () => boolean,
+  ): Promise<boolean>;
+  /** Browser Close ends ephemeral recovery as well as live pages. */
+  clearApplicationPageRecovery?(): void;
+  /** Native destruction differs from a CDP detach during person handoff. */
+  forgetClosedApplicationPage?(
+    source: JobSource,
+    pageBindingKey: string,
+  ): boolean;
   /** Bring the exact retained application page to the person without URL matching. */
   focusApplicationPageBinding?(
     source: JobSource,

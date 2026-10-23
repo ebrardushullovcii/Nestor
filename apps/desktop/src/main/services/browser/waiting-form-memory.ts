@@ -1,10 +1,10 @@
 import type { WaitingFormMemory } from "@nestor/contracts";
 
-// R3 measured about 470 MB for 7–10 renderers. Allow 768 MiB for retained
-// forms, with 96 MiB reserved before admitting another working tab. Keep
-// answers and attachments in place; never reload or discard a form to save RAM.
-export const WAITING_FORM_MEMORY_BUDGET = 768 * 1024 * 1024;
-const NEXT_FORM_RESERVE = 96 * 1024 * 1024;
+// Five mixed replica/real pages settled at ~513 MiB working set (334 MiB
+// private) on a 16 GiB PC. This is a reclamation target, not an admission
+// gate: a waiting form must not consume a new application's working slot.
+export const WAITING_FORM_MEMORY_BUDGET = 2 * 1024 * 1024 * 1024;
+const NEXT_FORM_RESERVE = 256 * 1024 * 1024;
 
 export function measureWaitingFormMemory(input: {
   recordedAt: string;

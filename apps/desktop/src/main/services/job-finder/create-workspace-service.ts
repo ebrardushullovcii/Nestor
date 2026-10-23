@@ -1,4 +1,5 @@
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
+import type { Page } from "playwright";
 import { publishJobFinderWorkspaceUpdate } from "./workspace-updates";
 import { mainBuildDigest } from "./startup-workspace-view";
 import {
@@ -450,6 +451,21 @@ export function createDesktopBrowserRuntime(
       aiClient,
       ...(embedded
         ? {
+            onApplicationPageRestored: async (
+              key: string,
+              page: Page,
+            ) => {
+              await embedded.runAutomation(
+                "Restoring application",
+                undefined,
+                async (_signal, _update, claim, tabs) => {
+                  claim(page);
+                  await tabs();
+                },
+                { owner: key },
+              );
+              embedded.markPreparedForm(key);
+            },
             browserHost: {
               connect: () => embedded.connect(),
               getOpenBrowser: () => embedded.getOpenBrowser(),
@@ -457,8 +473,8 @@ export function createDesktopBrowserRuntime(
               assertAutomationSafe: () => embedded.assertAutomationSafe(),
               openTabCount: () => embedded.openTabCount(),
               workingTabCount: () => embedded.workingTabCount(),
-              hasAutomationTabCapacity: () =>
-                embedded.hasAutomationTabCapacity(),
+              hasAutomationTabCapacity: (reservedTabs?: number) =>
+                embedded.hasAutomationTabCapacity(reservedTabs),
             },
           }
         : {}),

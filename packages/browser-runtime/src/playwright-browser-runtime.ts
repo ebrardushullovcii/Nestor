@@ -50,6 +50,12 @@ import type {
 } from "./runtime-types";
 import { ApplicationNavigationError } from "./application-navigation-error";
 import {
+  capturePreparedForm,
+  restorePreparedForm,
+  type PreparedFormSnapshot,
+  type RecoveryFile,
+} from "./prepared-form-recovery";
+import {
   applicationSiteKey,
   createApplicationPreparationScheduler,
   type ApplicationPreparationLease,
@@ -63,6 +69,7 @@ import {
   closePrepareOnlyFinalActionWindow,
   openPrepareOnlyFinalActionWindow,
   installServiceWorkerRegisterGuardInPage,
+  loadVerifiedResumeBytes,
   type ServiceWorkerSafetyFinding,
 } from "./playwright-application-flow";
 import {
@@ -616,6 +623,8 @@ async function buildApplyVisualDiagnostics(input: {
 
 export interface BrowserAgentRuntimeOptions {
   userDataDir: string;
+  /** Rebind native tab ownership after a verified, model-free refill. */
+  onApplicationPageRestored?(key: string, page: Page): Promise<void>;
   /** Host-owned pages, for example a desktop application's embedded browser. */
   browserHost?: {
     connect(): Promise<Browser>;
@@ -627,9 +636,9 @@ export interface BrowserAgentRuntimeOptions {
      * automation never sees. The host's tab limit counts those too.
      */
     openTabCount?(): number;
-    /** Waiting forms are excluded from the eight working slots. */
+    /** Waiting forms are excluded from the host's working slots. */
     workingTabCount?(): number;
-    hasAutomationTabCapacity?(): boolean;
+    hasAutomationTabCapacity?(reservedTabs?: number): boolean;
   };
   headless?: boolean;
   maxJobsPerRun?: number;
@@ -1202,10 +1211,10 @@ export async function reserveEmbeddedApplicationTab(
   /** The host's own count of open tabs, when it has tabs automation cannot see. */
   hostTabCount?: () => number,
   hostWorkingTabCount?: () => number,
-  hostHasCapacity?: () => boolean,
+  hostHasCapacity?: (reservedTabs: number) => boolean,
 ): Promise<() => void> {
-  // The embedded browser allows eight tabs. Keep one spare for a site's popup
-  // and let a waiting application use the next tab the person closes.
+  // Reserve atomically before creating a page. Native hosts account for their
+  // own working/retained tabs; older hosts retain the conservative fallback.
   const startedAt = Date.now();
   const deadline = startedAt + 20_000;
   let toldWaiting = false;
@@ -1220,10 +1229,13 @@ export async function reserveEmbeddedApplicationTab(
       ? hostWorkingTabCount() +
         (pendingEmbeddedApplicationTabs.get(context) ?? 0)
       : occupied;
+    const pending = pendingEmbeddedApplicationTabs.get(context) ?? 0;
+    // The native host owns its capacity, including tabs hidden from CDP.
+    // Keep the old bounded fallback only for hosts without that capability.
     if (
-      working < 7 &&
-      occupied < (hostWorkingTabCount ? 15 : 7) &&
-      (hostHasCapacity?.() ?? true)
+      hostHasCapacity
+        ? hostHasCapacity(pending)
+        : working < 7 && occupied < (hostWorkingTabCount ? 15 : 7)
     ) {
       pendingEmbeddedApplicationTabs.set(
         context,
@@ -1360,6 +1372,16 @@ export function createBrowserAgentRuntime(
   // Prepared pages the person was handed to finish themselves, until the
   // next continuation or send locks them again.
   const preparedPagesWithPerson = new Set<string>();
+  const formRecovery = new Map<
+    string,
+    {
+      files: RecoveryFile[];
+      guard: (page: Page) => Promise<unknown>;
+      snapshot?: PreparedFormSnapshot;
+    }
+  >();
+  const recoveryUnavailable = new Set<string>();
+  const recoveringForms = new Map<string, Promise<void>>();
 
   async function markPreparedPage(key: string, page: Page): Promise<void> {
     if (typeof page.evaluate !== "function") return;
@@ -1394,9 +1416,17 @@ export function createBrowserAgentRuntime(
   }
 
   function bindPreparedApplicationPage(key: string, page: Page): void {
+    const alreadyBound = preparedApplicationPages.get(key) === page;
     preparedApplicationPages.set(key, page);
     markedPreparedApplicationKeys.add(key);
     void markPreparedPage(key, page);
+    if (alreadyBound) return;
+    page.once?.("close", () => {
+      if (preparedApplicationPages.get(key) !== page) return;
+      preparedApplicationPages.delete(key);
+      // CDP detachment also closes Playwright's Page while the native tab
+      // remains with the person. Keep its marker until native destruction.
+    });
   }
 
   /**
@@ -1409,6 +1439,32 @@ export function createBrowserAgentRuntime(
     if (current && !current.isClosed()) {
       // Keep the mark fresh across the form's own navigations.
       await markPreparedPage(key, current);
+      return;
+    }
+    const recovery = formRecovery.get(key);
+    if (recovery?.snapshot) {
+      let pending = recoveringForms.get(key);
+      if (!pending) {
+        const snapshot = recovery.snapshot;
+        pending = (async () => {
+          const page = await restorePreparedForm({
+            context: await getContext(),
+            snapshot,
+            files: recovery.files,
+            guard: recovery.guard,
+          });
+          if (!page)
+            throw new Error(
+              "The saved form could not be refilled exactly. Prepare the application again before sending.",
+            );
+          bindPreparedApplicationPage(key, page);
+          await markPreparedPage(key, page);
+          delete recovery.snapshot;
+          await options.onApplicationPageRestored?.(key, page);
+        })().finally(() => recoveringForms.delete(key));
+        recoveringForms.set(key, pending);
+      }
+      await pending;
       return;
     }
     if (!markedPreparedApplicationKeys.has(key) || !options.browserHost) return;
@@ -1433,7 +1489,11 @@ export function createBrowserAgentRuntime(
 
   /** Forgets a finished application's page and closes it unless the person has it. */
   async function releaseApplicationPage(key: string): Promise<boolean> {
-    await rebindPreparedApplicationPage(key);
+    // Completing an evicted application must not reopen it just to close it.
+    if (!formRecovery.get(key)?.snapshot)
+      await rebindPreparedApplicationPage(key);
+    formRecovery.delete(key);
+    recoveryUnavailable.delete(key);
     const page = preparedApplicationPages.get(key);
     const withPerson = preparedPagesWithPerson.has(key);
     preparedApplicationPages.delete(key);
@@ -2322,6 +2382,7 @@ export function createBrowserAgentRuntime(
     },
     observeApplicationForm: observeApplicationFormForSource,
     async hasApplicationPageBinding(_source, pageBindingKey) {
+      if (formRecovery.get(pageBindingKey)?.snapshot) return true;
       await rebindPreparedApplicationPage(pageBindingKey);
       try {
         selectPreparedApplicationPage(preparedApplicationPages, pageBindingKey);
@@ -2330,8 +2391,92 @@ export function createBrowserAgentRuntime(
         return false;
       }
     },
+    clearApplicationPageRecovery() {
+      formRecovery.clear();
+      recoveryUnavailable.clear();
+      markedPreparedApplicationKeys.clear();
+      preparedPagesWithPerson.clear();
+      preparedApplicationPages.clear();
+    },
+    forgetClosedApplicationPage(_source, key) {
+      preparedApplicationPages.delete(key);
+      if (formRecovery.get(key)?.snapshot) return false;
+      markedPreparedApplicationKeys.delete(key);
+      preparedPagesWithPerson.delete(key);
+      formRecovery.delete(key);
+      recoveryUnavailable.delete(key);
+      return true;
+    },
+    async hibernateApplicationPageBinding(_source, key, canDiscard) {
+      const recovery = formRecovery.get(key);
+      const page = preparedApplicationPages.get(key);
+      if (
+        !recovery ||
+        recovery.snapshot ||
+        recoveryUnavailable.has(key) ||
+        !page ||
+        page.isClosed() ||
+        pagesInUse.has(page) ||
+        preparedPagesWithPerson.has(key) ||
+        !canDiscard()
+      )
+        return false;
+      let duplicate: Page | null = null;
+      try {
+        const snapshot = await capturePreparedForm(page);
+        if (
+          !snapshot ||
+          snapshot.fields.some((field) =>
+            field.files.some(
+              (saved) =>
+                recovery.files.filter((file) => file.name === saved.name).length !==
+                1,
+            ),
+          )
+        ) {
+          recoveryUnavailable.add(key);
+          return false;
+        }
+        duplicate = await restorePreparedForm({
+          context: page.context(),
+          snapshot,
+          files: recovery.files,
+          guard: recovery.guard,
+        });
+        if (!duplicate) {
+          recoveryUnavailable.add(key);
+          return false;
+        }
+        if (
+          !canDiscard() ||
+          pagesInUse.has(page) ||
+          preparedPagesWithPerson.has(key) ||
+          JSON.stringify(await capturePreparedForm(page)) !==
+            JSON.stringify(snapshot)
+        )
+          return false;
+        recovery.snapshot = snapshot;
+        await page.close({ runBeforeUnload: false });
+        preparedApplicationPages.delete(key);
+        return true;
+      } finally {
+        await duplicate
+          ?.close({ runBeforeUnload: false })
+          .catch(() => undefined);
+      }
+    },
     async focusApplicationPageBinding(_source, pageBindingKey) {
-      await rebindPreparedApplicationPage(pageBindingKey);
+      try {
+        await rebindPreparedApplicationPage(pageBindingKey);
+      } catch {
+        // Use the existing lost-page recovery in the workspace instead of
+        // leaving a changed form marked ready behind a button that loops.
+        formRecovery.delete(pageBindingKey);
+        markedPreparedApplicationKeys.delete(pageBindingKey);
+        preparedPagesWithPerson.delete(pageBindingKey);
+        recoveryUnavailable.delete(pageBindingKey);
+        return false;
+      }
       return focusPreparedApplicationPage(
         preparedApplicationPages,
         pageBindingKey,
@@ -2420,6 +2565,10 @@ export function createBrowserAgentRuntime(
       await closePrepareOnlyAuthorizedFormActionWindow(page);
       await closePrepareOnlyFinalActionWindow(page);
       preparedApplicationPages.delete(previousKey);
+      const recovery = formRecovery.get(previousKey);
+      formRecovery.delete(previousKey);
+      if (recovery) formRecovery.set(nextKey, recovery);
+      recoveryUnavailable.delete(previousKey);
       markedPreparedApplicationKeys.delete(previousKey);
       preparedPagesWithPerson.delete(previousKey);
       bindPreparedApplicationPage(nextKey, page);
@@ -2977,6 +3126,25 @@ export function createBrowserAgentRuntime(
         }
         recordExecutionTiming("total", executionStartedAtMs);
         const lastCheckpointIndex = executionResult.checkpoints.length - 1;
+
+        if (
+          input.applicationPageBindingKey &&
+          executionResult.state === "ready" &&
+          preparedApplicationPages.has(input.applicationPageBindingKey)
+        ) {
+          const resumeArtifact = input.resumeArtifact;
+          const attachments = input.applicationAttachments ?? [];
+          const authorized = input.intermediateMutationsAuthorized === true;
+          const origins = [...(input.intermediateMutationAllowedOrigins ?? [])];
+          formRecovery.set(input.applicationPageBindingKey, {
+            files: [
+              { name: resumeArtifact.fileName, load: () => loadVerifiedResumeBytes(resumeArtifact) },
+              ...attachments.map(file => ({name: file.fileName, load: file.loadVerifiedBytes})),
+            ],
+            guard: page => ensurePrepareOnlyMutationGuard(page, authorized, origins),
+          });
+          recoveryUnavailable.delete(input.applicationPageBindingKey);
+        }
 
         if (
           executionResult.state === "submitted" ||
