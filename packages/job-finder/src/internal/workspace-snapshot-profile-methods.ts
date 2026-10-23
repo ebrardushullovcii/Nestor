@@ -56,6 +56,9 @@ import {
 } from "@nestor/contracts";
 import { reassessSavedJobs } from "./saved-job-reassessment";
 import type { JobFinderRepositorySeed } from "@nestor/db";
+import { readSavedJobProjectionChanges } from "@nestor/db";
+import { mergeSortedRowChanges } from "./sorted-row-changes";
+import { createListingActivityChangeResolver } from "./listing-activity-changes";
 
 import { runApplicationNoResponseAutomation } from "./application-crm";
 import {
@@ -131,6 +134,7 @@ import {
   inactiveListingLedger,
 } from "./listing-activity";
 import { createSyncedJobIdentityIndex } from "./discovery-run-indexes";
+import { warmDiscoveryLedgerIndex } from "./workspace-discovery-ledger";
 import {
   deriveGlobalDailyApplicationPreparationCapacity,
   MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
@@ -193,10 +197,15 @@ function buildJobViews(
     discoveryLedger: input.discoveryLedger,
     listingSignals: input.listingSignals,
     applicationAttempts: input.applicationAttempts,
-    identityJobs: [
-      ...input.rawSavedJobs,
-      ...input.pendingDiscoveryJobs.filter((job) => !savedJobIds.has(job.id)),
-    ],
+    identityJobs:
+      input.pendingDiscoveryJobs.length === 0
+        ? input.rawSavedJobs
+        : [
+            ...input.rawSavedJobs,
+            ...input.pendingDiscoveryJobs.filter(
+              (job) => !savedJobIds.has(job.id),
+            ),
+          ],
     ...(identityIndex ? { identityIndex } : {}),
   });
   const projectedJobById = new Map(
@@ -638,43 +647,119 @@ export function createWorkspaceSnapshotProfileMethods(
   const jobViewIdentityIndex =
     ctx.listingActivityIdentityIndex ??
     createSyncedJobIdentityIndex<SavedJob>((job) => job);
+  const listingActivityChanges =
+    createListingActivityChangeResolver(jobViewIdentityIndex);
   function deriveJobViews(input: JobViewInput) {
     const last = lastJobViews;
     const sameEvidence =
       last &&
       last.input.planId === input.planId &&
       last.input.pendingDiscoveryJobs === input.pendingDiscoveryJobs &&
-      inactiveListingLedger(last.input.discoveryLedger) ===
-        inactiveListingLedger(input.discoveryLedger) &&
       last.input.listingSignals === input.listingSignals &&
-      last.input.applicationAttempts === input.applicationAttempts &&
-      last.input.companies === input.companies;
-    if (sameEvidence && last.input.rawSavedJobs === input.rawSavedJobs) {
-      return last.views;
+      last.input.applicationAttempts === input.applicationAttempts;
+    let companyJobIds = last?.views.companyJobIds ?? new Set<string>();
+    if (!last || last.input.companies !== input.companies) {
+      const next = new Set(
+        input.companies
+          .filter((company) => isListableCompanyName(company.canonicalName))
+          .flatMap((company) => company.jobIds),
+      );
+      if (
+        next.size !== companyJobIds.size ||
+        [...next].some((id) => !companyJobIds.has(id))
+      )
+        companyJobIds = next;
     }
+    const sameInactive =
+      last &&
+      inactiveListingLedger(last.input.discoveryLedger) ===
+        inactiveListingLedger(input.discoveryLedger);
     if (
       sameEvidence &&
-      Object.isFrozen(input.rawSavedJobs) &&
-      input.rawSavedJobs.length === last.input.rawSavedJobs.length &&
-      input.rawSavedJobs.every(
-        (job, index) => job.id === last.input.rawSavedJobs[index]?.id,
-      )
+      sameInactive &&
+      companyJobIds === last.views.companyJobIds &&
+      last.input.rawSavedJobs === input.rawSavedJobs
     ) {
-      const rawById = new Map(input.rawSavedJobs.map((job) => [job.id, job]));
-      const changed = input.rawSavedJobs
-        .filter((job) => last.rawById.get(job.id) !== job)
-        .map((job) => readPlanAssessment(job, input.planId));
-      const changedIds = new Set(changed.map((job) => job.id));
-      for (const id of last.rawById.keys())
-        if (!rawById.has(id)) changedIds.add(id);
+      lastJobViews = { ...last, input };
+      return last.views;
+    }
+    if (sameEvidence && Object.isFrozen(input.rawSavedJobs)) {
+      const sameJobs = last.input.rawSavedJobs === input.rawSavedJobs;
+      const changes = sameJobs
+        ? { rows: [], removedIds: [] }
+        : readSavedJobProjectionChanges(
+            last.input.rawSavedJobs,
+            input.rawSavedJobs,
+          );
+      const rawById = changes
+        ? new Map(last.rawById)
+        : new Map(input.rawSavedJobs.map((job) => [job.id, job]));
+      if (changes) {
+        for (const id of changes.removedIds) rawById.delete(id);
+        for (const row of changes.rows) rawById.set(row.id, row);
+      }
+      const rawChanged =
+        changes?.rows ??
+        input.rawSavedJobs.filter((job) => last.rawById.get(job.id) !== job);
+      const removed = changes
+        ? changes.removedIds.map((id) => last.rawById.get(id)!).filter(Boolean)
+        : [...last.rawById.values()].filter((job) => !rawById.has(job.id));
+      const evidenceIds = listingActivityChanges({
+        beforeJobs:
+          input.pendingDiscoveryJobs.length === 0
+            ? last.input.rawSavedJobs
+            : [
+                ...last.input.rawSavedJobs,
+                ...input.pendingDiscoveryJobs.filter(
+                  (row) => !last.rawById.has(row.id),
+                ),
+              ],
+        jobs:
+          input.pendingDiscoveryJobs.length === 0
+            ? input.rawSavedJobs
+            : [
+                ...input.rawSavedJobs,
+                ...input.pendingDiscoveryJobs.filter(
+                  (row) => !rawById.has(row.id),
+                ),
+              ],
+        beforeById: last.rawById,
+        changed: rawChanged,
+        removed,
+        beforeLedger: last.input.discoveryLedger,
+        ledger: input.discoveryLedger,
+      });
+      const changedIds = new Set([
+        ...rawChanged.map((row) => row.id),
+        ...removed.map((row) => row.id),
+        ...evidenceIds,
+      ]);
+      if (companyJobIds !== last.views.companyJobIds) {
+        for (const id of last.views.companyJobIds)
+          if (!companyJobIds.has(id)) changedIds.add(id);
+        for (const id of companyJobIds)
+          if (!last.views.companyJobIds.has(id)) changedIds.add(id);
+      }
+      const changed = [...changedIds].flatMap((id) => {
+        const row = rawById.get(id);
+        return row ? [readPlanAssessment(row, input.planId)] : [];
+      });
+      for (const job of input.pendingDiscoveryJobs)
+        if (changedIds.has(job.id) && !rawById.has(job.id))
+          changed.push(readPlanAssessment(job, input.planId));
       const projectedJobById = new Map(last.views.projectedJobById);
       for (const id of changedIds) projectedJobById.delete(id);
       for (const view of projectDiscoveryJobViews({
         jobs: changed,
-        identityJobs: [
-          ...input.rawSavedJobs,
-          ...input.pendingDiscoveryJobs.filter((job) => !rawById.has(job.id)),
-        ],
+        identityJobs:
+          input.pendingDiscoveryJobs.length === 0
+            ? input.rawSavedJobs
+            : [
+                ...input.rawSavedJobs,
+                ...input.pendingDiscoveryJobs.filter(
+                  (job) => !rawById.has(job.id),
+                ),
+              ],
         discoveryLedger: input.discoveryLedger,
         listingSignals: input.listingSignals,
         applicationAttempts: input.applicationAttempts,
@@ -686,38 +771,66 @@ export function createWorkspaceSnapshotProfileMethods(
           const view = projectedJobById.get(job.id);
           return view ? [view] : [];
         });
+      const savedJobs =
+        changes &&
+        changes.removedIds.length === 0 &&
+        input.rawSavedJobs.length === last.input.rawSavedJobs.length
+          ? last.views.savedJobs.slice()
+          : input.rawSavedJobs.map((job) =>
+              readPlanAssessment(job, input.planId),
+            );
+      if (
+        changes &&
+        changes.removedIds.length === 0 &&
+        input.rawSavedJobs.length === last.input.rawSavedJobs.length
+      ) {
+        for (const row of changes.rows) {
+          let low = 0;
+          let high = input.rawSavedJobs.length;
+          while (low < high) {
+            const middle = (low + high) >>> 1;
+            if (input.rawSavedJobs[middle]!.id < row.id) low = middle + 1;
+            else high = middle;
+          }
+          if (input.rawSavedJobs[low]?.id === row.id)
+            savedJobs[low] = readPlanAssessment(row, input.planId);
+        }
+      }
       const views: ReturnType<typeof buildJobViews> = {
-        savedJobs: Object.freeze(
-          input.rawSavedJobs.map((job) =>
-            readPlanAssessment(job, input.planId),
-          ),
-        ) as SavedJob[],
-        discoveryJobs: rankDiscoveryJobs([
-          ...last.views.discoveryJobs.filter((job) => !changedIds.has(job.id)),
-          ...project(selectVisibleDiscoveryJobs(changed)),
-        ]),
-        projectedDismissedDiscoveryJobs: rankDismissedJobs([
-          ...last.views.projectedDismissedDiscoveryJobs.filter(
-            (job) => !changedIds.has(job.id),
-          ),
-          ...project(
+        savedJobs: Object.freeze(savedJobs) as SavedJob[],
+        discoveryJobs: mergeSortedRowChanges(
+          last.views.discoveryJobs,
+          changedIds,
+          project(selectVisibleDiscoveryJobs(changed)),
+          compareDiscoveryJobs,
+        ),
+        projectedDismissedDiscoveryJobs: mergeSortedRowChanges(
+          last.views.projectedDismissedDiscoveryJobs,
+          changedIds,
+          project(
             changed.filter(
               (job) =>
                 job.status === "archived" && job.discoveryFeedback !== null,
             ),
           ),
-        ]),
-        companyJobs: project(
-          rankCompanyJobs([
-            ...last.views.savedJobs.filter(
-              (job) =>
-                last.views.companyJobIds.has(job.id) && !changedIds.has(job.id),
+          compareDiscoveryJobs,
+        ),
+        companyJobs: mergeSortedRowChanges(
+          last.views.companyJobs,
+          changedIds,
+          project(
+            changed.filter(
+              (job) => rawById.has(job.id) && companyJobIds.has(job.id),
             ),
-            ...changed.filter((job) => last.views.companyJobIds.has(job.id)),
-          ]),
+          ),
+          (left, right) =>
+            compareDiscoveryJobs(
+              readPlanAssessment(rawById.get(left.id) ?? left, input.planId),
+              readPlanAssessment(rawById.get(right.id) ?? right, input.planId),
+            ),
         ),
         projectedJobById,
-        companyJobIds: last.views.companyJobIds,
+        companyJobIds,
       };
       Object.freeze(views.companyJobs);
       lastJobViews = { input, views, rawById };
@@ -1606,10 +1719,29 @@ export function createWorkspaceSnapshotProfileMethods(
       lastJobViews?.input.rawSavedJobs !== rawSavedJobs ||
       lastJobViews.input.planId !== snapshotPlanId
     )
-      await warmDiscoveryJobChecks(rawSavedJobs, {
-        key: snapshotPlanId,
-        of: (job) => readPlanAssessment(job, snapshotPlanId),
-      });
+      await warmDiscoveryJobChecks(
+        lastJobViews && lastJobViews.input.planId === snapshotPlanId
+          ? (readSavedJobProjectionChanges(
+              lastJobViews.input.rawSavedJobs,
+              rawSavedJobs,
+            )?.rows ?? rawSavedJobs)
+          : rawSavedJobs,
+        {
+          key: snapshotPlanId,
+          of: (job) => readPlanAssessment(job, snapshotPlanId),
+        },
+      );
+    if (
+      !lastJobViews &&
+      inactiveListingLedger(discovery.discoveryLedger).length > 0
+    )
+      await jobViewIdentityIndex.warm?.(rawSavedJobs);
+    if (!lastJobViews) {
+      const canonical = await ctx.repository.readDiscoveryStateForRun?.();
+      await warmDiscoveryLedgerIndex(
+        canonical?.discoveryLedger ?? discovery.discoveryLedger,
+      );
+    }
     const {
       savedJobs,
       discoveryJobs,

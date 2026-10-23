@@ -111,6 +111,43 @@ async function fixture(storage: "memory" | "file") {
 
 for (const storage of ["memory", "file"] as const) {
   describe(`${storage} snapshot display projection`, () => {
+    test("company membership edits preserve discovery rows and match canonical company lists", async () => {
+      const { repo, close } = await fixture(storage);
+      try {
+        const workspace = service(repo);
+        await workspace.getWorkspaceProjection();
+        const before = await workspace.getWorkspaceProjection();
+        const intelligence = await repo.getIntelligenceState();
+        const jobs = await repo.listSavedJobs();
+        const chosen = jobs[0]!;
+        const { CompanyEntitySchema } = await import("@nestor/contracts");
+        await repo.saveIntelligenceState({
+          ...intelligence,
+          companies: [
+            CompanyEntitySchema.parse({
+              id: "synthetic_membership",
+              canonicalName: "Synthetic employer",
+              jobIds: [chosen.id],
+              createdAt: "2026-10-23T00:00:00.000Z",
+              updatedAt: "2026-10-23T00:00:00.000Z",
+            }),
+          ],
+        });
+        const after = await workspace.getWorkspaceProjection();
+        const canonical = await workspace.getWorkspaceSnapshot();
+        expect(after.companyJobs.map((job) => job.id)).toEqual([chosen.id]);
+        expect(after.companyJobs).toEqual(canonical.companyJobs);
+        expect(after.discoveryJobs).toEqual(before.discoveryJobs);
+        if (storage === "file")
+          for (const row of after.discoveryJobs)
+            expect(row).toBe(
+              before.discoveryJobs.find((job) => job.id === row.id),
+            );
+      } finally {
+        await close();
+      }
+    });
+
     test("changed rows and activity converge while display progress never rewrites plans", async () => {
       const { repo, close } = await fixture(storage);
       try {

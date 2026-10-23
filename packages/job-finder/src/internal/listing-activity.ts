@@ -168,6 +168,7 @@ export function projectDiscoveryJobViews(input: {
    * few of them at a time.
    */
   identityIndex?: {
+    warm?(values: readonly SavedJob[]): Promise<void>;
     sync(
       values: readonly SavedJob[],
     ): Pick<JobIdentityIndex<Pick<SavedJob, "id">>, "resolve">;

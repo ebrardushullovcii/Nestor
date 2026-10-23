@@ -844,14 +844,15 @@ export function createWorkspaceApplicationMethods(
         throw new Error(`Unable to shortlist unknown job '${id}'.`);
     // Resolving inactive aliases needs the complete identity inventory; the common
     // active-listing path reads only the rows this shortlist actually changes.
-    const activityJobs = discovery.discoveryLedger.some(
+    const identityJobs = discovery.discoveryLedger.some(
       (entry) => entry.latestStatus === "inactive" && entry.inactiveAt !== null,
     )
-      ? [
-          ...(await ctx.repository.readSavedJobsProjection()),
-          ...selectedPending,
-        ]
+      ? await ctx.repository.readSavedJobsProjection()
       : [...selected.values()];
+    const activityJobs =
+      selectedPending.length > 0
+        ? [...identityJobs, ...selectedPending]
+        : identityJobs;
     const views = projectDiscoveryJobViews({
       jobs: [...selected.values()],
       identityJobs: activityJobs,
