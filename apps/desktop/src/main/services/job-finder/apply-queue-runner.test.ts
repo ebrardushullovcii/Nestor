@@ -1,5 +1,6 @@
 import type { ApplicationAutomationMode, ApplyQueue } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
+import { SameCompanyApplicationConflictError } from "@nestor/job-finder";
 
 import {
   createApplyQueueRunner,
@@ -14,7 +15,11 @@ function ids(count: number, prefix = "job"): string[] {
 
 interface Harness {
   deps: ApplyQueueRunnerDeps;
-  runs: Array<{ jobIds: string[]; mode: ApplicationAutomationMode; runId: string }>;
+  runs: Array<{
+    jobIds: string[];
+    mode: ApplicationAutomationMode;
+    runId: string;
+  }>;
   cancelled: string[];
   finishRun(index: number): void;
   queue(): ApplyQueue | null;
@@ -30,7 +35,9 @@ interface Harness {
   };
 }
 
-function createHarness(initial: { remaining?: number; queue?: ApplyQueue | null } = {}): Harness {
+function createHarness(
+  initial: { remaining?: number; queue?: ApplyQueue | null } = {},
+): Harness {
   let stored: ApplyQueue | null = initial.queue ?? null;
   let remaining = initial.remaining ?? 1_000;
   let nowIso = "2026-10-23T14:00:00.000Z";
@@ -51,7 +58,8 @@ function createHarness(initial: { remaining?: number; queue?: ApplyQueue | null 
       stored = queue ? structuredClone(queue) : null;
       return Promise.resolve();
     },
-    readDailyCapacity: () => Promise.resolve({ remaining, resetsAt: resetsAt() }),
+    readDailyCapacity: () =>
+      Promise.resolve({ remaining, resetsAt: resetsAt() }),
     readSavedMode: () => Promise.resolve(state.savedMode),
     isActivityPaused: () => Promise.resolve(state.paused),
     startRun: (jobIds, mode): Promise<ApplyQueueStartedRun> => {
@@ -70,7 +78,10 @@ function createHarness(initial: { remaining?: number; queue?: ApplyQueue | null 
         startedJobIds: started,
         skipped: jobIds
           .filter((id) => state.skip.has(id))
-          .map((jobId) => ({ jobId, reason: "Its resume waits for your review." })),
+          .map((jobId) => ({
+            jobId,
+            reason: "Its resume waits for your review.",
+          })),
         settled,
       });
     },
@@ -121,6 +132,109 @@ async function settle(): Promise<void> {
 }
 
 describe("apply queue runner", () => {
+  it("sets aside only named company conflicts and fills later runs with the rest", async () => {
+    const harness = createHarness();
+    const startRun = harness.deps.startRun.bind(harness.deps);
+    const skipped = ["job_1", "job_2"].map((jobId) => ({
+      jobId,
+      reason: `${jobId} at Example shares an employer. Review the pair in Safeguards.`,
+    }));
+    harness.deps.startRun = (jobIds, mode) =>
+      jobIds.includes("job_1")
+        ? Promise.reject(
+            new SameCompanyApplicationConflictError("Same employer", skipped),
+          )
+        : startRun(jobIds, mode);
+    const runner = createApplyQueueRunner(harness.deps);
+    await runner.start(ids(25), "autonomous_submit");
+    expect(harness.runs[0]!.jobIds).toEqual(ids(25).slice(2, 12));
+    expect(harness.queue()?.skipped).toEqual(skipped);
+    harness.finishRun(0);
+    await settle();
+    harness.finishRun(1);
+    await settle();
+    harness.finishRun(2);
+    await settle();
+    expect(harness.runs.map((run) => run.jobIds.length)).toEqual([10, 10, 3]);
+    expect(harness.queue()).toMatchObject({
+      state: "done",
+      pausedReason: null,
+      startedJobIds: ids(25).slice(2),
+    });
+  });
+
+  it("continues when an entire run has company conflicts, without using daily capacity", async () => {
+    const harness = createHarness({ remaining: 3 });
+    const startRun = harness.deps.startRun.bind(harness.deps);
+    harness.deps.startRun = (jobIds, mode) =>
+      jobIds.includes("job_1")
+        ? Promise.reject(
+            new SameCompanyApplicationConflictError(
+              "Same employer",
+              jobIds.map((jobId) => ({ jobId, reason: "Same employer." })),
+            ),
+          )
+        : startRun(jobIds, mode);
+    const runner = createApplyQueueRunner(harness.deps);
+    await runner.start(ids(8), "autonomous_submit");
+    expect(harness.runs[0]!.jobIds).toEqual(["job_4", "job_5", "job_6"]);
+    harness.finishRun(0);
+    await settle();
+    expect(harness.queue()?.state).toBe("waiting_for_tomorrow");
+    expect(harness.queue()?.skipped).toContainEqual({
+      jobId: "job_1",
+      reason: "Same employer.",
+    });
+    expect(harness.queue()?.skipped).toHaveLength(3);
+  });
+
+  it("does not interpret a queue-wide refusal as permission to skip jobs", async () => {
+    for (const reason of [
+      "Global pause",
+      "Daily limit",
+      "Abnormal failure rate",
+      "These applications share an employer: untyped failure",
+    ]) {
+      const harness = createHarness();
+      harness.state.refuse = reason;
+      const runner = createApplyQueueRunner(harness.deps);
+      await runner.start(ids(4), "autonomous_submit");
+      expect(harness.queue()).toMatchObject({
+        state: "paused",
+        pausedReason: reason,
+        startedJobIds: [],
+        skipped: [],
+      });
+      expect(harness.runs).toHaveLength(0);
+    }
+  });
+
+  it("keeps a person's Pause when a company refusal arrives during staging", async () => {
+    const harness = createHarness();
+    const startRun = harness.deps.startRun.bind(harness.deps);
+    let refuse!: (error: Error) => void;
+    harness.deps.startRun = () =>
+      new Promise((_resolve, reject) => {
+        refuse = reject;
+      });
+    const runner = createApplyQueueRunner(harness.deps);
+    const starting = runner.start(ids(3), "autonomous_submit");
+    await settle();
+    await runner.control("pause");
+    refuse(
+      new SameCompanyApplicationConflictError("Same employer", [
+        { jobId: "job_1", reason: "Same employer." },
+      ]),
+    );
+    await starting;
+    expect(harness.queue()?.state).toBe("paused");
+    expect(harness.runs).toHaveLength(0);
+    harness.deps.startRun = startRun;
+    await runner.control("continue");
+    await settle();
+    expect(harness.runs[0]!.jobIds).toEqual(["job_2", "job_3"]);
+  });
+
   it("chains runs of ten without another press until every job has started", async () => {
     const harness = createHarness();
     const runner = createApplyQueueRunner(harness.deps);
@@ -259,7 +373,9 @@ describe("apply queue runner", () => {
     expect(harness.queue()).toMatchObject({
       state: "done",
       startedJobIds: ["job_1", "job_3"],
-      skipped: [{ jobId: "job_2", reason: "Its resume waits for your review." }],
+      skipped: [
+        { jobId: "job_2", reason: "Its resume waits for your review." },
+      ],
     });
   });
 
@@ -293,8 +409,8 @@ describe("apply queue runner", () => {
     expect(leastPermissiveMode("autonomous_submit", "prepare_only")).toBe(
       "prepare_only",
     );
-    expect(leastPermissiveMode("confirm_before_submit", "autonomous_submit")).toBe(
-      "confirm_before_submit",
-    );
+    expect(
+      leastPermissiveMode("confirm_before_submit", "autonomous_submit"),
+    ).toBe("confirm_before_submit");
   });
 });

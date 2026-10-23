@@ -32,10 +32,15 @@ export function applyQueueVerb(mode: ApplicationAutomationMode): {
 } {
   return mode === "autonomous_submit"
     ? { doing: "Applying to", done: "Applied to" }
-    : { doing: "Filling in applications for", done: "Filled in applications for" };
+    : {
+        doing: "Filling in applications for",
+        done: "Filled in applications for",
+      };
 }
 
-export function isApplyQueueOngoing(queue: ApplyQueue | null | undefined): boolean {
+export function isApplyQueueOngoing(
+  queue: ApplyQueue | null | undefined,
+): boolean {
   return (
     !!queue &&
     (queue.state === "running" ||
@@ -79,7 +84,7 @@ export function describeApplyQueue(
   const toGo = listApplyQueueRemainingJobIds(queue).length;
   const verb = applyQueueVerb(queue.mode);
   const jobs = plural(total, "job", "jobs");
-  const leftOutPart = leftOut > 0 ? ` · ${leftOut} left out` : "";
+  const leftOutPart = leftOut > 0 ? ` · ${leftOut} not applied` : "";
   switch (queue.state) {
     case "running":
       return {
@@ -102,9 +107,11 @@ export function describeApplyQueue(
     case "paused":
       return {
         title: `${verb.doing} ${jobs} · paused`,
-        detail: queue.pausedReason
-          ? firstSentence(queue.pausedReason)
-          : `${started} started · ${toGo} to go${queue.activeRunId ? " · the ones already started finish" : ""}`,
+        detail:
+          (queue.pausedReason
+            ? firstSentence(queue.pausedReason)
+            : `${started} started · ${toGo} to go${queue.activeRunId ? " · the ones already started finish" : ""}`) +
+          leftOutPart,
         active: false,
         primary: { label: "Continue", action: "continue" },
         secondary: { label: "Stop", action: "stop" },
@@ -122,7 +129,7 @@ export function describeApplyQueue(
         title: `${verb.done} ${plural(started, "job", "jobs")}`,
         detail:
           leftOut > 0
-            ? `${plural(leftOut, "job was", "jobs were")} left out: ${queue.skipped[0]!.reason}${leftOut > 1 ? " (and others)" : ""}`
+            ? `${leftOut} not applied.`
             : "Check each one in Applications.",
         active: false,
         primary: null,

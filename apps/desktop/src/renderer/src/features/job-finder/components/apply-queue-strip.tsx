@@ -20,7 +20,9 @@ export function ApplyQueueStrip(props: {
   onControl: (action: ApplyQueueControlAction) => void;
   onRaiseLimit: () => void;
 }) {
-  const view = describeApplyQueue(props.queue, { dailyLimit: props.dailyLimit });
+  const view = describeApplyQueue(props.queue, {
+    dailyLimit: props.dailyLimit,
+  });
   if (!view) return null;
   const press = (button: ApplyQueueViewButton) =>
     button.action === "raise_limit"
@@ -46,6 +48,18 @@ export function ApplyQueueStrip(props: {
         <p className="min-w-0 break-words text-xs text-foreground-muted">
           {view.detail}
         </p>
+        {props.queue?.skipped.length ? (
+          <details className="mt-1 text-xs text-foreground-muted">
+            <summary className="cursor-pointer">See jobs not applied</summary>
+            <ul className="mt-1 list-disc space-y-1 pl-4">
+              {props.queue.skipped.map((entry) => (
+                <li className="break-words" key={entry.jobId}>
+                  {entry.reason}
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {view.primary ? (

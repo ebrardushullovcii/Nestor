@@ -1,4 +1,5 @@
 export * from "./workspace-service";
+export { SameCompanyApplicationConflictError } from "./application-run-refusal";
 export {
   recordApplicationAuthoritySuccessor,
   resolveApplicationAuthoritySuccessorId,

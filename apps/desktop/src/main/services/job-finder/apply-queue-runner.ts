@@ -5,6 +5,7 @@ import {
   type ApplyQueue,
   type ApplyQueueSkippedJob,
 } from "@nestor/contracts";
+import { SameCompanyApplicationConflictError } from "@nestor/job-finder";
 
 /** The run ceiling from ADR 0012: one run starts at most ten applications. */
 export const APPLY_QUEUE_RUN_SIZE = 10;
@@ -75,7 +76,11 @@ export function leastPermissiveMode(
 
 function errorSentence(error: unknown): string {
   const message =
-    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
   return (message.trim() || "The next applications could not start.").slice(
     0,
     1_000,
@@ -97,7 +102,8 @@ export function createApplyQueueRunner(
     });
   const createId =
     deps.createId ??
-    (() => `apply_queue_${now().getTime().toString(36)}_${Math.random().toString(36).slice(2, 8)}`);
+    (() =>
+      `apply_queue_${now().getTime().toString(36)}_${Math.random().toString(36).slice(2, 8)}`);
   const onError =
     deps.onError ??
     ((error: unknown) => console.error("[Apply queue] step failed", error));
@@ -110,7 +116,9 @@ export function createApplyQueueRunner(
 
   const save = async (queue: ApplyQueue | null) => {
     await deps.saveQueue(
-      queue ? ApplyQueueSchema.parse({ ...queue, updatedAt: now().toISOString() }) : null,
+      queue
+        ? ApplyQueueSchema.parse({ ...queue, updatedAt: now().toISOString() })
+        : null,
     );
     deps.publish();
   };
@@ -118,7 +126,10 @@ export function createApplyQueueRunner(
   const armWakeTimer = (resumesAt: string) => {
     clearWakeTimer?.();
     // A second past local midnight, so the new day's count is what is read.
-    const delayMs = Math.max(1_000, Date.parse(resumesAt) - now().getTime() + 1_000);
+    const delayMs = Math.max(
+      1_000,
+      Date.parse(resumesAt) - now().getTime() + 1_000,
+    );
     // Timers longer than about 24.8 days overflow; a day is the most needed.
     clearWakeTimer = setTimer(
       () => {
@@ -140,14 +151,22 @@ export function createApplyQueueRunner(
     if (remaining.length === 0) {
       clearWakeTimer?.();
       clearWakeTimer = null;
-      await save({ ...queue, state: "done", activeRunId: null, resumesAt: null });
+      await save({
+        ...queue,
+        state: "done",
+        activeRunId: null,
+        resumesAt: null,
+      });
       return;
     }
     // "Pause new work" holds the queue too; resuming nudges it.
     if (await deps.isActivityPaused()) return;
     const capacity = await deps.readDailyCapacity();
     if (capacity.remaining <= 0) {
-      if (queue.state !== "waiting_for_tomorrow" || queue.resumesAt !== capacity.resetsAt) {
+      if (
+        queue.state !== "waiting_for_tomorrow" ||
+        queue.resumesAt !== capacity.resetsAt
+      ) {
         await save({
           ...queue,
           state: "waiting_for_tomorrow",
@@ -179,6 +198,33 @@ export function createApplyQueueRunner(
     try {
       started = await deps.startRun(take, mode);
     } catch (error: unknown) {
+      const refused =
+        error instanceof SameCompanyApplicationConflictError
+          ? error.skipped.filter((entry) => take.includes(entry.jobId))
+          : [];
+      if (refused.length > 0) {
+        const current = await deps.loadQueue();
+        if (current) {
+          const giveBack = new Set(take);
+          const refusedIds = new Set(refused.map((entry) => entry.jobId));
+          await save({
+            ...current,
+            startedJobIds: current.startedJobIds.filter(
+              (id) => !giveBack.has(id),
+            ),
+            skipped: [
+              ...current.skipped.filter(
+                (entry) => !refusedIds.has(entry.jobId),
+              ),
+              ...refused,
+            ],
+          });
+        }
+        // Only the named jobs are set aside. Re-read capacity and mode before
+        // starting the others; a concurrent Pause or Stop still wins.
+        pumpAgain = true;
+        return;
+      }
       // Nothing started: the jobs go back and the queue pauses with the
       // reason, so Continue tries the same jobs again.
       const current = await deps.loadQueue();
@@ -187,8 +233,11 @@ export function createApplyQueueRunner(
         await save({
           ...current,
           state: current.state === "stopped" ? "stopped" : "paused",
-          pausedReason: current.state === "stopped" ? null : errorSentence(error),
-          startedJobIds: current.startedJobIds.filter((id) => !giveBack.has(id)),
+          pausedReason:
+            current.state === "stopped" ? null : errorSentence(error),
+          startedJobIds: current.startedJobIds.filter(
+            (id) => !giveBack.has(id),
+          ),
         });
       }
       return;
@@ -262,19 +311,25 @@ export function createApplyQueueRunner(
       const existing = await deps.loadQueue();
       const createdAt = now().toISOString();
       const ongoing =
-        existing &&
-        existing.state !== "done" &&
-        existing.state !== "stopped";
+        existing && existing.state !== "done" && existing.state !== "stopped";
       let queue: ApplyQueue;
       if (ongoing && existing) {
         const known = new Set(existing.jobIds);
         queue = {
           ...existing,
           mode,
-          jobIds: [...existing.jobIds, ...unique.filter((id) => !known.has(id))],
+          jobIds: [
+            ...existing.jobIds,
+            ...unique.filter((id) => !known.has(id)),
+          ],
           // A job pressed again after it was skipped gets another chance.
-          skipped: existing.skipped.filter((entry) => !unique.includes(entry.jobId)),
-          state: existing.state === "waiting_for_tomorrow" ? existing.state : "running",
+          skipped: existing.skipped.filter(
+            (entry) => !unique.includes(entry.jobId),
+          ),
+          state:
+            existing.state === "waiting_for_tomorrow"
+              ? existing.state
+              : "running",
           pausedReason: null,
         };
       } else {
@@ -310,19 +365,31 @@ export function createApplyQueueRunner(
         return queue;
       }
       if (action === "pause") {
-        if (queue.state !== "running" && queue.state !== "waiting_for_tomorrow") {
+        if (
+          queue.state !== "running" &&
+          queue.state !== "waiting_for_tomorrow"
+        ) {
           return queue;
         }
         clearWakeTimer?.();
         clearWakeTimer = null;
         // The run under way finishes; no new run starts.
-        const next = { ...queue, state: "paused" as const, pausedReason: null, resumesAt: null };
+        const next = {
+          ...queue,
+          state: "paused" as const,
+          pausedReason: null,
+          resumesAt: null,
+        };
         await save(next);
         return next;
       }
       if (action === "continue") {
         if (queue.state !== "paused") return queue;
-        const next = { ...queue, state: "running" as const, pausedReason: null };
+        const next = {
+          ...queue,
+          state: "running" as const,
+          pausedReason: null,
+        };
         await save(next);
         pump();
         return next;

@@ -25,6 +25,7 @@ import {
   withResumeBatchLiveness,
 } from "./resume-batch-checkpoint";
 import { checkSameCompanySends } from "./same-company-sends";
+import { SameCompanyApplicationConflictError } from "../application-run-refusal";
 import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import { withPlanAssessment } from "./plan-assessment";
 import {
@@ -8780,12 +8781,23 @@ export function createWorkspaceApplicationMethods(
         scopedSettings.applicationAutomationMode ??
         "prepare_only";
       if (effectiveApplicationAutomationMode === "autonomous_submit") {
+        const refused = new Map<string, string>();
         const overlap = await checkSameCompanySends({
           repository: ctx.repository,
           jobIds: uniqueJobIds,
           transition: ctx.withIntelligenceTransition.bind(ctx),
+          onRefusedJob: (jobId, reason) => {
+            if (!refused.has(jobId)) refused.set(jobId, reason);
+          },
         });
-        if (overlap) throw new Error(overlap);
+        if (overlap)
+          throw new SameCompanyApplicationConflictError(
+            overlap,
+            [...refused].map(([jobId, reason]) => ({
+              jobId,
+              reason: reason.slice(0, 500),
+            })),
+          );
       }
       const capturedCampaignId = await ctx.getActiveCampaignId();
       const runId = createUniqueId("apply_run");
