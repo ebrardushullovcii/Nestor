@@ -96,7 +96,7 @@ export type DiscoveryInventoryPosting = Pick<
 export type DiscoveryInventoryPreparation = Pick<
   DiscoveryPostingPreparation,
   "content" | "aliases"
-> & { postingFingerprint: string };
+> & { postingFingerprint: string; descriptionDigest?: string };
 export type DiscoveryCpuTask =
   | { kind: "feed"; input: DiscoveryFeedTask }
   | { kind: "inventory"; postings: DiscoveryInventoryPosting[] };

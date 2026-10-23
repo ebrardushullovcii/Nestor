@@ -195,15 +195,20 @@ function packListingContent(content: string) {
 
 type PackedContent = DiscoveryPostingPreparation["content"];
 const preparedContent = new Map<string, PackedContent>();
+const preparedContentByValue = new WeakMap<object, PackedContent>();
+const preparedDescriptionDigests = new WeakMap<object, string>();
 
 /** Transferred from the feed worker; the bounded memo also serves copied rows. */
 export function rememberPreparedListingContent(
   description: string,
   content: PackedContent,
+  posting?: JobIdentityInput,
 ): void {
   if (preparedContent.size >= LISTING_CONTENT_IDENTITY_MEMO_LIMIT)
     preparedContent.clear();
   preparedContent.set(description, content);
+  if (posting && Object.isFrozen(posting))
+    preparedContentByValue.set(posting, content);
 }
 
 export function prepareListingContent(description: string): PackedContent {
@@ -220,9 +225,11 @@ function readPreparedContent(
   input: JobIdentityInput,
 ): JobIdentityInput["exactContent"] {
   if (input.exactContent) return input.exactContent;
-  const content = input.description
-    ? preparedContent.get(input.description)
-    : null;
+  const content = preparedContentByValue.has(input)
+    ? preparedContentByValue.get(input)
+    : input.description
+      ? preparedContent.get(input.description)
+      : null;
   return content
     ? {
         digest: content.digest,
@@ -231,11 +238,20 @@ function readPreparedContent(
     : undefined;
 }
 
+/** Compressed immutable evidence, without reopening a SQLite detail getter. */
+export function preparedJobIdentityContent(
+  input: JobIdentityInput,
+): JobIdentityInput["exactContent"] {
+  if (!preparedContentByValue.has(input)) return undefined;
+  return readPreparedContent(input);
+}
+
 /** Counting inspected identities must not retain every complete provider posting. */
 export function compactJobIdentity(input: JobIdentityInput): JobIdentityInput {
   const content =
     readPreparedContent(input) ??
     (() => {
+      if (preparedContentByValue.has(input)) return undefined;
       const normalized = normalizeListingContentIdentity(input.description);
       return normalized ? packListingContent(normalized) : undefined;
     })();
@@ -455,9 +471,10 @@ export function buildJobIdentityAliases(
   }
 
   const prepared = readPreparedContent(input);
-  const exactContent = prepared
-    ? null
-    : normalizeListingContentIdentity(input.description);
+  const exactContent =
+    prepared || preparedContentByValue.has(input)
+      ? null
+      : normalizeListingContentIdentity(input.description);
   const contentCompany = input.company ? normalizeText(input.company) : "";
   const contentLocation = input.location ? normalizeText(input.location) : "";
   if ((exactContent || prepared) && contentCompany && contentLocation) {
@@ -641,7 +658,11 @@ function readAliasBasis(
   descriptionDigest?: string,
   acrossSources = input.matchAcrossSources === true,
 ): AliasBasis {
-  const description = input.description;
+  descriptionDigest ??= Object.isFrozen(input)
+    ? preparedDescriptionDigests.get(input)
+    : undefined;
+  const description =
+    descriptionDigest === undefined ? input.description : undefined;
   return [
     input.source,
     input.sourceJobId,
@@ -655,10 +676,11 @@ function readAliasBasis(
     input.location,
     // The alias memo needs change detection, never another retained listing
     // body. SHA-256 also keeps its keys bounded for very large descriptions.
-    description == null
-      ? description
-      : (descriptionDigest ?? digestJobIdentityDescription(description)),
-    input.exactContent?.digest,
+    descriptionDigest ??
+      (description == null
+        ? description
+        : digestJobIdentityDescription(description)),
+    descriptionDigest === undefined ? input.exactContent?.digest : undefined,
     input.postedAt,
     input.postedAtText,
     acrossSources,
@@ -744,9 +766,12 @@ export function rememberPreparedJobIdentity(
   descriptionDigest?: string,
 ): void {
   const immutable = immutableAliasInput(input);
+  const localBasis = readAliasBasis(input, descriptionDigest, false);
+  if (Object.isFrozen(posting) && typeof localBasis[10] === "string")
+    preparedDescriptionDigests.set(posting, localBasis[10]);
   indexedAliasCache.set(posting, [
     {
-      basis: readAliasBasis(input, descriptionDigest, false),
+      basis: localBasis,
       aliases: aliases.local,
       input: immutable,
     },
@@ -760,11 +785,37 @@ export function rememberPreparedJobIdentity(
   rememberAliasPeer(peerKey, posting);
 }
 
+/** The caller changed only non-listing fields on these immutable views. */
+export function copyPreparedJobIdentity(
+  before: JobIdentityInput,
+  after: JobIdentityInput,
+): void {
+  if (!Object.isFrozen(before) || !Object.isFrozen(after)) return;
+  const aliases = indexedAliasCache.get(before);
+  if (aliases) indexedAliasCache.set(after, aliases);
+  const digest = preparedDescriptionDigests.get(before);
+  if (digest !== undefined) preparedDescriptionDigests.set(after, digest);
+  if (preparedContentByValue.has(before))
+    preparedContentByValue.set(after, preparedContentByValue.get(before)!);
+  rememberAliasPeer(
+    `${after.source}\u0000${after.sourceJobId}\u0000${after.canonicalUrl}`,
+    after,
+  );
+}
+
 function readIndexedAliases(
   value: object,
   input: JobIdentityInput,
 ): readonly JobIdentityAlias[] {
   const entries = indexedAliasCache.get(value);
+  const preparedDigest = Object.isFrozen(input)
+    ? preparedDescriptionDigests.get(input)
+    : undefined;
+  if (preparedDigest !== undefined && entries) {
+    const basis = readAliasBasis(input, preparedDigest);
+    const cached = entries.find((entry) => sameAliasBasis(entry.basis, basis));
+    if (cached) return cached.aliases;
+  }
   const peerKey = `${input.source}\u0000${input.sourceJobId}\u0000${input.canonicalUrl}`;
   const peers = (aliasPeers.get(peerKey) ?? []).flatMap((ref) => {
     const peer = ref.deref();

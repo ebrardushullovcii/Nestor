@@ -79,7 +79,10 @@ import {
   canSwitchCanonicalSighting,
   selectCanonicalSighting,
 } from "./listing-sightings";
-import { createMatchAssessmentSession } from "./match-assessment-session";
+import {
+  copyPreparedMatchAssessmentPostingFingerprint,
+  createMatchAssessmentSession,
+} from "./match-assessment-session";
 import { withSavedJobSearchBehavior } from "./job-search-behavior";
 import {
   compareMatchRecommendationPriority,
@@ -121,6 +124,7 @@ import {
 } from "./listing-screen";
 import {
   compactJobIdentity,
+  copyPreparedJobIdentity,
   normalizeJobIdentityUrl,
   type JobIdentityInput,
 } from "./job-identity";
@@ -1664,9 +1668,11 @@ export function createWorkspaceDiscoveryMethods(
           job,
           readPlanAssessment(job, assessmentPlanId).matchAssessment,
         );
-        return matchAssessment === job.matchAssessment
-          ? job
-          : { ...job, matchAssessment };
+        if (matchAssessment === job.matchAssessment) return job;
+        const view = Object.freeze(copyView(job, { matchAssessment }));
+        copyPreparedJobIdentity(job, view);
+        copyPreparedMatchAssessmentPostingFingerprint(job, view);
+        return view;
       },
       SETUP_JOBS_PER_TURN,
     );

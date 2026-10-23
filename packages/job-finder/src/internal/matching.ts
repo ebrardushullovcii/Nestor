@@ -36,6 +36,8 @@ import {
   type JobIdentityInput,
   hasEquivalentListingContentIdentity,
   type JobIdentityIndex,
+  preparedJobIdentityContent,
+  copyPreparedJobIdentity,
 } from "./job-identity";
 import { assessJobPostingDetailQuality } from "./job-posting-detail-quality";
 import {
@@ -1451,7 +1453,10 @@ function uniqueProvenance(
  * A saved job's identity for matching new sightings: its own fields plus the
  * listing links its other sources showed.
  */
+const sightingIdentities = new WeakMap<SavedJob, JobIdentityInput>();
 export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
+  const cached = Object.isFrozen(job) ? sightingIdentities.get(job) : undefined;
+  if (cached) return cached;
   const identity: JobIdentityInput = {
     source: job.source,
     sourceJobId: job.sourceJobId,
@@ -1473,9 +1478,11 @@ export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
         : [],
     ),
   };
+  const content = preparedJobIdentityContent(job);
+  if (content) identity.exactContent = content;
   // Route/title compatibility checks do not read content. Keep the immutable
   // SQLite getter until a content comparison actually needs it.
-  return Object.defineProperty(
+  Object.defineProperty(
     identity,
     "description",
     Object.getOwnPropertyDescriptor(job, "description") ?? {
@@ -1483,6 +1490,12 @@ export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
       value: job.description,
     },
   );
+  if (Object.isFrozen(job)) {
+    Object.freeze(identity);
+    copyPreparedJobIdentity(job, identity);
+    sightingIdentities.set(job, identity);
+  }
+  return identity;
 }
 
 const SIGHTING_ROUTE_FIELDS = [

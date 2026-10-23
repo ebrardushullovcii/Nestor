@@ -11,6 +11,7 @@ import {
   prepareListingContent,
   rememberPreparedListingContent,
   rememberPreparedJobIdentity,
+  digestJobIdentityDescription,
 } from "./job-identity";
 import {
   createMatchAssessmentPostingFingerprint,
@@ -36,6 +37,7 @@ export async function runDiscoveryCpuTask(
     });
     result.push({
       postingFingerprint: createMatchAssessmentPostingFingerprint(posting),
+      descriptionDigest: digestJobIdentityDescription(posting.description),
       content: prepareListingContent(posting.description),
       aliases: {
         local: acrossSources.filter(
@@ -96,8 +98,17 @@ export async function warmDiscoveryInventory(
             job,
             row.postingFingerprint,
           );
-          rememberPreparedListingContent(job.description, row.content);
-          rememberPreparedJobIdentity(job, row.aliases, postings[position]);
+          rememberPreparedListingContent(
+            postings[position]!.description,
+            row.content,
+            job,
+          );
+          rememberPreparedJobIdentity(
+            job,
+            row.aliases,
+            postings[position],
+            row.descriptionDigest,
+          );
         }
       }),
     );

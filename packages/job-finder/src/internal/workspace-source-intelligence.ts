@@ -2067,11 +2067,6 @@ export async function collectPublicProviderJobs(input: {
         const raw = jobs[position]!;
         const job = { ...raw, ...preparation.normalized };
         rememberPreparedDiscoveryPosting(raw, job);
-        rememberPreparedListingContent(job.description, preparation.content);
-        rememberPreparedListingContent(
-          raw.description,
-          preparation.screeningContent,
-        );
         if (preparation.screening) {
           rememberDiscoveryListingFingerprints(
             raw,
@@ -2086,6 +2081,16 @@ export async function collectPublicProviderJobs(input: {
         } else if (hasSameJobIdentity(raw, job))
           rememberPreparedJobIdentity(raw, preparation.aliases);
         rememberDiscoveryListingFingerprints(job, preparation.fingerprints);
+        rememberPreparedListingContent(
+          job.description,
+          preparation.content,
+          job,
+        );
+        rememberPreparedListingContent(
+          raw.description,
+          preparation.screeningContent,
+          raw,
+        );
         rememberPreparedJobIdentity(
           job,
           preparation.aliases,

@@ -1,5 +1,5 @@
 import { buildFitVerdictContext } from "@nestor/ai-providers";
-import { fnv1a64 } from "@nestor/core";
+import { copyView, fnv1a64 } from "@nestor/core";
 import type {
   CandidateProfile,
   FitJudgment,
@@ -159,6 +159,16 @@ export function createMatchAssessmentPostingFingerprint(
 }
 
 const preparedPostingFingerprints = new WeakMap<object, string>();
+export function copyPreparedMatchAssessmentPostingFingerprint(
+  before: MatchAssessmentPostingInput,
+  after: MatchAssessmentPostingInput,
+): void {
+  const fingerprint = Object.isFrozen(before)
+    ? preparedPostingFingerprints.get(before)
+    : undefined;
+  if (fingerprint && Object.isFrozen(after))
+    preparedPostingFingerprints.set(after, fingerprint);
+}
 /** Only frozen repository rows may reuse an inventory worker's exact digest. */
 export function rememberMatchAssessmentPostingFingerprint(
   posting: MatchAssessmentPostingInput,
@@ -290,7 +300,7 @@ export function createMatchAssessmentSession(input: {
     return preserveCompletedAssessment(
       persistedAssessment,
       assess(
-        { ...posting, matchAssessment: persistedAssessment ?? null },
+        copyView(posting, { matchAssessment: persistedAssessment ?? null }),
         persistedAssessment?.judgment ?? null,
         postingFingerprint,
       ),
