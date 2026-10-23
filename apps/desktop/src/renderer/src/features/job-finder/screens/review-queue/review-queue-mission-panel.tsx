@@ -726,6 +726,7 @@ export function ReviewQueueMissionPanel({
         {/* Quiet capacity fact below the actions, and only where it can
             change a decision. */}
         {!existingApplication &&
+        dailyCapacityDescription &&
         (primaryApplicationAction.kind === "start_apply" ||
           dailyCapacityExhausted) ? (
           <p
