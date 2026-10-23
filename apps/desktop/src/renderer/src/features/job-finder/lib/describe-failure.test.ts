@@ -103,3 +103,17 @@ it("names a failed listing site and reserves the internet sentence for an offlin
     "internet",
   );
 });
+
+describe("a file that moved or was deleted", () => {
+  it("says so in plain words and keeps the raw text behind details", () => {
+    const failure = describeFailure(
+      new Error(
+        "Error invoking remote method 'job-finder:import-resume': Error: ENOENT: no such file or directory, open 'C:/Users/person/resume.pdf'",
+      ),
+      { action: "import your resume" },
+    );
+    expect(failure.kind).toBe("file_missing");
+    expect(failure.userMessage).not.toMatch(/ENOENT|no such file/);
+    expect(failure.technicalDetails).toContain("ENOENT");
+  });
+});
