@@ -44,6 +44,7 @@ type FileRepositoryResumeMethods = Pick<
   | "getResumeDraftByJobId"
   | "upsertResumeDraft"
   | "listResumeDraftRevisions"
+  | "getLatestResumeDraftRevisionId"
   | "upsertResumeDraftRevision"
   | "listResumeExportArtifacts"
   | "upsertResumeExportArtifact"
@@ -155,6 +156,19 @@ export function createFileRepositoryResumeMethods(
           ),
         ),
       );
+    },
+    getLatestResumeDraftRevisionId(draftId) {
+      // Every save asks for this; reading the up to 100 kept revisions with
+      // their full drafts to take the first id cost ~140 ms on a long history.
+      const row = database
+        .prepare(
+          `SELECT id FROM resume_draft_revisions
+           WHERE draft_id = ?
+           ORDER BY created_at DESC, id ASC
+           LIMIT 1`,
+        )
+        .get(draftId) as { id?: unknown } | undefined;
+      return Promise.resolve(typeof row?.id === "string" ? row.id : null);
     },
     upsertResumeDraftRevision(revision) {
       const normalizedRevision = ResumeDraftRevisionSchema.parse(

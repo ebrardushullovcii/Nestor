@@ -187,6 +187,7 @@ describe("JobFinderWindowCloseGuard decisions", () => {
 
     await act(async () => {
       finishSave(true);
+      await Promise.resolve();
     });
     await waitFor(() => {
       expect(bridge.resolutions).toEqual([

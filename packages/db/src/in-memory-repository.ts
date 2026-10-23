@@ -898,6 +898,15 @@ export function createInMemoryJobFinderRepository(
         : state.resumeDraftRevisions;
       return Promise.resolve(sortNewestFirst(cloneValue(values)));
     },
+    getLatestResumeDraftRevisionId(draftId) {
+      return Promise.resolve(
+        sortNewestFirst(
+          state.resumeDraftRevisions.filter(
+            (entry) => entry.draftId === draftId,
+          ),
+        )[0]?.id ?? null,
+      );
+    },
     upsertResumeDraftRevision(revision) {
       const normalizedRevision = ResumeDraftRevisionSchema.parse(
         cloneValue(revision),

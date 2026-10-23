@@ -468,9 +468,7 @@ async function getLatestResumeRevisionId(
   ctx: WorkspaceServiceContext,
   draftId: string,
 ): Promise<string | null> {
-  return (
-    (await ctx.repository.listResumeDraftRevisions(draftId))[0]?.id ?? null
-  );
+  return ctx.repository.getLatestResumeDraftRevisionId(draftId);
 }
 
 /**

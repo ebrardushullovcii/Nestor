@@ -197,6 +197,11 @@ type BaseActionArgs = {
       updateAssistantMessages?: boolean;
     },
   ) => Promise<boolean>;
+  /**
+   * Puts an autosaved draft into the open resume at once and reloads the rest
+   * (checks, history) only once the edits settle.
+   */
+  adoptAutosavedResumeDraft: (draft: ResumeDraft) => void;
   resumeAssistantRequestTokenRef: MutableRefObject<number>;
   setActionState: Dispatch<SetStateAction<ActionState>>;
   setLiveDiscoveryEvents: Dispatch<SetStateAction<DiscoveryActivityEvent[]>>;
@@ -1010,6 +1015,7 @@ export function createPrimaryPageActions(
     profileSetupState,
     profileCopilotRequestTokenRef,
     refreshResumeWorkspace,
+    adoptAutosavedResumeDraft,
     resumeAssistantRequestTokenRef,
     runAction,
     runResumeWorkspaceAction,
@@ -3138,8 +3144,22 @@ export function createPrimaryPageActions(
         const savedDraft = snapshot.resumeDrafts.find(
           (entry) => entry.id === draft.id,
         );
-        if (savedDraft) onSaved(savedDraft.updatedAt);
-        await refreshResumeWorkspace(draft.jobId);
+        if (savedDraft) {
+          onSaved(savedDraft.updatedAt);
+          // Not a reload of the whole resume (~0.3 s of main-process work
+          // after every pause in typing): the save's own fields go on the
+          // text that was sent, and the checks and history follow later.
+          adoptAutosavedResumeDraft({
+            ...draft,
+            status: savedDraft.status,
+            approvedAt: savedDraft.approvedAt,
+            approvedExportId: savedDraft.approvedExportId,
+            staleReason: savedDraft.staleReason,
+            updatedAt: savedDraft.updatedAt,
+          });
+        } else {
+          await refreshResumeWorkspace(draft.jobId);
+        }
         return { saved: true };
       } catch (error) {
         return {
