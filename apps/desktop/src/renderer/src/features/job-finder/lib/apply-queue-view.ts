@@ -53,6 +53,12 @@ export function listApplyQueueWaitingJobIds(
     : [];
 }
 
+/** A refusal's first sentence; the screen that owns the cause says the rest. */
+function firstSentence(text: string): string {
+  const match = /^(.+?[.!?])(\s|$)/u.exec(text.trim());
+  return match ? match[1]! : text.trim();
+}
+
 function formatResumeTime(iso: string | null): string {
   if (!iso) return "after midnight";
   const at = new Date(iso);
@@ -97,7 +103,7 @@ export function describeApplyQueue(
       return {
         title: `${verb.doing} ${jobs} · paused`,
         detail: queue.pausedReason
-          ? queue.pausedReason
+          ? firstSentence(queue.pausedReason)
           : `${started} started · ${toGo} to go${queue.activeRunId ? " · the ones already started finish" : ""}`,
         active: false,
         primary: { label: "Continue", action: "continue" },

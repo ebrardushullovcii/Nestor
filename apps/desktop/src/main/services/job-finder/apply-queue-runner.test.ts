@@ -46,15 +46,16 @@ function createHarness(initial: { remaining?: number; queue?: ApplyQueue | null 
     skip: new Set(),
   };
   const deps: ApplyQueueRunnerDeps = {
-    loadQueue: async () => (stored ? structuredClone(stored) : null),
-    saveQueue: async (queue) => {
+    loadQueue: () => Promise.resolve(stored ? structuredClone(stored) : null),
+    saveQueue: (queue) => {
       stored = queue ? structuredClone(queue) : null;
+      return Promise.resolve();
     },
-    readDailyCapacity: async () => ({ remaining, resetsAt: resetsAt() }),
-    readSavedMode: async () => state.savedMode,
-    isActivityPaused: async () => state.paused,
-    startRun: async (jobIds, mode): Promise<ApplyQueueStartedRun> => {
-      if (state.refuse) throw new Error(state.refuse);
+    readDailyCapacity: () => Promise.resolve({ remaining, resetsAt: resetsAt() }),
+    readSavedMode: () => Promise.resolve(state.savedMode),
+    isActivityPaused: () => Promise.resolve(state.paused),
+    startRun: (jobIds, mode): Promise<ApplyQueueStartedRun> => {
+      if (state.refuse) return Promise.reject(new Error(state.refuse));
       const runId = `run_${runs.length + 1}`;
       const started = jobIds.filter((id) => !state.skip.has(id));
       runs.push({ jobIds: [...jobIds], mode, runId });
@@ -64,17 +65,18 @@ function createHarness(initial: { remaining?: number; queue?: ApplyQueue | null 
         settle = resolve;
       });
       settlers.push(settle);
-      return {
+      return Promise.resolve({
         runId,
         startedJobIds: started,
         skipped: jobIds
           .filter((id) => state.skip.has(id))
           .map((jobId) => ({ jobId, reason: "Its resume waits for your review." })),
         settled,
-      };
+      });
     },
-    cancelRun: async (runId) => {
+    cancelRun: (runId) => {
       cancelled.push(runId);
+      return Promise.resolve();
     },
     publish: () => undefined,
     now: () => new Date(nowIso),

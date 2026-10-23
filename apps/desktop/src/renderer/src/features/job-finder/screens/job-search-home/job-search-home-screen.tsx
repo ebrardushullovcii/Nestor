@@ -562,7 +562,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
                 className="flex min-w-0 flex-wrap items-center justify-between gap-3"
                 key={item.id}
               >
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="min-w-0 break-words text-sm font-medium text-(--text-headline)">
                     <span
                       aria-hidden="true"
