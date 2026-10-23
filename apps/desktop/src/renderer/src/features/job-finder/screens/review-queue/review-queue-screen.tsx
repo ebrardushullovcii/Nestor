@@ -737,7 +737,7 @@ export function ReviewQueueScreen(props: {
                     the pane's right edge. */}
                 <div className="grid min-w-0 max-w-3xl gap-6">
                   <section className="grid min-w-0 gap-2 border-t border-(--surface-panel-border) pt-5">
-                    <span className="label-mono-xs text-foreground-muted">
+                    <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-muted">
                       About this job
                     </span>
                     {/* An echoed title under a heading looks like a bug; the

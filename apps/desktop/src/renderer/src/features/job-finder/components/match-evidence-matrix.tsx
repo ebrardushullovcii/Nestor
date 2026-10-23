@@ -5,6 +5,7 @@ import type {
   EvidenceConfidenceLevel,
   JobRequirementAssessment,
   JobRequirementEvidenceStatus,
+  JobRequirementImportance,
   ListingDetailCaptureState,
   MatchAssessment,
   MatchDimensionEvidence,
@@ -74,6 +75,12 @@ const statusCopy: Record<
   missing: { label: "Missing", tone: "critical" },
   unknown: { label: "Unknown", tone: "neutral" },
   conflict: { label: "Conflict", tone: "critical" },
+};
+
+const importanceLabel: Record<JobRequirementImportance, string> = {
+  required: "Required",
+  preferred: "Preferred",
+  inferred: "Inferred",
 };
 
 interface DimensionRowProps {
@@ -227,8 +234,8 @@ function RequirementRow({
             <strong className="text-(length:--text-small) text-(--text-headline)">
               {requirement.label}
             </strong>
-            <span className="rounded-full border border-(--surface-panel-border) px-2 py-0.5 text-(length:--text-label-mono-xs) uppercase tracking-(--tracking-badge) text-foreground-muted">
-              {requirement.importance}
+            <span className="rounded-full border border-(--surface-panel-border) px-2 py-0.5 text-(length:--text-tiny) text-foreground-muted">
+              {importanceLabel[requirement.importance]}
             </span>
           </div>
           {scrubbedExplanation ? (
@@ -242,7 +249,7 @@ function RequirementRow({
 
       {scrubbedJobEvidence ? (
         <div className="grid gap-1.5 rounded-(--radius-small) border border-(--surface-panel-border) bg-background/25 px-3 py-2.5">
-          <span className="text-(length:--text-label-mono-xs) uppercase tracking-(--tracking-badge) text-foreground-muted">
+          <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-muted">
             Listing says
           </span>
           <p className="text-(length:--text-small) leading-6 text-foreground-soft">
@@ -252,7 +259,7 @@ function RequirementRow({
       ) : null}
 
       <div className="grid gap-2">
-        <span className="text-(length:--text-label-mono-xs) uppercase tracking-(--tracking-badge) text-foreground-muted">
+        <span className="text-(length:--text-small) font-semibold leading-5 text-foreground-muted">
           Resume evidence
         </span>
         {requirement.resumeEvidence.length > 0 ? (
@@ -500,7 +507,7 @@ export function MatchEvidenceMatrix({
           </p>
           {legacyReasons.length > 0 ? (
             <div className="grid min-w-0 gap-2">
-              <h4 className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
+              <h4 className="text-(length:--text-small) font-semibold leading-5 text-foreground-muted">
                 Why it may fit
               </h4>
               <ul className="m-0 grid min-w-0 gap-2 pl-5 text-(length:--text-small) leading-6 text-foreground-soft">
@@ -514,7 +521,7 @@ export function MatchEvidenceMatrix({
           ) : null}
           {legacyGaps.length > 0 ? (
             <div className="grid min-w-0 gap-2">
-              <h4 className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
+              <h4 className="text-(length:--text-small) font-semibold leading-5 text-foreground-muted">
                 Questions to review
               </h4>
               <ul className="m-0 grid min-w-0 gap-2 pl-5 text-(length:--text-small) leading-6 text-foreground-soft">
