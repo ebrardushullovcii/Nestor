@@ -633,13 +633,14 @@ export function ReviewQueueListPanel({
   ) : null;
   const bulkNoteLines = (
     <>
-      {isSelecting && selectedEligibleIds.length < selectedJobIds.size ? (
+      {/* Only when Create covers part of the selection: a selection with
+          nothing to create offers no Create button, and saying so read like
+          a refusal of something the person never asked for. */}
+      {isSelecting &&
+      selectedEligibleIds.length > 0 &&
+      selectedEligibleIds.length < selectedJobIds.size ? (
         <p className="m-0 text-xs text-foreground-muted">
-          {selectedEligibleIds.length === 0
-            ? selectedJobIds.size === 1
-              ? "The selected job already has a resume."
-              : "The selected jobs already have resumes."
-            : `${selectedEligibleIds.length} of the selected jobs need a resume; the others keep theirs.`}
+          {`${selectedEligibleIds.length} of the selected jobs need a resume; the others keep theirs.`}
         </p>
       ) : null}
       {showsAllJobsRow &&

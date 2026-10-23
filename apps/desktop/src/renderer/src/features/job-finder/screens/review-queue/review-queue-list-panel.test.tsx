@@ -94,13 +94,11 @@ describe("ReviewQueueListPanel", () => {
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Select Role ready" }),
     );
-    // No dead "Create 0 resumes" control; the line says why there is none.
+    // No dead "Create 0 resumes" control, and no line refusing it either.
     expect(
       screen.queryByRole("button", { name: /^Create \d+ resumes?$/ }),
     ).toBe(null);
-    expect(
-      screen.getByText("The selected job already has a resume."),
-    ).toBeTruthy();
+    expect(screen.queryByText(/already ha(s|ve) a resume/)).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Role two" }));
     expect(screen.getByText("2 selected")).toBeTruthy();
     expect(
