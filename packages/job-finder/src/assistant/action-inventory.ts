@@ -912,6 +912,8 @@ export const SERVICE_METHOD_COVERAGE: Record<
   approveApplyRun: "apply_to_jobs",
   cancelApplyRun: "cancel_applications",
   resolveApplyConsentRequest: "internal",
+  returnApplicationToShortlist: "internal",
+  undoReturnApplicationToShortlist: "internal",
   revokeApplyRunApproval: "cancel_applications",
   inspectPreparedApplicationPage: "browser_use_application",
   focusPreparedApplicationPage: "continue_application",

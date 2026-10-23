@@ -20,6 +20,7 @@ import type {
   JobFinderApplyRunActionInput,
   JobFinderApplyQueueControlInput,
   JobFinderRemoveFromApplyQueueInput,
+  JobFinderReturnApplicationToShortlistInput,
   JobFinderApproveResumesInput,
   JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
@@ -340,7 +341,9 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         assertWorkspaceHydrated();
       }
       const sequence = beginWorkspaceRequest();
-      let response: JobFinderRendererWorkspaceSnapshot | JobFinderWorkspaceSyncResult;
+      let response:
+        | JobFinderRendererWorkspaceSnapshot
+        | JobFinderWorkspaceSyncResult;
       try {
         response = await action();
       } catch (error) {
@@ -747,9 +750,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           window.nestor.jobFinder.startApplyQueue(input),
         ),
       approveResumes: (input: JobFinderApproveResumesInput) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.approveResumes(input),
-        ),
+        runWorkspaceAction(() => window.nestor.jobFinder.approveResumes(input)),
       controlApplyQueue: (input: JobFinderApplyQueueControlInput) =>
         runWorkspaceAction(() =>
           window.nestor.jobFinder.controlApplyQueue(input),
@@ -757,6 +758,16 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       removeFromApplyQueue: (input: JobFinderRemoveFromApplyQueueInput) =>
         runWorkspaceAction(() =>
           window.nestor.jobFinder.removeFromApplyQueue(input),
+        ),
+      returnApplicationToShortlist: (
+        input: JobFinderReturnApplicationToShortlistInput,
+      ) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.returnApplicationToShortlist(input),
+        ),
+      undoReturnApplicationToShortlist: (jobId: string) =>
+        runWorkspaceAction(() =>
+          window.nestor.jobFinder.undoReturnApplicationToShortlist(jobId),
         ),
       approveApplyRun: (input: JobFinderApplyRunActionInput) =>
         runWorkspaceAction(() =>

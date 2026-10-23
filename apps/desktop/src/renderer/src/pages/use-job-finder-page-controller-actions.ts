@@ -1258,6 +1258,16 @@ export function createPrimaryPageActions(
           jobFinderPendingActions.apply(),
         );
       case "moved_to_shortlisted":
+        return settle(
+          async () => {
+            for (const id of ids)
+              await actions.undoReturnApplicationToShortlist(id);
+          },
+          ids.length === 1
+            ? "Back in Applications. Its form was closed; Apply again fills it in."
+            : `${ids.length} applications are back in Applications.`,
+          jobFinderPendingActions.apply(),
+        );
       case "taken_out_of_queue":
         return Promise.resolve(false);
     }
@@ -2104,6 +2114,28 @@ export function createPrimaryPageActions(
             if (change) void undoRecentChange(change);
           },
           ...(jobIds.length > 1 ? { undoLabel: "Undo all" } : {}),
+        },
+      );
+    },
+    onReturnApplicationToShortlist: (record: { id: string; jobId: string }) => {
+      let change: RecentChange | null = null;
+      return runAction(
+        () =>
+          actions.returnApplicationToShortlist({
+            applicationRecordId: record.id,
+          }),
+        () => {
+          change = recordMove({
+            kind: "moved_to_shortlisted",
+            jobIds: [record.jobId],
+          });
+        },
+        "Moved back to Shortlisted. Nothing was sent.",
+        {
+          scope: jobFinderPendingActions.apply(),
+          undo: () => {
+            if (change) void undoRecentChange(change);
+          },
         },
       );
     },

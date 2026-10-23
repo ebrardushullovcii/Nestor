@@ -139,6 +139,29 @@ describe("recent changes", () => {
     });
   });
 
+  it("a move back to Shortlisted undoes until the job is applied to again", () => {
+    const change = recordRecentChange({
+      kind: "moved_to_shortlisted",
+      jobIds: ["a"],
+      label: "A at Acme",
+    });
+    expect(
+      getRecentChangeUndo(
+        change,
+        workspace({ shortlisted: [["a", "approved"]] }),
+      ),
+    ).toEqual({ possible: true, jobIds: ["a"] });
+    expect(
+      getRecentChangeUndo(
+        change,
+        workspace({ shortlisted: [["a", "approved"]], applied: ["a"] }),
+      ),
+    ).toEqual({ possible: false, reason: "In Applications again since." });
+    expect(describeRecentChange(change)).toBe(
+      "Moved A at Acme back to Shortlisted",
+    );
+  });
+
   it("only a job's newest move offers Undo", () => {
     const older = recordRecentChange({
       kind: "moved_to_find_jobs",

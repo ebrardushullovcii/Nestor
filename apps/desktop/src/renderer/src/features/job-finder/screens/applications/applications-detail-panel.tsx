@@ -50,6 +50,7 @@ import type {
   FinishInBrowserInput,
 } from "./applications-detail-panel-recovery-actions-section";
 import { openApplicationForm } from "./application-form-open";
+import { resolveApplicationMoveBack } from "./application-move-back";
 import { ApplicationsDetailPanelRecoverySections } from "./applications-detail-panel-recovery-sections";
 import {
   pageNeedsPreparing,
@@ -69,7 +70,9 @@ import { formatApplicationEmployerLine } from "../../lib/job-employer-location-d
 
 function buildLiveAssistantApplicationHref(input: {
   record: ApplicationRecord;
-  relatedJob: JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number] | null;
+  relatedJob:
+    | JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number]
+    | null;
 }) {
   const { record, relatedJob } = input;
   const employerLine = formatApplicationEmployerLine({
@@ -84,7 +87,8 @@ function buildLiveAssistantApplicationHref(input: {
       ? `Latest application activity: ${record.lastActionLabel}`
       : null,
     relatedJob?.matchAssessment.judgment?.summary
-      ? `Job fit: ${relatedJob.matchAssessment.judgment.summary}` : null,
+      ? `Job fit: ${relatedJob.matchAssessment.judgment.summary}`
+      : null,
   ].filter((entry): entry is string => Boolean(entry));
   const params = new URLSearchParams({
     source: "job_application",
@@ -105,6 +109,8 @@ function buildLiveAssistantApplicationHref(input: {
 
 interface ApplicationsDetailPanelProps {
   progressNow?: number | undefined;
+  /** Applications -> Shortlisted, shown only for an unsent application. */
+  onReturnToShortlist?: (record: ApplicationRecord) => void;
   answerDraft?: QuestionAnswerDraft | undefined;
   answerDraftRestored?: boolean;
   onAnswerDraftChange?: (draft: QuestionAnswerDraft) => void | Promise<void>;
@@ -113,7 +119,9 @@ interface ApplicationsDetailPanelProps {
   customStages?: readonly ApplicationCrmStageDefinition[];
   /** What each result's run is doing, so a planned job is never "Filling in". */
   readApplyRunContext?: (
-    result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null,
+    result:
+      | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number]
+      | null,
   ) => ApplyRunContext | null;
   applyRunDetails: ApplyRunDetails | null;
   applyRunDetailsTarget: {
@@ -200,6 +208,7 @@ interface ApplicationsDetailPanelProps {
 
 export function ApplicationsDetailPanel({
   progressNow,
+  onReturnToShortlist,
   applyMode,
   activeFilter,
   customStages,
@@ -415,10 +424,10 @@ export function ApplicationsDetailPanel({
               : selectedApplyState.formClosed
                 ? ("warning" as const)
                 : selectedApplyState.kind === "could_not_apply"
-                ? ("critical" as const)
-                : selectedApplyState.kind === "needs_you"
-                  ? ("warning" as const)
-                  : ("active" as const),
+                  ? ("critical" as const)
+                  : selectedApplyState.kind === "needs_you"
+                    ? ("warning" as const)
+                    : ("active" as const),
       }
     : selectedRecord
       ? getApplicationStagePresentation(selectedRecord)
@@ -603,6 +612,21 @@ export function ApplicationsDetailPanel({
             Prepare interview
           </a>
         </Button>
+      ) : null}
+      {onReturnToShortlist &&
+      resolveApplicationMoveBack(selectedRecord, selectedApplyState?.kind) ===
+        "to_shortlisted" ? (
+        <div>
+          <Button
+            className="h-auto px-0 text-sm font-medium normal-case tracking-normal"
+            onClick={() => onReturnToShortlist(selectedRecord)}
+            size="compact"
+            type="button"
+            variant="link"
+          >
+            Move back to Shortlisted
+          </Button>
+        </div>
       ) : null}
     </>
   ) : null;

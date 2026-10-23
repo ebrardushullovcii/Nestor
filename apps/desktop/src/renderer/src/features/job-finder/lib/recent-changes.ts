@@ -308,11 +308,7 @@ export function getRecentChangeUndo(
         "Approved again since.",
       );
     case "moved_to_shortlisted":
-      return {
-        possible: false,
-        reason:
-          "Its form was closed. Apply again from Shortlisted for a fresh one.",
-      };
+      return pick((id) => !applied.has(id), "In Applications again since.");
     case "taken_out_of_queue":
       return {
         possible: false,

@@ -167,6 +167,14 @@ export interface JobFinderPageContext {
   onMoveResumesBackToReview: (jobIds: readonly string[]) => Promise<boolean>;
   /** Takes waiting jobs out of the Apply queue before a run takes them. */
   onTakeOutOfApplyQueue: (jobIds: readonly string[]) => Promise<boolean>;
+  /**
+   * Applications -> Shortlisted for an application nothing was sent for:
+   * its form closes, nothing is sent, history stays. Undo lists it again.
+   */
+  onReturnApplicationToShortlist: (record: {
+    id: string;
+    jobId: string;
+  }) => Promise<boolean>;
   /** Puts a recorded move back (toast Undo, Activity's Recent changes). */
   onUndoRecentChange: (change: RecentChange) => Promise<boolean>;
   onRemoveReviewJobs?: (

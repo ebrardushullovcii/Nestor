@@ -27,6 +27,7 @@ import type {
   JobFinderApplyRunActionInput,
   JobFinderApplyQueueControlInput,
   JobFinderRemoveFromApplyQueueInput,
+  JobFinderReturnApplicationToShortlistInput,
   JobFinderApproveResumesInput,
   JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
@@ -444,6 +445,13 @@ export interface JobFinderShellActions {
   /** Takes waiting jobs out of the Apply queue before they start. */
   removeFromApplyQueue: (
     input: JobFinderRemoveFromApplyQueueInput,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  /** Applications -> Shortlisted for an unsent application; never sends. */
+  returnApplicationToShortlist: (
+    input: JobFinderReturnApplicationToShortlistInput,
+  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
+  undoReturnApplicationToShortlist: (
+    jobId: string,
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   approveApplyRun: (
     input: JobFinderApplyRunActionInput,
