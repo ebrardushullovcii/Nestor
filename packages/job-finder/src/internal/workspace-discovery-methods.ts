@@ -4395,6 +4395,7 @@ export function createWorkspaceDiscoveryMethods(
                 job,
                 assessmentSession.verdictFingerprint,
                 assessmentSession.contextFingerprint,
+                { refreshRubric: true },
               ) &&
               fitAskedFingerprints.get(job.id) !== fitPostingFingerprint(job),
           )

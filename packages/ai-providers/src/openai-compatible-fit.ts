@@ -39,20 +39,22 @@ export function buildFitEvidenceInstructions(): string {
   ].join(" ");
 }
 
-/** Absolute anchors shared by batch judging and a requested full assessment. */
+/** Absolute bands shared by batch judging and a requested full assessment. */
 export function buildFitScoringInstructions(): string {
   return [
     "Judge each job independently against this person and these goals only. Other jobs, their order, the batch size and previous verdicts are not evidence. Never rank within the batch, grade on a curve or spread scores to create a distribution.",
-    "Use this absolute decision procedure IN ORDER, stopping at the first matching step. Return that step's exact score and recommendation, without interpolation or extra points. A score describes the evidence for applying, not a probability of getting hired.",
+    "Use this absolute decision procedure IN ORDER, stopping at the first matching step. Keep that step's recommendation and score band. Then calculate the score inside that band using the evidence points below. A score describes the evidence for applying, not a probability of getting hired.",
     "Step 1: 0 / skip for a non-vacancy (closed, talent pool, general application or account page).",
-    "Step 2: 20 / skip for a clearly different profession, an explicitly incompatible career level, or a confirmed non-negotiable place, permission or saved-goal conflict. This applies even to cards and excerpts. The Work modes goal lists the allowed modes: when it contains only remote, fully remote work is required, not merely preferred, and unknown willingness to relocate does not relax it. A listed hybrid or onsite work mode requires presence, so it conflicts with that goal unless a fully remote option is explicitly offered. A remote tag alone does not make hybrid work fully remote. A city or employer address alone does not prove attendance or a worker-country restriction. Missing permission is not a proven conflict. A different function or specialization within the same broad profession is not a different profession. On a sparse card, an occupational rejection requires a clearly different professional practice or credential with no plausible transferable background; unclear duties within the same broad profession need review, even when the title is not a target title.",
-    "Step 3: 60 / review_before_applying if listing evidence is incomplete: detailQuality is card_only or partial_detail, evidenceOmitted is true, or an excerpt marker says text was omitted. This takes precedence over skill gaps and positive matches. Do not choose 45, 70, 80 or 90 for incomplete evidence; request a full read and name the unknowns.",
-    "Step 4: 45 / review_before_applying for a full listing whose central required qualification has neither direct nor credible transferable support in the supplied profile. Name missing evidence, never claim you cannot do it. A missing preferred tool alone does not qualify.",
-    "Step 5: 60 / review_before_applying if a material eligibility, place, pay or schedule question remains. If a minimum pay goal is set, unstated pay or different currencies without a supplied conversion leaves this question unresolved, regardless of how high the amount looks. Never invent exchange rates. A missing schedule matters only when a configured schedule goal cannot be checked.",
-    "Step 6: 70 / review_before_applying for a full listing with credible related experience but bridgeable required-skill or scope gaps needing checking or tailoring. Transferable experience is not direct proof of the required specialty, years or management scope.",
-    "Step 7: 80 / apply_with_original when all essential requirements are directly supported and no material question remains, but at least one preferred qualification is not evidenced. Missing preferred evidence belongs here even when the gap is minor.",
-    "Step 8: 90 / strong_fit only for a full listing for exactly the work you seek with direct support for all essential AND preferred qualifications (or no preferred qualifications), all configured goals met, and no unresolved constraint. Never promote a missing preferred qualification to support.",
-    "Choose the anchor from this job's own evidence before writing its explanation. Distinguish an explicit contradiction, absent evidence, and demonstrated transferable experience consistently. Do not infer a restriction from an employer's address or invent support for a required qualification.",
+    "Step 2: 10-20 / skip for a clearly different profession, an explicitly incompatible career level, or a confirmed non-negotiable place, permission or saved-goal conflict. This applies even to cards and excerpts. The Work modes goal lists the allowed modes: when it contains only remote, fully remote work is required, not merely preferred, and unknown willingness to relocate does not relax it. A listed hybrid or onsite work mode requires presence, so it conflicts with that goal unless a fully remote option is explicitly offered. A remote tag alone does not make hybrid work fully remote. A city or employer address alone does not prove attendance or a worker-country restriction. Missing permission is not a proven conflict. A different function or specialization within the same broad profession is not a different profession. On a sparse card, an occupational rejection requires a clearly different professional practice or credential with no plausible transferable background; unclear duties within the same broad profession need review, even when the title is not a target title.",
+    "Step 3: 50-60 / review_before_applying if listing evidence is incomplete: detailQuality is card_only or partial_detail, evidenceOmitted is true, or an excerpt marker says text was omitted. This takes precedence over skill gaps and positive matches. Request a full read and name the unknowns.",
+    "Step 4: 35-45 / review_before_applying for a full listing whose central required qualification has neither direct nor credible transferable support in the supplied profile. Name missing evidence, never claim you cannot do it. A missing preferred tool alone does not qualify.",
+    "Step 5: 50-60 / review_before_applying if a material eligibility, place, pay or schedule question remains. If a minimum pay goal is set, unstated pay or different currencies without a supplied conversion leaves this question unresolved, regardless of how high the amount looks. Never invent exchange rates. A missing schedule matters only when a configured schedule goal cannot be checked.",
+    "Step 6: 65-75 / review_before_applying for a full listing with credible related experience but bridgeable required-skill or scope gaps needing checking or tailoring. Transferable experience is not direct proof of the required specialty, years or management scope.",
+    "Step 7: 75-85 / apply_with_original when all essential requirements are directly supported and no material question remains, but at least one preferred qualification is not evidenced. Missing preferred evidence belongs here even when the gap is minor.",
+    "Step 8: 90-100 / strong_fit only for a full listing for exactly the work you seek with direct support for all essential AND preferred qualifications (or no preferred qualifications), all configured goals met, and no unresolved constraint. Never promote a missing preferred qualification to support.",
+    "Evidence points: R (role alignment) = 4 for exactly the target work at a compatible level, 2 for related work or an unconfirmed level, 0 for unknown or conflicting work/level. E (essential requirement evidence) = 0 when duties or requirements are absent or unsupported; 1 when only transferable background supports them; 2 when some have direct support but others are missing or transferable; 4 when every stated essential is directly supported AND the profile demonstrates doing the same core work in a confirmed role or project; otherwise 3 when every stated essential is directly supported. A title alone is not a stated essential or proof of doing the work. G (goals) = 0 if any material goal, place or eligibility constraint conflicts or is unresolved; 1 if those constraints are resolved but a configured optional preference is unknown or unmet; 2 if all configured goals and constraints are confirmed met (or none are configured). Use the first applicable definition for each dimension; missing evidence earns no invented support.",
+    "Return an integer score: step 1 = 0; otherwise add R+E+G to that step's lower bound (10, 50, 35, 50, 65, 75 or 90 respectively). Do not add discretionary points, count reasons, use other jobs or change the recommendation because of the point total. Explain the decisive evidence and unknowns. Distinguish an explicit contradiction, absent evidence, and demonstrated transferable experience consistently. Do not infer a restriction from an employer's address or invent support for a required qualification.",
+    "Before scoring, check the decision order again: a confirmed conflict always selects step 2, even when text is omitted; otherwise incomplete listing evidence always selects step 3. On a complete listing, an unresolved pay currency or eligibility question selects step 5 before considering bridgeable skill gaps in step 6. Evidence points never override these checks. Different pay currencies remain unresolved without a supplied conversion, even when the advertised amount looks generous. If a listing explicitly requires office attendance and the person accepts only remote work, that is a confirmed conflict, not an unknown to review.",
   ].join(" ");
 }
 
@@ -64,7 +66,7 @@ export function buildJobFitJudgingPrompt(structured = false): string {
     "You judge how well each job fits one person who is looking for work.",
     "Input jobs are row arrays: jobColumns names each field in order. Each row contains the same listing evidence as an object with those field names.",
     structured
-      ? 'Return JSON {"judgments": {"jobId": {...}}}: one object keyed by every supplied jobId, with no missing or extra keys. Each value is that job\'s independent verdict, matching the response schema.'
+      ? 'Return JSON {"judgments": {"jobId": {...}}}: one object keyed by every supplied jobId, with no missing or extra keys. Each value is that job\'s independent verdict, matching the response schema. Write rubricStep first, then rolePoints (R), essentialPoints (E), goalPoints (G), and finally the score calculated from that step and those points. For step 1 all points are zero. Choose the step before calculating points.'
       : 'Return JSON {"judgments": [...]} with one entry per job, each with the jobId exactly as given.',
     'role: "exact" when the job is the kind of work the person is looking for, in any wording or language; "adjacent" when it is related work they could credibly do; "conflict" when it is a different occupation, or a level far from theirs; "unknown" when the listing says too little.',
     'preferences: compare the job\'s place, work mode, level, employment type and pay with the person\'s goals: "aligned", "mixed", "conflict" when it contradicts a goal the person set, "unknown" when the listing is silent, "not_configured" when the person set no goals.',
@@ -100,15 +102,6 @@ export function buildJobFitJudgingResponseSchema(jobIds: readonly string[]) {
     listingClosed: { type: "boolean" },
     listingClosedEvidence: nullableText,
   };
-  const anchors = [
-    [0, "skip"],
-    [20, "skip"],
-    [45, "review_before_applying"],
-    [60, "review_before_applying"],
-    [70, "review_before_applying"],
-    [80, "apply_with_original"],
-    [90, "strong_fit"],
-  ] as const;
   return {
     name: "job_fit_judgments",
     schema: {
@@ -129,16 +122,31 @@ export function buildJobFitJudgingResponseSchema(jobIds: readonly string[]) {
         judgment: {
           type: "object",
           properties: {
-            score: { type: "integer", enum: anchors.map(([score]) => score) },
+            rubricStep: { type: "integer", minimum: 1, maximum: 8 },
+            rolePoints: { type: "integer", enum: [0, 2, 4] },
+            essentialPoints: { type: "integer", minimum: 0, maximum: 4 },
+            goalPoints: { type: "integer", minimum: 0, maximum: 2 },
+            score: { type: "integer", minimum: 0, maximum: 100 },
             recommendation: {
               type: "string",
               enum: [
-                ...new Set(anchors.map(([, recommendation]) => recommendation)),
+                "skip",
+                "review_before_applying",
+                "apply_with_original",
+                "strong_fit",
               ],
             },
             ...fields,
           },
-          required: ["score", "recommendation", ...Object.keys(fields)],
+          required: [
+            "rubricStep",
+            "rolePoints",
+            "essentialPoints",
+            "goalPoints",
+            "score",
+            "recommendation",
+            ...Object.keys(fields),
+          ],
           additionalProperties: false,
         },
       },
@@ -494,10 +502,11 @@ export function normalizeJobFitJudgments(
   const entries = Array.isArray(judgments)
     ? judgments
     : judgments && typeof judgments === "object"
-      ? Object.entries(judgments).flatMap(([jobId, value]) =>
-          value && typeof value === "object" && !Array.isArray(value)
-            ? [{ ...value, jobId }]
-            : [],
+      ? Object.entries(judgments as Record<string, unknown>).flatMap(
+          ([jobId, value]) =>
+            value && typeof value === "object" && !Array.isArray(value)
+              ? [{ ...value, jobId }]
+              : [],
         )
       : [];
   const results = new Map<string, JobFitJudgmentResult>();

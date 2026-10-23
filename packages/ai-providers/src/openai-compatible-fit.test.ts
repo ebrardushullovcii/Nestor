@@ -192,9 +192,11 @@ describe("batch fit judging", () => {
       "1",
     ]);
     expect(schema.properties.judgments.additionalProperties).toBe(false);
-    expect(schema.$defs.judgment.properties.score.enum).toEqual([
-      0, 20, 45, 60, 70, 80, 90,
-    ]);
+    expect(schema.$defs.judgment.properties.score).toEqual({
+      type: "integer",
+      minimum: 0,
+      maximum: 100,
+    });
     expect(schema.$defs.judgment.properties.recommendation.enum).toEqual([
       "skip",
       "review_before_applying",

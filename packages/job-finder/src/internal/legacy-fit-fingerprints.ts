@@ -46,10 +46,13 @@ export function buildLegacyVerdictFingerprintMap(input: {
         input.settings,
       ),
     ]) {
-      map.set(
-        createMatchAssessmentContextFingerprint(input.profile, preferences),
-        createFitVerdictFingerprint(input.profile, preferences),
+      const context = createMatchAssessmentContextFingerprint(
+        input.profile,
+        preferences,
       );
+      const verdict = createFitVerdictFingerprint(input.profile, preferences);
+      map.set(context, verdict);
+      map.set(context.replace("_logic16_", "_logic15_"), verdict);
     }
   }
   return map;
