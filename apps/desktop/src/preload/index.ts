@@ -52,6 +52,8 @@ import type {
   EditApplicationDocumentInput,
   ExportApplicationDocumentInput,
   DesktopPlatformPing,
+  DesktopContextMenuInput,
+  DesktopContextMenuResult,
   DesktopWindowCloseGuardState,
   DesktopWindowCloseResolution,
   DesktopWindowCloseRequest,
@@ -368,6 +370,11 @@ const desktopApi = {
   ping: () => ipcRenderer.invoke("system:ping") as Promise<DesktopPlatformPing>,
   window: {
     close: () => ipcRenderer.invoke("window:close") as Promise<{ ok: true }>,
+    showContextMenu: (input: DesktopContextMenuInput) =>
+      ipcRenderer.invoke(
+        "window:show-context-menu",
+        input,
+      ) as Promise<DesktopContextMenuResult>,
     getControlsState: () =>
       ipcRenderer.invoke(
         "window:get-controls-state",

@@ -2008,6 +2008,38 @@ export type DesktopWindowCloseGuardState = z.infer<
 >;
 
 /**
+ * A right-click menu the window asks main to show as the system's own menu.
+ * Main answers with the chosen item's id, or null when it was dismissed.
+ */
+export const DesktopContextMenuItemSchema = z.union([
+  z
+    .object({
+      id: z.string().trim().min(1).max(80),
+      label: z.string().trim().min(1).max(120),
+      enabled: z.boolean().optional(),
+    })
+    .strict(),
+  z.object({ type: z.literal("separator") }).strict(),
+]);
+export type DesktopContextMenuItem = z.infer<
+  typeof DesktopContextMenuItemSchema
+>;
+
+export const DesktopContextMenuInputSchema = z
+  .object({ items: z.array(DesktopContextMenuItemSchema).min(1).max(24) })
+  .strict();
+export type DesktopContextMenuInput = z.infer<
+  typeof DesktopContextMenuInputSchema
+>;
+
+export const DesktopContextMenuResultSchema = z
+  .object({ id: z.string().nullable() })
+  .strict();
+export type DesktopContextMenuResult = z.infer<
+  typeof DesktopContextMenuResultSchema
+>;
+
+/**
  * Main-to-renderer request pushed after a native close was paused. The
  * renderer answers through `DesktopWindowCloseResolution`; an unanswered
  * request is bounded by a main-process watchdog instead of blocking forever.

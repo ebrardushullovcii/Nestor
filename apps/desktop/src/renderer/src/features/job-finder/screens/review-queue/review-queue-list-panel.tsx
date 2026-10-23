@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type MouseEvent,
 } from "react";
 import {
   CollectionPagination,
@@ -26,6 +27,10 @@ import { formatJobEmployerLocationLine } from "../../lib/job-employer-location-d
 import { jobFinderListRegionClassName } from "../../components/list-row";
 import { usePersistedCollectionView } from "../../hooks/use-persisted-collection-view";
 import { useStableCallback } from "../../hooks/use-stable-callback";
+import {
+  listingRowMenuEntries,
+  openRowContextMenu,
+} from "../../lib/row-context-menu";
 import { ReviewQueueRow } from "./review-queue-list-row";
 import {
   applySelectionRange,
@@ -92,6 +97,8 @@ interface ReviewQueueListPanelProps {
   onShowItem?: (jobId: string) => void;
   /** Moves the given jobs back to Find jobs. */
   onRemoveJobs?: (jobIds: readonly string[]) => Promise<void>;
+  /** The listing's address, for a row's Open listing and Copy link. */
+  listingUrlForJob?: (jobId: string) => string | null;
   onStopTailoredDraftPreparation?: () => void;
   /**
    * Jobs whose application is already prepared. They stop counting as ready
@@ -127,6 +134,7 @@ export function ReviewQueueListPanel({
   onSelectItem,
   onShowItem = onSelectItem,
   onRemoveJobs,
+  listingUrlForJob,
   onStopTailoredDraftPreparation = () => undefined,
   preparedJobIds,
   applicationPreparingJobIds,
@@ -507,6 +515,88 @@ export function ReviewQueueListPanel({
       }
       onSelectItem(nextId);
       setPendingFocusId(nextId);
+    },
+  );
+  // Right-click: a ticked row acts for every ticked job; any other row
+  // acts for itself. Same actions and words as the bar above the list.
+  const openRowMenu = useStableCallback(
+    (event: MouseEvent<HTMLElement>, jobId: string) => {
+      const forTicked = selectedJobIds.has(jobId) && selectedJobIds.size > 1;
+      const ids = forTicked ? [...selectedJobIds] : [jobId];
+      const approvable = ids.filter((id) => approvableIdSet.has(id));
+      const ready = ids.filter((id) => readyIdSet.has(id));
+      const eligible = ids.filter((id) => eligibleResumeIds.has(id));
+      const count = (n: number, one: string, many: string) =>
+        n === 1 ? one : `${many.replace("#", String(n))}`;
+      const done = () => {
+        if (forTicked) clearSelection();
+      };
+      openRowContextMenu(event, [
+        ...(!forTicked
+          ? [{ id: "open", label: "Open", run: () => selectItem(jobId) }]
+          : []),
+        ...(approvable.length > 0 && onApproveResumes
+          ? [
+              {
+                id: "approve",
+                label: count(
+                  approvable.length,
+                  "Approve resume",
+                  "Approve # resumes",
+                ),
+                enabled: !isApprovingResumes,
+                run: () => approveResumes(approvable),
+              },
+            ]
+          : []),
+        ...(ready.length > 0 && onApplyToJobs && !safeguardBlockerSentence
+          ? [
+              {
+                id: "apply",
+                label: forTicked
+                  ? `${applyVerb} ${ready.length} selected`
+                  : applyVerb.replace(/\s+to$/u, ""),
+                enabled: !isApplyToAllPending,
+                run: () => {
+                  onApplyToJobs(ready);
+                  done();
+                },
+              },
+            ]
+          : []),
+        ...(eligible.length > 0 && !isDraftPreparationRunning
+          ? [
+              {
+                id: "create-resume",
+                label: count(
+                  eligible.length,
+                  "Create resume",
+                  "Create # resumes",
+                ),
+                run: () => {
+                  onPrepareTailoredDrafts(eligible);
+                  done();
+                },
+              },
+            ]
+          : []),
+        ...(onRemoveJobs
+          ? [
+              "separator" as const,
+              {
+                id: "remove",
+                label: forTicked
+                  ? `Remove ${ids.length} from shortlist`
+                  : "Remove from shortlist",
+                run: () =>
+                  forTicked
+                    ? removeSelection()
+                    : onRemoveJobs([jobId]).catch(() => undefined),
+              },
+            ]
+          : []),
+        ...(forTicked ? [] : listingRowMenuEntries(listingUrlForJob?.(jobId))),
+      ]);
     },
   );
   const selectItem = useStableCallback((jobId: string) => {
@@ -1002,6 +1092,7 @@ export function ReviewQueueListPanel({
                   jobId={item.jobId}
                   key={item.jobId}
                   onSelect={selectItem}
+                  onOpenMenu={openRowMenu}
                   onSelectionKeyDown={handleListKeyDown}
                   resumePolicyCaption={getReviewQueueRowCaption(
                     statusLabel,

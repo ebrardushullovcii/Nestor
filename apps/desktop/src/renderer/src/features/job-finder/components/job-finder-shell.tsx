@@ -1247,7 +1247,8 @@ export function JobFinderShell({
   useHistoryNavigationShortcuts(stepHistory);
   useEffect(
     // A clicked "Search finished" notice opens the screen it is about.
-    () => window.nestor?.jobFinder?.onOpenRoute?.((route) => void navigate(route)),
+    () =>
+      window.nestor?.jobFinder?.onOpenRoute?.((route) => void navigate(route)),
     [navigate],
   );
 

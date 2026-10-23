@@ -71,6 +71,10 @@ import {
   handleListSearchEscape,
   LIST_SEARCH_ATTRIBUTE,
 } from "../../lib/list-search-focus";
+import {
+  listingRowMenuEntries,
+  openRowContextMenu,
+} from "../../lib/row-context-menu";
 import { getAttemptLabel } from "../../lib/job-finder-utils";
 import {
   formatApplicationEmployerAriaLabel,
@@ -587,6 +591,16 @@ export function ApplicationsRecordsPanel({
                   aria-label={`View details for ${employerAriaLabel}`}
                   data-collection-item-id={record.id}
                   onClick={() => onSelectRecord(record.id)}
+                  onContextMenu={(event) =>
+                    openRowContextMenu(event, [
+                      {
+                        id: "open",
+                        label: "Open",
+                        run: () => onSelectRecord(record.id),
+                      },
+                      ...listingRowMenuEntries(relatedJob?.canonicalUrl),
+                    ])
+                  }
                   onKeyDown={(event) =>
                     handleRecordRowKeyDown(event, record.id)
                   }

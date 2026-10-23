@@ -60,6 +60,8 @@ import type {
   EditApplicationDocumentInput,
   ExportApplicationDocumentInput,
   DesktopPlatformPing,
+  DesktopContextMenuInput,
+  DesktopContextMenuResult,
   DesktopWindowCloseGuardState,
   DesktopWindowCloseResolution,
   DesktopWindowCloseRequest,
@@ -178,6 +180,9 @@ declare global {
       ping: () => Promise<DesktopPlatformPing>;
       window: {
         close: () => Promise<{ ok: true }>;
+        showContextMenu: (
+          input: DesktopContextMenuInput,
+        ) => Promise<DesktopContextMenuResult>;
         getControlsState: () => Promise<DesktopWindowControlsState>;
         onControlsStateChange: (
           listener: (state: DesktopWindowControlsState) => void,

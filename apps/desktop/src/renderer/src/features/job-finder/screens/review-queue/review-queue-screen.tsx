@@ -142,6 +142,8 @@ export function ReviewQueueScreen(props: {
   onClaimResumeIdentity?: () => void;
   onKeepResumeIdentity?: () => void;
   onRemoveReviewJob: (jobId: string) => void;
+  /** The listing's address, for a row's Open listing and Copy link. */
+  listingUrlForJob?: (jobId: string) => string | null;
   /** Moves the selected jobs back to Find jobs in one request. */
   onRemoveReviewJobs?: (jobIds: readonly string[]) => Promise<void>;
   /** Reads a job's listing again when the search kept only its card. */
@@ -586,6 +588,9 @@ export function ReviewQueueScreen(props: {
           isApplyToAllPending={applyAllPending || isApplyPending}
           isJobPending={isJobPending}
           onApplyToJobs={handleApplyToJobs}
+          {...(props.listingUrlForJob
+            ? { listingUrlForJob: props.listingUrlForJob }
+            : {})}
           queuedJobIds={queuedJobIds}
           {...(props.onApproveResumes
             ? { onApproveResumes: props.onApproveResumes }

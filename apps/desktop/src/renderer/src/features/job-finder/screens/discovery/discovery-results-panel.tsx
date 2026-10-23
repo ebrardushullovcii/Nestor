@@ -123,6 +123,11 @@ import type { DiscoveryLatestRunVerdict } from "./discovery-run-feedback";
 import { useAssistantContextSource } from "../../assistant/assistant-provider";
 import { buildListContext } from "../../assistant/assistant-context-capture";
 import {
+  listingRowMenuEntries,
+  openRowContextMenu,
+  type RowMenuEntry,
+} from "../../lib/row-context-menu";
+import {
   DISCOVERY_OFFLINE_RUNTIME_LABEL,
   DISCOVERY_OFFLINE_SETUP_NOTICE,
   getDiscoveryRuntimeProjection,
@@ -1001,6 +1006,49 @@ export function DiscoveryResultsPanel({
       shortlistInFlight.current = false;
       setIsShortlisting(false);
     }
+  };
+  // Right-click: a ticked row acts for every ticked job, like a file list;
+  // any other row acts for itself.
+  const rowMenuFor = (job: JobListRow): RowMenuEntry[] => {
+    const forTicked =
+      bulkSelectedJobIds.has(job.id) && bulkSelectedJobIds.size > 1;
+    const shortlistable = forTicked
+      ? selectedShortlistableJobs.map((candidate) => candidate.id)
+      : selectablePageJobIds.includes(job.id)
+        ? [job.id]
+        : [];
+    const hideCount = forTicked ? bulkSelectedJobIds.size : 1;
+    return [
+      ...(onShortlistJobs
+        ? [
+            {
+              id: "shortlist",
+              label: forTicked
+                ? `Shortlist ${shortlistable.length} ticked`
+                : "Shortlist",
+              enabled: shortlistable.length > 0 && !isShortlisting,
+              run: () =>
+                forTicked
+                  ? shortlistSelected()
+                  : onShortlistJobs(shortlistable),
+            },
+          ]
+        : []),
+      ...(onDismissJobs
+        ? [
+            {
+              id: "hide",
+              label: forTicked ? `Hide ${hideCount} ticked` : "Hide",
+              enabled: !isShortlisting,
+              run: () =>
+                forTicked
+                  ? dismissSelected()
+                  : onDismissJobs([job.id]).catch(() => undefined),
+            },
+          ]
+        : []),
+      ...listingRowMenuEntries(job.canonicalUrl),
+    ];
   };
   // Every job the filters and search match, on every page, that a bulk
   // action can still act on.
@@ -2116,6 +2164,9 @@ export function DiscoveryResultsPanel({
                         className={baseButtonClasses}
                         aria-keyshortcuts="ArrowUp ArrowDown Home End"
                         data-collection-item-id={job.id}
+                        onContextMenu={(event) =>
+                          openRowContextMenu(event, rowMenuFor(job))
+                        }
                         onClick={(event) => {
                           if (
                             onShortlistJobs &&

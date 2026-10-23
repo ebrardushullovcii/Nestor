@@ -1698,6 +1698,10 @@ function JobFinderReviewQueueRouteContent() {
           context.workspace.intelligence.resumeBatchCheckpoint
         }
         applyQueue={context.workspace.applyQueue}
+        listingUrlForJob={(jobId) =>
+          context.workspace.discoveryJobs.find((job) => job.id === jobId)
+            ?.canonicalUrl ?? null
+        }
         globalDailyApplicationPreparationCapacity={
           context.workspace.dashboard
             ?.globalDailyApplicationPreparationCapacity ?? null
