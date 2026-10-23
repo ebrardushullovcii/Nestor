@@ -854,20 +854,26 @@ export function useProfileSetupForms(input: {
     const preferencesChangedSinceSeen =
       incomingPreferencesFingerprint !==
       seenSearchPreferencesContentFingerprintRef.current;
+    // Only an edited form can be echoing its own save. Building and checking
+    // both payloads cost 30-45 ms on every visit to Profile, edited or not.
     const draftPreferencesValues = preferencesForm.getValues();
-    const savedPreferencesPayload = buildSearchPreferencesPayload(
-      latestSearchPreferencesRef.current,
-      draftPreferencesValues,
-    ).payload;
-    const pendingCanonicalPreferencesPayload = buildSearchPreferencesPayload(
-      pendingCanonicalSearchPreferencesRef.current,
-      draftPreferencesValues,
-    ).payload;
-    const savedPreferencesEchoFingerprints = new Set(
-      [savedPreferencesPayload, pendingCanonicalPreferencesPayload]
+    const isEchoOfSavedPayload = () => {
+      const savedPreferencesPayload = buildSearchPreferencesPayload(
+        latestSearchPreferencesRef.current,
+        draftPreferencesValues,
+      ).payload;
+      const pendingCanonicalPreferencesPayload = buildSearchPreferencesPayload(
+        pendingCanonicalSearchPreferencesRef.current,
+        draftPreferencesValues,
+      ).payload;
+      return [savedPreferencesPayload, pendingCanonicalPreferencesPayload]
         .filter((payload) => payload !== undefined)
-        .map((payload) => buildComparableValueFingerprint(payload)),
-    );
+        .some(
+          (payload) =>
+            buildComparableValueFingerprint(payload) ===
+            incomingPreferencesFingerprint,
+        );
+    };
     const ownPreferences = ownSaveRef.current.preferences;
     const ownPreferencesOverlay = ownPreferences
       ? mergeDirtyEditorValues(
@@ -878,7 +884,7 @@ export function useProfileSetupForms(input: {
       : null;
     const isSavedPreferencesDraftEcho =
       preferencesForm.formState.isDirty &&
-      (savedPreferencesEchoFingerprints.has(incomingPreferencesFingerprint) ||
+      (isEchoOfSavedPayload() ||
         (preferencesChangedSinceSeen &&
           ownPreferencesOverlay?.status === "merged" &&
           buildComparableValueFingerprint(ownPreferencesOverlay.value) ===
