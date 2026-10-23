@@ -29,6 +29,10 @@ export default defineConfig({
         currentDir,
         "packages/job-finder/src/assistant/attention.ts",
       ),
+      "@nestor/job-finder/discovery-cpu": path.resolve(
+        currentDir,
+        "packages/job-finder/src/discovery-cpu.ts",
+      ),
       "@nestor/job-finder/discovery-ordering": path.resolve(
         currentDir,
         "packages/job-finder/src/discovery-ordering.ts",
@@ -41,7 +45,10 @@ export default defineConfig({
         currentDir,
         "packages/job-finder/src/resume-record-identity.ts",
       ),
-      "@nestor/job-finder/plan-safeguard-pauses": path.resolve(currentDir, "packages/job-finder/src/plan-safeguard-pauses.ts"),
+      "@nestor/job-finder/plan-safeguard-pauses": path.resolve(
+        currentDir,
+        "packages/job-finder/src/plan-safeguard-pauses.ts",
+      ),
       "@nestor/job-finder/resume-identity": path.resolve(
         currentDir,
         "packages/job-finder/src/internal/resume-identity.ts",
@@ -54,11 +61,10 @@ export default defineConfig({
         currentDir,
         "packages/job-finder/src/source-health.ts",
       ),
-      "@nestor/job-finder/application-submission-runtime-main":
-        path.resolve(
-          currentDir,
-          "packages/job-finder/src/application-submission-runtime-main.ts",
-        ),
+      "@nestor/job-finder/application-submission-runtime-main": path.resolve(
+        currentDir,
+        "packages/job-finder/src/application-submission-runtime-main.ts",
+      ),
       "@nestor/job-finder": path.resolve(
         currentDir,
         "packages/job-finder/src/index.ts",

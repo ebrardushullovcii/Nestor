@@ -9,6 +9,7 @@ import {
   type SavedJobDiscoveryProvenance,
 } from "@nestor/contracts";
 import { createUniqueId } from "./shared";
+import { isDeepStrictEqual } from "node:util";
 import { fnv1a64, yieldToEventLoop } from "@nestor/core";
 import { patchDiscoveryLedger, readDiscoveryLedgerChanges } from "@nestor/db";
 import {
@@ -76,9 +77,77 @@ function createVersionOneFingerprint(value: unknown): string {
   return `v1_${fnv1a64(serialized)}`;
 }
 
+const preparedFingerprints = new WeakMap<
+  object,
+  DiscoveryListingFingerprints
+>();
+const preparedPostings = new Map<string, WeakRef<JobPosting>>();
+const fingerprintFieldSet: Record<keyof DiscoveryFingerprintPosting, true> = {
+  applicationUrl: true,
+  title: true,
+  company: true,
+  location: true,
+  workMode: true,
+  applyPath: true,
+  easyApplyEligible: true,
+  postedAt: true,
+  postedAtText: true,
+  providerUpdatedAt: true,
+  salaryText: true,
+  employmentType: true,
+  department: true,
+  team: true,
+  detailQuality: true,
+  summary: true,
+  description: true,
+  keySkills: true,
+  responsibilities: true,
+  minimumQualifications: true,
+  preferredQualifications: true,
+  seniority: true,
+  screeningHints: true,
+  benefits: true,
+};
+const fingerprintFields = Object.keys(fingerprintFieldSet) as Array<
+  keyof DiscoveryFingerprintPosting
+>;
+
+/** Only owned worker results are frozen and eligible for this memo. */
+export function rememberDiscoveryListingFingerprints(
+  posting: JobPosting,
+  fingerprints: DiscoveryListingFingerprints,
+): void {
+  const freeze = (value: unknown): void => {
+    if (!value || typeof value !== "object" || Object.isFrozen(value)) return;
+    for (const child of Object.values(value)) freeze(child);
+    Object.freeze(value);
+  };
+  freeze(posting);
+  preparedFingerprints.set(posting, fingerprints);
+  if (preparedPostings.size >= 2_000) preparedPostings.clear();
+  preparedPostings.set(posting.canonicalUrl, new WeakRef(posting));
+}
+
 export function createDiscoveryListingFingerprints(
   posting: DiscoveryFingerprintPosting,
 ): DiscoveryListingFingerprints {
+  const prepared = preparedFingerprints.get(posting);
+  if (prepared) return { ...prepared };
+  // Schema parsing and triage create owned copies. Reuse the worker's digest
+  // only when every fingerprint input still equals its frozen source.
+  const source =
+    "canonicalUrl" in posting && typeof posting.canonicalUrl === "string"
+      ? preparedPostings.get(posting.canonicalUrl)?.deref()
+      : undefined;
+  if (
+    source &&
+    fingerprintFields.every((field) =>
+      isDeepStrictEqual(source[field], posting[field]),
+    )
+  ) {
+    const fingerprints = preparedFingerprints.get(source);
+    if (fingerprints) return { ...fingerprints };
+  }
   const card = createVersionOneFingerprint({
     applicationUrl: normalizeFingerprintText(posting.applicationUrl),
     title: normalizeFingerprintText(posting.title),
@@ -351,7 +420,8 @@ function carryLedgerIndex(
     for (const entry of changes.added) last.index.add(entry);
     return last.index;
   }
-  if (Math.abs(last.ledger.length - ledger.length) > MAX_CARRIED_LEDGER_CHANGES) return null;
+  if (Math.abs(last.ledger.length - ledger.length) > MAX_CARRIED_LEDGER_CHANGES)
+    return null;
   const current = new Set(ledger);
   const previous = new Set(last.ledger);
   if (current.size !== ledger.length || previous.size !== last.ledger.length)

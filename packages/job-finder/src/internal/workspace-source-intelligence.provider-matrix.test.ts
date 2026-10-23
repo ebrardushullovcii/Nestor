@@ -3,6 +3,14 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { JobDiscoveryTarget, JobSource } from "@nestor/contracts";
 
 import { runPublicProviderSourceCheck } from "./workspace-public-provider-source-check";
+import { toProviderAwarePosting } from "./discovery-posting-normalization";
+import { preparePublicProviderFeed } from "./workspace-source-intelligence";
+import { createDiscoveryListingFingerprints } from "./workspace-discovery-ledger";
+import {
+  buildJobIdentityAliases,
+  rememberPreparedListingContent,
+  prepareListingContent,
+} from "./job-identity";
 import {
   collectPublicProviderJobs,
   inferSourceIntelligenceFromTarget,
@@ -139,6 +147,62 @@ afterEach(() => {
 });
 
 describe("public provider ATS acceptance matrix", () => {
+  test.each(providerCases)(
+    "$name prepares exactly the same posting, fingerprints and identity evidence off main",
+    async ({ target, payload }) => {
+      const intelligence = inferSourceIntelligenceFromTarget({
+        target,
+        currentArtifact: null,
+      });
+      const base = {
+        text: JSON.stringify(payload),
+        target,
+        intelligence,
+        source: "target_site" as const,
+      };
+      const raw = await preparePublicProviderFeed({
+        ...base,
+        prepareForDiscovery: false,
+      });
+      const prepared = await preparePublicProviderFeed({
+        ...base,
+        prepareForDiscovery: true,
+      });
+      expect(prepared.skippedMalformedCount).toBe(raw.skippedMalformedCount);
+      const expected = raw.jobs.map((posting) =>
+        toProviderAwarePosting({
+          posting,
+          target,
+          intelligence,
+          adapterKind: "target_site",
+          collectionMethod: "api",
+          discoveryMethod: "public_api",
+        }),
+      );
+      expect(
+        prepared.jobs.map((job) => ({ ...job, discoveredAt: "" })),
+      ).toEqual(raw.jobs.map((job) => ({ ...job, discoveredAt: "" })));
+      expect(
+        prepared.preparations.map(({ normalized }, index) => ({
+          ...prepared.jobs[index],
+          ...normalized,
+          discoveredAt: "",
+        })),
+      ).toEqual(expected.map((job) => ({ ...job, discoveredAt: "" })));
+      prepared.preparations.forEach((evidence, index) => {
+        const job = { ...prepared.jobs[index]!, ...evidence.normalized };
+        expect(evidence.fingerprints).toEqual(
+          createDiscoveryListingFingerprints(expected[index]!),
+        );
+        expect(evidence.content).toEqual(
+          prepareListingContent(job.description),
+        );
+        const aliases = buildJobIdentityAliases(job);
+        rememberPreparedListingContent(job.description, evidence.content);
+        expect(buildJobIdentityAliases(job)).toEqual(aliases);
+      });
+    },
+  );
   test.each(providerCases.slice(0, 3))(
     "$name uses the employer board identity for hostname and URL source labels",
     async ({ target: originalTarget, payload }) => {

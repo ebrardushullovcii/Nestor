@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
+import type { DiscoveryPostingPreparation } from "@nestor/contracts";
 
 import { normalizeText } from "./shared";
 
@@ -200,10 +201,48 @@ function packListingContent(content: string) {
   });
 }
 
+type PackedContent = DiscoveryPostingPreparation["content"];
+const preparedContent = new Map<string, PackedContent>();
+
+/** Transferred from the feed worker; the bounded memo also serves copied rows. */
+export function rememberPreparedListingContent(
+  description: string,
+  content: PackedContent,
+): void {
+  if (preparedContent.size >= LISTING_CONTENT_IDENTITY_MEMO_LIMIT)
+    preparedContent.clear();
+  preparedContent.set(description, content);
+}
+
+export function prepareListingContent(description: string): PackedContent {
+  const normalized = normalizeListingContentIdentity(description);
+  return normalized
+    ? {
+        digest: digestListingContent(normalized),
+        packed: deflateRawSync(normalized, { level: 1 }),
+      }
+    : null;
+}
+
+function readPreparedContent(
+  input: JobIdentityInput,
+): JobIdentityInput["exactContent"] {
+  if (input.exactContent) return input.exactContent;
+  const content = input.description
+    ? preparedContent.get(input.description)
+    : null;
+  return content
+    ? {
+        digest: content.digest,
+        read: () => inflateRawSync(content.packed).toString(),
+      }
+    : undefined;
+}
+
 /** Counting inspected identities must not retain every complete provider posting. */
 export function compactJobIdentity(input: JobIdentityInput): JobIdentityInput {
   const content =
-    input.exactContent ??
+    readPreparedContent(input) ??
     (() => {
       const normalized = normalizeListingContentIdentity(input.description);
       return normalized ? packListingContent(normalized) : undefined;
@@ -310,10 +349,10 @@ export function hasEquivalentListingContentIdentity(
 ): boolean {
   if (!hasCompatibleSeniority(left, right)) return false;
   const leftContent =
-    left.exactContent?.read() ??
+    readPreparedContent(left)?.read() ??
     normalizeListingContentIdentity(left.description);
   const rightContent =
-    right.exactContent?.read() ??
+    readPreparedContent(right)?.read() ??
     normalizeListingContentIdentity(right.description);
   if (!leftContent || leftContent !== rightContent) {
     return false;
@@ -423,22 +462,19 @@ export function buildJobIdentityAliases(
     });
   }
 
-  const exactContent = input.exactContent
+  const prepared = readPreparedContent(input);
+  const exactContent = prepared
     ? null
     : normalizeListingContentIdentity(input.description);
   const contentCompany = input.company ? normalizeText(input.company) : "";
   const contentLocation = input.location ? normalizeText(input.location) : "";
-  if (
-    (exactContent || input.exactContent) &&
-    contentCompany &&
-    contentLocation
-  ) {
+  if ((exactContent || prepared) && contentCompany && contentLocation) {
     aliases.push({
       // A digest, not the text: aliases stay cached with every indexed job,
       // and a key holding the whole normalized description kept a second
       // copy of every listing in memory. Every match on this alias is
       // confirmed by comparing the full content (the index's resolve).
-      key: `content:${contentCompany}\u0000${contentLocation}\u0000${input.exactContent?.digest ?? digestListingContent(exactContent!)}`,
+      key: `content:${contentCompany}\u0000${contentLocation}\u0000${prepared?.digest ?? digestListingContent(exactContent!)}`,
       kind: "exact_listing_content",
       confidence: "strong",
       priority: 50,

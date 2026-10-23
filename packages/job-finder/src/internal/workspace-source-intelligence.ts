@@ -1,4 +1,5 @@
 import { yieldToEventLoop } from "@nestor/core";
+import { isDeepStrictEqual } from "node:util";
 import {
   JobPostingSchema,
   SourceIntelligenceArtifactSchema,
@@ -17,6 +18,20 @@ import {
 import { matchesExcludedLocation } from "./matching";
 import { isExplicitSearchProbeDisproof } from "./source-instruction-evidence";
 import { normalizeText, uniqueStrings } from "./shared";
+import type { DiscoveryFeedTask, DiscoveryFeedResult } from "@nestor/contracts";
+import {
+  getDiscoveryFeedExecutor,
+  rememberPreparedDiscoveryPosting,
+} from "./discovery-feed-executor";
+import { toProviderAwarePosting } from "./discovery-posting-normalization";
+import {
+  prepareListingContent,
+  rememberPreparedListingContent,
+} from "./job-identity";
+import {
+  createDiscoveryListingFingerprints,
+  rememberDiscoveryListingFingerprints,
+} from "./workspace-discovery-ledger";
 
 type PublicApiFieldPath = readonly string[];
 type PublicApiFieldSelector = readonly PublicApiFieldPath[];
@@ -1623,12 +1638,15 @@ function createProviderApiQuietTimeout(quietMs: number, totalMs: number) {
 }
 
 /** The feed's JSON, read chunk by chunk so each chunk counts as progress. */
-async function readFeedJson(
+async function readFeedText(
   response: Response,
   onProgress: () => void,
-): Promise<unknown> {
+): Promise<string> {
   const reader = response.body?.getReader();
-  if (!reader) return response.json();
+  if (!reader)
+    return typeof response.text === "function"
+      ? response.text()
+      : JSON.stringify(await response.json());
   const decoder = new TextDecoder();
   let text = "";
   for (;;) {
@@ -1638,7 +1656,7 @@ async function readFeedJson(
     text += decoder.decode(value, { stream: true });
   }
   text += decoder.decode();
-  return JSON.parse(text) as unknown;
+  return text;
 }
 
 function composeAbortSignals(
@@ -1814,6 +1832,74 @@ function toProviderJobPosting(
   });
 }
 
+/** The exact same reader runs in a worker in Electron and locally in other hosts. */
+export async function preparePublicProviderFeed(
+  task: DiscoveryFeedTask,
+): Promise<DiscoveryFeedResult> {
+  const provider = task.intelligence.provider;
+  const adapter =
+    provider &&
+    PUBLIC_API_RESPONSE_ADAPTERS[
+      provider.key as keyof typeof PUBLIC_API_RESPONSE_ADAPTERS
+    ];
+  if (!provider || !adapter)
+    throw new Error("No public provider reader is configured.");
+  const parsed = parsePublicApiJobRecords(
+    JSON.parse(task.text) as unknown,
+    adapter,
+  );
+  const records = parsed.records.sort(
+    (left, right) =>
+      Number(isExactProviderJobTarget(right, task.target.startingUrl)) -
+      Number(isExactProviderJobTarget(left, task.target.startingUrl)),
+  );
+  const jobs: JobPosting[] = [];
+  const preparations: DiscoveryFeedResult["preparations"] = [];
+  for (const [position, record] of records.entries()) {
+    if (position % PROVIDER_API_JOBS_PER_TURN === 0) await yieldToEventLoop();
+    const raw = toProviderJobPosting(record, {
+      target: task.target,
+      source: task.source,
+      provider,
+      artifact: { intelligence: task.intelligence },
+    });
+    if (!raw) continue;
+    const posting = task.prepareForDiscovery
+      ? toProviderAwarePosting({
+          posting: raw,
+          target: task.target,
+          collectionMethod: "api",
+          discoveryMethod: "public_api",
+          intelligence: task.intelligence,
+          adapterKind: task.source,
+        })
+      : raw;
+    jobs.push(raw);
+    if (task.prepareForDiscovery) {
+      const content = prepareListingContent(posting.description);
+      const normalized: Partial<JobPosting> = {};
+      for (const field of Object.keys(posting) as Array<keyof JobPosting>) {
+        if (!isDeepStrictEqual(raw[field], posting[field]))
+          Object.assign(normalized, { [field]: posting[field] });
+      }
+      preparations.push({
+        normalized,
+        fingerprints: createDiscoveryListingFingerprints(posting),
+        content,
+        screeningContent:
+          raw.description === posting.description
+            ? content
+            : prepareListingContent(raw.description),
+      });
+    }
+  }
+  return {
+    jobs,
+    skippedMalformedCount: parsed.skippedMalformedCount,
+    preparations,
+  };
+}
+
 export async function collectPublicProviderJobs(input: {
   target: JobDiscoveryTarget;
   artifact: Pick<SourceInstructionArtifact, "intelligence">;
@@ -1823,6 +1909,8 @@ export async function collectPublicProviderJobs(input: {
   retryDelaysMs?: readonly number[];
   /** Silence that ends a request; the default suits real networks. */
   timeoutMs?: number;
+  /** Discovery can consume the worker's normalized postings without a second pass. */
+  prepareForDiscovery?: boolean;
 }): Promise<{
   jobs: JobPosting[];
   warning: string | null;
@@ -1847,7 +1935,7 @@ export async function collectPublicProviderJobs(input: {
     if (responseAdapter && provider.publicApiUrlTemplate) {
       const publicApiUrl = provider.publicApiUrlTemplate;
       // One request with its own time limit; the body is read inside it.
-      const requestFeed = async (): Promise<unknown> => {
+      const requestFeed = async (): Promise<string> => {
         const timeout = createProviderApiQuietTimeout(
           input.timeoutMs ?? PROVIDER_API_TIMEOUT_MS,
           PROVIDER_API_TOTAL_TIMEOUT_MS,
@@ -1870,7 +1958,7 @@ export async function collectPublicProviderJobs(input: {
                 : null,
             );
           }
-          return await readFeedJson(response, timeout.progress);
+          return await readFeedText(response, timeout.progress);
         } finally {
           composedSignal.cleanup();
           timeout.cleanup();
@@ -1878,10 +1966,10 @@ export async function collectPublicProviderJobs(input: {
       };
 
       pagesCovered += 1;
-      let payload: unknown;
+      let text: string;
       for (let attempt = 0; ; attempt += 1) {
         try {
-          payload = await requestFeed();
+          text = await requestFeed();
           break;
         } catch (error) {
           const delay = retryDelaysMs[attempt];
@@ -1904,28 +1992,31 @@ export async function collectPublicProviderJobs(input: {
         }
       }
 
-      const parsedPublicApiRecords = parsePublicApiJobRecords(
-        payload,
-        responseAdapter,
+      const execute = getDiscoveryFeedExecutor() ?? preparePublicProviderFeed;
+      const parsing = execute(
+        {
+          text,
+          target: input.target,
+          intelligence: input.artifact.intelligence,
+          source: input.source,
+          prepareForDiscovery: input.prepareForDiscovery ?? false,
+        },
+        input.signal,
       );
-      payload = null;
-      const records = parsedPublicApiRecords.records.sort(
-        (left, right) =>
-          Number(isExactProviderJobTarget(right, input.target.startingUrl)) -
-          Number(isExactProviderJobTarget(left, input.target.startingUrl)),
-      );
-      // A big board is hundreds of HTML descriptions; converting them in one
-      // go held the main process for a quarter of a second or more.
-      const jobs: JobPosting[] = [];
-      for (const [position, record] of records.entries()) {
-        if (position % PROVIDER_API_JOBS_PER_TURN === 0) {
-          await yieldToEventLoop();
-          if (input.signal?.aborted) {
-            throw new DOMException("Aborted", "AbortError");
-          }
-        }
-        const posting = toProviderJobPosting(record, { ...input, provider });
-        if (posting) jobs.push(posting);
+      text = "";
+      const parsedPublicApiRecords = await parsing;
+      input.signal?.throwIfAborted();
+      const { jobs, preparations } = parsedPublicApiRecords;
+      for (const [position, preparation] of preparations.entries()) {
+        const raw = jobs[position]!;
+        const job = { ...raw, ...preparation.normalized };
+        rememberPreparedDiscoveryPosting(raw, job);
+        rememberPreparedListingContent(job.description, preparation.content);
+        rememberPreparedListingContent(
+          raw.description,
+          preparation.screeningContent,
+        );
+        rememberDiscoveryListingFingerprints(job, preparation.fingerprints);
       }
 
       return {

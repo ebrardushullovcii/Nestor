@@ -1,4 +1,5 @@
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
+import { installDiscoveryFeedWorkers } from "./discovery-cpu";
 import { publishJobFinderWorkspaceUpdate } from "./workspace-updates";
 import { mainBuildDigest } from "./startup-workspace-view";
 import {
@@ -611,6 +612,7 @@ export async function createJobFinderWorkspaceServiceAsync(
   publishOnApplyStandingChanges(jobFinderRepository, () =>
     publishJobFinderWorkspaceUpdate(),
   );
+  installDiscoveryFeedWorkers();
   const workspaceService = createJobFinderWorkspaceService({
     aiClient,
     visionProvider,
