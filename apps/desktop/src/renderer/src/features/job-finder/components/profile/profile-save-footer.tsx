@@ -1,6 +1,19 @@
-import { useId } from "react";
+import { useEffect, useId } from "react";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
+import {
+  eventMatchesJobFinderShortcut,
+  formatJobFinderShortcutCombo,
+  getJobFinderAriaKeyshortcuts,
+  PROFILE_SAVE_COMBO,
+  type JobFinderPlatform,
+} from "../../lib/job-finder-shortcuts";
+
+function currentPlatform(): JobFinderPlatform {
+  return typeof navigator !== "undefined" && /mac/i.test(navigator.platform)
+    ? "darwin"
+    : "win32";
+}
 
 interface ProfileSaveFooterProps {
   actionMessage: string | null;
@@ -25,6 +38,17 @@ export function ProfileSaveFooter({
   validationMessage,
 }: ProfileSaveFooterProps) {
   const saveStateId = useId();
+  // Ctrl+S saves, as in any desktop editor; with nothing to save it does
+  // nothing and the browser's own "Save page" never opens.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!eventMatchesJobFinderShortcut(event, PROFILE_SAVE_COMBO)) return;
+      event.preventDefault();
+      if (hasUnsavedChanges && !isSavePending) onSave();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [hasUnsavedChanges, isSavePending, onSave]);
 
   return (
     <div
@@ -115,6 +139,10 @@ export function ProfileSaveFooter({
           <span className="contents" data-profile-assistant-launcher-slot />
           <Button
             aria-describedby={hasUnsavedChanges ? undefined : saveStateId}
+            aria-keyshortcuts={getJobFinderAriaKeyshortcuts(
+              PROFILE_SAVE_COMBO,
+              currentPlatform(),
+            )}
             className="w-full sm:w-auto sm:shrink-0"
             disabled={!hasUnsavedChanges}
             pending={isSavePending}
@@ -123,6 +151,15 @@ export function ProfileSaveFooter({
             variant="primary"
           >
             Save changes
+            <kbd
+              aria-hidden="true"
+              className="ml-1 rounded-sm border border-current/30 px-1 font-sans text-(length:--text-tiny) font-medium opacity-80"
+            >
+              {formatJobFinderShortcutCombo(
+                PROFILE_SAVE_COMBO,
+                currentPlatform(),
+              )}
+            </kbd>
           </Button>
         </div>
       </div>

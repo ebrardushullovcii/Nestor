@@ -13,7 +13,8 @@ export type JobFinderShortcutCombo =
   | "mod+b"
   | "mod+enter"
   | "mod+i"
-  | "mod+k";
+  | "mod+k"
+  | "mod+s";
 
 const LITERAL_KEY_COMBOS: readonly JobFinderShortcutCombo[] = ["/", "?"];
 
@@ -76,6 +77,9 @@ export const JOB_FINDER_SHORTCUTS: readonly JobFinderShortcutDefinition[] = [
  * in the app-wide list, which holds no approve, delete or submit shortcut.
  */
 export const RESUME_REVIEW_APPROVE_AND_NEXT_COMBO = "mod+enter" as const;
+
+/** Profile's own combo: save the page's unsaved changes, named on Save. */
+export const PROFILE_SAVE_COMBO = "mod+s" as const;
 
 export interface JobFinderKeyEventLike {
   altKey: boolean;
