@@ -2400,6 +2400,9 @@ export function createWorkspaceDiscoveryMethods(
         invalidSkipped: activeRun.summary.invalidSkipped,
       });
     const listingAbortController = new AbortController();
+    // HTTP and extraction can run eight at once; rendered fallbacks also
+    // need browser tabs alongside the sources and the person's open pages.
+    const renderedListingSlots = createConcurrencyLimiter(2);
     let listingReadsReserved = 0;
     const completedListingReads = new Map<
       string,
@@ -2486,6 +2489,9 @@ export function createWorkspaceDiscoveryMethods(
           }),
         );
       readingProgress();
+      const readRenderedPage = ctx.browserRuntime.readRenderedPage?.bind(
+        ctx.browserRuntime,
+      );
       const listingPass = enrichSavedJobListingDetails({
         jobs: [],
         nextJob: () => listingQueue.next(),
@@ -2493,11 +2499,13 @@ export function createWorkspaceDiscoveryMethods(
         concurrency: 8,
         fetchHtml: ctx.fetchListingHtml,
         readPage: createModelListingPageReader(ctx.aiClient),
-        ...(ctx.browserRuntime.readRenderedPage
+        ...(readRenderedPage
           ? {
-              readRenderedPage: ctx.browserRuntime.readRenderedPage.bind(
-                ctx.browserRuntime,
-              ),
+              readRenderedPage: (
+                url: string,
+                options: { signal?: AbortSignal },
+              ) =>
+                renderedListingSlots.run(() => readRenderedPage(url, options)),
             }
           : {}),
         assess: assessDiscoveryPosting,

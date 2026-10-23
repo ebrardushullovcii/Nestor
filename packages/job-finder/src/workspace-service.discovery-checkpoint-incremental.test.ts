@@ -230,6 +230,66 @@ test("reads and judges full listings before collection ends, and reuses both on 
 }, 30_000);
 
 describe("discovery checkpoint incremental persistence", () => {
+  test("rendered listing fallbacks leave browser capacity for source tabs", async () => {
+    const { seed } = createHarness();
+    const template = createSeed().savedJobs[0]!;
+    seed.savedJobs = Array.from({ length: 6 }, (_, index) => ({
+      ...template,
+      id: `render_${index}`,
+      sourceJobId: `render_${index}`,
+      canonicalUrl: `https://example.com/jobs/render_${index}`,
+      status: "discovered" as const,
+      personSupplied: false,
+      detailQuality: "card_only" as const,
+      listingDetailFetch: null,
+    }));
+    const fullText =
+      "Own product research and design systems with engineering teams.\n".repeat(
+        20,
+      );
+    let active = 0;
+    let peak = 0;
+    const readRenderedPage = vi.fn(async (url: string) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      active -= 1;
+      return {
+        html: `<html><body>rendered-body ${fullText}</body></html>`,
+        finalUrl: url,
+      };
+    });
+    const { workspaceService } = createWorkspaceServiceHarness({
+      seed,
+      browserRuntime: { ...createAgentBrowserRuntime([]), readRenderedPage },
+      fetchListingHtml: (url) =>
+        Promise.resolve({
+          status: 200,
+          html: "<html>Loading</html>",
+          finalUrl: url,
+        }),
+      aiClient: {
+        ...createAgentAiClient(),
+        extractJobsFromPage: (input) =>
+          Promise.resolve([
+            {
+              ...seed.savedJobs.find(
+                (job) => job.canonicalUrl === input.pageUrl,
+              )!,
+              description: input.pageText.includes("rendered-body")
+                ? fullText
+                : "",
+              needsRenderedPage: !input.pageText.includes("rendered-body"),
+            },
+          ]),
+        judgeJobFits: () => Promise.resolve([]),
+      },
+    });
+    await workspaceService.runAgentDiscovery();
+    expect(readRenderedPage).toHaveBeenCalledTimes(6);
+    expect(peak).toBe(2);
+  });
+
   test("overlapping older listing and fit queues share the per-source fit allowance", async () => {
     const { seed } = createHarness();
     const template = createSeed().savedJobs[0]!;
