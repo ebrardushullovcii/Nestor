@@ -152,8 +152,7 @@ export function useResumeAutosave(input: {
     return saved;
   }, []);
   const closeSaveKey = useRef(Symbol("resume-autosave"));
-  const hasPendingSave =
-    enabled && (unsaved || saving) && !failedOnThisContent;
+  const hasPendingSave = enabled && (unsaved || saving) && !failedOnThisContent;
   useEffect(() => {
     const key = closeSaveKey.current;
     setPendingCloseSave(key, hasPendingSave ? saveBeforeClose : null);

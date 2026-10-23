@@ -35,9 +35,11 @@ describe("ProfileSetupStepFooter save state", () => {
     renderFooter({ hasUnsavedChanges: true, hasUserEdits: false });
 
     expect(
-      screen.getByText("Imported details are not saved yet."),
+      screen.getByText("Filled in from your resume. Saved when you continue."),
     ).toBeTruthy();
     expect(screen.queryByText(/on this step/)).toBeNull();
+    // The step's own button saves; no separate Save button for an import.
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
   });
 
   it("still names the person's own edits as unsaved changes", () => {
