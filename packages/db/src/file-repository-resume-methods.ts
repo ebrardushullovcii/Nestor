@@ -85,6 +85,7 @@ type FileRepositoryResumeMethods = Pick<
 
 export function createFileRepositoryResumeMethods(
   context: FileRepositoryContext,
+  scheduleApprovalFold: () => void,
 ): FileRepositoryResumeMethods {
   const { database, filePath, upsertPersistedValue, writePersistedValue } =
     context;
@@ -1072,6 +1073,7 @@ export function createFileRepositoryResumeMethods(
       });
 
       await secureDatabaseFile(filePath);
+      scheduleApprovalFold();
     },
   };
 }

@@ -6,7 +6,7 @@ import {
   type TailoredAsset,
 } from "@nestor/contracts";
 
-/** Approval changes must not rewrite the (potentially megabyte) draft body. */
+/** Atomic approval commits defer writes to the (potentially megabyte) bodies. */
 export function ensureResumeApprovalState(database: DatabaseSync): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS tailored_asset_file_state (

@@ -180,3 +180,186 @@ test("an existing workspace gains approval state without changing draft bytes", 
     await temp.cleanup();
   }
 });
+
+test("background folds yield and preserve cached bodies while legacy SQL reads become stale", async () => {
+  const temp = await createTempRepository("nestor-approval-fold-");
+  const repo = await temp.createRepository();
+  const db = new DatabaseSync(temp.filePath);
+  try {
+    for (let i = 0; i < 8; i++) await repo.upsertResumeDraft(draft(String(i)));
+    const before = await repo.readDisplayCollections!();
+    await repo.staleResumeDrafts!({
+      draftIds: before.resumeDrafts.map((d) => d.id),
+      staleReason: reason,
+      updatedAt: staleAt,
+    });
+    const pending = () =>
+      Number(
+        db.prepare("SELECT count(*) n FROM resume_draft_approval_state").get()!
+          .n,
+      );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(pending()).toBeGreaterThan(0);
+    expect(pending()).toBeLessThan(8);
+    for (let i = 0; i < 100 && pending(); i++)
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(pending()).toBe(0);
+    const parse = vi.spyOn(JSON, "parse");
+    const after = await repo.readDisplayCollections!();
+    expect(parse).not.toHaveBeenCalled();
+    parse.mockRestore();
+    for (const value of after.resumeDrafts) {
+      expect(value.sections).toBe(
+        before.resumeDrafts.find((d) => d.id === value.id)!.sections,
+      );
+      const body: unknown = JSON.parse(
+        String(
+          db
+            .prepare("SELECT value FROM resume_drafts WHERE id=?")
+            .get(value.id)!.value,
+        ),
+      );
+      expect(body).toEqual(value);
+      expect(body).toMatchObject({
+        status: "stale",
+        staleReason: reason,
+        approvedAt: null,
+        approvedExportId: null,
+      });
+    }
+  } finally {
+    vi.restoreAllMocks();
+    db.close();
+    await repo.close();
+    await temp.cleanup();
+  }
+});
+
+test("startup and close fold pending draft and asset state; later body writes win", async () => {
+  const temp = await createTempRepository("nestor-approval-fold-lifecycle-");
+  let repo = await temp.createRepository();
+  const db = new DatabaseSync(temp.filePath);
+  try {
+    await repo.upsertResumeDraft(draft("a"));
+    await repo.upsertTailoredAsset(
+      TailoredAssetSchema.parse({
+        id: "asset",
+        jobId: "a",
+        kind: "resume",
+        status: "ready",
+        label: "Synthetic",
+        version: "1",
+        templateName: "Classic",
+        compatibilityScore: 90,
+        progressPercent: 100,
+        updatedAt: originalAt,
+        storagePath: "/synthetic.pdf",
+      }),
+    );
+    await repo.close();
+    // Simulate a process killed immediately after its atomic profile commit.
+    db.prepare("INSERT INTO resume_draft_approval_state VALUES (?, ?, ?)").run(
+      "a",
+      reason,
+      staleAt,
+    );
+    db.prepare("INSERT INTO tailored_asset_file_state VALUES (?, ?)").run(
+      "asset",
+      staleAt,
+    );
+    repo = await temp.createRepository();
+    expect(
+      db.prepare("SELECT count(*) n FROM resume_draft_approval_state").get()!.n,
+    ).toBe(0);
+    expect(
+      db.prepare("SELECT count(*) n FROM tailored_asset_file_state").get()!.n,
+    ).toBe(0);
+    expect(
+      JSON.parse(
+        String(db.prepare("SELECT value FROM resume_drafts").get()!.value),
+      ),
+    ).toMatchObject({ status: "stale", staleReason: reason });
+    expect(
+      JSON.parse(
+        String(db.prepare("SELECT value FROM tailored_assets").get()!.value),
+      ),
+    ).toMatchObject({ storagePath: null, updatedAt: staleAt });
+
+    await repo.staleResumeDrafts!({
+      draftIds: ["a"],
+      staleReason: "New reason",
+      updatedAt: staleAt,
+    });
+    await repo.upsertResumeDraft(draft("a"));
+    await repo.close();
+    expect(
+      JSON.parse(
+        String(db.prepare("SELECT value FROM resume_drafts").get()!.value),
+      ),
+    ).toEqual(draft("a"));
+    repo = await temp.createRepository();
+    await repo.staleResumeDrafts!({
+      draftIds: ["a"],
+      staleReason: "Close reason",
+      updatedAt: staleAt,
+    });
+    await repo.close();
+    expect(
+      JSON.parse(
+        String(db.prepare("SELECT value FROM resume_drafts").get()!.value),
+      ),
+    ).toMatchObject({ status: "stale", staleReason: "Close reason" });
+    repo = await temp.createRepository();
+  } finally {
+    db.close();
+    await repo.close();
+    await temp.cleanup();
+  }
+});
+
+test("a failed fold keeps durable side state and retries on close without publishing rolled-back cache fields", async () => {
+  const temp = await createTempRepository("nestor-approval-fold-retry-");
+  const repo = await temp.createRepository();
+  let closed = false;
+  const db = new DatabaseSync(temp.filePath);
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    await repo.upsertResumeDraft(draft("a"));
+    await repo.readDisplayCollections!();
+    db.exec(`CREATE TRIGGER fail_fold BEFORE UPDATE ON resume_drafts
+      BEGIN SELECT RAISE(ABORT, 'synthetic fold failure'); END;`);
+    await repo.staleResumeDrafts!({
+      draftIds: ["a"],
+      staleReason: reason,
+      updatedAt: staleAt,
+    });
+    for (let i = 0; i < 20 && warn.mock.calls.length === 0; i++)
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(warn).toHaveBeenCalled();
+    expect(
+      JSON.parse(
+        String(db.prepare("SELECT value FROM resume_drafts").get()!.value),
+      ),
+    ).toMatchObject({ status: "approved" });
+    expect(
+      db.prepare("SELECT count(*) n FROM resume_draft_approval_state").get()!.n,
+    ).toBe(1);
+    expect(
+      (await repo.readDisplayCollections!()).resumeDrafts[0],
+    ).toMatchObject({ status: "stale", staleReason: reason });
+    db.exec("DROP TRIGGER fail_fold");
+    await repo.close();
+    closed = true;
+    expect(
+      JSON.parse(
+        String(db.prepare("SELECT value FROM resume_drafts").get()!.value),
+      ),
+    ).toMatchObject({ status: "stale", staleReason: reason });
+  } finally {
+    db.exec("DROP TRIGGER IF EXISTS fail_fold");
+    if (!closed) await repo.close();
+    db.close();
+    warn.mockRestore();
+    await temp.cleanup();
+  }
+});

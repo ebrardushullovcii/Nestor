@@ -137,6 +137,7 @@ import {
 import { createIntelligenceProjectionReader } from "./internal/intelligence-projection";
 import { createDisplayCollectionsReader } from "./internal/display-collections";
 import { createSingletonProjectionReader } from "./internal/singleton-projection";
+import { createResumeApprovalFolder } from "./internal/resume-approval-fold";
 
 const nullableCampaignSchema = JobSearchCampaignCollectionSchema.nullable();
 
@@ -356,6 +357,7 @@ export async function createFileJobFinderRepository(
   // Set this before any connection-local projection tables are created.
   database.exec("PRAGMA temp_store = FILE; PRAGMA temp.cache_size = -2048");
   const stopWalCheckpoints = scheduleWalCheckpoints(database, options.filePath);
+  let approvalFolder: ReturnType<typeof createResumeApprovalFolder>;
 
   // Everything below runs on the open connection. If any step fails, the
   // connection is closed before the error leaves: an orphaned handle keeps the
@@ -410,6 +412,8 @@ export async function createFileJobFinderRepository(
       await secureDatabaseFile(options.filePath);
     }
 
+    // Complete interrupted folds before publishing any startup view.
+    await createResumeApprovalFolder(database).flush();
     context = createFileRepositoryContext({
       database,
       filePath: options.filePath,
@@ -430,6 +434,10 @@ export async function createFileJobFinderRepository(
     readDisplayCollections = createDisplayCollectionsReader(database, {
       validationStamp: options.rowValidationStamp ?? null,
     });
+    approvalFolder = createResumeApprovalFolder(
+      database,
+      readDisplayCollections.prepareResumeStateFold,
+    );
     const readDiscoveryDisplay = createDiscoveryDisplayProjectionReader(
       database,
       normalizedSeed.discovery,
@@ -458,6 +466,7 @@ export async function createFileJobFinderRepository(
       return sharedDiscovery;
     };
   } catch (error) {
+    await stopWalCheckpoints();
     closeDatabaseQuietly(database);
     throw error;
   }
@@ -858,7 +867,7 @@ export async function createFileJobFinderRepository(
           return result;
         }),
     }),
-    ...createFileRepositoryResumeMethods(context),
+    ...createFileRepositoryResumeMethods(context, approvalFolder.schedule),
     // These reads need only authority envelopes, not the application/result
     // bodies loaded by the transaction store for preflight/outcome mutations.
     listApplicationAuthorityEnvelopes(filter) {
@@ -896,6 +905,7 @@ export async function createFileJobFinderRepository(
     exportState: () =>
       Promise.resolve(cloneValue(readState(database, normalizedSeed))),
     async close() {
+      await approvalFolder.flush();
       if (automaticBackup.onClose) {
         const backup = await createWorkspaceCloseDatabaseBackup({
           database,

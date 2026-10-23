@@ -600,8 +600,9 @@ export interface JobFinderRepository
    * Marks stored drafts stale in one transaction, as clearResumeApproval
    * does for one: status, reason and time, no approval, the job's exports
    * unapproved, and the job's first tailored asset without its file. Only
-   * those fields change, so whole drafts (often most of a megabyte each)
-   * are not read, validated and written again. Unknown ids are skipped.
+   * those fields change in the commit; the file repository then folds them
+   * into the bodies in bounded background slices for older builds. Whole
+   * drafts are not read or validated by the save. Unknown ids are skipped.
    */
   staleResumeDrafts?(input: {
     draftIds: readonly string[];
