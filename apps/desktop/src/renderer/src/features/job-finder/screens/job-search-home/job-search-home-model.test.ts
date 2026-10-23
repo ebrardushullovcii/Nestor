@@ -915,7 +915,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     });
     expect(
       model.next.secondary.map((button) => button.label).slice(0, 2),
-    ).toEqual(["Create the resume", "Apply to 1 ready job"]);
+    ).toEqual(["Create the missing resume", "Apply to 1 ready job"]);
   });
 
   it("leads with Create when most shortlisted jobs still need a resume, with Apply beside it", () => {
@@ -957,7 +957,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     const model = build(ws);
     expect(model.next).toMatchObject({ id: "apply", title: "Apply to 2 ready jobs" });
     expect(model.next.secondary[0]).toMatchObject({
-      label: "Create the resume",
+      label: "Create the missing resume",
       action: { kind: "create_resumes" },
     });
   });
@@ -2317,7 +2317,7 @@ describe("buildJobSearchHomeModel · applications the person stopped or may have
       primary: { action: { kind: "navigate" } },
     });
     expect(model.next.detail).toContain("Prepare again");
-    expect(model.stages?.[2]?.detail).toBe("1 needs Prepare again");
+    expect(model.stages?.[2]?.detail).toBe("1 form closed");
 
   });
 

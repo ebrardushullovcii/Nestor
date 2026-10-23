@@ -1284,7 +1284,7 @@ export function buildJobSearchHomeModel(
           primary: {
             label:
               shortlist.missingResumes === 1
-                ? "Create the resume"
+                ? "Create the missing resume"
                 : `Create ${shortlist.missingResumes} resumes`,
             action: { kind: "create_resumes" },
           },
@@ -2142,7 +2142,7 @@ export function buildJobSearchHomeModel(
                 ? `${applications.applied} applied`
                 : null,
               applications.pageClosedJobIds.length > 0
-                ? `${applications.pageClosedJobIds.length} ${applications.pageClosedJobIds.length === 1 ? "needs" : "need"} Prepare again`
+                ? `${plural(applications.pageClosedJobIds.length, "form")} closed`
                 : null,
               applications.couldNotApply -
                 applications.notStarted -
