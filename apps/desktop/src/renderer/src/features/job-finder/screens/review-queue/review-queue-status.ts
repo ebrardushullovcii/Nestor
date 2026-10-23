@@ -1016,15 +1016,20 @@ export type ShortlistStatusFilter =
   | "ready"
   | "in_applications";
 
+/**
+ * Tab names, shorter than the row badges they count: five or six tabs with
+ * their counts have to fit the list column at 1440 px, where "Needs a resume"
+ * and "Ready to apply" pushed the last tab under a scrollbar.
+ */
 export const SHORTLIST_STATUS_FILTER_LABELS: Record<
   ShortlistStatusFilter,
   string
 > = {
   all: "All",
-  needs_resume: NEEDS_RESUME_LABEL,
+  needs_resume: "No resume",
   writing: "Writing",
   to_review: TO_REVIEW_LABEL,
-  ready: "Ready to apply",
+  ready: "Ready",
   in_applications: "In Applications",
 };
 

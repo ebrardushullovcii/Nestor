@@ -442,7 +442,20 @@ export function ReviewQueueListPanel({
   const approveResumes = (jobIds: readonly string[]) => {
     if (!onApproveResumes || jobIds.length === 0) return;
     setIsApprovingResumes(true);
-    void onApproveResumes(jobIds).finally(() => setIsApprovingResumes(false));
+    // Approved jobs leave To review, so their ticks go too: "2 selected" over
+    // rows the tab no longer shows read as a selection nobody could see.
+    void onApproveResumes(jobIds)
+      .then(() =>
+        setResumeSelection((current) => {
+          if (!current) return current;
+          const approved = new Set(jobIds);
+          const jobIdsLeft = current.jobIds.filter((id) => !approved.has(id));
+          return jobIdsLeft.length > 0
+            ? { ...current, jobIds: jobIdsLeft }
+            : null;
+        }),
+      )
+      .finally(() => setIsApprovingResumes(false));
   };
   // One press queues every chosen job; the queue keeps to ten at a time and
   // to the daily limit by itself (ADR 0058).
@@ -737,6 +750,7 @@ export function ReviewQueueListPanel({
           ) : null}
           {onRemoveJobs ? (
             <Button
+              aria-label="Remove from shortlist"
               disabled={isRemovingSelection}
               onClick={() => void removeSelection()}
               pending={isRemovingSelection}
@@ -744,7 +758,7 @@ export function ReviewQueueListPanel({
               type="button"
               variant="outline"
             >
-              Remove from shortlist
+              Remove
             </Button>
           ) : null}
           {filteredJobIds.some((id) => !selectedJobIds.has(id)) ? (
