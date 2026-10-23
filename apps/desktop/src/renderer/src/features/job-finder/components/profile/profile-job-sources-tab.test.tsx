@@ -336,7 +336,11 @@ describe("ProfileJobSourcesTab", () => {
         name: "Previous source page (top of list)",
       }),
     ).toHaveProperty("disabled", true);
-    expect(within(topPager).getByText("Page 1 of 21")).toBeTruthy();
+    expect(
+      within(topPager)
+        .getByRole("button", { name: "Page 1" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
     expect(screen.getAllByRole("button", { name: "Next" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Previous" })).toHaveLength(1);
 

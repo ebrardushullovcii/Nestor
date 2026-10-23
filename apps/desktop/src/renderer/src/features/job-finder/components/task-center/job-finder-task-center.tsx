@@ -360,7 +360,10 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
           <div className="grid gap-1">
             <h2 className="font-display text-(--text-headline)">Activity</h2>
             <p className="text-(length:--text-small) leading-5 text-foreground-soft">
-              What Job Finder is doing now and how its last runs ended.
+              {/* Promise last runs only while there are some to show. */}
+              {finishedItems.length > 0
+                ? "What Job Finder is doing now and how its last runs ended."
+                : "What Job Finder is doing now."}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1">

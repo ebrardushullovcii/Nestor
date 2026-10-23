@@ -10,6 +10,7 @@ import {
 } from "@nestor/contracts";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { APPLICATION_WORK_PAUSED_REASON } from "../../lib/application-work-paused";
 import { ApplicationsRecordsPanel } from "./applications-records-panel";
 import {
   READY_PAGE_OPENED_STATUS,
@@ -55,6 +56,7 @@ function renderPanel(
     onFinishInBrowser?: FinishInBrowserHandler;
     onStartApplyCopilot?: () => void;
     isApplyPending?: boolean;
+    applicationWorkPaused?: boolean;
     applyMode?: "fill_only" | "apply_for_me";
   },
 ) {
@@ -189,6 +191,24 @@ describe("Open form on an Applications row", () => {
       applyMode: "apply_for_me",
     });
     expect(screen.getByRole("button", { name: "Apply again" })).toBeTruthy();
+  });
+
+  it("holds a row's Apply again while all work is paused and says why", () => {
+    const { record, result } = fixture("failed", "The page did not load");
+    const onStartApplyCopilot = vi.fn();
+    renderPanel(record, result, {
+      onFinishInBrowser: vi.fn(),
+      onStartApplyCopilot,
+      applyMode: "apply_for_me",
+      applicationWorkPaused: true,
+    });
+    const button = screen.getByRole<HTMLButtonElement>("button", {
+      name: "Apply again",
+    });
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(onStartApplyCopilot).not.toHaveBeenCalled();
+    expect(screen.getByText(APPLICATION_WORK_PAUSED_REASON)).toBeTruthy();
   });
 
   it("offers no retry on a row the person cancelled", () => {

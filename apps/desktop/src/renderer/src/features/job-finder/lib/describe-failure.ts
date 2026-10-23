@@ -60,7 +60,7 @@ export const FAILURE_SENTENCES = {
   invalid_details:
     "Some details were missing or did not fit, so nothing was saved. Check the fields you just changed and try again.",
   paused:
-    "Background work is paused, so nothing new can start. Press Resume background work on the Job Finder Home screen, then try again.",
+    "All work is paused, so nothing new can start. Press Continue on Home, then try again.",
   unknown: "Something went wrong and this did not finish. Try again.",
   unusable_resume:
     "No resume details were found in this file. Choose another file.",
@@ -222,6 +222,7 @@ const INVALID_DETAILS_PATTERNS = [
 
 const PAUSED_PATTERNS: readonly RegExp[] = [
   /activity is paused/i,
+  /work is paused/i,
   /resume background work/i,
 ];
 

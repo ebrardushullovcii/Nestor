@@ -111,6 +111,7 @@ export type JobFinderAutoApplyQueueStartOutcome =
       status: "refused";
       reason:
         | "daily_capacity_exhausted"
+        | "work_paused"
         | "empty_selection"
         | "cancelled_stayed_in_workspace";
       message: string | null;
@@ -390,6 +391,7 @@ export interface JobFinderShellActions {
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   clearResumeApproval: (
     jobId: string,
+    restoreStatus?: "draft" | "needs_review",
   ) => Promise<JobFinderRendererWorkspaceSnapshot>;
   setWorkHistoryReviewAcknowledgment: (
     input: JobFinderSetWorkHistoryReviewAcknowledgmentInput,

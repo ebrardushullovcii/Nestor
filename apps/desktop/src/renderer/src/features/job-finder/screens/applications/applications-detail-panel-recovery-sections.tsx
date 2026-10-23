@@ -28,6 +28,7 @@ export function ApplicationsDetailPanelRecoverySections(props: {
   dailyPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
   excludedQueueRecoveryEntries: QueueEntry[];
   isApplyPending: boolean;
+  applicationWorkPaused?: boolean;
   onStartApplyCopilot: (input: JobFinderExactApplicationTarget) => void;
   onReviewResumePdf?: (jobId: string) => void;
   onStartAutoApplyQueue: (jobIds: string[]) => void;
@@ -71,6 +72,7 @@ export function ApplicationsDetailPanelRecoverySections(props: {
     dailyPreparationCapacity,
     excludedQueueRecoveryEntries,
     isApplyPending,
+    applicationWorkPaused = false,
     onStartApplyCopilot,
     onReviewResumePdf,
     onStartAutoApplyQueue,
@@ -108,6 +110,7 @@ export function ApplicationsDetailPanelRecoverySections(props: {
       dailyPreparationCapacity={dailyPreparationCapacity}
       excludedQueueRecoveryEntries={excludedQueueRecoveryEntries}
       isApplyPending={isApplyPending}
+      applicationWorkPaused={applicationWorkPaused}
       onStartApplyCopilot={onStartApplyCopilot}
       {...(onReviewResumePdf ? { onReviewResumePdf } : {})}
       onStartAutoApplyQueue={onStartAutoApplyQueue}

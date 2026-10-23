@@ -1,3 +1,4 @@
+import { APPLICATION_WORK_PAUSED_REASON } from "../../lib/application-work-paused";
 import { LIST_DETAIL_COLUMNS_CLASS } from "../../components/list-detail-columns";
 import { projectApplicationRecordsActivity } from "@nestor/contracts";
 import type { ReactNode } from "react";
@@ -257,6 +258,7 @@ export function ApplicationsScreen(props: {
     selectedAttempt,
     selectedRecord,
   } = props;
+  const applicationWorkPaused = Boolean(props.activityControl?.paused);
   const [activeFilter, setActiveFilter] = useRememberedString(
     "applications.filter",
     "all",
@@ -918,11 +920,13 @@ export function ApplicationsScreen(props: {
       applicationsStatusItems.push({
         id: "bulk-retry",
         tone: "warning",
-        text: `${retryCount} applications need another try`,
+        text: applicationWorkPaused
+          ? `${retryCount} applications need another try. ${APPLICATION_WORK_PAUSED_REASON}`
+          : `${retryCount} applications need another try`,
         action: {
           kind: "button",
           label: `Try again for all ${retryCount}`,
-          disabled: isApplyPending,
+          disabled: isApplyPending || applicationWorkPaused,
           onClick: () =>
             onStartAutoApplyQueue(
               retryableJobIds,
@@ -1051,6 +1055,7 @@ export function ApplicationsScreen(props: {
               onRaiseLimit={() => props.onRaiseDailyLimit?.()}
               pending={isApplyPending}
               queue={props.applyQueue}
+              results={applyJobResults}
             />
           ) : null}
           {visibleActionMessage ? (
@@ -1174,6 +1179,7 @@ export function ApplicationsScreen(props: {
               : {})}
             onStartApplyCopilot={onStartApplyCopilot}
             isApplyPending={isApplyPending}
+            applicationWorkPaused={applicationWorkPaused}
             hasUnassignedLegacyHistory={hasUnassignedLegacyLineage}
             onFilterChange={handleFilterChange}
             onSelectRecord={selectRecordAndRevealDetails}
@@ -1310,6 +1316,7 @@ export function ApplicationsScreen(props: {
             hasAnyApplications={applicationRecords.length > 0}
             hasVisibleApplications={filteredApplicationRecords.length > 0}
             isApplyPending={isApplyPending}
+            applicationWorkPaused={applicationWorkPaused}
             isApplyRequestPending={isApplyRequestPending}
             isApplyRunPending={isApplyRunPending}
             onApproveApplyRun={onApproveApplyRun}

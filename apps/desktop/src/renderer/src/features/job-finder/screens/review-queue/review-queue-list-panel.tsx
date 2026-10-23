@@ -1,3 +1,4 @@
+import { APPLICATION_WORK_PAUSED_REASON } from "../../lib/application-work-paused";
 import { estimateResumeBatchMinutesLeft } from "@nestor/contracts";
 import type { ReviewQueueItem, TailoredAssetSummary } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui";
@@ -95,6 +96,8 @@ interface ReviewQueueListPanelProps {
   onOpenSafeguards?: () => void;
   /** A safeguard holding every application start back, in plain words. */
   safeguardBlocker?: string | null;
+  /** All work is paused: Apply waits for Continue and says so. */
+  applicationWorkPaused?: boolean;
   onSelectItem: (jobId: string) => void;
   /**
    * Opens a job without scrolling to it, for when a status tab or the search
@@ -137,6 +140,7 @@ export function ReviewQueueListPanel({
   queuedJobIds,
   onOpenSafeguards,
   safeguardBlocker = null,
+  applicationWorkPaused = false,
   onSelectItem,
   onShowItem = onSelectItem,
   onRemoveJobs,
@@ -578,7 +582,7 @@ export function ReviewQueueListPanel({
                 label: forTicked
                   ? `${applyVerb} ${ready.length} selected`
                   : applyVerb.replace(/\s+to$/u, ""),
-                enabled: !isApplyToAllPending,
+                enabled: !isApplyToAllPending && !applicationWorkPaused,
                 run: () => {
                   onApplyToJobs(ready);
                   done();
@@ -720,7 +724,12 @@ export function ReviewQueueListPanel({
           !safeguardBlockerSentence ? (
             <Button
               data-testid="apply-selected"
-              disabled={isApplyToAllPending}
+              disabled={isApplyToAllPending || applicationWorkPaused}
+              title={
+                applicationWorkPaused
+                  ? APPLICATION_WORK_PAUSED_REASON
+                  : undefined
+              }
               onClick={() => {
                 onApplyToJobs(selectedReadyIds);
                 clearSelection();
@@ -832,7 +841,12 @@ export function ReviewQueueListPanel({
               <>
                 <Button
                   data-testid="apply-all-ready"
-                  disabled={isApplyToAllPending}
+                  disabled={isApplyToAllPending || applicationWorkPaused}
+                  title={
+                    applicationWorkPaused
+                      ? APPLICATION_WORK_PAUSED_REASON
+                      : undefined
+                  }
                   onClick={() => onApplyToJobs(readyToApplyJobIds)}
                   pending={isApplyToAllPending}
                   size="toolbar"
@@ -846,7 +860,7 @@ export function ReviewQueueListPanel({
                 {showsApplyPageButton ? (
                   <Button
                     data-testid="apply-page-ready"
-                    disabled={isApplyToAllPending}
+                    disabled={isApplyToAllPending || applicationWorkPaused}
                     onClick={() => onApplyToJobs(pageReadyIds)}
                     size="toolbar"
                     title="The ready jobs on this page of the list."
@@ -911,7 +925,9 @@ export function ReviewQueueListPanel({
           className="m-0 text-xs text-foreground-muted"
           data-testid="apply-all-outcome"
         >
-          {applyAllOutcome}
+          {applicationWorkPaused
+            ? APPLICATION_WORK_PAUSED_REASON
+            : applyAllOutcome}
         </p>
       ) : null}
       {!isSelecting && safeguardBlockerSentence && readyToApplyCount > 0 ? (

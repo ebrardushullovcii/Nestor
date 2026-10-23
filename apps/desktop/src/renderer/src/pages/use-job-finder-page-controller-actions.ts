@@ -1,3 +1,4 @@
+import { APPLICATION_WORK_PAUSED_REASON } from "@renderer/features/job-finder/lib/application-work-paused";
 import type { ResumeBatchGenerationProgress } from "@nestor/contracts";
 import { FAILURE_SENTENCES } from "@renderer/features/job-finder/lib/describe-failure";
 import {
@@ -116,6 +117,8 @@ import type { ApplyQueueControlAction } from "../features/job-finder/lib/apply-q
 import { buildResumeWorkspaceRoute } from "@renderer/features/job-finder/lib/resume-workspace-route";
 import {
   enqueueResumeApproval,
+  forgetResumeReview,
+  getResumeReviewSession,
   markResumeReviewApproved,
   markResumeReviewApproving,
   markResumeReviewFailed,
@@ -1087,7 +1090,12 @@ export function createPrimaryPageActions(
   // start surfaces disable their own controls when nothing remains, but any
   // caller that still reaches a start handler must see the refusal as a
   // visible actionable status instead of a dialog flowing into a no-op.
-  const getDailyCapacityRefusalMessage = (): string | null => {
+  // Every application start asks this first. The pause is the person's
+  // brake (the service refuses the same starts), then the spent day.
+  const getApplicationStartRefusalMessage = (): string | null => {
+    if (workspace?.activityControl?.paused) {
+      return APPLICATION_WORK_PAUSED_REASON;
+    }
     const capacity =
       workspace?.dashboard?.globalDailyApplicationPreparationCapacity ?? null;
     if (!capacity || !isDailyPreparationCapacityExhausted(capacity)) {
@@ -1773,6 +1781,11 @@ export function createPrimaryPageActions(
         },
       ),
     onApproveApply: (jobId: string) => {
+      const startRefusal = getApplicationStartRefusalMessage();
+      if (startRefusal) {
+        applyRouteScopedMessage({ message: startRefusal, tone: "failure" });
+        return;
+      }
       void confirmLeaveDirtyResumeWorkspace("approve this application").then(
         (mayLeave) => {
           if (!mayLeave) {
@@ -1827,6 +1840,11 @@ export function createPrimaryPageActions(
         const message = "No jobs selected for auto-apply queue.";
         applyRouteScopedMessage({ message });
         return { status: "refused", reason: "empty_selection", message };
+      }
+      if (workspace?.activityControl?.paused) {
+        const message = APPLICATION_WORK_PAUSED_REASON;
+        applyRouteScopedMessage({ message, tone: "failure" });
+        return { status: "refused", reason: "work_paused", message };
       }
 
       // Stay resolves false: take no action and keep every draft. Leave
@@ -1911,7 +1929,7 @@ export function createPrimaryPageActions(
         { scope: jobFinderPendingActions.apply() },
       ),
     onStartAutoApply: (input: JobFinderApplicationStartTarget) => {
-      const capacityRefusal = getDailyCapacityRefusalMessage();
+      const capacityRefusal = getApplicationStartRefusalMessage();
       if (capacityRefusal) {
         applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
         return;
@@ -1944,7 +1962,7 @@ export function createPrimaryPageActions(
       );
     },
     onStartApplyCopilot: (input: JobFinderApplicationStartTarget) => {
-      const capacityRefusal = getDailyCapacityRefusalMessage();
+      const capacityRefusal = getApplicationStartRefusalMessage();
       if (capacityRefusal) {
         applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
         return;
@@ -2186,6 +2204,13 @@ export function createPrimaryPageActions(
       // has read this resume and approved it, so the next one opens now and
       // the approval finishes behind it, one at a time. A failure keeps the
       // job in "To review" and is named on the review line in the studio.
+      // Undo puts the resume back under To review as it was, so it needs
+      // the status the approval is about to replace.
+      const restoreStatus =
+        workspace.reviewQueue.find((item) => item.jobId === jobId)
+          ?.resumeReview.status === "draft"
+          ? ("draft" as const)
+          : ("needs_review" as const);
       markResumeReviewApproving(jobId);
       enqueueResumeApproval(async () => {
         try {
@@ -2209,14 +2234,35 @@ export function createPrimaryPageActions(
         }
       });
       setSelectedReviewJobId(nextJobId ?? jobId);
-      navigate(
-        nextJobId
-          ? buildResumeWorkspaceRoute(nextJobId)
-          : "/job-finder/review-queue",
+      const destination = nextJobId
+        ? buildResumeWorkspaceRoute(nextJobId)
+        : "/job-finder/review-queue";
+      navigate(destination);
+      let undone = false;
+      applyRouteScopedMessage(
+        {
+          message: "Resume approved.",
+          tone: "success",
+          undo: () => {
+            if (undone) return;
+            undone = true;
+            // After the approval itself, which may still be building.
+            enqueueResumeApproval(async () => {
+              if (getResumeReviewSession().failed.has(jobId)) return;
+              await runAction(
+                () => actions.clearResumeApproval(jobId, restoreStatus),
+                () => forgetResumeReview(jobId),
+                "The resume is back under To review.",
+                { scope: jobFinderPendingActions.resumeExport(jobId) },
+              );
+            });
+          },
+        },
+        destination,
       );
     },
     onApproveResumeAndApply: (jobId: string) => {
-      const capacityRefusal = getDailyCapacityRefusalMessage();
+      const capacityRefusal = getApplicationStartRefusalMessage();
       if (capacityRefusal) {
         applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
         return;

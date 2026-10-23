@@ -6527,16 +6527,21 @@ export function createWorkspaceApplicationMethods(
         await approveResumeArtifact(jobId, artifact.id);
       });
     },
-    async clearResumeApproval(jobId) {
+    async clearResumeApproval(jobId, options) {
       return withResumeDraftTransition(jobId, async () => {
         const { draft, job, profile, tailoredAsset, templates } =
           await ensureResumeDraft(ctx, jobId);
+        const restoreStatus = options?.restoreStatus ?? null;
         const nextDraft = ResumeDraftSchema.parse({
           ...draft,
-          status: "stale",
+          // Undo of an approval puts back the status it replaced; any other
+          // clear asks for a fresh review.
+          status: restoreStatus ?? "stale",
           approvedAt: null,
           approvedExportId: null,
-          staleReason: "Resume approval was cleared and needs a fresh review.",
+          staleReason: restoreStatus
+            ? null
+            : "Resume approval was cleared and needs a fresh review.",
           updatedAt: new Date().toISOString(),
         });
         const nextAsset = buildTailoredAssetBridge({
@@ -6551,7 +6556,9 @@ export function createWorkspaceApplicationMethods(
         await assertResumeDraftCurrent(draft);
         await ctx.repository.clearResumeApproval({
           draft: nextDraft,
-          staleReason: nextDraft.staleReason ?? "Resume approval cleared.",
+          staleReason: restoreStatus
+            ? null
+            : (nextDraft.staleReason ?? "Resume approval cleared."),
           tailoredAsset: nextAsset,
         });
 

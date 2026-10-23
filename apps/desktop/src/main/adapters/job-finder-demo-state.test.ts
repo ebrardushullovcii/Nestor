@@ -7,6 +7,7 @@ import {
 
 import {
   createAggressiveTailoringDriveState,
+  assertDriveSeedStaysLocal,
   createAgentOwnedBrowserDriveState,
   createApplyQueueDemoState,
   createResumeWorkspaceDemoState,
@@ -96,6 +97,63 @@ describe("job finder demo state", () => {
     expect(state.applicationAttempts).toEqual([]);
     expect(state.userActionRequests).toEqual([]);
     expect(JobFinderRepositoryStateSchema.safeParse(state).success).toBe(true);
+  });
+
+  test("every browser-drive job a queue can reach points at loopback", () => {
+    for (const secondaryApplicationUrl of [
+      undefined,
+      "http://127.0.0.1:43210/apply-second",
+    ]) {
+      const state = createAgentOwnedBrowserDriveState({
+        sourceUrl: "http://127.0.0.1:43210",
+        applicationUrl: "http://127.0.0.1:43210/apply",
+        ...(secondaryApplicationUrl ? { secondaryApplicationUrl } : {}),
+        foundJobs: [
+          {
+            title: "Found",
+            company: "Local",
+            applicationUrl: "http://localhost:43211/apply",
+          },
+        ],
+      });
+      for (const job of state.savedJobs) {
+        for (const url of [
+          job.applicationUrl,
+          job.canonicalUrl,
+          job.employerWebsiteUrl,
+        ]) {
+          if (!url) continue;
+          expect(new URL(url).hostname, `${job.id} ${url}`).toMatch(
+            /^(?:127\.0\.0\.1|localhost)$/u,
+          );
+        }
+      }
+    }
+  });
+
+  test("a browser-drive seed refuses a job that would leave this machine", () => {
+    expect(() =>
+      createAgentOwnedBrowserDriveState({
+        sourceUrl: "http://127.0.0.1:43210",
+        applicationUrl: "https://www.linkedin.com/jobs/view/1/apply",
+      }),
+    ).toThrow("loopback");
+    expect(() =>
+      createAgentOwnedBrowserDriveState({
+        sourceUrl: "http://127.0.0.1:43210",
+        applicationUrl: "http://127.0.0.1:43210/apply",
+        foundJobs: [
+          {
+            title: "Real",
+            company: "Employer",
+            applicationUrl: "https://jobs.example.com/apply",
+          },
+        ],
+      }),
+    ).toThrow("job_found_1");
+    expect(() =>
+      assertDriveSeedStaysLocal(createApplyQueueDemoState()),
+    ).toThrow("loopback");
   });
 
   test("apply-queue seed jobs pin historical provenance to the configured target", () => {

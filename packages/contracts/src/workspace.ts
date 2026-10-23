@@ -134,6 +134,19 @@ export type JobFinderJobActionInput = z.infer<
   typeof JobFinderJobActionInputSchema
 >;
 
+/**
+ * Clearing a resume's approval. Undo of an approval names the status the
+ * draft had before it, so the resume goes back to To review as it was
+ * instead of reading as stale.
+ */
+export const JobFinderClearResumeApprovalInputSchema =
+  JobFinderJobActionInputSchema.extend({
+    restoreStatus: z.enum(["draft", "needs_review"]).optional(),
+  });
+export type JobFinderClearResumeApprovalInput = z.infer<
+  typeof JobFinderClearResumeApprovalInputSchema
+>;
+
 /** Send for me: the filled-in forms the agent sends, one after another. */
 export const JobFinderSendPreparedApplicationsInputSchema = z.object({
   jobIds: z.array(NonEmptyStringSchema).min(1).max(100),

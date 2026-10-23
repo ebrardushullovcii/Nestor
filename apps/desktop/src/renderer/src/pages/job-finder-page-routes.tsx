@@ -1662,6 +1662,7 @@ function JobFinderReviewQueueRouteContent() {
       workspace={context.workspace}
     >
       <ReviewQueueScreen
+        applicationWorkPaused={context.workspace.activityControl?.paused ?? false}
         // One plan has nothing to choose between; a picker with one entry
         // was just another row above the list.
         scopeControl={
