@@ -133,6 +133,37 @@ function useVisibleBrowserTitle(): string | null {
   return title;
 }
 
+/**
+ * The record the next message would mean by "this" (the open job, resume or
+ * application), so the header can name it. Screens publish it lazily, so it
+ * is re-read after clicks, keys and navigation while the chat is shown.
+ */
+function useFocusLabel(
+  peekFocus: (() => AssistantEntityRef | null) | undefined,
+  shown: boolean,
+  routeKey: string,
+): string | null {
+  const [label, setLabel] = useState<string | null>(null);
+  useEffect(() => {
+    if (!shown || !peekFocus) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read = () => {
+      clearTimeout(timer);
+      // After the click's own render, when the screen's getter is current.
+      timer = setTimeout(() => setLabel(peekFocus()?.label ?? null), 60);
+    };
+    read();
+    document.addEventListener("pointerup", read, true);
+    document.addEventListener("keyup", read, true);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("pointerup", read, true);
+      document.removeEventListener("keyup", read, true);
+    };
+  }, [peekFocus, shown, routeKey]);
+  return shown ? label : null;
+}
+
 function useContentWidth(): number {
   const [width, setWidth] = useState(() =>
     typeof window === "undefined" ? 1440 : window.innerWidth,
@@ -347,6 +378,11 @@ function AssistantSidebarPanel() {
   const width = assistant?.width ?? 400;
   const narrow = contentWidth - width < NARROW_CONTENT_MIN_WIDTH;
   const showPanel = open && (!narrow || assistant?.narrowView === "chat");
+  const focusLabel = useFocusLabel(
+    assistant?.peekFocus,
+    showPanel,
+    `${location.pathname}${location.search}`,
+  );
   const running =
     state.activeTurn !== null ||
     state.activity?.toolName === "generate_resumes";
@@ -670,6 +706,12 @@ function AssistantSidebarPanel() {
     state.conversations.find((entry) => entry.id === state.conversationId)
       ?.title ?? "Assistant";
   const pending = new Set(state.pendingMessageIds);
+  const lastReplyIsOutage =
+    state.messages
+      .at(-1)
+      ?.parts.some(
+        (part) => part.type === "notice" && part.kind === "outage",
+      ) ?? false;
   const viewingArchive =
     state.conversations.find((entry) => entry.id === state.conversationId)
       ?.status === "archived";
@@ -777,7 +819,9 @@ function AssistantSidebarPanel() {
               Looking at:{" "}
               {browserChip
                 ? `Browser · ${browserChip}`
-                : describeScreen(screen)}
+                : focusLabel
+                  ? `${describeScreen(screen)} · ${focusLabel}`
+                  : describeScreen(screen)}
             </span>
           </div>
           <button
@@ -871,7 +915,9 @@ function AssistantSidebarPanel() {
             </span>
           </div>
         ) : null}
-        {state.status && !state.status.available ? (
+        {/* A failed turn already says this as its reply; the banner only
+            warns before a message is sent. */}
+        {state.status && !state.status.available && !lastReplyIsOutage ? (
           <p
             className="shrink-0 border-b border-(--surface-panel-shell-border) px-3 py-2 text-[13px] text-muted-foreground"
             data-assistant-outage

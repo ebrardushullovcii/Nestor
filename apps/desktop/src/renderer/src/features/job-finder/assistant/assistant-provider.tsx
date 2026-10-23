@@ -102,6 +102,8 @@ interface AssistantProviderValue {
     mentions: AssistantEntityRef[];
     attachments: AssistantAttachment[];
   }) => Promise<AssistantContextReference>;
+  /** The record the screen would send as "this" right now, if any. */
+  peekFocus: () => AssistantEntityRef | null;
 }
 
 const AssistantContext = createContext<AssistantProviderValue | null>(null);
@@ -220,22 +222,36 @@ export function AssistantProvider(props: { children: ReactNode }) {
     [],
   );
 
+  const collectPatches = useCallback(() => {
+    const patches: AssistantContextPatch[] = [];
+    // Higher priority merges last and wins: a list that knows the ticked
+    // rows beats the screen's own list.
+    const ordered = [...sources.current.values()].sort(
+      (left, right) => left.priority - right.priority,
+    );
+    for (const { getter } of ordered) {
+      try {
+        const patch = getter();
+        if (patch) patches.push(patch);
+      } catch {
+        // A screen that cannot describe itself contributes nothing.
+      }
+    }
+    return patches;
+  }, []);
+
+  const peekFocus = useCallback(
+    () =>
+      collectPatches().reduce<AssistantEntityRef | null>(
+        (current, patch) => patch.focus ?? current,
+        null,
+      ),
+    [collectPatches],
+  );
+
   const captureContext = useCallback<AssistantProviderValue["captureContext"]>(
     async (extra) => {
-      const patches: AssistantContextPatch[] = [];
-      // Higher priority merges last and wins: a list that knows the ticked
-      // rows beats the screen's own list.
-      const ordered = [...sources.current.values()].sort(
-        (left, right) => left.priority - right.priority,
-      );
-      for (const { getter } of ordered) {
-        try {
-          const patch = getter();
-          if (patch) patches.push(patch);
-        } catch {
-          // A screen that cannot describe itself contributes nothing.
-        }
-      }
+      const patches = collectPatches();
       let browser: AssistantContextReference["browser"] = null;
       try {
         const state = await window.nestor?.browser?.getState();
@@ -272,7 +288,7 @@ export function AssistantProvider(props: { children: ReactNode }) {
         now: new Date().toISOString(),
       });
     },
-    [],
+    [collectPatches],
   );
 
   const openWith = useCallback<AssistantProviderValue["openWith"]>(
@@ -312,6 +328,7 @@ export function AssistantProvider(props: { children: ReactNode }) {
       openWith,
       registerContext,
       captureContext,
+      peekFocus,
     }),
     [
       open,
@@ -327,6 +344,7 @@ export function AssistantProvider(props: { children: ReactNode }) {
       openWith,
       registerContext,
       captureContext,
+      peekFocus,
     ],
   );
 
