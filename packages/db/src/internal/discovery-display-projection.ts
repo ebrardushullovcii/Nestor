@@ -70,8 +70,11 @@ export function createDiscoveryDisplayProjectionReader(
         const row = event === "DELETE" ? "OLD" : "NEW";
         const runId = table === "discovery_run_targets" || table === "discovery_run_activity"
           ? `${row}.run_id` : "''";
+        const retiredChild = event === "DELETE" && runId !== "''";
         database.exec(`CREATE TEMP TRIGGER discovery_display_${table}_${event.toLowerCase()}
-          AFTER ${event} ON main.${table} BEGIN
+          AFTER ${event} ON main.${table}
+          ${retiredChild ? "WHEN EXISTS (SELECT 1 FROM discovery_runs WHERE id = OLD.run_id)" : ""}
+          BEGIN
             UPDATE discovery_display_epoch SET revision = revision + 1;
             INSERT INTO discovery_display_changes (table_name, run_id, id, revision)
               VALUES ('${table}', ${runId}, ${row}.id, (SELECT revision FROM discovery_display_epoch))

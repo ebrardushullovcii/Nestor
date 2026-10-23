@@ -706,8 +706,10 @@ export function updateDiscoveryStorage(database: DatabaseSync, before: JobFinder
   });
   const afterKeys = new Set(afterRuns.map(({ key }) => key));
   for (const id of beforeRuns.keys()) if (!afterKeys.has(id)) {
-    for (const table of ["discovery_run_checkpoints", "discovery_run_activity", "discovery_run_targets"]) database.prepare(`DELETE FROM ${table} WHERE run_id = ?`).run(id);
+    // Removing the header invalidates the whole run. Its child rows no longer
+    // need thousands of individual display/cache notifications as they go.
     database.prepare("DELETE FROM discovery_runs WHERE id = ?").run(id);
+    for (const table of ["discovery_run_checkpoints", "discovery_run_activity", "discovery_run_targets"]) database.prepare(`DELETE FROM ${table} WHERE run_id = ?`).run(id);
   }
   const ledger = writeChangedRows(database, "discovery_ledger", before.discoveryLedger, proposed.discoveryLedger, DiscoveryLedgerEntrySchema, aliases, undefined, positionCache);
   const pending = writeChangedRows(database, "discovery_pending_jobs", before.pendingDiscoveryJobs, proposed.pendingDiscoveryJobs, SavedJobSchema, aliases, undefined, positionCache);
@@ -730,8 +732,10 @@ export function createDiscoveryStorage(database: DatabaseSync, fallback: JobFind
   }
   for (const table of ["discovery_runs", "discovery_run_targets", "discovery_run_checkpoints", "discovery_run_activity", "discovery_ledger", "discovery_pending_jobs"]) {
     for (const event of ["INSERT", "UPDATE", "DELETE"]) {
+      const retiredChild = event === "DELETE" && table.startsWith("discovery_run_");
       database.exec(`CREATE TEMP TRIGGER discovery_canonical_${table}_${event.toLowerCase()}
         AFTER ${event} ON main.${table}
+        ${retiredChild ? "WHEN EXISTS (SELECT 1 FROM discovery_runs WHERE id = OLD.run_id)" : ""}
         BEGIN UPDATE discovery_canonical_epoch SET revision = revision + 1; END`);
     }
   }
