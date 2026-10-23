@@ -105,7 +105,20 @@ describe("CompaniesScreen", () => {
       provenance: [],
     });
     const onRefresh = vi.fn(() => new Promise<void>(() => undefined));
-    renderScreen({ companies: [], discoveryJobs: [job], onRefresh });
+    renderScreen({
+      companies: [],
+      discoveryJobs: [
+        {
+          ...job,
+          listingActivity: {
+            status: "active",
+            observedAt: now,
+            evidence: "last_seen_at",
+          },
+        },
+      ],
+      onRefresh,
+    });
 
     expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Listing your employers")).toBeTruthy();

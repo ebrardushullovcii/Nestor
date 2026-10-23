@@ -45,6 +45,8 @@ it("shows every proposal's full wording before Apply, including the ninth item",
   expect(view.container.textContent).toContain(replacement + "8");
   expect(view.container.textContent).toContain("Current synthetic summary 8.");
   expect(view.container.querySelectorAll("li")).toHaveLength(9);
+  // The current wording waits behind a disclosure; the proposal leads.
+  expect(view.container.querySelectorAll("li details")).toHaveLength(9);
   expect(view.container.querySelector(".line-clamp-2")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Apply" }));
   expect(resolve).toHaveBeenCalledWith({
