@@ -416,7 +416,7 @@ describe("runJobFinderApplicationBrowserHandoff", () => {
     const phases: string[] = [];
     const order: string[] = [];
     const onReopenApplicationPage = vi.fn(
-      async (
+      (
         resultId: string,
         onProgress: (progress: {
           resultId: string;
@@ -431,7 +431,11 @@ describe("runJobFinderApplicationBrowserHandoff", () => {
           "ready",
         ] as const)
           onProgress({ resultId, phase });
-        return { resultId, state: "open" as const, reason: null };
+        return Promise.resolve({
+          resultId,
+          state: "open" as const,
+          reason: null,
+        });
       },
     );
     const onFocusPreparedApplicationPage = vi.fn(() => {

@@ -553,7 +553,9 @@ export function ApplicationsApplicationDocuments(props: {
       }
     >
       {demoteAsSecondary ? (
-        <details className="group grid gap-4">
+        // Not a grid: a closed <details> still lays out its hidden content
+        // slot as a grid row, so the gap added 16 px under the summary.
+        <details className="group">
           {header}
           <div className="mt-3 grid gap-4 rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-4">
             <p className="text-(length:--text-small) leading-6 text-foreground-soft">
