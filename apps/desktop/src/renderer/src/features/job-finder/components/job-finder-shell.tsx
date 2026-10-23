@@ -92,6 +92,7 @@ import {
 import { isImeComposingEvent } from "../lib/job-finder-shortcuts";
 import { useJobFinderOverlayOwnership } from "../lib/job-finder-overlay-ownership";
 import { useJobFinderShellShortcuts } from "../lib/use-job-finder-shell-shortcuts";
+import { useHistoryNavigationShortcuts } from "../lib/use-history-navigation-shortcuts";
 import { getDefaultProfileRoute } from "../lib/job-finder-utils";
 import { JobFinderShellBrand } from "./job-finder-shell-brand";
 import {
@@ -560,6 +561,12 @@ export function JobFinderShell({
   const isWindows = platform === "win32";
   const location = useLocation();
   const navigate = useNavigate();
+  const stepHistory = useCallback(
+    (step: -1 | 1) => {
+      void navigate(step);
+    },
+    [navigate],
+  );
   const mainRef = useRef<HTMLElement | null>(null);
   const dragRegionStyle = { WebkitAppRegion: "drag" } as CSSProperties;
   const noDragRegionStyle = { WebkitAppRegion: "no-drag" } as CSSProperties;
@@ -1237,6 +1244,7 @@ export function JobFinderShell({
     ...(assistant ? { onToggleAssistant: assistant.toggle } : {}),
     onToggleSidebar: toggleSidebar,
   });
+  useHistoryNavigationShortcuts(stepHistory);
 
   return (
     <div

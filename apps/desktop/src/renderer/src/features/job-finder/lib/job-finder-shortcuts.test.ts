@@ -129,9 +129,9 @@ describe("job finder shortcut registry", () => {
       },
       {
         combos: [["/"]],
-        id: "open-global-search",
-        rowId: "open-global-search::Outside text fields, controls, and dialogs",
-        label: "Search your workspace",
+        id: "focus-list-search",
+        rowId: "focus-list-search::Outside text fields, controls, and dialogs",
+        label: "Search this list, or your workspace off a list",
         scope: "Outside text fields, controls, and dialogs",
       },
       {

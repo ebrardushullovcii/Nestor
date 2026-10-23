@@ -67,6 +67,10 @@ import {
 import { StatusBadge } from "../../components/status-badge";
 import { Link } from "react-router-dom";
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
+import {
+  handleListSearchEscape,
+  LIST_SEARCH_ATTRIBUTE,
+} from "../../lib/list-search-focus";
 import { getAttemptLabel } from "../../lib/job-finder-utils";
 import {
   formatApplicationEmployerAriaLabel,
@@ -343,8 +347,13 @@ export function ApplicationsRecordsPanel({
               className="min-w-40 flex-1"
               aria-label="Search applications"
               placeholder="Search applications"
+              title="Search this list (/)"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) =>
+                handleListSearchEscape(event, query, setQuery)
+              }
+              {...{ [LIST_SEARCH_ATTRIBUTE]: "" }}
             />
           ) : null}
           {showsStagePicker ? (

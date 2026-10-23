@@ -6,6 +6,7 @@ import {
   isInteractiveShortcutTarget,
 } from "./job-finder-shortcuts";
 import { useHasOpenJobFinderOverlays } from "./job-finder-overlay-ownership";
+import { focusVisibleListSearch } from "./list-search-focus";
 
 const WIDE_LAYOUT_MEDIA_QUERY = "(min-width: 1440px)";
 
@@ -89,12 +90,19 @@ export function useJobFinderShellShortcuts(
       if (
         eventMatchesJobFinderShortcut(event, "/") &&
         !isAnyOverlayOpen &&
-        !isEditableShortcutTarget(event.target) &&
-        !isInteractiveShortcutTarget(event.target)
+        !isEditableShortcutTarget(event.target)
       ) {
-        event.preventDefault();
-        onOpenGlobalSearch();
-        return;
+        // On a list, "/" goes to that list's own search, also from a focused
+        // row; elsewhere it opens the workspace search.
+        if (focusVisibleListSearch()) {
+          event.preventDefault();
+          return;
+        }
+        if (!isInteractiveShortcutTarget(event.target)) {
+          event.preventDefault();
+          onOpenGlobalSearch();
+          return;
+        }
       }
 
       if (
