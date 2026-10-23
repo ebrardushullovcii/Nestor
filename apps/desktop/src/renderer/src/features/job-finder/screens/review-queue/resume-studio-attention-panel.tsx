@@ -28,7 +28,7 @@ export interface ResumeStudioAttentionPanelProps {
   onReviewSetAsideProposal?: () => void;
   onReviewWorkHistoryDecisions: () => void;
   /** The blocking-validation list, rendered by the shell. */
-  pdfStatusMessage: string;
+  pdfStatusMessage: string | null;
   setAsideProposalNote?: string;
   validationIssueList?: ReactNode;
 }
@@ -173,12 +173,14 @@ export function ResumeStudioAttentionPanel(
 
       {props.claimConfirmationPanel}
 
-      <p
-        className="text-(length:--text-tiny) leading-4 text-foreground-soft"
-        data-resume-pdf-status
-      >
-        {props.pdfStatusMessage}
-      </p>
+      {props.pdfStatusMessage ? (
+        <p
+          className="text-(length:--text-tiny) leading-4 text-foreground-soft"
+          data-resume-pdf-status
+        >
+          {props.pdfStatusMessage}
+        </p>
+      ) : null}
     </section>
   );
 }

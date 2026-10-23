@@ -830,7 +830,7 @@ export function ResumeWorkspaceStudioShell(
             ? `Application PDF ready${describeApprovedPageCount(
                 props.approvedExportPageCount ?? null,
               )}. Download a copy if you want one.`
-            : "The application PDF is built and checked when you approve."
+            : null
       }
       {...(props.setAsideProposalNote
         ? { setAsideProposalNote: props.setAsideProposalNote }
@@ -1211,7 +1211,9 @@ export function ResumeWorkspaceStudioShell(
           owns the approved state, its warning and `Clear approval` at compact
           widths, so this band only renders while there is a different status
           to report. */}
-      {props.canClearApproval || isDesktopStudio ? null : (
+      {props.canClearApproval ||
+      isDesktopStudio ||
+      (!studioStatusText && !props.approvalStateLabel) ? null : (
         <div
           className="grid shrink-0 gap-2.5 border-b border-(--surface-panel-border) px-4 py-2"
           data-resume-studio-compact-status

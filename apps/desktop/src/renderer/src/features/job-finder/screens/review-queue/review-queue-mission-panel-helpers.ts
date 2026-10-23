@@ -425,7 +425,7 @@ export function getReadinessDescription(input: {
     if (draftNeedsPersonReview) {
       // ADR 0051: stretches are not confirmed line by line any more, so the
       // step is a read-through, not a line-by-line chore.
-      return "Aggressive resumes stretch a little past your saved evidence. Read it through, then approve it.";
+      return "Read the resume through, then approve it.";
     }
     return "The resume is ready. Apply approves it and starts the application.";
   }

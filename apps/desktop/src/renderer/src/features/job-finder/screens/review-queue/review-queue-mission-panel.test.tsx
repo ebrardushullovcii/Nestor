@@ -347,7 +347,7 @@ describe("ReviewQueueMissionPanel", () => {
     // The primary already opens the resume, so it is not offered twice.
     expect(screen.queryByRole("button", { name: "Edit resume" })).toBeNull();
     expect(screen.getByTestId("shortlisted-state-line").textContent).toContain(
-      "Read it through, then approve it.",
+      "Read the resume through, then approve it.",
     );
     // ADR 0051: no line-by-line chore for Aggressive stretches.
     expect(

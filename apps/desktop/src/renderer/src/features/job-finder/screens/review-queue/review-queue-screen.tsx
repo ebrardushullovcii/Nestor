@@ -574,11 +574,11 @@ export function ReviewQueueScreen(props: {
               away the job title or its state. */}
           <header className="sticky top-0 z-10 grid shrink-0 gap-1 border-b border-(--surface-panel-border) bg-(--surface-panel) px-5 pb-3 pt-4 xl:static">
             {/* Title and place on the left, the status on the right: the
-                same header Applications uses. With wrapping on, a long title
-                pushed the badge under the employer line. */}
+                same header Applications and Find jobs use. A long title wraps
+                instead of being cut off; the badge stays beside it. */}
             <div className="flex min-w-0 items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <h2 className="truncate text-(--text-headline)">
+                <h2 className="min-w-0 break-words font-semibold tracking-tight text-(--text-headline)">
                   {selectedJob?.title ?? "Job"}
                 </h2>
                 {selectedJob ? (

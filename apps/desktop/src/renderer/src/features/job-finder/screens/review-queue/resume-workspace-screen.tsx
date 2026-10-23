@@ -1141,7 +1141,6 @@ export function ResumeWorkspaceScreen(props: ResumeWorkspaceScreenProps) {
   const claimConfirmationPanel = null;
   const { approvalStateLabel, studioStatusMessage } = buildWorkspaceStatusCopy({
     approvalBlockedReason,
-    availableExportToApprove,
     draft,
     hasUnsavedChanges,
     selectedTemplateApprovalEligible,
