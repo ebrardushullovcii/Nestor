@@ -1,4 +1,9 @@
 import {
+  resumeDraftValueSql,
+  resumeDraftUpdatedAtSql,
+  tailoredAssetValueSql,
+} from "./resume-approval-state";
+import {
   PreparedApplicationFormSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
@@ -45,11 +50,7 @@ import {
   UserActionRequestSchema,
   type JobFinderRepositoryState,
 } from "@nestor/contracts";
-import type {
-  DatabaseSync,
-  SQLInputValue,
-  SQLOutputValue,
-} from "node:sqlite";
+import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
 import {
   APPLICATION_ATTEMPT_INDEXED_COLLECTION_CONFIG,
   APPLY_COLLECTION_ORDER_BY_SQL,
@@ -278,7 +279,7 @@ export function listValues<TValue>(
 ): TValue[] {
   const pagination = buildPaginationSql(options);
   const statement = database.prepare(
-    `SELECT id, value FROM ${stateTableNames[tableName]} ORDER BY id${pagination.sql}`,
+    `SELECT id, ${collectionValueSql(tableName)} AS value FROM ${stateTableNames[tableName]} ORDER BY id${pagination.sql}`,
   );
   const rows = statement.all(...pagination.params);
   return rows.map((row) =>
@@ -293,6 +294,12 @@ export function listValues<TValue>(
 
 const PARSE_CHUNK_ROWS = 100;
 
+function collectionValueSql(tableName: StateCollectionTable): string {
+  if (tableName === "resume_drafts") return resumeDraftValueSql;
+  if (tableName === "tailored_assets") return tailoredAssetValueSql;
+  return "value";
+}
+
 /**
  * `listValues` for a whole large collection without holding the event loop:
  * the rows are read at once, so the result is one consistent read, and are
@@ -305,7 +312,9 @@ export async function listValuesInChunks<TValue>(
   schema: SchemaParser<TValue>,
 ): Promise<TValue[]> {
   const rows: (Record<string, SQLOutputValue> | null)[] = database
-    .prepare(`SELECT id, value FROM ${stateTableNames[tableName]} ORDER BY id`)
+    .prepare(
+      `SELECT id, ${collectionValueSql(tableName)} AS value FROM ${stateTableNames[tableName]} ORDER BY id`,
+    )
     .all();
   const values: TValue[] = [];
   for (let start = 0; start < rows.length; start += PARSE_CHUNK_ROWS) {
@@ -351,7 +360,7 @@ export function listCollectionValues<TValue>(
   const baseParams = [...(options.params ?? [])] as SQLInputValue[];
   return database
     .prepare(
-      `SELECT id, value FROM ${stateTableNames[tableName]}${whereClause} ORDER BY ${options.orderBySql}${pagination.sql}`,
+      `SELECT id, ${collectionValueSql(tableName)} AS value FROM ${stateTableNames[tableName]}${whereClause} ORDER BY ${tableName === "resume_drafts" ? options.orderBySql.replace(/\bupdated_at\b/g, resumeDraftUpdatedAtSql) : options.orderBySql}${pagination.sql}`,
     )
     .all(...baseParams, ...pagination.params)
     .map((row) =>

@@ -11,6 +11,7 @@ import { isDeepStrictEqual } from "node:util";
 import { recordApplicationsSentByPerson } from "./internal/application-sent-by-person";
 import { judgeUnjudgedPlanJobs } from "./internal/backlog-fit-judgment";
 import { refreshAutomaticApplicationFailurePauses } from "./internal/automatic-safeguards";
+import type { JobFinderRepository } from "@nestor/db";
 import {
   ACTIVITY_PAUSED_MESSAGE,
   ApplicationRecordSchema,
@@ -664,6 +665,9 @@ export function createJobFinderWorkspaceService(
     async staleApprovedResumeDrafts(
       staleReason: string,
       jobIds?: readonly string[],
+      profileInputs?: Parameters<
+        NonNullable<JobFinderRepository["staleResumeDrafts"]>
+      >[0]["profileInputs"],
     ): Promise<void> {
       // The cached display rows, when the repository keeps them: every
       // draft holds whole resumes, and parsing them all again made each
@@ -708,7 +712,7 @@ export function createJobFinderWorkspaceService(
         }
         toStale.push({ draft, existingAsset });
       }
-      if (toStale.length === 0) return;
+      if (toStale.length === 0 && !profileInputs) return;
       // Only the approval fields change, so a repository that can mark them
       // in place does so in one transaction. Reading, validating and writing
       // each whole draft again held a profile save for about 1.5 s.
@@ -717,6 +721,7 @@ export function createJobFinderWorkspaceService(
           draftIds: toStale.map(({ draft }) => draft.id),
           staleReason,
           updatedAt: new Date().toISOString(),
+          ...(profileInputs ? { profileInputs } : {}),
         });
         return;
       }
@@ -734,6 +739,14 @@ export function createJobFinderWorkspaceService(
               }
             : null,
         });
+      }
+      if (profileInputs) {
+        if (profileInputs.searchPreferences)
+          await repository.saveProfileAndSearchPreferences(
+            profileInputs.profile,
+            profileInputs.searchPreferences,
+          );
+        else await repository.saveProfile(profileInputs.profile);
       }
     },
     async openRunBrowserSession(

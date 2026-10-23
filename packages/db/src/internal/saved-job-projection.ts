@@ -415,9 +415,10 @@ export function createSavedJobProjectionReader(
     if (!database.isOpen) return;
     const stamp = await marks.settled();
     if (!stamp) return;
+    // Cold rows can carry large evidence bodies; this runs beside foreground saves.
     const page = database.prepare(`SELECT ${marks.selectSql}
       WHERE ${"saved_jobs"}.id > ? AND (validated_stamp IS NULL OR validated_stamp != ?)
-      ORDER BY saved_jobs.id LIMIT 5`);
+      ORDER BY saved_jobs.id LIMIT 1`);
     let after = "";
     while (database.isOpen) {
       await new Promise<void>((resolve) => setImmediate(resolve));

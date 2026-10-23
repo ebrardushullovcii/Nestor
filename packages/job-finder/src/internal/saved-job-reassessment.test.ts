@@ -32,7 +32,8 @@ function reassessmentContext(
 ) {
   return {
     repository,
-    persistDiscoveryState: repository.commitDiscoveryStateUpdate.bind(repository),
+    persistDiscoveryState:
+      repository.commitDiscoveryStateUpdate.bind(repository),
     getActiveCampaignId: () => Promise.resolve(null),
   };
 }
@@ -55,9 +56,12 @@ test("an edit that leaves every score as it was rewrites no job", async () => {
 });
 
 /** A minimum pay no seeded listing meets, which moves every rule score. */
-function aboveEveryListing<T extends { minimumSalaryUsd: number | null; compensation: { minimum: number | null } }>(
-  preferences: T,
-): T {
+function aboveEveryListing<
+  T extends {
+    minimumSalaryUsd: number | null;
+    compensation: { minimum: number | null };
+  },
+>(preferences: T): T {
   return {
     ...preferences,
     minimumSalaryUsd: 900_000,
@@ -132,6 +136,34 @@ test("a goal save answers before its rescoring and tells the host when scores ch
       job.matchAssessment.compensationFit.state,
     ]);
   expect(scores(settled)).not.toEqual(scores(stamped));
+});
+
+test("a source-only profile save keeps assessments and does not rescore saved jobs", async () => {
+  const { repository, workspaceService } = foundJobsHarness();
+  const initial = await workspaceService.getWorkspaceSnapshot();
+  const commit = vi.spyOn(repository, "commitSavedJobDelta");
+  expect(initial.searchPreferences.discovery.targets.length).toBeGreaterThan(0);
+  const preferences = {
+    ...initial.searchPreferences,
+    discovery: {
+      ...initial.searchPreferences.discovery,
+      targets: initial.searchPreferences.discovery.targets.map((target, i) =>
+        i === 0 ? { ...target, enabled: !target.enabled } : target,
+      ),
+    },
+  };
+  const before = await repository.listSavedJobs();
+  await workspaceService.saveProfileAndSearchPreferences(
+    initial.profile,
+    preferences,
+  );
+  const settled = await workspaceService.getWorkspaceSnapshot();
+  expect(await repository.getSearchPreferences()).toEqual(preferences);
+  expect(await repository.listSavedJobs()).toEqual(before);
+  expect(commit).not.toHaveBeenCalled();
+  expect(settled.searchPreferences.discovery.targets).toEqual(
+    preferences.discovery.targets,
+  );
 });
 
 test("an unstamped score is stamped even when its content stays the same", async () => {
