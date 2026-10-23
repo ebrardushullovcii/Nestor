@@ -3124,6 +3124,33 @@ export function createPrimaryPageActions(
         scope: jobFinderPendingActions.resumeJob(draft.jobId),
         surface: "resume",
       }),
+    // Resume Studio saves edits by itself a moment after the last one. It is
+    // quiet: no "Saving…" line, no toast, no pending scope that would lock
+    // the fields, and it stays out of the save coordinator so leaving the
+    // page mid-save asks nothing. The editor shows its own state and keeps
+    // the edits marked unsaved only when this fails.
+    onAutosaveResumeDraft: async (
+      draft: ResumeDraft,
+      onSaved: (updatedAt: string) => void,
+    ): Promise<{ saved: true } | { saved: false; message: string }> => {
+      try {
+        const snapshot = await actions.saveResumeDraft(draft);
+        const savedDraft = snapshot.resumeDrafts.find(
+          (entry) => entry.id === draft.id,
+        );
+        if (savedDraft) onSaved(savedDraft.updatedAt);
+        await refreshResumeWorkspace(draft.jobId);
+        return { saved: true };
+      } catch (error) {
+        return {
+          saved: false,
+          message: getJobFinderErrorMessage(
+            error,
+            "Your latest resume edits were not saved.",
+          ),
+        };
+      }
+    },
     onSaveResumeDraftAndThen: (
       draft: ResumeDraft,
       next: () => void | Promise<void>,

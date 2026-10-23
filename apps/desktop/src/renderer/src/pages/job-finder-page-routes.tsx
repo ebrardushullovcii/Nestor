@@ -1908,6 +1908,7 @@ export function JobFinderResumeWorkspaceRoute() {
         }
         onSaveDraft={context.onSaveResumeDraft}
         onSaveDraftAndThen={context.onSaveResumeDraftAndThen}
+        onAutosaveDraft={context.onAutosaveResumeDraft}
         onSendAssistantMessage={context.onSendResumeAssistantMessage}
         onResolveAssistantProposal={context.onResolveResumeAssistantProposal}
         reviewFlow={reviewFlow}

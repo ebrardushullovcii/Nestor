@@ -332,6 +332,11 @@ export interface JobFinderPageContext {
     pendingRequest: string | null,
   ) => void;
   onSaveResumeDraft: (draft: ResumeDraft) => void;
+  /** Saves Resume Studio edits by itself; resolves with what happened. */
+  onAutosaveResumeDraft: (
+    draft: ResumeDraft,
+    onSaved: (updatedAt: string) => void,
+  ) => Promise<{ saved: true } | { saved: false; message: string }>;
   onSaveResumeDraftAndThen: (
     draft: ResumeDraft,
     next: () => void | Promise<void>,
