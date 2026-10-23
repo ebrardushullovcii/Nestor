@@ -124,6 +124,29 @@ describe("CompaniesScreen", () => {
     expect(screen.getByText("Listing your employers")).toBeTruthy();
   });
 
+  it("builds the list itself when saved jobs exist but none is tied to a company yet", () => {
+    const onRefresh = vi.fn(() => new Promise<void>(() => undefined));
+    render(
+      <CompaniesScreen
+        actionMessage={null}
+        companies={[]}
+        discoveryJobs={[]}
+        hasSavedJobs
+        isMergePending={() => false}
+        isMutationPending={() => false}
+        isPreferencePending={() => false}
+        isRefreshPending={false}
+        onMutateCompanyIntelligence={vi.fn()}
+        onNavigate={vi.fn()}
+        onRefresh={onRefresh}
+        onReviewCompanyMerge={vi.fn()}
+        onSetCompanyPreference={vi.fn()}
+      />,
+    );
+
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it("hides legacy absence-placeholder company shells from the list", () => {
     renderScreen({
       companies: [

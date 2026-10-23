@@ -36,6 +36,12 @@ interface CompaniesScreenProps {
   actionMessage: string | null;
   companies: readonly CompanyEntity[];
   discoveryJobs: readonly JobListRow[];
+  /**
+   * Whether any saved job or application exists. `discoveryJobs` holds only
+   * jobs already tied to a company, so it is empty exactly when the list has
+   * never been built and cannot tell the screen to build it.
+   */
+  hasSavedJobs?: boolean;
   isLoading?: boolean;
   isMergePending: (companyId: string) => boolean;
   isMutationPending: (companyId: string) => boolean;
@@ -418,7 +424,7 @@ export function CompaniesScreen(props: CompaniesScreenProps) {
   const needsFirstBuild =
     !props.isLoading &&
     listableCompanies.length === 0 &&
-    props.discoveryJobs.length > 0;
+    (props.hasSavedJobs ?? props.discoveryJobs.length > 0);
   useEffect(() => {
     if (!needsFirstBuild || autoRefreshed.current) return;
     autoRefreshed.current = true;
