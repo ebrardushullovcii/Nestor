@@ -1,13 +1,18 @@
 import { describe, expect, test } from "vitest";
 import { SourceIntelligenceArtifactSchema } from "@nestor/contracts";
-import { createOpenAiCompatibleJobFinderAiClient } from "./openai-compatible";
+import {
+  createJobFinderAiClientFromEnvironment,
+  createOpenAiCompatibleJobFinderAiClient,
+} from "./openai-compatible";
 
 import {
   buildFitEvidenceInstructions,
+  buildFitScoringInstructions,
   buildJobFitAssessmentPayload,
   buildJobFitJudgingPayload,
   buildJobFitJudgingRequest,
   buildJobFitJudgingPrompt,
+  buildJobFitJudgingResponseSchema,
   normalizeJobFitJudgments,
 } from "./openai-compatible-fit";
 
@@ -18,7 +23,186 @@ import {
   mockCapturingJsonFetch,
 } from "./test-fixtures";
 
+test.each([
+  [
+    "https://opencode.ai/zen/go/v1",
+    "muse-spark-1.3-contributor",
+    "responses",
+    0,
+  ],
+  ["https://opencode.ai/zen/go/v1", "other-model", "responses", undefined],
+  [
+    "https://example.com/v1",
+    "muse-spark-1.3-contributor",
+    "responses",
+    undefined,
+  ],
+  [
+    "https://opencode.ai/zen/go/v1",
+    "muse-spark-1.3-contributor",
+    "chat_completions",
+    undefined,
+  ],
+] as const)(
+  "fit sampling on %s / %s / %s",
+  async (baseUrl, model, apiMode, temperature) => {
+    const verdict = {
+      score: 58,
+      recommendation: "review_before_applying",
+      reasons: ["Check a requirement"],
+      gaps: [],
+    };
+    const result = { ...verdict, judgments: [{ ...verdict, jobId: "0" }] };
+    const mock = mockCapturingJsonFetch({
+      output_text: JSON.stringify(result),
+      choices: [{ message: { content: JSON.stringify(result) } }],
+    });
+    try {
+      const client = createOpenAiCompatibleJobFinderAiClient({
+        apiKey: "synthetic-key",
+        baseUrl,
+        model,
+        apiMode,
+        reasoningEffort: "medium",
+        streaming: false,
+        maxAttempts: 1,
+      });
+      const input = {
+        assessmentDate: "2026-10-23",
+        profile: createProfile(),
+        searchPreferences: createPreferences(),
+      };
+      const batch = await client.judgeJobFits!({
+        ...input,
+        jobs: [{ jobId: "one", posting: createJobPosting() }],
+      });
+      const batchBody = JSON.parse(mock.getCapturedBody()) as Record<
+        string,
+        unknown
+      >;
+      if (temperature === 0) {
+        expect(batchBody.text).toMatchObject({
+          format: {
+            type: "json_schema",
+            strict: true,
+            ...buildJobFitJudgingResponseSchema(["0"]),
+          },
+        });
+      } else {
+        expect(JSON.stringify(batchBody)).not.toContain('"json_schema"');
+      }
+      const full = await client.assessJobFit({
+        ...input,
+        job: createJobPosting(),
+      });
+      const fullBody = JSON.parse(mock.getCapturedBody()) as Record<
+        string,
+        unknown
+      >;
+      for (const body of [batchBody, fullBody]) {
+        expect(body.temperature).toBe(temperature);
+        expect(body).not.toHaveProperty("seed");
+        const messages = (body.input ?? body.messages) as Array<{
+          content: string;
+        }>;
+        expect(messages[0]!.content).toContain(buildFitScoringInstructions());
+      }
+      // The rubric guides the model; the app does not replace its verdict.
+      expect(batch[0]?.score).toBe(58);
+      expect(full?.score).toBe(58);
+    } finally {
+      mock.restore();
+    }
+  },
+);
+
+test.each([
+  [undefined, "low"],
+  ["high", "high"],
+] as const)(
+  "bundled fit effort honors %s while a full read keeps its own effort",
+  async (override, expected) => {
+    const mock = mockCapturingJsonFetch({
+      output_text: JSON.stringify({
+        score: 60,
+        reasons: [],
+        gaps: [],
+        judgments: [
+          { jobId: "0", score: 60, recommendation: "review_before_applying" },
+        ],
+      }),
+    });
+    try {
+      const client = createJobFinderAiClientFromEnvironment({
+        NESTOR_AI_API_KEY: "synthetic-key",
+        NESTOR_AI_STREAMING: "0",
+        NESTOR_AI_MAX_ATTEMPTS: "1",
+        ...(override ? { NESTOR_AI_FIT_REASONING_EFFORT: override } : {}),
+      });
+      const input = {
+        profile: createProfile(),
+        searchPreferences: createPreferences(),
+      };
+      await client.judgeJobFits!({
+        ...input,
+        assessmentDate: "2026-10-23",
+        jobs: [{ jobId: "one", posting: createJobPosting() }],
+      });
+      expect(JSON.parse(mock.getCapturedBody())).toMatchObject({
+        temperature: 0,
+        reasoning: { effort: expected },
+      });
+      await client.assessJobFit({ ...input, job: createJobPosting() });
+      expect(JSON.parse(mock.getCapturedBody())).toMatchObject({
+        temperature: 0,
+        reasoning: { effort: "xhigh" },
+      });
+    } finally {
+      mock.restore();
+    }
+  },
+);
+
 describe("batch fit judging", () => {
+  test("binds keyed structured verdicts to their keys and accepts only asked jobs", () => {
+    const judgments = normalizeJobFitJudgments(
+      {
+        judgments: {
+          second: {
+            jobId: "first",
+            score: 60,
+            recommendation: "review_before_applying",
+          },
+          first: null,
+          outside: { score: 90, recommendation: "strong_fit" },
+        },
+      },
+      new Set(["first", "second"]),
+    );
+    expect(judgments).toMatchObject([
+      { jobId: "second", score: 60, recommendation: "review_before_applying" },
+    ]);
+  });
+
+  test("requires every job key and limits scores and recommendations to the rubric", () => {
+    const { schema } = buildJobFitJudgingResponseSchema(["0", "1"]);
+    expect(schema.properties.judgments.required).toEqual(["0", "1"]);
+    expect(Object.keys(schema.properties.judgments.properties)).toEqual([
+      "0",
+      "1",
+    ]);
+    expect(schema.properties.judgments.additionalProperties).toBe(false);
+    expect(schema.$defs.judgment.properties.score.enum).toEqual([
+      0, 20, 45, 60, 70, 80, 90,
+    ]);
+    expect(schema.$defs.judgment.properties.recommendation.enum).toEqual([
+      "skip",
+      "review_before_applying",
+      "apply_with_original",
+      "strong_fit",
+    ]);
+  });
+
   test("gives both judges explicit country and office constraints (R3-017)", () => {
     const prompt = buildJobFitJudgingPrompt();
     expect(prompt).toContain(buildFitEvidenceInstructions());

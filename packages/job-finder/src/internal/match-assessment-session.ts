@@ -54,8 +54,10 @@ import {
 // scores written before are retired; a stored model verdict is kept.
 // Revision 15 (version 16): country eligibility, availability and full
 // listing evidence are explicit inputs; prior verdicts stay until replacement.
-export const MATCH_ASSESSMENT_SCORER_VERSION = 16;
-const MATCH_ASSESSMENT_LOGIC_REVISION = 15;
+// Revision 16 (version 17): both model judges use the same absolute fit anchors
+// and the supported Muse route samples at zero. Replace old verdicts on demand.
+export const MATCH_ASSESSMENT_SCORER_VERSION = 17;
+const MATCH_ASSESSMENT_LOGIC_REVISION = 16;
 
 function stableSerialize(value: unknown): string {
   if (value === null || typeof value !== "object") {

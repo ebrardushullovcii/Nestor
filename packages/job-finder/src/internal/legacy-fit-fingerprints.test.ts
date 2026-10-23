@@ -166,7 +166,10 @@ test("a stored verdict stays current through the fingerprint change and a later 
   ).toBe(true);
 
   // A change the model does read still asks again.
-  const relevant = { ...seed.profile, skills: [...seed.profile.skills, "Rust"] };
+  const relevant = {
+    ...seed.profile,
+    skills: [...seed.profile.skills, "Rust"],
+  };
   const afterRelevantEdit = createMatchAssessmentSession({
     profile: relevant,
     searchPreferences: judgingGoals(seed, relevant),
@@ -180,8 +183,46 @@ test("a stored verdict stays current through the fingerprint change and a later 
     ),
   ).toBe(true);
   expect(createFitVerdictFingerprint(seed.profile, goals)).toMatch(
-    /^fit_verdict_v1_logic15_/u,
+    /^fit_verdict_v1_logic16_/u,
   );
+});
+
+test("the absolute rubric retires older verdicts without dropping their displayed assessment", () => {
+  const seed = createSeed();
+  const goals = judgingGoals(seed, seed.profile);
+  const stored = legacyJudgedJob(
+    seed,
+    seed.savedJobs[0]!,
+    "older_rubric",
+    goals,
+  );
+  const session = createMatchAssessmentSession({
+    profile: seed.profile,
+    searchPreferences: goals,
+    calculate: createMatchAssessment,
+  });
+  const judgment = stored.matchAssessment.judgment!;
+  stored.matchAssessment.judgment = {
+    ...judgment,
+    contextFingerprint: session.verdictFingerprint.replace(
+      "_logic16_",
+      "_logic15_",
+    ),
+    postingFingerprint: judgment.postingFingerprint!.replace(
+      "_logic16_",
+      "_logic15_",
+    ),
+  };
+  expect(
+    jobNeedsFitJudgment(
+      stored,
+      session.verdictFingerprint,
+      session.contextFingerprint,
+    ),
+  ).toBe(true);
+  expect(
+    session.assessPersisted(stored, stored.matchAssessment).judgment,
+  ).toEqual(stored.matchAssessment.judgment);
 });
 
 test("opening the workspace re-stamps stored verdicts, so Judge all asks nothing after an unrelated edit", async () => {
