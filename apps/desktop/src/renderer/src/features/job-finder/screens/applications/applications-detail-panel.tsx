@@ -568,7 +568,7 @@ export function ApplicationsDetailPanel({
           {/* Reference links, not actions: text links read as "also
               available" rather than as one more thing to do. */}
           <Button
-            className="h-auto px-0 text-sm font-medium normal-case tracking-normal"
+            className="h-auto min-w-0 whitespace-normal px-0 text-left text-sm font-medium normal-case tracking-normal"
             onClick={() => onOpenCompany(selectedRecordCompanyId)}
             size="compact"
             type="button"

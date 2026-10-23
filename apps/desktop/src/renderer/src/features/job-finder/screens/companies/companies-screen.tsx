@@ -121,7 +121,7 @@ function CompanyCard(props: {
 
       <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
         <div>
-          <dt className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+          <dt className="text-(length:--text-tiny) font-medium text-foreground-muted">
             Last seen available
           </dt>
           <dd className="text-foreground-soft">
@@ -129,7 +129,7 @@ function CompanyCard(props: {
           </dd>
         </div>
         <div>
-          <dt className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+          <dt className="text-(length:--text-tiny) font-medium text-foreground-muted">
             Needs verification
           </dt>
           <dd className="text-foreground-soft">
@@ -137,7 +137,7 @@ function CompanyCard(props: {
           </dd>
         </div>
         <div>
-          <dt className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+          <dt className="text-(length:--text-tiny) font-medium text-foreground-muted">
             Reported closed
           </dt>
           <dd className="text-foreground-soft">
@@ -145,7 +145,7 @@ function CompanyCard(props: {
           </dd>
         </div>
         <div>
-          <dt className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+          <dt className="text-(length:--text-tiny) font-medium text-foreground-muted">
             Applications
           </dt>
           <dd className="text-foreground-soft">
@@ -156,7 +156,7 @@ function CompanyCard(props: {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label className="grid gap-1 text-sm">
-          <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+          <span className="text-(length:--text-tiny) font-medium text-foreground-muted">
             Company tracking
           </span>
           <select

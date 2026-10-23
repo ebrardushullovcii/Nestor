@@ -1118,7 +1118,7 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
         </div>
         <div className="grid shrink-0 gap-1">
           <label className="flex items-center gap-2 text-sm">
-            <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+            <span className="text-(length:--text-tiny) font-medium text-foreground-muted">
               Company tracking
             </span>
             <select
@@ -1188,7 +1188,7 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
         >
           {openings.lastSeenAvailable.length > 0 ? (
             <div className="grid gap-1">
-              <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+              <p className="text-(length:--text-tiny) font-medium text-foreground-muted">
                 Last seen available
               </p>
               <BoundedCollectionList
@@ -1210,7 +1210,7 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
           )}
           {openings.needsVerification.length > 0 ? (
             <div className="grid gap-1">
-              <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+              <p className="text-(length:--text-tiny) font-medium text-foreground-muted">
                 Needs verification
               </p>
               <BoundedCollectionList
@@ -1228,7 +1228,7 @@ export function CompanyDetailScreen(props: CompanyDetailScreenProps) {
           ) : null}
           {openings.reportedClosed.length > 0 ? (
             <div className="grid gap-1">
-              <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-foreground-muted">
+              <p className="text-(length:--text-tiny) font-medium text-foreground-muted">
                 Reported closed
               </p>
               <BoundedCollectionList
