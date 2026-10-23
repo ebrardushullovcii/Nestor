@@ -198,6 +198,106 @@ describe("workspace application answer methods", () => {
     },
   );
 
+  it("saves and continues the person's own answer when a reused one fails or keeps working", async () => {
+    let ownRequestId = "";
+    const performUserAction = vi.fn((command: UserActionCommand) =>
+      "requestId" in command && command.requestId === ownRequestId
+        ? Promise.resolve(undefined)
+        : new Promise<undefined>(() => undefined),
+    );
+    const { job, repository, methods } = createHarness({
+      questionKind: "other",
+      performUserAction,
+    });
+    const run = (await repository.listApplyRuns())[0]!;
+    const result = (await repository.listApplyJobResults())[0]!;
+    const question = (await repository.listApplicationQuestionRecords())[0]!;
+    const record = (await repository.listApplicationRecords())[0]!;
+    const blocker = ApplicationAttemptBlockerSchema.parse({
+      code: "missing_candidate_answer",
+      userActionKind: "manual_answer",
+      summary: "Answer the employer question.",
+      questionIds: [question.id],
+      url: job.applicationUrl ?? job.canonicalUrl,
+    });
+    const peers = ["job-slow", "job-failing"];
+    await repository.commitSavedJobDelta({
+      upserts: peers.map((id) => ({ ...job, id })),
+    });
+    await repository.upsertApplyRun({
+      ...run,
+      jobIds: [job.id, ...peers],
+      totalJobs: 3,
+    });
+    for (const id of [job.id, ...peers]) {
+      const own = id === job.id;
+      const suffix = own ? "" : `-${id}`;
+      if (!own) {
+        await repository.upsertApplicationRecord({
+          ...record,
+          id: `${record.id}${suffix}`,
+          jobId: id,
+        });
+        await repository.upsertApplyJobResult({
+          ...result,
+          id: `${result.id}${suffix}`,
+          jobId: id,
+          applicationRecordId: `${record.id}${suffix}`,
+        });
+        await repository.upsertApplicationQuestionRecord({
+          ...question,
+          id: `${question.id}${suffix}`,
+          jobId: id,
+          resultId: `${result.id}${suffix}`,
+          applicationRecordId: `${record.id}${suffix}`,
+        });
+      }
+      await persistApplicationUserAction({
+        repository,
+        applicationRecordId: `${record.id}${suffix}`,
+        job: { ...job, id },
+        runId: run.id,
+        resultId: `${result.id}${suffix}`,
+        replayCheckpointId: `checkpoint${suffix}`,
+        blocker: { ...blocker, questionIds: [`${question.id}${suffix}`] },
+        occurredAt: "2026-08-10T10:00:00.000Z",
+      });
+    }
+    ownRequestId = (await repository.listUserActionRequests()).find(
+      (request) =>
+        request.scope.type === "application" &&
+        request.scope.resultId === result.id,
+    )!.id;
+    const commit = repository.commitApplicationAnswerMutation.bind(repository);
+    vi.spyOn(repository, "commitApplicationAnswerMutation").mockImplementation(
+      (input) =>
+        input.answer.jobId === "job-failing"
+          ? Promise.reject(new Error("Peer write failed"))
+          : commit(input),
+    );
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await methods.saveApplicationAnswer({
+      ...saveCommand("save-shared", 0),
+      jobId: job.id,
+      saveScope: "reusable_profile",
+    });
+
+    expect(
+      await repository.listApplicationAnswerRecords({ questionId: question.id }),
+    ).toHaveLength(1);
+    expect(
+      await repository.listApplicationAnswerRecords({
+        questionId: `${question.id}-job-slow`,
+      }),
+    ).toHaveLength(1);
+    expect(performUserAction).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: ownRequestId }),
+    );
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
   it.each([
     ["Canada", false],
     ["United Kingdom", true],

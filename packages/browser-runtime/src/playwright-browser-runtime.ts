@@ -2342,10 +2342,17 @@ export function createBrowserAgentRuntime(
     actionInput: ExecuteExactlyOneFinalActionInput,
   ) {
     actionInput.signal?.throwIfAborted();
-    return executeExactlyOneFinalActionOnPage(
-      await getPreparedApplicationPage(source, actionInput.pageBindingKey),
-      actionInput,
+    const page = await getPreparedApplicationPage(
+      source,
+      actionInput.pageBindingKey,
     );
+    // Marks the page in use so tab reclamation cannot close it mid-send.
+    const releasePageUse = usePage(page);
+    try {
+      return await executeExactlyOneFinalActionOnPage(page, actionInput);
+    } finally {
+      releasePageUse();
+    }
   }
 
   return {
@@ -2540,21 +2547,27 @@ export function createBrowserAgentRuntime(
           // that this form can never be restored. Keep it for a later try.
           return false;
         }
+        const pageIsFree = () =>
+          canDiscard() &&
+          !page.isClosed() &&
+          !pagesInUse.has(page) &&
+          !preparedPagesWithPerson.has(key);
         if (
-          !canDiscard() ||
-          pagesInUse.has(page) ||
-          preparedPagesWithPerson.has(key) ||
+          !pageIsFree() ||
           JSON.stringify(await capturePreparedForm(page)) !==
             JSON.stringify(snapshot)
         )
           return false;
-        recovery.snapshot = snapshot;
         if (recovery.saved && preparedFormStore) {
           recovery.saved = {...recovery.saved, snapshot, savedAt: new Date().toISOString()};
           await preparedFormStore.save(recovery.saved);
         }
-        await page.close({ runBeforeUnload: false });
+        // The readback and save awaited: a Send or the person may have taken
+        // the page since. Close it only if it is still free right now.
+        if (!pageIsFree()) return false;
+        recovery.snapshot = snapshot;
         preparedApplicationPages.delete(key);
+        await page.close({ runBeforeUnload: false });
         return true;
       } finally {
         await duplicate
@@ -3269,7 +3282,7 @@ export function createBrowserAgentRuntime(
               }
             }
             const saved: PreparedApplicationForm = {id: key,
-              label: [input.job.location, input.job.title.slice(0, 120), input.job.company.slice(0, 80)].filter(Boolean).join(" · ").slice(0, 280),
+              label: [input.job.location, input.job.title.slice(0, 120), input.job.company.slice(0, 80)].filter(Boolean).join(" Â· ").slice(0, 280),
               savedAt: new Date().toISOString(), snapshot,
               attachments: snapshot ? descriptors : [], reason,
             };
@@ -3417,7 +3430,7 @@ export function createBrowserAgentRuntime(
               // afterwards, by the run that dedupes and retains. Reporting
               // the first number as the second is how one screen carried
               // "Stopped early with 24 jobs saved" beside its own "15
-              // results" — three numbers for one population, and at most one
+              // results" â€” three numbers for one population, and at most one
               // of them true. The kept count belongs to the run report, and
               // this sentence points at it instead of guessing.
               result.incomplete
