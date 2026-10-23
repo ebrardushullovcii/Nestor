@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import type { ReactNode } from "react";
 import { SETTINGS_AI_JOB_SEARCH_ANCHOR_ID } from "../../lib/job-finder-route-hrefs";
 import {
   AiBehaviorPreferenceSchema,
@@ -278,6 +279,17 @@ function GroupHeading(props: { title: string; description: string }) {
   );
 }
 
+function ChoiceField(props: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid min-w-0 gap-1.5">
+      <p className="text-(length:--text-small) font-medium text-foreground">
+        {props.label}
+      </p>
+      {props.children}
+    </div>
+  );
+}
+
 interface SettingsAiBehaviorSectionProps {
   /** Reports staged edits so a stale shell save retry is retired. */
   onSettingsDraftEdited?: () => void;
@@ -393,9 +405,11 @@ export function SettingsAiBehaviorSection({
       >
         <GroupHeading
           title="Assistant"
-          description="The assistant in the side chat. Choose how much it volunteers and how long it talks."
+          description="The assistant in the side chat."
         />
-        <div className="grid min-w-0 gap-3 lg:grid-cols-[3fr_2fr]">
+        {/* Two separate choices, each under its own name. Side by side they
+          read as one row of five cards. */}
+        <ChoiceField label="Suggestions">
           <ChoiceCards
             aria-label="How much the assistant suggests"
             columns={3}
@@ -406,9 +420,11 @@ export function SettingsAiBehaviorSection({
             options={initiativeOptions}
             value={draft.behavior.profileAssistant.initiative}
           />
+        </ChoiceField>
+        <ChoiceField label="Reply length">
           <ChoiceCards
             aria-label="How the profile assistant replies"
-            columns={2}
+            columns={3}
             disabled={isSavePending}
             onChange={(replyStyle) =>
               editBehavior("profileAssistant", { replyStyle })
@@ -416,7 +432,7 @@ export function SettingsAiBehaviorSection({
             options={replyStyleOptions}
             value={draft.behavior.profileAssistant.replyStyle}
           />
-        </div>
+        </ChoiceField>
       </article>
 
       <article
