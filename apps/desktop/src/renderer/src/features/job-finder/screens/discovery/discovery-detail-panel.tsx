@@ -35,6 +35,7 @@ import {
 import { EmptyState } from "../../components/empty-state";
 import { ExternalUrlLink } from "../../components/open-outside-links";
 import { PreferenceList } from "../../components/preference-list";
+import { Chip } from "@renderer/components/ui/chip";
 import { StatusBadge } from "../../components/status-badge";
 import { MatchEvidenceMatrix } from "../../components/match-evidence-matrix";
 import { jobDescriptionToText } from "../../lib/job-description-text";
@@ -1451,15 +1452,29 @@ export function DiscoveryDetailPanel({
                       </strong>
                     </div>
                   ) : null}
+                  {/* A card like the two above it, and skills in their own
+                      spelling ("Node.js", not "NODE.JS"). */}
+                  {selectedJob.keySkills.length > 0 ? (
+                    <div
+                      className="surface-card-tint min-w-0 rounded-(--radius-field) border border-(--surface-panel-border) p-4 sm:col-span-2"
+                      data-testid="discovery-detail-skills"
+                    >
+                      <span className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-soft">
+                        Skills mentioned
+                      </span>
+                      <div className="mt-2 flex min-w-0 flex-wrap gap-1.5">
+                        {selectedJob.keySkills.map((skill) => (
+                          <Chip
+                            className="font-sans text-(length:--text-small) normal-case tracking-normal"
+                            key={skill}
+                          >
+                            {skill}
+                          </Chip>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-
-                {selectedJob.keySkills.length > 0 ? (
-                  <PreferenceList
-                    compact
-                    label="Skills mentioned"
-                    values={selectedJob.keySkills}
-                  />
-                ) : null}
 
                 {selectedJob.screeningHints.remoteGeographies.length > 0 ? (
                   <PreferenceList
