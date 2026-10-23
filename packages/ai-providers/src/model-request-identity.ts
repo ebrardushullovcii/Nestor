@@ -94,6 +94,14 @@ export const modelConversationKeys = {
   resumeWriting(profile: { id: string }): string {
     return `resume-writing:${profile.id}`;
   },
+  /** The same evidence leads every resume check, across jobs and restarts. */
+  resumeClaimChecking(
+    evidence: ReadonlyArray<{ id: string; text: string }>,
+  ): string {
+    return `resume-claims:${createHash("sha256")
+      .update(JSON.stringify(evidence), "utf8")
+      .digest("hex")}`;
+  },
   /** A full listing read; the person and goals lead, as in resumeWriting. */
   listingReading(profile: { id: string }): string {
     return `listing-reading:${profile.id}`;

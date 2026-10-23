@@ -76,7 +76,25 @@ const ResumeBulletIncludedInputSchema = z.object({
   included: z.boolean(),
 });
 const ResumeGenerationProposalInputSchema = z.object({
-  proposal: z.record(z.string(), z.unknown()),
+  proposal: z.preprocess(
+    (value: unknown) => {
+      if (typeof value !== "string") return value;
+      // Some providers serialize this nested object as JSON inside a string.
+      // They can also repeat its closing brace. Accept only a complete object,
+      // then run the same grounding checks; never remove fields or invent text.
+      let encoded = value.trim();
+      if (!encoded.startsWith("{")) return value;
+      for (;;) {
+        try {
+          return JSON.parse(encoded) as unknown;
+        } catch {
+          if (!encoded.endsWith("}")) return value;
+          encoded = encoded.slice(0, -1).trimEnd();
+        }
+      }
+    },
+    z.record(z.string(), z.unknown()),
+  ),
   templateId: z.string().trim().min(1).optional(),
   reasonForRevision: z.string().trim().min(1).optional(),
 });
