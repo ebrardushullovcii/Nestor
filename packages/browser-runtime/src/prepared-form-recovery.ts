@@ -62,6 +62,49 @@ export async function capturePreparedForm(
       >(selector),
     ];
     if (!controls.length || controls.length > 200) return null;
+    // Fields inside shadow roots or custom form elements are invisible to
+    // this capture, so a refill could read back exact while losing them.
+    const hidesFields = (root: Document | ShadowRoot): boolean =>
+      [...root.querySelectorAll("*")].some((element) => {
+        if (
+          element.localName.includes("-") &&
+          ((
+            customElements.get(element.localName) as
+              | { formAssociated?: boolean }
+              | undefined
+          )?.formAssociated ||
+            (root !== document && !element.shadowRoot))
+        )
+          return true;
+        const shadow = element.shadowRoot;
+        return Boolean(
+          shadow &&
+            (shadow.querySelector(
+              `${selector},[contenteditable],[role=textbox],[role=combobox],[role=spinbutton],[role=slider]`,
+            ) ||
+              hidesFields(shadow)),
+        );
+      });
+    if (hidesFields(document)) return null;
+    const native = new Set(["INPUT", "TEXTAREA", "SELECT", "BUTTON", "FIELDSET", "OUTPUT", "OBJECT"]);
+    if (
+      [...document.forms].some((form) =>
+        [...form.elements].some((element) => !native.has(element.tagName)),
+      )
+    )
+      return null;
+    // A custom element without an open root may hold a closed one, or upgrade
+    // later. Inside the area that holds the fields, keep the original page.
+    let area: Element | null = controls[0]!.form ?? controls[0]!.parentElement;
+    while (area && !controls.every((control) => area!.contains(control)))
+      area = area.parentElement;
+    if (
+      [...(area ?? document.documentElement).querySelectorAll("*")].some(
+        (element) =>
+          element.localName.includes("-") && !element.shadowRoot,
+      )
+    )
+      return null;
     if (
       controls.some((control) =>
         /password|passwd|captcha|csrf|token|secret|session|otp|credential/iu.test(
