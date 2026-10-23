@@ -11,6 +11,7 @@ import {
   type ResumeBatchProviderBlock,
 } from "@nestor/contracts";
 import { refreshApprovedApplicationLetter } from "./approved-application-letter";
+import { createReturnToShortlistMethods } from "./application-return-to-shortlist";
 import type {
   DiscoveryFeedbackBatchOutcome,
   DiscoveryFeedbackBatchResult,
@@ -406,6 +407,8 @@ type WorkspaceApplicationMethods = Omit<
     | "approveApplyRun"
     | "cancelApplyRun"
     | "resolveApplyConsentRequest"
+    | "returnApplicationToShortlist"
+    | "undoReturnApplicationToShortlist"
     | "revokeApplyRunApproval"
     | "approveApply"
     | "focusPreparedApplicationPage"
@@ -5648,6 +5651,11 @@ export function createWorkspaceApplicationMethods(
 
   return {
     resumeApplicationUserAction,
+    ...createReturnToShortlistMethods({
+      ctx,
+      withApplyRunTransition,
+      withExactApplicationRecordTransition,
+    }),
     async resumeParkedApplyRuns(control, onFinished) {
       const [runs, results] = await Promise.all([
         ctx.repository.listApplyRuns(),

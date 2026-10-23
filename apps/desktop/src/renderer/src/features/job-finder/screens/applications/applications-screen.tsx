@@ -175,6 +175,11 @@ export function ApplicationsScreen(props: {
   onMutateApplicationCrm?: (
     command: ApplicationCrmMutationInput,
   ) => Promise<void>;
+  /**
+   * Applications -> Shortlisted for an application nothing was sent for.
+   * Offered on the row menu and in the detail panel.
+   */
+  onReturnApplicationToShortlist?: (record: ApplicationRecord) => void;
   onMutateApplicationCrmBulkStage?: (
     command: ApplicationCrmBulkStageMutationInput,
   ) => Promise<void>;
@@ -1180,6 +1185,12 @@ export function ApplicationsScreen(props: {
             onStartApplyCopilot={onStartApplyCopilot}
             isApplyPending={isApplyPending}
             applicationWorkPaused={applicationWorkPaused}
+            {...(props.onReturnApplicationToShortlist
+              ? { onReturnToShortlist: props.onReturnApplicationToShortlist }
+              : {})}
+            {...(props.onMutateApplicationCrm
+              ? { onMutateApplicationCrm: props.onMutateApplicationCrm }
+              : {})}
             hasUnassignedLegacyHistory={hasUnassignedLegacyLineage}
             onFilterChange={handleFilterChange}
             onSelectRecord={selectRecordAndRevealDetails}
@@ -1263,6 +1274,9 @@ export function ApplicationsScreen(props: {
         ) : (
           <ApplicationsDetailPanel
             progressNow={progressNow}
+            {...(props.onReturnApplicationToShortlist
+              ? { onReturnToShortlist: props.onReturnApplicationToShortlist }
+              : {})}
             {...(props.crmSettings
               ? { customStages: props.crmSettings.customStages }
               : {})}

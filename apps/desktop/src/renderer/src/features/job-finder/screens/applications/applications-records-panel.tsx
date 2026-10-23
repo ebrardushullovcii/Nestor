@@ -19,6 +19,7 @@ import {
 import {
   isApplicationTrackedAsSentByPerson,
   isApplicationWithdrawnByPerson,
+  type ApplicationCrmMutationInput,
   type ApplicationCrmStageDefinition,
   type ApplicationRecord,
   type ApplyJobResultListRow,
@@ -87,7 +88,9 @@ import {
 import {
   listingRowMenuEntries,
   openRowContextMenu,
+  type RowMenuEntry,
 } from "../../lib/row-context-menu";
+import { resolveApplicationMoveBack } from "./application-move-back";
 import {
   isAnyString,
   useRememberedString,
@@ -156,6 +159,12 @@ interface ApplicationsRecordsPanelProps {
   isApplyPending?: boolean;
   /** All work is paused: a row's Try again waits for Continue. */
   applicationWorkPaused?: boolean;
+  /** Applications -> Shortlisted for an unsent application. */
+  onReturnToShortlist?: (record: ApplicationRecord) => void;
+  /** Mark withdrawn and Archive, offered on a sent application's row. */
+  onMutateApplicationCrm?: (
+    command: ApplicationCrmMutationInput,
+  ) => Promise<void>;
   onFilterChange: (filter: ApplicationsViewFilter) => void;
   onSelectRecord: (recordId: string) => void;
   selectedRecord: ApplicationRecord | null;
@@ -179,6 +188,8 @@ export function ApplicationsRecordsPanel({
   onStartApplyCopilot,
   isApplyPending = false,
   applicationWorkPaused = false,
+  onReturnToShortlist,
+  onMutateApplicationCrm,
   onFilterChange,
   onSelectRecord,
   selectedRecord,
@@ -556,10 +567,10 @@ export function ApplicationsRecordsPanel({
                           : applyState.formClosed
                             ? ("warning" as const)
                             : applyState.kind === "could_not_apply"
-                            ? ("critical" as const)
-                            : applyState.kind === "needs_you"
-                              ? ("warning" as const)
-                              : ("active" as const),
+                              ? ("critical" as const)
+                              : applyState.kind === "needs_you"
+                                ? ("warning" as const)
+                                : ("active" as const),
                   }
                 : getApplicationStagePresentation(record);
             // One status word per row. The stage badge is it; a second badge
@@ -646,6 +657,58 @@ export function ApplicationsRecordsPanel({
                 ),
               });
             };
+            // One way back per row: an unsent application returns to
+            // Shortlisted; a sent one stays, and the menu says why.
+            const moveBack = resolveApplicationMoveBack(
+              record,
+              applyState?.kind,
+            );
+            const mutateCrm = (
+              mutation: ApplicationCrmMutationInput["mutation"],
+            ) =>
+              onMutateApplicationCrm?.({
+                applicationRecordId: record.id,
+                expectedRevision: applicationCrmDataForView(record).revision,
+                mutation,
+              });
+            const moveBackMenu: RowMenuEntry[] =
+              moveBack === "to_shortlisted" && onReturnToShortlist
+                ? [
+                    "separator",
+                    {
+                      id: "move-back-to-shortlisted",
+                      label: "Move back to Shortlisted",
+                      run: () => onReturnToShortlist(record),
+                    },
+                  ]
+                : moveBack === "sent" && onMutateApplicationCrm
+                  ? [
+                      "separator",
+                      {
+                        id: "sent-stays",
+                        label: "It was sent, so it cannot move back",
+                        enabled: false,
+                        run: () => undefined,
+                      },
+                      {
+                        id: "mark-withdrawn",
+                        label: "Mark withdrawn",
+                        run: () =>
+                          mutateCrm({
+                            type: "set_stage",
+                            stage: "withdrawn",
+                            customStageId: null,
+                            note: null,
+                          }),
+                      },
+                      {
+                        id: "archive",
+                        label: "Archive",
+                        run: () =>
+                          mutateCrm({ type: "set_archived", archived: true }),
+                      },
+                    ]
+                  : [];
             const recordStateDescriptionId = `applications-record-${record.id}-state-description`;
             const relatedJob = relatedJobsById.get(record.jobId);
             const employerLine = [
@@ -698,6 +761,7 @@ export function ApplicationsRecordsPanel({
                             },
                           ]
                         : []),
+                      ...moveBackMenu,
                       ...listingRowMenuEntries(relatedJob?.canonicalUrl),
                     ])
                   }
@@ -802,9 +866,10 @@ export function ApplicationsRecordsPanel({
                           : formAction?.kind === "prepare" &&
                               applicationWorkPaused
                             ? APPLICATION_WORK_PAUSED_REASON
-                            : nextStepLabel && nextStepLabel !== formAction?.label
-                            ? `Next: ${nextStepLabel}`
-                            : null}
+                            : nextStepLabel &&
+                                nextStepLabel !== formAction?.label
+                              ? `Next: ${nextStepLabel}`
+                              : null}
                       </SelectableRowLine>
                     )}
                   </button>

@@ -59,7 +59,10 @@ import {
   BrowserVisualObservationSetSchema,
   ApplyVisualCheckpointSchema,
 } from "./visual";
-import { ApplicationCrmDataSchema } from "./application-crm";
+import {
+  ApplicationCrmDataSchema,
+  isApplicationTrackedAsSentByPerson,
+} from "./application-crm";
 import { ApplicationListingSignalEvidenceSchema } from "./job-finder-intelligence";
 
 export const JobDiscoveryTargetSchema = z.object({
@@ -2938,8 +2941,61 @@ export const ApplicationRecordSchema = z.object({
    * did.
    */
   automationMode: ApplicationAutomationModeSchema.default("prepare_only"),
+  /**
+   * When the person moved this unsent application back to Shortlisted. It
+   * leaves Applications until the record is next updated (a new Apply), and
+   * keeps its history and receipts. Optional so a build without it reads the
+   * record anyway (the object is not strict and drops the key); such a build
+   * simply lists the application again.
+   */
+  returnedToShortlistAt: IsoDateTimeSchema.nullable().optional(),
 });
 export type ApplicationRecord = z.infer<typeof ApplicationRecordSchema>;
+
+/**
+ * Moved back to Shortlisted and not touched since: Applications leaves it out
+ * and Shortlisted shows the job again. Any later write (a new Apply) moves the
+ * last update past the marker and brings it back.
+ */
+export function isApplicationReturnedToShortlist(
+  record: Pick<ApplicationRecord, "lastUpdatedAt" | "returnedToShortlistAt">,
+): boolean {
+  return (
+    typeof record.returnedToShortlistAt === "string" &&
+    Date.parse(record.returnedToShortlistAt) >= Date.parse(record.lastUpdatedAt)
+  );
+}
+
+const SENT_APPLICATION_STATUSES = new Set<ApplicationRecord["status"]>([
+  "submitted",
+  "assessment",
+  "interview",
+  "rejected",
+  "offer",
+]);
+
+/**
+ * The record says this application went to the employer: sent by Job Finder,
+ * or by the person by their own word. A sent application cannot go back to
+ * Shortlisted; it can be marked withdrawn or archived.
+ */
+export function isApplicationRecordSent(
+  record: Pick<
+    ApplicationRecord,
+    "status" | "lastAttemptState" | "personSendReceipt" | "crm"
+  >,
+): boolean {
+  return (
+    SENT_APPLICATION_STATUSES.has(record.status) ||
+    record.lastAttemptState === "submitted" ||
+    record.personSendReceipt !== undefined ||
+    isApplicationTrackedAsSentByPerson(record.crm)
+  );
+}
+
+/** Why a sent application has no "Move back to Shortlisted". */
+export const APPLICATION_SENT_CANNOT_MOVE_BACK_MESSAGE =
+  "It was sent, so it stays here. Mark it withdrawn or archive it instead.";
 /**
  * What a caller may hand the repository. Defaulted fields may be omitted; the
  * repository parses before it stores, so every stored record is complete.

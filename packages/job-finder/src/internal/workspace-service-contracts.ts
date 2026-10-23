@@ -661,6 +661,18 @@ export interface JobFinderWorkspaceService {
     requestId: string,
     action: "approve" | "decline",
   ): Promise<JobFinderWorkspaceSnapshot>;
+  /**
+   * Moves an unsent application back to Shortlisted: its prepared form
+   * closes, nothing is sent or prepared again, and its history and receipts
+   * stay. Refused for a sent application and while one is being filled in.
+   */
+  returnApplicationToShortlist(
+    applicationRecordId: string,
+  ): Promise<JobFinderWorkspaceSnapshot>;
+  /** Undo of the move: the application is listed in Applications again. */
+  undoReturnApplicationToShortlist(
+    jobId: string,
+  ): Promise<JobFinderWorkspaceSnapshot>;
   revokeApplyRunApproval(runId: string): Promise<JobFinderWorkspaceSnapshot>;
   inspectPreparedApplicationPage(
     input: JobFinderPreparedApplicationPageInput,

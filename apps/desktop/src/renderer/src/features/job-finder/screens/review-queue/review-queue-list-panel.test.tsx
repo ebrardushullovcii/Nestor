@@ -690,8 +690,9 @@ it("counts a job whose resume is being written under Writing, as its row says", 
     ],
     onPrepareTailoredDrafts: vi.fn(),
   });
-  expect(screen.getByRole("button", { name: "No resume: 1 jobs" }))
-    .toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "No resume: 1 jobs" }),
+  ).toBeTruthy();
   expect(screen.getByRole("button", { name: "Writing: 1 jobs" })).toBeTruthy();
   expect(
     screen.getByRole("button", { name: "Create the missing resume" }),
@@ -705,8 +706,9 @@ it("says nothing about the filter when every job the button covers is shown", ()
     onPrepareTailoredDrafts: vi.fn(),
   });
   fireEvent.click(screen.getByRole("button", { name: /^No resume: 2/ }));
-  expect(screen.getByRole("button", { name: "Create 2 missing resumes" }))
-    .toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Create 2 missing resumes" }),
+  ).toBeTruthy();
   expect(screen.queryByTestId("shortlist-bulk-filter-scope")).toBeNull();
 });
 
@@ -744,7 +746,9 @@ it("queues all 53 ready applications with one press, or just this page", () => {
     onApplyToJobs,
   });
   expect(screen.queryByText(/start now/)).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Apply to all 53 ready" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Apply to all 53 ready" }),
+  );
   expect(onApplyToJobs).toHaveBeenLastCalledWith(
     Array.from({ length: 53 }, (_, i) => `ready_${i}`),
   );
@@ -833,42 +837,50 @@ it("filters by resume status with counts while Create missing resumes stays plan
   );
 });
 
-it("selects the page with its checkbox, everything with Select all, and clears", () => {
-  const onPrepareTailoredDrafts = vi.fn();
-  const queue = Array.from({ length: 103 }, (_, index) =>
-    createEligibleItem(`pick-${index}`),
-  );
-  queue[0] = createReadyItem("pick-0");
-  renderPanel({ queue, onPrepareTailoredDrafts });
-  fireEvent.click(
-    screen.getByRole("checkbox", { name: "Select the 50 jobs on this page" }),
-  );
-  // The ready job is ticked too; only the 49 that need a resume are written.
-  expect(
-    screen.getByRole("button", { name: "Create 49 resumes" }),
-  ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-  fireEvent.click(
-    screen.getByRole("checkbox", { name: "Select the 50 jobs on this page" }),
-  );
-  expect(
-    screen.getByRole("button", { name: "Create 99 resumes" }),
-  ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
-  expect(
-    screen.queryByRole("button", { name: /^Create \d+ resumes?$/ }),
-  ).toBeNull();
-  fireEvent.change(screen.getByRole("searchbox"), {
-    target: { value: "pick-100" },
-  });
-  fireEvent.click(
-    screen.getByRole("checkbox", { name: "Select Role pick-100" }),
-  );
-  expect(screen.getByRole("button", { name: "Create 1 resume" })).toBeTruthy();
-  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "" } });
-  fireEvent.click(screen.getByRole("button", { name: "Select all 103" }));
-  fireEvent.click(screen.getByRole("button", { name: "Create 102 resumes" }));
-  expect(onPrepareTailoredDrafts).toHaveBeenCalledExactlyOnceWith(
-    expect.arrayContaining(queue.slice(1).map((item) => item.jobId)),
-  );
-});
+// 103 rows and full-page role queries: about 1.5 s alone, past 5 s under a
+// busy full run.
+it(
+  "selects the page with its checkbox, everything with Select all, and clears",
+  { timeout: 20_000 },
+  () => {
+    const onPrepareTailoredDrafts = vi.fn();
+    const queue = Array.from({ length: 103 }, (_, index) =>
+      createEligibleItem(`pick-${index}`),
+    );
+    queue[0] = createReadyItem("pick-0");
+    renderPanel({ queue, onPrepareTailoredDrafts });
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Select the 50 jobs on this page" }),
+    );
+    // The ready job is ticked too; only the 49 that need a resume are written.
+    expect(
+      screen.getByRole("button", { name: "Create 49 resumes" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Select the 50 jobs on this page" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Create 99 resumes" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+    expect(
+      screen.queryByRole("button", { name: /^Create \d+ resumes?$/ }),
+    ).toBeNull();
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "pick-100" },
+    });
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Select Role pick-100" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Create 1 resume" }),
+    ).toBeTruthy();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Select all 103" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create 102 resumes" }));
+    expect(onPrepareTailoredDrafts).toHaveBeenCalledExactlyOnceWith(
+      expect.arrayContaining(queue.slice(1).map((item) => item.jobId)),
+    );
+  },
+);

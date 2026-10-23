@@ -97,6 +97,7 @@ import type {
   JobFinderApplyRunActionInput,
   JobFinderApplyQueueControlInput,
   JobFinderRemoveFromApplyQueueInput,
+  JobFinderReturnApplicationToShortlistInput,
   JobFinderApproveResumesInput,
   JobFinderStartApplyQueueInput,
   JobFinderApplyRunDetailsQuery,
@@ -1513,6 +1514,17 @@ const desktopApi = {
         "job-finder:remove-from-apply-queue",
         input,
       ) as Promise<JobFinderWorkspaceSyncResult>,
+    returnApplicationToShortlist: (
+      input: JobFinderReturnApplicationToShortlistInput,
+    ) =>
+      ipcRenderer.invoke(
+        "job-finder:return-application-to-shortlist",
+        input,
+      ) as Promise<JobFinderWorkspaceSyncResult>,
+    undoReturnApplicationToShortlist: (jobId: string) =>
+      ipcRenderer.invoke("job-finder:undo-return-application-to-shortlist", {
+        jobId,
+      }) as Promise<JobFinderWorkspaceSyncResult>,
     approveApplyRun: (input: JobFinderApplyRunActionInput) =>
       ipcRenderer.invoke(
         "job-finder:approve-apply-run",

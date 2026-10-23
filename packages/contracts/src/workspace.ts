@@ -135,6 +135,17 @@ export type JobFinderJobActionInput = z.infer<
 >;
 
 /**
+ * Moves an unsent application back to Shortlisted: its prepared form closes,
+ * nothing is sent, and its history stays. Undo names the job.
+ */
+export const JobFinderReturnApplicationToShortlistInputSchema = z.object({
+  applicationRecordId: NonEmptyStringSchema,
+});
+export type JobFinderReturnApplicationToShortlistInput = z.infer<
+  typeof JobFinderReturnApplicationToShortlistInputSchema
+>;
+
+/**
  * Clearing a resume's approval. Undo of an approval names the status the
  * draft had before it, so the resume goes back to To review as it was
  * instead of reading as stale.

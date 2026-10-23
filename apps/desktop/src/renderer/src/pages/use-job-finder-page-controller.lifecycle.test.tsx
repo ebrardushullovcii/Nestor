@@ -440,11 +440,9 @@ describe("useJobFinderPageController cross-route status lifetime", () => {
       await harness.current?.context?.onQueueJob("job_discovery_1");
     });
     // ADR 0044: a success on Find jobs is news, so it is a toast with its
-    // link, and nothing is left behind to replay on a later visit.
+    // Undo, and nothing is left behind to replay on a later visit.
     expect(await screen.findByText("Job added to Shortlisted.")).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Open Shortlisted" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
     expect(harness.current?.context?.actionState.message).toBeNull();
   });
 
