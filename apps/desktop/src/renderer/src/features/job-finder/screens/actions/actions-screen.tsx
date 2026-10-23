@@ -1487,8 +1487,8 @@ export function ActionsScreen(props: {
               Nothing needs you right now
             </h2>
             <p className="text-sm text-foreground-soft">
-              Blocked sources and applications will appear here when a
-              browser-only step needs your attention.
+              A sign-in, a security check or a question only you can answer
+              shows up here.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
