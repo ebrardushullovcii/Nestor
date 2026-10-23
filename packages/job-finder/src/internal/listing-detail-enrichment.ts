@@ -109,10 +109,6 @@ export interface ListingDetailEnrichmentSummary {
 
 export interface EnrichSavedJobListingDetailsInput {
   onProgress?: (completed: number, total: number) => void;
-  /** More jobs from the same bounded search pass, until its sources finish. */
-  nextJob?: () => Promise<SavedJob | undefined>;
-  /** Publish each completed read without waiting for the other pages. */
-  onJobRead?: (original: SavedJob, updated: SavedJob) => Promise<void>;
   /**
    * Read again even inside the retry back-off after a failed attempt. Used
    * when the person acts on a job right now and the body matters at once.
@@ -138,7 +134,7 @@ export interface EnrichSavedJobListingDetailsInput {
 }
 
 export interface EnrichSavedJobListingDetailsResult {
-  /** Input jobs followed by streamed jobs, updated where a read changed them. */
+  /** Every input job, updated where a read changed it, in input order. */
   jobs: SavedJob[];
   changedJobIds: string[];
   summary: ListingDetailEnrichmentSummary;
@@ -801,7 +797,6 @@ export async function enrichSavedJobListingDetails(
     elapsedMs: 0,
   };
   const updated = new Map<string, SavedJob>();
-  const streamedJobs: SavedJob[] = [];
   let providerAccessError: unknown;
   let rateLimitPauseUntilMs = 0;
   let rateLimitRetryAfterAtMs = 0;
@@ -856,19 +851,15 @@ export async function enrichSavedJobListingDetails(
   let completed = 0;
   let cursor = 0;
   const worker = async (): Promise<void> => {
-    while (cursor < (input.nextJob ? maxJobs : capped.length)) {
+    while (cursor < capped.length) {
       if (input.signal?.aborted || deferRemainingForRateLimit) {
         return;
       }
-      const position = cursor;
+      const job = capped[cursor];
       cursor += 1;
-      const job =
-        position < capped.length ? capped[position] : await input.nextJob?.();
       if (!job) {
         return;
       }
-      if (input.signal?.aborted) return;
-      if (position >= capped.length) streamedJobs.push(job);
       let attemptedAt: string | null = null;
       try {
         if (!(await waitForSharedRateLimit())) return;
@@ -1019,7 +1010,6 @@ export async function enrichSavedJobListingDetails(
         );
       } finally {
         if (attemptedAt) {
-          await input.onJobRead?.(job, updated.get(job.id) ?? job);
           completed += 1;
           input.onProgress?.(completed, capped.length);
         }
@@ -1028,21 +1018,16 @@ export async function enrichSavedJobListingDetails(
   };
 
   await Promise.all(
-    Array.from(
-      {
-        length: Math.min(concurrency, input.nextJob ? maxJobs : capped.length),
-      },
-      () => worker(),
+    Array.from({ length: Math.min(concurrency, capped.length) }, () =>
+      worker(),
     ),
   );
 
-  summary.skipped += Math.max(0, capped.length - summary.attempted);
+  summary.skipped += capped.length - summary.attempted;
 
   summary.elapsedMs = Date.now() - startedAtMs;
   return {
-    jobs: [...input.jobs, ...streamedJobs].map(
-      (job) => updated.get(job.id) ?? job,
-    ),
+    jobs: input.jobs.map((job) => updated.get(job.id) ?? job),
     changedJobIds: [...updated.keys()],
     summary,
     ...(providerAccessError === undefined ? {} : { providerAccessError }),

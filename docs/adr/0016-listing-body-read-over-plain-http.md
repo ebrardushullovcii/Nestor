@@ -1,6 +1,6 @@
-# ADR 0016: Listing bodies are read over plain HTTP during the search
+# ADR 0016: Listing bodies are read over plain HTTP after the scan
 
-Status: accepted (2026-09-05); listing reads overlap source collection (2026-10-23).
+Status: accepted (2026-09-05); collection overlap trial backed out (2026-10-23).
 
 ## Context
 
@@ -8,9 +8,11 @@ Compact discovery (ADR 0013) stops at the target job count after reading listing
 
 Opening every listing inside the managed browser during the scan would multiply run time and browser steps, and it is what the bounded agent was designed not to do.
 
+A trial that read and judged listings during source collection reduced search time, but its fit bands differed more than repeated controls on identical inputs. The changed scheduling also changed fit batch composition. Listing reads and reassessment therefore stay after source collection; the trial did not establish that its speed gain preserved quality.
+
 ## Decision
 
-- As source checkpoints retain jobs, Job Finder reads their listing pages over plain HTTP from the main process: no browser, no session, no cookies. One bounded pass, up to eight reads at once, overlaps collection and shares rate-limit pauses across its pages. Completed reads join the fit queue immediately; a card awaiting its read does not also spend a fit call unless a retention rule needs its verdict first. The search waits for the reads and fit queue before finishing. The same read runs once for a job when it is shortlisted, if the run left it unread.
+- After a run's sources finish and before the run is declared finished, Job Finder reads the listing page of every job the run retained as a card, over plain HTTP from the main process: no browser, no session, no cookies. The same read runs once for a job when it is shortlisted, if the run left it unread.
 - The reader is source-generic (ADR 0007). It reads the schema.org `JobPosting` record most job pages publish as JSON-LD, and falls back to the visible text of the page. It knows HTML, not boards.
 - The body replaces the card's stand-in description; employer, location, pay, posting date and employment type fill only gaps or placeholders. The job is then re-scored by the same assessment session the run used, so "Search finished" means scored results.
 - Every attempt is recorded on the job (`listingDetailFetch`: outcome, method, when) so the product can say "read", "wanted a sign-in", "no listing text" or "could not be reached" instead of "not captured", and so no page is re-read more than once a day (once an hour after a failure).
