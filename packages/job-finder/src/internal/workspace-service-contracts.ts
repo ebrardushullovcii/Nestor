@@ -922,6 +922,8 @@ export interface CandidateAssetResolver {
 }
 
 export interface CreateJobFinderWorkspaceServiceOptions {
+  /** Host acknowledgement that the first display transfer has finished. */
+  backgroundWorkReady?: PromiseLike<void>;
   resumeDraftProcessor?: ResumeDraftProcessor;
   onFitJudgmentProgress?: () => void;
   aiClient: JobFinderAiClient;

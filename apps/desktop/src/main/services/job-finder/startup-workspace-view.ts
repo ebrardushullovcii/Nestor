@@ -94,6 +94,47 @@ let loaded:
   | undefined;
 let bootstrapTaken = false;
 let snapshotTaken = false;
+let savedViewAccepted = false;
+let snapshotSent = false;
+let windowHydrated = false;
+let hydrationReady: Promise<void> | null = null;
+let resolveHydration: (() => void) | null = null;
+let hydrationFallback: ReturnType<typeof setTimeout> | null = null;
+
+/** Background reads must not compete with the first full window transfer. */
+export function waitForStartupWorkspaceHydration(): Promise<void> {
+  if (windowHydrated) return Promise.resolve();
+  hydrationReady ??= new Promise<void>((resolve) => {
+    resolveHydration = resolve;
+    // A closed or failed renderer must not strand background work forever.
+    hydrationFallback = setTimeout(releaseStartupWorkspaceHydration, 15_000);
+    hydrationFallback.unref?.();
+  });
+  return hydrationReady;
+}
+
+export function releaseStartupWorkspaceHydration(): void {
+  windowHydrated = true;
+  if (hydrationFallback) clearTimeout(hydrationFallback);
+  hydrationFallback = null;
+  resolveHydration?.();
+  resolveHydration = null;
+}
+
+export function noteStartupWorkspaceSnapshotSent(): void {
+  snapshotSent = true;
+}
+
+/** The renderer already sends this acknowledgement after applying each view. */
+export function noteStartupWorkspaceRevisionHeld(): void {
+  if (snapshotSent) releaseStartupWorkspaceHydration();
+}
+
+/** A valid saved view needs no canonical service before its first transfer. */
+export function waitForSavedStartupWorkspace(): Promise<void> | null {
+  loadStartupWorkspaceView();
+  return savedViewAccepted ? waitForStartupWorkspaceHydration() : null;
+}
 
 /**
  * Notes, before anything opens the workspace database, whether it is still
@@ -124,6 +165,7 @@ function loadStartupWorkspaceView() {
       readFileSync(viewPath()),
     ) as StoredStartupWorkspaceView;
     if (stored.format === FORMAT && stored.database === startupDatabase) {
+      savedViewAccepted = true;
       loaded = { bootstrap: stored.bootstrap, snapshot: stored.snapshot };
     }
   } catch {
@@ -149,6 +191,11 @@ export function takeStartupBootstrap(): JobFinderRendererWorkspaceSnapshot | nul
   const view = loadStartupWorkspaceView();
   const bootstrap = decode(view?.bootstrap);
   if (view) view.bootstrap = null;
+  if (savedViewAccepted && !bootstrap) {
+    savedViewAccepted = false;
+    loaded = null;
+    releaseStartupWorkspaceHydration();
+  }
   return bootstrap;
 }
 
@@ -158,6 +205,10 @@ export function takeStartupSnapshot(): JobFinderRendererWorkspaceSnapshot | null
   snapshotTaken = true;
   const snapshot = decode(loadStartupWorkspaceView()?.snapshot);
   loaded = null;
+  if (savedViewAccepted && !snapshot) {
+    savedViewAccepted = false;
+    releaseStartupWorkspaceHydration();
+  }
   return snapshot;
 }
 

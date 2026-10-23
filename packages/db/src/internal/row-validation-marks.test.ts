@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { ResumeDraftSchema } from "@nestor/contracts";
+import { ResumeDraftSchema, SavedJobListFactsSchema } from "@nestor/contracts";
 import { afterEach, expect, test, vi } from "vitest";
 import { createFileJobFinderRepository } from "../file-repository";
 import { createSavedJob } from "../file-repository.test-support";
@@ -25,10 +25,20 @@ function workspaceFile(): string {
 }
 
 /** One start of the app: a connection and a reader for one build. */
-function start(filePath: string, validationStamp: string | null) {
+function start(
+  filePath: string,
+  validationStamp: string | null,
+  sqliteDetails = false,
+) {
   const db = new DatabaseSync(filePath);
   cleanups.push(() => db.isOpen && db.close());
-  return { db, read: createSavedJobProjectionReader(db, { validationStamp }) };
+  return {
+    db,
+    read: createSavedJobProjectionReader(db, {
+      validationStamp,
+      sqliteDetails,
+    }),
+  };
 }
 
 function put(db: DatabaseSync, value: object & { id: string }): void {
@@ -113,6 +123,34 @@ test("only the build that marked a row skips its schema", async () => {
   const otherBuild = start(filePath, "build-2");
   const [validated] = await otherBuild.read();
   expect(validated?.keySkills).toEqual([]);
+});
+
+test("a full unchanged validation also proves list facts, until a write or a new build", async () => {
+  const filePath = workspaceFile();
+  const first = start(filePath, "build-1", true);
+  put(first.db, createSavedJob({ id: "a" }));
+  await first.read();
+  await first.read.validation();
+  expect(marks(first.db)).toEqual(["a:build-1"]);
+  first.db.close();
+
+  const parse = vi.spyOn(SavedJobListFactsSchema, "parse");
+  try {
+    const sameBuild = start(filePath, "build-1", true);
+    expect((await sameBuild.read())[0]!.title).toBe("Lead Designer");
+    expect(parse).not.toHaveBeenCalled();
+    put(sameBuild.db, createSavedJob({ id: "a", title: "Edited" }));
+    expect((await sameBuild.read())[0]!.title).toBe("Edited");
+    expect(parse).toHaveBeenCalledTimes(1);
+    sameBuild.db.close();
+
+    const nextBuild = start(filePath, "build-2", true);
+    expect((await nextBuild.read())[0]!.title).toBe("Edited");
+    expect(parse).toHaveBeenCalledTimes(2);
+    await nextBuild.read.validation();
+  } finally {
+    parse.mockRestore();
+  }
 });
 
 test("a missing trigger drops every mark before the next read", async () => {

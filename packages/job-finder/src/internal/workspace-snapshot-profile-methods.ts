@@ -576,6 +576,7 @@ export function createWorkspaceSnapshotProfileMethods(
   // whole-profile fingerprint are re-bound before any edit can strand them.
   let legacyFitFingerprintRebinding: Promise<unknown> | null = null;
   let lastNoResponseAutomationRunAt: number | null = null;
+  let ledgerWarmup: Promise<void> | null = null;
   const normalizedDraftRows = new WeakMap<
     object,
     {
@@ -1738,12 +1739,6 @@ export function createWorkspaceSnapshotProfileMethods(
       inactiveListingLedger(discovery.discoveryLedger).length > 0
     )
       await jobViewIdentityIndex.warm?.(rawSavedJobs);
-    if (!lastJobViews) {
-      const canonical = await ctx.repository.readDiscoveryStateForRun?.();
-      await warmDiscoveryLedgerIndex(
-        canonical?.discoveryLedger ?? discovery.discoveryLedger,
-      );
-    }
     const {
       savedJobs,
       discoveryJobs,
@@ -2081,6 +2076,19 @@ export function createWorkspaceSnapshotProfileMethods(
     };
     if (!borrowValidatedJobs)
       return JobFinderWorkspaceSnapshotSchema.parse(snapshot);
+    // The window only needs display evidence. Keep the canonical feedback
+    // cache warm for triage after the first full view has reached the window.
+    ledgerWarmup ??= (async () => {
+      await ctx.backgroundWorkReady;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (ctx.isWorkspaceClosing?.()) return;
+      const canonical = await ctx.repository.readDiscoveryStateForRun?.();
+      await warmDiscoveryLedgerIndex(
+        canonical?.discoveryLedger ?? discovery.discoveryLedger,
+      );
+    })().catch((error: unknown) => {
+      console.warn("[Job Finder] Warming triage history failed", error);
+    });
     // Rows were validated on entering the immutable repository projection.
     // Re-parsing the same jobs in three lists deep-copied every listing again
     // on each progress update. Only display callers borrow these values; IPC

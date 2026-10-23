@@ -435,11 +435,19 @@ app.on("before-quit", (event) => {
   jobFinderShutdownInFlight = true;
   event.preventDefault();
   void runShutdownWithTimeout(
-    () =>
-      Promise.all([
+    async () => {
+      // The assistant or scheduler may itself be waiting for the opening view.
+      // Cancel that wait before awaiting either service's shutdown.
+      if (jobFinderServicesPromise) {
+        const { beginJobFinderWorkspaceShutdown } =
+          await jobFinderServicesPromise;
+        beginJobFinderWorkspaceShutdown();
+      }
+      await Promise.all([
         stopCampaignScheduler().then(shutdownJobFinderServicesIfLoaded),
         shutdownLiveAssistantIfLoaded(),
-      ]).then(() => undefined),
+      ]);
+    },
     jobFinderShutdownTimeoutMs,
     () => {
       console.warn(

@@ -76,6 +76,7 @@ export interface WorkspaceServiceContext {
   exportFileVerifier?: ResumeExportFileVerifier;
   researchAdapter?: ResumeResearchAdapter;
   repository: JobFinderRepository;
+  backgroundWorkReady?: PromiseLike<void>;
   listingAssessmentJobIds?: Set<string>;
   listingActivityIdentityIndex?: ReturnType<
     typeof createListingActivityIdentityIndex

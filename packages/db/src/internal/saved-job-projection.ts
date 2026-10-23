@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
 import {
   SavedJobSchema,
@@ -11,7 +11,11 @@ import {
   type ParseMarkedRow,
   type RowValidationStamp,
 } from "./row-validation-marks";
-import { listCollectionValues, parsePersistedRowValue } from "./state";
+import {
+  listCollectionValues,
+  parsePersistedRowJson,
+  parsePersistedRowValue,
+} from "./state";
 import {
   createSavedJobDetails,
   savedJobDetailFields,
@@ -151,6 +155,7 @@ export function createSavedJobProjectionReader(
     /** Who validates rows; rows it already marked skip the schema. */
     validationStamp?: RowValidationStamp;
     sqliteDetails?: boolean;
+    backgroundValidationReady?: PromiseLike<void>;
   } = {},
 ) {
   const details = options.sqliteDetails
@@ -212,24 +217,57 @@ export function createSavedJobProjectionReader(
   // SQLite strips evidence before it crosses into the JS heap. In addition
   // to avoiding a large parse, retained strings cannot keep a full raw row's
   // backing string alive through an implementation-specific substring view.
-  const factsQuery = `SELECT id,
-    CASE WHEN json_valid(saved_jobs.value) THEN json_remove(
+  const withoutDetails = `jsonb_remove(saved_jobs.value,
+    ${savedJobDetailFields.map((key) => `'$.${key}'`).join(", ")})`;
+  // Materialize only this page, parsing each large row into SQLite JSONB
+  // once for the repeated field and array operations. The full evidence
+  // still never enters JS.
+  const factsQuery = (selection: string) => `
+    WITH saved_job_list_source AS MATERIALIZED (
+      SELECT id, CASE WHEN json_valid(value) THEN jsonb(value) ELSE value END AS value,
+        ${
+          marks
+            ? `(SELECT validated_stamp FROM row_validations
+          WHERE validated_table = 'saved_jobs' AND validated_row_id = saved_jobs.id)`
+            : "NULL"
+        } AS validated_stamp
+      FROM saved_jobs ${selection}
+    ) SELECT id, validated_stamp,
+    CASE WHEN typeof(saved_jobs.value) = 'blob' THEN json(
       CASE WHEN json_type(saved_jobs.value, '$.provenance') = 'array'
         AND NOT EXISTS (SELECT 1 FROM json_each(saved_jobs.value, '$.provenance') WHERE type != 'object')
-      THEN json_set(saved_jobs.value, '$.provenance', json((
+      THEN jsonb_set(${withoutDetails}, '$.provenance', jsonb((
         SELECT json_group_array(json(json_remove(sighting.value, '$.listingFacts')))
         FROM json_each(saved_jobs.value, '$.provenance') AS sighting
-      ))) ELSE saved_jobs.value END,
-      ${savedJobDetailFields.map((key) => `'$.${key}'`).join(", ")}
+      ))) ELSE ${withoutDetails} END
     ) ELSE saved_jobs.value END AS list_value
-    FROM saved_jobs`;
+    FROM saved_job_list_source AS saved_jobs ORDER BY id`;
   const readFactsPage = details
-    ? database.prepare(`${factsQuery}
-    WHERE id > ? ORDER BY id LIMIT ?`)
+    ? database.prepare(factsQuery("WHERE id > ? ORDER BY id LIMIT ?"))
     : null;
+
+  function readListFacts(
+    row: Record<string, SQLOutputValue>,
+  ): SavedJobListFacts {
+    const input = {
+      tableName: "saved_jobs",
+      rowId: String(row.id),
+      rawValue: String(row.list_value),
+    };
+    const stamp = marks?.current();
+    // The full schema returned exactly this stored JSON. Removing only detail
+    // fields cannot invalidate its remaining facts; do not clone their large
+    // verdict evidence through another schema on every saved-view relaunch.
+    const facts =
+      stamp && row.validated_stamp === stamp
+        ? (parsePersistedRowJson(input) as SavedJobListFacts)
+        : parsePersistedRowValue({ ...input, schema: SavedJobListFactsSchema });
+    return freezeProjection(shareListValues(facts, share));
+  }
   const readChangedFacts = details
-    ? database.prepare(`${factsQuery}
-    WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id`)
+    ? database.prepare(
+        factsQuery("WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id"),
+      )
     : null;
 
   /**
@@ -249,17 +287,7 @@ export function createSavedJobProjectionReader(
       const rows = (thin ? readFactsPage : readPage).all(after, pageRows);
       for (const row of rows) {
         if (details && marks?.current()) {
-          const facts = freezeProjection(
-            shareListValues(
-              parsePersistedRowValue({
-                tableName: "saved_jobs",
-                rowId: String(row.id),
-                rawValue: String(row.list_value),
-                schema: SavedJobListFactsSchema,
-              }),
-              share,
-            ),
-          );
+          const facts = readListFacts(row);
           jobs.set(facts.id, details.project(facts));
           continue;
         }
@@ -320,17 +348,7 @@ export function createSavedJobProjectionReader(
           const found = new Set<string>();
           marks.read(() => {
             for (const row of readChangedFacts.all(JSON.stringify(pageIds))) {
-              const facts = freezeProjection(
-                shareListValues(
-                  parsePersistedRowValue({
-                    tableName: "saved_jobs",
-                    rowId: String(row.id),
-                    rawValue: String(row.list_value),
-                    schema: SavedJobListFactsSchema,
-                  }),
-                  share,
-                ),
-              );
+              const facts = readListFacts(row);
               found.add(facts.id);
               next.set(facts.id, details.project(facts));
             }
@@ -393,6 +411,8 @@ export function createSavedJobProjectionReader(
 
   async function validateInBackground(): Promise<void> {
     if (!marks) return;
+    await options.backgroundValidationReady;
+    if (!database.isOpen) return;
     const stamp = await marks.settled();
     if (!stamp) return;
     const page = database.prepare(`SELECT ${marks.selectSql}

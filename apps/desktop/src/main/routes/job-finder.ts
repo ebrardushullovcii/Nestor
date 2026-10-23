@@ -197,7 +197,11 @@ import {
 import { collectJobFinderPerformanceSnapshot } from "../services/job-finder/collect-performance-snapshot";
 import { createJobFinderWorkspaceDeltaTracker } from "../services/job-finder/workspace-delta";
 import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-workspace-view";
-import { takeStartupSnapshot } from "../services/job-finder/startup-workspace-view";
+import {
+  takeStartupSnapshot,
+  noteStartupWorkspaceSnapshotSent,
+  noteStartupWorkspaceRevisionHeld,
+} from "../services/job-finder/startup-workspace-view";
 import {
   publishJobFinderWorkspaceUpdate,
   scheduleAnswerDraftWorkspaceUpdate,
@@ -1155,6 +1159,7 @@ export function registerJobFinderRouteHandlers(
     (event, payload: unknown) => {
       const { revision } = JobFinderWorkspaceHeldRevisionSchema.parse(payload);
       workspaceDeltaTracker.noteHeldRevision(event.sender, revision);
+      noteStartupWorkspaceRevisionHeld();
     },
   );
   const activeResumePreviewRequests = new WeakMap<
@@ -1238,6 +1243,7 @@ export function registerJobFinderRouteHandlers(
       const startupSnapshot =
         input.baseRevision === null ? takeStartupSnapshot() : null;
       if (startupSnapshot) {
+        noteStartupWorkspaceSnapshotSent();
         // The view saved at the last clean close stands in until the real
         // workspace has loaded; then the window converges by delta. If the
         // workspace cannot load, the window reloads into the ordinary path,
@@ -1255,6 +1261,7 @@ export function registerJobFinderRouteHandlers(
       }
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot = await readWorkspaceProjection(jobFinderWorkspaceService);
+      noteStartupWorkspaceSnapshotSent();
 
       return workspaceDeltaTracker.synchronize(
         input.baseRevision,
