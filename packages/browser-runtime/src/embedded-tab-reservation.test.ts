@@ -81,3 +81,54 @@ test("host capacity admits work above the old seven/fifteen limits and counts co
   expect(capacity).toHaveBeenLastCalledWith(0);
   next();
 });
+
+test("search reservations leave working slots for applications and a popup", async () => {
+  const context = {
+    pages: () => [],
+  } as unknown as BrowserContext;
+  const capacity = vi.fn((pending: number) => 9 + pending < 16);
+  const source = await reserveEmbeddedApplicationTab(
+    context,
+    undefined,
+    undefined,
+    undefined,
+    () => 9,
+    () => 9,
+    capacity,
+    6,
+  );
+  const controller = new AbortController();
+  const nextSource = reserveEmbeddedApplicationTab(
+    context,
+    controller.signal,
+    undefined,
+    undefined,
+    () => 9,
+    () => 9,
+    capacity,
+    6,
+  );
+  // The tenth source has reserved its tab. Another source waits, but all
+  // five application workers and a popup can still reserve their own tabs.
+  const applications = [];
+  for (let index = 0; index < 6; index += 1) {
+    applications.push(
+      await reserveEmbeddedApplicationTab(
+        context,
+        undefined,
+        undefined,
+        undefined,
+        () => 9,
+        () => 9,
+        capacity,
+      ),
+    );
+  }
+  expect(capacity.mock.calls.map(([pending]) => pending)).toEqual([
+    6, 7, 1, 2, 3, 4, 5, 6,
+  ]);
+  controller.abort();
+  await expect(nextSource).rejects.toMatchObject({ name: "AbortError" });
+  source();
+  applications.forEach((release) => release());
+});

@@ -229,9 +229,9 @@ const SCREEN_LOOKUPS_PER_TURN = 40;
 const PUBLIC_API_PROCESSING_CONCURRENCY = 3;
 /**
  * How many browser sources one search works on at the same time. Each gets
- * its own browser tab; the number stays small so a laptop and a site's
- * patience both hold. API feeds run in their own lane beside them. Override
- * with NESTOR_SEARCH_CONCURRENCY.
+ * its own browser tab. Ten readers fit the measured native host budget; tab
+ * admission also leaves room for applications and popups. API feeds run in
+ * their own lane beside them. Override with NESTOR_SEARCH_CONCURRENCY.
  */
 const DISCOVERY_SOURCE_CONCURRENCY = (() => {
   const configured = Number.parseInt(
@@ -239,8 +239,8 @@ const DISCOVERY_SOURCE_CONCURRENCY = (() => {
     10,
   );
   return Number.isFinite(configured) && configured > 0
-    ? Math.min(configured, 8)
-    : 5;
+    ? Math.min(configured, 10)
+    : 10;
 })();
 /**
  * The time one browser source may take in a search of several. Sources that

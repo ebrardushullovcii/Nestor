@@ -1220,6 +1220,8 @@ export async function reserveEmbeddedApplicationTab(
   hostTabCount?: () => number,
   hostWorkingTabCount?: () => number,
   hostHasCapacity?: (reservedTabs: number) => boolean,
+  /** Native working slots left for other workflows when admitting a search. */
+  spareWorkingTabs = 0,
 ): Promise<() => void> {
   // Reserve atomically before creating a page. Native hosts account for their
   // own working/retained tabs; older hosts retain the conservative fallback.
@@ -1242,7 +1244,7 @@ export async function reserveEmbeddedApplicationTab(
     // Keep the old bounded fallback only for hosts without that capability.
     if (
       hostHasCapacity
-        ? hostHasCapacity(pending)
+        ? hostHasCapacity(pending + spareWorkingTabs)
         : working < 7 && occupied < (hostWorkingTabCount ? 15 : 7)
     ) {
       pendingEmbeddedApplicationTabs.set(
@@ -3501,6 +3503,10 @@ export function createBrowserAgentRuntime(
             hostTabCount,
             hostWorkingTabCount,
             hostHasCapacity,
+            // Five application preparations and a popup must still fit while
+            // a ten-source search runs. Hosts without native capacity keep
+            // their existing conservative admission limit.
+            6,
           );
         }
         page = await getAgentRunPage(source, agentOptions, async (resolvedPage) => {
