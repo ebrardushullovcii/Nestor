@@ -202,6 +202,7 @@ export function createMatchAssessmentSession(input: {
   const assess = (
     posting: JobPosting & { matchAssessment?: MatchAssessment | null },
     carriedInput: FitJudgment | null = readCarriedJudgment(posting),
+    knownPostingFingerprint?: string,
   ): MatchAssessment => {
     const carried =
       carriedInput?.contextFingerprint === fingerprints.legacyVerdictFingerprint
@@ -228,6 +229,7 @@ export function createMatchAssessmentSession(input: {
       return previous;
     const postingInput = createMatchAssessmentPostingInput(posting);
     const postingFingerprint =
+      knownPostingFingerprint ??
       createMatchAssessmentPostingFingerprint(postingInput);
     const cacheKey = assessmentCacheKey(postingFingerprint, carried);
     const cached = cache.get(cacheKey);
@@ -278,6 +280,7 @@ export function createMatchAssessmentSession(input: {
       assess(
         { ...posting, matchAssessment: persistedAssessment ?? null },
         persistedAssessment?.judgment ?? null,
+        postingFingerprint,
       ),
     );
   };

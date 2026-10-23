@@ -9,7 +9,8 @@ import {
   type SavedJobDiscoveryProvenance,
 } from "@nestor/contracts";
 import { createUniqueId } from "./shared";
-import { fnv1a64 } from "@nestor/core";
+import { fnv1a64, yieldToEventLoop } from "@nestor/core";
+import { patchDiscoveryLedger, readDiscoveryLedgerChanges } from "@nestor/db";
 import {
   createJobIdentityIndex,
   normalizeJobIdentityUrl,
@@ -263,8 +264,7 @@ export async function createDiscoveryFreshnessDigestInTurns(
   const { counts, classify } = startFreshnessDigest(input);
   const classified: ReturnType<typeof classify>[] = [];
   for (const [position, posting] of input.postings.entries()) {
-    if (position > 0 && position % input.perTurn === 0)
-      await new Promise<void>((resolve) => setImmediate(resolve));
+    if (position % input.perTurn === 0) await yieldToEventLoop();
     classified.push(classify(posting));
   }
   return finishFreshnessDigest(input.postings.length, counts, classified);
@@ -312,6 +312,26 @@ let lastIndexedLedger: {
 /** More changed entries than this rebuild the index instead. */
 const MAX_CARRIED_LEDGER_CHANGES = 64;
 
+/** Build the feedback lookup between turns, before the first Hide needs it. */
+export async function warmDiscoveryLedgerIndex(
+  ledger: readonly DiscoveryLedgerEntry[],
+): Promise<void> {
+  if (!Object.isFrozen(ledger) || frozenLedgerIndexes.has(ledger)) return;
+  const carried = carryLedgerIndex(ledger);
+  if (carried) {
+    frozenLedgerIndexes.set(ledger, carried);
+    lastIndexedLedger = { ledger, index: carried };
+    return;
+  }
+  const index = createDiscoveryLedgerIndex([]);
+  for (let start = 0; start < ledger.length; start += 100) {
+    for (const entry of ledger.slice(start, start + 100)) index.add(entry);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  frozenLedgerIndexes.set(ledger, index);
+  lastIndexedLedger = { ledger, index };
+}
+
 /**
  * The last ledger's index, moved to `ledger` when the two share all but a
  * few entries. Storage keeps every unchanged entry as the same frozen value,
@@ -323,11 +343,15 @@ function carryLedgerIndex(
   ledger: readonly DiscoveryLedgerEntry[],
 ): DiscoveryLedgerIndex | null {
   const last = lastIndexedLedger;
-  if (
-    !last ||
-    Math.abs(last.ledger.length - ledger.length) > MAX_CARRIED_LEDGER_CHANGES
-  )
-    return null;
+  if (!last) return null;
+  const changes = readDiscoveryLedgerChanges(last.ledger, ledger);
+  if (changes) {
+    frozenLedgerIndexes.delete(last.ledger);
+    for (const entry of changes.removed) last.index.remove(entry);
+    for (const entry of changes.added) last.index.add(entry);
+    return last.index;
+  }
+  if (Math.abs(last.ledger.length - ledger.length) > MAX_CARRIED_LEDGER_CHANGES) return null;
   const current = new Set(ledger);
   const previous = new Set(last.ledger);
   if (current.size !== ledger.length || previous.size !== last.ledger.length)
@@ -365,6 +389,14 @@ function upsertLedgerEntry(
   existingEntry: DiscoveryLedgerEntry | null,
   nextEntry: DiscoveryLedgerEntry,
 ): DiscoveryLedgerEntry[] {
+  if (Object.isFrozen(ledger))
+    return patchDiscoveryLedger(ledger, [
+      {
+        id: nextEntry.id,
+        moveToEnd: true,
+        update: () => nextEntry,
+      },
+    ]);
   const nextLedger = existingEntry
     ? ledger.filter((entry) => entry !== existingEntry)
     : [...ledger];

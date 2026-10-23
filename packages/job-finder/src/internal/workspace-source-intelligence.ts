@@ -1,3 +1,4 @@
+import { yieldToEventLoop } from "@nestor/core";
 import {
   JobPostingSchema,
   SourceIntelligenceArtifactSchema,
@@ -1514,9 +1515,6 @@ function waitBeforeRetry(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-const yieldToEventLoop = () =>
-  new Promise<void>((resolve) => setImmediate(resolve));
-
 function escapeRegularExpression(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
@@ -1920,7 +1918,7 @@ export async function collectPublicProviderJobs(input: {
       // go held the main process for a quarter of a second or more.
       const jobs: JobPosting[] = [];
       for (const [position, record] of records.entries()) {
-        if (position > 0 && position % PROVIDER_API_JOBS_PER_TURN === 0) {
+        if (position % PROVIDER_API_JOBS_PER_TURN === 0) {
           await yieldToEventLoop();
           if (input.signal?.aborted) {
             throw new DOMException("Aborted", "AbortError");
@@ -2045,4 +2043,3 @@ export function applyDiscoveryTitleTriage(input: {
     reason: null,
   };
 }
-

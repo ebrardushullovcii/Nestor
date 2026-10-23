@@ -1,4 +1,6 @@
-import { createConcurrencyLimiter } from "@nestor/core";
+import { createConcurrencyLimiter, yieldToEventLoop } from "@nestor/core";
+import { isDeepStrictEqual } from "node:util";
+import { patchDiscoveryLedger } from "@nestor/db";
 import {
   createDiscoverySavedJobWriter,
   markSupersedingDiscoveryUpdate,
@@ -111,13 +113,18 @@ import {
   screenListingsWithModel,
   type ListingScreenListing,
 } from "./listing-screen";
-import { normalizeJobIdentityUrl } from "./job-identity";
+import {
+  compactJobIdentity,
+  normalizeJobIdentityUrl,
+  type JobIdentityInput,
+} from "./job-identity";
 import { createDiscoveryRefreshDecision } from "./workspace-discovery-refresh-schedule";
 import {
   createDiscoveryFreshnessDigestInTurns,
   createDiscoveryListingFingerprints,
+  warmDiscoveryLedgerIndex,
 } from "./workspace-discovery-ledger";
-import { rebaseRunLedgerOntoPersisted } from "./workspace-discovery-state-helpers";
+import { rebaseDiscoveryLedgerEntry } from "./workspace-discovery-state-helpers";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
 import type {
   CampaignRunContext,
@@ -267,7 +274,7 @@ const SEARCH_FIT_MAX_BATCH_WAIT_MS = 90_000;
  * Feeds a search holds at once: downloading, waiting for the listing screen,
  * or ready to merge. Downloads themselves run a few at a time.
  */
-const PUBLIC_API_PREFETCH_CONCURRENCY = 48;
+const PUBLIC_API_PREFETCH_CONCURRENCY = 8;
 const PUBLIC_API_DOWNLOAD_CONCURRENCY = 8;
 /** Feed listings looked up against the run's jobs per event-loop turn. */
 const SCREEN_LOOKUPS_PER_TURN = 40;
@@ -303,11 +310,9 @@ const DISCOVERY_STALL_STEP_WINDOW = MAX_DISCOVERY_AGENT_NO_PROGRESS_STEPS;
 const RESUME_STALENESS_FLUSH_MS = 2 * 60_000;
 const DISCOVERY_SAVE_COALESCE_MS = 250;
 /** Saved jobs a search's setup prepares per event-loop turn. */
-const SETUP_JOBS_PER_TURN = 250;
+const SETUP_JOBS_PER_TURN = 50;
 /** Postings a source's final pass triages and merges per event-loop turn. */
 const FINAL_PASS_POSTINGS_PER_TURN = 40;
-const yieldToEventLoop = () =>
-  new Promise<void>((resolve) => setImmediate(resolve));
 /** `items.map(map)`, giving the event loop a turn every few dozen items. */
 async function mapInTurns<T, R>(
   items: readonly T[],
@@ -316,7 +321,7 @@ async function mapInTurns<T, R>(
 ): Promise<R[]> {
   const mapped: R[] = [];
   for (const [position, item] of items.entries()) {
-    if (position > 0 && position % perTurn === 0) await yieldToEventLoop();
+    if (position % perTurn === 0) await yieldToEventLoop();
     mapped.push(map(item));
   }
   return mapped;
@@ -348,10 +353,6 @@ const CHECKPOINT_RESUME_HEARTBEAT_REVISIONS = 8;
 const AGENT_RUNTIME_UNAVAILABLE_WARNING =
   "The bounded browser agent runtime is unavailable for this source; live collection fell back to direct discovery.";
 
-function serializeSavedJobDeltaValue(value: unknown): string {
-  return JSON.stringify(value) ?? "undefined";
-}
-
 function applySavedJobDelta(
   currentJob: SavedJob,
   baselineJob: SavedJob,
@@ -359,18 +360,17 @@ function applySavedJobDelta(
 ): SavedJob {
   const changedFields: Record<string, unknown> = {};
   for (const key of Object.keys(intendedJob) as Array<keyof SavedJob>) {
-    if (
-      serializeSavedJobDeltaValue(intendedJob[key]) !==
-      serializeSavedJobDeltaValue(baselineJob[key])
-    ) {
+    if (!isDeepStrictEqual(intendedJob[key], baselineJob[key])) {
       if (key === "planAssessments") {
         const assessments = { ...currentJob.planAssessments };
         for (const [planId, assessment] of Object.entries(
           intendedJob.planAssessments ?? {},
         )) {
           if (
-            serializeSavedJobDeltaValue(assessment) !==
-            serializeSavedJobDeltaValue(baselineJob.planAssessments?.[planId])
+            !isDeepStrictEqual(
+              assessment,
+              baselineJob.planAssessments?.[planId],
+            )
           )
             assessments[planId] = assessment;
         }
@@ -379,7 +379,20 @@ function applySavedJobDelta(
     }
   }
 
-  return SavedJobSchema.parse({ ...currentJob, ...changedFields });
+  // The repository validates this returned row at its write boundary.
+  return { ...currentJob, ...changedFields };
+}
+
+/** Inspection counts need identity facts, not complete retained provider postings. */
+function inspectionIdentity(
+  posting: JobPosting,
+  id: string,
+): JobIdentityInput & { id: string } {
+  return Object.freeze({
+    ...compactJobIdentity(posting),
+    id,
+    matchAcrossSources: true,
+  });
 }
 
 type PublicProviderJobsResult = Awaited<
@@ -1605,7 +1618,8 @@ export function createWorkspaceDiscoveryMethods(
       // jobs from these, and a second private copy of every saved job held
       // about half a gigabyte for the whole search on 6,284 jobs.
       ctx.repository.readSavedJobsProjection(),
-      ctx.repository.getDiscoveryState(),
+      ctx.repository.readDiscoveryStateForRun?.() ??
+        ctx.repository.getDiscoveryState(),
       ctx.repository.listUserActionRequests({ scopeType: "discovery_source" }),
     ]).catch((error: unknown) => {
       clearActiveController();
@@ -1747,13 +1761,15 @@ export function createWorkspaceDiscoveryMethods(
     // search's first seconds froze the window.
     let workingSavedJobs = await mapInTurns(
       startingSavedJobs,
-      (job) => ({
-        ...job,
-        matchAssessment: assessmentSession.assessPersisted(
+      (job) => {
+        const matchAssessment = assessmentSession.assessPersisted(
           job,
           readPlanAssessment(job, assessmentPlanId).matchAssessment,
-        ),
-      }),
+        );
+        return matchAssessment === job.matchAssessment
+          ? job
+          : { ...job, matchAssessment };
+      },
       SETUP_JOBS_PER_TURN,
     );
     let workingPendingJobs = startingDiscovery.pendingDiscoveryJobs.map(
@@ -1792,6 +1808,8 @@ export function createWorkspaceDiscoveryMethods(
       toSightingIdentityInput,
     );
     const indexOver = (jobs: readonly SavedJob[]) => jobIdentity.sync(jobs);
+    await runLedger.warm();
+    await jobIdentity.warm(workingSavedJobs);
     let allJobsMemo: {
       saved: readonly SavedJob[];
       pending: readonly SavedJob[];
@@ -1830,7 +1848,7 @@ export function createWorkspaceDiscoveryMethods(
     // built once and shared with the run's job index; postings inspected
     // later are added as they come.
     const inspectionIdentityIndex = createJobIdentityIndex<
-      JobPosting & { id: string; alternateListingUrls?: string[] }
+      JobIdentityInput & { id: string }
     >([], (value) =>
       Array.isArray((value as Partial<SavedJob>).provenance)
         ? toSightingIdentityInput(value as SavedJob)
@@ -1895,16 +1913,31 @@ export function createWorkspaceDiscoveryMethods(
     // and pending-job removals that differ from these baselines while the run
     // is in flight belong to the user and must survive run persistence.
     const baselineLedger = startingDiscovery.discoveryLedger;
+    const baselineLedgerById = new Map(
+      baselineLedger.map((entry) => [entry.id, entry]),
+    );
     const baselinePendingJobIds = new Set(
       startingDiscovery.pendingDiscoveryJobs.map((job) => job.id),
     );
 
+    const warmFeedbackLedger = async () => {
+      if (!ctx.repository.readDiscoveryStateForRun) return;
+      const state = await ctx.repository.readDiscoveryStateForRun();
+      await warmDiscoveryLedgerIndex(state.discoveryLedger);
+    };
     const savedJobWriter = createDiscoverySavedJobWriter({
       persistedJobs: startingSavedJobs,
       toStoredJob: storedJob,
       merge: applySavedJobDelta,
-      commit: (input) => ctx.repository.commitSavedJobDelta(input),
-      persistDiscovery: (update) => ctx.persistDiscoveryState(update),
+      commit: async (input) => {
+        await ctx.repository.commitSavedJobDelta(input);
+        if (input.updateDiscoveryState)
+          await warmFeedbackLedger().catch(() => undefined);
+      },
+      persistDiscovery: async (update) => {
+        await ctx.persistDiscoveryState(update);
+        await warmFeedbackLedger().catch(() => undefined);
+      },
       // A search of many sources saves several times a second; those saves
       // share a transaction. A small search saves each one at once.
       coalesceMs:
@@ -2073,27 +2106,38 @@ export function createWorkspaceDiscoveryMethods(
     });
     const captureWorkingDiscoveryUpdate = () => {
       const run = captureRunForCommit();
-      const ledger = runLedger.entries();
+      const ledger = runLedger.captureChanges();
       const pendingJobs = workingPendingJobs;
       const pendingIds = new Set(touchedPendingJobIds);
-      return markSupersedingDiscoveryUpdate((current) =>
-        finalizeDiscoveryState(
-          {
-            ...current,
-            pendingDiscoveryJobs: overlayTouchedPendingJobs(
-              current.pendingDiscoveryJobs,
-              pendingJobs.map(storedJob),
-              pendingIds,
-              baselinePendingJobIds,
+      return markSupersedingDiscoveryUpdate(
+        Object.assign(
+          (current: typeof startingDiscovery) =>
+            finalizeDiscoveryState(
+              {
+                ...current,
+                pendingDiscoveryJobs: overlayTouchedPendingJobs(
+                  current.pendingDiscoveryJobs,
+                  pendingJobs.map(storedJob),
+                  pendingIds,
+                  baselinePendingJobIds,
+                ),
+                discoveryLedger: patchDiscoveryLedger(
+                  current.discoveryLedger,
+                  ledger.entries.map((entry) => ({
+                    id: entry.id,
+                    update: (persisted) =>
+                      rebaseDiscoveryLedgerEntry(
+                        baselineLedgerById.get(entry.id) ?? null,
+                        entry,
+                        persisted,
+                      ),
+                  })),
+                ),
+              },
+              run,
+              enrichedPreferences,
             ),
-            discoveryLedger: rebaseRunLedgerOntoPersisted({
-              baselineLedger,
-              workingLedger: ledger,
-              persistedLedger: current.discoveryLedger,
-            }),
-          },
-          run,
-          enrichedPreferences,
+          { committed: ledger.committed },
         ),
       );
     };
@@ -2279,11 +2323,7 @@ export function createWorkspaceDiscoveryMethods(
           touchedPendingJobIds,
           baselinePendingJobIds,
         ),
-        discoveryLedger: rebaseRunLedgerOntoPersisted({
-          baselineLedger,
-          workingLedger: runLedger.entries(),
-          persistedLedger: current.discoveryLedger,
-        }),
+        discoveryLedger: current.discoveryLedger,
       }))
       .catch((error: unknown) => {
         clearActiveController();
@@ -2595,8 +2635,7 @@ export function createWorkspaceDiscoveryMethods(
         // A failed incremental attempt rolls back to the pre-attempt state and
         // falls back to end-of-source persistence instead of failing the run;
         // AbortError still propagates so cancellation stays immediate.
-        const targetBaselineLedger = runLedger.entries();
-        const targetBaselineLedgerVersion = runLedger.version;
+        const targetBaselineLedger = runLedger.captureSnapshot();
         // Processed identity keys carry the listing-fingerprint composites of
         // every raw variant already processed for that identity (one identity
         // may legitimately appear with several card/title variants inside one
@@ -2744,7 +2783,9 @@ export function createWorkspaceDiscoveryMethods(
               matchAcrossSources: true,
             });
             const inspectionId = knownInspection?.id ?? toSavedJobId(posting);
-            inspectionIdentityIndex.add({ ...posting, id: inspectionId });
+            inspectionIdentityIndex.add(
+              inspectionIdentity(posting, inspectionId),
+            );
             checkpointState.inspectedJobIds.add(inspectionId);
             const sourceCounts = sourceCountsFor(posting);
             sourceCounts.inspected += 1;
@@ -2954,9 +2995,13 @@ export function createWorkspaceDiscoveryMethods(
             executionSignal,
             assessDiscoveryPosting,
             batchSavedJobIds,
-            { identityIndex: mergeIdentityIndex, recordRankOnlyAudits: false },
+            {
+              identityIndex: mergeIdentityIndex,
+              recordRankOnlyAudits: false,
+              reuseInventory: true,
+            },
           );
-          const landedIndex = indexOver(mergeResult.mergedJobs);
+          const landedIndex = jobIdentity.accept(mergeResult.mergedJobs);
           const landed = landedJobIdsFor(target.id);
           const landedJobs = new Map<string, SavedJob>();
           for (const posting of budgetedPostings) {
@@ -3506,6 +3551,7 @@ export function createWorkspaceDiscoveryMethods(
             ...(prefetchedPublicApiResult ? { prefetchedPublicApiResult } : {}),
           });
         } catch (error) {
+          targetBaselineLedger.release();
           const interrupted =
             executionSignal.aborted ||
             (error instanceof DOMException && error.name === "AbortError");
@@ -3575,15 +3621,11 @@ export function createWorkspaceDiscoveryMethods(
         // job kept mid-run still classifies exactly once against the same
         // pre-target baseline.
         const freshnessDigest = await createDiscoveryFreshnessDigestInTurns({
-          ledger: targetBaselineLedger,
+          ledger: [],
           postings: collectedJobs,
-          // Nothing recorded since this source started: the run's index is
-          // the baseline's index.
-          ...(runLedger.version === targetBaselineLedgerVersion
-            ? { index: runLedger.index() }
-            : {}),
+          index: targetBaselineLedger,
           perTurn: FINAL_PASS_POSTINGS_PER_TURN,
-        });
+        }).finally(() => targetBaselineLedger.release());
         const freshnessSummary =
           formatDiscoveryFreshnessDigest(freshnessDigest);
         // Re-seen postings never reach the merge (their content is unchanged),
@@ -3723,11 +3765,9 @@ export function createWorkspaceDiscoveryMethods(
           sliceStart === 0 || sliceStart < remainingRawPostings.length;
           sliceStart += finalPassSliceSize
         ) {
-          if (sliceStart > 0) {
-            await yieldToEventLoop();
-            if (executionSignal.aborted) {
-              throw new DOMException("Aborted", "AbortError");
-            }
+          await yieldToEventLoop();
+          if (executionSignal.aborted) {
+            throw new DOMException("Aborted", "AbortError");
           }
           const sliceTriage = runTriageAndLedgerForPostings(
             remainingRawPostings.slice(

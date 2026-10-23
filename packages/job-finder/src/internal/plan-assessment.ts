@@ -11,6 +11,12 @@ export function withPlanAssessment<T extends SavedJob>(
   planId: string | null,
   assessment: MatchAssessment = job.matchAssessment,
 ): T {
+  if (
+    planId
+      ? job.planAssessments?.[planId] === assessment
+      : job.matchAssessment === assessment
+  )
+    return job;
   return {
     ...job,
     matchAssessment: planId ? job.matchAssessment : assessment,

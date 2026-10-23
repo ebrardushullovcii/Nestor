@@ -77,6 +77,50 @@ describe("createRunDiscoveryLedger", () => {
     status: "seen" as const,
   });
 
+  test("an older save acknowledges only its captured observations and leaves newer work retryable", () => {
+    const run = createRunDiscoveryLedger([]);
+    run.record(sighting("one", "2026-10-21T00:00:01.000Z"));
+    const first = run.captureChanges();
+    run.record(sighting("one", "2026-10-21T00:00:02.000Z"));
+    first.committed();
+    const second = run.captureChanges();
+    expect(second.entries.map((entry) => entry.lastSeenAt)).toEqual([
+      "2026-10-21T00:00:02.000Z",
+    ]);
+    expect(run.captureChanges().entries).toEqual(second.entries);
+    second.committed();
+    expect(run.captureChanges().entries).toEqual([]);
+  });
+
+  test("overlapping source baselines keep their own observations while the live ledger changes", async () => {
+    const run = createRunDiscoveryLedger([]);
+    await run.warm();
+    const empty = run.captureSnapshot();
+    run.record(sighting("one", "2026-10-21T00:00:01.000Z"));
+    const first = run.captureSnapshot();
+    run.record(sighting("one", "2026-10-21T00:00:02.000Z"));
+    const second = run.captureSnapshot();
+    run.record(sighting("two", "2026-10-21T00:00:03.000Z"));
+    expect(empty.find(posting("one"))).toBeNull();
+    expect(first.find(posting("one"))?.lastSeenAt).toBe(
+      "2026-10-21T00:00:01.000Z",
+    );
+    expect(first.find(posting("two"))).toBeNull();
+    expect(second.find(posting("one"))?.lastSeenAt).toBe(
+      "2026-10-21T00:00:02.000Z",
+    );
+    first.release();
+    empty.release();
+    expect(second.find(posting("one"))?.lastSeenAt).toBe(
+      "2026-10-21T00:00:02.000Z",
+    );
+    second.release();
+    expect(() => second.find(posting("one"))).toThrow("released");
+    expect(run.find(posting("two"))?.lastSeenAt).toBe(
+      "2026-10-21T00:00:03.000Z",
+    );
+  });
+
   test("records sightings in the same order as the array ledger", () => {
     const initial = ["one", "two", "three"].map((id) =>
       DiscoveryLedgerEntrySchema.parse({

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 
 import { normalizeText } from "./shared";
 
@@ -26,6 +27,8 @@ export type JobIdentityInput = {
   company?: string | null;
   location?: string | null;
   description?: string | null;
+  /** Private indexed evidence, inflated only to confirm a content-hash match. */
+  exactContent?: { digest: string; read(): string };
   postedAt?: string | null;
   postedAtText?: string | null;
   /**
@@ -189,18 +192,58 @@ function digestListingContent(content: string): string {
   return createHash("sha256").update(content).digest("base64url");
 }
 
+function packListingContent(content: string) {
+  const packed = deflateRawSync(content, { level: 1 });
+  return Object.freeze({
+    digest: digestListingContent(content),
+    read: () => inflateRawSync(packed).toString(),
+  });
+}
+
+/** Counting inspected identities must not retain every complete provider posting. */
+export function compactJobIdentity(input: JobIdentityInput): JobIdentityInput {
+  const content =
+    input.exactContent ??
+    (() => {
+      const normalized = normalizeListingContentIdentity(input.description);
+      return normalized ? packListingContent(normalized) : undefined;
+    })();
+  return Object.freeze({
+    source: input.source,
+    sourceJobId: input.sourceJobId,
+    canonicalUrl: input.canonicalUrl,
+    applicationUrl: input.applicationUrl ?? null,
+    providerKey: input.providerKey ?? null,
+    providerBoardToken: input.providerBoardToken ?? null,
+    providerIdentifier: input.providerIdentifier ?? null,
+    title: input.title ?? null,
+    seniority: input.seniority ?? null,
+    company: input.company ?? null,
+    location: input.location ?? null,
+    postedAt: input.postedAt ?? null,
+    postedAtText: input.postedAtText ?? null,
+    alternateListingUrls: input.alternateListingUrls
+      ? Object.freeze([...input.alternateListingUrls])
+      : null,
+    matchAcrossSources: input.matchAcrossSources ?? false,
+    ...(content ? { exactContent: content } : {}),
+  });
+}
+
 function computeListingContentIdentity(description: string): string | null {
   const normalized = normalizeText(description)
     // A source may label the same final link "Apply" or "Apply now". That
     // call to action is page chrome, not listing identity.
     .replace(/\bapply(?: now)?$/u, "")
     .trim();
-  if (
-    normalized.length < MIN_EXACT_CONTENT_IDENTITY_CHARACTERS ||
-    normalized.split(/\s+/u).length < MIN_EXACT_CONTENT_IDENTITY_WORDS
-  ) {
+  if (normalized.length < MIN_EXACT_CONTENT_IDENTITY_CHARACTERS) {
     return null;
   }
+  const words = /\S+/gu;
+  let count = 0;
+  while (count < MIN_EXACT_CONTENT_IDENTITY_WORDS && words.test(normalized))
+    count += 1;
+  if (count < MIN_EXACT_CONTENT_IDENTITY_WORDS) return null;
   return normalized;
 }
 
@@ -266,8 +309,12 @@ export function hasEquivalentListingContentIdentity(
   right: JobIdentityInput,
 ): boolean {
   if (!hasCompatibleSeniority(left, right)) return false;
-  const leftContent = normalizeListingContentIdentity(left.description);
-  const rightContent = normalizeListingContentIdentity(right.description);
+  const leftContent =
+    left.exactContent?.read() ??
+    normalizeListingContentIdentity(left.description);
+  const rightContent =
+    right.exactContent?.read() ??
+    normalizeListingContentIdentity(right.description);
   if (!leftContent || leftContent !== rightContent) {
     return false;
   }
@@ -376,16 +423,22 @@ export function buildJobIdentityAliases(
     });
   }
 
-  const exactContent = normalizeListingContentIdentity(input.description);
+  const exactContent = input.exactContent
+    ? null
+    : normalizeListingContentIdentity(input.description);
   const contentCompany = input.company ? normalizeText(input.company) : "";
   const contentLocation = input.location ? normalizeText(input.location) : "";
-  if (exactContent && contentCompany && contentLocation) {
+  if (
+    (exactContent || input.exactContent) &&
+    contentCompany &&
+    contentLocation
+  ) {
     aliases.push({
       // A digest, not the text: aliases stay cached with every indexed job,
       // and a key holding the whole normalized description kept a second
       // copy of every listing in memory. Every match on this alias is
       // confirmed by comparing the full content (the index's resolve).
-      key: `content:${contentCompany}\u0000${contentLocation}\u0000${digestListingContent(exactContent)}`,
+      key: `content:${contentCompany}\u0000${contentLocation}\u0000${input.exactContent?.digest ?? digestListingContent(exactContent!)}`,
       kind: "exact_listing_content",
       confidence: "strong",
       priority: 50,
@@ -568,6 +621,7 @@ function readAliasBasis(input: JobIdentityInput): AliasBasis {
     input.company,
     input.location,
     input.description,
+    input.exactContent?.digest,
     input.postedAt,
     input.postedAtText,
     input.matchAcrossSources,
@@ -582,6 +636,16 @@ function sameAliasBasis(left: AliasBasis, right: AliasBasis): boolean {
   );
 }
 
+export function hasSameJobIdentity(
+  left: JobIdentityInput,
+  right: JobIdentityInput,
+): boolean {
+  return (
+    left.seniority === right.seniority &&
+    sameAliasBasis(readAliasBasis(left), readAliasBasis(right))
+  );
+}
+
 /**
  * Aliases already built for an indexed value. A search builds several
  * indexes over every saved job at each checkpoint, and normalizing each
@@ -593,6 +657,10 @@ const indexedAliasCache = new WeakMap<
   object,
   { basis: AliasBasis; aliases: readonly JobIdentityAlias[] }[]
 >();
+// Different immutable views of one listing have the same aliases. Peers are
+// weak: this hint cannot keep an old job, its body or its run alive.
+const aliasPeers = new Map<string, WeakRef<object>>();
+const ALIAS_PEER_LIMIT = 20_000;
 
 function readIndexedAliases(
   value: object,
@@ -602,21 +670,37 @@ function readIndexedAliases(
   const entries = indexedAliasCache.get(value);
   const cached = entries?.find((entry) => sameAliasBasis(entry.basis, basis));
   if (cached) return cached.aliases;
-  const aliases = buildJobIdentityAliases(input);
+  const peerKey = `${input.source}\u0000${input.sourceJobId}\u0000${input.canonicalUrl}`;
+  const peer = aliasPeers.get(peerKey)?.deref();
+  const peerEntry = peer
+    ? indexedAliasCache
+        .get(peer)
+        ?.find((entry) => sameAliasBasis(entry.basis, basis))
+    : undefined;
+  const aliases = peerEntry?.aliases ?? buildJobIdentityAliases(input);
   // One value is indexed with and without cross-source matching.
   indexedAliasCache.set(value, [
     { basis, aliases },
     ...(entries ?? []).slice(0, 1),
   ]);
+  aliasPeers.delete(peerKey);
+  if (aliasPeers.size >= ALIAS_PEER_LIMIT)
+    aliasPeers.delete(aliasPeers.keys().next().value!);
+  aliasPeers.set(peerKey, new WeakRef(value));
   return aliases;
 }
 
 export function createJobIdentityIndex<T extends object>(
   values: readonly T[],
   selectIdentity: (value: T) => JobIdentityInput,
+  include?: (value: T) => boolean,
 ): JobIdentityIndex<T> {
   const valuesByAlias = new Map<string, Set<T>>();
   const aliasesByValue = new Map<T, readonly JobIdentityAlias[]>();
+  const matchesFor = (key: string) => {
+    const matches = valuesByAlias.get(key);
+    return include && matches ? new Set([...matches].filter(include)) : matches;
+  };
 
   const add = (value: T): void => {
     const aliases = readIndexedAliases(value, selectIdentity(value));
@@ -659,7 +743,7 @@ export function createJobIdentityIndex<T extends object>(
       if (alias.confidence !== "strong") {
         continue;
       }
-      const indexedMatches = valuesByAlias.get(alias.key);
+      const indexedMatches = matchesFor(alias.key);
       const matches =
         (alias.kind === "employer_application_url" ||
           alias.kind === "source_posting_id") &&
@@ -735,7 +819,7 @@ export function createJobIdentityIndex<T extends object>(
     const matchedCorroboratingAliases: JobIdentityAlias[] = [];
     let corroboratingCandidates: ReadonlySet<T> | null = null;
     for (const alias of corroboratingAliases) {
-      const matches = valuesByAlias.get(alias.key);
+      const matches = matchesFor(alias.key);
       if (!matches || matches.size === 0) {
         continue;
       }
@@ -780,7 +864,7 @@ export function createJobIdentityIndex<T extends object>(
     const matchedPossibleAliases: JobIdentityAlias[] = [];
     let possibleCandidates: ReadonlySet<T> | null = null;
     for (const alias of possibleAliases) {
-      const matches = valuesByAlias.get(alias.key);
+      const matches = matchesFor(alias.key);
       if (!matches || matches.size === 0) {
         continue;
       }
