@@ -785,10 +785,10 @@ describe("applyCompensationPreferenceChange", () => {
 });
 
 describe("paused background work names a control that exists", () => {
-  it("points at the Resume background work button on Home", () => {
+  it("points at the Continue button on Home", () => {
     // The app has no "command center". A person who read that sentence had
     // nowhere to go.
-    expect(ACTIVITY_PAUSED_MESSAGE).toContain("Resume background work");
+    expect(ACTIVITY_PAUSED_MESSAGE).toContain("Press Continue");
     expect(ACTIVITY_PAUSED_MESSAGE).toContain("Home");
     expect(ACTIVITY_PAUSED_MESSAGE).not.toContain("command center");
   });
