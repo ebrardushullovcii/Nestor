@@ -263,7 +263,10 @@ export const DESTINATION_COUNT_ATTENTION_CLASS =
  * carries the qualifier.
  */
 export const DESTINATION_COUNT_RAIL_MARKER_LAYOUT_CLASS =
-  "absolute -top-2.5 -right-3.5 shrink-0";
+  // Anchored by its left edge at the icon's right side so a wide "99+" grows
+  // into the free rail instead of back over the glyph; anchored on the right
+  // it covered the top of the Find jobs and Shortlisted icons.
+  "absolute -top-2 left-[calc(100%-0.625rem)] shrink-0";
 
 /* ------------------------------------------------------------------------ *
  * Shell chrome.
@@ -603,6 +606,26 @@ export function JobFinderShell({
   >(null);
   const [compactRouteScrollEdges, setCompactRouteScrollEdges] =
     useState<CompactRouteScrollEdges>(NO_ROUTE_SCROLL_EDGES);
+  // The header actions sit over the compact navigation row below 1280px, and
+  // with their labels shown (1100px and up) they are wider than the fixed
+  // 20rem the row reserved, so the destinations ran under Search and
+  // Activity. The row reserves the group's measured width instead.
+  const headerActionsRef = useRef<HTMLDivElement | null>(null);
+  const [headerActionsWidth, setHeaderActionsWidth] = useState<number | null>(
+    null,
+  );
+  useLayoutEffect(() => {
+    const actions = headerActionsRef.current;
+    if (!actions) return undefined;
+    const measure = () => {
+      setHeaderActionsWidth(Math.ceil(actions.getBoundingClientRect().width));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(actions);
+    return () => observer.disconnect();
+  }, []);
   // The palette index used to be rebuilt on every workspace commit even while
   // the palette was closed. It is only ever read by the open dialog, so it is
   // built on demand and stays a stable empty list the rest of the time.
@@ -1385,9 +1408,16 @@ export function JobFinderShell({
               "xl:row-start-1 xl:justify-self-center",
               isMac
                 ? "sm:pr-64 max-[899px]:pr-40 min-[900px]:!pr-0 xl:ml-56 xl:mr-[17rem]"
-                : "sm:pr-64 max-[899px]:pr-40 min-[900px]:!pr-80 xl:!pr-0 xl:ml-40 xl:mr-[25rem]",
+                : "sm:pr-64 max-[899px]:pr-40 min-[900px]:!pr-[max(20rem,calc(var(--job-finder-header-actions-width,0px)+0.75rem))] xl:!pr-0 xl:ml-40 xl:mr-[25rem]",
             )}
-            style={noDragRegionStyle}
+            style={
+              headerActionsWidth === null
+                ? noDragRegionStyle
+                : ({
+                    ...noDragRegionStyle,
+                    "--job-finder-header-actions-width": `${headerActionsWidth}px`,
+                  } as CSSProperties)
+            }
           >
             <div
               className="relative flex w-fit min-w-0 max-w-full flex-nowrap items-center gap-1 overflow-visible rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-panel) p-1 sm:gap-1.5"
@@ -1768,6 +1798,7 @@ export function JobFinderShell({
                 ? "sm:right-0 sm:top-14 sm:h-[3.75rem] min-[900px]:!top-0 min-[900px]:!h-14"
                 : "sm:right-0 sm:top-14 sm:h-[3.75rem] xl:top-0 xl:h-14 xl:mr-36 min-[1440px]:!z-40",
             )}
+            ref={headerActionsRef}
             role="group"
             style={noDragRegionStyle}
           >
@@ -1833,7 +1864,7 @@ export function JobFinderShell({
                 {/* A bare bell and a number read as an unlabelled glyph pill
                     beside the task-center pill. The compact navigation row
                     reserves the width this label needs. */}
-                <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden xl:max-[1439px]:!hidden">
+                <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden xl:max-[1440px]:!hidden">
                   Needs you
                 </span>
                 {actionScreen.count !== null ? (
