@@ -575,7 +575,7 @@ describe("runAgentLoop", () => {
     }
   });
 
-  test("a host can keep fewer recent tool answers whole", async () => {
+  test.each([4, 1])("a host can keep fewer recent tool answers whole (batch=%s)", async (batchSize) => {
     let looks = 0;
     const look = tool("look", () => {
       looks += 1;
@@ -595,17 +595,19 @@ describe("runAgentLoop", () => {
       tools: [look, finishTool],
       subjectLabel: "the site",
       staleToolResultKeepRecent: 2,
+      staleToolResultBatchSize: batchSize,
     });
     const answers = result.messages.filter(
       (message) =>
         message.role === "tool" && message.content.startsWith("Page"),
     );
-    // Eight answers, two kept whole: six are stale, shortened four at a time.
+    // A batch of four leaves two old answers whole until the next batch;
+    // shortening immediately leaves exactly the two recent answers whole.
     expect(
       answers.filter((answer) =>
         answer.content.includes("Older answer shortened"),
       ),
-    ).toHaveLength(4);
+    ).toHaveLength(batchSize === 4 ? 4 : 6);
     for (const recent of answers.slice(-2)) {
       expect(recent.content.length).toBeGreaterThan(3_000);
     }
