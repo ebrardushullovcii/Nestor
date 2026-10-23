@@ -5,6 +5,7 @@ import {
   createJobIdentityDigest,
   createJobIdentityIndex,
   hasEquivalentListingContentIdentity,
+  prepareListingContent,
   type JobIdentityInput,
 } from "./job-identity";
 
@@ -23,6 +24,13 @@ const posting: JobIdentityInput = {
       100,
     ),
 };
+
+test("transferred compressed evidence owns only its used bytes", () => {
+  const evidence = prepareListingContent(posting.description!);
+  expect(evidence).not.toBeNull();
+  expect(evidence!.packed.byteLength).toBeLessThan(16384);
+  expect(evidence!.packed.buffer.byteLength).toBe(evidence!.packed.byteLength);
+});
 
 test("compressed inspection evidence preserves aliases, ids and full content verification", () => {
   const compact = compactJobIdentity(posting);

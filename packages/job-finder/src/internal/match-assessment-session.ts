@@ -148,10 +148,24 @@ export function rebindLegacyVerdict<
 export function createMatchAssessmentPostingFingerprint(
   posting: MatchAssessmentPostingInput,
 ): string {
+  const prepared = Object.isFrozen(posting)
+    ? preparedPostingFingerprints.get(posting)
+    : undefined;
+  if (prepared) return prepared;
   return createFingerprint(
     `match_posting_v4_logic${MATCH_ASSESSMENT_LOGIC_REVISION}`,
     createMatchAssessmentPostingInput(posting),
   );
+}
+
+const preparedPostingFingerprints = new WeakMap<object, string>();
+/** Only frozen repository rows may reuse an inventory worker's exact digest. */
+export function rememberMatchAssessmentPostingFingerprint(
+  posting: MatchAssessmentPostingInput,
+  fingerprint: string,
+): void {
+  if (Object.isFrozen(posting))
+    preparedPostingFingerprints.set(posting, fingerprint);
 }
 
 function assessmentCacheKey(
@@ -230,7 +244,7 @@ export function createMatchAssessmentSession(input: {
     const postingInput = createMatchAssessmentPostingInput(posting);
     const postingFingerprint =
       knownPostingFingerprint ??
-      createMatchAssessmentPostingFingerprint(postingInput);
+      createMatchAssessmentPostingFingerprint(posting);
     const cacheKey = assessmentCacheKey(postingFingerprint, carried);
     const cached = cache.get(cacheKey);
     if (cached) {
@@ -260,9 +274,7 @@ export function createMatchAssessmentSession(input: {
     // context is stale. Hashing the full listing first cannot change that
     // answer and allocated gigabytes during inventory revalidation.
     if (persistedAssessment?.judgment) return persistedAssessment;
-    const postingFingerprint = createMatchAssessmentPostingFingerprint(
-      createMatchAssessmentPostingInput(posting),
-    );
+    const postingFingerprint = createMatchAssessmentPostingFingerprint(posting);
     if (
       persistedAssessment?.scorerVersion === MATCH_ASSESSMENT_SCORER_VERSION &&
       persistedAssessment.contextFingerprint === contextFingerprint &&

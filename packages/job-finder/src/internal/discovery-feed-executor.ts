@@ -2,6 +2,8 @@ import type {
   DiscoveryFeedResult,
   DiscoveryFeedTask,
   JobPosting,
+  DiscoveryInventoryPosting,
+  DiscoveryInventoryPreparation,
 } from "@nestor/contracts";
 
 export type DiscoveryFeedExecutor = (
@@ -10,6 +12,19 @@ export type DiscoveryFeedExecutor = (
 ) => Promise<DiscoveryFeedResult>;
 
 let executor: DiscoveryFeedExecutor | null = null;
+type DiscoveryInventoryExecutor = (
+  postings: DiscoveryInventoryPosting[],
+  signal?: AbortSignal,
+) => Promise<DiscoveryInventoryPreparation[]>;
+let inventoryExecutor: DiscoveryInventoryExecutor | null = null;
+export function setDiscoveryInventoryExecutor(
+  next: DiscoveryInventoryExecutor | null,
+): void {
+  inventoryExecutor = next;
+}
+export function getDiscoveryInventoryExecutor(): DiscoveryInventoryExecutor | null {
+  return inventoryExecutor;
+}
 const preparedPostings = new WeakMap<JobPosting, JobPosting>();
 
 export function rememberPreparedDiscoveryPosting(

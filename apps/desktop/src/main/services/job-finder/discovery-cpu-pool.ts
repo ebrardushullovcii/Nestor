@@ -5,12 +5,16 @@ import type {
   DiscoveryCpuResponse,
   DiscoveryFeedTask,
   DiscoveryFeedResult,
+  DiscoveryCpuTask,
+  DiscoveryCpuResult,
+  DiscoveryInventoryPosting,
+  DiscoveryInventoryPreparation,
 } from "@nestor/contracts";
 
 type Work = {
   id: number;
-  task: DiscoveryFeedTask | null;
-  resolve: (result: DiscoveryFeedResult) => void;
+  task: DiscoveryCpuTask | null;
+  resolve: (result: DiscoveryCpuResult) => void;
   reject: (error: Error) => void;
   cleanup: () => void;
 };
@@ -87,10 +91,19 @@ export function createDiscoveryCpuPool(
       try {
         const task = work.task;
         if (!task) throw new Error("Feed task has already been dispatched.");
-        slot.worker.postMessage({
-          id: work.id,
-          task,
-        } satisfies DiscoveryCpuRequest);
+        const transfer =
+          task.kind === "feed" &&
+          task.input.payload instanceof Uint8Array &&
+          task.input.payload.buffer instanceof ArrayBuffer
+            ? [task.input.payload.buffer]
+            : [];
+        slot.worker.postMessage(
+          {
+            id: work.id,
+            task,
+          } satisfies DiscoveryCpuRequest,
+          transfer,
+        );
         work.task = null;
       } catch (error) {
         fail(slot, error instanceof Error ? error : new Error(String(error)));
@@ -98,11 +111,11 @@ export function createDiscoveryCpuPool(
     }
   }
 
-  return {
-    run(
-      task: DiscoveryFeedTask,
+  const pool = {
+    runTask(
+      task: DiscoveryCpuTask,
       signal?: AbortSignal,
-    ): Promise<DiscoveryFeedResult> {
+    ): Promise<DiscoveryCpuResult> {
       if (closed) return Promise.reject(new Error("Feed reader is closed."));
       if (signal?.aborted) return Promise.reject(abortError());
       return new Promise((resolve, reject) => {
@@ -147,6 +160,33 @@ export function createDiscoveryCpuPool(
           await worker.terminate();
         }),
       );
+    },
+  };
+  return {
+    close: () => pool.close(),
+    async run(
+      task: DiscoveryFeedTask,
+      signal?: AbortSignal,
+    ): Promise<DiscoveryFeedResult> {
+      const response = await pool.runTask(
+        { kind: "feed", input: task },
+        signal,
+      );
+      if (response.kind !== "feed")
+        throw new Error("Unexpected feed reader response.");
+      return response.result;
+    },
+    async runInventory(
+      postings: DiscoveryInventoryPosting[],
+      signal?: AbortSignal,
+    ): Promise<DiscoveryInventoryPreparation[]> {
+      const response = await pool.runTask(
+        { kind: "inventory", postings },
+        signal,
+      );
+      if (response.kind !== "inventory")
+        throw new Error("Unexpected inventory reader response.");
+      return response.result;
     },
   };
 }

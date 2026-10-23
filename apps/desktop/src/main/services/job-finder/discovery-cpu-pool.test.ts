@@ -5,14 +5,21 @@ import type { DiscoveryFeedTask } from "@nestor/contracts";
 const entry = new URL(
   `data:text/javascript,${encodeURIComponent(`
   import { parentPort } from 'node:worker_threads';
-  parentPort.on('message', async ({id, task}) => {
-    if (task.text === 'crash') process.exit(2);
-    if (task.text === 'wait') await new Promise(r => setTimeout(r, 10000));
-    parentPort.postMessage(task.text === 'error' ? {id,error:'Unreadable feed'} : {id,result:{jobs:[],preparations:[],skippedMalformedCount:Number(task.text) || 0}});
+  parentPort.on('message', async ({id, task:wire}) => {
+    if (wire.kind === 'inventory') {
+      parentPort.postMessage({id,result:{kind:'inventory',result:[]}});
+      return;
+    }
+    const task = wire.input;
+    const text = typeof task.payload === 'string' ? task.payload : new TextDecoder().decode(task.payload);
+    if (text === 'crash') process.exit(2);
+    if (text === 'wait') await new Promise(r => setTimeout(r, 10000));
+    parentPort.postMessage(text === 'error' ? {id,error:'Unreadable feed'} : {id,result:{kind:'feed',result:{jobs:[],preparations:[],skippedMalformedCount:Number(text) || 0}}});
   });
 `)}`,
 );
-const task = (text: string) => ({ text }) as DiscoveryFeedTask;
+const task = (payload: string | Uint8Array) =>
+  ({ payload }) as DiscoveryFeedTask;
 const pools: ReturnType<typeof createDiscoveryCpuPool>[] = [];
 afterEach(async () => {
   await Promise.all(pools.splice(0).map((pool) => pool.close()));
@@ -24,6 +31,22 @@ const pool = () => {
 };
 
 describe("discovery CPU reader pool", () => {
+  test("transfers owned feed bytes without retaining a second main-process payload", async () => {
+    const p = pool();
+    const bytes = new TextEncoder().encode("10");
+    const result = await p.run(task(bytes));
+    expect(result.skippedMalformedCount).toBe(10);
+    expect(bytes.byteLength).toBe(0);
+  });
+  test("shares the bounded readers between inventory and feed tasks", async () => {
+    const p = pool();
+    const [feed, inventory] = await Promise.all([
+      p.run(task("9")),
+      p.runInventory([]),
+    ]);
+    expect(feed.skippedMalformedCount).toBe(9);
+    expect(inventory).toEqual([]);
+  });
   test("routes queued responses to the right request and reuses the reader", async () => {
     const p = pool();
     const results = await Promise.all([

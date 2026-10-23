@@ -1,4 +1,5 @@
 import { createConcurrencyLimiter, yieldToEventLoop } from "@nestor/core";
+import { warmDiscoveryInventory } from "./discovery-inventory-preparation";
 import { isDeepStrictEqual } from "node:util";
 import { patchDiscoveryLedger } from "@nestor/db";
 import {
@@ -1642,6 +1643,20 @@ export function createWorkspaceDiscoveryMethods(
     // persisted assessment; any relevant change misses safely and recomputes.
     // Thousands of saved jobs are checked a slice per turn: in one go the
     // search's first seconds froze the window.
+    await warmDiscoveryInventory(startingSavedJobs, executionSignal).catch(
+      (error: unknown) => {
+        if (executionSignal.aborted) {
+          clearActiveController();
+          throw error;
+        }
+        // A reader failing cannot strand the search before its run exists.
+        // Unprepared rows retain the existing main-process calculation path.
+        console.warn(
+          "[Job Finder] Inventory preparation fell back to main.",
+          error,
+        );
+      },
+    );
     let workingSavedJobs = await mapInTurns(
       startingSavedJobs,
       (job) => {

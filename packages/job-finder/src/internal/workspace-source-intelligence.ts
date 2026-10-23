@@ -27,6 +27,9 @@ import { toProviderAwarePosting } from "./discovery-posting-normalization";
 import {
   prepareListingContent,
   rememberPreparedListingContent,
+  buildJobIdentityAliases,
+  rememberPreparedJobIdentity,
+  hasSameJobIdentity,
 } from "./job-identity";
 import {
   createDiscoveryListingFingerprints,
@@ -1638,25 +1641,31 @@ function createProviderApiQuietTimeout(quietMs: number, totalMs: number) {
 }
 
 /** The feed's JSON, read chunk by chunk so each chunk counts as progress. */
-async function readFeedText(
+async function readFeedBytes(
   response: Response,
   onProgress: () => void,
-): Promise<string> {
+): Promise<Uint8Array> {
   const reader = response.body?.getReader();
   if (!reader)
-    return typeof response.text === "function"
-      ? response.text()
-      : JSON.stringify(await response.json());
-  const decoder = new TextDecoder();
-  let text = "";
+    return typeof response.arrayBuffer === "function"
+      ? new Uint8Array(await response.arrayBuffer())
+      : new TextEncoder().encode(JSON.stringify(await response.json()));
+  const chunks: Uint8Array[] = [];
+  let length = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     onProgress();
-    text += decoder.decode(value, { stream: true });
+    chunks.push(value);
+    length += value.byteLength;
   }
-  text += decoder.decode();
-  return text;
+  const payload = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    payload.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return payload;
 }
 
 function composeAbortSignals(
@@ -1845,7 +1854,11 @@ export async function preparePublicProviderFeed(
   if (!provider || !adapter)
     throw new Error("No public provider reader is configured.");
   const parsed = parsePublicApiJobRecords(
-    JSON.parse(task.text) as unknown,
+    JSON.parse(
+      typeof task.payload === "string"
+        ? task.payload
+        : new TextDecoder().decode(task.payload),
+    ) as unknown,
     adapter,
   );
   const records = parsed.records.sort(
@@ -1877,6 +1890,10 @@ export async function preparePublicProviderFeed(
     jobs.push(raw);
     if (task.prepareForDiscovery) {
       const content = prepareListingContent(posting.description);
+      const acrossSources = buildJobIdentityAliases({
+        ...posting,
+        matchAcrossSources: true,
+      });
       const normalized: Partial<JobPosting> = {};
       for (const field of Object.keys(posting) as Array<keyof JobPosting>) {
         if (!isDeepStrictEqual(raw[field], posting[field]))
@@ -1886,6 +1903,12 @@ export async function preparePublicProviderFeed(
         normalized,
         fingerprints: createDiscoveryListingFingerprints(posting),
         content,
+        aliases: {
+          local: acrossSources.filter(
+            (alias) => alias.kind !== "cross_source_listing_facts",
+          ),
+          acrossSources,
+        },
         screeningContent:
           raw.description === posting.description
             ? content
@@ -1935,7 +1958,7 @@ export async function collectPublicProviderJobs(input: {
     if (responseAdapter && provider.publicApiUrlTemplate) {
       const publicApiUrl = provider.publicApiUrlTemplate;
       // One request with its own time limit; the body is read inside it.
-      const requestFeed = async (): Promise<string> => {
+      const requestFeed = async (): Promise<Uint8Array> => {
         const timeout = createProviderApiQuietTimeout(
           input.timeoutMs ?? PROVIDER_API_TIMEOUT_MS,
           PROVIDER_API_TOTAL_TIMEOUT_MS,
@@ -1958,7 +1981,7 @@ export async function collectPublicProviderJobs(input: {
                 : null,
             );
           }
-          return await readFeedText(response, timeout.progress);
+          return await readFeedBytes(response, timeout.progress);
         } finally {
           composedSignal.cleanup();
           timeout.cleanup();
@@ -1966,10 +1989,10 @@ export async function collectPublicProviderJobs(input: {
       };
 
       pagesCovered += 1;
-      let text: string;
+      let payload: Uint8Array;
       for (let attempt = 0; ; attempt += 1) {
         try {
-          text = await requestFeed();
+          payload = await requestFeed();
           break;
         } catch (error) {
           const delay = retryDelaysMs[attempt];
@@ -1995,7 +2018,7 @@ export async function collectPublicProviderJobs(input: {
       const execute = getDiscoveryFeedExecutor() ?? preparePublicProviderFeed;
       const parsing = execute(
         {
-          text,
+          payload,
           target: input.target,
           intelligence: input.artifact.intelligence,
           source: input.source,
@@ -2003,7 +2026,7 @@ export async function collectPublicProviderJobs(input: {
         },
         input.signal,
       );
-      text = "";
+      payload = new Uint8Array(0);
       const parsedPublicApiRecords = await parsing;
       input.signal?.throwIfAborted();
       const { jobs, preparations } = parsedPublicApiRecords;
@@ -2017,6 +2040,9 @@ export async function collectPublicProviderJobs(input: {
           preparation.screeningContent,
         );
         rememberDiscoveryListingFingerprints(job, preparation.fingerprints);
+        if (hasSameJobIdentity(raw, job))
+          rememberPreparedJobIdentity(raw, preparation.aliases);
+        rememberPreparedJobIdentity(job, preparation.aliases);
       }
 
       return {

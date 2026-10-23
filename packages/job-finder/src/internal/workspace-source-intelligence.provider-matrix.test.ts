@@ -155,7 +155,7 @@ describe("public provider ATS acceptance matrix", () => {
         currentArtifact: null,
       });
       const base = {
-        text: JSON.stringify(payload),
+        payload: JSON.stringify(payload),
         target,
         intelligence,
         source: "target_site" as const,
@@ -193,6 +193,10 @@ describe("public provider ATS acceptance matrix", () => {
         const job = { ...prepared.jobs[index]!, ...evidence.normalized };
         expect(evidence.fingerprints).toEqual(
           createDiscoveryListingFingerprints(expected[index]!),
+        );
+        expect(evidence.aliases.local).toEqual(buildJobIdentityAliases(job));
+        expect(evidence.aliases.acrossSources).toEqual(
+          buildJobIdentityAliases({ ...job, matchAcrossSources: true }),
         );
         expect(evidence.content).toEqual(
           prepareListingContent(job.description),

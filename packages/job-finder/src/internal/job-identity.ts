@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
-import type { DiscoveryPostingPreparation } from "@nestor/contracts";
+import type {
+  DiscoveryPostingPreparation,
+  DiscoveryJobIdentityAlias,
+} from "@nestor/contracts";
 
 import { normalizeText } from "./shared";
 
@@ -52,21 +55,8 @@ export type JobIdentityInput = {
  */
 const MAX_CROSS_SOURCE_CANDIDATES = 8;
 
-export type JobIdentityAliasKind =
-  | "provider_posting_id"
-  | "source_posting_id"
-  | "employer_application_url"
-  | "canonical_listing_url"
-  | "exact_listing_content"
-  | "cross_source_listing_facts"
-  | "corroborated_listing_facts";
-
-export type JobIdentityAlias = {
-  key: string;
-  kind: JobIdentityAliasKind;
-  confidence: "strong" | "corroborating" | "possible";
-  priority: number;
-};
+export type JobIdentityAlias = DiscoveryJobIdentityAlias;
+export type JobIdentityAliasKind = DiscoveryJobIdentityAlias["kind"];
 
 export type JobIdentityResolution<T> =
   | {
@@ -194,7 +184,9 @@ function digestListingContent(content: string): string {
 }
 
 function packListingContent(content: string) {
-  const packed = deflateRawSync(content, { level: 1 });
+  // zlib's result can be a small view of a much larger allocation. Retain
+  // and transfer only its bytes, rather than one whole slab per identity.
+  const packed = Uint8Array.from(deflateRawSync(content, { level: 1 }));
   return Object.freeze({
     digest: digestListingContent(content),
     read: () => inflateRawSync(packed).toString(),
@@ -219,7 +211,7 @@ export function prepareListingContent(description: string): PackedContent {
   return normalized
     ? {
         digest: digestListingContent(normalized),
-        packed: deflateRawSync(normalized, { level: 1 }),
+        packed: Uint8Array.from(deflateRawSync(normalized, { level: 1 })),
       }
     : null;
 }
@@ -660,7 +652,7 @@ function readAliasBasis(input: JobIdentityInput): AliasBasis {
     input.exactContent?.digest,
     input.postedAt,
     input.postedAtText,
-    input.matchAcrossSources,
+    input.matchAcrossSources === true,
     ...(input.alternateListingUrls ?? []),
   ];
 }
@@ -697,6 +689,28 @@ const indexedAliasCache = new WeakMap<
 // weak: this hint cannot keep an old job, its body or its run alive.
 const aliasPeers = new Map<string, WeakRef<object>>();
 const ALIAS_PEER_LIMIT = 20_000;
+
+/** Aliases were prepared from these exact immutable facts by the feed worker. */
+export function rememberPreparedJobIdentity(
+  posting: JobIdentityInput,
+  aliases: DiscoveryPostingPreparation["aliases"],
+  input: JobIdentityInput = posting,
+): void {
+  indexedAliasCache.set(posting, [
+    {
+      basis: readAliasBasis({ ...input, matchAcrossSources: false }),
+      aliases: aliases.local,
+    },
+    {
+      basis: readAliasBasis({ ...input, matchAcrossSources: true }),
+      aliases: aliases.acrossSources,
+    },
+  ]);
+  const peerKey = `${posting.source}\u0000${posting.sourceJobId}\u0000${posting.canonicalUrl}`;
+  if (aliasPeers.size >= ALIAS_PEER_LIMIT)
+    aliasPeers.delete(aliasPeers.keys().next().value!);
+  aliasPeers.set(peerKey, new WeakRef(posting));
+}
 
 function readIndexedAliases(
   value: object,
@@ -764,11 +778,10 @@ export function createJobIdentityIndex<T extends object>(
   };
 
   const resolve = (identity: JobIdentityInput): JobIdentityResolution<T> => {
-    // A frozen identity (a stored ledger row) is resolved again on every
-    // workspace refresh; its aliases are built once.
-    const aliases = Object.isFrozen(identity)
-      ? readIndexedAliases(identity, identity)
-      : buildJobIdentityAliases(identity);
+    // A query copy can borrow its worker-prepared peer's aliases too. Every
+    // identity field is checked against the cached basis, including mutable
+    // queries: edits invalidate the hint before a match is considered.
+    const aliases = readIndexedAliases(identity, identity);
     // A URL still matches when corrected card facts have no indexed alias.
     // Check every known alias before selecting it: an alias naming another
     // posting must not attach that posting's history or activity to this one.
