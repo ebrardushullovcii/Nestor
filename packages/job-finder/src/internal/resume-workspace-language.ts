@@ -10,6 +10,14 @@ import {
   type AgentTaskValidationIssue,
 } from "@nestor/contracts";
 
+const ENTRY_LANGUAGE_FIELDS = [
+  "title",
+  "subtitle",
+  "location",
+  "dateRange",
+  "summary",
+] as const;
+
 /** One model call translates every displayed field together, preserving structure. */
 export async function writeResumeLanguage(input: {
   aiClient: Pick<JobFinderAiClient, "chatWithTools">;
@@ -117,13 +125,7 @@ function resumeLanguageFields(source: ResumeDraft) {
         bullet.origin = "ai_generated";
       });
     for (const entry of section.entries) {
-      for (const key of [
-        "title",
-        "subtitle",
-        "location",
-        "dateRange",
-        "summary",
-      ] as const) {
+      for (const key of ENTRY_LANGUAGE_FIELDS) {
         add(`${entry.id}:${key}`, entry[key], (text) => {
           if (key === "summary" || key === "title")
             keepOriginal(`${entry.id}:${key}`, entry[key]!, entry.sourceRefs);
@@ -152,13 +154,37 @@ export function collectResumeLanguageFields(draft: ResumeDraft) {
 export function applyResumeLanguage(
   source: ResumeDraft,
   result: ReturnType<typeof ResumeLanguageTranslationSchema.parse>,
+  generationSourceProjectIds: readonly string[] = [],
 ): ResumeDraft {
   const { draft, fields } = resumeLanguageFields(source);
   const targets = new Map(fields.map((field) => [field.id, field]));
+  const keptProjectIds = new Set(
+    draft.sections
+      .filter((section) => section.kind === "projects")
+      .flatMap((section) =>
+        section.entries.map((entry) => entry.profileRecordId),
+      ),
+  );
+  // A writer can translate a source project's fields and then leave that
+  // project off. Those translations have no destination. Only generation
+  // supplies canonical source IDs; ordinary language edits stay strict.
+  const omittedProjectIds = generationSourceProjectIds.filter(
+    (id) => !keptProjectIds.has(id),
+  );
+  const omittedFields = new Set(
+    omittedProjectIds.flatMap((id) =>
+      ENTRY_LANGUAGE_FIELDS.map((field) => `project_${id}:${field}`),
+    ),
+  );
+  if (omittedProjectIds.length > 0 && !targets.has("section_projects:label"))
+    omittedFields.add("section_projects:label");
   const seen = new Set<string>();
   const issues: AgentTaskValidationIssue[] = [];
   for (const [index, translation] of result.translations.entries()) {
-    if (!targets.has(translation.id) || seen.has(translation.id)) {
+    if (
+      (!targets.has(translation.id) && !omittedFields.has(translation.id)) ||
+      seen.has(translation.id)
+    ) {
       const repeated = seen.has(translation.id);
       issues.push({
         code: repeated
@@ -178,7 +204,8 @@ export function applyResumeLanguage(
     );
   }
   for (const translation of result.translations) {
-    const target = targets.get(translation.id)!;
+    const target = targets.get(translation.id);
+    if (!target) continue;
     if (translation.text !== target.text) target.write(translation.text);
   }
   return {

@@ -455,7 +455,13 @@ export function createLocalJobFinderDocumentManager(
       const htmlFileName = `${artifactBaseName}.html`;
       const htmlPath = path.join(artifactDirectory, htmlFileName);
       const html = options.renderResumeHtml
-        ? (await options.renderResumeHtml(input)).exportHtml
+        ? (
+            await options.renderResumeHtml({
+              renderDocument: input.renderDocument,
+              settings: input.settings,
+              templateId: input.templateId,
+            })
+          ).exportHtml
         : renderResumeTemplateHtml(input);
 
       const requestedFormat =
