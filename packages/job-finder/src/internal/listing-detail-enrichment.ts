@@ -108,7 +108,14 @@ export interface ListingDetailEnrichmentSummary {
 }
 
 export interface EnrichSavedJobListingDetailsInput {
+  /** The preparation and application stages of one pass share its retry limits. */
+  rateLimitState?: ListingReadRateLimitState;
   onProgress?: (completed: number, total: number) => void;
+  /** Buffered reads are applied only when this pass selects the job. */
+  readAhead?: (job: SavedJob) => PreparedListingRead | undefined;
+  /** Prepare page facts without changing a job or judging its fit. */
+  onReadPrepared?: (job: SavedJob, read: PreparedListingRead) => void;
+  nextJob?: () => Promise<SavedJob | undefined>;
   /**
    * Read again even inside the retry back-off after a failed attempt. Used
    * when the person acts on a job right now and the body matters at once.
@@ -131,6 +138,35 @@ export interface EnrichSavedJobListingDetailsInput {
   perRequestTimeoutMs?: number;
   /** Never read more than this many pages in one call. */
   maxJobs?: number;
+}
+
+export interface PreparedListingRead {
+  attemptedAt: string;
+  detail?: ExtractedListingDetail | null;
+  failure?: {
+    outcome: Exclude<ListingDetailFetchOutcome, "enriched" | "partial">;
+    reason: string;
+    retryAfterAt?: string | undefined;
+  };
+  providerAccessError?: unknown;
+}
+
+export interface ListingReadRateLimitState {
+  pauseUntilMs: number;
+  retryAfterAtMs: number;
+  retriesLeft: number;
+  firstRateLimitAtMs: number | null;
+  deferRemaining: boolean;
+}
+
+export function createListingReadRateLimitState(): ListingReadRateLimitState {
+  return {
+    pauseUntilMs: 0,
+    retryAfterAtMs: 0,
+    retriesLeft: RATE_LIMIT_RETRIES_PER_PASS,
+    firstRateLimitAtMs: null,
+    deferRemaining: false,
+  };
 }
 
 export interface EnrichSavedJobListingDetailsResult {
@@ -797,35 +833,32 @@ export async function enrichSavedJobListingDetails(
     elapsedMs: 0,
   };
   const updated = new Map<string, SavedJob>();
+  const streamedJobs: SavedJob[] = [];
   let providerAccessError: unknown;
-  let rateLimitPauseUntilMs = 0;
-  let rateLimitRetryAfterAtMs = 0;
-  let rateLimitRetriesLeft = RATE_LIMIT_RETRIES_PER_PASS;
-  let firstRateLimitAtMs: number | null = null;
-  let deferRemainingForRateLimit = false;
+  const rateLimit = input.rateLimitState ?? createListingReadRateLimitState();
   const registerRateLimit = (response: ListingHtmlFetchResult): number => {
     const pauseMs = Math.min(
       MAX_DEFERRED_RATE_LIMIT_MS,
       Math.max(0, response.retryAfterMs ?? DEFAULT_RATE_LIMIT_PAUSE_MS),
     );
-    rateLimitPauseUntilMs = Math.max(
-      rateLimitPauseUntilMs,
+    rateLimit.pauseUntilMs = Math.max(
+      rateLimit.pauseUntilMs,
       Date.now() + pauseMs,
     );
     const responseAtMs = Date.parse(now());
-    rateLimitRetryAfterAtMs = Math.max(
-      rateLimitRetryAfterAtMs,
+    rateLimit.retryAfterAtMs = Math.max(
+      rateLimit.retryAfterAtMs,
       (Number.isFinite(responseAtMs) ? responseAtMs : Date.now()) + pauseMs,
     );
     if (pauseMs > MAX_RATE_LIMIT_PAUSE_MS) {
-      deferRemainingForRateLimit = true;
+      rateLimit.deferRemaining = true;
     }
     return pauseMs;
   };
   const waitForSharedRateLimit = async (): Promise<boolean> => {
-    while (!deferRemainingForRateLimit) {
+    while (!rateLimit.deferRemaining) {
       input.signal?.throwIfAborted();
-      const delayMs = rateLimitPauseUntilMs - Date.now();
+      const delayMs = rateLimit.pauseUntilMs - Date.now();
       if (delayMs <= 0) return true;
       await waitForRateLimitPause(delayMs, input.signal);
     }
@@ -851,17 +884,79 @@ export async function enrichSavedJobListingDetails(
   let completed = 0;
   let cursor = 0;
   const worker = async (): Promise<void> => {
-    while (cursor < capped.length) {
-      if (input.signal?.aborted || deferRemainingForRateLimit) {
+    while (cursor < (input.nextJob ? maxJobs : capped.length)) {
+      if (
+        input.signal?.aborted ||
+        (rateLimit.deferRemaining && !input.readAhead)
+      ) {
         return;
       }
-      const job = capped[cursor];
+      const position = cursor;
       cursor += 1;
+      const job =
+        position < capped.length ? capped[position] : await input.nextJob?.();
       if (!job) {
         return;
       }
+      if (input.signal?.aborted) return;
+      if (position >= capped.length) streamedJobs.push(job);
       let attemptedAt: string | null = null;
+      const applyRead = async (read: PreparedListingRead): Promise<void> => {
+        attemptedAt = read.attemptedAt;
+        providerAccessError ??= read.providerAccessError;
+        if (input.onReadPrepared) {
+          input.onReadPrepared(job, read);
+          return;
+        }
+        if (read.failure) {
+          const { outcome, reason, retryAfterAt } = read.failure;
+          if (outcome === "blocked") summary.blocked += 1;
+          else if (outcome === "no_detail") summary.noDetail += 1;
+          else summary.failed += 1;
+          updated.set(
+            job.id,
+            recordFailedAttempt(
+              job,
+              read.attemptedAt,
+              outcome,
+              reason,
+              retryAfterAt,
+            ),
+          );
+          return;
+        }
+        if (!read.detail) {
+          summary.noDetail += 1;
+          updated.set(
+            job.id,
+            recordFailedAttempt(
+              job,
+              read.attemptedAt,
+              "no_detail",
+              "The listing could not be read from this page. Open the listing and try again.",
+            ),
+          );
+          return;
+        }
+        const applied = await applyListingDetailToJob({
+          job,
+          detail: read.detail,
+          attemptedAt: read.attemptedAt,
+          assess: input.assess,
+        });
+        if (applied.outcome === "enriched") summary.enriched += 1;
+        else if (applied.outcome === "partial") summary.partial += 1;
+        else summary.noDetail += 1;
+        updated.set(job.id, applied.job);
+      };
       try {
+        const prepared = input.readAhead?.(job);
+        if (prepared) {
+          summary.attempted += 1;
+          await applyRead(prepared);
+          continue;
+        }
+        if (rateLimit.deferRemaining) continue;
         if (!(await waitForSharedRateLimit())) return;
         summary.attempted += 1;
         attemptedAt = now();
@@ -875,19 +970,19 @@ export async function enrichSavedJobListingDetails(
         let retriesForJob = 0;
         while (response.status === 429) {
           const pauseMs = registerRateLimit(response);
-          firstRateLimitAtMs ??= Date.now();
+          rateLimit.firstRateLimitAtMs ??= Date.now();
           if (
             pauseMs > MAX_RATE_LIMIT_PAUSE_MS ||
-            Date.now() + pauseMs - firstRateLimitAtMs >
+            Date.now() + pauseMs - rateLimit.firstRateLimitAtMs >
               RATE_LIMIT_WAIT_BUDGET_MS ||
             retriesForJob >= RATE_LIMIT_RETRIES_PER_JOB ||
-            rateLimitRetriesLeft <= 0 ||
+            rateLimit.retriesLeft <= 0 ||
             !(await waitForSharedRateLimit())
           ) {
             break;
           }
           retriesForJob += 1;
-          rateLimitRetriesLeft -= 1;
+          rateLimit.retriesLeft -= 1;
           response = await input.fetchHtml(job.canonicalUrl, {
             signal: combineSignals(input.signal, perRequestTimeoutMs),
           });
@@ -897,34 +992,30 @@ export async function enrichSavedJobListingDetails(
           response.status === 403 ||
           response.status === 429
         ) {
-          summary.blocked += 1;
-          updated.set(
-            job.id,
-            recordFailedAttempt(
-              job,
-              attemptedAt,
-              "blocked",
-              response.status === 429
-                ? "The site asked Job Finder to slow down (HTTP 429). The listing is read again on the next search."
-                : `The page answered ${response.status}; it may require access or a signed-in visitor.`,
-              response.status === 429
-                ? new Date(rateLimitRetryAfterAtMs).toISOString()
-                : undefined,
-            ),
-          );
+          await applyRead({
+            attemptedAt,
+            failure: {
+              outcome: "blocked",
+              reason:
+                response.status === 429
+                  ? "The site asked Job Finder to slow down (HTTP 429). The listing is read again on the next search."
+                  : `The page answered ${response.status}; it may require access or a signed-in visitor.`,
+              retryAfterAt:
+                response.status === 429
+                  ? new Date(rateLimit.retryAfterAtMs).toISOString()
+                  : undefined,
+            },
+          });
           continue;
         }
         if (response.status >= 400) {
-          summary.failed += 1;
-          updated.set(
-            job.id,
-            recordFailedAttempt(
-              job,
-              attemptedAt,
-              "fetch_failed",
-              `The page answered ${response.status}.`,
-            ),
-          );
+          await applyRead({
+            attemptedAt,
+            failure: {
+              outcome: "fetch_failed",
+              reason: `The page answered ${response.status}.`,
+            },
+          });
           continue;
         }
         let detail = await readListingDetail({
@@ -962,52 +1053,21 @@ export async function enrichSavedJobListingDetails(
             }
           }
         }
-        if (!detail) {
-          summary.noDetail += 1;
-          updated.set(
-            job.id,
-            recordFailedAttempt(
-              job,
-              attemptedAt,
-              "no_detail",
-              "The listing could not be read from this page. Open the listing and try again.",
-            ),
-          );
-          continue;
-        }
-        const applied = await applyListingDetailToJob({
-          job,
-          detail,
-          attemptedAt,
-          assess: input.assess,
-        });
-        if (applied.outcome === "enriched") {
-          summary.enriched += 1;
-        } else if (applied.outcome === "partial") {
-          summary.partial += 1;
-        } else {
-          summary.noDetail += 1;
-        }
-        updated.set(job.id, applied.job);
+        await applyRead({ attemptedAt, detail });
       } catch (error) {
         if (input.signal?.aborted) {
           return;
         }
-        summary.failed += 1;
         if (
           providerAccessError === undefined &&
           (getAiProviderAccessFailure(error) || isAiServiceBusy(error))
         )
           providerAccessError = error;
-        updated.set(
-          job.id,
-          recordFailedAttempt(
-            job,
-            attemptedAt ?? now(),
-            "fetch_failed",
-            describeError(error),
-          ),
-        );
+        await applyRead({
+          attemptedAt: attemptedAt ?? now(),
+          failure: { outcome: "fetch_failed", reason: describeError(error) },
+          ...(providerAccessError === undefined ? {} : { providerAccessError }),
+        });
       } finally {
         if (attemptedAt) {
           completed += 1;
@@ -1018,16 +1078,21 @@ export async function enrichSavedJobListingDetails(
   };
 
   await Promise.all(
-    Array.from({ length: Math.min(concurrency, capped.length) }, () =>
-      worker(),
+    Array.from(
+      {
+        length: Math.min(concurrency, input.nextJob ? maxJobs : capped.length),
+      },
+      () => worker(),
     ),
   );
 
-  summary.skipped += capped.length - summary.attempted;
+  summary.skipped += Math.max(0, capped.length - summary.attempted);
 
   summary.elapsedMs = Date.now() - startedAtMs;
   return {
-    jobs: input.jobs.map((job) => updated.get(job.id) ?? job),
+    jobs: [...input.jobs, ...streamedJobs].map(
+      (job) => updated.get(job.id) ?? job,
+    ),
     changedJobIds: [...updated.keys()],
     summary,
     ...(providerAccessError === undefined ? {} : { providerAccessError }),

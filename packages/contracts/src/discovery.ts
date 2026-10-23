@@ -690,7 +690,9 @@ export type TitleFamilyMatch = z.infer<typeof TitleFamilyMatchSchema>;
  * model reads the listing and the person's goals and decides; the scorer
  * builds the assessment from this verdict instead of its own title, place and
  * keyword rules. `batch` verdicts come from the search's per-page judging of
- * many jobs at once; `full` comes from reading and assessing one listing.
+ * many jobs at once; `full` marks a completed listing and requirement comparison.
+ * A rubric-only batch refresh retains `full` when that comparison's evidence
+ * fingerprints still match and its requirement evidence is preserved.
  * The fingerprints record what the verdict was made from, so a later change
  * to the profile or the listing can be judged again.
  */
