@@ -111,6 +111,7 @@ export type JobFinderAutoApplyQueueStartOutcome =
       status: "refused";
       reason:
         | "daily_capacity_exhausted"
+        | "work_paused"
         | "empty_selection"
         | "cancelled_stayed_in_workspace";
       message: string | null;

@@ -138,6 +138,8 @@ interface ApplicationsDetailPanelProps {
   hasAnyApplications: boolean;
   hasVisibleApplications: boolean;
   isApplyPending: boolean;
+  /** All work is paused: no control here may start an application. */
+  applicationWorkPaused?: boolean;
   isApplyRequestPending: (requestId: string) => boolean;
   isApplyRunPending: (runId: string) => boolean;
   onApproveApplyRun: (input: JobFinderApplyRunActionInput) => void;
@@ -216,6 +218,7 @@ export function ApplicationsDetailPanel({
   hasAnyApplications,
   hasVisibleApplications,
   isApplyPending,
+  applicationWorkPaused = false,
   isApplyRequestPending,
   isApplyRunPending,
   onApproveApplyRun,
@@ -475,6 +478,7 @@ export function ApplicationsDetailPanel({
       dailyPreparationCapacity={dailyPreparationCapacity}
       excludedQueueRecoveryEntries={excludedQueueRecoveryEntries}
       isApplyPending={isApplyPending}
+      applicationWorkPaused={applicationWorkPaused}
       onStartApplyCopilot={onStartApplyCopilot}
       {...(onReviewResumePdf ? { onReviewResumePdf } : {})}
       onStartAutoApplyQueue={onStartAutoApplyQueue}

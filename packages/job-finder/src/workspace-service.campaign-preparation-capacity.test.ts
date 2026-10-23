@@ -364,6 +364,22 @@ describe("workspace campaign preparation capacity", () => {
     ).rejects.toThrow("up to 20 preparations per day");
   });
 
+  test("refuses every application start while all work is paused and keeps the pause", async () => {
+    const harness = createWorkspaceServiceHarness({
+      seed: createCapacitySeed(),
+    });
+    await seedActiveCampaign(harness);
+    await harness.workspaceService.setActivityControl({ paused: true });
+
+    await expect(
+      harness.workspaceService.startAutoApplyRun("job_generating"),
+    ).rejects.toThrow("All work is paused");
+    await expect(
+      harness.workspaceService.startAutoApplyQueueRun(["job_ready"]),
+    ).rejects.toThrow("All work is paused");
+    expect((await harness.repository.getActivityControl()).paused).toBe(true);
+  });
+
   test("enforces a configured daily application limit below the default", async () => {
     const seed = createCapacitySeed();
     seed.settings = {

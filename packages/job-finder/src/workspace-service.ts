@@ -12,6 +12,7 @@ import { recordApplicationsSentByPerson } from "./internal/application-sent-by-p
 import { judgeUnjudgedPlanJobs } from "./internal/backlog-fit-judgment";
 import { refreshAutomaticApplicationFailurePauses } from "./internal/automatic-safeguards";
 import {
+  ACTIVITY_PAUSED_MESSAGE,
   ApplicationRecordSchema,
   JobFinderDiscoveryCancellationInputSchema,
   JobFinderActivityControlSchema,
@@ -75,7 +76,10 @@ import { createWorkspaceGroupedAnswerMethods } from "./internal/workspace-groupe
 import { createWorkspaceCrmMethods } from "./internal/workspace-crm-methods";
 import { createWorkspaceIntelligenceMethods } from "./internal/workspace-intelligence-methods";
 import { createWorkspaceSafeguardMethods } from "./internal/workspace-safeguard-methods";
-import { createWorkspaceUserActionMethods } from "./internal/workspace-user-action-methods";
+import {
+  createWorkspaceUserActionMethods,
+  isWorkspaceActivityPaused,
+} from "./internal/workspace-user-action-methods";
 import { toDiscoverySessionState } from "./internal/discovery-state";
 import { uniqueStrings } from "./internal/shared";
 import { buildDiscoveryJobs } from "./internal/matching-review-queue";
@@ -1103,6 +1107,19 @@ export function createJobFinderWorkspaceService(
     await onExplicitUserStart?.();
   }
 
+  /**
+   * Application work is the exception: the global pause is the person's brake
+   * on anything that fills in or sends a form, so a row's Try again or an
+   * Apply press refuses instead of quietly lifting it. Continue on Home (or in
+   * the header) is the one way back.
+   */
+  async function requireApplicationActivityNotPaused(): Promise<void> {
+    if (await isWorkspaceActivityPaused(repository)) {
+      throw new Error(ACTIVITY_PAUSED_MESSAGE);
+    }
+    await onExplicitUserStart?.();
+  }
+
   async function resolvePreparationCampaign(
     run: ApplyRun | null,
   ): Promise<JobSearchCampaign | null> {
@@ -1244,7 +1261,7 @@ export function createJobFinderWorkspaceService(
     reservedJobs = 0,
     reservedJobIds: readonly string[] = [],
   ): Promise<void> {
-    await requireActivityEnabled();
+    await requireApplicationActivityNotPaused();
     await requireEmployerApplicationCapacity(
       jobIds,
       run,

@@ -139,6 +139,8 @@ export function ReviewQueueScreen(props: {
   onOpenProfile: () => void;
   onOpenSafeguards?: () => void;
   safeguardBlocker?: string | null;
+  /** All work is paused: Apply controls wait for Continue. */
+  applicationWorkPaused?: boolean;
   onClaimResumeIdentity?: () => void;
   onKeepResumeIdentity?: () => void;
   onRemoveReviewJob: (jobId: string) => void;
@@ -187,6 +189,7 @@ export function ReviewQueueScreen(props: {
     onOpenProfile,
     onOpenSafeguards,
     safeguardBlocker,
+    applicationWorkPaused = false,
     onClaimResumeIdentity,
     onKeepResumeIdentity,
     onRemoveReviewJob,
@@ -608,6 +611,7 @@ export function ReviewQueueScreen(props: {
           {...(onRemoveReviewJobs ? { onRemoveJobs: onRemoveReviewJobs } : {})}
           {...(onOpenSafeguards ? { onOpenSafeguards } : {})}
           safeguardBlocker={safeguardBlocker ?? null}
+          applicationWorkPaused={applicationWorkPaused}
           onSelectItem={selectItemAndRevealWorkspace}
           onShowItem={onSelectItem}
           onStopTailoredDraftPreparation={stopVisibleBatch}

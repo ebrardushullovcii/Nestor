@@ -1,3 +1,4 @@
+import { APPLICATION_WORK_PAUSED_REASON } from "@renderer/features/job-finder/lib/application-work-paused";
 import type { ResumeBatchGenerationProgress } from "@nestor/contracts";
 import { FAILURE_SENTENCES } from "@renderer/features/job-finder/lib/describe-failure";
 import {
@@ -1087,7 +1088,12 @@ export function createPrimaryPageActions(
   // start surfaces disable their own controls when nothing remains, but any
   // caller that still reaches a start handler must see the refusal as a
   // visible actionable status instead of a dialog flowing into a no-op.
-  const getDailyCapacityRefusalMessage = (): string | null => {
+  // Every application start asks this first. The pause is the person's
+  // brake (the service refuses the same starts), then the spent day.
+  const getApplicationStartRefusalMessage = (): string | null => {
+    if (workspace?.activityControl?.paused) {
+      return APPLICATION_WORK_PAUSED_REASON;
+    }
     const capacity =
       workspace?.dashboard?.globalDailyApplicationPreparationCapacity ?? null;
     if (!capacity || !isDailyPreparationCapacityExhausted(capacity)) {
@@ -1773,6 +1779,11 @@ export function createPrimaryPageActions(
         },
       ),
     onApproveApply: (jobId: string) => {
+      const startRefusal = getApplicationStartRefusalMessage();
+      if (startRefusal) {
+        applyRouteScopedMessage({ message: startRefusal, tone: "failure" });
+        return;
+      }
       void confirmLeaveDirtyResumeWorkspace("approve this application").then(
         (mayLeave) => {
           if (!mayLeave) {
@@ -1827,6 +1838,11 @@ export function createPrimaryPageActions(
         const message = "No jobs selected for auto-apply queue.";
         applyRouteScopedMessage({ message });
         return { status: "refused", reason: "empty_selection", message };
+      }
+      if (workspace?.activityControl?.paused) {
+        const message = APPLICATION_WORK_PAUSED_REASON;
+        applyRouteScopedMessage({ message, tone: "failure" });
+        return { status: "refused", reason: "work_paused", message };
       }
 
       // Stay resolves false: take no action and keep every draft. Leave
@@ -1911,7 +1927,7 @@ export function createPrimaryPageActions(
         { scope: jobFinderPendingActions.apply() },
       ),
     onStartAutoApply: (input: JobFinderApplicationStartTarget) => {
-      const capacityRefusal = getDailyCapacityRefusalMessage();
+      const capacityRefusal = getApplicationStartRefusalMessage();
       if (capacityRefusal) {
         applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
         return;
@@ -1944,7 +1960,7 @@ export function createPrimaryPageActions(
       );
     },
     onStartApplyCopilot: (input: JobFinderApplicationStartTarget) => {
-      const capacityRefusal = getDailyCapacityRefusalMessage();
+      const capacityRefusal = getApplicationStartRefusalMessage();
       if (capacityRefusal) {
         applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
         return;
@@ -2216,7 +2232,7 @@ export function createPrimaryPageActions(
       );
     },
     onApproveResumeAndApply: (jobId: string) => {
-      const capacityRefusal = getDailyCapacityRefusalMessage();
+      const capacityRefusal = getApplicationStartRefusalMessage();
       if (capacityRefusal) {
         applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
         return;

@@ -27,6 +27,7 @@ import {
 import { resolveApplyStatePresentation } from "./apply-state";
 import type { ApplyMode } from "../../lib/apply-mode-contracts-stub";
 import { StatusBadge } from "../../components/status-badge";
+import { APPLICATION_WORK_PAUSED_REASON } from "../../lib/application-work-paused";
 import {
   getApplyResultDestinationUrl,
   getCustomerFacingApplyText,
@@ -84,6 +85,8 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   dailyPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
   excludedQueueRecoveryEntries: QueueEntry[];
   isApplyPending: boolean;
+  /** All work is paused: nothing here may start an application. */
+  applicationWorkPaused?: boolean;
   onStartApplyCopilot: (input: JobFinderExactApplicationTarget) => void;
   onReviewResumePdf?: (jobId: string) => void;
   onStartAutoApplyQueue: (jobIds: string[]) => void;
@@ -154,6 +157,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
     canRestageQueueRun,
     dailyPreparationCapacity,
     isApplyPending,
+    applicationWorkPaused = false,
     onStartApplyCopilot,
     onReviewResumePdf,
     onStartAutoApplyQueue,
@@ -229,6 +233,8 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   const isDailyCapacityExhausted = isDailyPreparationCapacityExhausted(
     dailyPreparationCapacity,
   );
+  // The pause holds every start the same way the spent day does.
+  const isStartBlocked = isDailyCapacityExhausted || applicationWorkPaused;
   const dailyCapacityReachedText =
     dailyPreparationCapacity && isDailyCapacityExhausted
       ? formatDailyPreparationCapacityReachedText(dailyPreparationCapacity)
@@ -260,7 +266,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
     presentation.state !== "preparing" &&
     presentation.state !== "verify_outcome" &&
     presentation.state !== "structural_stop" &&
-    !isDailyCapacityExhausted;
+    !isStartBlocked;
   // The site-saves state keeps the browser hand-off as its secondary way out,
   // for a person who would rather finish it there than grant the permission.
   const showSecondaryOpenBrowser =
@@ -602,8 +608,13 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
                   className={RECOVERY_PRIMARY_ACTION_CLASS_NAME}
                   data-testid="applications-recovery-primary-action-button"
                   disabled={
-                    isDailyCapacityExhausted ||
+                    (!rejectedFormat && isStartBlocked) ||
                     (!rejectedFormat && isApplyPending)
+                  }
+                  title={
+                    !rejectedFormat && applicationWorkPaused
+                      ? APPLICATION_WORK_PAUSED_REASON
+                      : undefined
                   }
                   onClick={
                     rejectedFormat
@@ -743,7 +754,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
                     type="button"
                     variant="secondary"
                     disabled={
-                      isDailyCapacityExhausted ||
+                      isStartBlocked ||
                       selectedQueueRecoveryExceedsDailyRemaining
                     }
                   >
@@ -789,6 +800,16 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
             id={queueRecoveryExceedsNoteId}
           >
             {dailyQueueRecoveryExceedsRemainingReason}
+          </p>
+        ) : null}
+        {applicationWorkPaused &&
+        ((primaryAction === "try_again" && !rejectedFormat) ||
+          showQueueRecoveryAction) ? (
+          <p
+            className="text-(length:--text-small) leading-6 text-foreground-soft"
+            data-testid="application-work-paused-note"
+          >
+            {APPLICATION_WORK_PAUSED_REASON}
           </p>
         ) : null}
         {dailyCapacityReachedText ? (

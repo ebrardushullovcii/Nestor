@@ -1,3 +1,4 @@
+import { APPLICATION_WORK_PAUSED_REASON } from "../../lib/application-work-paused";
 import {
   Select,
   SelectContent,
@@ -153,6 +154,8 @@ interface ApplicationsRecordsPanelProps {
   onFinishInBrowser?: FinishInBrowserHandler;
   onStartApplyCopilot?: (input: JobFinderExactApplicationTarget) => void;
   isApplyPending?: boolean;
+  /** All work is paused: a row's Try again waits for Continue. */
+  applicationWorkPaused?: boolean;
   onFilterChange: (filter: ApplicationsViewFilter) => void;
   onSelectRecord: (recordId: string) => void;
   selectedRecord: ApplicationRecord | null;
@@ -175,6 +178,7 @@ export function ApplicationsRecordsPanel({
   onFinishInBrowser,
   onStartApplyCopilot,
   isApplyPending = false,
+  applicationWorkPaused = false,
   onFilterChange,
   onSelectRecord,
   selectedRecord,
@@ -622,6 +626,7 @@ export function ApplicationsRecordsPanel({
             const runFormAction = () => {
               if (!formAction || !latestResult || formOpenPhase) return;
               if (formAction.kind === "prepare") {
+                if (applicationWorkPaused) return;
                 setPreparingRecordId(record.id);
                 onStartApplyCopilot?.({
                   jobId: record.jobId,
@@ -794,7 +799,10 @@ export function ApplicationsRecordsPanel({
                             said it twice. */}
                         {liveLine
                           ? `Now: ${liveLine}`
-                          : nextStepLabel && nextStepLabel !== formAction?.label
+                          : formAction?.kind === "prepare" &&
+                              applicationWorkPaused
+                            ? APPLICATION_WORK_PAUSED_REASON
+                            : nextStepLabel && nextStepLabel !== formAction?.label
                             ? `Next: ${nextStepLabel}`
                             : null}
                       </SelectableRowLine>
@@ -804,8 +812,16 @@ export function ApplicationsRecordsPanel({
                     <Button
                       className="absolute right-4 bottom-2.5"
                       data-testid="applications-row-form-action"
-                      disabled={formOpenPhase !== null}
+                      disabled={
+                        formOpenPhase !== null ||
+                        (formAction.kind === "prepare" && applicationWorkPaused)
+                      }
                       onClick={runFormAction}
+                      title={
+                        formAction.kind === "prepare" && applicationWorkPaused
+                          ? APPLICATION_WORK_PAUSED_REASON
+                          : undefined
+                      }
                       pending={formOpenPhase !== null}
                       size="xs"
                       type="button"

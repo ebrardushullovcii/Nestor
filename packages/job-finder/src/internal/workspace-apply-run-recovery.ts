@@ -301,8 +301,8 @@ export function describeUnstartedBatchReason(
   rawMessage: string | null,
 ): string {
   const message = rawMessage?.trim() ?? "";
-  if (message.includes("activity is paused")) {
-    return "Job Finder did not start these jobs because background work is paused. Press Resume background work on the Job Finder Home screen, then try again.";
+  if (message.includes("activity is paused") || message.includes("work is paused")) {
+    return "Job Finder did not start these jobs because all work is paused. Press Continue on Home, then try again.";
   }
   if (message.includes("per local day")) {
     return "Job Finder did not start these jobs because you have already reached today's limit on how many applications it may begin. Try again tomorrow.";
