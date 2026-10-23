@@ -70,9 +70,11 @@ import {
 } from "./openai-compatible-request-compaction";
 import {
   buildFitEvidenceInstructions,
+  buildFitScoringInstructions,
   buildJobFitAssessmentPayload,
   buildJobFitJudgingRequest,
   buildJobFitJudgingPrompt,
+  buildJobFitJudgingResponseSchema,
   normalizeJobFitJudgments,
 } from "./openai-compatible-fit";
 import {
@@ -100,6 +102,7 @@ import { getAiProviderAccessFailure } from "./ai-provider-access-failure";
 import {
   buildModelRequestHeaders,
   createInstanceConversationKey,
+  isOpenCodeBaseUrl,
   modelConversationKeys,
 } from "./model-request-identity";
 
@@ -134,6 +137,19 @@ const SEARCH_RESULTS_EXTRACTION_PAGE_TEXT_LIMIT = 8_000;
 const JOB_DETAIL_EXTRACTION_PAGE_TEXT_LIMIT = 12_000;
 const SEARCH_RESULTS_MAX_MODEL_JOBS = 12;
 const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 196_000;
+
+/** Sampling support was verified on this route, not on arbitrary models. */
+function isStableFitRoute(route: {
+  model: string;
+  baseUrl: string;
+  apiMode: "responses" | "chat_completions";
+}): boolean {
+  return (
+    route.apiMode === "responses" &&
+    route.model === DEFAULT_TEXT_MODEL &&
+    isOpenCodeBaseUrl(route.baseUrl)
+  );
+}
 
 /** Token usage in one shape whatever API reported it. */
 export function normalizeModelUsage(usage: ModelUsagePayload): {
@@ -326,6 +342,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
       conversationKey?: string;
       /** Overrides the client's effort for this one request. */
       reasoningEffort?: ModelReasoningEffort | undefined;
+      jsonSchema?: { name: string; schema: Record<string, unknown> };
     },
   ): Promise<unknown> {
     if (!validatedOptions) {
@@ -369,10 +386,18 @@ export function createOpenAiCompatibleJobFinderAiClient(
         body: buildModelRequestBody({
           apiMode,
           model: validatedOptions.model,
+          // Muse's Responses route defaults to temperature 1. Fit verdicts
+          // should repeat for the same facts. This route accepts zero even
+          // with reasoning enabled; other model routes may reject it.
+          ...((operation === "judgeJobFits" || operation === "assessJobFit") &&
+          isStableFitRoute({ ...validatedOptions, apiMode })
+            ? { temperature: 0 }
+            : {}),
           reasoningEffort:
             options?.reasoningEffort ?? validatedOptions.reasoningEffort,
           reasoningSummary: resilience.streaming !== false,
           jsonOutput: true,
+          jsonSchema: options?.jsonSchema,
           messages: [
             {
               role: "system",
@@ -633,8 +658,9 @@ export function createOpenAiCompatibleJobFinderAiClient(
         [
           "You assess how well a job fits the person whose profile is given.",
           buildFitEvidenceInstructions(),
+          buildFitScoringInstructions(),
           "Return JSON only.",
-          "Use a 0-100 score, 1-3 reasons, and up to 3 gaps.",
+          "Give 1-3 reasons and up to 3 gaps.",
           "Keep explanations specific to the provided profile and job.",
           "Include requirements for every explicit language and level, enrollment or availability window, education, portfolio, experience, and named tool in the full listing. Compare each with the profile; absence is missing or unknown, never support. A conflict needs explicit contradictory evidence. Use assessmentDate for availability windows.",
           "Each requirement has id, category (skill, experience, seniority, location, work_mode, work_authorization, domain), label, importance (required, preferred, inferred), status (supported, partial, missing, unknown, conflict), jobEvidence (quote from the listing), resumeEvidence (array of {sourceKind: profile_skill, experience, project, or profile; sourceId: string or null; label; detail}), and explanation. Use skill for languages and tools, experience for education, enrollment, availability and portfolio. Keep required country restrictions separate from remote work mode.",
@@ -662,14 +688,27 @@ export function createOpenAiCompatibleJobFinderAiClient(
         ...job,
         jobId: String(index),
       }));
+      const structured =
+        validatedOptions !== null &&
+        isStableFitRoute({
+          ...validatedOptions,
+          apiMode: validatedOptions.apiMode ?? "chat_completions",
+        });
       const payload = await fetchModelJson(
         "judgeJobFits",
-        buildJobFitJudgingPrompt(),
+        buildJobFitJudgingPrompt(structured),
         buildJobFitJudgingRequest({ ...rest, jobs }),
         {
           conversationKey: modelConversationKeys.fitJudging(input.profile),
           ...(signal ? { signal } : {}),
           reasoningEffort: reasoningEffortFor("fit_batch"),
+          ...(structured
+            ? {
+                jsonSchema: buildJobFitJudgingResponseSchema(
+                  jobs.map((job) => job.jobId),
+                ),
+              }
+            : {}),
         },
       );
       const jobIds = new Map(
@@ -1144,19 +1183,31 @@ export function createJobFinderAiClientFromEnvironment(
     };
   }
 
-  const primaryClient = createOpenAiCompatibleJobFinderAiClient({
-    apiKey,
+  const primaryRoute = {
     baseUrl: env.NESTOR_AI_BASE_URL ?? DEFAULT_OPENCODE_GO_BASE_URL,
     model: env.NESTOR_AI_MODEL ?? DEFAULT_TEXT_MODEL,
     apiMode:
       parseModelApiMode(env.NESTOR_AI_API_MODE) ?? DEFAULT_TEXT_MODEL_API_MODE,
+  };
+  const taskReasoningEfforts = resolveTaskReasoningEffortsFromEnvironment(env);
+  if (
+    isStableFitRoute(primaryRoute) &&
+    !parseModelReasoningEffort(env.NESTOR_AI_FIT_REASONING_EFFORT)
+  ) {
+    // Repeated and shuffled fit replays were steadier and cheaper at low.
+    // Keep other routes' defaults and explicit operator overrides intact.
+    taskReasoningEfforts.fit_batch = "low";
+  }
+  const primaryClient = createOpenAiCompatibleJobFinderAiClient({
+    apiKey,
+    ...primaryRoute,
     reasoningEffort:
       parseModelReasoningEffort(env.NESTOR_AI_REASONING_EFFORT) ??
       DEFAULT_TEXT_MODEL_REASONING_EFFORT,
     agentReasoningEffort:
       parseModelReasoningEffort(env.NESTOR_AI_AGENT_REASONING_EFFORT) ??
       DEFAULT_AGENT_TURN_REASONING_EFFORT,
-    taskReasoningEfforts: resolveTaskReasoningEffortsFromEnvironment(env),
+    taskReasoningEfforts,
     label: "AI resume agent",
     requestTimeoutMs: parsedRequestTimeoutMs,
     resumeExtractionTimeoutMs: parsedResumeExtractionTimeoutMs,
