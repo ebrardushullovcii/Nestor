@@ -1173,6 +1173,40 @@ export function createWorkHistoryReviewDriveState(): JobFinderRepositoryState {
 }
 
 /** Test-only state for driving the real search/apply agents against a local synthetic site. */
+function isLoopbackUrl(value: string | null | undefined): boolean {
+  if (!value) return true;
+  const hostname = new URL(value).hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/gu, "");
+  return (
+    hostname === "localhost" ||
+    hostname === "::1" ||
+    /^127(?:\.\d{1,3}){3}$/u.test(hostname)
+  );
+}
+
+/**
+ * The browser-drive seed is pressed for real (Apply to all, a row's Try
+ * again), so every job in it must lead to the local replica sites. On
+ * 2026-10-23 two seeded jobs still carried the apply-queue demo's
+ * linkedin.com addresses and a queue started a run on one.
+ */
+export function assertDriveSeedStaysLocal(
+  state: Pick<JobFinderRepositoryState, "savedJobs">,
+): void {
+  const leaving = state.savedJobs.filter(
+    (job) =>
+      !isLoopbackUrl(job.applicationUrl) ||
+      !isLoopbackUrl(job.canonicalUrl) ||
+      !isLoopbackUrl(job.employerWebsiteUrl),
+  );
+  if (leaving.length > 0) {
+    throw new Error(
+      `Browser-drive seed jobs must use loopback addresses: ${leaving.map((job) => job.id).join(", ")}`,
+    );
+  }
+}
+
 export function createAgentOwnedBrowserDriveState(input: {
   sourceUrl: string;
   applicationUrl: string;
@@ -1192,7 +1226,19 @@ export function createAgentOwnedBrowserDriveState(input: {
   // the resume-workspace seed left every live drive blocked before browser
   // launch because that seed intentionally has no generated assets.
   const base = createApplyQueueDemoState();
-  return JobFinderRepositoryStateSchema.parse({
+  const sourceOrigin = new URL(input.sourceUrl).origin;
+  // Jobs the inputs do not name keep their place in the seed but point at
+  // the local source site, never at the demo's real job board.
+  const localJobAddress = (
+    job: (typeof base.savedJobs)[number],
+  ): (typeof base.savedJobs)[number] => ({
+    ...job,
+    canonicalUrl: `${sourceOrigin}/jobs/${job.id}`,
+    applicationUrl: `${sourceOrigin}/jobs/${job.id}/apply`,
+    employerWebsiteUrl: sourceOrigin,
+    employerDomain: new URL(sourceOrigin).hostname,
+  });
+  const state = JobFinderRepositoryStateSchema.parse({
     ...base,
     searchPreferences: {
       ...base.searchPreferences,
@@ -1255,7 +1301,7 @@ export function createAgentOwnedBrowserDriveState(input: {
                 requiresConsentInterruptKind: null,
               },
             }
-        : job,
+        : localJobAddress(job),
     ),
       ...(input.foundJobs ?? []).map((found, index) => ({
         ...base.savedJobs[0]!,
@@ -1294,6 +1340,8 @@ export function createAgentOwnedBrowserDriveState(input: {
     userActionRequests: [],
     userActionEvents: [],
   });
+  assertDriveSeedStaysLocal(state);
+  return state;
 }
 
 /**
