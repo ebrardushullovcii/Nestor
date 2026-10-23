@@ -45,7 +45,7 @@ import {
   ListRowSelectionCell,
 } from "../../components/list-selection";
 import { discoverySourceFailureCopy } from "./discovery-source-failure-copy";
-import { ChevronDown, LoaderCircle } from "lucide-react";
+import { ChevronDown, LoaderCircle, X } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
 import { SelectableRow } from "@renderer/components/ui";
 import { EmptyState } from "@renderer/features/job-finder/components/empty-state";
@@ -532,43 +532,84 @@ function getSelectedJobPage(
     : Math.floor(selectedIndex / DISCOVERY_RESULTS_PAGE_SIZE);
 }
 
-function RecoveryCallout(props: {
+const DISMISSED_SESSION_NOTICES_KEY = "nestor.discovery.dismissed-session-notices";
+
+function readDismissedSessionNotices(): string[] {
+  try {
+    const stored: unknown = JSON.parse(
+      window.localStorage.getItem(DISMISSED_SESSION_NOTICES_KEY) ?? "[]",
+    );
+    return Array.isArray(stored)
+      ? stored.filter((entry): entry is string => typeof entry === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * A browser sign-in the next search needs, said in one quiet line above
+ * results the person is reading (ADR 0051). It was a large amber alert in
+ * the middle of the list; the results are fine, so it is a note with the
+ * one action, and it stays hidden once dismissed.
+ */
+function SessionRecoveryLine(props: {
   description: string;
   onRecoveryAction?: (() => void) | null;
   recoveryActionLabel?: string | null;
-  recoveryActionNextStep?: string | null;
   recoveryActionPending?: boolean;
 }) {
-  const recoveryActionProps = props.onRecoveryAction
-    ? { onClick: props.onRecoveryAction }
-    : {};
-  const recoveryPendingProps = props.recoveryActionPending
-    ? { pending: true }
-    : {};
-
+  const dismissKey = props.recoveryActionLabel ?? props.description;
+  const [dismissed, setDismissed] = useState(() =>
+    readDismissedSessionNotices().includes(dismissKey),
+  );
+  if (dismissed) return null;
   return (
     <div
-      aria-atomic="true"
-      className="rounded-(--radius-panel) border border-(--warning-border) bg-(--warning-surface) px-4 py-3 text-(length:--text-description) leading-6 text-(--warning-text)"
-      role="alert"
+      className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-(length:--text-small) leading-6 text-foreground-soft"
+      data-testid="discovery-session-recovery-line"
+      role="status"
     >
-      <p>{props.description}</p>
-      {props.recoveryActionLabel ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            type="button"
-            variant="primary"
-            {...recoveryActionProps}
-            {...recoveryPendingProps}
-          >
-            {props.recoveryActionLabel}
-          </Button>
-          <span className="text-(length:--text-small) opacity-80">
-            {props.recoveryActionNextStep ?? "Then search again."}
-          </span>
-        </div>
+      <span className="min-w-0">{props.description}</span>
+      {props.recoveryActionLabel && props.onRecoveryAction ? (
+        <Button
+          className="h-auto px-0 py-0 underline underline-offset-2"
+          onClick={props.onRecoveryAction}
+          pending={props.recoveryActionPending === true}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {props.recoveryActionLabel}
+        </Button>
       ) : null}
+      <Button
+        aria-label="Dismiss this note"
+        className="ml-auto size-6 rounded-full p-0"
+        onClick={() => {
+          setDismissed(true);
+          try {
+            window.localStorage.setItem(
+              DISMISSED_SESSION_NOTICES_KEY,
+              JSON.stringify(
+                [
+                  ...readDismissedSessionNotices().filter(
+                    (entry) => entry !== dismissKey,
+                  ),
+                  dismissKey,
+                ].slice(-50),
+              ),
+            );
+          } catch {
+            /* Dismissal still holds for this visit. */
+          }
+        }}
+        size="icon-xs"
+        type="button"
+        variant="ghost"
+      >
+        <X aria-hidden="true" className="size-3.5" />
+      </Button>
     </div>
   );
 }
@@ -1788,15 +1829,12 @@ export function DiscoveryResultsPanel({
         ) : null}
 
         {sessionNeedsAttention && jobs.length > 0 ? (
-          <div className="px-5 py-4">
-            <RecoveryCallout
-              description={`You're viewing results from the last completed search. Open ${JOB_FINDER_BROWSER_NAME} when you're ready to run a new one.`}
+          <div className="px-5 py-2">
+            <SessionRecoveryLine
+              description="A job site needs you to sign in before the next search."
               {...(onRecoveryAction !== undefined ? { onRecoveryAction } : {})}
               {...(recoveryActionLabel !== undefined
                 ? { recoveryActionLabel }
-                : {})}
-              {...(recoveryActionNextStep !== undefined
-                ? { recoveryActionNextStep }
                 : {})}
               {...(recoveryActionPending
                 ? { recoveryActionPending: true }
