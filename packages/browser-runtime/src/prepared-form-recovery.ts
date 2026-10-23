@@ -2,9 +2,31 @@ import type { BrowserContext, Page } from "playwright";
 import { createHash } from "node:crypto";
 import {
   PreparedFormSnapshotSchema,
+  type PreparedFormAttachment,
   type PreparedFormSnapshot,
 } from "@nestor/contracts";
 export type { PreparedFormSnapshot } from "@nestor/contracts";
+
+/**
+ * Every file in the snapshot must resolve to exactly one resume or asset
+ * record with the same name and bytes, or a restart could not refill it.
+ */
+export function describePreparedFormAttachments(
+  snapshot: PreparedFormSnapshot,
+  available: readonly PreparedFormAttachment[],
+): PreparedFormAttachment[] | null {
+  const descriptors: PreparedFormAttachment[] = [];
+  for (const file of snapshot.fields.flatMap((field) => field.files)) {
+    const matches = available.filter(
+      (candidate) =>
+        candidate.name === file.name && candidate.sha256 === file.sha256,
+    );
+    if (matches.length !== 1) return null;
+    if (!descriptors.some((candidate) => candidate.name === file.name))
+      descriptors.push(matches[0]!);
+  }
+  return descriptors;
+}
 
 const FIELDS =
   "input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]),textarea,select";

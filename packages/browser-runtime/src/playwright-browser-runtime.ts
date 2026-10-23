@@ -57,6 +57,7 @@ import type {
 import { ApplicationNavigationError } from "./application-navigation-error";
 import {
   capturePreparedForm,
+  describePreparedFormAttachments,
   restorePreparedForm,
   type PreparedFormSnapshot,
   type RecoveryFile,
@@ -1383,6 +1384,8 @@ export function createBrowserAgentRuntime(
     string,
     {
       files: RecoveryFile[];
+      /** Durable identities of `files`, for any later save of this form. */
+      attachments: PreparedFormAttachment[];
       guard: (page: Page) => Promise<unknown>;
       snapshot?: PreparedFormSnapshot;
       saved?: PreparedApplicationForm;
@@ -1397,6 +1400,7 @@ export function createBrowserAgentRuntime(
       formRecovery.set(key, {
         snapshot: saved.snapshot,
         saved,
+        attachments: saved.attachments,
         files: saved.attachments.map(file => ({name: file.name, load: async () => {
           const bytes = await preparedFormStore!.loadAttachment(file);
           if (createHash("sha256").update(bytes).digest("hex") !== file.sha256)
@@ -2523,8 +2527,12 @@ export function createBrowserAgentRuntime(
       let duplicate: Page | null = null;
       try {
         const snapshot = await capturePreparedForm(page);
+        // A form saved for restarts must carry its files' identities, or it
+        // would come back unable to attach them; keep the live page instead.
+        const attachments = snapshot && describePreparedFormAttachments(snapshot, recovery.attachments);
         if (
           !snapshot ||
+          (preparedFormStore && !attachments) ||
           snapshot.fields.some((field) =>
             field.files.some(
               (saved) =>
@@ -2559,7 +2567,7 @@ export function createBrowserAgentRuntime(
         )
           return false;
         if (recovery.saved && preparedFormStore) {
-          recovery.saved = {...recovery.saved, snapshot, savedAt: new Date().toISOString()};
+          recovery.saved = {...recovery.saved, snapshot, attachments: attachments ?? [], reason: null, savedAt: new Date().toISOString()};
           await preparedFormStore.save(recovery.saved);
         }
         // The readback and save awaited: a Send or the person may have taken
@@ -3252,11 +3260,20 @@ export function createBrowserAgentRuntime(
         ) {
           const resumeArtifact = input.resumeArtifact;
           const attachments = input.applicationAttachments ?? [];
+          const available: PreparedFormAttachment[] = [
+            ...(resumeArtifact.sha256 && (resumeArtifact.exportArtifactId || resumeArtifact.sourceDocumentId) ? [{
+              kind: resumeArtifact.exportArtifactId ? "resume_export" as const : "resume_source" as const,
+              id: (resumeArtifact.exportArtifactId ?? resumeArtifact.sourceDocumentId)!,
+              name: resumeArtifact.fileName, sha256: resumeArtifact.sha256.toLowerCase(),
+            }] : []),
+            ...attachments.map(file => ({kind: "candidate_asset" as const, id: file.assetId, name: file.fileName, sha256: file.sha256.toLowerCase()})),
+          ];
           formRecovery.set(input.applicationPageBindingKey, {
             files: [
               { name: resumeArtifact.fileName, load: () => loadVerifiedResumeBytes(resumeArtifact) },
               ...attachments.map(file => ({name: file.fileName, load: file.loadVerifiedBytes})),
             ],
+            attachments: available,
             guard: page => ensurePrepareOnlyMutationGuard(page, false),
           });
           recoveryUnavailable.delete(input.applicationPageBindingKey);
@@ -3265,26 +3282,12 @@ export function createBrowserAgentRuntime(
             const page = preparedApplicationPages.get(key)!;
             let snapshot = await capturePreparedForm(page).catch(() => null);
             let reason: PreparedApplicationForm["reason"] = snapshot ? null : "unsupported_form";
-            const descriptors: PreparedFormAttachment[] = [];
-            if (snapshot) {
-              const available: PreparedFormAttachment[] = [
-                ...(resumeArtifact.sha256 && (resumeArtifact.exportArtifactId || resumeArtifact.sourceDocumentId) ? [{
-                  kind: resumeArtifact.exportArtifactId ? "resume_export" as const : "resume_source" as const,
-                  id: (resumeArtifact.exportArtifactId ?? resumeArtifact.sourceDocumentId)!,
-                  name: resumeArtifact.fileName, sha256: resumeArtifact.sha256.toLowerCase(),
-                }] : []),
-                ...attachments.map(file => ({kind: "candidate_asset" as const, id: file.assetId, name: file.fileName, sha256: file.sha256.toLowerCase()})),
-              ];
-              for (const file of snapshot.fields.flatMap(field => field.files)) {
-                const matches = available.filter(candidate => candidate.name === file.name && candidate.sha256 === file.sha256);
-                if (matches.length !== 1) { snapshot = null; reason = "attachment_unavailable"; break; }
-                if (!descriptors.some(candidate => candidate.name === file.name)) descriptors.push(matches[0]!);
-              }
-            }
+            const descriptors = snapshot ? describePreparedFormAttachments(snapshot, available) : null;
+            if (snapshot && !descriptors) { snapshot = null; reason = "attachment_unavailable"; }
             const saved: PreparedApplicationForm = {id: key,
               label: [input.job.location, input.job.title.slice(0, 120), input.job.company.slice(0, 80)].filter(Boolean).join(" · ").slice(0, 280),
               savedAt: new Date().toISOString(), snapshot,
-              attachments: snapshot ? descriptors : [], reason,
+              attachments: snapshot ? descriptors ?? [] : [], reason,
             };
             await preparedFormStore.save(saved);
             formRecovery.get(key)!.saved = saved;
