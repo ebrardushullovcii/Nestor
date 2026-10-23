@@ -220,18 +220,10 @@ describe("SettingsScreen scoped section saves", () => {
       within(resumeLook).queryByRole("button", { name: "Save resume look" }),
     ).toBeNull();
 
+    // The switch saves when flipped, with only the fields it owns.
     const keepBrowserSwitch = within(workspace).getAllByRole("switch")[0]!;
     fireEvent.click(keepBrowserSwitch);
     expect(keepBrowserSwitch.getAttribute("aria-checked")).toBe("true");
-
-    const workspaceSave = within(workspace).getByRole<HTMLButtonElement>(
-      "button",
-      {
-        name: "Save browser & saved jobs",
-      },
-    );
-    expect(workspaceSave.disabled).toBe(false);
-    fireEvent.click(workspaceSave);
 
     await waitFor(() =>
       expect(callbacks.onUpdateWorkspaceBehavior).toHaveBeenCalledWith({
@@ -504,26 +496,11 @@ describe("SettingsScreen scoped section saves", () => {
     const workspace = screen.getByRole("region", {
       name: WORKSPACE_BEHAVIOR_LABEL,
     });
+    // Flipping the switch starts its save at once.
     fireEvent.click(within(workspace).getAllByRole("switch")[0]!);
-    fireEvent.click(
-      within(workspace).getByRole<HTMLButtonElement>("button", {
-        name: "Save browser & saved jobs",
-      }),
-    );
-
+    expect(callbacks.onUpdateWorkspaceBehavior).toHaveBeenCalledTimes(1);
     expect(
-      within(workspace)
-        .getByRole<HTMLButtonElement>("button", {
-          name: "Saving browser & saved jobs",
-        })
-        .hasAttribute("disabled"),
-    ).toBe(false);
-    expect(
-      within(workspace)
-        .getByRole<HTMLButtonElement>("button", {
-          name: "Saving browser & saved jobs",
-        })
-        .getAttribute("aria-disabled"),
+      within(workspace).getAllByRole("switch")[0]!.getAttribute("aria-checked"),
     ).toBe("true");
 
     await act(() => {

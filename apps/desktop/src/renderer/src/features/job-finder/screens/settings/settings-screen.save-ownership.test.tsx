@@ -224,12 +224,17 @@ describe("Settings save ownership", () => {
   it("offers the section's save once something in it changes", () => {
     renderScreen(parseSettings(), createCallbacks());
 
-    const region = screen.getByRole("region", {
-      name: WORKSPACE_BEHAVIOR_LABEL,
+    const region = screen.getByRole("region", { name: "AI behavior" });
+    const replies = within(region).getByRole("radiogroup", {
+      name: "How the profile assistant replies",
     });
-    fireEvent.click(within(region).getAllByRole("switch")[0]!);
+    fireEvent.click(
+      within(replies)
+        .getAllByRole("radio")
+        .find((radio) => radio.getAttribute("aria-checked") !== "true")!,
+    );
     const save = within(region).getByRole<HTMLButtonElement>("button", {
-      name: "Save browser & saved jobs",
+      name: "Save AI behavior",
     });
 
     expect(save.disabled).toBe(false);
@@ -245,17 +250,20 @@ describe("Settings save ownership", () => {
 
     expect(unsavedBar()).toBeNull();
 
-    const workspace = screen.getByRole("region", {
-      name: WORKSPACE_BEHAVIOR_LABEL,
+    const ai = screen.getByRole("region", { name: "AI behavior" });
+    const replies = within(ai).getByRole("radiogroup", {
+      name: "How the profile assistant replies",
     });
-    fireEvent.click(within(workspace).getAllByRole("switch")[0]!);
+    fireEvent.click(
+      within(replies)
+        .getAllByRole("radio")
+        .find((radio) => radio.getAttribute("aria-checked") !== "true")!,
+    );
 
     const bar = unsavedBar();
     expect(bar).not.toBeNull();
     expect(bar?.getAttribute("data-settings-unsaved-count")).toBe("1");
-    expect(bar?.textContent).toContain(
-      `Unsaved changes in ${WORKSPACE_BEHAVIOR_LABEL}.`,
-    );
+    expect(bar?.textContent).toContain("Unsaved changes in AI behavior.");
 
     // The bar is pinned inside the viewport, so the commit never drifts
     // thousands of pixels away from the control it commits.
@@ -264,9 +272,27 @@ describe("Settings save ownership", () => {
 
     fireEvent.click(
       within(bar as HTMLElement).getByRole("button", {
-        name: "Save browser & saved jobs",
+        name: "Save AI behavior",
       }),
     );
+
+    await waitFor(() =>
+      expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1),
+    );
+    expect(callbacks.onUpdateWorkspaceBehavior).not.toHaveBeenCalled();
+    expect(callbacks.onUpdateApplicationDefaults).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(unsavedBar()).toBeNull());
+  });
+
+  it("saves a Browser & saved jobs switch when it is flipped", async () => {
+    const callbacks = createCallbacks();
+    renderScreen(parseSettings(), callbacks);
+
+    const workspace = screen.getByRole("region", {
+      name: WORKSPACE_BEHAVIOR_LABEL,
+    });
+    fireEvent.click(within(workspace).getAllByRole("switch")[0]!);
 
     await waitFor(() =>
       expect(callbacks.onUpdateWorkspaceBehavior).toHaveBeenCalledWith({
@@ -274,13 +300,13 @@ describe("Settings save ownership", () => {
         keepSessionAlive: true,
       }),
     );
-    expect(callbacks.onUpdateAppearanceTheme).not.toHaveBeenCalled();
-    expect(callbacks.onUpdateApplicationDefaults).not.toHaveBeenCalled();
-
+    // No Save press and no reminder: the switch acts like the theme.
+    expect(
+      within(workspace).queryByRole("button", {
+        name: "Save browser & saved jobs",
+      }),
+    ).toBeNull();
     await waitFor(() => expect(unsavedBar()).toBeNull());
-
-    // The section that committed reports its own confirmation, so "saved"
-    // and "never touched" are no longer the same quiet state.
     expect(
       within(workspace).getByText("Browser & saved jobs saved."),
     ).toBeTruthy();
@@ -374,27 +400,29 @@ describe("Settings save ownership", () => {
       .find((radio) => radio.getAttribute("aria-checked") !== "true");
     fireEvent.click(unchecked!);
 
-    const workspace = screen.getByRole("region", {
-      name: WORKSPACE_BEHAVIOR_LABEL,
-    });
-    fireEvent.click(within(workspace).getAllByRole("switch")[0]!);
+    const tracker = screen.getByRole("region", { name: "Tracker" });
+    fireEvent.click(
+      within(tracker).getByRole("checkbox", {
+        name: /Mark applications for follow-up/,
+      }),
+    );
 
     const bar = unsavedBar() as HTMLElement;
     expect(bar.getAttribute("data-settings-unsaved-count")).toBe("2");
     expect(bar.textContent).toContain("Unsaved changes in 2 sections");
     expect(bar.textContent).toContain("AI behavior");
-    expect(bar.textContent).toContain(WORKSPACE_BEHAVIOR_LABEL);
+    expect(bar.textContent).toContain("Tracker");
 
     // One button cannot honestly say what it would write, so the bar only
     // navigates while two sections are outstanding.
     const barButtons = within(bar).getAllByRole("button");
     expect(barButtons.map((button) => button.textContent)).toEqual([
       "Go to AI behavior",
-      `Go to ${WORKSPACE_BEHAVIOR_LABEL}`,
+      "Go to Tracker",
     ]);
     fireEvent.click(barButtons[0]!);
     expect(callbacks.onUpdateAiBehavior).not.toHaveBeenCalled();
-    expect(callbacks.onUpdateWorkspaceBehavior).not.toHaveBeenCalled();
+    expect(callbacks.onUpdateTrackerCrm).not.toHaveBeenCalled();
   });
 
   it("keeps the bar up while a failed section is still unsaved", async () => {
@@ -405,12 +433,8 @@ describe("Settings save ownership", () => {
     const workspace = screen.getByRole("region", {
       name: WORKSPACE_BEHAVIOR_LABEL,
     });
+    // The switch saves when flipped; this save fails.
     fireEvent.click(within(workspace).getAllByRole("switch")[0]!);
-    fireEvent.click(
-      within(workspace).getByRole("button", {
-        name: "Save browser & saved jobs",
-      }),
-    );
 
     await waitFor(() =>
       expect(

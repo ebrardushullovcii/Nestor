@@ -47,27 +47,42 @@ export function SettingsWorkspaceBehaviorSection({
   const hasUnsavedChanges =
     draftKeepSessionAlive !== settings.keepSessionAlive ||
     draftDiscoveryOnly !== settings.discoveryOnly;
-  const updateStagedDrafts = (updater: () => void) => {
+  const saveBehavior = (input: UpdateWorkspaceBehaviorInput) => {
+    void runSectionSave({
+      execute: () => onUpdateWorkspaceBehavior(input),
+      failedMessage:
+        "Browser & saved jobs were not saved. Retry before leaving this page.",
+      savedMessage: "Browser & saved jobs saved.",
+    });
+  };
+  // A switch acts when flipped, like the theme: it saves at once instead of
+  // waiting for a Save press. A failed save keeps the choice and offers Retry.
+  const flipSwitch = (next: {
+    discoveryOnly: boolean;
+    keepSessionAlive: boolean;
+  }) => {
     if (isSavePending) {
       return;
     }
-    updater();
+    setDraftDiscoveryOnly(next.discoveryOnly);
+    setDraftKeepSessionAlive(next.keepSessionAlive);
     resetSectionSave();
     onSettingsDraftEdited?.();
+    if (
+      next.discoveryOnly !== settings.discoveryOnly ||
+      next.keepSessionAlive !== settings.keepSessionAlive
+    ) {
+      saveBehavior(next);
+    }
   };
+  // Retry after a failed save.
   const saveWorkspaceBehavior = () => {
     if (!hasUnsavedChanges || isSavePending) {
       return;
     }
-    void runSectionSave({
-      execute: () =>
-        onUpdateWorkspaceBehavior({
-          discoveryOnly: draftDiscoveryOnly,
-          keepSessionAlive: draftKeepSessionAlive,
-        }),
-      failedMessage:
-        "Browser & saved jobs were not saved. Retry before leaving this page.",
-      savedMessage: "Browser & saved jobs saved.",
+    saveBehavior({
+      discoveryOnly: draftDiscoveryOnly,
+      keepSessionAlive: draftKeepSessionAlive,
     });
   };
 
@@ -113,7 +128,10 @@ export function SettingsWorkspaceBehaviorSection({
           hint="Off closes finished tabs when you are not looking at them. Unfinished applications and saved sign-ins are kept."
           label="Keep browser tabs after runs"
           onCheckedChange={(checked) =>
-            updateStagedDrafts(() => setDraftKeepSessionAlive(checked))
+            flipSwitch({
+              discoveryOnly: draftDiscoveryOnly,
+              keepSessionAlive: checked,
+            })
           }
         />
         <ToggleField
@@ -123,7 +141,10 @@ export function SettingsWorkspaceBehaviorSection({
           hint="Useful if you want a cleaner workspace with fewer saved jobs."
           label="Only keep jobs I shortlist"
           onCheckedChange={(checked) =>
-            updateStagedDrafts(() => setDraftDiscoveryOnly(checked))
+            flipSwitch({
+              discoveryOnly: checked,
+              keepSessionAlive: draftKeepSessionAlive,
+            })
           }
         />
       </div>
