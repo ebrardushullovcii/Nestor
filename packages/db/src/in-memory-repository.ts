@@ -142,7 +142,7 @@ export function createInMemoryJobFinderRepository(
 ): JobFinderRepository {
   const state = JobFinderRepositoryStateSchema.parse(cloneValue(seed));
   assertAtMostOneActiveApplicationAuthority(state);
-  let applyQueue: ApplyQueue | null = null;
+  let applyQueue: ApplyQueue | null = state.applyQueue ?? null;
   let profileRevision = 1;
   let discoveryProjectionSource: typeof state.discovery | null = null;
   let discoveryProjection: DiscoveryDisplayProjection | null = null;
@@ -237,7 +237,7 @@ export function createInMemoryJobFinderRepository(
     close() {
       return Promise.resolve();
     },
-    exportState: () => Promise.resolve(cloneValue(state)),
+    exportState: () => Promise.resolve(cloneValue({ ...state, applyQueue })),
     readDisplayCollections: () =>
       Promise.resolve({
         tailoredAssets: borrowDisplayRows(state.tailoredAssets),
@@ -305,7 +305,7 @@ export function createInMemoryJobFinderRepository(
         cloneValue(nextSeed),
       );
       assertAtMostOneActiveApplicationAuthority(normalizedSeed);
-      applyQueue = null;
+      applyQueue = normalizedSeed.applyQueue ?? null;
 
       // The reset replaces the whole workspace, but the compare-and-swap epoch
       // only ever moves forward — mirroring `initSingletonValue` in the SQLite

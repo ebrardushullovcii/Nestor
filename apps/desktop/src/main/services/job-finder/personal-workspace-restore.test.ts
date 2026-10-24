@@ -7,8 +7,12 @@ import {
   ApplicationQuestionRecordSchema,
   ApplicationAnswerRecordSchema,
   SavedJobSchema,
+  ApplyQueueSchema,
 } from "@nestor/contracts";
-import { createInMemoryJobFinderRepository } from "@nestor/db";
+import {
+  createFileJobFinderRepository,
+  createInMemoryJobFinderRepository,
+} from "@nestor/db";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -196,6 +200,110 @@ test("export round trip restores profile, jobs, applications, answers, documents
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("a waiting Apply queue survives export, restore and a restart, held by the restore's pause", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "restore-queue-"));
+  try {
+    const job = SavedJobSchema.parse({
+      id: "job_ready",
+      source: "target_site",
+      sourceJobId: "job_ready",
+      canonicalUrl: "https://example.test/job_ready",
+      title: "Analyst",
+      company: "Synthetic",
+      location: "Canada",
+      discoveredAt: at,
+      firstSeenAt: at,
+      lastSeenAt: at,
+      workMode: ["remote"],
+      applyPath: "external_redirect",
+      easyApplyEligible: false,
+      salaryText: null,
+      description: "Synthetic role",
+      status: "approved",
+      matchAssessment: { score: 80 },
+    });
+    // Queued at the daily limit: waiting for tomorrow, nothing started.
+    const queue = ApplyQueueSchema.parse({
+      id: "queue_1",
+      mode: "prepare_only",
+      state: "waiting_for_tomorrow",
+      jobIds: [job.id],
+      startedJobIds: [],
+      skipped: [],
+      activeRunId: null,
+      pausedReason: null,
+      resumesAt: "2026-10-06T00:00:00.000Z",
+      createdAt: at,
+      updatedAt: at,
+    });
+    const sourceSeed = state(directory);
+    sourceSeed.savedJobs = [job];
+    const source = await createFileJobFinderRepository({
+      filePath: path.join(directory, "source.sqlite"),
+      seed: sourceSeed,
+    });
+    await source.saveApplyQueue(queue);
+    const content = await buildPersonalWorkspaceExport({
+      repositoryState: await source.exportState(),
+      workspace: { profile: sourceSeed.profile } as JobFinderWorkspaceSnapshot,
+      directories: [],
+      assistantHistory: [],
+      generatedAt: at,
+    });
+    await source.close();
+    const backup = parsePersonalWorkspaceExport(content);
+    expect(backup.repositoryState.applyQueue).toEqual(queue);
+
+    const targetPath = path.join(directory, "target.sqlite");
+    const target = await createFileJobFinderRepository({
+      filePath: targetPath,
+      seed: state(directory),
+    });
+    await restorePersonalWorkspace({
+      backup,
+      repository: target,
+      roots: new Map(),
+      safetyExportPath: path.join(directory, "safety.json"),
+      buildSafetyExport: () => Promise.resolve("current safety export"),
+      readChats: () => Promise.resolve([]),
+      restoreChats: () => Promise.resolve(),
+    });
+    expect(await target.getApplyQueue()).toEqual(queue);
+    expect((await target.getActivityControl()).paused).toBe(true);
+    await target.close();
+
+    const reopened = await createFileJobFinderRepository({
+      filePath: targetPath,
+      seed: state(directory),
+    });
+    expect(await reopened.getApplyQueue()).toEqual(queue);
+    await reopened.close();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 30_000);
+
+test("resetting everything still removes the Apply queue", async () => {
+  const repository = createInMemoryJobFinderRepository(state("/synthetic"));
+  await repository.saveApplyQueue(
+    ApplyQueueSchema.parse({
+      id: "queue_1",
+      mode: "prepare_only",
+      state: "waiting_for_tomorrow",
+      jobIds: ["job"],
+      startedJobIds: [],
+      skipped: [],
+      activeRunId: null,
+      pausedReason: null,
+      resumesAt: null,
+      createdAt: at,
+      updatedAt: at,
+    }),
+  );
+  await repository.reset(state("/synthetic"));
+  expect(await repository.getApplyQueue()).toBeNull();
 });
 
 test("refuses unknown versions, older incomplete exports, traversal and damaged bytes", () => {
