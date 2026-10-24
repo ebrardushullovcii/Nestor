@@ -11,13 +11,16 @@ import { getJobFinderWorkspaceFilePath } from "../services/job-finder/paths";
 import { setWorkspaceQueryUpdateMode } from "../services/job-finder/query-update-mode";
 import {
   prepareWorkspaceScreenReads,
+  prepareWorkspaceStartupContextReads,
   waitForWorkspaceDatabaseMigrations,
 } from "./workspace-database-startup";
 
 /** Small SQLite reads are ordinary typed IPC; no workspace hydration is needed. */
 export function createWorkspaceQueryHost() {
   const ready = prepareWorkspaceScreenReads();
+  const contextReady = prepareWorkspaceStartupContextReads();
   void ready.catch(() => undefined);
+  void contextReady.catch(() => undefined);
   let repository: WorkspaceQueryRepository | null = null;
   let cursor = 0;
   let unsubscribe: (() => void) | undefined;
@@ -25,12 +28,15 @@ export function createWorkspaceQueryHost() {
   let closed = false;
   void waitForWorkspaceDatabaseMigrations().then(schedulePush);
   const windows = new Set<BrowserWindow>();
-  async function reader(): Promise<WorkspaceQueryRepository> {
+  async function reader(
+    prepared: Promise<void>,
+  ): Promise<WorkspaceQueryRepository> {
     if (closed) throw new Error("The workspace is closing.");
-    if (repository) return repository;
     try {
-      await ready;
+      await prepared;
     } catch {
+      repository?.close();
+      repository = null;
       const { getJobFinderWorkspaceService } =
         await import("../services/job-finder");
       await getJobFinderWorkspaceService();
@@ -62,7 +68,9 @@ export function createWorkspaceQueryHost() {
       setWorkspaceQueryUpdateMode(event.sender.id, request.input.active);
       return;
     }
-    const db = await reader();
+    const db = await reader(
+      request.method === "getStartupContext" ? contextReady : ready,
+    );
     switch (request.method) {
       case "getStartupContext":
         return db.getStartupContext();

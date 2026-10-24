@@ -94,6 +94,12 @@ describe("independent workspace queries", () => {
     ]);
     expect(result.counts.discovery).toBe(3);
     expect(
+      result.rows.find((row) => row.id === "unchecked")?.scoreWithheld,
+    ).toBe(true);
+    expect(result.rows.find((row) => row.id === "strong")?.scoreWithheld).toBe(
+      false,
+    );
+    expect(
       reader
         .queryJobList({
           list: "discovery",
@@ -105,6 +111,33 @@ describe("independent workspace queries", () => {
     expect(
       reader.queryJobList({ list: "all", filters: { planId: null } }).total,
     ).toBe(6);
+    await writer.commitSavedJobDelta({
+      upserts: [
+        createSavedJob({
+          ...base,
+          id: "unbound-skip",
+          matchAssessment: {
+            ...judged,
+            contextFingerprint: null,
+            recommendation: "skip",
+            judgment: { ...judged.judgment, recommendation: "skip" },
+          },
+        }),
+      ],
+    });
+    expect(
+      reader
+        .queryJobList({
+          list: "all",
+          filters: { planId: null },
+          search: "Lead Designer",
+        })
+        .rows.find((row) => row.id === "unbound-skip"),
+    ).toMatchObject({
+      judged: true,
+      scoreWithheld: true,
+      resultGroup: "mismatches",
+    });
   });
   test("startup reads preserve legacy bodies and do not wait for evidence conversion", async () => {
     const temp = await createTempRepository("nestor-early-query-");

@@ -6,8 +6,9 @@ The first launch after an update spent tens of seconds converting stored search
 runs, resumes and job evidence on Electron's main thread. None of that evidence
 is needed to show Home or the first page of jobs.
 
-One temporary worker starts before Electron is ready. It prepares the scalar
-read index and signals that typed screen queries can read SQLite. Existing
+One temporary worker starts before Electron is ready. It first prepares additive
+schema and signals that the startup header can read SQLite, then prepares the
+scalar read index and releases inventory queries. Existing
 unnormalized rows supply the same scalar facts until evidence conversion ends.
 The existing intake and display functions prepare their scalar values; no new
 matching or scoring policy is introduced. The worker then runs the forward
@@ -24,6 +25,12 @@ conversion validates old records once, preserves incomplete repair rows and
 stored preparation, and verifies the exact reconstructed canonical facts before
 commit. The read index is rebuilt inside that transaction so a reader observes
 either the previous complete index or the converted complete index.
+
+Consecutive evidence conversions share one consistent pre-batch SQLite backup.
+Every migration keeps its existing recovery filename; immutable hard links refer
+to that snapshot, with exclusive file copies when links are unavailable. Existing
+backups are retained and never reused as the source of a later upgrade batch.
+Temporary conversion tables stay in memory on the preparation connection.
 
 Find jobs queries expose the existing four result bands and exclude jobs already
 decided on. Default counts include matches and unchecked rows. Complete listing

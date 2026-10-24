@@ -18,6 +18,7 @@ import { ensureWorkspaceReadIndex } from "./workspace-read-index";
 import { migrateResumeStorage } from "./resume-storage-migration";
 import { migratePreferenceStorage } from "./preference-storage";
 import { migrateSavedJobStorage } from "./saved-job-storage-migration";
+import { withStorageMigrationBackups } from "./storage-migration-backup";
 
 /**
  * Exact column shape every application-authority table must have. The assert
@@ -2087,13 +2088,7 @@ export function runMigrations(database: DatabaseSync): void {
     }
 
     ensurePreparedApplicationForms();
-    migrateDiscoveryStorage(database);
-    ensureTailoredAssetJobIndex(database);
-    ensureResumeApprovalState(database);
-    migratePreferenceStorage(database);
-    migrateResumeStorage(database);
-    migrateSavedJobStorage(database);
-    ensureWorkspaceReadIndex(database);
+    migrateEvidenceStorage(database);
     return;
   }
 
@@ -2362,11 +2357,17 @@ export function runMigrations(database: DatabaseSync): void {
     throw error;
   }
   ensurePreparedApplicationForms();
-  migrateDiscoveryStorage(database);
-  ensureTailoredAssetJobIndex(database);
-  ensureResumeApprovalState(database);
-  migratePreferenceStorage(database);
-  migrateResumeStorage(database);
-  migrateSavedJobStorage(database);
-  ensureWorkspaceReadIndex(database);
+  migrateEvidenceStorage(database);
+}
+
+function migrateEvidenceStorage(database: DatabaseSync): void {
+  withStorageMigrationBackups(database, () => {
+    migrateDiscoveryStorage(database);
+    ensureTailoredAssetJobIndex(database);
+    ensureResumeApprovalState(database);
+    migratePreferenceStorage(database);
+    migrateResumeStorage(database);
+    migrateSavedJobStorage(database);
+    ensureWorkspaceReadIndex(database);
+  });
 }

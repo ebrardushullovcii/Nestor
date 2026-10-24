@@ -49,6 +49,33 @@ export interface WorkspaceQueryRepository {
   close(): void;
 }
 
+function prepareQuerySchema(database: DatabaseSync): void {
+  validateWorkspaceSettingsFile(database);
+  ensureResumeApprovalState(database);
+  ensureSavedJobRelations(database);
+  ensurePreferenceStorageTables(database);
+  database.exec(`CREATE TABLE IF NOT EXISTS workspace_changes (
+    revision INTEGER PRIMARY KEY AUTOINCREMENT, table_name TEXT, item_id TEXT,
+    operation TEXT CHECK(operation IN ('upsert', 'delete')))`);
+}
+
+/** Header reads need only additive schema, never an inventory scan. */
+export function prepareWorkspaceQuerySchema(filePath: string): void {
+  const database = new DatabaseSync(filePath);
+  try {
+    database.exec(
+      "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; BEGIN IMMEDIATE",
+    );
+    prepareQuerySchema(database);
+    database.exec("COMMIT");
+  } catch (error) {
+    if (database.isTransaction) database.exec("ROLLBACK");
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
 /** Prepare screen facts only. Evidence conversion is not a prerequisite. */
 export function prepareWorkspaceQueryDatabase(filePath: string): void {
   const database = new DatabaseSync(filePath);
@@ -56,10 +83,7 @@ export function prepareWorkspaceQueryDatabase(filePath: string): void {
     database.exec(
       "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY; BEGIN IMMEDIATE",
     );
-    validateWorkspaceSettingsFile(database);
-    ensureResumeApprovalState(database);
-    ensureSavedJobRelations(database);
-    ensurePreferenceStorageTables(database);
+    prepareQuerySchema(database);
     const legacy = !database
       .prepare("SELECT 1 FROM schema_migrations WHERE version = 27")
       .get();
@@ -76,12 +100,14 @@ export function prepareWorkspaceQueryDatabase(filePath: string): void {
         .get()
     ) {
       const updates = [];
+      const readDescription = database.prepare(
+        "SELECT json_extract(value, '$.description') AS description FROM saved_jobs WHERE id = ?",
+      );
       for (const row of database
         .prepare(
-          `SELECT id, json_extract(value, '$.title') AS title,
-        json_extract(value, '$.canonicalUrl') AS canonicalUrl, json_extract(value, '$.company') AS company,
-        json_extract(value, '$.location') AS location, json_extract(value, '$.description') AS description,
-        json_extract(value, '$.status') AS status FROM saved_jobs WHERE assessment_id IS NULL`,
+          `SELECT i.id, i.title, i.canonical_url AS canonicalUrl, i.company, i.location, i.status
+          FROM workspace_job_index i JOIN saved_jobs s ON s.id = i.id
+          WHERE i.origin = 'saved_jobs' AND i.plan_id = '' AND s.assessment_id IS NULL`,
         )
         .iterate()) {
         // The existing intake/display policy, with no model decision changed.
@@ -97,10 +123,21 @@ export function prepareWorkspaceQueryDatabase(filePath: string): void {
           company: row.company,
           canonicalUrl: row.canonicalUrl,
           location: row.location,
-          ...(typeof row.description === "string"
-            ? { description: row.description }
-            : {}),
         };
+        // The shared intake policy reads a body only when employer facts are
+        // absent. Other startup rows never need listing or evidence reads.
+        let description: string | undefined;
+        let descriptionRead = false;
+        Object.defineProperty(job, "description", {
+          get() {
+            if (!descriptionRead) {
+              const value = readDescription.get(row.id!)?.description;
+              description = typeof value === "string" ? value : undefined;
+              descriptionRead = true;
+            }
+            return description;
+          },
+        });
         updates.push({
           id: row.id,
           visible:
@@ -113,9 +150,17 @@ export function prepareWorkspaceQueryDatabase(filePath: string): void {
       }
       const update =
         database.prepare(`UPDATE workspace_job_index SET visible = ?, company = ?, location = ?
-        WHERE origin = 'saved_jobs' AND id = ?`);
+        WHERE origin = 'saved_jobs' AND id = ? AND (visible IS NOT ? OR company IS NOT ? OR location IS NOT ?)`);
       for (const row of updates)
-        update.run(row.visible, row.company, row.location, row.id!);
+        update.run(
+          row.visible,
+          row.company,
+          row.location,
+          row.id!,
+          row.visible,
+          row.company,
+          row.location,
+        );
     }
     database.exec("COMMIT");
   } catch (error) {
@@ -425,7 +470,7 @@ export function createWorkspaceQueryRepository(
           i.discovered_at AS discoveredAt, i.first_seen_at AS firstSeenAt, i.seen AS lastSeenAt,
           i.salary_text AS salaryText, i.detail_quality AS detailQuality,
           i.resume_mode AS resumeApplicationMode, i.tailoring_mode AS resumeTailoringMode,
-          nullif(i.plan_id, '') AS planId, COALESCE(plan_verdict.score, i.score) AS score, i.recommendation, i.unjudged,
+          nullif(i.plan_id, '') AS planId, COALESCE(plan_verdict.score, i.score) AS score, i.recommendation, i.unjudged, i.provisional,
           i.score_upper AS scoreUpper, i.title_family_match AS titleFamilyMatch,
           i.location_reach AS locationReach, i.closed, i.result_group AS resultGroup
           FROM workspace_job_index i LEFT JOIN job_plan_assessments plan_verdict ON i.origin = 'saved_jobs'
@@ -434,12 +479,20 @@ export function createWorkspaceQueryRepository(
           )
           .all(...args, query.page.limit, query.page.offset);
         const rows = columns.map(
-          ({ workModeMask, unjudged, scoreUpper, closed, ...row }) => ({
+          ({
+            workModeMask,
+            unjudged,
+            provisional,
+            scoreUpper,
+            closed,
+            ...row
+          }) => ({
             ...row,
             workMode: workModeValues.filter(
               (_, index) => (Number(workModeMask) & (1 << index)) !== 0,
             ),
             judged: unjudged === 0,
+            scoreWithheld: unjudged !== 0 || provisional !== 0,
             scoreIsUpperBound: scoreUpper === 1,
             listingClosed: closed === 1,
           }),

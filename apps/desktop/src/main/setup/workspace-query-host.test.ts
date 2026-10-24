@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   subscribe: vi.fn(),
   unsubscribe: vi.fn(),
+  screenReady: vi.fn(() => Promise.resolve()),
   repository: {
     getChanges: vi.fn(() => ({ revision: 0 })),
     getStartupContext: vi.fn(() => ({})),
@@ -31,7 +32,8 @@ vi.mock("../services/job-finder/query-update-mode", () => ({
   setWorkspaceQueryUpdateMode: vi.fn(),
 }));
 vi.mock("./workspace-database-startup", () => ({
-  prepareWorkspaceScreenReads: () => Promise.resolve(),
+  prepareWorkspaceScreenReads: mocks.screenReady,
+  prepareWorkspaceStartupContextReads: () => Promise.resolve(),
   waitForWorkspaceDatabaseMigrations: () => Promise.resolve(),
 }));
 
@@ -41,6 +43,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.create.mockReturnValue(mocks.repository);
   mocks.subscribe.mockReturnValue(mocks.unsubscribe);
+  mocks.screenReady.mockReturnValue(Promise.resolve());
 });
 
 function fixture() {
@@ -53,10 +56,10 @@ function fixture() {
   ) => unknown;
   return {
     host,
-    read: () =>
+    read: (method = "getStartupContext") =>
       handler(
         { sender: webContents, senderFrame: webContents.mainFrame },
-        { method: "getStartupContext", input: {} },
+        { method, input: method === "getChanges" ? { after: 0 } : {} },
       ),
   };
 }
@@ -74,6 +77,26 @@ test("shutdown releases the reader once before the writer's clean close", async 
   willQuit();
   expect(mocks.repository.close).toHaveBeenCalledOnce();
   expect(mocks.create).toHaveBeenCalledOnce();
+});
+
+test("the startup header answers while inventory preparation is still pending", async () => {
+  let release!: () => void;
+  mocks.screenReady.mockReturnValue(
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  const { host, read } = fixture();
+  await read();
+  expect(mocks.repository.getStartupContext).toHaveBeenCalledOnce();
+  const changes = read("getChanges");
+  await Promise.resolve();
+  // Only the cursor read needed to open the connection has happened so far.
+  expect(mocks.repository.getChanges).toHaveBeenCalledOnce();
+  release();
+  await changes;
+  expect(mocks.repository.getChanges).toHaveBeenCalledTimes(2);
+  host.close();
 });
 
 test("quitting before the first query never opens a connection", async () => {

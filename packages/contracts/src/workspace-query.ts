@@ -95,6 +95,7 @@ export type WorkspaceJobListRow = Pick<
   score: number;
   recommendation: SavedJob["matchAssessment"]["recommendation"];
   judged: boolean;
+  scoreWithheld: boolean;
   scoreIsUpperBound: boolean;
   titleFamilyMatch: SavedJob["matchAssessment"]["titleFamilyMatch"] | null;
   locationReach: SavedJob["matchAssessment"]["locationReach"];
