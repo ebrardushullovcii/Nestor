@@ -134,6 +134,7 @@ export {
   DISCOVERY_CLEAR_MISMATCH_SCORE_FLOOR,
   isDiscoveryClearMismatch,
 } from "./discovery-result-groups";
+import { useHiddenJobs } from "./use-hidden-jobs";
 
 /**
  * Whether Find jobs opens with the weaker matches shown. It follows the rule
@@ -205,17 +206,14 @@ const resolvePlanSearchPreferences = createIdentityMemo(
       ...workspaceSearchPreferences,
       discovery: {
         ...workspaceSearchPreferences.discovery,
-        targets: workspaceSearchPreferences.discovery.targets.map(
-          (target) => ({
-            ...target,
-            enabled: effectiveSourceIds.has(target.id),
-          }),
-        ),
+        targets: workspaceSearchPreferences.discovery.targets.map((target) => ({
+          ...target,
+          enabled: effectiveSourceIds.has(target.id),
+        })),
       },
     };
   },
 );
-
 
 /**
  * The person's own Show/Hide weaker matches choice per plan and opening rule,
@@ -253,7 +251,6 @@ export function DiscoveryScreen(props: {
   isTargetPending: (targetId: string) => boolean;
   /** Jobs in the plan, from the workspace the route holds, until the list answers. */
   planJobCount: number;
-  dismissedJobs: readonly JobListRow[];
   liveEvents: readonly DiscoveryActivityEvent[];
   onBackToRapidReview?: () => void;
   /** Cancels the active run through the same fenced request the Task Center uses. */
@@ -278,10 +275,7 @@ export function DiscoveryScreen(props: {
     jobId: string;
     normalizedCompanyName: string;
   }) => void;
-  onRestoreDismissedJob: (
-    jobId: string,
-    options?: { quiet?: boolean },
-  ) => void;
+  onRestoreDismissedJob: (jobId: string, options?: { quiet?: boolean }) => void;
   onOpenBrowserSession: () => void;
   onOpenBrowserSessionForTarget: (targetId: string) => void;
   onOpenCompany?: (companyId: string) => void;
@@ -309,7 +303,11 @@ export function DiscoveryScreen(props: {
   /** How picky the search is, from Settings, AI behavior; shown read-only. */
   searchSelectivity?: JobSearchSelectivity | null;
   preserveSelectedJob?: boolean;
-  selectedJob: JobListRow | null;
+  /**
+   * The open job. On Home's first view (ADR 0077) only its id is known; the
+   * list's own row stands for it there.
+   */
+  selectedJob: JobListRow | { id: string } | null;
   selectedSourceTargetId?: string | null;
   sourceAccessPrompts: readonly SourceAccessPrompt[];
 }) {
@@ -334,7 +332,6 @@ export function DiscoveryScreen(props: {
     isDiscoveryAllPending,
     isJobPending,
     isTargetPending,
-    dismissedJobs,
     liveEvents,
     onBackToRapidReview,
     onCancelDiscovery,
@@ -384,6 +381,7 @@ export function DiscoveryScreen(props: {
     activeCampaignMode,
   );
   const weakerMatchesChoiceKey = `${activeCampaignId ?? ""}|${opensWide}`;
+  const hiddenJobs = useHiddenJobs(activeCampaignId);
   const [showAlsoFound, setShowAlsoFoundState] = useState(
     () => weakerMatchesChoices.get(weakerMatchesChoiceKey) ?? opensWide,
   );
@@ -747,15 +745,17 @@ export function DiscoveryScreen(props: {
     [reviewQueue],
   );
   const selectedJobDecided =
-    selectedJob !== null && isDiscoveryDecidedJob(selectedJob, shortlistedJobIds);
+    selectedJob !== null &&
+    ("status" in selectedJob
+      ? isDiscoveryDecidedJob(selectedJob, shortlistedJobIds)
+      : shortlistedJobIds.has(selectedJob.id));
   const openedUndecidedJobIdRef = useRef<string | null>(null);
   if (selectedJob && !selectedJobDecided)
     openedUndecidedJobIdRef.current = selectedJob.id;
   const heldDecidedJobId =
     selectedJob &&
     selectedJobDecided &&
-    (preserveSelectedJob ||
-      openedUndecidedJobIdRef.current === selectedJob.id)
+    (preserveSelectedJob || openedUndecidedJobIdRef.current === selectedJob.id)
       ? selectedJob.id
       : null;
   // The page the results panel shows and the list's order, read from the
@@ -769,7 +769,10 @@ export function DiscoveryScreen(props: {
       : undefined;
   // Rows shown on earlier pages, so the open job can stay open. Bounded by
   // what the person paged through.
-  const seenRows = useMemo(() => new Map<string, (typeof listRows)[number]>(), []);
+  const seenRows = useMemo(
+    () => new Map<string, (typeof listRows)[number]>(),
+    [],
+  );
   for (const row of listRows) seenRows.set(row.id, row);
   const inspectedJob = useMemo<DiscoveryInspectedJob | null>(() => {
     const fromRow = (row: {
@@ -793,12 +796,16 @@ export function DiscoveryScreen(props: {
       if (row) return fromRow(row);
       // A job opened by a link stays open even when the list does not show
       // it (a weaker match while those are hidden).
-      return preserveSelectedJob && selectedJob?.id === jobId
+      return preserveSelectedJob &&
+        selectedJob?.id === jobId &&
+        "title" in selectedJob
         ? fromRow(selectedJob)
         : null;
     };
     if (displayedJobId === undefined)
-      return find(selectedJob?.id) ?? (listRows[0] ? fromRow(listRows[0]) : null);
+      return (
+        find(selectedJob?.id) ?? (listRows[0] ? fromRow(listRows[0]) : null)
+      );
     if (displayedJobId === null) return null;
     return find(displayedJobId);
   }, [
@@ -846,7 +853,11 @@ export function DiscoveryScreen(props: {
       const fresh =
         current?.runId !== runningRunId || current.planId !== activeCampaignId;
       const record = fresh
-        ? { runId: runningRunId, planId: activeCampaignId, ids: new Set<string>() }
+        ? {
+            runId: runningRunId,
+            planId: activeCampaignId,
+            ids: new Set<string>(),
+          }
         : current;
       searchVisibleJobs.current = record;
       void queries
@@ -924,8 +935,7 @@ export function DiscoveryScreen(props: {
   } | null>(null);
   const assessJobWithFeedback = onAssessJobListing
     ? async (id: string) => {
-        const job =
-          inspectedDetail.job?.id === id ? inspectedDetail.job : null;
+        const job = inspectedDetail.job?.id === id ? inspectedDetail.job : null;
         assessedRequest.current = {
           id,
           previousJudgedAt: job?.matchAssessment.judgment?.judgedAt ?? null,
@@ -1292,18 +1302,18 @@ export function DiscoveryScreen(props: {
     // never reads as "Enable sources" while a source is already on.
     const readinessAction: PageStatusAction | null =
       searchReadiness.blocker === "no_search_roles"
+        ? {
+            kind: "link",
+            label: "Add target roles",
+            to: JOB_FINDER_ROUTE_PATHS.profileTargetRoles,
+          }
+        : searchReadiness.blocker === "no_enabled_sources"
           ? {
               kind: "link",
-              label: "Add target roles",
-              to: JOB_FINDER_ROUTE_PATHS.profileTargetRoles,
+              label: savedSourceCount > 0 ? "Enable sources" : "Add sources",
+              to: JOB_FINDER_ROUTE_PATHS.profileSources,
             }
-          : searchReadiness.blocker === "no_enabled_sources"
-            ? {
-                kind: "link",
-                label: savedSourceCount > 0 ? "Enable sources" : "Add sources",
-                to: JOB_FINDER_ROUTE_PATHS.profileSources,
-              }
-            : null;
+          : null;
     discoveryStatusItems.push({
       id: "search-readiness",
       tone: "warning",
@@ -1374,7 +1384,7 @@ export function DiscoveryScreen(props: {
         {runFeedbackCallout}
         <DiscoveryResultsPanel
           hiddenJobsControl={
-            dismissedJobs.length > 0 ? (
+            hiddenJobs.total > 0 ? (
               <details className="text-sm open:w-full">
                 {/* Short and the size of the run line beside it, so the fit
                     actions stay on the same row at 1440 wide. */}
@@ -1382,13 +1392,13 @@ export function DiscoveryScreen(props: {
                   className="cursor-pointer text-xs font-medium text-foreground-soft"
                   title="Jobs you marked Not interested"
                 >
-                  Hidden ({dismissedJobs.length})
+                  Hidden ({hiddenJobs.total})
                 </summary>
                 <p className="mt-2 text-(length:--text-small) leading-5 text-foreground-muted">
                   Hidden jobs stay on this device and do not change fit scores.
                 </p>
                 <ul className="mt-3 grid gap-2">
-                  {dismissedJobs.map((job) => (
+                  {hiddenJobs.rows.map((job) => (
                     <li
                       className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-(--surface-panel-border) pt-2"
                       key={job.id}
@@ -1398,9 +1408,11 @@ export function DiscoveryScreen(props: {
                           {job.title}
                         </p>
                         <p className="text-(length:--text-tiny) text-foreground-muted">
-                          {job.discoveryFeedback?.reasons
-                            .map(formatDiscoveryHideReason)
-                            .join(" · ") ?? "Hidden without saved reasons"}
+                          {job.discoveryFeedback === undefined
+                            ? " "
+                            : (job.discoveryFeedback?.reasons
+                                .map(formatDiscoveryHideReason)
+                                .join(" · ") ?? "Hidden without saved reasons")}
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -1571,7 +1583,9 @@ export function DiscoveryScreen(props: {
             <section className="surface-panel-shell p-6" aria-live="polite">
               <h2>{inspectedJob?.title}</h2>
               {/* "Loading" shows only if the read takes longer than a blink. */}
-              <p className={inspectedDetail.error ? undefined : "delayed-appear"}>
+              <p
+                className={inspectedDetail.error ? undefined : "delayed-appear"}
+              >
                 {inspectedDetail.error ?? "Loading job details…"}
               </p>
               {inspectedDetail.error ? (

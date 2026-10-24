@@ -48,7 +48,6 @@ export interface FindJobsQueryFixture {
 
 const DEFAULT_BANDS = ["matches", "unchecked"] as const;
 
-
 /** Partial test rows may lack the lists a tie reason reads. */
 function tieBreakReasonOf(job: JobListRow): string | null {
   try {
@@ -98,7 +97,8 @@ export function toQueryRow(
     scoreIsUpperBound: Boolean(assessment.scoreIsUpperBound),
     titleFamilyMatch: assessment.titleFamilyMatch ?? null,
     locationReach: assessment.locationReach,
-    listingClosed: activity.status === "inactive" || activity.status === "closed",
+    listingClosed:
+      activity.status === "inactive" || activity.status === "closed",
     listingActivity: activity,
     providerUpdatedAt: job.providerUpdatedAt ?? null,
     discoveryMethod: job.discoveryMethod,
@@ -136,7 +136,11 @@ export function answerFindJobsQuery(
   const jobs = allJobs.map((job) =>
     job.workMode && job.provenance
       ? job
-      : { ...job, workMode: job.workMode ?? [], provenance: job.provenance ?? [] },
+      : {
+          ...job,
+          workMode: job.workMode ?? [],
+          provenance: job.provenance ?? [],
+        },
   );
   // Rows a panel test hands over are shown as they are, decided or not.
   const undecided = options.visibleJobIds
@@ -145,13 +149,16 @@ export function answerFindJobsQuery(
   const bands = new Set<string>(filters.discoveryBands ?? DEFAULT_BANDS);
   const visible = options.visibleJobIds;
   // The "all" list is every job in the plan, decided or not, in any band.
-  const pool = input.list === "all" ? jobs : undecided.filter((job) =>
-    visible && bands.size < 4
-      ? filters.discoveryBands
-        ? !visible.has(job.id)
-        : visible.has(job.id)
-      : bands.has(getDiscoveryResultGroup(job)),
-  );
+  const pool =
+    input.list === "all"
+      ? jobs
+      : undecided.filter((job) =>
+          visible && bands.size < 4
+            ? filters.discoveryBands
+              ? !visible.has(job.id)
+              : visible.has(job.id)
+            : bands.has(getDiscoveryResultGroup(job)),
+        );
   const facets = getDiscoveryResultFacets(pool, options.targets ?? []);
   const labelsOf = (job: JobListRow) =>
     facets.sourceLabelsByJobId.get(job.id) ?? [SOURCE_UNAVAILABLE_FILTER];
@@ -173,9 +180,10 @@ export function answerFindJobsQuery(
         labelsOf(job).some((label) => filters.sourceLabels!.includes(label))) &&
       (!wanted.length || modes.some((mode) => wanted.includes(mode))) &&
       (!filters.activities?.length ||
-        filters.activities.includes(job.listingActivity?.status ?? "unknown")) &&
-      (!filters.newOnly ||
-        isNewSinceVisit(job, filters.newSince ?? null)) &&
+        filters.activities.includes(
+          job.listingActivity?.status ?? "unknown",
+        )) &&
+      (!filters.newOnly || isNewSinceVisit(job, filters.newSince ?? null)) &&
       matchesDiscoveryJobSearch(job, query)
     );
   });
@@ -188,7 +196,10 @@ export function answerFindJobsQuery(
   const scores = new Map<number, number>();
   for (const job of ordered) {
     if (getMatchAssessmentPresentation(job).isScoreWithheld) continue;
-    scores.set(job.matchAssessment.score, (scores.get(job.matchAssessment.score) ?? 0) + 1);
+    scores.set(
+      job.matchAssessment.score,
+      (scores.get(job.matchAssessment.score) ?? 0) + 1,
+    );
   }
   const offset = input.page?.offset ?? 0;
   const limit = input.page?.limit ?? 50;
@@ -208,19 +219,28 @@ export function answerFindJobsQuery(
     if (last?.group === group) last.count += 1;
     else outline.push({ group, count: 1 });
   }
-  const count = <T extends string>(values: readonly T[], of: (job: JobListRow) => readonly T[]) =>
+  const count = <T extends string>(
+    values: readonly T[],
+    of: (job: JobListRow) => readonly T[],
+  ) =>
     values.map((value) => ({
       value,
       count: pool.filter((job) => of(job).includes(value)).length,
     }));
-  const judged = filtered.filter((job) => Boolean(job.matchAssessment.judgment));
-  const reaches = [...new Set(judged.map((job) => job.matchAssessment.locationReach))];
+  const judged = filtered.filter((job) =>
+    Boolean(job.matchAssessment.judgment),
+  );
+  const reaches = [
+    ...new Set(judged.map((job) => job.matchAssessment.locationReach)),
+  ];
   return {
     rows,
     total: ordered.length,
     counts: {
       discovery: undecided.filter((job) =>
-        (DEFAULT_BANDS as readonly string[]).includes(getDiscoveryResultGroup(job)),
+        (DEFAULT_BANDS as readonly string[]).includes(
+          getDiscoveryResultGroup(job),
+        ),
       ).length,
       dismissed: 0,
       shortlisted: shortlisted.size,
@@ -245,7 +265,9 @@ export function answerFindJobsQuery(
       ]),
       locationReach: reaches.map((value) => ({
         value,
-        count: judged.filter((job) => job.matchAssessment.locationReach === value).length,
+        count: judged.filter(
+          (job) => job.matchAssessment.locationReach === value,
+        ).length,
       })),
       assessed: judged.length,
       newSince: filters.newSince
@@ -264,9 +286,12 @@ export function installFindJobsQueries(
     targets?: readonly JobDiscoveryTarget[];
     shortlistedJobIds?: Iterable<string>;
     visibleJobIds?: Iterable<string>;
+    /** Jobs the person hid: the "dismissed" list. */
+    dismissedJobs?: readonly JobListRow[];
   } = {},
 ): FindJobsQueryFixture {
   let jobs = initialJobs;
+  const dismissed = options.dismissedJobs ?? [];
   let targets = options.targets;
   const calls: QueryJobListInput[] = [];
   const listeners = new Set<(changes: WorkspaceChanges) => void>();
@@ -274,10 +299,12 @@ export function installFindJobsQueries(
   let visibleJobIds = options.visibleJobIds
     ? new Set(options.visibleJobIds)
     : undefined;
-  const nestor = ((window as unknown as { nestor?: Record<string, unknown> })
-    .nestor ??= {});
-  const jobFinder = ((nestor.jobFinder as Record<string, unknown> | undefined) ??
-    (nestor.jobFinder = {}));
+  const nestor = ((
+    window as unknown as { nestor?: Record<string, unknown> }
+  ).nestor ??= {});
+  const jobFinder =
+    (nestor.jobFinder as Record<string, unknown> | undefined) ??
+    (nestor.jobFinder = {});
   const previous = jobFinder.queries;
   const previousDetail = jobFinder.getJobDetail as
     | ((jobId: string, planId: string | null) => Promise<unknown>)
@@ -288,7 +315,9 @@ export function installFindJobsQueries(
     jobs.find((candidate) => candidate.id === jobId) ?? null;
   // The inspector reads the job by id, as it does from the database.
   jobFinder.getJobDetail = (jobId: string, planId: string | null) => {
-    const job = jobs.find((candidate) => candidate.id === jobId);
+    const job =
+      jobs.find((candidate) => candidate.id === jobId) ??
+      dismissed.find((candidate) => candidate.id === jobId);
     return job
       ? Promise.resolve({ job, planId })
       : (previousDetail?.(jobId, planId) ??
@@ -296,8 +325,20 @@ export function installFindJobsQueries(
   };
   jobFinder.queries = {
     ...(previous as object | undefined),
+    // The query API reads a job by id the same way.
+    getJobDetail: (jobId: string, planId: string | null) =>
+      (
+        jobFinder.getJobDetail as (
+          jobId: string,
+          planId: string | null,
+        ) => Promise<unknown>
+      )(jobId, planId),
     queryJobList: (input: QueryJobListInput) => {
       calls.push(input);
+      if (input.list === "dismissed")
+        return Promise.resolve(
+          answerFindJobsQuery(dismissed, { ...input, list: "all" }),
+        );
       return Promise.resolve(
         answerFindJobsQuery(jobs, input, {
           ...(targets ? { targets } : {}),
@@ -449,14 +490,18 @@ function hiddenMismatchRow(index: number): JobListRow {
 export function DiscoveryScreenWithJobs(
   props: Omit<ComponentProps<typeof DiscoveryScreen>, "planJobCount"> & {
     jobs: readonly JobListRow[];
+    /** Jobs the person hid, answered as the "dismissed" list. */
+    dismissedJobs?: readonly JobListRow[];
   },
 ) {
-  const { jobs, ...rest } = props;
+  const { jobs, dismissedJobs, ...rest } = props;
   const screenProps = { ...rest, planJobCount: jobs.length };
   useFixtureJobs(
     jobs,
     props.searchPreferences.discovery.targets,
     (props.reviewQueue ?? []).map((item) => item.jobId),
+    undefined,
+    dismissedJobs,
   );
   return <DiscoveryScreen {...screenProps} />;
 }
@@ -466,6 +511,7 @@ function useFixtureJobs(
   targets: readonly JobDiscoveryTarget[] | undefined,
   shortlistedJobIds: Iterable<string> | undefined,
   visibleJobs?: readonly JobListRow[],
+  dismissedJobs?: readonly JobListRow[],
 ) {
   const visibleJobIds = visibleJobs?.map((job) => job.id);
   const fixtureRef = useRef<FindJobsQueryFixture | null>(null);
@@ -476,6 +522,7 @@ function useFixtureJobs(
       ...(targets ? { targets } : {}),
       ...(shortlistedJobIds ? { shortlistedJobIds } : {}),
       ...(visibleJobIds ? { visibleJobIds } : {}),
+      ...(dismissedJobs ? { dismissedJobs } : {}),
     });
   // Updated while rendering, so the screen's own effects already read the
   // new rows; the change is announced once the render commits.

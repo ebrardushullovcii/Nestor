@@ -73,9 +73,8 @@ vi.mock("./discovery-filters-panel", () => ({
   ),
 }));
 vi.mock("./discovery-results-panel", async () => {
-  const { useFixtureListReport } = await import(
-    "./find-jobs-list-report.test-support"
-  );
+  const { useFixtureListReport } =
+    await import("./find-jobs-list-report.test-support");
   return {
     DiscoveryResultsPanel: (
       props: Parameters<typeof useFixtureListReport>[0] & {
@@ -252,7 +251,6 @@ function buildScreen(overrides?: {
         isTargetPending={() => false}
         jobs={overrides?.jobs ?? [createJob("strong")]}
         searchSelectivity={overrides?.searchSelectivity ?? null}
-        dismissedJobs={[]}
         liveEvents={[]}
         onDismissJob={vi.fn()}
         onRestoreDismissedJob={vi.fn()}

@@ -123,7 +123,6 @@ async function renderScreen(options?: { onBackToRapidReview?: () => void }) {
         isJobPending={() => false}
         isTargetPending={() => false}
         jobs={[job]}
-        dismissedJobs={[]}
         liveEvents={[]}
         onDismissJob={vi.fn()}
         onRestoreDismissedJob={vi.fn()}

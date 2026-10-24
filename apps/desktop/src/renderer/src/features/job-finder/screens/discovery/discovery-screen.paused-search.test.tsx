@@ -43,20 +43,19 @@ vi.mock("./discovery-filters-panel", () => ({
   ),
 }));
 vi.mock("./discovery-results-panel", async () => {
-  const { useFixtureListReport } = await import(
-    "./find-jobs-list-report.test-support"
-  );
+  const { useFixtureListReport } =
+    await import("./find-jobs-list-report.test-support");
   return {
-    DiscoveryResultsPanel: (props: Parameters<typeof useFixtureListReport>[0]) => {
+    DiscoveryResultsPanel: (
+      props: Parameters<typeof useFixtureListReport>[0],
+    ) => {
       useFixtureListReport(props);
       return <section aria-label="Job results">Job results</section>;
     },
   };
 });
 
-import {
-  DiscoveryScreenWithJobs,
-} from "./find-jobs-query-fixture.test-support";
+import { DiscoveryScreenWithJobs } from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site",
@@ -133,7 +132,6 @@ function buildScreen(overrides?: {
         isJobPending={() => false}
         isTargetPending={() => false}
         jobs={[createJob("strong")]}
-        dismissedJobs={[]}
         liveEvents={[]}
         onDismissJob={vi.fn()}
         onRestoreDismissedJob={vi.fn()}

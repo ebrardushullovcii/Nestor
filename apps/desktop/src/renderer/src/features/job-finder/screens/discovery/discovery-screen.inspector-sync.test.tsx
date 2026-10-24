@@ -22,18 +22,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Job details load over IPC in the app; here the fixture's row is the detail.
 vi.mock("../../hooks/use-job-detail", async () => {
-  const { readFixtureJob } = await import(
-    "./find-jobs-list-report.test-support"
-  );
+  const { readFixtureJob } =
+    await import("./find-jobs-list-report.test-support");
   return {
-  useJobDetail: (row: { id: string } | null) => ({
-    job: row ? readFixtureJob(row.id) : null,
-    error: null,
-    loading: false,
-    retry: () => undefined,
-  }),
-  clearJobDetailCache: () => undefined,
-  prefetchJobDetail: () => undefined,
+    useJobDetail: (row: { id: string } | null) => ({
+      job: row ? readFixtureJob(row.id) : null,
+      error: null,
+      loading: false,
+      retry: () => undefined,
+    }),
+    clearJobDetailCache: () => undefined,
+    prefetchJobDetail: () => undefined,
   };
 });
 
@@ -199,7 +198,6 @@ async function renderScreen(options?: {
         isJobPending={() => false}
         isTargetPending={() => false}
         jobs={jobs}
-        dismissedJobs={[]}
         liveEvents={[]}
         onDismissJob={vi.fn()}
         onRestoreDismissedJob={vi.fn()}
@@ -391,7 +389,6 @@ describe("DiscoveryScreen inspector sync across pagination and search", () => {
           isJobPending={() => false}
           isTargetPending={() => false}
           jobs={jobs}
-          dismissedJobs={[]}
           liveEvents={[]}
           onDismissJob={vi.fn()}
           onRestoreDismissedJob={vi.fn()}
@@ -434,7 +431,11 @@ it("keeps the initial filtered row and inspector together", async () => {
   );
   // A parent remount must not reset the inspector to the hidden requested job.
   view.unmount();
-  await renderScreen({ jobs, selectedJob: jobs[0]!, activeCampaignId: "sync-plan" });
+  await renderScreen({
+    jobs,
+    selectedJob: jobs[0]!,
+    activeCampaignId: "sync-plan",
+  });
   expect(detailProbe.latest?.selectedJob?.id).toBe(jobs[1]!.id);
   expect(getResultButton(jobs[1]!.id).getAttribute("aria-current")).toBe(
     "true",
@@ -458,7 +459,6 @@ it("announces the assessed fit when the job moves to weaker matches", async () =
             isJobPending={() => false}
             isTargetPending={() => false}
             jobs={jobs}
-            dismissedJobs={[]}
             liveEvents={[]}
             onDismissJob={vi.fn()}
             onRestoreDismissedJob={vi.fn()}

@@ -771,17 +771,19 @@ export function DiscoveryHistoryModal(props: {
                         // These are disjoint additions in the frozen run:
                         // direct saved jobs and jobs staged for the results list.
                         const contributed =
-                          (execution?.jobsPersisted ?? 0) + (execution?.jobsStaged ?? 0);
+                          (execution?.jobsPersisted ?? 0) +
+                          (execution?.jobsStaged ?? 0);
                         const terminalReport =
                           contributed === 0 &&
                           (execution?.state !== "completed" ||
                             source.health !== "healthy")
-                          ? selectedRun.activity.findLast((event) =>
-                              event.targetId === source.targetId &&
-                              event.stage === "target" &&
-                              event.terminalState !== null,
-                            )?.message
-                          : undefined;
+                            ? selectedRun.activity.findLast(
+                                (event) =>
+                                  event.targetId === source.targetId &&
+                                  event.stage === "target" &&
+                                  event.terminalState !== null,
+                              )?.message
+                            : undefined;
                         // Jobs this source listed that were already saved: a
                         // quiet re-run found them, it did not come up empty.
                         const alreadySaved =
@@ -805,13 +807,14 @@ export function DiscoveryHistoryModal(props: {
                           previousExecution.duplicatesMerged +
                             previousExecution.jobsSkippedByLedger ===
                             0;
-                        const zeroReason = repeatedZero && !terminalReport
-                          ? execution?.warning || source.warnings[0]
-                            ? "The source was blocked or could not be read. Review it in the Job Finder browser or replace it."
-                            : (execution?.jobsReviewed ?? 0) === 0
-                              ? "The page layout could not be read. Check the source address or try another careers page."
-                              : "No jobs matched this plan in either of its last two runs. Broaden the plan or try another source."
-                          : null;
+                        const zeroReason =
+                          repeatedZero && !terminalReport
+                            ? execution?.warning || source.warnings[0]
+                              ? "The source was blocked or could not be read. Review it in the Job Finder browser or replace it."
+                              : (execution?.jobsReviewed ?? 0) === 0
+                                ? "The page layout could not be read. Check the source address or try another careers page."
+                                : "No jobs matched this plan in either of its last two runs. Broaden the plan or try another source."
+                            : null;
 
                         return (
                           <article
@@ -900,13 +903,11 @@ export function DiscoveryHistoryModal(props: {
                             execution?.state !== "completed" ? (
                               <>
                                 <p className="text-[0.82rem] leading-5 text-foreground-soft">
-                                  {
-                                    contributed > 0
-                                      ? "Some jobs were collected, but this source did not finish."
-                                      : describeFailure(source.warnings[0], {
-                                          action: "read this source",
-                                        }).userMessage
-                                  }
+                                  {contributed > 0
+                                    ? "Some jobs were collected, but this source did not finish."
+                                    : describeFailure(source.warnings[0], {
+                                        action: "read this source",
+                                      }).userMessage}
                                 </p>
                               </>
                             ) : null}

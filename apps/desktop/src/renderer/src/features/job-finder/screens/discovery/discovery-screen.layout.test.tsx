@@ -57,46 +57,45 @@ vi.mock("./discovery-filters-panel", () => ({
   ),
 }));
 vi.mock("./discovery-results-panel", async () => {
-  const { useFixtureListReport } = await import(
-    "./find-jobs-list-report.test-support"
-  );
+  const { useFixtureListReport } =
+    await import("./find-jobs-list-report.test-support");
   return {
-  DISCOVERY_OFFLINE_CATALOG_NOTICE_ID: "discovery-offline-catalog-notice",
-  DISCOVERY_SEARCH_SETUP_BLOCKER_ID: "discovery-search-setup-blocker",
-  DiscoveryResultsPanel: (
-    props: Parameters<typeof useFixtureListReport>[0] & {
-      browserSession: BrowserSessionState;
-      hiddenJobsControl?: ReactNode;
-      searchSetupBlocker?: {
-        actionLabel?: string | null;
-        title: string;
-      } | null;
-    },
-  ) => {
-    const jobs = useFixtureListReport(props);
-    const { browserSession, hiddenJobsControl, searchSetupBlocker } = props;
-    return (
-    <section aria-label="Job results">
-      Job results
-      {hiddenJobsControl}
-      {searchSetupBlocker ? (
-        <div id="discovery-search-setup-blocker">
-          <p>{searchSetupBlocker.title}</p>
-          {searchSetupBlocker.actionLabel ? (
-            <a href="/job-finder/profile?section=sources&focus=job-sources">
-              {searchSetupBlocker.actionLabel}
-            </a>
+    DISCOVERY_OFFLINE_CATALOG_NOTICE_ID: "discovery-offline-catalog-notice",
+    DISCOVERY_SEARCH_SETUP_BLOCKER_ID: "discovery-search-setup-blocker",
+    DiscoveryResultsPanel: (
+      props: Parameters<typeof useFixtureListReport>[0] & {
+        browserSession: BrowserSessionState;
+        hiddenJobsControl?: ReactNode;
+        searchSetupBlocker?: {
+          actionLabel?: string | null;
+          title: string;
+        } | null;
+      },
+    ) => {
+      const jobs = useFixtureListReport(props);
+      const { browserSession, hiddenJobsControl, searchSetupBlocker } = props;
+      return (
+        <section aria-label="Job results">
+          Job results
+          {hiddenJobsControl}
+          {searchSetupBlocker ? (
+            <div id="discovery-search-setup-blocker">
+              <p>{searchSetupBlocker.title}</p>
+              {searchSetupBlocker.actionLabel ? (
+                <a href="/job-finder/profile?section=sources&focus=job-sources">
+                  {searchSetupBlocker.actionLabel}
+                </a>
+              ) : null}
+            </div>
           ) : null}
-        </div>
-      ) : null}
-      {browserSession.driver === "catalog_seed" && jobs.length > 0 ? (
-        <div id="discovery-offline-catalog-notice" role="status">
-          Offline catalog · review-only. Catalog jobs are review-only.
-        </div>
-      ) : null}
-    </section>
-    );
-  },
+          {browserSession.driver === "catalog_seed" && jobs.length > 0 ? (
+            <div id="discovery-offline-catalog-notice" role="status">
+              Offline catalog · review-only. Catalog jobs are review-only.
+            </div>
+          ) : null}
+        </section>
+      );
+    },
   };
 });
 
@@ -171,7 +170,6 @@ async function renderEstablishedResults() {
         isJobPending={() => false}
         isTargetPending={() => false}
         jobs={[selectedJob, hiddenMismatch]}
-        dismissedJobs={[]}
         liveEvents={[]}
         onDismissJob={vi.fn()}
         onRestoreDismissedJob={vi.fn()}
@@ -216,7 +214,6 @@ describe("DiscoveryScreen established-results layout", () => {
           isJobPending={() => false}
           isTargetPending={() => false}
           jobs={[catalogJob]}
-          dismissedJobs={[]}
           liveEvents={[]}
           onDismissJob={vi.fn()}
           onRestoreDismissedJob={vi.fn()}
@@ -265,7 +262,6 @@ describe("DiscoveryScreen established-results layout", () => {
           isJobPending={() => false}
           isTargetPending={() => false}
           jobs={[selectedJob]}
-          dismissedJobs={[]}
           liveEvents={[]}
           onDismissJob={vi.fn()}
           onRestoreDismissedJob={vi.fn()}
@@ -298,7 +294,6 @@ describe("DiscoveryScreen established-results layout", () => {
           isJobPending={() => false}
           isTargetPending={() => false}
           jobs={[]}
-          dismissedJobs={[]}
           liveEvents={[]}
           onDismissJob={vi.fn()}
           onRestoreDismissedJob={vi.fn()}
@@ -382,8 +377,9 @@ describe("DiscoveryScreen established-results layout", () => {
     await flushFindJobsQueries();
     fireEvent.click(screen.getByText(/^Hidden \(\d+\)$/u));
     await flushFindJobsQueries();
+    // Why it was hidden comes with the job's own record, read by id.
     fireEvent.click(
-      screen.getByRole("button", {
+      await screen.findByRole("button", {
         name: "Allow this employer in future searches",
       }),
     );
@@ -429,7 +425,9 @@ describe("DiscoveryScreen established-results layout", () => {
     }
 
     // Search setup is a disclosure opened from the bar, not a peer tab.
-    fireEvent.click(screen.getByRole("button", { name: "Roles, places & sources" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Roles, places & sources" }),
+    );
     await flushFindJobsQueries();
     expect(screen.getByRole("region", { name: "Current search" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Job results" })).toBeNull();

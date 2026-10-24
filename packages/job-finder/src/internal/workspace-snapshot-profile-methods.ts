@@ -2132,7 +2132,8 @@ export function createWorkspaceSnapshotProfileMethods(
       discoveryJobs,
       dismissedDiscoveryJobs: projectedDismissedDiscoveryJobs,
       companyJobs,
-      selectedDiscoveryJobId: discoveryJobs[0]?.id ?? null,
+      // The first view's rows are not Find jobs' order; it picks no default.
+      selectedDiscoveryJobId: homeTier ? null : (discoveryJobs[0]?.id ?? null),
       reviewQueue,
       selectedReviewJobId: reviewQueue[0]?.jobId ?? null,
       tailoredAssets,

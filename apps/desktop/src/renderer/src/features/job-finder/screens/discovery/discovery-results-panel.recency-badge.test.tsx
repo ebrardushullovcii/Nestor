@@ -4,9 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  getDiscoveryListingDateBadge,
-} from "./discovery-results-panel";
+import { getDiscoveryListingDateBadge } from "./discovery-results-panel";
 import {
   DiscoveryResultsPanelWithJobs,
   flushFindJobsQueries,

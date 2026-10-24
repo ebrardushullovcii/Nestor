@@ -63,34 +63,33 @@ vi.mock("./discovery-filters-panel", () => ({
   ),
 }));
 vi.mock("./discovery-results-panel", async () => {
-  const { useFixtureListReport } = await import(
-    "./find-jobs-list-report.test-support"
-  );
+  const { useFixtureListReport } =
+    await import("./find-jobs-list-report.test-support");
   return {
-  DiscoveryResultsPanel: (
-    props: Parameters<typeof useFixtureListReport>[0] & {
-      latestRunVerdict?: unknown;
-      onSelectJob: (jobId: string) => void;
+    DiscoveryResultsPanel: (
+      props: Parameters<typeof useFixtureListReport>[0] & {
+        latestRunVerdict?: unknown;
+        onSelectJob: (jobId: string) => void;
+      },
+    ) => {
+      state.latestRunVerdicts.push(props.latestRunVerdict);
+      state.alsoFoundShown.push(props.areAlsoFoundShown);
+      const jobs = useFixtureListReport(props);
+      return (
+        <section aria-label="Job results">
+          Job results
+          {jobs.map((job) => (
+            <button
+              key={job.id}
+              data-collection-item-id={job.id}
+              onClick={() => props.onSelectJob(job.id)}
+            >
+              {job.id}
+            </button>
+          ))}
+        </section>
+      );
     },
-  ) => {
-    state.latestRunVerdicts.push(props.latestRunVerdict);
-    state.alsoFoundShown.push(props.areAlsoFoundShown);
-    const jobs = useFixtureListReport(props);
-    return (
-      <section aria-label="Job results">
-        Job results
-        {jobs.map((job) => (
-          <button
-            key={job.id}
-            data-collection-item-id={job.id}
-            onClick={() => props.onSelectJob(job.id)}
-          >
-            {job.id}
-          </button>
-        ))}
-      </section>
-    );
-  },
   };
 });
 
@@ -174,7 +173,6 @@ function buildScreen(overrides?: ScreenOverrides) {
         isJobPending={() => false}
         isTargetPending={() => false}
         jobs={overrides?.jobs ?? []}
-        dismissedJobs={[]}
         liveEvents={[]}
         onDismissJob={vi.fn()}
         onRestoreDismissedJob={vi.fn()}
