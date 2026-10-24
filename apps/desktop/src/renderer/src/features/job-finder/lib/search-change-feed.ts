@@ -49,12 +49,19 @@ export function isSearchViewRoute(route: string): boolean {
   );
 }
 
+/**
+ * What a batch touched: the search's jobs, its run progress, or other work
+ * (resumes, applications, settings). Main holds its own update notices while
+ * a search runs, so other work is followed from the feed on every screen.
+ */
 export function classifySearchChanges(changes: WorkspaceChanges): {
   jobs: boolean;
   run: boolean;
+  other: boolean;
 } {
   let jobs = false;
   let run = false;
+  let other = false;
   for (const change of changes.changes) {
     if (SEARCH_JOB_TABLES.has(change.table)) jobs = true;
     else if (
@@ -63,8 +70,14 @@ export function classifySearchChanges(changes: WorkspaceChanges): {
         (change.id === "discovery_state" || change.id === "campaign_state"))
     )
       run = true;
+    // The ledger and fingerprints are the search's own bookkeeping.
+    else if (
+      !change.table.startsWith("discovery_") &&
+      change.table !== "saved_job_discovery_fingerprints"
+    )
+      other = true;
   }
-  return { jobs, run };
+  return { jobs, run, other };
 }
 
 export interface SearchChangeFeedFollower {
@@ -128,9 +141,9 @@ export function createSearchChangeFeedFollower(options: {
     lastCountsAt = now();
     options.refreshCounts();
   };
-  const follow = (jobs: boolean, run: boolean) => {
-    if (!jobs && !run) return;
-    if (isSearchViewRoute(options.currentRoute())) sync();
+  const follow = (jobs: boolean, run: boolean, other = false) => {
+    if (!jobs && !run && !other) return;
+    if (other || isSearchViewRoute(options.currentRoute())) sync();
     else if (jobs) {
       behind = true;
       counts();
@@ -140,8 +153,8 @@ export function createSearchChangeFeedFollower(options: {
   return {
     onChanges(changes) {
       if (disposed || !options.isSearchRunning()) return;
-      const { jobs, run } = classifySearchChanges(changes);
-      follow(jobs, run);
+      const { jobs, run, other } = classifySearchChanges(changes);
+      follow(jobs, run, other);
     },
     onSearchProgress() {
       if (disposed) return;

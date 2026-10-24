@@ -68,13 +68,20 @@ describe("search change feed", () => {
     expect(classifySearchChanges(batch(["saved_jobs"]))).toEqual({
       jobs: true,
       run: false,
+      other: false,
     });
     expect(
       classifySearchChanges(batch(["discovery_run_activity"])),
-    ).toEqual({ jobs: false, run: true });
+    ).toEqual({ jobs: false, run: true, other: false });
+    expect(classifySearchChanges(batch(["discovery_ledger"]))).toEqual({
+      jobs: false,
+      run: false,
+      other: false,
+    });
     expect(classifySearchChanges(batch(["resume_drafts"]))).toEqual({
       jobs: false,
       run: false,
+      other: true,
     });
   });
 
@@ -100,6 +107,12 @@ describe("search change feed", () => {
     expect(h.refreshCounts).toHaveBeenCalledTimes(1);
     h.state.route = "/job-finder/discovery";
     h.follower.onRouteChange();
+    expect(h.requestSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows other work on every screen, since main holds its notices", () => {
+    const h = harness("/job-finder/review-queue");
+    h.follower.onChanges(batch(["resume_drafts"]));
     expect(h.requestSync).toHaveBeenCalledTimes(1);
   });
 
