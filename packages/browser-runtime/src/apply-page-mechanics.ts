@@ -1378,6 +1378,69 @@ export function createPlaywrightApplyPageMechanics(
   return {
     readPage: () => readRawApplyPage(page),
     readLinkedText: () => readPageLinkedText(page),
+    checkAction: async (ref): Promise<ApplyWriteResult> => {
+      const locator = actionLocator(page, ref);
+      if (!locator)
+        return { ok: false, error: `No action named ${ref} on this page.` };
+      try {
+        return await locator.evaluate(
+          (element): ApplyWriteResult => {
+            if (
+              !(element instanceof HTMLElement) ||
+              element.matches(":disabled, [aria-disabled='true']")
+            )
+              return {
+                ok: false,
+                error: "The intended button is unavailable.",
+              };
+            element.scrollIntoView({
+              block: "center",
+              inline: "center",
+              behavior: "instant",
+            });
+            const rect = element.getBoundingClientRect();
+            const root = element.getRootNode();
+            const hit = (
+              root instanceof ShadowRoot ? root : document
+            ).elementFromPoint(
+              rect.x + rect.width / 2,
+              rect.y + rect.height / 2,
+            );
+            if (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              hit &&
+              (hit === element || element.contains(hit))
+            )
+              return {
+                ok: true,
+                observedValue: "The intended button is reachable.",
+              };
+            const covering =
+              hit?.closest("[role='dialog'], [role='alertdialog'], aside") ??
+              hit;
+            const text = (covering?.textContent ?? "")
+              .replace(/\s+/gu, " ")
+              .trim()
+              .slice(0, 300);
+            return {
+              ok: false,
+              error: `The intended button is covered or outside the visible page.${text ? ` In front of it: ${text}` : ""}`,
+            };
+          },
+          undefined,
+          { timeout: 5_000 },
+        );
+      } catch (error) {
+        return {
+          ok: false,
+          error: describeWriteFailure(
+            error,
+            "The intended button could not be checked.",
+          ),
+        };
+      }
+    },
     fillText: async (ref, value): Promise<ApplyWriteResult> => {
       const locator = controlLocator(page, ref);
       if (!locator) {
@@ -1471,18 +1534,11 @@ export function createPlaywrightApplyPageMechanics(
                   // setChecked scrolls for its pointer action. The hit test
                   // only needs current geometry, without a separate wait for
                   // animation-frame stability on a hidden page.
-                  const before = element.getBoundingClientRect();
-                  if (
-                    before.top < 0 ||
-                    before.left < 0 ||
-                    before.bottom > innerHeight ||
-                    before.right > innerWidth
-                  )
-                    element.scrollIntoView({
-                      block: "nearest",
-                      inline: "nearest",
-                      behavior: "instant",
-                    });
+                  element.scrollIntoView({
+                    block: "center",
+                    inline: "center",
+                    behavior: "instant",
+                  });
                   const rect = element.getBoundingClientRect();
                   const root = element.getRootNode();
                   const hit = (

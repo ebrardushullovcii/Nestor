@@ -248,6 +248,8 @@ export interface ApplyPageHands {
     file: { name: string; mimeType: string; bytes: Uint8Array },
   ) => Promise<ApplyWriteResult>;
   clickAction: (ref: string) => Promise<ApplyWriteResult>;
+  /** Report whether an intended action is reachable, without clicking it. */
+  checkAction?: (ref: string) => Promise<ApplyWriteResult>;
   /** Opens what a link points at, in the same page. A read, never a write. */
   followLink: (ref: string) => Promise<ApplyNavigationResult>;
   /** Moves the run into a tab the page opened, closing that tab. */

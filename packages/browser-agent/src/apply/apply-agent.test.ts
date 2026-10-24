@@ -252,6 +252,40 @@ function scriptedModel(
   };
 }
 
+test("a completed form returns an obstructed final button to the model in fill-only mode", async () => {
+  const source = page();
+  const input = config(source);
+  const checks = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: false,
+      error: "Cookie choices cover Send. Reject optional is available.",
+    })
+    .mockResolvedValue({ ok: true, observedValue: "Reachable" });
+  input.hands.checkAction = checks;
+  const click = vi.fn(input.hands.clickElement);
+  input.hands.clickElement = click;
+  const model = scriptedModel([
+    { name: "finish", args: { reason: "The form is complete." } },
+    {
+      name: "finish",
+      args: { reason: "The overlay is cleared and the form is complete." },
+    },
+  ]);
+  const chat = vi.spyOn(model, "chatWithTools");
+  const result = await runApplyAgent(input, model);
+  expect(checks).toHaveBeenCalledTimes(2);
+  expect(chat).toHaveBeenCalledTimes(2);
+  expect(
+    chat.mock.calls[1][0].some((message) =>
+      String(message.content).includes("Cookie choices cover Send"),
+    ),
+  ).toBe(true);
+  expect(result.outcome).toBe("prepared");
+  expect(result.readyToSend).toBeNull();
+  expect(click).not.toHaveBeenCalled();
+});
+
 test("prose instructions separate candidate evidence from job requirements", () => {
   const prompt = createApplySystemPrompt(config(page()));
   expect(prompt).toContain(

@@ -878,7 +878,8 @@ async function runMeasuredApplyAgent(
       case "finished": {
         // A write receipt is not proof that a controlled field retained its
         // value. Re-read the live form before accepting the model's finish.
-        const observation = await pageTools.observe();
+        let observation = await pageTools.observe();
+        const observedShape = applyStepShape(observation);
         const classifications = await classifyQuestions?.(
           observation.controls,
           JSON.stringify({ url: observation.url, step: observation.step }),
@@ -1147,6 +1148,38 @@ async function runMeasuredApplyAgent(
             ? `${outcome.reason.trim()} Still empty on the form: ${stillEmpty.join(", ")}.`
             : outcome.reason;
         const readiness = checkFormReadiness(observation);
+        if (
+          readiness.ok &&
+          config.hands.checkAction &&
+          pendingQuestions.size === 0 &&
+          pauses.length === 0 &&
+          !outcome.needsPerson &&
+          !outcome.stuck
+        ) {
+          const action = observation.actions.find(
+            (entry) =>
+              entry.kind === "final" && entry.visible && !entry.disabled,
+          )!;
+          const reachable = await config.hands.checkAction(action.ref);
+          const after = await pageTools.observe();
+          const pageChanged = observedShape !== applyStepShape(after);
+          for (const control of after.controls) {
+            const reading =
+              classifications?.get(
+                questionClassificationKey(control, after.controls),
+              ) ?? classifications?.get(questionPrompt(control));
+            if (reading?.required) control.required = true;
+          }
+          syncObservation(after);
+          if (!reachable.ok || pageChanged || !checkFormReadiness(after).ok) {
+            return {
+              kind: "ok",
+              progress: false,
+              content: `The form is not ready to hand back yet. ${reachable.ok ? "The page changed while its final button was checked." : reachable.error} Read the current page and use its own controls to finish.\n\n${renderObservation(after)}`,
+            };
+          }
+          observation = after;
+        }
         if (
           !readiness.ok &&
           pendingQuestions.size === 0 &&
