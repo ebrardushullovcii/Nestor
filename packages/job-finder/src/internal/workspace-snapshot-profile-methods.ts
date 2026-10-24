@@ -1737,10 +1737,13 @@ export function createWorkspaceSnapshotProfileMethods(
       normalizedDraftCollection = normalizedResumeDrafts;
     }
 
-    const discoverySessions = await ctx.refreshDiscoverySessions(
-      setupContext.searchPreferences,
-      discovery.sessions,
-    );
+    // Refreshing saves the sessions; the first view shows them as stored.
+    const discoverySessions = homeTier
+      ? discovery.sessions
+      : await ctx.refreshDiscoverySessions(
+          setupContext.searchPreferences,
+          discovery.sessions,
+        );
     const preferredSessionAdapter = getPreferredSessionAdapter(
       setupContext.searchPreferences,
     );

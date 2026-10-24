@@ -37,6 +37,25 @@ vi.mock("./internal/application-crm", async (importOriginal) => ({
   },
 }));
 
+/** Names of repository calls that save, from now on. */
+function recordRepositoryWrites(repository: object): string[] {
+  const writes: string[] = [];
+  const target = repository as Record<string, unknown>;
+  for (const name of Object.keys(target)) {
+    const method = target[name];
+    if (
+      typeof method !== "function" ||
+      !/^(save|commit|upsert|persist|delete)/.test(name)
+    )
+      continue;
+    target[name] = (...args: unknown[]) => {
+      writes.push(name);
+      return (method as (...a: unknown[]) => unknown).apply(repository, args);
+    };
+  }
+  return writes;
+}
+
 describe("Home's first view on a cold start (ADR 0077)", () => {
   test("answers without draft settlement or automation, then starts them once", async () => {
     const harness = createWorkspaceServiceHarness({ seed: createSeed() });
@@ -46,8 +65,11 @@ describe("Home's first view on a cold start (ADR 0077)", () => {
       searchPreferences: await harness.repository.getSearchPreferences(),
     });
 
+    const writes = recordRepositoryWrites(harness.repository);
     const home = await harness.workspaceService.getWorkspaceHomeSnapshot?.();
     expect(home?.hydration.deferredCollections).toEqual(["discovery_jobs"]);
+    // Nothing is saved before the first view answers.
+    expect(writes).toEqual([]);
     expect(held.settlement.calls).toBe(0);
     expect(held.automation.calls).toBe(0);
 
