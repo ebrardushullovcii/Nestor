@@ -15,6 +15,14 @@ export type DiscoveryPreparedContent = {
   description: string;
   value: { digest: string; packed?: Uint8Array } | null;
 };
+/** Search owns these opaque keys and the exact proof behind a content alias. */
+export type DiscoverySavedJobIdentity = DiscoveryPreparedKeys & {
+  version: 1;
+  content: { digest: string; packed: Uint8Array } | null;
+};
+export type DiscoverySavedJobFingerprints = DiscoveryListingFingerprints & {
+  identity?: DiscoverySavedJobIdentity;
+};
 export type DiscoveryPreparation = {
   content?: DiscoveryPreparedContent;
   identity?: DiscoveryPreparedKeys & {
@@ -24,6 +32,11 @@ export type DiscoveryPreparation = {
     basis?: Readonly<Record<string, unknown>>;
     owner?: object;
     value: DiscoveryListingFingerprints;
+  };
+  savedIdentity?: {
+    basis?: Readonly<Record<string, unknown>>;
+    owner?: object;
+    value: DiscoverySavedJobIdentity;
   };
   normalizedPosting?: JobPosting;
 };
@@ -38,7 +51,9 @@ export function readDiscoveryPreparation(
 
 export function writeDiscoveryPreparation(
   value: object,
-  preparation: Partial<DiscoveryPreparation>,
+  preparation: {
+    [K in keyof DiscoveryPreparation]?: DiscoveryPreparation[K] | undefined;
+  },
 ): boolean {
   if (
     !Object.isExtensible(value) ||
@@ -93,12 +108,6 @@ function equalInput(left: unknown, right: unknown): boolean {
     left.length !== right.length
   )
     return false;
-  if (
-    Array.isArray(left) &&
-    Array.isArray(right) &&
-    left.length !== right.length
-  )
-    return false;
   const keys = Object.keys(left);
   return (
     keys.length === Object.keys(right).length &&
@@ -108,6 +117,61 @@ function equalInput(left: unknown, right: unknown): boolean {
         equalInput(Reflect.get(left, key), Reflect.get(right, key)),
     )
   );
+}
+
+const SAVED_IDENTITY_FIELDS = [
+  "source",
+  "sourceJobId",
+  "canonicalUrl",
+  "applicationUrl",
+  "providerKey",
+  "providerBoardToken",
+  "providerIdentifier",
+  "title",
+  "seniority",
+  "company",
+  "location",
+  "description",
+  "postedAt",
+  "postedAtText",
+] as const;
+
+/** Capture only identity inputs, never provenance evidence or a second body copy. */
+export function captureDiscoverySavedIdentityBasis(
+  job: object,
+): Readonly<Record<string, unknown>> {
+  const canonicalUrl: unknown = Reflect.get(job, "canonicalUrl");
+  const provenance: unknown = Reflect.get(job, "provenance");
+  return {
+    ...Object.fromEntries(
+      SAVED_IDENTITY_FIELDS.map((field) => [field, Reflect.get(job, field)]),
+    ),
+    alternateListingUrls: Array.isArray(provenance)
+      ? provenance.flatMap((entry: unknown) => {
+          if (!entry || typeof entry !== "object") return [];
+          const url: unknown = Reflect.get(entry, "listingUrl");
+          return typeof url === "string" && url && url !== canonicalUrl
+            ? [url]
+            : [];
+        })
+      : [],
+  };
+}
+
+/** Only a trusted frozen owner avoids checking the captured identity inputs. */
+export function readPreparedSavedJobIdentity(
+  job: object,
+): DiscoverySavedJobIdentity | null {
+  const prepared = readDiscoveryPreparation(job)?.savedIdentity;
+  if (!prepared || (prepared.owner && !Object.isFrozen(prepared.owner)))
+    return null;
+  if (prepared.owner === job) return prepared.value;
+  const basis =
+    prepared.basis ??
+    (prepared.owner && captureDiscoverySavedIdentityBasis(prepared.owner));
+  return basis && equalInput(basis, captureDiscoverySavedIdentityBasis(job))
+    ? prepared.value
+    : null;
 }
 
 /** Stored fingerprints belong to the row; a changed copy must prepare new facts. */

@@ -2,8 +2,8 @@ import {
   parseSavedJobWithPreparation,
   parseSavedJobsWithPreparation,
   cloneSavedJobWithPreparation,
+  readSavedJobPreparedValue,
 } from "./internal/saved-job-fingerprints";
-import { readPreparedDiscoveryFingerprints } from "@nestor/contracts";
 import {
   PreparedApplicationFormSchema,
   ApplyJobResultSchema,
@@ -304,7 +304,7 @@ export function createInMemoryJobFinderRepository(
       applyQueue = null;
 
       // The reset replaces the whole workspace, but the compare-and-swap epoch
-      // only ever moves forward — mirroring `initSingletonValue` in the SQLite
+      // only ever moves forward ï¿½ mirroring `initSingletonValue` in the SQLite
       // backend. Rewinding it to 1 would let a token captured before the reset
       // still satisfy the equality check afterwards and overwrite the freshly
       // seeded profile, search preferences and profile setup state.
@@ -558,7 +558,7 @@ export function createInMemoryJobFinderRepository(
         limit < 0
           ? orderedJobs.slice(offset)
           : orderedJobs.slice(offset, offset + limit);
-      return Promise.resolve(cloneValue(sliced));
+      return Promise.resolve(sliced.map(cloneSavedJobWithPreparation));
     },
     readSavedJobsProjection() {
       if (savedProjectionSource !== state.savedJobs) {
@@ -567,7 +567,7 @@ export function createInMemoryJobFinderRepository(
           .map((job) => {
             let row = savedProjectionRows.get(job);
             if (!row) {
-              row = freezeProjection(cloneValue(job));
+              row = freezeProjection(cloneSavedJobWithPreparation(job));
               savedProjectionRows.set(job, row);
             }
             return row;
@@ -592,11 +592,10 @@ export function createInMemoryJobFinderRepository(
     listSavedJobsByIds(jobIds) {
       const wanted = new Set(jobIds);
       return Promise.resolve(
-        cloneValue(
-          state.savedJobs
-            .filter((job) => wanted.has(job.id))
-            .sort((left, right) => left.id.localeCompare(right.id)),
-        ),
+        state.savedJobs
+          .filter((job) => wanted.has(job.id))
+          .sort((left, right) => left.id.localeCompare(right.id))
+          .map(cloneSavedJobWithPreparation),
       );
     },
     readSavedJobDiscoveryFingerprints(jobIds) {
@@ -606,8 +605,8 @@ export function createInMemoryJobFinderRepository(
           state.savedJobs
             .filter((job) => wanted.has(job.id))
             .flatMap((job) => {
-              const value = readPreparedDiscoveryFingerprints(job);
-              return value ? [[job.id, {...value}] as const] : [];
+              const value = readSavedJobPreparedValue(job);
+              return value ? [[job.id, value] as const] : [];
             }),
         ),
       );

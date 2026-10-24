@@ -1,3 +1,8 @@
+import {
+  savedJobFingerprintSelectSql,
+  attachStoredSavedJobFingerprints,
+  ensureSavedJobFingerprintStorage,
+} from "./saved-job-fingerprints";
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -158,6 +163,7 @@ export function createSavedJobProjectionReader(
     backgroundValidationReady?: PromiseLike<void>;
   } = {},
 ) {
+  ensureSavedJobFingerprintStorage(database);
   const details = options.sqliteDetails
     ? createSavedJobDetails(database)
     : null;
@@ -211,7 +217,7 @@ export function createSavedJobProjectionReader(
   );
 
   const readPage = database.prepare(
-    `SELECT ${marks?.selectSql ?? "id, value FROM saved_jobs"}
+    `SELECT ${marks?.selectSql.replace("FROM saved_jobs", `${savedJobFingerprintSelectSql} FROM saved_jobs`) ?? `id, value${savedJobFingerprintSelectSql} FROM saved_jobs`}
       WHERE id > ? ORDER BY id LIMIT ?`,
   );
   // SQLite strips evidence before it crosses into the JS heap. In addition
@@ -224,7 +230,7 @@ export function createSavedJobProjectionReader(
   // still never enters JS.
   const factsQuery = (selection: string) => `
     WITH saved_job_list_source AS MATERIALIZED (
-      SELECT id, CASE WHEN json_valid(value) THEN jsonb(value) ELSE value END AS value,
+      SELECT id, CASE WHEN json_valid(value) THEN jsonb(value) ELSE value END AS value${savedJobFingerprintSelectSql},
         ${
           marks
             ? `(SELECT validated_stamp FROM row_validations
@@ -232,7 +238,7 @@ export function createSavedJobProjectionReader(
             : "NULL"
         } AS validated_stamp
       FROM saved_jobs ${selection}
-    ) SELECT id, validated_stamp,
+    ) SELECT id, validated_stamp, discovery_fingerprints,
     CASE WHEN typeof(saved_jobs.value) = 'blob' THEN json(
       CASE WHEN json_type(saved_jobs.value, '$.provenance') = 'array'
         AND NOT EXISTS (SELECT 1 FROM json_each(saved_jobs.value, '$.provenance') WHERE type != 'object')
@@ -262,6 +268,7 @@ export function createSavedJobProjectionReader(
       stamp && row.validated_stamp === stamp
         ? (parsePersistedRowJson(input) as SavedJobListFacts)
         : parsePersistedRowValue({ ...input, schema: SavedJobListFactsSchema });
+    attachStoredSavedJobFingerprints(facts, row.discovery_fingerprints, true);
     return freezeProjection(shareListValues(facts, share));
   }
   const readChangedFacts = details
@@ -292,14 +299,18 @@ export function createSavedJobProjectionReader(
           continue;
         }
         const job = toProjectionRow(
-          parse
-            ? parse(row, SavedJobSchema)
-            : parsePersistedRowValue({
-                tableName: "saved_jobs",
-                rowId: String(row.id),
-                rawValue: String(row.value),
-                schema: SavedJobSchema,
-              }),
+          attachStoredSavedJobFingerprints(
+            parse
+              ? parse(row, SavedJobSchema)
+              : parsePersistedRowValue({
+                  tableName: "saved_jobs",
+                  rowId: String(row.id),
+                  rawValue: String(row.value),
+                  schema: SavedJobSchema,
+                }),
+            row.discovery_fingerprints,
+            true,
+          ),
           share,
         );
         jobs.set(

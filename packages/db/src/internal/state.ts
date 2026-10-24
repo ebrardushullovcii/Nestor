@@ -1,4 +1,8 @@
-import { writeSavedJobFingerprints } from "./saved-job-fingerprints";
+import {
+  savedJobFingerprintSelectSql,
+  attachStoredSavedJobFingerprints,
+  writeSavedJobFingerprints,
+} from "./saved-job-fingerprints";
 import type { SavedJob } from "@nestor/contracts";
 import {
   resumeDraftValueSql,
@@ -263,11 +267,15 @@ export function parsePersistedRowValue<TValue>(input: {
   rowId: string;
   rawValue: string;
   schema: SchemaParser<TValue>;
+  rawFingerprints?: unknown;
 }): TValue {
-  return validatePersistedRowValue({
+  const value = validatePersistedRowValue({
     ...input,
     value: parsePersistedRowJson(input),
   });
+  return input.tableName === "saved_jobs"
+    ? attachStoredSavedJobFingerprints(value, input.rawFingerprints)
+    : value;
 }
 
 export function listValues<TValue>(
@@ -281,7 +289,7 @@ export function listValues<TValue>(
 ): TValue[] {
   const pagination = buildPaginationSql(options);
   const statement = database.prepare(
-    `SELECT id, ${collectionValueSql(tableName)} AS value FROM ${stateTableNames[tableName]} ORDER BY id${pagination.sql}`,
+    `SELECT id, ${collectionValueSql(tableName)} AS value${tableName === "saved_jobs" ? savedJobFingerprintSelectSql : ""} FROM ${stateTableNames[tableName]} ORDER BY id${pagination.sql}`,
   );
   const rows = statement.all(...pagination.params);
   return rows.map((row) =>
@@ -289,6 +297,7 @@ export function listValues<TValue>(
       tableName,
       rowId: String(row.id),
       rawValue: String(row.value),
+      rawFingerprints: row.discovery_fingerprints,
       schema,
     }),
   );
@@ -315,7 +324,7 @@ export async function listValuesInChunks<TValue>(
 ): Promise<TValue[]> {
   const rows: (Record<string, SQLOutputValue> | null)[] = database
     .prepare(
-      `SELECT id, ${collectionValueSql(tableName)} AS value FROM ${stateTableNames[tableName]} ORDER BY id`,
+      `SELECT id, ${collectionValueSql(tableName)} AS value${tableName === "saved_jobs" ? savedJobFingerprintSelectSql : ""} FROM ${stateTableNames[tableName]} ORDER BY id`,
     )
     .all();
   const values: TValue[] = [];
@@ -337,6 +346,7 @@ export async function listValuesInChunks<TValue>(
           tableName,
           rowId: String(row.id),
           rawValue: String(row.value),
+          rawFingerprints: row.discovery_fingerprints,
           schema,
         }),
       );
@@ -362,7 +372,7 @@ export function listCollectionValues<TValue>(
   const baseParams = [...(options.params ?? [])] as SQLInputValue[];
   return database
     .prepare(
-      `SELECT id, ${collectionValueSql(tableName)} AS value FROM ${stateTableNames[tableName]}${whereClause} ORDER BY ${tableName === "resume_drafts" ? options.orderBySql.replace(/\bupdated_at\b/g, resumeDraftUpdatedAtSql) : options.orderBySql}${pagination.sql}`,
+      `SELECT id, ${collectionValueSql(tableName)} AS value${tableName === "saved_jobs" ? savedJobFingerprintSelectSql : ""} FROM ${stateTableNames[tableName]}${whereClause} ORDER BY ${tableName === "resume_drafts" ? options.orderBySql.replace(/\bupdated_at\b/g, resumeDraftUpdatedAtSql) : options.orderBySql}${pagination.sql}`,
     )
     .all(...baseParams, ...pagination.params)
     .map((row) =>
@@ -370,6 +380,7 @@ export function listCollectionValues<TValue>(
         tableName,
         rowId: String(row.id),
         rawValue: String(row.value),
+        rawFingerprints: row.discovery_fingerprints,
         schema,
       }),
     );

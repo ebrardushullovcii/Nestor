@@ -17,7 +17,7 @@ import type {
   ApplicationReplayCheckpoint,
   ApplicationReplayCheckpointInput,
   CandidateProfile,
-  DiscoveryListingFingerprints,
+  DiscoverySavedJobFingerprints,
   JobFinderDiscoveryState,
   JobFinderActivityControl,
   ApplyQueue,
@@ -309,7 +309,7 @@ export interface JobFinderRepository
   /** Stored prepared fingerprints in one indexed batch; listing bodies are not read. */
   readSavedJobDiscoveryFingerprints(
     jobIds: readonly string[],
-  ): Promise<ReadonlyMap<string, DiscoveryListingFingerprints>>;
+  ): Promise<ReadonlyMap<string, DiscoverySavedJobFingerprints>>;
   /**
    * Atomically applies row-local saved-job updates and/or inserts without
    * replacing rows that the caller did not intend to change.

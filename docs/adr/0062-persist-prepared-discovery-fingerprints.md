@@ -17,6 +17,17 @@ without reading job bodies or retaining another cache. Missing values mean that
 search prepares the posting once and supplies the result with the next job write.
 No matching, scoring, collision or relevance policy moves into storage.
 
+The same value may carry versioned compact local/across-source identity keys and
+compressed exact-content evidence, because digest equality alone cannot prove a
+content-alias collision. Search supplies these opaque values from the saved row's
+exact identity inputs, including alternate sighting URLs; no raw description or
+input snapshot is stored. Mutable copies check their captured basis, while trusted
+frozen reads bind preparation to their owner without opening lazy listing bodies.
+This extends the existing batch method and table, without a second identity cache.
+Canonical reads attach owned preparation; borrowed rows attach it before freezing.
+Root-row changes invalidate stored preparation before typed writes replace it in
+the same transaction, so a changed job never inherits an older identity proof.
+
 The table is additive and initially empty: creating it does not scan or transform
 existing saved jobs. There is no hash backfill, duplicate JSON field, downgrade
 shape or separate identity store. Forward migrations that transform the saved-job

@@ -1,6 +1,9 @@
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import {
   SavedJobSchema,
+  readPreparedDiscoveryFingerprints,
+  readPreparedSavedJobIdentity,
+  writeDiscoveryPreparation,
   JobPostingSchema,
   type SavedJob,
   type SavedJobListFacts,
@@ -142,6 +145,16 @@ export function createSavedJobDetails(database: DatabaseSync) {
       return Object.freeze(sighting);
     });
     Object.freeze(row.provenance);
+    const fingerprint = readPreparedDiscoveryFingerprints(job);
+    if (fingerprint)
+      writeDiscoveryPreparation(row, {
+        fingerprints: { owner: row, value: fingerprint },
+      });
+    const identity = readPreparedSavedJobIdentity(job);
+    if (identity)
+      writeDiscoveryPreparation(row, {
+        savedIdentity: { owner: row, value: identity },
+      });
     Object.freeze(row);
     registry.register(anchor, version);
     return row;
