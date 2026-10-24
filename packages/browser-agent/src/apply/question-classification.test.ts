@@ -273,6 +273,109 @@ function clientReplyingSparse(args: unknown): LLMClient {
   } as unknown as LLMClient;
 }
 
+test("reuses a complete identical model read across applications, without sharing mutable results", async () => {
+  const client = clientReplying([
+    { index: 0, asksAboutPay: true, declarationKind: null },
+  ]);
+  const cacheScope = {};
+  const first = await createQuestionClassifier({ client, cacheScope })(
+    controls(),
+  );
+  first.get("Pay")!.asksAboutPay = false;
+  const nextControls = controls();
+  nextControls[0].ref = "another-application";
+  nextControls[0].value = "Annual";
+  const next = await createQuestionClassifier({ client, cacheScope })(
+    nextControls,
+  );
+  expect(next.get("Pay")?.asksAboutPay).toBe(true);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+});
+
+test("shared reads require the full same request and AI-client scope", async () => {
+  const client = clientReplying([
+    { index: 0, asksAboutPay: true, declarationKind: null },
+  ]);
+  const cacheScope = {};
+  for (const questions of [
+    controls(),
+    controls("Pay", ["Annual"], true),
+    controls("Pay", ["Hourly"]),
+    controls("Rate"),
+  ]) {
+    await createQuestionClassifier({ client, cacheScope })(questions);
+  }
+  await createQuestionClassifier({ client, cacheScope: {} })(controls());
+  expect(client.chatWithTools).toHaveBeenCalledTimes(5);
+});
+
+test("incomplete, failed and cancelled reads never become reusable model decisions", async () => {
+  const cacheScope = {};
+  const client = clientReplying([]);
+  await expect(
+    createQuestionClassifier({ client, cacheScope })(controls()),
+  ).rejects.toThrow("every question");
+  vi.mocked(client.chatWithTools).mockRejectedValueOnce(new Error("offline"));
+  await expect(
+    createQuestionClassifier({ client, cacheScope })(controls()),
+  ).rejects.toThrow("offline");
+  vi.mocked(client.chatWithTools).mockResolvedValue({
+    toolCalls: [
+      {
+        id: "complete",
+        type: "function",
+        function: {
+          name: "report_question_kinds",
+          arguments: JSON.stringify({ plainIndexes: [0], flagged: [] }),
+        },
+      },
+    ],
+  });
+  const abort = new AbortController();
+  vi.mocked(client.chatWithTools).mockImplementationOnce(() => {
+    abort.abort(new Error("Stopped"));
+    return Promise.resolve({
+      toolCalls: [
+        {
+          id: "cancelled",
+          type: "function",
+          function: {
+            name: "report_question_kinds",
+            arguments: JSON.stringify({ plainIndexes: [0], flagged: [] }),
+          },
+        },
+      ],
+    });
+  });
+  await expect(
+    createQuestionClassifier({ client, cacheScope, signal: abort.signal })(
+      controls(),
+    ),
+  ).rejects.toThrow("Stopped");
+  await createQuestionClassifier({ client, cacheScope })(controls());
+  await expect(
+    createQuestionClassifier({ client, cacheScope, signal: abort.signal })(
+      controls(),
+    ),
+  ).rejects.toThrow("Stopped");
+  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
+});
+
+test("bounds shared question reads and reads an evicted page with the model again", async () => {
+  const cacheScope = {};
+  const client = clientReplying([
+    { index: 0, asksAboutPay: false, declarationKind: null },
+  ]);
+  for (let page = 0; page < 65; page++)
+    await createQuestionClassifier({ client, cacheScope })(
+      controls(`Page ${page}`),
+    );
+  await createQuestionClassifier({ client, cacheScope })(controls("Page 64"));
+  expect(client.chatWithTools).toHaveBeenCalledTimes(65);
+  await createQuestionClassifier({ client, cacheScope })(controls("Page 0"));
+  expect(client.chatWithTools).toHaveBeenCalledTimes(66);
+});
+
 test("plain questions are named by index and only flagged ones are spelled out", async () => {
   const client = clientReplyingSparse({
     plainIndexes: [0, 2],

@@ -2972,28 +2972,9 @@ export function createBrowserAgentRuntime(
                     (await reserveEmbeddedApplicationTab(
                       context,
                       options?.signal,
-                      async () => {
-                        const keep = new Set(
-                          await getProtectedApplicationPages(context),
-                        );
-                        const free = (page: Page) =>
-                          !page.isClosed() &&
-                          !keep.has(page) &&
-                          !pagesInUse.has(page);
-                        // Reclaim only the unused startup tab.
-                        const idle =
-                          context
-                            .pages()
-                            .find(
-                              (page) =>
-                                free(page) &&
-                                (page.url() === "about:blank" ||
-                                  page.url() === ""),
-                            );
-                        if (!idle) return false;
-                        await idle.close().catch(() => undefined);
-                        return idle.isClosed();
-                      },
+                      // A blank tab may still be opening for another worker.
+                      // The native host owns its actual startup placeholder.
+                      undefined,
                       input.onWaitingForBrowserTab
                         ? () => {
                             void Promise.resolve(

@@ -629,6 +629,43 @@ describe("independent workspace queries", () => {
         .all(),
     ).toEqual([]);
   });
+  test("a bulk index rebuild bumps order/activity once and retains subsequent row updates", async () => {
+    const { writer, reader, filePath } = await fixture();
+    await writer.commitSavedJobDelta({
+      upserts: Array.from({ length: 12 }, (_, index) =>
+        assessedJob({ id: `bulk-${index}` }),
+      ),
+    });
+    const raw = new DatabaseSync(filePath);
+    cleanups.push(() => raw.close());
+    const epochs = () =>
+      raw
+        .prepare(
+          "SELECT key, CAST(value AS INTEGER) AS value FROM workspace_read_meta WHERE key IN ('activity_revision','sort_revision') ORDER BY key",
+        )
+        .all();
+    const beforeRows = reader.queryJobList({
+      list: "all",
+      filters: { planId: null },
+    }).rows;
+    const before = epochs();
+    raw.exec("DELETE FROM workspace_read_meta WHERE key = 'version'");
+    ensureWorkspaceReadIndex(raw);
+    expect(epochs()).toEqual(
+      before.map((row) => ({ ...row, value: Number(row.value) + 1 })),
+    );
+    expect(
+      reader.queryJobList({ list: "all", filters: { planId: null } }).rows,
+    ).toEqual(beforeRows);
+    await writer.commitSavedJobDelta({
+      updateJobIds: ["bulk-0"],
+      update: (current) => ({ ...current, title: "Updated after rebuild" }),
+    });
+    expect(reader.getJobDetail("bulk-0")?.job.title).toBe(
+      "Updated after rebuild",
+    );
+    expect(epochs()).not.toEqual(before);
+  });
   test("closing the query connection before the writer permits a clean-close marker", async () => {
     const temp = await createTempRepository("nestor-query-close-");
     const writer = await temp.createRepository();

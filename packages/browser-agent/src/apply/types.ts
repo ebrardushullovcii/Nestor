@@ -248,6 +248,8 @@ export interface ApplyPageHands {
     file: { name: string; mimeType: string; bytes: Uint8Array },
   ) => Promise<ApplyWriteResult>;
   clickAction: (ref: string) => Promise<ApplyWriteResult>;
+  /** Report whether an intended action is reachable, without clicking it. */
+  checkAction?: (ref: string) => Promise<ApplyWriteResult>;
   /** Opens what a link points at, in the same page. A read, never a write. */
   followLink: (ref: string) => Promise<ApplyNavigationResult>;
   /** Moves the run into a tab the page opened, closing that tab. */
@@ -476,6 +478,8 @@ export interface ApplyAgentConfig {
    * classification on the observation stands.
    */
   modelQuestionClassification?: boolean;
+  /** Reuse complete, identical model question reads within this AI client. */
+  questionReadCacheScope?: object;
   /** Latest saved answers while other applications in this batch are open. */
   readReusableAnswers?: () => Promise<readonly CandidateReusableAnswer[]>;
   /** The guard and worker checks for this page. Absent only in tests. */

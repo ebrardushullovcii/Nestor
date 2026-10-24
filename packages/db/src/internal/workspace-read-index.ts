@@ -176,6 +176,14 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
       "CREATE INDEX IF NOT EXISTS plan_job_membership_job_idx ON plan_job_memberships(item_id, plan_id)",
     );
     if (version !== VERSION || indexedTriggers !== 6) {
+      // Rebuilds replace identical facts in bulk. Per-row activity/sort bumps
+      // would rewrite the same metadata thousands of times inside this commit.
+      for (const { name } of database
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'workspace_job_index'",
+        )
+        .all())
+        database.exec(`DROP TRIGGER ${String(name)}`);
       database.exec("DELETE FROM workspace_job_index");
       for (const table of jobTables) {
         database.exec(indexJobSql(table));
@@ -200,6 +208,9 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
         .run(VERSION);
       database.exec(
         "INSERT INTO workspace_read_meta(key,value) VALUES ('activity_revision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1",
+      );
+      database.exec(
+        "INSERT INTO workspace_read_meta(key,value) VALUES ('sort_revision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1",
       );
     }
     ensureActivityRevision(database);

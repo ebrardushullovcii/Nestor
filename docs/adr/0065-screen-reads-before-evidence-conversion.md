@@ -23,8 +23,8 @@ Canonical opening still owns corruption recovery and authorization recovery.
 Search-run progress and saved-job evidence conversion use set-based SQL. Job
 conversion validates old records once, preserves incomplete repair rows and
 stored preparation, and verifies the exact reconstructed canonical facts before
-commit. The read index is rebuilt inside that transaction so a reader observes
-either the previous complete index or the converted complete index.
+commit. ADR 0069 retains those already-correct read facts and commits evidence
+conversion in slices; readers can decode complete old or converted rows.
 
 Consecutive evidence conversions share one consistent pre-batch SQLite backup.
 Every migration keeps its existing recovery filename; immutable hard links refer
