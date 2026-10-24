@@ -40,10 +40,11 @@ export function ApplyQueueStrip(props: {
       <div className="min-w-0 flex-1">
         <p className="min-w-0 break-words text-sm font-medium text-(--text-headline)">
           <span
+            key={view.title}
             aria-hidden="true"
             className={cn(
               "mr-2 inline-block size-2 rounded-full align-middle",
-              view.active ? "animate-pulse bg-primary" : "bg-foreground-muted",
+              view.active ? "motion-safe:animate-pulse-brief bg-primary" : "bg-foreground-muted",
             )}
           />
           {view.title}

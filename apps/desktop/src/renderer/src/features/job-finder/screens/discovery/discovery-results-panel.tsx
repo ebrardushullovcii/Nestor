@@ -2117,9 +2117,11 @@ export function DiscoveryResultsPanel({
               role="status"
             >
               {resultsStatusLine.busy ? (
+                // Turns when the line changes, not every frame of a search.
                 <LoaderCircle
+                  key={resultsStatusLine.text}
                   aria-hidden="true"
-                  className="mt-0.5 size-3.5 shrink-0 animate-spin motion-reduce:animate-none"
+                  className="mt-0.5 size-3.5 shrink-0 motion-safe:animate-spin-brief"
                 />
               ) : null}
               <span className="min-w-0 break-words">

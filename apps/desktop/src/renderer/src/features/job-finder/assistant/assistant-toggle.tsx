@@ -40,7 +40,7 @@ export function AssistantToggle(props: { platform: JobFinderPlatform }) {
       {assistant.working && !assistant.open ? (
         <span
           aria-hidden="true"
-          className="absolute right-1 top-1 size-2 rounded-full bg-primary motion-safe:animate-pulse"
+          className="absolute right-1 top-1 size-2 rounded-full bg-primary motion-safe:animate-pulse-brief"
           data-assistant-working-dot
         />
       ) : null}

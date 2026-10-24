@@ -565,12 +565,13 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
                 <div className="min-w-0 flex-1">
                   <p className="min-w-0 break-words text-sm font-medium text-(--text-headline)">
                     <span
+                      key={`${item.title}:${item.detail ?? ""}`}
                       aria-hidden="true"
                       className={cn(
                         "mr-2 inline-block size-2 rounded-full align-middle",
                         item.active === false
                           ? "bg-foreground-muted"
-                          : "animate-pulse bg-primary",
+                          : "motion-safe:animate-pulse-brief bg-primary",
                       )}
                     />
                     {item.title}

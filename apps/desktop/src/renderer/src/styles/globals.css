@@ -60,6 +60,11 @@
      tone and pinned by styles/globals.test.ts. */
   --color-warning: var(--warning-text);
   --color-warning-surface: var(--warning-surface);
+  /* Working signals that can last minutes move three times, then rest; a new
+     key restarts them when the work they describe changes. An endless pulse
+     or spin makes the window draw every frame for as long as it shows. */
+  --animate-pulse-brief: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) 3;
+  --animate-spin-brief: spin 1s linear 3;
 }
 
 :root {
