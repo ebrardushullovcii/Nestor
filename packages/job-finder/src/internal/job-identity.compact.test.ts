@@ -1,11 +1,19 @@
 import { expect, test } from "vitest";
 import {
+  readDiscoveryPreparation,
+  writeDiscoveryPreparation,
+} from "@nestor/contracts";
+import { createSeed } from "../workspace-service.test-fixtures";
+import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
+import { toSightingIdentityInput } from "./matching";
+import {
   buildJobIdentityAliases,
   compactJobIdentity,
   createJobIdentityDigest,
   createJobIdentityIndex,
   hasEquivalentListingContentIdentity,
   prepareListingContent,
+  prepareJobIdentity,
   type JobIdentityInput,
 } from "./job-identity";
 
@@ -30,6 +38,38 @@ test("transferred compressed evidence owns only its used bytes", () => {
   expect(evidence).not.toBeNull();
   expect(evidence!.packed.byteLength).toBeLessThan(16384);
   expect(evidence!.packed.buffer.byteLength).toBe(evidence!.packed.byteLength);
+});
+
+test("saved-job indexes retain compressed identity evidence without posting carriers or bodies", () => {
+  const job = prepareDiscoveryPosting({
+    ...createSeed().savedJobs[0]!,
+    description: posting.description!,
+  });
+  writeDiscoveryPreparation(job, { normalizedPosting: { ...job } });
+  Object.freeze(job);
+  const identity = toSightingIdentityInput(job);
+  expect(toSightingIdentityInput(job)).toBe(identity);
+  expect(identity.description).toBeUndefined();
+  const preparation = readDiscoveryPreparation(identity)!;
+  expect(preparation.content).toBeUndefined();
+  expect(preparation.fingerprints).toBeUndefined();
+  expect(preparation.normalizedPosting).toBeUndefined();
+  expect(preparation.identity!.basis).not.toContain(job.description);
+  expect(hasEquivalentListingContentIdentity(job, identity)).toBe(true);
+});
+
+test("compacting digest-only preparation releases its raw text too", () => {
+  const source = { ...posting };
+  prepareJobIdentity(source);
+  expect(
+    readDiscoveryPreparation(source)!.content!.value!.packed,
+  ).toBeUndefined();
+  const compact = compactJobIdentity(source);
+  source.description = "Changed after preparing";
+  expect(hasEquivalentListingContentIdentity(posting, compact)).toBe(true);
+  expect(readDiscoveryPreparation(compact)!.identity!.basis).not.toContain(
+    posting.description,
+  );
 });
 
 test("compressed inspection evidence preserves aliases, ids and full content verification", () => {

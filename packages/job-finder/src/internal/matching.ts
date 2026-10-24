@@ -33,7 +33,7 @@ import { canonicalizeLocationAliases } from "./location-normalization";
 import {
   createJobIdentityDigest,
   createJobIdentityIndex,
-  prepareJobIdentity,
+  compactJobIdentity,
   type JobIdentityInput,
   hasEquivalentListingContentIdentity,
   type JobIdentityIndex,
@@ -1488,15 +1488,19 @@ export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
     ),
   };
   const preparation = readDiscoveryPreparation(job);
-  if (preparation) writeDiscoveryPreparation(identity, preparation);
-  prepareJobIdentity(identity);
+  if (preparation)
+    writeDiscoveryPreparation(identity, {
+      ...(preparation.content ? { content: preparation.content } : {}),
+      ...(preparation.identity ? { identity: preparation.identity } : {}),
+    });
+  // The run's indexes keep identity facts, never a saved row's large text or
+  // its unrelated fingerprints/normalized posting. Compressed evidence is
+  // inflated only to prove an actual content-alias collision.
+  const compact = compactJobIdentity(identity);
   if (immutable) {
-    if (identity.alternateListingUrls)
-      Object.freeze(identity.alternateListingUrls);
-    Object.freeze(identity);
-    sightingIdentities.set(job, identity);
+    sightingIdentities.set(job, compact);
   }
-  return identity;
+  return compact;
 }
 
 const SIGHTING_ROUTE_FIELDS = [

@@ -212,7 +212,11 @@ function readPreparedContent(
 
 export function compactJobIdentity(input: JobIdentityInput): JobIdentityInput {
   let source = input;
-  if (readPreparedContent(source) === undefined) {
+  const prepared = readDiscoveryPreparation(source)?.content;
+  if (
+    readPreparedContent(source) === undefined ||
+    (prepared?.value && !prepared.value.packed && source.description)
+  ) {
     if (!Object.isExtensible(source)) source = { ...source };
     rememberPreparedListingContent(
       source,

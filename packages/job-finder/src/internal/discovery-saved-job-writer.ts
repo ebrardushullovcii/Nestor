@@ -137,12 +137,16 @@ export function createDiscoverySavedJobWriter(input: {
         borrowCurrentJobs: true,
         upserts,
         updateJobIds: [...updates.keys()],
-        update: (current) => {
-          const change = updates.get(current.id);
-          return change
-            ? input.merge(current, change.baseline, change.intended)
-            : current;
-        },
+        ...(updates.size > 0
+          ? {
+              update: (current: SavedJob) => {
+                const change = updates.get(current.id);
+                return change
+                  ? input.merge(current, change.baseline, change.intended)
+                  : current;
+              },
+            }
+          : {}),
         ...(last && updateDiscoveryState ? { updateDiscoveryState } : {}),
       });
       for (const id of partIds) settled(id, captured.get(id)!);
