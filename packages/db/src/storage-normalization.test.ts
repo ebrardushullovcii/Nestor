@@ -522,6 +522,8 @@ test("saved-job conversion retains exact prepared identity across the codec", as
     card: "card",
     detail: "detail",
     material: "material",
+    matchAssessmentPostingFingerprint:
+      contracts.computeMatchAssessmentPostingFingerprint(job),
     identity: {
       version: 1,
       local: { keys: ["opaque"], priorities: [40] },
@@ -533,6 +535,7 @@ test("saved-job conversion retains exact prepared identity across the codec", as
   writeDiscoveryPreparation(job, {
     fingerprints: { owner: job, value: fingerprints },
     savedIdentity: { owner: job, value: identity! },
+    matchAssessmentPostingFingerprint: value.matchAssessmentPostingFingerprint,
   });
   Object.freeze(job);
   await repo.commitSavedJobDelta({ upserts: [job] });
