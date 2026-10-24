@@ -1756,9 +1756,7 @@ export function createWorkspaceDiscoveryMethods(
           job,
           readPlanAssessment(job, assessmentPlanId).matchAssessment,
         );
-        return matchAssessment === job.matchAssessment
-          ? job
-          : Object.freeze(copyView(job, { matchAssessment }));
+        return readPlanAssessment(job, assessmentPlanId, matchAssessment);
       },
       SETUP_JOBS_PER_TURN,
     );

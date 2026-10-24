@@ -1,4 +1,9 @@
 import { expect, it } from "vitest";
+import {
+  writeDiscoveryPreparation,
+  readPreparedBodySalaryRange,
+  readPreparedSavedJobIdentity,
+} from "@nestor/contracts";
 import { jobNeedsFitJudgment, toFitJudgment } from "./fit-judgment";
 import { createMatchAssessmentPostingFingerprint } from "./match-assessment-session";
 import { createSeed } from "../workspace-service.test-fixtures";
@@ -7,6 +12,45 @@ import {
   readPlanAssessment,
   withPlanAssessment,
 } from "./plan-assessment";
+
+it("a frozen assessment view carries body preparation without opening unchanged text", () => {
+  const job = createSeed().savedJobs[0]!;
+  writeDiscoveryPreparation(job, {
+    fingerprints: {
+      owner: job,
+      value: {
+        version: 1,
+        card: "card",
+        detail: "detail",
+        material: "material",
+      },
+    },
+    savedIdentity: {
+      owner: job,
+      value: {
+        version: 1,
+        local: { keys: [], priorities: [] },
+        acrossSources: { keys: [], priorities: [] },
+        content: null,
+      },
+    },
+    bodySalaryRange: "EUR 96,000",
+  });
+  Object.defineProperty(job, "description", {
+    enumerable: true,
+    get() {
+      throw new Error("Assessment view opened unchanged text");
+    },
+  });
+  Object.freeze(job);
+  const assessment = { ...job.matchAssessment, score: 71 };
+  const view = readPlanAssessment(job, "test", assessment);
+  expect(Object.isFrozen(view)).toBe(true);
+  expect(view.matchAssessment).toBe(assessment);
+  expect(readPreparedBodySalaryRange(view)).toBe("EUR 96,000");
+  expect(readPreparedSavedJobIdentity(view)).not.toBeNull();
+  expect(readPlanAssessment(job, "test", assessment)).toBe(view);
+});
 
 it("stores a plan verdict and the original shared verdict without reading lazy details", () => {
   const base = createSeed().savedJobs[0]!;
