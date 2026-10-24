@@ -3,7 +3,6 @@ import { deflateRawSync, inflateRawSync } from "node:zlib";
 import type {
   DiscoveryPostingPreparation,
   DiscoveryJobIdentityAlias,
-  DiscoveryIdentityStore,
 } from "@nestor/contracts";
 
 import { normalizeText } from "./shared";
@@ -677,113 +676,67 @@ export function hasSameJobIdentity(
   );
 }
 
-// Only a short cache key stays beside an input, never its alias array. Mutable
-// input objects are checked against their exact fields before reusing the key.
-const identitySignatures = new WeakMap<
-  JobIdentityInput,
-  { basis: AliasBasis; signature: string }
->();
-
-function readIdentitySignature(input: JobIdentityInput): string {
-  const cached = identitySignatures.get(input);
-  if (
-    cached &&
-    Object.isFrozen(input) &&
-    (!input.alternateListingUrls || Object.isFrozen(input.alternateListingUrls))
-  )
-    return cached.signature;
-  const basis = readAliasBasis(input);
-  if (cached && sameAliasBasis(cached.basis, basis)) return cached.signature;
-  const prepared = readPreparedContent(input);
-  const content = prepared
-    ? null
-    : normalizeListingContentIdentity(input.description);
-  const key = [...basis];
-  key[10] =
-    prepared?.digest ?? (content ? digestListingContent(content) : null);
-  key[11] = null;
-  const signature = `identity_aliases_v2:${JSON.stringify(key)}`;
-  identitySignatures.set(input, { basis, signature });
-  return signature;
-}
-
 export function createJobIdentityIndex<T extends object>(
   values: readonly T[],
   selectIdentity: (value: T) => JobIdentityInput,
   include?: (value: T) => boolean,
-  storage?: DiscoveryIdentityStore,
 ): JobIdentityIndex<T> {
-  const valuesByAlias = storage ? null : new Map<string, Set<T>>();
-  const aliasesByValue = storage
-    ? null
-    : new Map<T, readonly JobIdentityAlias[]>();
+  // Most keys identify one row. Keep a number there, and allocate a set only
+  // for real collisions. Rich alias objects exist only while a query runs.
+  const valuesByAlias = new Map<string, number | Set<number>>();
   const tokens = new WeakMap<T, number>();
-  const valuesByToken = new Map<number, T>();
+  const valuesByToken = new Map<
+    number,
+    { value: T; keys: readonly string[] }
+  >();
   let nextToken = 0;
-  const matchesFor = (key: string, stored?: Map<string, Set<T>>) => {
-    const matches = (stored ?? valuesByAlias)?.get(key);
-    return include && matches ? new Set([...matches].filter(include)) : matches;
+  const matchesFor = (key: string) => {
+    const found = valuesByAlias.get(key);
+    if (found === undefined) return undefined;
+    const matches = new Set<T>();
+    for (const token of typeof found === "number" ? [found] : found) {
+      const value = valuesByToken.get(token)?.value;
+      if (value && (!include || include(value))) matches.add(value);
+    }
+    return matches;
   };
 
   const add = (value: T): void => {
-    const input = selectIdentity(value);
-    if (storage) {
-      const token = tokens.get(value) ?? ++nextToken;
-      tokens.set(value, token);
-      valuesByToken.set(token, value);
-      storage.put(token, readIdentitySignature(input), () =>
-        buildJobIdentityAliases(input),
-      );
-      return;
-    }
-    const aliases = buildJobIdentityAliases(input);
-    aliasesByValue!.set(value, aliases);
-    for (const alias of aliases) {
-      const matches = valuesByAlias!.get(alias.key);
-      if (matches) {
-        matches.add(value);
-      } else {
-        valuesByAlias!.set(alias.key, new Set([value]));
-      }
+    const token = tokens.get(value) ?? ++nextToken;
+    tokens.set(value, token);
+    const keys = buildJobIdentityAliases(selectIdentity(value)).map(
+      (alias) => alias.key,
+    );
+    valuesByToken.set(token, { value, keys });
+    for (const key of keys) {
+      const found = valuesByAlias.get(key);
+      if (found === undefined) valuesByAlias.set(key, token);
+      else if (typeof found === "number") {
+        if (found !== token) valuesByAlias.set(key, new Set([found, token]));
+      } else found.add(token);
     }
   };
 
   const remove = (value: T): void => {
-    if (storage) {
-      const token = tokens.get(value);
-      if (token !== undefined) {
-        storage.remove(token);
-        valuesByToken.delete(token);
-        tokens.delete(value);
-      }
-      return;
-    }
-    const aliases = aliasesByValue!.get(value) ?? [];
-    for (const alias of aliases) {
-      const matches = valuesByAlias!.get(alias.key);
-      matches?.delete(value);
-      if (matches?.size === 0) {
-        valuesByAlias!.delete(alias.key);
+    const token = tokens.get(value);
+    if (token === undefined) return;
+    for (const key of valuesByToken.get(token)?.keys ?? []) {
+      const found = valuesByAlias.get(key);
+      if (typeof found === "number") {
+        if (found === token) valuesByAlias.delete(key);
+      } else if (found) {
+        found.delete(token);
+        if (found.size === 1)
+          valuesByAlias.set(key, found.values().next().value!);
+        else if (found.size === 0) valuesByAlias.delete(key);
       }
     }
-    aliasesByValue!.delete(value);
+    valuesByToken.delete(token);
+    tokens.delete(value);
   };
 
   const resolve = (identity: JobIdentityInput): JobIdentityResolution<T> => {
-    const aliases = storage
-      ? storage.read(readIdentitySignature(identity), () =>
-          buildJobIdentityAliases(identity),
-        )
-      : buildJobIdentityAliases(identity);
-    const storedMatches = storage ? new Map<string, Set<T>>() : undefined;
-    if (storage && storedMatches)
-      for (const row of storage.find(aliases.map((alias) => alias.key))) {
-        const value = valuesByToken.get(row.id);
-        if (!value) continue;
-        const matches = storedMatches.get(row.key) ?? new Set<T>();
-        matches.add(value);
-        storedMatches.set(row.key, matches);
-      }
+    const aliases = buildJobIdentityAliases(identity);
     // A URL still matches when corrected card facts have no indexed alias.
     // Check every known alias before selecting it: an alias naming another
     // posting must not attach that posting's history or activity to this one.
@@ -794,7 +747,7 @@ export function createJobIdentityIndex<T extends object>(
       if (alias.confidence !== "strong") {
         continue;
       }
-      const indexedMatches = matchesFor(alias.key, storedMatches);
+      const indexedMatches = matchesFor(alias.key);
       const matches =
         (alias.kind === "employer_application_url" ||
           alias.kind === "source_posting_id") &&
@@ -870,7 +823,7 @@ export function createJobIdentityIndex<T extends object>(
     const matchedCorroboratingAliases: JobIdentityAlias[] = [];
     let corroboratingCandidates: ReadonlySet<T> | null = null;
     for (const alias of corroboratingAliases) {
-      const matches = matchesFor(alias.key, storedMatches);
+      const matches = matchesFor(alias.key);
       if (!matches || matches.size === 0) {
         continue;
       }
@@ -915,7 +868,7 @@ export function createJobIdentityIndex<T extends object>(
     const matchedPossibleAliases: JobIdentityAlias[] = [];
     let possibleCandidates: ReadonlySet<T> | null = null;
     for (const alias of possibleAliases) {
-      const matches = matchesFor(alias.key, storedMatches);
+      const matches = matchesFor(alias.key);
       if (!matches || matches.size === 0) {
         continue;
       }

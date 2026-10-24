@@ -25,17 +25,14 @@ sources' captured baselines. Replacing an entry closes its old version; active
 baseline readers retain that version until they release it. Do not eagerly
 build a third ledger index after every checkpoint for a future feedback action.
 
-File repositories keep alias candidate rows in SQLite TEMP indexes. A persistent
-SHA-256 key of the exact identity inputs and alias-policy version reuses the
-existing alias builder's output when that identity is recorded again. Candidate
-queries fetch only matching keys and row tokens. The existing intersection,
-cross-source compatibility and exact-content collision checks still decide the
-match. Cache tables contain derived keys, never listing bodies; run indexes are
-dropped when the run ends. Other hosts retain the same in-memory implementation.
-SQLite-backed runs do not construct the in-memory alias maps or retain alias
-arrays in global caches. Queries read the stored alias columns. Feed workers
-prepare content digests but no longer build and transfer two alias arrays per
-posting. A short identity signature replaces the former body-and-alias cache.
+One compact identity-key index is built once per run and updated for changed
+rows. Its keys retain today's exact identity logic: URLs, provider identifiers,
+listing facts and the existing content digest. Each unique key points to a
+numeric row token; only collisions allocate a set of tokens. Rich alias objects,
+duplicate global alias caches and feed alias transfers are removed. Existing
+intersection, cross-source compatibility and content collision checks still
+decide matches. No database query or transaction is needed for an identity
+lookup; no additional process is introduced.
 
 Typed discovery updates and saved-job deltas trust their domain values. Decode
 stored JSON without another schema walk in these paths. Migrations, imports,

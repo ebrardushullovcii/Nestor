@@ -17,7 +17,6 @@ import type {
   ApplicationReplayCheckpoint,
   ApplicationReplayCheckpointInput,
   CandidateProfile,
-  DiscoveryIdentityStore,
   JobFinderDiscoveryState,
   JobFinderActivityControl,
   ApplyQueue,
@@ -213,8 +212,6 @@ export interface JobFinderRepository
   getTailoredAssetByJobId(jobId: string): Promise<TailoredAsset | null>;
   exportState(): Promise<JobFinderRepositoryState>;
   close(): Promise<void>;
-  /** Search-only indexed alias candidates; matching policy stays in Job Finder. */
-  createDiscoveryIdentityStore?(): DiscoveryIdentityStore;
   reset(seed: JobFinderRepositorySeed): Promise<void>;
   getProfile(): Promise<CandidateProfile>;
   /** Validated frozen singleton; display readers must not mutate it. */

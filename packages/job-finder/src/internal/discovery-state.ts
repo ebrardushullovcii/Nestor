@@ -239,12 +239,12 @@ export function createDiscoveryEvent(
     >,
 ): DiscoveryActivityEvent {
   return {
-    waitReason: null,
-    resolvedAdapterKind: null,
-    collectionMethod: null,
-    sourceIntelligenceProvider: null,
-    terminalState: null,
     ...input,
+    waitReason: input.waitReason ?? null,
+    resolvedAdapterKind: input.resolvedAdapterKind ?? null,
+    collectionMethod: input.collectionMethod ?? null,
+    sourceIntelligenceProvider: input.sourceIntelligenceProvider ?? null,
+    terminalState: input.terminalState ?? null,
     id: `${input.runId}_${input.stage}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
   };
 }

@@ -1,7 +1,4 @@
-import type {
-  DiscoveryLedgerEntry,
-  DiscoveryIdentityStore,
-} from "@nestor/contracts";
+import type { DiscoveryLedgerEntry } from "@nestor/contracts";
 import { yieldToEventLoop } from "@nestor/core";
 import {
   createJobIdentityIndex,
@@ -29,18 +26,12 @@ import {
  */
 export function createSyncedJobIdentityIndex<T extends object>(
   selectIdentity: (value: T) => JobIdentityInput,
-  storage?: DiscoveryIdentityStore,
 ): {
   sync(values: readonly T[]): JobIdentityIndex<T>;
   warm(values: readonly T[]): Promise<void>;
   accept(values: readonly T[]): JobIdentityIndex<T>;
 } {
-  const inner = createJobIdentityIndex<T>(
-    [],
-    selectIdentity,
-    undefined,
-    storage,
-  );
+  const inner = createJobIdentityIndex<T>([], selectIdentity);
   const members = new Set<T>();
   let syncedWith: readonly T[] | null = null;
   let resolutions = new WeakMap<object, JobIdentityResolution<T>>();
@@ -95,8 +86,7 @@ export function createSyncedJobIdentityIndex<T extends object>(
             }
           }
         };
-        if (storage) storage.batch(add);
-        else add();
+        add();
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
       invalidate();
@@ -137,7 +127,6 @@ export function createSyncedJobIdentityIndex<T extends object>(
  */
 export function createRunDiscoveryLedger(
   initial: readonly DiscoveryLedgerEntry[],
-  storage?: DiscoveryIdentityStore,
 ) {
   let byId = new Map(initial.map((entry) => [entry.id, entry]));
   let byTarget = new Map<string, Set<string>>();
@@ -206,7 +195,6 @@ export function createRunDiscoveryLedger(
           ?.some(
             (range) => range.from <= lookupVersion && lookupVersion < range.to,
           ) === true,
-      storage,
     );
   const currentIndex = () => {
     if (!historyIndex) {
@@ -230,8 +218,7 @@ export function createRunDiscoveryLedger(
       const rows = entries();
       for (let start = 0; start < rows.length; start += 100) {
         const add = () => rows.slice(start, start + 100).forEach(observe);
-        if (storage) storage.batch(add);
-        else add();
+        add();
         await yieldToEventLoop();
       }
     },

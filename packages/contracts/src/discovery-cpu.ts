@@ -42,23 +42,6 @@ export type DiscoveryJobIdentityAlias = {
   priority: number;
 };
 
-/** Internal repository index: candidates still pass the existing identity policy. */
-export interface DiscoveryIdentityStore {
-  read(
-    signature: string,
-    build: () => readonly DiscoveryJobIdentityAlias[],
-  ): readonly DiscoveryJobIdentityAlias[];
-  put(
-    id: number,
-    signature: string,
-    build: () => readonly DiscoveryJobIdentityAlias[],
-  ): void;
-  remove(id: number): void;
-  find(keys: readonly string[]): Array<{ key: string; id: number }>;
-  batch(operation: () => void): void;
-  close(): void;
-}
-
 export type DiscoveryFeedResult = {
   jobs: JobPosting[];
   skippedMalformedCount: number;

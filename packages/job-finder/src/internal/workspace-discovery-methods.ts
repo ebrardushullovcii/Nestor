@@ -25,7 +25,6 @@ import {
   DiscoveryAgentMetadataSchema,
   type CandidateProfile,
   type DiscoveryActivityEvent,
-  type DiscoveryIdentityStore,
   type DiscoveryRunRecord,
   type DiscoveryRunResult,
   type FitJudgment,
@@ -1497,12 +1496,6 @@ export function createWorkspaceDiscoveryMethods(
     }
 
     const executionController = new AbortController();
-    const identityStores: DiscoveryIdentityStore[] = [];
-    const createIdentityStore = () => {
-      const store = ctx.repository.createDiscoveryIdentityStore?.();
-      if (store) identityStores.push(store);
-      return store;
-    };
     ctx.activeDiscoveryAbortControllerRef.current = executionController;
     const onExternalAbort = () => executionController.abort();
     if (options.signal?.aborted) {
@@ -1512,7 +1505,6 @@ export function createWorkspaceDiscoveryMethods(
     }
     const executionSignal = executionController.signal;
     const clearActiveController = () => {
-      for (const store of identityStores.splice(0)) store.close();
       options.signal?.removeEventListener("abort", onExternalAbort);
       if (
         ctx.activeDiscoveryAbortControllerRef.current === executionController
@@ -1699,7 +1691,6 @@ export function createWorkspaceDiscoveryMethods(
     );
     const runLedger = createRunDiscoveryLedger(
       startingDiscovery.discoveryLedger,
-      createIdentityStore(),
     );
     // Each enriched posting's form as it arrived from the source.
     const postingAsArrived = new WeakMap<JobPosting, JobPosting>();
@@ -1723,7 +1714,6 @@ export function createWorkspaceDiscoveryMethods(
     // working list a step reads. Working rows are replaced, never edited.
     const jobIdentity = createSyncedJobIdentityIndex<SavedJob>(
       toSightingIdentityInput,
-      createIdentityStore(),
     );
     const indexOver = (jobs: readonly SavedJob[]) => jobIdentity.sync(jobs);
     await runLedger.warm();
@@ -1774,7 +1764,6 @@ export function createWorkspaceDiscoveryMethods(
           ? toSightingIdentityInput(value as SavedJob)
           : { ...value, matchAcrossSources: true },
       undefined,
-      createIdentityStore(),
     );
     for (const [position, job] of [
       ...startingSavedJobs,
