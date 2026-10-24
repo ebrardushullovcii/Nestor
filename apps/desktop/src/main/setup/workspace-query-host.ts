@@ -16,8 +16,10 @@ export function createWorkspaceQueryHost() {
   let cursor = 0;
   let unsubscribe: (() => void) | undefined;
   let pendingPush: ReturnType<typeof setImmediate> | undefined;
+  let closed = false;
   const windows = new Set<BrowserWindow>();
   function reader(): WorkspaceQueryRepository {
+    if (closed) throw new Error("The workspace is closing.");
     if (repository) return repository;
     const filePath = getJobFinderWorkspaceFilePath();
     if (!existsSync(filePath))
@@ -77,12 +79,16 @@ export function createWorkspaceQueryHost() {
   function schedulePush() {
     pendingPush ??= setImmediate(pushChanges);
   }
-  app.once("will-quit", () => {
+  function close() {
+    if (closed) return;
+    closed = true;
     unsubscribe?.();
     if (pendingPush) clearImmediate(pendingPush);
     repository?.close();
-  });
+  }
+  app.once("will-quit", close);
   return {
+    close,
     attach(window: BrowserWindow) {
       const id = window.webContents.id;
       windows.add(window);

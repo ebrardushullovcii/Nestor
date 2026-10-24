@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { existsSync } from "node:fs";
 import {
   ApplicationRecordSchema,
   QueryJobListInputSchema,
@@ -28,6 +29,19 @@ async function fixture() {
   return { ...temp, writer, reader };
 }
 describe("independent workspace queries", () => {
+  test("closing the query connection before the writer permits a clean-close marker", async () => {
+    const temp = await createTempRepository("nestor-query-close-");
+    const writer = await temp.createRepository();
+    const reader = createWorkspaceQueryRepository(temp.filePath);
+    try {
+      reader.getStartupContext();
+      reader.close();
+      await writer.close();
+      expect(existsSync(`${temp.filePath}.clean-close`)).toBe(true);
+    } finally {
+      await temp.cleanup();
+    }
+  });
   test("pending rows retain their location before promotion", async () => {
     const { writer, reader } = await fixture();
     await writer.commitDiscoveryStateUpdate((current) => ({
