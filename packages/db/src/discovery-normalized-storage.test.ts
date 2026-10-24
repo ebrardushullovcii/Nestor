@@ -78,7 +78,7 @@ describe("normalized discovery storage", () => {
       await rm(backupPath, { force: true });
       const raw = new DatabaseSync(temp.filePath);
       try {
-        const { activity: _activity, targetExecutions: _targets, ...metadata } = legacy;
+        const metadata = Object.fromEntries(Object.entries(legacy).filter(([key]) => key !== "activity" && key !== "targetExecutions"));
         raw.prepare("UPDATE discovery_runs SET value = ?, progress = '{}' WHERE id = ?").run(JSON.stringify(metadata), legacy.id);
         raw.exec("DELETE FROM discovery_run_source_health; DELETE FROM schema_migrations WHERE version = 29");
       } finally { raw.close(); }
