@@ -28,3 +28,9 @@ either the previous complete index or the converted complete index.
 Find jobs queries expose the existing four result bands and exclude jobs already
 decided on. Default counts include matches and unchecked rows. Complete listing
 activity and renderer migration remain explicit acceptance gates under ADR 0060.
+
+The existing per-window query-update mode also suppresses inventory arrays in
+that window's legacy sync and mutation replies. Other windows retain their
+current complete legacy projection. This removes duplicate queried rows without
+changing canonical service reads or introducing another product setting. Query
+routes still avoid legacy sync entirely; remaining history moves with its screen.

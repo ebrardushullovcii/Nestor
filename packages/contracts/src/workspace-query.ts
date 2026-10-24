@@ -75,7 +75,6 @@ export type WorkspaceJobListRow = Pick<
   | "status"
   | "title"
   | "company"
-  | "location"
   | "source"
   | "sourceJobId"
   | "canonicalUrl"
@@ -91,6 +90,7 @@ export type WorkspaceJobListRow = Pick<
   | "resumeApplicationMode"
   | "resumeTailoringMode"
 > & {
+  location: string | null;
   planId: string | null;
   score: number;
   recommendation: SavedJob["matchAssessment"]["recommendation"];
