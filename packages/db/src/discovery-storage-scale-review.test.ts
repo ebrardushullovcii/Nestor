@@ -84,6 +84,8 @@ test("moving the first of 10k ledger rows to last and removing the first pending
     }
     // Creating audit triggers on another connection changes data_version.
     // Warm both caches after that external schema commit.
+    raw.exec(`CREATE TRIGGER fail_synthetic_pending AFTER INSERT ON discovery_pending_jobs
+      WHEN NEW.id = 'rollback_pending' BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END`);
     const before = await repo.getDiscoveryState();
     const displayBefore = await repo.readDiscoveryDisplayProjection();
     let borrowed: Readonly<JobFinderDiscoveryState> | null = null;
@@ -102,7 +104,7 @@ test("moving the first of 10k ledger rows to last and removing the first pending
             ],
             pendingDiscoveryJobs: [
               ...current.pendingDiscoveryJobs.slice(1),
-              { id: "invalid" } as never,
+              { ...current.pendingDiscoveryJobs[0]!, id: "rollback_pending" },
             ],
           };
         },
@@ -377,7 +379,7 @@ test("run scopes are pruned across 48 histories with delimiters and duplicate ID
           .filter((scope) => scope.runId)
           .every((scope) => runIds.has(scope.runId)),
       ).toBe(true);
-      expect(cache.scopes.size).toBeLessThanOrEqual(12);
+      expect(cache.scopes.size).toBeLessThanOrEqual(runIds.size * 3 + 2);
       expect(
         [...cache.scopes.values()].reduce(
           (count, scope) => count + scope.values.size,
@@ -423,7 +425,7 @@ test("run scopes are pruned across 48 histories with delimiters and duplicate ID
     readDiscoveryStorage(raw, createSeed().discovery, false, cache);
     expect(cache.scopes.size).toBe(2);
     console.info(
-      "48 run histories: at most 12 cache scopes / 10 retained rows; empty history returns to 2 global scopes",
+      "48 run histories: at most 17 cache scopes / 10 retained rows; empty history returns to 2 global scopes",
     );
   } finally {
     raw.close();

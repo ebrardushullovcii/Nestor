@@ -493,7 +493,13 @@ describe("company reconciliation evidence at scale", () => {
       createCompanyId,
     };
     expect(reconcileCompanies(input).ok).toBe(true);
+    // Ownership does not validate unused listing fields on our typed rows.
     job.keySkills.push(42 as unknown as string);
-    expect(reconcileCompanies(input).ok).toBe(false);
+    job.provenance[0]!.listingUrl = "https://changed-employer.example.test/role";
+    const next = reconcileCompanies(input);
+    expect(next.ok).toBe(true);
+    // A new row is a carrier-free control; mutable sighting links must not
+    // be hidden by the evidence memo on the shallow-frozen original.
+    expect(next).toEqual(reconcileCompanies({ ...input, jobs: [{ ...job }] }));
   });
 });

@@ -58,14 +58,8 @@ export function createDiscoverySavedJobWriter(input: {
   ) => SavedJob;
   commit: JobFinderRepository["commitSavedJobDelta"];
   persistDiscovery: (update: DiscoveryUpdate) => Promise<unknown>;
-  /**
-   * How long a save waits for others to join it. A search over hundreds of
-   * provider feeds finishes several sources a second, and one transaction
-   * each rewrote the run's sources and ledger every time. Saves asked for
-   * within the window are written together, their discovery updates applied
-   * in the order they were asked for. Zero writes each save on its own.
-   */
-  coalesceMs?: number;
+  /** Gather saves requested in this event-loop turn into one transaction. */
+  coalesce?: boolean;
 }) {
   const persisted = new Map(input.persistedJobs.map((job) => [job.id, job]));
   const committedReferences = new Map(persisted);
@@ -99,7 +93,18 @@ export function createDiscoverySavedJobWriter(input: {
       const intended = input.toStoredJob(job);
       intendedRows.set(id, intended);
       const baseline = persisted.get(id);
-      if (!baseline || !isDeepStrictEqual(baseline, intended))
+      if (
+        !baseline ||
+        Object.keys(intended).some((key) => {
+          const left = Object.getOwnPropertyDescriptor(baseline, key);
+          const right = Object.getOwnPropertyDescriptor(intended, key);
+          if (left?.get && left.get === right?.get) return false;
+          return !isDeepStrictEqual(
+            Reflect.get(baseline, key),
+            Reflect.get(intended, key),
+          );
+        })
+      )
         changedIds.push(id);
     }
 
@@ -126,12 +131,16 @@ export function createDiscoverySavedJobWriter(input: {
         borrowCurrentJobs: true,
         upserts,
         updateJobIds: [...updates.keys()],
-        update: (current) => {
-          const change = updates.get(current.id);
-          return change
-            ? input.merge(current, change.baseline, change.intended)
-            : current;
-        },
+        ...(updates.size > 0
+          ? {
+              update: (current: SavedJob) => {
+                const change = updates.get(current.id);
+                return change
+                  ? input.merge(current, change.baseline, change.intended)
+                  : current;
+              },
+            }
+          : {}),
         ...(last && updateDiscoveryState ? { updateDiscoveryState } : {}),
       });
       for (const id of partIds) settled(id, captured.get(id)!);
@@ -158,8 +167,7 @@ export function createDiscoverySavedJobWriter(input: {
       for (const job of jobs) stage(job);
     },
     persist(this: void, updateDiscoveryState?: DiscoveryUpdate): Promise<void> {
-      const coalesceMs = input.coalesceMs ?? 0;
-      if (coalesceMs <= 0) {
+      if (!input.coalesce) {
         // Capture the intended references now, when the save is asked for.
         const captured = new Map(pending);
         return enqueue(() => write(captured, updateDiscoveryState));
@@ -173,16 +181,16 @@ export function createDiscoverySavedJobWriter(input: {
         : [];
       const batch = {
         updates,
-        promise: new Promise<void>((resolve) =>
-          setTimeout(resolve, coalesceMs),
-        ).then(() => {
-          gathering = null;
-          // Every save in the batch was asked for by now, so the rows pending
-          // at this moment include each one's rows.
-          return enqueue(() =>
-            write(new Map(pending), composeUpdates(updates)),
-          );
-        }),
+        promise: new Promise<void>((resolve) => setImmediate(resolve)).then(
+          () => {
+            gathering = null;
+            // Every save in the batch was asked for by now, so the rows pending
+            // at this moment include each one's rows.
+            return enqueue(() =>
+              write(new Map(pending), composeUpdates(updates)),
+            );
+          },
+        ),
       };
       gathering = batch;
       return batch.promise;

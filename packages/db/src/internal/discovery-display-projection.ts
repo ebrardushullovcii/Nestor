@@ -79,20 +79,11 @@ export function createDiscoveryDisplayProjectionReader(
     )`);
     // Checkpoint bodies are absent from this projection. A checkpoint-only
     // commit must keep the same display object and avoid rebuilding history.
-    for (const table of [
-      "discovery_runs",
-      "discovery_run_targets",
-      "discovery_run_activity",
-      "discovery_ledger",
-      "discovery_pending_jobs",
-    ]) {
+    for (const table of ["discovery_runs", "discovery_run_targets", "discovery_run_activity", "discovery_run_source_health", "discovery_ledger", "discovery_pending_jobs"]) {
       for (const event of ["INSERT", "UPDATE", "DELETE"]) {
         const row = event === "DELETE" ? "OLD" : "NEW";
-        const runId =
-          table === "discovery_run_targets" ||
-          table === "discovery_run_activity"
-            ? `${row}.run_id`
-            : "''";
+        const runId = table === "discovery_run_targets" || table === "discovery_run_activity" || table === "discovery_run_source_health"
+          ? `${row}.run_id` : "''";
         const retiredChild = event === "DELETE" && runId !== "''";
         database.exec(`CREATE TEMP TRIGGER discovery_display_${table}_${event.toLowerCase()}
           AFTER ${event} ON main.${table}

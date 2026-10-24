@@ -7,6 +7,7 @@ import {
 import { writeSavedJobSightings } from "./internal/saved-job-sightings";
 import { writeSavedJobPlanAssessments } from "./internal/saved-job-plan-assessments";
 import { isDeepStrictEqual } from "node:util";
+import { channel } from "node:diagnostics_channel";
 import {
   PreparedApplicationFormSchema,
   ApplyJobResultSchema,
@@ -46,6 +47,7 @@ import {
   SubmissionPreflightRecordSchema,
   TailoredAssetSchema,
   type CandidateProfile,
+  type SavedJob,
   type JobFinderDiscoveryState,
   type JobFinderRepositoryState,
 } from "@nestor/contracts";
@@ -1331,8 +1333,9 @@ export async function createFileJobFinderRepository(
       clearResumeApproval,
       updateDiscoveryState,
     }) {
+      const startedAt = performance.now();
       try {
-        const suppliedUpserts = parseSavedJobsWithPreparation(upserts);
+        const suppliedUpserts = [...upserts];
         let committedDiscovery: JobFinderDiscoveryState | null = null;
 
         runImmediateTransaction(database, () => {
@@ -1345,14 +1348,10 @@ export async function createFileJobFinderRepository(
           const normalizedUpserts = [
             ...suppliedUpserts,
             ...(upsertsFromDiscovery && currentDiscoveryState
-              ? parseSavedJobsWithPreparation(
-                  upsertsFromDiscovery(cloneValue(currentDiscoveryState)),
-                )
+              ? upsertsFromDiscovery(cloneValue(currentDiscoveryState))
               : []),
             ...(upsertsFromBorrowedDiscovery && currentDiscoveryState
-              ? parseSavedJobsWithPreparation(
-                  upsertsFromBorrowedDiscovery(currentDiscoveryState),
-                )
+              ? upsertsFromBorrowedDiscovery(currentDiscoveryState)
               : []),
           ];
           if (updateSettings) {
@@ -1378,30 +1377,33 @@ export async function createFileJobFinderRepository(
 
           if (update) {
             const currentJobs = updateJobIds
-              ? listCollectionValues(database, "saved_jobs", SavedJobSchema, {
-                  whereSql: "id IN (SELECT value FROM json_each(?))",
-                  params: [
-                    JSON.stringify([
-                      ...new Set([
-                        ...updateJobIds,
-                        ...normalizedUpserts.map((job) => job.id),
-                        ...(clearResumeApproval
-                          ? [clearResumeApproval.jobId]
-                          : []),
+              ? listCollectionValues(
+                  database,
+                  "saved_jobs",
+                  { parse: (value) => value as SavedJob },
+                  {
+                    whereSql: "id IN (SELECT value FROM json_each(?))",
+                    params: [
+                      JSON.stringify([
+                        ...new Set([
+                          ...updateJobIds,
+                          ...normalizedUpserts.map((job) => job.id),
+                          ...(clearResumeApproval
+                            ? [clearResumeApproval.jobId]
+                            : []),
+                        ]),
                       ]),
-                    ]),
-                  ],
-                  orderBySql: "id",
-                })
-              : listValues(database, "saved_jobs", SavedJobSchema);
+                    ],
+                    orderBySql: "id",
+                  },
+                )
+              : listValues(database, "saved_jobs", {
+                  parse: (value) => value as SavedJob,
+                });
             for (const currentJob of currentJobs) {
               existingJobIds.add(currentJob.id);
-              const nextJob = parseSavedJobWithPreparation(
-                update(
-                  borrowCurrentJobs
-                    ? freezeProjection(currentJob)
-                    : cloneSavedJobWithPreparation(currentJob),
-                ),
+              const nextJob = update(
+                borrowCurrentJobs ? freezeProjection(currentJob) : currentJob,
               );
               if (nextJob.id !== currentJob.id) {
                 throw new Error(
@@ -1508,6 +1510,13 @@ export async function createFileJobFinderRepository(
         );
       }
 
+      const bookkeeping = channel("nestor.discovery.bookkeeping");
+      if (bookkeeping.hasSubscribers)
+        bookkeeping.publish({
+          phase: "write",
+          rows: upserts.length + (updateJobIds?.length ?? 0),
+          ms: performance.now() - startedAt,
+        });
       return secureDatabaseFile(options.filePath);
     },
     commitDiscoveryFeedbackUpdate(jobId, update, feedbackOptions) {
@@ -2477,11 +2486,6 @@ export async function createFileJobFinderRepository(
 
         return secureDatabaseFile(options.filePath).then(() => ({
           ...nextDiscoveryState,
-          sessions: [...nextDiscoveryState.sessions],
-          recentRuns: [...nextDiscoveryState.recentRuns],
-          recentSourceDebugRuns: [...nextDiscoveryState.recentSourceDebugRuns],
-          discoveryLedger: [...nextDiscoveryState.discoveryLedger],
-          pendingDiscoveryJobs: [...nextDiscoveryState.pendingDiscoveryJobs],
         }));
       } catch (error) {
         return Promise.reject(

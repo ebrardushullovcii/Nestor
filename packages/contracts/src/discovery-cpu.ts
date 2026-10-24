@@ -5,6 +5,8 @@ import type {
   JobPosting,
 } from "./discovery";
 import type { SourceIntelligenceArtifact } from "./source-debug";
+import type { DiscoveryPreparedKeys } from "./discovery-preparation";
+import type { extractSalaryRangeFromListingBody } from "./listing-salary-evidence";
 
 /**
  * A feed reader that crashed or exited took its transferred bytes with it;
@@ -26,10 +28,11 @@ export type DiscoveryPostingPreparation = {
   fingerprints: DiscoveryListingFingerprints;
   content: { digest: string; packed: Uint8Array } | null;
   screeningContent: { digest: string; packed: Uint8Array } | null;
-  aliases: {
-    local: readonly DiscoveryJobIdentityAlias[];
-    acrossSources: readonly DiscoveryJobIdentityAlias[];
-  };
+  keys: DiscoveryPreparedKeys;
+  screeningKeys: DiscoveryPreparedKeys;
+  screeningFingerprints: DiscoveryListingFingerprints;
+  bodySalaryRange: ReturnType<typeof extractSalaryRangeFromListingBody>;
+  screeningBodySalaryRange: ReturnType<typeof extractSalaryRangeFromListingBody>;
 };
 
 export type DiscoveryJobIdentityAlias = {
@@ -52,50 +55,8 @@ export type DiscoveryFeedResult = {
   preparations: DiscoveryPostingPreparation[];
 };
 
-export type DiscoveryInventoryPosting = Pick<
-  JobPosting,
-  | "source"
-  | "sourceJobId"
-  | "canonicalUrl"
-  | "applicationUrl"
-  | "providerKey"
-  | "providerBoardToken"
-  | "providerIdentifier"
-  | "title"
-  | "company"
-  | "location"
-  | "workMode"
-  | "seniority"
-  | "employmentType"
-  | "applyPath"
-  | "easyApplyEligible"
-  | "salaryText"
-  | "detailQuality"
-  | "screeningHints"
-  | "summary"
-  | "description"
-  | "keySkills"
-  | "keywordSignals"
-  | "responsibilities"
-  | "minimumQualifications"
-  | "preferredQualifications"
-  | "department"
-  | "team"
-  | "benefits"
-  | "atsProvider"
-  | "postedAt"
-  | "postedAtText"
-> & { alternateListingUrls: readonly string[] };
-export type DiscoveryInventoryPreparation = Pick<
-  DiscoveryPostingPreparation,
-  "content" | "aliases"
-> & { postingFingerprint: string };
-export type DiscoveryCpuTask =
-  | { kind: "feed"; input: DiscoveryFeedTask }
-  | { kind: "inventory"; postings: DiscoveryInventoryPosting[] };
-export type DiscoveryCpuResult =
-  | { kind: "feed"; result: DiscoveryFeedResult }
-  | { kind: "inventory"; result: DiscoveryInventoryPreparation[] };
+export type DiscoveryCpuTask = { kind: "feed"; input: DiscoveryFeedTask };
+export type DiscoveryCpuResult = { kind: "feed"; result: DiscoveryFeedResult };
 export type DiscoveryCpuRequest = { id: number; task: DiscoveryCpuTask };
 export type DiscoveryCpuResponse =
   | { id: number; result: DiscoveryCpuResult; error?: never }

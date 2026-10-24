@@ -197,7 +197,7 @@ describe("progressive public API discovery", () => {
     pendingResponse.resolve(createFailedResponse(503));
   });
 
-  test("limits large public API catalogs to eight in-flight source requests", async () => {
+  test("limits large public API catalogs to 24 in-flight source requests", async () => {
     const seed = createSeed();
     seed.savedJobs = [];
     seed.discovery.pendingDiscoveryJobs = [];
@@ -206,7 +206,7 @@ describe("progressive public API discovery", () => {
     seed.searchPreferences.companyWhitelist = [];
     seed.searchPreferences.targetRoles = ["Senior Product Designer"];
     seed.searchPreferences.discovery.targets = Array.from(
-      { length: 12 },
+      { length: 36 },
       (_, index) => ({
         id: `target_board_${index}`,
         label: `Board ${index}`,
@@ -233,11 +233,11 @@ describe("progressive public API discovery", () => {
       controller.signal,
     );
 
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(8));
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(24));
     controller.abort();
     const snapshot = await runPromise;
 
-    expect(fetchSpy).toHaveBeenCalledTimes(8);
+    expect(fetchSpy).toHaveBeenCalledTimes(24);
     expect(snapshot.recentDiscoveryRuns[0]?.summary.outcome).toBe("cancelled");
     pendingResponse.resolve(createFailedResponse(503));
   });

@@ -1,7 +1,9 @@
 import type { JobFinderAiClient } from "@nestor/ai-providers";
 import {
-  SavedJobDiscoveryProvenanceSchema,
-  SavedJobSchema,
+  captureDiscoverySavedIdentityBasis,
+  readDiscoveryPreparation,
+  readPreparedSavedJobIdentity,
+  writeDiscoveryPreparation,
   jobPostingDetailQualityValues,
   type ApplicationStatus,
   type CandidateProfile,
@@ -33,10 +35,14 @@ import { canonicalizeLocationAliases } from "./location-normalization";
 import {
   createJobIdentityDigest,
   createJobIdentityIndex,
+  compactJobIdentity,
+  rememberPreparedJobIdentity,
+  readPackedListingContent,
   type JobIdentityInput,
   hasEquivalentListingContentIdentity,
   type JobIdentityIndex,
 } from "./job-identity";
+import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
 import { assessJobPostingDetailQuality } from "./job-posting-detail-quality";
 import {
   attributeLegacySighting,
@@ -567,15 +573,16 @@ function hasWeakerIncomingDetailEvidence(
   posting: JobPosting,
   existingJob: SavedJob,
 ): boolean {
+  const incomingRank = jobPostingDetailQualityRank(
+    assessJobPostingDetailQuality(posting),
+  );
+  if (incomingRank === jobPostingDetailQualityValues.length - 1) return false;
   const existingQuality = strongestDetailQuality(
     existingJob.detailQuality,
     assessJobPostingDetailQuality(existingJob),
   );
 
-  return (
-    jobPostingDetailQualityRank(assessJobPostingDetailQuality(posting)) <
-    jobPostingDetailQualityRank(existingQuality)
-  );
+  return incomingRank < jobPostingDetailQualityRank(existingQuality);
 }
 
 // Preserved groups cover every resume-affecting content field verbatim so a
@@ -633,9 +640,9 @@ export function enrichDiscoveredPosting(
     ...posting,
     title:
       existingJob &&
-      hasEquivalentListingContentIdentity(posting, existingJob) &&
       normalizeText(existingJob.title).length >
-        normalizeText(posting.title).length
+        normalizeText(posting.title).length &&
+      hasEquivalentListingContentIdentity(posting, existingJob)
         ? existingJob.title
         : posting.title,
     providerUpdatedAt: selectLatestProviderUpdate(
@@ -736,19 +743,25 @@ export function enrichDiscoveredPosting(
     isLikelyAccessGateListingUrl(posting.canonicalUrl) &&
     !isLikelyAccessGateListingUrl(existingJob.canonicalUrl)
   ) {
-    return {
-      ...preserveRicherExistingDetail(enrichedPosting, existingJob),
-      title: existingJob.title,
-      canonicalUrl: existingJob.canonicalUrl,
-      applicationUrl: existingJob.applicationUrl,
-    };
+    return prepareDiscoveryPosting(
+      {
+        ...preserveRicherExistingDetail(enrichedPosting, existingJob),
+        title: existingJob.title,
+        canonicalUrl: existingJob.canonicalUrl,
+        applicationUrl: existingJob.applicationUrl,
+      },
+      existingJob,
+    );
   }
 
   if (existingJob && hasWeakerIncomingDetailEvidence(posting, existingJob)) {
-    return preserveRicherExistingDetail(enrichedPosting, existingJob);
+    return prepareDiscoveryPosting(
+      preserveRicherExistingDetail(enrichedPosting, existingJob),
+      existingJob,
+    );
   }
 
-  return enrichedPosting;
+  return prepareDiscoveryPosting(enrichedPosting);
 }
 
 function matchesLocationPhrase(
@@ -1092,7 +1105,7 @@ function assembleMergedDiscoveredJob(input: {
 }): SavedJob {
   const { matchAssessment, enrichedPosting, posting, existingJob } = input;
 
-  return SavedJobSchema.parse({
+  return {
     ...enrichedPosting,
     id: existingJob?.id ?? toSavedJobId(posting),
     // A discovery recrawl refreshes shared listing content, not the plans that
@@ -1111,7 +1124,10 @@ function assembleMergedDiscoveredJob(input: {
     discoveryFeedback: existingJob?.discoveryFeedback ?? null,
     resumeApplicationMode: existingJob?.resumeApplicationMode ?? null,
     latestMatchAssessmentAudit: existingJob?.latestMatchAssessmentAudit ?? null,
-  });
+    provenance: (enrichedPosting as Partial<SavedJob>).provenance ?? [],
+    resumeTailoringMode:
+      (enrichedPosting as Partial<SavedJob>).resumeTailoringMode ?? null,
+  };
 }
 
 // Ranks of a job list a merge already computed. A search merges source after
@@ -1277,18 +1293,21 @@ export function mergeDiscoveredPostings(
         : []),
       provenance,
     ]);
-    const enrichedPosting = existingJob
-      ? settleCanonicalRoute(
-          enrichDiscoveredPosting(posting, existingJob),
-          existingJob,
-          mergedProvenance,
-          posting,
-        )
-      : enrichDiscoveredPosting(posting, existingJob);
+    const enrichedPosting = prepareDiscoveryPosting(
+      existingJob
+        ? settleCanonicalRoute(
+            enrichDiscoveredPosting(posting, existingJob),
+            existingJob,
+            mergedProvenance,
+            posting,
+          )
+        : enrichDiscoveredPosting(posting, existingJob),
+      existingJob,
+    );
     const matchAssessment = assessPosting
       ? assessPosting(enrichedPosting)
       : createMatchAssessment(profile, searchPreferences, enrichedPosting);
-    let mergedJob = SavedJobSchema.parse({
+    let mergedJob: SavedJob = {
       ...assembleMergedDiscoveredJob({
         matchAssessment,
         enrichedPosting,
@@ -1296,7 +1315,7 @@ export function mergeDiscoveredPostings(
         existingJob,
       }),
       provenance: mergedProvenance,
-    });
+    };
 
     if (!existingJob && nextJobsById.has(mergedJob.id)) {
       const baseId = `${mergedJob.id}_${createJobIdentityDigest(posting)}`;
@@ -1306,7 +1325,7 @@ export function mergeDiscoveredPostings(
         availableId = `${baseId}_${collisionIndex}`;
         collisionIndex += 1;
       }
-      mergedJob = SavedJobSchema.parse({ ...mergedJob, id: availableId });
+      mergedJob = { ...mergedJob, id: availableId };
     }
 
     if (existingJob) {
@@ -1394,7 +1413,7 @@ export function mergeDiscoveredPostings(
 
   return {
     mergedJobs,
-    newJobs: mergedJobs.filter((job) => newJobIds.has(job.id)),
+    newJobs: [...newJobIds].map((id) => nextJobsById.get(id)!),
     validatedCount,
     duplicatesMerged,
     invalidSkipped,
@@ -1406,8 +1425,7 @@ function uniqueProvenance(
 ): SavedJobDiscoveryProvenance[] {
   const kept = new Map<string, SavedJobDiscoveryProvenance>();
 
-  for (const value of values) {
-    const parsed = SavedJobDiscoveryProvenanceSchema.parse(value);
+  for (const parsed of values) {
     const key = `${parsed.targetId}:${parsed.adapterKind}:${parsed.resolvedAdapterKind ?? "none"}:${parsed.startingUrl}`;
     const first = kept.get(key);
     if (!first) {
@@ -1451,8 +1469,14 @@ function uniqueProvenance(
  * A saved job's identity for matching new sightings: its own fields plus the
  * listing links its other sources showed.
  */
+const sightingIdentities = new WeakMap<SavedJob, JobIdentityInput>();
+
 export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
-  return {
+  const immutable = Object.isFrozen(job);
+  const cached = immutable ? sightingIdentities.get(job) : undefined;
+  if (cached) return cached;
+  const saved = readPreparedSavedJobIdentity(job);
+  const identity: JobIdentityInput = {
     source: job.source,
     sourceJobId: job.sourceJobId,
     canonicalUrl: job.canonicalUrl,
@@ -1464,7 +1488,16 @@ export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
     seniority: job.seniority,
     company: job.company,
     location: job.location,
-    description: job.description,
+    ...(saved
+      ? saved.content
+        ? {
+            exactContent: {
+              ...saved.content,
+              read: () => readPackedListingContent(saved.content!.packed),
+            },
+          }
+        : {}
+      : { description: job.description }),
     postedAt: job.postedAt,
     postedAtText: job.postedAtText,
     matchAcrossSources: true,
@@ -1474,6 +1507,38 @@ export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
         : [],
     ),
   };
+  if (saved) rememberPreparedJobIdentity(identity, saved);
+  const preparation = readDiscoveryPreparation(job);
+  if (preparation && !saved)
+    writeDiscoveryPreparation(identity, {
+      ...(preparation.content ? { content: preparation.content } : {}),
+      ...(preparation.identity ? { identity: preparation.identity } : {}),
+    });
+  // The run's indexes keep identity facts, never a saved row's large text or
+  // its unrelated fingerprints/normalized posting. Compressed evidence is
+  // inflated only to prove an actual content-alias collision.
+  const compact = compactJobIdentity(identity);
+  if (!saved && !immutable) {
+    const content = compact.exactContent;
+    const keys = readDiscoveryPreparation(compact)!.identity!;
+    writeDiscoveryPreparation(job, {
+      savedIdentity: {
+        basis: captureDiscoverySavedIdentityBasis(job),
+        value: {
+          version: 1,
+          local: keys.local,
+          acrossSources: keys.acrossSources,
+          content: content?.packed
+            ? { digest: content.digest, packed: content.packed }
+            : null,
+        },
+      },
+    });
+  }
+  if (immutable) {
+    sightingIdentities.set(job, compact);
+  }
+  return compact;
 }
 
 const SIGHTING_ROUTE_FIELDS = [
@@ -1541,7 +1606,10 @@ export function applySightingRoute<T extends JobPosting>(
     providerBoardToken: sighting.providerBoardToken ?? null,
     providerIdentifier: sameProvider ? job.providerIdentifier : null,
   } as T;
-  return { ...routed, atsProvider: detectAtsProvider(routed) } as T;
+  return prepareDiscoveryPosting({
+    ...routed,
+    atsProvider: detectAtsProvider(routed),
+  } as T);
 }
 
 function settleCanonicalRoute(

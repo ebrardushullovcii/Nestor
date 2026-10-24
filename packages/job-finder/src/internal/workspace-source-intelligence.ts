@@ -1,6 +1,7 @@
 import { yieldToEventLoop } from "@nestor/core";
 import { isDeepStrictEqual } from "node:util";
 import {
+  readDiscoveryPreparation,
   JobPostingSchema,
   SourceIntelligenceArtifactSchema,
   type CandidateProfile,
@@ -29,12 +30,15 @@ import {
 } from "./discovery-feed-executor";
 import { toProviderAwarePosting } from "./discovery-posting-normalization";
 import {
-  prepareListingContent,
   rememberPreparedListingContent,
-  buildJobIdentityAliases,
+  prepareJobIdentity,
   rememberPreparedJobIdentity,
-  hasSameJobIdentity,
 } from "./job-identity";
+import {
+  prepareDiscoveryPosting,
+  prepareBodySalaryRange,
+  rememberPreparedBodySalaryRange,
+} from "./discovery-posting-preparation";
 import {
   createDiscoveryListingFingerprints,
   rememberDiscoveryListingFingerprints,
@@ -1881,6 +1885,7 @@ export async function preparePublicProviderFeed(
       artifact: { intelligence: task.intelligence },
     });
     if (!raw) continue;
+    if (task.prepareForDiscovery) prepareDiscoveryPosting(raw);
     const posting = task.prepareForDiscovery
       ? toProviderAwarePosting({
           posting: raw,
@@ -1893,11 +1898,16 @@ export async function preparePublicProviderFeed(
       : raw;
     jobs.push(raw);
     if (task.prepareForDiscovery) {
-      const content = prepareListingContent(posting.description);
-      const acrossSources = buildJobIdentityAliases({
-        ...posting,
-        matchAcrossSources: true,
-      });
+      const preparedContent = readDiscoveryPreparation(posting)!.content!.value;
+      const content = preparedContent
+        ? { digest: preparedContent.digest, packed: preparedContent.packed! }
+        : null;
+      const keys = prepareJobIdentity(posting);
+      const fingerprints = createDiscoveryListingFingerprints(posting);
+      const rawContent = readDiscoveryPreparation(raw)!.content!.value;
+      const screeningContent = rawContent
+        ? { digest: rawContent.digest, packed: rawContent.packed! }
+        : null;
       const normalized: Partial<JobPosting> = {};
       for (const field of Object.keys(posting) as Array<keyof JobPosting>) {
         if (!isDeepStrictEqual(raw[field], posting[field]))
@@ -1905,18 +1915,14 @@ export async function preparePublicProviderFeed(
       }
       preparations.push({
         normalized,
-        fingerprints: createDiscoveryListingFingerprints(posting),
+        fingerprints,
+        keys,
+        screeningKeys: prepareJobIdentity(raw),
+        screeningFingerprints: createDiscoveryListingFingerprints(raw),
         content,
-        aliases: {
-          local: acrossSources.filter(
-            (alias) => alias.kind !== "cross_source_listing_facts",
-          ),
-          acrossSources,
-        },
-        screeningContent:
-          raw.description === posting.description
-            ? content
-            : prepareListingContent(raw.description),
+        screeningContent,
+        bodySalaryRange: prepareBodySalaryRange(posting),
+        screeningBodySalaryRange: prepareBodySalaryRange(raw),
       });
     }
   }
@@ -2050,15 +2056,20 @@ export async function collectPublicProviderJobs(input: {
         const raw = jobs[position]!;
         const job = { ...raw, ...preparation.normalized };
         rememberPreparedDiscoveryPosting(raw, job);
-        rememberPreparedListingContent(job.description, preparation.content);
-        rememberPreparedListingContent(
-          raw.description,
-          preparation.screeningContent,
+        rememberPreparedListingContent(job, preparation.content);
+        rememberPreparedListingContent(raw, preparation.screeningContent);
+        rememberPreparedJobIdentity(job, preparation.keys);
+        rememberPreparedJobIdentity(raw, preparation.screeningKeys);
+        rememberPreparedBodySalaryRange(job, preparation.bodySalaryRange);
+        rememberPreparedBodySalaryRange(
+          raw,
+          preparation.screeningBodySalaryRange,
         );
         rememberDiscoveryListingFingerprints(job, preparation.fingerprints);
-        if (hasSameJobIdentity(raw, job))
-          rememberPreparedJobIdentity(raw, preparation.aliases);
-        rememberPreparedJobIdentity(job, preparation.aliases);
+        rememberDiscoveryListingFingerprints(
+          raw,
+          preparation.screeningFingerprints,
+        );
       }
 
       return {

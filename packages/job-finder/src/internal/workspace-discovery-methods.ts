@@ -1,7 +1,15 @@
-import { createConcurrencyLimiter, yieldToEventLoop } from "@nestor/core";
-import { warmDiscoveryInventory } from "./discovery-inventory-preparation";
+import {
+  copyView,
+  createConcurrencyLimiter,
+  yieldToEventLoop,
+} from "@nestor/core";
 import { isDeepStrictEqual } from "node:util";
+import { channel } from "node:diagnostics_channel";
 import { patchDiscoveryLedger } from "@nestor/db";
+import {
+  prepareDiscoveryPosting,
+  prepareBodySalaryRange,
+} from "./discovery-posting-preparation";
 import {
   createDiscoverySavedJobWriter,
   markSupersedingDiscoveryUpdate,
@@ -13,15 +21,16 @@ import {
   personPickedJob,
   personSuppliedJob,
 } from "./plan-assessment";
+import { parseNormalizedCompensation } from "./matching-compensation";
 import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import {
-  JobSearchCampaignCollectionSchema,
   DISCOVERY_NO_JOB_SITES_MESSAGE,
   DISCOVERY_RUN_ALREADY_ACTIVE_MESSAGE,
-  DiscoveryRunRecordSchema,
   DiscoveryAgentMetadataSchema,
-  JobPostingSchema,
-  SavedJobSchema,
+  readPreparedBodySalaryRange,
+  readPreparedDiscoveryFingerprints,
+  DISCOVERY_FINGERPRINT_FIELDS,
+  writeDiscoveryPreparation,
   type CandidateProfile,
   type DiscoveryActivityEvent,
   type DiscoveryRunRecord,
@@ -124,7 +133,6 @@ import { createDiscoveryRefreshDecision } from "./workspace-discovery-refresh-sc
 import {
   createDiscoveryFreshnessDigestInTurns,
   createDiscoveryListingFingerprints,
-  warmDiscoveryLedgerIndex,
 } from "./workspace-discovery-ledger";
 import { rebaseDiscoveryLedgerEntry } from "./workspace-discovery-state-helpers";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
@@ -178,7 +186,7 @@ import {
   findSiteFurnitureSalaryTexts,
   isSalaryTextStatedInBody,
   isSiteFurnitureSalaryText,
-  reconcileSalaryTextWithListingBody,
+  reconcileSalaryTextWithPreparedBody,
 } from "./matching-compensation";
 import { normalizeListingText } from "./listing-detail-extraction";
 import { toProviderAwarePosting } from "./discovery-posting-normalization";
@@ -198,6 +206,7 @@ export {
 export { normalizeListingText };
 
 const DISCOVERY_ACTIVITY_SAMPLE_LIMIT = 3;
+const bookkeeping = channel("nestor.discovery.bookkeeping");
 /**
  * Every job a search keeps is judged (ADR 0041). Older jobs of the plan
  * that need a new verdict, after the profile or goals changed, are judged
@@ -220,8 +229,8 @@ const SEARCH_FIT_MAX_BATCH_WAIT_MS = 90_000;
  * Feeds a search holds at once: downloading, waiting for the listing screen,
  * or ready to merge. Downloads themselves run a few at a time.
  */
-const PUBLIC_API_PREFETCH_CONCURRENCY = 8;
-const PUBLIC_API_DOWNLOAD_CONCURRENCY = 8;
+const PUBLIC_API_PREFETCH_CONCURRENCY = 24;
+const PUBLIC_API_DOWNLOAD_CONCURRENCY = 24;
 /** Feed listings looked up against the run's jobs per event-loop turn. */
 const SCREEN_LOOKUPS_PER_TURN = 40;
 /**
@@ -254,7 +263,6 @@ const DISCOVERY_SOURCE_CONCURRENCY = (() => {
 const MULTI_SOURCE_TARGET_TIME_BUDGET_MS = 20 * 60_000;
 const DISCOVERY_STALL_STEP_WINDOW = MAX_DISCOVERY_AGENT_NO_PROGRESS_STEPS;
 const RESUME_STALENESS_FLUSH_MS = 2 * 60_000;
-const DISCOVERY_SAVE_COALESCE_MS = 250;
 /** Saved jobs a search's setup prepares per event-loop turn. */
 const SETUP_JOBS_PER_TURN = 50;
 /** Postings a source's final pass triages and merges per event-loop turn. */
@@ -266,8 +274,12 @@ async function mapInTurns<T, R>(
   perTurn = FINAL_PASS_POSTINGS_PER_TURN,
 ): Promise<R[]> {
   const mapped: R[] = [];
+  let turnStarted = performance.now();
   for (const [position, item] of items.entries()) {
-    if (position % perTurn === 0) await yieldToEventLoop();
+    if (position % perTurn === 0 || performance.now() - turnStarted >= 8) {
+      await yieldToEventLoop();
+      turnStarted = performance.now();
+    }
     mapped.push(map(item));
   }
   return mapped;
@@ -299,13 +311,26 @@ const CHECKPOINT_RESUME_HEARTBEAT_REVISIONS = 8;
 const AGENT_RUNTIME_UNAVAILABLE_WARNING =
   "The bounded browser agent runtime is unavailable for this source; live collection fell back to direct discovery.";
 
-function applySavedJobDelta(
+export function applySavedJobDelta(
   currentJob: SavedJob,
   baselineJob: SavedJob,
   intendedJob: SavedJob,
 ): SavedJob {
   const changedFields: Record<string, unknown> = {};
   for (const key of Object.keys(intendedJob) as Array<keyof SavedJob>) {
+    const intendedDescriptor = Object.getOwnPropertyDescriptor(
+      intendedJob,
+      key,
+    );
+    const baselineDescriptor = Object.getOwnPropertyDescriptor(
+      baselineJob,
+      key,
+    );
+    if (
+      intendedDescriptor?.get &&
+      intendedDescriptor.get === baselineDescriptor?.get
+    )
+      continue;
     if (!isDeepStrictEqual(intendedJob[key], baselineJob[key])) {
       if (key === "planAssessments") {
         const assessments = { ...currentJob.planAssessments };
@@ -325,8 +350,31 @@ function applySavedJobDelta(
     }
   }
 
-  // The repository validates this returned row at its write boundary.
-  return { ...currentJob, ...changedFields };
+  const next = copyView(currentJob, changedFields);
+  const fingerprints = DISCOVERY_FINGERPRINT_FIELDS.some((field) => field in changedFields)
+    ? null
+    : readPreparedDiscoveryFingerprints(currentJob);
+  if (fingerprints) {
+    const bodySalaryRange = readPreparedBodySalaryRange(currentJob);
+    writeDiscoveryPreparation(next, {
+      fingerprints: { owner: next, value: fingerprints },
+      ...(bodySalaryRange !== undefined ? { bodySalaryRange } : {}),
+    });
+    return Object.freeze(next);
+  }
+  let bodySalaryRange = readPreparedBodySalaryRange(next);
+  if (bodySalaryRange === undefined) {
+    const intendedRange = readPreparedBodySalaryRange(intendedJob);
+    if (
+      intendedRange !== undefined &&
+      next.description === intendedJob.description
+    )
+      bodySalaryRange = intendedRange;
+  }
+  createDiscoveryListingFingerprints(next);
+  if (bodySalaryRange !== undefined)
+    writeDiscoveryPreparation(next, { bodySalaryRange });
+  return next;
 }
 
 /** Inspection counts need identity facts, not complete retained provider postings. */
@@ -723,8 +771,18 @@ function createInitialRunRecord(input: {
   previousRuns?: readonly DiscoveryRunRecord[];
   searchRequest?: JobFinderSearchRequest;
 }): DiscoveryRunRecord {
-  return DiscoveryRunRecordSchema.parse({
+  const emptyDigest = () => ({
+    new: 0,
+    unchanged: 0,
+    changed: 0,
+    reactivated: 0,
+    inactive: 0,
+    known: 0,
+    skipped: 0,
+  });
+  return {
     id: input.id,
+    runPhase: null,
     campaignId: input.campaignId,
     state: "running",
     scope: input.scope,
@@ -765,6 +823,8 @@ function createInitialRunRecord(input: {
       duplicatesMerged: 0,
       invalidSkipped: 0,
       warning: null,
+      encounteredJobIds: [],
+      changeDigest: emptyDigest(),
       compactionState: null,
       compactionUsedFallbackTrigger: false,
       timing: null,
@@ -790,17 +850,20 @@ function createInitialRunRecord(input: {
       outcome: "running",
       browserCloseout: null,
       timing: null,
+      report: null,
+      sourceHealth: [],
+      warnings: [],
+      changeDigest: emptyDigest(),
     },
-  });
+  };
 }
 
 function updateRunSummary(
   run: DiscoveryRunRecord,
   patch: Partial<DiscoveryRunRecord["summary"]>,
 ): DiscoveryRunRecord {
-  // This is the service-owned run accumulator. The repository validates the
-  // changed metadata when it commits; reparsing here copied its full activity
-  // and checkpoint history on every summary increment.
+  // This is the service-owned run accumulator. Reparsing it copied its full
+  // activity and checkpoint history on every summary increment.
   return {
     ...run,
     summary: {
@@ -971,7 +1034,7 @@ export function resolvePostingProducingTarget(
 
 function normalizeCollectedCheckpointPosting(posting: JobPosting): JobPosting {
   const detailQuality = assessJobPostingDetailQuality(posting);
-  return JobPostingSchema.parse({
+  return prepareDiscoveryPosting({
     ...posting,
     detailQuality,
     listingDetailCapture: deriveListingDetailCapture({
@@ -1589,7 +1652,7 @@ export function createWorkspaceDiscoveryMethods(
           previous)
         : previous;
       return assessmentSession.assess(
-        { ...posting, matchAssessment: assessment ?? null },
+        copyView(posting, { matchAssessment: assessment ?? null }),
         runJudgments.get(toSavedJobId(posting)) ?? assessment?.judgment ?? null,
       );
     };
@@ -1641,25 +1704,6 @@ export function createWorkspaceDiscoveryMethods(
       throw new Error(DISCOVERY_NO_JOB_SITES_MESSAGE);
     }
 
-    // Revalidate the local inventory before consulting the discovery ledger.
-    // Exact scorer, profile/preference, and posting fingerprints reuse a
-    // persisted assessment; any relevant change misses safely and recomputes.
-    // Thousands of saved jobs are checked a slice per turn: in one go the
-    // search's first seconds froze the window.
-    await warmDiscoveryInventory(startingSavedJobs, executionSignal).catch(
-      (error: unknown) => {
-        if (executionSignal.aborted) {
-          clearActiveController();
-          throw error;
-        }
-        // A reader failing cannot strand the search before its run exists.
-        // Unprepared rows retain the existing main-process calculation path.
-        console.warn(
-          "[Job Finder] Inventory preparation fell back to main.",
-          error,
-        );
-      },
-    );
     let workingSavedJobs = await mapInTurns(
       startingSavedJobs,
       (job) => {
@@ -1669,7 +1713,7 @@ export function createWorkspaceDiscoveryMethods(
         );
         return matchAssessment === job.matchAssessment
           ? job
-          : { ...job, matchAssessment };
+          : Object.freeze(copyView(job, { matchAssessment }));
       },
       SETUP_JOBS_PER_TURN,
     );
@@ -1750,14 +1794,17 @@ export function createWorkspaceDiscoveryMethods(
     // later are added as they come.
     const inspectionIdentityIndex = createJobIdentityIndex<
       JobIdentityInput & { id: string }
-    >([], (value) =>
-      Array.isArray((value as Partial<SavedJob>).provenance)
-        ? toSightingIdentityInput(value as SavedJob)
-        : { ...value, matchAcrossSources: true },
+    >(
+      [],
+      (value) =>
+        Array.isArray((value as Partial<SavedJob>).provenance)
+          ? toSightingIdentityInput(value as SavedJob)
+          : { ...value, matchAcrossSources: true },
+      undefined,
     );
     for (const [position, job] of [
-      ...startingSavedJobs,
-      ...startingDiscovery.pendingDiscoveryJobs,
+      ...workingSavedJobs,
+      ...workingPendingJobs,
     ].entries()) {
       if (position > 0 && position % SETUP_JOBS_PER_TURN === 0)
         await yieldToEventLoop();
@@ -1798,12 +1845,11 @@ export function createWorkspaceDiscoveryMethods(
       const cached = storedJobs.get(job);
       if (cached) return cached;
       const stored = withPlanAssessment(
-        {
-          ...job,
+        copyView(job, {
           matchAssessment:
             originalJobsById.get(job.id)?.matchAssessment ??
             job.matchAssessment,
-        },
+        }),
         assessmentPlanId,
         job.matchAssessment,
       );
@@ -1821,30 +1867,19 @@ export function createWorkspaceDiscoveryMethods(
       startingDiscovery.pendingDiscoveryJobs.map((job) => job.id),
     );
 
-    const warmFeedbackLedger = async () => {
-      if (!ctx.repository.readDiscoveryStateForRun) return;
-      const state = await ctx.repository.readDiscoveryStateForRun();
-      await warmDiscoveryLedgerIndex(state.discoveryLedger);
-    };
     const savedJobWriter = createDiscoverySavedJobWriter({
       persistedJobs: startingSavedJobs,
       toStoredJob: storedJob,
       merge: applySavedJobDelta,
       commit: async (input) => {
         await ctx.repository.commitSavedJobDelta(input);
-        if (input.updateDiscoveryState)
-          await warmFeedbackLedger().catch(() => undefined);
       },
       persistDiscovery: async (update) => {
         await ctx.persistDiscoveryState(update);
-        await warmFeedbackLedger().catch(() => undefined);
       },
       // A search of many sources saves several times a second; those saves
       // share a transaction. A small search saves each one at once.
-      coalesceMs:
-        selectedTargets.length >= DISCOVERY_SAVE_COALESCE_MIN_SOURCES
-          ? DISCOVERY_SAVE_COALESCE_MS
-          : 0,
+      coalesce: selectedTargets.length >= DISCOVERY_SAVE_COALESCE_MIN_SOURCES,
     });
     const touchSavedJob = (job: SavedJob): SavedJob => {
       touchedSavedJobIds.add(job.id);
@@ -2670,14 +2705,29 @@ export function createWorkspaceDiscoveryMethods(
           // duplicate-checkpoint heartbeat.
           persistedCheckpointRevision: null as number | null,
         };
+        const producingTargets = new Map<
+          string | null,
+          ReturnType<typeof resolvePostingProducingTarget>
+        >();
+        const producingTargetFor = (
+          posting: Pick<JobPosting, "producingPageUrl">,
+        ) => {
+          const key = posting.producingPageUrl ?? null;
+          let source = producingTargets.get(key);
+          if (!source) {
+            source = resolvePostingProducingTarget(
+              posting,
+              target,
+              enrichedPreferences.discovery.targets,
+            );
+            producingTargets.set(key, source);
+          }
+          return source;
+        };
         const sourceCountsFor = (
           posting: Pick<JobPosting, "producingPageUrl">,
         ): DiscoverySourceListingCounts => {
-          const source = resolvePostingProducingTarget(
-            posting,
-            target,
-            enrichedPreferences.discovery.targets,
-          );
+          const source = producingTargetFor(posting);
           let counts = checkpointState.sourceCounts.get(source.id);
           if (!counts) {
             counts = {
@@ -2731,6 +2781,7 @@ export function createWorkspaceDiscoveryMethods(
           skippedByLedger: number;
           skippedByTitleTriage: number;
         } => {
+          const startedAt = performance.now();
           const keptPostings: JobPosting[] = [];
           // Re-observations of identities already processed by an earlier
           // phase whose content changed (richer re-extractions), plus
@@ -2778,7 +2829,7 @@ export function createWorkspaceDiscoveryMethods(
             }
 
             checkpointState.inspectedCount += 1;
-            const posting = JobPostingSchema.parse(rawPosting);
+            const posting = rawPosting;
             const knownInspection = inspectionIdentityIndex.find({
               ...posting,
               matchAcrossSources: true,
@@ -2893,6 +2944,12 @@ export function createWorkspaceDiscoveryMethods(
 
           checkpointState.skippedByLedger += phaseSkippedByLedger;
           checkpointState.skippedByTitleTriage += phaseSkippedByTitleTriage;
+          if (bookkeeping.hasSubscribers)
+            bookkeeping.publish({
+              phase: "triage",
+              rows: rawPostings.length,
+              ms: performance.now() - startedAt,
+            });
           return {
             keptPostings,
             keptUpgradePostings,
@@ -2910,6 +2967,7 @@ export function createWorkspaceDiscoveryMethods(
           jobsPersisted: number;
           jobsStaged: number;
         } => {
+          const startedAt = performance.now();
           // Greedy budget applies only to genuinely new identities: each
           // consumes one of the target's remaining slots. Upgrades of already
           // retained identities update existing saved/staged rows and consume
@@ -2968,11 +3026,7 @@ export function createWorkspaceDiscoveryMethods(
             mergeSeedJobs,
             budgetedPostings,
             (posting) => {
-              const producingTarget = resolvePostingProducingTarget(
-                posting,
-                target,
-                enrichedPreferences.discovery.targets,
-              );
+              const producingTarget = producingTargetFor(posting);
               return createDiscoveryProvenance({
                 targetId: producingTarget.id,
                 sourceLabel: producingTarget.label,
@@ -3023,19 +3077,19 @@ export function createWorkspaceDiscoveryMethods(
             ),
           );
 
-          const persistedSavedJobIds = new Set(
-            workingSavedJobs.map((job) => job.id),
-          );
+          const persistedSavedJobIds = settings.discoveryOnly
+            ? new Set(workingSavedJobs.map((job) => job.id))
+            : null;
           let jobsPersisted = 0;
           let jobsStaged = 0;
 
           if (settings.discoveryOnly) {
             const nextPendingJobs = mergeResult.mergedJobs.filter(
-              (job) => !persistedSavedJobIds.has(job.id),
+              (job) => !persistedSavedJobIds!.has(job.id),
             );
             workingSavedJobs = mergeResult.mergedJobs.filter(
               (job) =>
-                persistedSavedJobIds.has(job.id) &&
+                persistedSavedJobIds!.has(job.id) &&
                 !mergeResult.newJobs.some((newJob) => newJob.id === job.id),
             );
             workingPendingJobs = mergePendingJobs(
@@ -3048,7 +3102,7 @@ export function createWorkspaceDiscoveryMethods(
             jobsPersisted = mergeResult.newJobs.length;
           }
           for (const job of landedJobs.values()) {
-            if (settings.discoveryOnly && !persistedSavedJobIds.has(job.id)) {
+            if (settings.discoveryOnly && !persistedSavedJobIds!.has(job.id)) {
               touchedPendingJobIds.add(job.id);
             } else touchSavedJob(job);
           }
@@ -3061,11 +3115,7 @@ export function createWorkspaceDiscoveryMethods(
               // kept job read as "changed" when seen again, so each search
               // merged and rewrote every kept job of every board it read.
               posting: postingAsArrived.get(posting) ?? posting,
-              targetId: resolvePostingProducingTarget(
-                posting,
-                target,
-                enrichedPreferences.discovery.targets,
-              ).id,
+              targetId: producingTargetFor(posting).id,
               seenAt: new Date().toISOString(),
               status:
                 posting.detailQuality === "detail_enriched"
@@ -3093,6 +3143,12 @@ export function createWorkspaceDiscoveryMethods(
           checkpointState.duplicatesMerged += mergeResult.duplicatesMerged;
           checkpointState.invalidSkipped += mergeResult.invalidSkipped;
 
+          if (bookkeeping.hasSubscribers)
+            bookkeeping.publish({
+              phase: "merge",
+              rows: budgetedPostings.length,
+              ms: performance.now() - startedAt,
+            });
           return { budgetedPostings, mergeResult, jobsPersisted, jobsStaged };
         };
 
@@ -3200,19 +3256,17 @@ export function createWorkspaceDiscoveryMethods(
               for (const jobId of jobIds) attachedPlanJobIds.add(jobId);
               return;
             }
-            await ctx.repository.saveCampaignState(
-              JobSearchCampaignCollectionSchema.parse({
-                ...state,
-                campaigns: state.campaigns.map((candidate) =>
-                  candidate.id === campaignId
-                    ? {
-                        ...candidate,
-                        jobIds: [...candidate.jobIds, ...missing],
-                      }
-                    : candidate,
-                ),
-              }),
-            );
+            await ctx.repository.saveCampaignState({
+              ...state,
+              campaigns: state.campaigns.map((candidate) =>
+                candidate.id === campaignId
+                  ? {
+                      ...candidate,
+                      jobIds: [...candidate.jobIds, ...missing],
+                    }
+                  : candidate,
+              ),
+            });
             for (const jobId of jobIds) attachedPlanJobIds.add(jobId);
           });
         };
@@ -3735,9 +3789,7 @@ export function createWorkspaceDiscoveryMethods(
                     job.status === "archived"
                   ? "discovered"
                   : null;
-            return status
-              ? touchSavedJob(SavedJobSchema.parse({ ...job, status }))
-              : job;
+            return status ? touchSavedJob({ ...job, status }) : job;
           });
           jobsPutAwayByScreen.clear();
           jobsBroughtBackByScreen.clear();
@@ -4384,13 +4436,11 @@ export function createWorkspaceDiscoveryMethods(
           const winner = selectCanonicalSighting(job.provenance);
           let next = job;
           if (winner?.listingUrl && winner.listingUrl !== job.canonicalUrl) {
-            const routed = SavedJobSchema.parse(
-              applySightingRoute(job, winner),
-            );
-            next = SavedJobSchema.parse({
+            const routed = applySightingRoute(job, winner);
+            next = {
               ...routed,
               matchAssessment: assessDiscoveryPosting(routed),
-            });
+            };
             if (routed.canonicalUrl !== job.canonicalUrl) switchedCount += 1;
           }
           if (next !== originalById.get(job.id)) {
@@ -4606,22 +4656,23 @@ export function createWorkspaceDiscoveryMethods(
         touchedJobIds: Set<string>,
       ): SavedJob => {
         if (!runRetainedJobIds.has(job.id)) return job;
-        const salaryText = reconcileSalaryTextWithListingBody(
+        const salaryText = reconcileSalaryTextWithPreparedBody(
           job.salaryText,
-          job.description,
+          prepareBodySalaryRange(job),
+          () => job.description,
         );
         if (salaryText === job.salaryText) return job;
         correctedSalaryCount += 1;
         touchedJobIds.add(job.id);
-        const correctedJob = SavedJobSchema.parse({
+        const correctedJob: SavedJob = {
           ...job,
           salaryText,
-          normalizedCompensation: {},
-        });
-        return SavedJobSchema.parse({
+          normalizedCompensation: parseNormalizedCompensation(null),
+        };
+        return {
           ...correctedJob,
           matchAssessment: assessDiscoveryPosting(correctedJob),
-        });
+        };
       };
       // Each job's whole listing is searched for its pay; with thousands of
       // jobs that held main for a second, so it goes a slice per turn.
@@ -4683,15 +4734,15 @@ export function createWorkspaceDiscoveryMethods(
             }
             droppedSalaryCount += 1;
             touchedJobIds.add(job.id);
-            const sanitizedJob = SavedJobSchema.parse({
+            const sanitizedJob: SavedJob = {
               ...job,
               salaryText: null,
-              normalizedCompensation: {},
-            });
-            return SavedJobSchema.parse({
+              normalizedCompensation: parseNormalizedCompensation(null),
+            };
+            return {
               ...sanitizedJob,
               matchAssessment: assessDiscoveryPosting(sanitizedJob),
-            });
+            };
           };
           workingSavedJobs = workingSavedJobs.map((job) => {
             const next = sanitizeFurnitureSalary(job, touchedSavedJobIds);

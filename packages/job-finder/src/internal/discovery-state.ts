@@ -1,7 +1,5 @@
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
-  DiscoveryActivityEventSchema,
-  DiscoveryTargetExecutionSchema,
   isFinishedDiscoveryTargetExecutionState,
   type AgentDiscoveryProgress,
   type DiscoveryActivityEvent,
@@ -240,10 +238,15 @@ export function createDiscoveryEvent(
       | "sourceIntelligenceProvider"
     >,
 ): DiscoveryActivityEvent {
-  return DiscoveryActivityEventSchema.parse({
+  return {
     ...input,
+    waitReason: input.waitReason ?? null,
+    resolvedAdapterKind: input.resolvedAdapterKind ?? null,
+    collectionMethod: input.collectionMethod ?? null,
+    sourceIntelligenceProvider: input.sourceIntelligenceProvider ?? null,
+    terminalState: input.terminalState ?? null,
     id: `${input.runId}_${input.stage}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-  });
+  };
 }
 
 export function appendDiscoveryEvent(
@@ -266,12 +269,9 @@ export function appendDiscoveryEvent(
   // Discovery activity is persisted as a complete run history. This function
   // is called for every agent progress event, so cloning and reparsing the
   // entire history here turns a long run into quadratic work. The run is an
-  // owned mutable accumulator inside the discovery service; the repository
-  // still schema-validates and clones it at each persistence boundary, and
-  // final history is never compacted. Validate only the new event and append
-  // in place so each event remains an O(1) state update.
-  const parsedEvent = DiscoveryActivityEventSchema.parse(event);
-  run.activity.push(parsedEvent);
+  // owned mutable accumulator inside the discovery service. Keep the complete
+  // history and append each typed event in O(1).
+  run.activity.push(event);
   return run;
 }
 
@@ -295,11 +295,9 @@ export function updateTargetExecution(
 
   // Like appendDiscoveryEvent, this is an update on the discovery service's
   // owned accumulator. Avoid rebuilding and reparsing every target and every
-  // activity event for each checkpoint; the repository validates the complete
-  // run when it crosses the persistence boundary.
-  run.targetExecutions[targetIndex] = DiscoveryTargetExecutionSchema.parse(
-    updater(currentTarget),
-  );
+  // activity event for each checkpoint. Feed/model inputs are validated before
+  // the service creates this typed update.
+  run.targetExecutions[targetIndex] = updater(currentTarget);
   return run;
 }
 

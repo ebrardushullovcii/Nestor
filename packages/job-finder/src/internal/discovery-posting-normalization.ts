@@ -1,10 +1,10 @@
 import {
-  JobPostingSchema,
   deriveListingDetailCapture,
   type JobDiscoveryTarget,
   type JobPosting,
   type JobSource,
 } from "@nestor/contracts";
+import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
 import { assessJobPostingDetailQuality } from "./job-posting-detail-quality";
 import {
   normalizeListingText,
@@ -87,7 +87,7 @@ export function toProviderAwarePosting(input: {
   const normalizedDescription = normalizeListingText(input.posting.description);
   const detailQuality = assessJobPostingDetailQuality(input.posting);
 
-  return JobPostingSchema.parse({
+  return prepareDiscoveryPosting({
     ...input.posting,
     source: input.posting.source ?? input.adapterKind,
     discoveryMethod: input.discoveryMethod,

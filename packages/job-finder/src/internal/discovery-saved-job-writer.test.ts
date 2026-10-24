@@ -1,5 +1,6 @@
 import type { JobFinderDiscoveryState, SavedJob } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
+import { copyView } from "@nestor/core";
 import { describe, expect, test, vi } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import {
@@ -76,6 +77,32 @@ function harness(size: number) {
 }
 
 describe("discovery saved-job checkpoint writer", () => {
+  test("unchanged lazy detail versions are never opened to compare a checkpoint", async () => {
+    const baseline = createSeed().savedJobs[0]!;
+    const read = vi.fn(() => {
+      throw new Error("Untouched body was opened");
+    });
+    Object.defineProperty(baseline, "description", {
+      enumerable: true,
+      configurable: true,
+      get: read,
+    });
+    const intended = copyView(baseline, {});
+    const commit = vi.fn<JobFinderRepository["commitSavedJobDelta"]>(
+      async () => {},
+    );
+    const writer = createDiscoverySavedJobWriter({
+      persistedJobs: [baseline],
+      toStoredJob: (job) => job,
+      merge: (current) => current,
+      commit,
+      persistDiscovery: async () => {},
+    });
+    writer.stage(intended);
+    await writer.persist();
+    expect(read).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+  });
   test.each([3_000, 10_000])(
     "only reads and copies touched rows with %i saved jobs",
     async (size) => {
@@ -203,7 +230,7 @@ describe("discovery saved-job checkpoint writer", () => {
       merge: (current) => current,
       commit,
       persistDiscovery: () => Promise.resolve(),
-      coalesceMs: 5,
+      coalesce: true,
     });
     const step = (name: string) => (state: JobFinderDiscoveryState) => {
       applied.push(name);

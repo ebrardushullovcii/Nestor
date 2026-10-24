@@ -8,8 +8,6 @@ import {
   type DiscoveryFeedResult,
   type DiscoveryCpuTask,
   type DiscoveryCpuResult,
-  type DiscoveryInventoryPosting,
-  type DiscoveryInventoryPreparation,
 } from "@nestor/contracts";
 
 type Work = {
@@ -177,18 +175,6 @@ export function createDiscoveryCpuPool(
       );
       if (response.kind !== "feed")
         throw new Error("Unexpected feed reader response.");
-      return response.result;
-    },
-    async runInventory(
-      postings: DiscoveryInventoryPosting[],
-      signal?: AbortSignal,
-    ): Promise<DiscoveryInventoryPreparation[]> {
-      const response = await pool.runTask(
-        { kind: "inventory", postings },
-        signal,
-      );
-      if (response.kind !== "inventory")
-        throw new Error("Unexpected inventory reader response.");
       return response.result;
     },
   };

@@ -1,9 +1,9 @@
-import type {
-  DiscoveryFeedResult,
-  DiscoveryFeedTask,
-  JobPosting,
-  DiscoveryInventoryPosting,
-  DiscoveryInventoryPreparation,
+import {
+  readDiscoveryPreparation,
+  writeDiscoveryPreparation,
+  type DiscoveryFeedResult,
+  type DiscoveryFeedTask,
+  type JobPosting,
 } from "@nestor/contracts";
 
 export type DiscoveryFeedExecutor = (
@@ -12,45 +12,48 @@ export type DiscoveryFeedExecutor = (
 ) => Promise<DiscoveryFeedResult>;
 
 let executor: DiscoveryFeedExecutor | null = null;
-type DiscoveryInventoryExecutor = (
-  postings: DiscoveryInventoryPosting[],
-  signal?: AbortSignal,
-) => Promise<DiscoveryInventoryPreparation[]>;
-let inventoryExecutor: DiscoveryInventoryExecutor | null = null;
-export function setDiscoveryInventoryExecutor(
-  next: DiscoveryInventoryExecutor | null,
-): void {
-  inventoryExecutor = next;
-}
-export function getDiscoveryInventoryExecutor(): DiscoveryInventoryExecutor | null {
-  return inventoryExecutor;
-}
-const preparedPostings = new WeakMap<JobPosting, JobPosting>();
 
 export function rememberPreparedDiscoveryPosting(
   raw: JobPosting,
   prepared: JobPosting,
 ): void {
-  preparedPostings.set(raw, prepared);
+  writeDiscoveryPreparation(raw, {
+    normalizedPosting: prepared,
+    normalizedPostingSource: raw,
+  });
 }
 
 export function takePreparedDiscoveryPosting(
   raw: JobPosting,
 ): JobPosting | null {
-  const prepared = preparedPostings.get(raw) ?? null;
-  preparedPostings.delete(raw);
-  return prepared;
+  const preparation = readDiscoveryPreparation(raw);
+  return Object.isFrozen(raw) && preparation?.normalizedPostingSource === raw
+    ? (preparation.normalizedPosting ?? null)
+    : null;
 }
 
 export function carryPreparedDiscoveryPosting(
   before: JobPosting,
   after: JobPosting,
 ): JobPosting {
-  const prepared = preparedPostings.get(before);
-  if (prepared)
-    preparedPostings.set(after, {
+  const prepared = takePreparedDiscoveryPosting(before);
+  if (
+    prepared &&
+    [...new Set([...Object.keys(before), ...Object.keys(after)])].every(
+      (key) =>
+        key === "searchRejection" ||
+        Reflect.get(before, key) === Reflect.get(after, key),
+    )
+  ) {
+    rememberPreparedDiscoveryPosting(after, {
       ...prepared,
       searchRejection: after.searchRejection,
+    });
+    Object.freeze(after);
+  } else if (readDiscoveryPreparation(after)?.normalizedPosting)
+    writeDiscoveryPreparation(after, {
+      normalizedPosting: undefined,
+      normalizedPostingSource: undefined,
     });
   return after;
 }

@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
-import type {
-  DiscoveryPostingPreparation,
-  DiscoveryJobIdentityAlias,
+import {
+  readDiscoveryPreparation,
+  writeDiscoveryPreparation,
+  type DiscoveryCompactKeys,
+  type DiscoveryPreparedKeys,
+  type DiscoveryPreparedContent,
+  type DiscoveryPostingPreparation,
+  type DiscoveryJobIdentityAlias,
 } from "@nestor/contracts";
 
 import { normalizeText } from "./shared";
@@ -32,7 +37,7 @@ export type JobIdentityInput = {
   location?: string | null;
   description?: string | null;
   /** Private indexed evidence, inflated only to confirm a content-hash match. */
-  exactContent?: { digest: string; read(): string };
+  exactContent?: { digest: string; packed?: Uint8Array; read(): string };
   postedAt?: string | null;
   postedAtText?: string | null;
   /**
@@ -155,55 +160,25 @@ function normalizePostedDate(input: JobIdentityInput): string | null {
 
 const MIN_EXACT_CONTENT_IDENTITY_CHARACTERS = 200;
 const MIN_EXACT_CONTENT_IDENTITY_WORDS = 40;
-/**
- * Normalized descriptions by description text. Every identity lookup builds
- * the content alias of the job it looks for, and a search looks each posting
- * up several times (ledger, saved jobs, merge, landing); normalizing a whole
- * description each time was most of a big board's main-process time.
- */
-const listingContentIdentityMemo = new Map<string, string | null>();
-const LISTING_CONTENT_IDENTITY_MEMO_LIMIT = 500;
-
 function normalizeListingContentIdentity(
   description: string | null | undefined,
 ): string | null {
-  if (!description) {
-    return null;
-  }
-  const remembered = listingContentIdentityMemo.get(description);
-  if (remembered !== undefined) return remembered;
-  const normalized = computeListingContentIdentity(description);
-  if (listingContentIdentityMemo.size >= LISTING_CONTENT_IDENTITY_MEMO_LIMIT)
-    listingContentIdentityMemo.clear();
-  listingContentIdentityMemo.set(description, normalized);
-  return normalized;
+  return description ? computeListingContentIdentity(description) : null;
 }
 
 function digestListingContent(content: string): string {
   return createHash("sha256").update(content).digest("base64url");
 }
 
-function packListingContent(content: string) {
-  // zlib's result can be a small view of a much larger allocation. Retain
-  // and transfer only its bytes, rather than one whole slab per identity.
-  const packed = Uint8Array.from(deflateRawSync(content, { level: 1 }));
-  return Object.freeze({
-    digest: digestListingContent(content),
-    read: () => inflateRawSync(packed).toString(),
-  });
-}
-
 type PackedContent = DiscoveryPostingPreparation["content"];
-const preparedContent = new Map<string, PackedContent>();
 
-/** Transferred from the feed worker; the bounded memo also serves copied rows. */
 export function rememberPreparedListingContent(
-  description: string,
-  content: PackedContent,
+  posting: JobIdentityInput,
+  content: DiscoveryPreparedContent["value"],
 ): void {
-  if (preparedContent.size >= LISTING_CONTENT_IDENTITY_MEMO_LIMIT)
-    preparedContent.clear();
-  preparedContent.set(description, content);
+  writeDiscoveryPreparation(posting, {
+    content: { description: posting.description ?? "", value: content },
+  });
 }
 
 export function prepareListingContent(description: string): PackedContent {
@@ -216,30 +191,45 @@ export function prepareListingContent(description: string): PackedContent {
     : null;
 }
 
-function readPreparedContent(
-  input: JobIdentityInput,
-): JobIdentityInput["exactContent"] {
-  if (input.exactContent) return input.exactContent;
-  const content = input.description
-    ? preparedContent.get(input.description)
-    : null;
-  return content
-    ? {
-        digest: content.digest,
-        read: () => inflateRawSync(content.packed).toString(),
-      }
-    : undefined;
+export function readPackedListingContent(packed: Uint8Array): string {
+  return inflateRawSync(packed).toString();
 }
 
-/** Counting inspected identities must not retain every complete provider posting. */
+function readPreparedContent(
+  input: JobIdentityInput,
+): JobIdentityInput["exactContent"] | null {
+  if (input.exactContent) return input.exactContent;
+  const content = readDiscoveryPreparation(input)?.content;
+  if (!content || content.description !== (input.description ?? ""))
+    return undefined;
+  if (!content.value) return null;
+  const { digest, packed } = content.value;
+  const description = packed ? null : content.description;
+  return {
+    digest,
+    ...(packed ? { packed } : {}),
+    read: () =>
+      packed
+        ? inflateRawSync(packed).toString()
+        : normalizeListingContentIdentity(description)!,
+  };
+}
+
 export function compactJobIdentity(input: JobIdentityInput): JobIdentityInput {
-  const content =
-    readPreparedContent(input) ??
-    (() => {
-      const normalized = normalizeListingContentIdentity(input.description);
-      return normalized ? packListingContent(normalized) : undefined;
-    })();
-  return Object.freeze({
+  let source = input;
+  const prepared = readDiscoveryPreparation(source)?.content;
+  if (
+    readPreparedContent(source) === undefined ||
+    (prepared?.value && !prepared.value.packed && source.description)
+  ) {
+    if (!Object.isExtensible(source)) source = { ...source };
+    rememberPreparedListingContent(
+      source,
+      prepareListingContent(source.description ?? ""),
+    );
+  }
+  const content = readPreparedContent(source);
+  const compact: JobIdentityInput = {
     source: input.source,
     sourceJobId: input.sourceJobId,
     canonicalUrl: input.canonicalUrl,
@@ -258,7 +248,9 @@ export function compactJobIdentity(input: JobIdentityInput): JobIdentityInput {
       : null,
     matchAcrossSources: input.matchAcrossSources ?? false,
     ...(content ? { exactContent: content } : {}),
-  });
+  };
+  rememberPreparedJobIdentity(compact, prepareJobIdentity(source));
+  return Object.freeze(compact);
 }
 
 function computeListingContentIdentity(description: string): string | null {
@@ -339,16 +331,8 @@ export function hasEquivalentListingContentIdentity(
   left: JobIdentityInput,
   right: JobIdentityInput,
 ): boolean {
-  if (!hasCompatibleSeniority(left, right)) return false;
-  const leftContent =
-    readPreparedContent(left)?.read() ??
-    normalizeListingContentIdentity(left.description);
-  const rightContent =
-    readPreparedContent(right)?.read() ??
-    normalizeListingContentIdentity(right.description);
-  if (!leftContent || leftContent !== rightContent) {
+  if (!hasCompatibleSeniority(left, right) || !hasCompatibleTitles(left, right))
     return false;
-  }
   const leftCompany = normalizeText(left.company ?? "");
   const rightCompany = normalizeText(right.company ?? "");
   const leftLocation = normalizeText(left.location ?? "");
@@ -358,10 +342,47 @@ export function hasEquivalentListingContentIdentity(
     leftCompany !== rightCompany ||
     !leftLocation ||
     leftLocation !== rightLocation
-  ) {
+  )
     return false;
+  if (
+    !left.exactContent &&
+    !right.exactContent &&
+    left.description &&
+    left.description === right.description
+  ) {
+    // Equal raw bodies have equal normalized bodies. Keep the same minimum
+    // evidence check without inflating two copies of text we already hold.
+    const leftPrepared = readPreparedContent(left);
+    const prepared =
+      leftPrepared === undefined ? readPreparedContent(right) : leftPrepared;
+    if (
+      !(prepared === undefined
+        ? normalizeListingContentIdentity(left.description)
+        : prepared)
+    )
+      return false;
+  } else {
+    const leftPrepared = readPreparedContent(left);
+    const rightPrepared = readPreparedContent(right);
+    // Equal compressed bytes decode to exactly equal text. This is the same
+    // collision proof without allocating/inflating two whole listing bodies.
+    if (
+      leftPrepared?.packed &&
+      rightPrepared?.packed &&
+      Buffer.compare(leftPrepared.packed, rightPrepared.packed) === 0
+    )
+      return true;
+    const leftContent =
+      leftPrepared === undefined
+        ? normalizeListingContentIdentity(left.description)
+        : leftPrepared?.read();
+    const rightContent =
+      rightPrepared === undefined
+        ? normalizeListingContentIdentity(right.description)
+        : rightPrepared?.read();
+    if (!leftContent || leftContent !== rightContent) return false;
   }
-  return hasCompatibleTitles(left, right);
+  return true;
 }
 
 export function buildJobIdentityAliases(
@@ -455,9 +476,10 @@ export function buildJobIdentityAliases(
   }
 
   const prepared = readPreparedContent(input);
-  const exactContent = prepared
-    ? null
-    : normalizeListingContentIdentity(input.description);
+  const exactContent =
+    prepared === undefined
+      ? normalizeListingContentIdentity(input.description)
+      : null;
   const contentCompany = input.company ? normalizeText(input.company) : "";
   const contentLocation = input.location ? normalizeText(input.location) : "";
   if ((exactContent || prepared) && contentCompany && contentLocation) {
@@ -648,11 +670,9 @@ function readAliasBasis(input: JobIdentityInput): AliasBasis {
     input.title,
     input.company,
     input.location,
-    // The alias memo needs change detection, never another retained listing
-    // body. SHA-256 also keeps its keys bounded for very large descriptions.
-    input.description == null
-      ? input.description
-      : createHash("sha256").update(input.description).digest("base64url"),
+    // Owned postings already retain this string. Comparing it directly avoids
+    // hashing the complete body again for each lookup.
+    input.description,
     input.exactContent?.digest,
     input.postedAt,
     input.postedAtText,
@@ -678,70 +698,80 @@ export function hasSameJobIdentity(
   );
 }
 
-/**
- * Aliases already built for an indexed value. A search builds several
- * indexes over every saved job at each checkpoint, and normalizing each
- * job's whole description every time took seconds at a few thousand jobs.
- * Entries go with their values, and a value whose identity fields changed
- * gets its aliases built again.
- */
-const indexedAliasCache = new WeakMap<
-  object,
-  { basis: AliasBasis; aliases: readonly JobIdentityAlias[] }[]
->();
-// Different immutable views of one listing have the same aliases. Peers are
-// weak: this hint cannot keep an old job, its body or its run alive.
-const aliasPeers = new Map<string, WeakRef<object>>();
-const ALIAS_PEER_LIMIT = 20_000;
+type CompactIdentity = DiscoveryPreparedKeys & { basis: AliasBasis };
+// Only foreign frozen inputs cannot carry their own preparation.
+const frozenIdentities = new WeakMap<JobIdentityInput, CompactIdentity>();
+const aliasMetadata: Record<number, Omit<JobIdentityAlias, "key">> = {
+  10: { kind: "provider_posting_id", confidence: "strong", priority: 10 },
+  11: { kind: "provider_posting_id", confidence: "strong", priority: 11 },
+  20: { kind: "source_posting_id", confidence: "strong", priority: 20 },
+  21: { kind: "source_posting_id", confidence: "corroborating", priority: 21 },
+  30: { kind: "employer_application_url", confidence: "strong", priority: 30 },
+  40: { kind: "canonical_listing_url", confidence: "strong", priority: 40 },
+  41: { kind: "canonical_listing_url", confidence: "strong", priority: 41 },
+  50: { kind: "exact_listing_content", confidence: "strong", priority: 50 },
+  60: {
+    kind: "cross_source_listing_facts",
+    confidence: "strong",
+    priority: 60,
+  },
+  100: {
+    kind: "corroborated_listing_facts",
+    confidence: "possible",
+    priority: 100,
+  },
+};
 
-/** Aliases were prepared from these exact immutable facts by the feed worker. */
-export function rememberPreparedJobIdentity(
-  posting: JobIdentityInput,
-  aliases: DiscoveryPostingPreparation["aliases"],
-  input: JobIdentityInput = posting,
-): void {
-  indexedAliasCache.set(posting, [
-    {
-      basis: readAliasBasis({ ...input, matchAcrossSources: false }),
-      aliases: aliases.local,
-    },
-    {
-      basis: readAliasBasis({ ...input, matchAcrossSources: true }),
-      aliases: aliases.acrossSources,
-    },
-  ]);
-  const peerKey = `${posting.source}\u0000${posting.sourceJobId}\u0000${posting.canonicalUrl}`;
-  if (aliasPeers.size >= ALIAS_PEER_LIMIT)
-    aliasPeers.delete(aliasPeers.keys().next().value!);
-  aliasPeers.set(peerKey, new WeakRef(posting));
+function identityBasis(input: JobIdentityInput): AliasBasis {
+  const basis = [...readAliasBasis(input)];
+  basis[14] = false; // Both source scopes are prepared together.
+  return basis;
 }
 
-function readIndexedAliases(
-  value: object,
+export function rememberPreparedJobIdentity(
   input: JobIdentityInput,
-): readonly JobIdentityAlias[] {
-  const basis = readAliasBasis(input);
-  const entries = indexedAliasCache.get(value);
-  const cached = entries?.find((entry) => sameAliasBasis(entry.basis, basis));
-  if (cached) return cached.aliases;
-  const peerKey = `${input.source}\u0000${input.sourceJobId}\u0000${input.canonicalUrl}`;
-  const peer = aliasPeers.get(peerKey)?.deref();
-  const peerEntry = peer
-    ? indexedAliasCache
-        .get(peer)
-        ?.find((entry) => sameAliasBasis(entry.basis, basis))
-    : undefined;
-  const aliases = peerEntry?.aliases ?? buildJobIdentityAliases(input);
-  // One value is indexed with and without cross-source matching.
-  indexedAliasCache.set(value, [
-    { basis, aliases },
-    ...(entries ?? []).slice(0, 1),
-  ]);
-  aliasPeers.delete(peerKey);
-  if (aliasPeers.size >= ALIAS_PEER_LIMIT)
-    aliasPeers.delete(aliasPeers.keys().next().value!);
-  aliasPeers.set(peerKey, new WeakRef(value));
-  return aliases;
+  keys: DiscoveryPreparedKeys,
+): void {
+  const identity = { ...keys, basis: identityBasis(input) };
+  if (!writeDiscoveryPreparation(input, { identity }))
+    frozenIdentities.set(input, identity);
+}
+
+export function prepareJobIdentity(
+  input: JobIdentityInput,
+): DiscoveryPreparedKeys {
+  const cached =
+    readDiscoveryPreparation(input)?.identity ?? frozenIdentities.get(input);
+  const basis = identityBasis(input);
+  if (cached && sameAliasBasis(cached.basis, basis)) return cached;
+  if (readPreparedContent(input) === undefined && input.description) {
+    const normalized = normalizeListingContentIdentity(input.description);
+    rememberPreparedListingContent(
+      input,
+      normalized ? { digest: digestListingContent(normalized) } : null,
+    );
+  }
+  const aliases = buildJobIdentityAliases({
+    ...input,
+    matchAcrossSources: true,
+  });
+  const pack = (values: readonly JobIdentityAlias[]): DiscoveryCompactKeys => ({
+    keys: values.map((alias) => alias.key),
+    priorities: values.map((alias) => alias.priority),
+  });
+  const keys = {
+    local: pack(
+      aliases.filter((alias) => alias.kind !== "cross_source_listing_facts"),
+    ),
+    acrossSources: pack(aliases),
+  };
+  rememberPreparedJobIdentity(input, keys);
+  return keys;
+}
+
+function readCompactIdentity(input: JobIdentityInput): DiscoveryCompactKeys {
+  const keys = prepareJobIdentity(input);
+  return input.matchAcrossSources ? keys.acrossSources : keys.local;
 }
 
 export function createJobIdentityIndex<T extends object>(
@@ -749,43 +779,64 @@ export function createJobIdentityIndex<T extends object>(
   selectIdentity: (value: T) => JobIdentityInput,
   include?: (value: T) => boolean,
 ): JobIdentityIndex<T> {
-  const valuesByAlias = new Map<string, Set<T>>();
-  const aliasesByValue = new Map<T, readonly JobIdentityAlias[]>();
+  // Most keys identify one row. Keep a number there, and allocate a set only
+  // for real collisions. Rich alias objects exist only while a query runs.
+  const valuesByAlias = new Map<string, number | Set<number>>();
+  const tokens = new WeakMap<T, number>();
+  const valuesByToken = new Map<
+    number,
+    { value: T; keys: readonly string[] }
+  >();
+  let nextToken = 0;
   const matchesFor = (key: string) => {
-    const matches = valuesByAlias.get(key);
-    return include && matches ? new Set([...matches].filter(include)) : matches;
+    const found = valuesByAlias.get(key);
+    if (found === undefined) return undefined;
+    const matches = new Set<T>();
+    for (const token of typeof found === "number" ? [found] : found) {
+      const value = valuesByToken.get(token)?.value;
+      if (value && (!include || include(value))) matches.add(value);
+    }
+    return matches;
   };
 
   const add = (value: T): void => {
-    const aliases = readIndexedAliases(value, selectIdentity(value));
-    aliasesByValue.set(value, aliases);
-    for (const alias of aliases) {
-      const matches = valuesByAlias.get(alias.key);
-      if (matches) {
-        matches.add(value);
-      } else {
-        valuesByAlias.set(alias.key, new Set([value]));
-      }
+    const token = tokens.get(value) ?? ++nextToken;
+    tokens.set(value, token);
+    const keys = readCompactIdentity(selectIdentity(value)).keys;
+    valuesByToken.set(token, { value, keys });
+    for (const key of keys) {
+      const found = valuesByAlias.get(key);
+      if (found === undefined) valuesByAlias.set(key, token);
+      else if (typeof found === "number") {
+        if (found !== token) valuesByAlias.set(key, new Set([found, token]));
+      } else found.add(token);
     }
   };
 
   const remove = (value: T): void => {
-    const aliases = aliasesByValue.get(value) ?? [];
-    for (const alias of aliases) {
-      const matches = valuesByAlias.get(alias.key);
-      matches?.delete(value);
-      if (matches?.size === 0) {
-        valuesByAlias.delete(alias.key);
+    const token = tokens.get(value);
+    if (token === undefined) return;
+    for (const key of valuesByToken.get(token)?.keys ?? []) {
+      const found = valuesByAlias.get(key);
+      if (typeof found === "number") {
+        if (found === token) valuesByAlias.delete(key);
+      } else if (found) {
+        found.delete(token);
+        if (found.size === 1)
+          valuesByAlias.set(key, found.values().next().value!);
+        else if (found.size === 0) valuesByAlias.delete(key);
       }
     }
-    aliasesByValue.delete(value);
+    valuesByToken.delete(token);
+    tokens.delete(value);
   };
 
   const resolve = (identity: JobIdentityInput): JobIdentityResolution<T> => {
-    // A query copy can borrow its worker-prepared peer's aliases too. Every
-    // identity field is checked against the cached basis, including mutable
-    // queries: edits invalidate the hint before a match is considered.
-    const aliases = readIndexedAliases(identity, identity);
+    const compact = readCompactIdentity(identity);
+    const aliases = compact.keys.map((key, position) => ({
+      key,
+      ...aliasMetadata[compact.priorities[position]!]!,
+    }));
     // A URL still matches when corrected card facts have no indexed alias.
     // Check every known alias before selecting it: an alias naming another
     // posting must not attach that posting's history or activity to this one.

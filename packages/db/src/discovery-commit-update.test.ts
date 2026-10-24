@@ -64,17 +64,6 @@ async function expectCommitDiscoveryStateUpdateParity(
     expect(await repository.getDiscoveryState()).toEqual(secondCommit);
 
     await expect(
-      repository.commitDiscoveryStateUpdate(
-        (current) =>
-          ({
-            ...current,
-            runState: "not-a-run-state",
-          }) as unknown as JobFinderDiscoveryState,
-      ),
-    ).rejects.toThrow();
-    expect(await repository.getDiscoveryState()).toEqual(secondCommit);
-
-    await expect(
       repository.commitDiscoveryStateUpdate((current) => {
         // @ts-expect-error Exercise a caller that ignores the borrowed-state contract.
         current.runState = "cancelled";
@@ -182,11 +171,9 @@ async function expectPairedSavedJobDiscoveryDeltaParity(
         upserts: [
           createSavedJob({ id: "job_invalid", sourceJobId: "target_invalid" }),
         ],
-        updateDiscoveryState: (current) =>
-          ({
-            ...current,
-            runState: "not-a-run-state",
-          }) as unknown as JobFinderDiscoveryState,
+        updateDiscoveryState: () => {
+          throw new Error("typed update failed");
+        },
       }),
     ).rejects.toThrow();
 
@@ -562,9 +549,7 @@ describe("file repository cross-handle discovery concurrency", () => {
   });
 
   test("singleton revision increments only for applied discovery commits", async () => {
-    const temp = await createTempRepository(
-      "nestor-db-discovery-revision-",
-    );
+    const temp = await createTempRepository("nestor-db-discovery-revision-");
     try {
       const repository = await temp.createRepository();
       try {
@@ -598,11 +583,9 @@ describe("file repository cross-handle discovery concurrency", () => {
                 sourceJobId: "target_revision_rollback",
               }),
             ],
-            updateDiscoveryState: (current) =>
-              ({
-                ...current,
-                runState: "not-a-run-state",
-              }) as unknown as JobFinderDiscoveryState,
+            updateDiscoveryState: () => {
+              throw new Error("typed update failed");
+            },
           }),
         ).rejects.toThrow();
 
@@ -692,9 +675,7 @@ describe("incremental per-run discovery appends", () => {
       updateDiscoveryState: (current) => ({
         ...current,
         discoveryLedger: [
-          ...current.discoveryLedger.filter(
-            (entry) => entry.id !== "ledger_2",
-          ),
+          ...current.discoveryLedger.filter((entry) => entry.id !== "ledger_2"),
           createLedgerEntry("ledger_2"),
         ],
       }),

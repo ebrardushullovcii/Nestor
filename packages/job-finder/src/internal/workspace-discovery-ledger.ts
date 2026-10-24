@@ -1,5 +1,8 @@
 import {
-  DiscoveryLedgerEntrySchema,
+  writeDiscoveryPreparation,
+  readDiscoveryPreparation,
+  readPreparedDiscoveryFingerprints,
+  DISCOVERY_FINGERPRINT_FIELDS,
   type DiscoveryLedgerEntry,
   type DiscoveryListingFingerprints,
   type DiscoveryTitleTriageOutcome,
@@ -77,40 +80,32 @@ function createVersionOneFingerprint(value: unknown): string {
   return `v1_${fnv1a64(serialized)}`;
 }
 
-const preparedFingerprints = new WeakMap<
+// Only a foreign frozen input needs a fallback: owned postings carry this slot.
+const frozenFingerprints = new WeakMap<
   object,
-  DiscoveryListingFingerprints
+  { basis: DiscoveryFingerprintPosting; value: DiscoveryListingFingerprints }
 >();
-const preparedPostings = new Map<string, WeakRef<JobPosting>>();
-const fingerprintFieldSet: Record<keyof DiscoveryFingerprintPosting, true> = {
-  applicationUrl: true,
-  title: true,
-  company: true,
-  location: true,
-  workMode: true,
-  applyPath: true,
-  easyApplyEligible: true,
-  postedAt: true,
-  postedAtText: true,
-  providerUpdatedAt: true,
-  salaryText: true,
-  employmentType: true,
-  department: true,
-  team: true,
-  detailQuality: true,
-  summary: true,
-  description: true,
-  keySkills: true,
-  responsibilities: true,
-  minimumQualifications: true,
-  preferredQualifications: true,
-  seniority: true,
-  screeningHints: true,
-  benefits: true,
-};
-const fingerprintFields = Object.keys(fingerprintFieldSet) as Array<
-  keyof DiscoveryFingerprintPosting
->;
+const fingerprintFields = DISCOVERY_FINGERPRINT_FIELDS;
+
+function memoFingerprints(
+  posting: DiscoveryFingerprintPosting,
+  fingerprints: DiscoveryListingFingerprints,
+): void {
+  const basis = Object.fromEntries(
+    fingerprintFields.map((field) => {
+      const value = posting[field];
+      return [
+        field,
+        value && typeof value === "object" && !Object.isFrozen(value)
+          ? structuredClone(value)
+          : value,
+      ];
+    }),
+  ) as DiscoveryFingerprintPosting;
+  const prepared = { basis, value: { ...fingerprints } };
+  if (!writeDiscoveryPreparation(posting, { fingerprints: prepared }))
+    frozenFingerprints.set(posting, prepared);
+}
 
 /** Only owned worker results are frozen and eligible for this memo. */
 export function rememberDiscoveryListingFingerprints(
@@ -122,32 +117,27 @@ export function rememberDiscoveryListingFingerprints(
     for (const child of Object.values(value)) freeze(child);
     Object.freeze(value);
   };
+  memoFingerprints(posting, fingerprints);
   freeze(posting);
-  preparedFingerprints.set(posting, fingerprints);
-  if (preparedPostings.size >= 2_000) preparedPostings.clear();
-  preparedPostings.set(posting.canonicalUrl, new WeakRef(posting));
 }
 
 export function createDiscoveryListingFingerprints(
   posting: DiscoveryFingerprintPosting,
 ): DiscoveryListingFingerprints {
-  const prepared = preparedFingerprints.get(posting);
-  if (prepared) return { ...prepared };
-  // Schema parsing and triage create owned copies. Reuse the worker's digest
-  // only when every fingerprint input still equals its frozen source.
-  const source =
-    "canonicalUrl" in posting && typeof posting.canonicalUrl === "string"
-      ? preparedPostings.get(posting.canonicalUrl)?.deref()
-      : undefined;
-  if (
-    source &&
-    fingerprintFields.every((field) =>
-      isDeepStrictEqual(source[field], posting[field]),
-    )
-  ) {
-    const fingerprints = preparedFingerprints.get(source);
-    if (fingerprints) return { ...fingerprints };
+  const carried = readPreparedDiscoveryFingerprints(posting);
+  if (carried) {
+    const owner = readDiscoveryPreparation(posting)?.fingerprints?.owner;
+    if (owner && owner !== posting) memoFingerprints(posting, carried);
+    return { ...carried };
   }
+  const frozen = frozenFingerprints.get(posting);
+  if (
+    frozen &&
+    fingerprintFields.every((field) =>
+      isDeepStrictEqual(frozen.basis[field], posting[field]),
+    )
+  )
+    return { ...frozen.value };
   const card = createVersionOneFingerprint({
     applicationUrl: normalizeFingerprintText(posting.applicationUrl),
     title: normalizeFingerprintText(posting.title),
@@ -187,12 +177,14 @@ export function createDiscoveryListingFingerprints(
       })
     : null;
 
-  return {
-    version: 1,
+  const fingerprints = {
+    version: 1 as const,
     card,
     detail,
     material: createVersionOneFingerprint({ card, detail }),
   };
+  memoFingerprints(posting, fingerprints);
+  return fingerprints;
 }
 
 export type DiscoveryFreshnessClassification =
@@ -555,7 +547,7 @@ export function buildDiscoveryLedgerEntry(
       ? (existingEntry?.fingerprints ?? incomingFingerprints)
       : incomingFingerprints;
 
-  return DiscoveryLedgerEntrySchema.parse({
+  return {
     id: existingEntry?.id ?? createUniqueId("discovery_ledger"),
     canonicalUrl: normalizeLedgerUrl(input.posting.canonicalUrl),
     applicationUrl:
@@ -599,7 +591,7 @@ export function buildDiscoveryLedgerEntry(
       input.listingScreen !== undefined
         ? input.listingScreen
         : (existingEntry?.listingScreen ?? null),
-  });
+  };
 }
 
 export function markSavedJobStatusInLedger(input: {
@@ -771,11 +763,11 @@ export function applyInactiveLedgerMarks(input: {
       return entry;
     }
 
-    return DiscoveryLedgerEntrySchema.parse({
+    return {
       ...entry,
-      latestStatus: "inactive",
+      latestStatus: "inactive" as const,
       inactiveAt: input.occurredAt,
-    });
+    };
   });
 }
 

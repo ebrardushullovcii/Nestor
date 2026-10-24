@@ -155,8 +155,9 @@ describe("workspace campaign and activity controls", () => {
 
     await workspaceService.setActivityControl({ paused: false });
     expect((await repository.listApplyRuns())[0]?.id).toBe(before.id);
+    const aborted = expect(firstRun).rejects.toThrow(/aborted/i);
     await workspaceService.cancelApplyRun(before.id);
-    await expect(firstRun).rejects.toThrow(/aborted/i);
+    await aborted;
   });
 
   test("deduplicates and aborts a direct copilot browser run when activity pauses", async () => {

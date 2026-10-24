@@ -483,10 +483,20 @@ export function reconcileSalaryTextWithListingBody(
   salaryText: string | null | undefined,
   description: string,
 ): string | null {
-  const stated = extractSalaryRangeFromListingBody(description);
+  return reconcileSalaryTextWithPreparedBody(
+    salaryText, extractSalaryRangeFromListingBody(description), () => description,
+  );
+}
+
+/** Same reconciliation; prepared text avoids another parse and unused body read. */
+export function reconcileSalaryTextWithPreparedBody(
+  salaryText: string | null | undefined,
+  stated: string | null,
+  readDescription: () => string,
+): string | null {
   if (!stated) return salaryText ?? null;
   if (!salaryText) return stated;
-  return isSalaryTextStatedInBody(description, salaryText)
+  return isSalaryTextStatedInBody(readDescription(), salaryText)
     ? salaryText
     : stated;
 }

@@ -1,6 +1,5 @@
 import {
   JobPostingSchema,
-  SavedJobSchema,
   assessJobPostingDetailQuality,
   deriveListingDetailCapture,
   type JobPosting,
@@ -23,6 +22,7 @@ import {
   isAiServiceBusy,
 } from "@nestor/ai-providers";
 import { collapseRepeatedLocationTokens } from "./listing-field-shapes";
+import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
 import { enrichDiscoveredPosting } from "./matching";
 import { listUnreadSightings } from "./listing-sightings";
 import { normalizeText } from "./shared";
@@ -512,7 +512,7 @@ export async function applyListingDetailToJob(input: {
   const observedTitle = detail.title;
   if (observedTitle && namesDifferentRole(job.title, observedTitle)) {
     return {
-      job: SavedJobSchema.parse({
+      job: prepareDiscoveryPosting<SavedJob>({
         ...job,
         listingDetailFetch: {
           attemptedAt: input.attemptedAt,
@@ -605,7 +605,7 @@ export async function applyListingDetailToJob(input: {
     { ...candidate, detailQuality: quality, listingDetailFetch: fetchRecord },
     job,
   );
-  const nextJob = SavedJobSchema.parse({
+  const nextJob = prepareDiscoveryPosting<SavedJob>({
     ...job,
     ...enrichedPosting,
     // A partial read can confirm identity and place without replacing the
@@ -638,7 +638,7 @@ export async function applyListingDetailToJob(input: {
     }),
   });
   return {
-    job: SavedJobSchema.parse({
+    job: prepareDiscoveryPosting<SavedJob>({
       ...nextJob,
       matchAssessment: await input.assess(nextJob),
     }),
@@ -739,7 +739,7 @@ export async function readSightingApplyRoutes(input: {
         continue;
       }
       summary.read += 1;
-      current = SavedJobSchema.parse({
+      current = prepareDiscoveryPosting<SavedJob>({
         ...current,
         provenance: recordSightingApplyLink(
           current.provenance,
@@ -770,7 +770,7 @@ function recordFailedAttempt(
     detail,
     ...(retryAfterAt ? { retryAfterAt } : {}),
   } as const;
-  return SavedJobSchema.parse({
+  return prepareDiscoveryPosting<SavedJob>({
     ...job,
     listingDetailFetch,
     listingDetailCapture: deriveListingDetailCapture({
