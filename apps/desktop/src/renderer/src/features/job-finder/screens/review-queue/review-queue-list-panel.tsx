@@ -197,6 +197,7 @@ export function ReviewQueueListPanel({
             isJobPending(item.jobId),
             preparedJobIds,
             applicationPreparingJobIds,
+            queuedJobIds,
           ).label;
           return [
             item.jobId,
@@ -219,6 +220,7 @@ export function ReviewQueueListPanel({
       isJobPending,
       preparedJobIds,
       queue,
+      queuedJobIds,
       unavailableApplicationJobIds,
     ],
   );
@@ -1174,6 +1176,7 @@ export function ReviewQueueListPanel({
                 isPending,
                 preparedJobIds,
                 applicationPreparingJobIds,
+                queuedJobIds,
               );
               const statusLabel = item.listingAssessmentPending
                 ? "Assessing listing"
