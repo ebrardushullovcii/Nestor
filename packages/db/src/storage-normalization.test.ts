@@ -30,15 +30,13 @@ import {
   migrateSavedJobStorage,
   migrateSavedJobStorageSteps,
 } from "./internal/saved-job-storage-migration";
-import {
-  savedJobValueSql,
-  writeSavedJobStorage,
-} from "./internal/saved-job-storage";
+import { savedJobValueSql } from "./internal/saved-job-storage";
 import {
   createWorkspaceQueryRepository,
   prepareWorkspaceQueryDatabase,
 } from "./workspace-query-repository";
 import { completeWorkspaceDatabaseMigrations } from "./workspace-database-startup";
+import { createFileJobFinderRepository } from "./file-repository";
 import { readSavedJobFingerprintBatch } from "./internal/saved-job-fingerprints";
 import {
   restoreResumeDraftStorage,
@@ -157,7 +155,30 @@ test("interrupted job conversion keeps queries exact and resumes without overwri
     title: "A newer title",
     description: "Salary: USD 91,000 per year.",
   };
-  writeSavedJobStorage(db, edited);
+  const liveWriter = await createFileJobFinderRepository({
+    filePath: temp.filePath,
+    seed: createSeed(),
+    deferEvidenceConversion: true,
+  });
+  try {
+    expect(
+      db.prepare("SELECT 1 FROM schema_migrations WHERE version=28").get(),
+    ).toBeUndefined();
+    expect(
+      savedJobData(
+        (await liveWriter.listSavedJobsByIds([jobs.at(-1)!.id]))[0]!,
+      ),
+    ).toEqual(jobs.at(-1));
+    await liveWriter.commitSavedJobDelta({
+      updateJobIds: [edited.id],
+      update: () => edited,
+    });
+    expect(
+      db.prepare("SELECT 1 FROM schema_migrations WHERE version=28").get(),
+    ).toBeUndefined();
+  } finally {
+    await liveWriter.close();
+  }
   migrateSavedJobStorage(db);
   expect(
     JSON.parse(
@@ -199,7 +220,16 @@ test("background conversion retires obsolete validation triggers before writing 
   db.exec(`DELETE FROM schema_migrations WHERE version IN (26,28);
     CREATE TRIGGER row_validations_guard AFTER UPDATE ON saved_jobs BEGIN
       SELECT RAISE(ABORT,'Retired validation trigger ran'); END;`);
-  await completeWorkspaceDatabaseMigrations(temp.filePath);
+  let writerReady = false;
+  await completeWorkspaceDatabaseMigrations(temp.filePath, () => {
+    writerReady = true;
+    expect(
+      db.prepare("SELECT 1 FROM schema_migrations WHERE version=28").get(),
+    ).toBeUndefined();
+    // An action can write the original row before its evidence is converted.
+    db.prepare("UPDATE saved_jobs SET value=value WHERE id=?").run(job.id);
+  });
+  expect(writerReady).toBe(true);
   expect(
     db
       .prepare("SELECT 1 FROM sqlite_master WHERE name='row_validations_guard'")
@@ -492,6 +522,8 @@ test("saved-job conversion retains exact prepared identity across the codec", as
     card: "card",
     detail: "detail",
     material: "material",
+    matchAssessmentPostingFingerprint:
+      contracts.computeMatchAssessmentPostingFingerprint(job),
     identity: {
       version: 1,
       local: { keys: ["opaque"], priorities: [40] },
@@ -503,6 +535,7 @@ test("saved-job conversion retains exact prepared identity across the codec", as
   writeDiscoveryPreparation(job, {
     fingerprints: { owner: job, value: fingerprints },
     savedIdentity: { owner: job, value: identity! },
+    matchAssessmentPostingFingerprint: value.matchAssessmentPostingFingerprint,
   });
   Object.freeze(job);
   await repo.commitSavedJobDelta({ upserts: [job] });

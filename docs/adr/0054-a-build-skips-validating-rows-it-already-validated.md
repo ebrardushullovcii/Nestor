@@ -2,7 +2,7 @@
 
 Status: accepted (2026-10-21).
 
-Amended by [ADR 0061](0061-store-evidence-once-and-query-startup-facts.md): startup views and validation marks are removed; typed app-owned rows are trusted on read. Canonical storage is normalized without changing repository contracts.
+Amended by [ADR 0071](0071-store-evidence-once-and-query-startup-facts.md): startup views and validation marks are removed; typed app-owned rows are trusted on read. Canonical storage is normalized without changing repository contracts.
 
 Amended by [ADR 0057](0057-saved-job-details-stay-in-sqlite.md) on 2026-10-23: saved-job lists validate their facts first, with full unopened rows validated in background slices. The marking and invalidation rules below remain in force.
 

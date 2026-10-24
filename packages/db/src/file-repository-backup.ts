@@ -1,5 +1,8 @@
-import { chmod, copyFile, rename, rm, stat } from "node:fs/promises";
+import { chmod, copyFile, readdir, rename, rm, stat } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { spawn } from "node:child_process";
+import { constants, setPriority } from "node:os";
 
 import { openDatabaseFile } from "./internal/migrations";
 
@@ -9,11 +12,11 @@ export type WorkspaceDatabaseBackupStatus =
 
 export interface WorkspaceDatabaseBackupPaths {
   /**
-   * Newest database-only snapshot written on graceful close. Rotated into
-   * `closeBackupPreviousPath` on every successful close snapshot.
+   * Newest background database-only recovery point, rotated at most daily
+   * or after a schema migration. Names are shared with existing recovery.
    */
   closeBackupPath: string;
-  /** Previous graceful-close generation, preserved against bad overwrites. */
+  /** Previous generation, preserved against bad overwrites. */
   closeBackupPreviousPath: string;
   closeTemporaryPath: string;
   /**
@@ -63,20 +66,75 @@ async function writeSnapshot(
 }
 
 /**
- * Writes the rotating graceful-close snapshot. On success the prior
+ * Writes a rotating background snapshot. On success the prior
  * `<filePath>.backup` generation is preserved as `<filePath>.backup.prev`
  * so one anomalous empty or damaged session cannot destroy the last known
  * good copy.
  */
-export async function createWorkspaceCloseDatabaseBackup(input: {
-  database: DatabaseSync;
+export async function createWorkspaceDatabaseBackup(input: {
   filePath: string;
+  signal?: AbortSignal;
 }): Promise<WorkspaceDatabaseBackupStatus> {
   const { closeBackupPath, closeBackupPreviousPath, closeTemporaryPath } =
     getWorkspaceDatabaseBackupPaths(input.filePath);
 
   try {
-    await writeSnapshot(input, closeTemporaryPath);
+    await rm(closeTemporaryPath, { force: true });
+    const abortReason = () =>
+      input.signal?.reason instanceof Error
+        ? input.signal.reason
+        : new Error("Database backup cancelled.");
+    await new Promise<void>((resolve, reject) => {
+      if (input.signal?.aborted) return reject(abortReason());
+      // A process can be stopped even while SQLite is inside VACUUM. A worker
+      // thread cannot interrupt that native call. Compacting also avoids
+      // backing up the free pages left behind by storage migrations.
+      const child = spawn(
+        process.execPath,
+        [
+          "--input-type=commonjs",
+          "-e",
+          `
+        const { DatabaseSync } = require("node:sqlite");
+        const { chmodSync } = require("node:fs");
+        const source = new DatabaseSync(process.argv[1], { readOnly: true });
+        try {
+          source.exec("PRAGMA busy_timeout = 1000");
+          source.prepare("VACUUM main INTO ?").run(process.argv[2]);
+          if (process.platform !== "win32") chmodSync(process.argv[2], 0o600);
+        } finally { source.close(); }
+      `,
+          input.filePath,
+          closeTemporaryPath,
+        ],
+        {
+          // process.execPath is Electron in the desktop and Node in package tests.
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+          windowsHide: true,
+          stdio: "ignore",
+        },
+      );
+      if (child.pid !== undefined) {
+        try {
+          setPriority(child.pid, constants.priority.PRIORITY_BELOW_NORMAL);
+        } catch {
+          /* Best effort on restricted hosts. */
+        }
+      }
+      const abort = () => {
+        child.kill();
+      };
+      input.signal?.addEventListener("abort", abort, { once: true });
+      child.once("error", reject);
+      child.once("exit", (code) => {
+        input.signal?.removeEventListener("abort", abort);
+        if (input.signal?.aborted) reject(abortReason());
+        else if (code !== 0)
+          reject(new Error(`Database backup process exited ${code}.`));
+        else resolve();
+      });
+    });
+    input.signal?.throwIfAborted();
     await rename(closeBackupPath, closeBackupPreviousPath).catch((error) => {
       if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
         return undefined;
@@ -89,6 +147,77 @@ export async function createWorkspaceCloseDatabaseBackup(input: {
     await rm(closeTemporaryPath, { force: true }).catch(() => undefined);
     return { status: "skipped", backupPath: closeBackupPath, reason: error };
   }
+}
+
+const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/** A single cancellable background task; quitting never starts a backup. */
+export function scheduleWorkspaceDatabaseBackups(input: {
+  filePath: string;
+  schemaVersion: number;
+}): () => Promise<void> {
+  const controller = new AbortController();
+  let pending: Promise<void> = Promise.resolve();
+  let timer: ReturnType<typeof setTimeout>;
+  const run = async () => {
+    let delay = BACKUP_INTERVAL_MS;
+    try {
+      const backupPath = getWorkspaceDatabaseBackupPaths(
+        input.filePath,
+      ).closeBackupPath;
+      let due = true;
+      try {
+        const age = Date.now() - (await stat(backupPath)).mtimeMs;
+        delay = Math.max(1, BACKUP_INTERVAL_MS - age);
+        const previous = openDatabaseFile(backupPath, { readOnly: true });
+        try {
+          const row = previous
+            .prepare("SELECT MAX(version) AS version FROM schema_migrations")
+            .get();
+          due =
+            age >= BACKUP_INTERVAL_MS || row?.version !== input.schemaVersion;
+        } finally {
+          previous.close();
+        }
+      } catch {
+        /* Missing or unreadable recovery point needs a refresh. */
+      }
+      if (due && !controller.signal.aborted) {
+        const result = await createWorkspaceDatabaseBackup({
+          ...input,
+          signal: controller.signal,
+        });
+        delay =
+          result.status === "created" ? BACKUP_INTERVAL_MS : 60 * 60 * 1000;
+        if (result.status === "skipped" && !controller.signal.aborted)
+          console.warn(
+            "[JobFinderRepository] Skipped background database backup.",
+            result.reason,
+          );
+      }
+    } catch (error) {
+      if (!controller.signal.aborted)
+        console.warn(
+          "[JobFinderRepository] Background database backup failed.",
+          error,
+        );
+    }
+    if (!controller.signal.aborted) {
+      timer = setTimeout(() => {
+        pending = run();
+      }, delay);
+      timer.unref?.();
+    }
+  };
+  timer = setTimeout(() => {
+    pending = run();
+  }, 0);
+  timer.unref?.();
+  return async () => {
+    controller.abort();
+    clearTimeout(timer);
+    await pending;
+  };
 }
 
 /**
@@ -124,6 +253,20 @@ export async function removeWorkspaceDatabaseBackups(
     for (const suffix of ["", "-wal", "-shm"]) {
       await rm(`${snapshotPath}${suffix}`, { force: true });
     }
+  }
+  const fileName = basename(filePath);
+  for (const entry of await readdir(dirname(filePath), {
+    withFileTypes: true,
+  })) {
+    const suffix = entry.name.slice(fileName.length);
+    if (
+      entry.isFile() &&
+      entry.name.startsWith(fileName) &&
+      /^\.before-(?:v\d+|discovery-progress)\.sqlite(?:-wal|-shm)?$/u.test(
+        suffix,
+      )
+    )
+      await rm(join(dirname(filePath), entry.name), { force: true });
   }
 }
 
@@ -291,7 +434,7 @@ async function reconcilePreviousGenerationFallback(input: {
 }
 
 /**
- * Recovers graceful-close and pre-reset snapshot destinations after a
+ * Recovers background and pre-reset snapshot destinations after a
  * process was killed between the renames of a rotation. Candidates are only
  * promoted, copied, or removed once they validate as readable SQLite files;
  * anything invalid is retained in place and reported as a warning so callers

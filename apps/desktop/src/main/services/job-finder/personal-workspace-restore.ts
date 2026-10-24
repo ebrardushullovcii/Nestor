@@ -145,7 +145,10 @@ export function restoredRepositoryState(
 
 export async function restorePersonalWorkspace(input: {
   backup: PersonalWorkspaceExport;
-  repository: Pick<JobFinderRepository, "exportState" | "reset">;
+  repository: Pick<
+    JobFinderRepository,
+    "exportState" | "reset" | "getApplyQueue" | "saveApplyQueue"
+  >;
   roots: ReadonlyMap<string, string>;
   safetyExportPath: string;
   buildSafetyExport: () => Promise<string>;
@@ -164,6 +167,7 @@ export async function restorePersonalWorkspace(input: {
     flag: "wx",
   });
   const current = await input.repository.exportState();
+  const currentQueue = await input.repository.getApplyQueue();
   const chats = await input.readChats();
   await input.beforeReplace?.();
   const swaps: {
@@ -214,13 +218,21 @@ export async function restorePersonalWorkspace(input: {
       swap.installed = true;
     }
     await input.repository.reset(next);
+    // Reset clears the old queue. Keep the imported choice under next's global
+    // pause; it does not restore any submission authority.
+    await input.repository.saveApplyQueue(
+      input.backup.workspace?.applyQueue ?? null,
+    );
     await input.restoreChats(input.backup.assistantHistory);
   } catch (error) {
     // Roll back all three stores; retain safety export and old directories if
     // rollback itself fails, so recovery remains possible.
     const failures: unknown[] = [];
     for (const rollback of [
-      () => input.repository.reset(current),
+      async () => {
+        await input.repository.reset(current);
+        await input.repository.saveApplyQueue(currentQueue);
+      },
       () => input.restoreChats(chats),
     ]) {
       try {

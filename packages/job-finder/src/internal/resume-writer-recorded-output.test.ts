@@ -172,11 +172,13 @@ describe("recorded synthetic writer and checker responses", () => {
       draft: checked,
       stretchesAreThePersons: false,
     });
+    // Removing the generated summary restores saved wording (ADR 0051),
+    // while the person's earlier achievement remains exactly as written.
     expect(
       fixed.sections
         .filter((section) => section.included)
         .map((section) => section.text),
-    ).toEqual([original, null]);
+    ).toEqual([original, seed.profile.summary]);
   });
 
   test("R3-015/R3-097 preserves omitted source achievements, skill limits, qualifications and dates", () => {

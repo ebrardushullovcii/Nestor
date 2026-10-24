@@ -3,7 +3,10 @@ import { chmod, copyFile, readdir, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
-import { getWorkspaceDatabaseBackupPaths } from "./file-repository-backup";
+import {
+  getWorkspaceDatabaseBackupPaths,
+  removeWorkspaceDatabaseBackups,
+} from "./file-repository-backup";
 import { openDatabaseFile, runMigrations } from "./internal/migrations";
 import { hasPersistedState } from "./internal/state";
 
@@ -168,7 +171,7 @@ export type WorkspaceDatabaseRecoveryResult =
     };
 
 /**
- * Automatic candidates are the two rotating graceful-close snapshots only.
+ * Automatic candidates are the two completed rotating background snapshots.
  * `<filePath>.reset-backup` is deliberately absent: it captures pre-reset
  * state whose reuse is a caller policy decision, never an automatic one.
  */
@@ -230,6 +233,9 @@ async function removeRecoveryTemporaries(tempPath: string): Promise<void> {
     rm(`${tempPath}-wal`, { force: true }),
     rm(`${tempPath}-shm`, { force: true }),
   ]).catch(() => undefined);
+  // Forward migrations of an isolated validation copy can create their own
+  // pre-migration snapshots. They belong to the throwaway probe too.
+  await removeWorkspaceDatabaseBackups(tempPath).catch(() => undefined);
 }
 
 /**
@@ -450,7 +456,7 @@ export async function removeWorkspaceRecoveryArtifacts(
   const directory = dirname(filePath);
   const entries = await readdir(directory, { withFileTypes: true });
   const temporaryTail =
-    /^\.(?:recovery-integrity-|recovery-validate-(?:backup|backup-prev)-|restore-)[A-Za-z0-9._-]+\.tmp(?:-wal|-shm)?$/u;
+    /^\.(?:recovery-integrity-|recovery-validate-(?:backup|backup-prev)-|restore-)[A-Za-z0-9._-]+\.tmp(?:(?:-wal|-shm)|\.before-(?:v\d+|discovery-progress)\.sqlite(?:-wal|-shm)?)?$/u;
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const tail = entry.name.slice(databaseBasename.length);
@@ -498,7 +504,7 @@ async function evaluateRecoveryCandidate(input: {
   const probePath = `${input.filePath}.recovery-validate-${input.kind}-${input.incidentId}.tmp`;
   try {
     await removeRecoveryTemporaries(probePath);
-    // Close snapshots are VACUUM INTO products: self-contained single files
+    // Completed SQLite backups are self-contained single files
     // with no WAL sidecars to stage.
     await input.io.copyFile(input.candidatePath, probePath);
 

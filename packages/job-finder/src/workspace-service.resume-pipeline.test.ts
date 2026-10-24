@@ -313,6 +313,10 @@ test("resume writing reuses the complete listing without forcing another full fi
   seed.savedJobs[0] = {
     ...seed.savedJobs[0]!,
     detailQuality: "detail_enriched",
+    description:
+      "Build accessible interfaces and reliable services with our product team. "
+        .repeat(12)
+        .trim(),
     listingDetailFetch: {
       attemptedAt: "2026-10-13T00:00:00.000Z",
       outcome: "enriched",
@@ -322,6 +326,7 @@ test("resume writing reuses the complete listing without forcing another full fi
   };
   const aiClient = createAiClient();
   const assess = vi.spyOn(aiClient, "assessJobFit");
+  const write = vi.spyOn(aiClient, "createResumeDraft");
   const fetchListingHtml = vi.fn((url: string) =>
     Promise.resolve({
       status: 200,
@@ -340,6 +345,10 @@ test("resume writing reuses the complete listing without forcing another full fi
   expect(receipt.outcome).toMatch(/written|fallback/);
   expect(assess).not.toHaveBeenCalled();
   expect(fetchListingHtml).not.toHaveBeenCalled();
+  expect(write).toHaveBeenCalledOnce();
+  expect(write.mock.calls[0]?.[0].job.description).toBe(
+    seed.savedJobs[0]!.description,
+  );
   await workspaceService.shutdown();
 });
 

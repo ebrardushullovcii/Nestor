@@ -2,6 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { JudgeJobFitsInput } from "@nestor/ai-providers";
 import {
   JobDiscoveryTargetSchema,
+  SavedJobSchema,
   SaveJobSearchCampaignInputSchema,
 } from "@nestor/contracts";
 import {
@@ -297,8 +298,12 @@ test("searching plan B never judges or changes plan A's jobs, including a shared
     ),
   ).toEqual([shared.id]);
   const storedAfter = await harness.repository.listSavedJobs();
-  expect(storedAfter.find((job) => job.id === onlyA.id)).toEqual(
-    storedBefore.find((job) => job.id === onlyA.id),
+  // Preparation is internal memoized evidence; compare every persisted domain
+  // field without requiring those non-JSON symbols to have been warmed equally.
+  expect(
+    SavedJobSchema.parse(storedAfter.find((job) => job.id === onlyA.id)),
+  ).toEqual(
+    SavedJobSchema.parse(storedBefore.find((job) => job.id === onlyA.id)),
   );
   expect(
     storedAfter.find((job) => job.id === shared.id)?.matchAssessment,

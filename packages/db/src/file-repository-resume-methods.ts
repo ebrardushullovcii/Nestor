@@ -1,4 +1,5 @@
 import { readResumeRevision } from "./internal/resume-revision-storage";
+import { retainedResumeExportPaths } from "./resume-export-retention";
 import {
   CandidateProfileSchema,
   JobSearchPreferencesSchema,
@@ -59,6 +60,7 @@ type FileRepositoryResumeMethods = Pick<
   | "upsertResumeDraftRevision"
   | "listResumeExportArtifacts"
   | "upsertResumeExportArtifact"
+  | "listRetainedResumeExportPaths"
   | "listResumeResearchArtifacts"
   | "upsertResumeResearchArtifact"
   | "listResumeImportRuns"
@@ -97,6 +99,65 @@ export function createFileRepositoryResumeMethods(
   const draftReads = new Map<string, { json: string; draft: ResumeDraft }>();
 
   return {
+    listRetainedResumeExportPaths() {
+      const references = database
+        .prepare(
+          "SELECT json_extract(value, '$.approvedExportId') AS reference FROM resume_drafts WHERE json_extract(value, '$.approvedExportId') IS NOT NULL",
+        )
+        .all()
+        .map((row) => String(row.reference));
+      for (const table of [
+        "application_records",
+        "application_attempts",
+        "apply_runs",
+        "apply_job_results",
+        "application_artifact_refs",
+        "application_replay_checkpoints",
+        "application_consent_requests",
+        "submission_preflights",
+        "submission_outcome_records",
+        "application_answer_snapshots",
+        "prepared_application_forms",
+      ]) {
+        const rows = database
+          .prepare(
+            `SELECT DISTINCT leaf.atom AS reference
+          FROM ${table} AS record, json_tree(record.value) AS leaf
+          WHERE leaf.type = 'text' AND (leaf.key IN ('filePath', 'storagePath')
+            OR leaf.atom IN (SELECT id FROM resume_export_artifacts)
+            OR leaf.atom IN (SELECT json_extract(value, '$.sha256') FROM resume_export_artifacts))`,
+          )
+          .all();
+        for (const row of rows) references.push(String(row.reference));
+      }
+      return Promise.resolve(
+        retainedResumeExportPaths({
+          assets: database
+            .prepare(
+              "SELECT json_extract(value, '$.storagePath') AS storagePath FROM tailored_assets",
+            )
+            .all() as Array<{ storagePath: string | null }>,
+          exports: database
+            .prepare(
+              `SELECT id, draft_id AS draftId, exported_at AS exportedAt, is_approved AS isApproved,
+          json_extract(value, '$.format') AS format, json_extract(value, '$.filePath') AS filePath,
+          json_extract(value, '$.sha256') AS sha256
+          FROM resume_export_artifacts`,
+            )
+            .all()
+            .map((row) => ({
+              id: String(row.id),
+              draftId: String(row.draftId),
+              exportedAt: String(row.exportedAt),
+              isApproved: Boolean(row.isApproved),
+              format: row.format as "html" | "pdf",
+              filePath: String(row.filePath),
+              sha256: row.sha256 ? String(row.sha256) : null,
+            })),
+          references,
+        }),
+      );
+    },
     getTailoredAssetById(assetId) {
       return Promise.resolve(
         listCollectionValues(database, "tailored_assets", TailoredAssetSchema, {

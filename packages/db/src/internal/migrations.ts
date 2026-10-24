@@ -15,7 +15,10 @@ import { migrateDiscoveryStorage } from "./discovery-storage";
 import { ensureTailoredAssetJobIndex } from "./tailored-asset-storage";
 import { ensureResumeApprovalState } from "./resume-approval-state";
 import { ensureWorkspaceReadIndex } from "./workspace-read-index";
-import { migrateResumeStorage } from "./resume-storage-migration";
+import {
+  migrateResumeStorage,
+  retireResumeReadValidation,
+} from "./resume-storage-migration";
 import { ensureResumeSourceTables } from "./resume-draft-storage";
 import { migratePreferenceStorage } from "./preference-storage";
 import { migrateSavedJobStorage } from "./saved-job-storage-migration";
@@ -2093,7 +2096,7 @@ export function runMigrations(
     }
 
     ensurePreparedApplicationForms();
-    migrateEvidenceStorage(database);
+    migrateEvidenceStorage(database, options.deferEvidenceConversion);
     return;
   }
 
@@ -2375,6 +2378,7 @@ function migrateEvidenceStorage(
     ensureResumeApprovalState(database);
     migratePreferenceStorage(database);
     if (deferEvidenceConversion) {
+      retireResumeReadValidation(database);
       ensureResumeSourceTables(database);
       ensureSavedJobRelations(database);
     } else {

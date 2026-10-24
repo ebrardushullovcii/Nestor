@@ -1,5 +1,12 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -47,6 +54,15 @@ function workspaceFilePath(userDataDirectory: string): string {
 
 function factFilePath(userDataDirectory: string): string {
   return path.join(userDataDirectory, "job-finder-startup-db-recovery.json");
+}
+
+async function seedRecoveryPoint(userDataDirectory: string) {
+  // The service is closed, so the checkpointed database is a complete snapshot.
+  // ADR 0072 deliberately allows a short session to quit before its first backup.
+  await copyFile(
+    workspaceFilePath(userDataDirectory),
+    `${workspaceFilePath(userDataDirectory)}.backup`,
+  );
 }
 
 async function createWorkspaceService(userDataDirectory: string) {
@@ -108,6 +124,7 @@ describe("startup database recovery disclosure", () => {
       const firstUserDataDirectory = await createUserDataDirectory();
       const firstService = await createWorkspaceService(firstUserDataDirectory);
       await firstService.shutdown();
+      await seedRecoveryPoint(firstUserDataDirectory);
       expect(
         existsSync(`${workspaceFilePath(firstUserDataDirectory)}.backup`),
       ).toBe(true);
@@ -188,6 +205,7 @@ describe("startup database recovery disclosure", () => {
         secondUserDataDirectory,
       );
       await thirdService.shutdown();
+      await seedRecoveryPoint(secondUserDataDirectory);
 
       expect(await getJobFinderStartupDatabaseRecoveryFact()).toMatchObject({
         status: "restored",
@@ -231,12 +249,14 @@ describe("startup database recovery disclosure", () => {
     const userDataDirectory = await createUserDataDirectory();
     const firstService = await createWorkspaceService(userDataDirectory);
     await firstService.shutdown();
+    await seedRecoveryPoint(userDataDirectory);
 
     await rm(workspaceFilePath(userDataDirectory), { force: true });
 
     let failure: unknown = null;
     try {
-      await createWorkspaceService(userDataDirectory);
+      const unexpectedService = await createWorkspaceService(userDataDirectory);
+      await unexpectedService.shutdown();
     } catch (error) {
       failure = error;
     }

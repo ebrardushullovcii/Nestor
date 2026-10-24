@@ -2,7 +2,7 @@
 
 Status: accepted (2026-10-23).
 
-Amended by [ADR 0061](0061-store-evidence-once-and-query-startup-facts.md): startup views and validation marks are removed; typed app-owned rows are trusted on read. Canonical storage is normalized without changing repository contracts.
+Amended by [ADR 0071](0071-store-evidence-once-and-query-startup-facts.md): startup views and validation marks are removed; typed app-owned rows are trusted on read. Canonical storage is normalized without changing repository contracts.
 
 Amends ADR 0053's same-build restriction and ADR 0054's eager saved-job validation.
 

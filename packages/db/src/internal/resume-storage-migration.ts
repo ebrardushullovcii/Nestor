@@ -21,6 +21,17 @@ export function migrateResumeStorage(database: DatabaseSync): void {
   for (const step of migrateResumeStorageSteps(database)) void step;
 }
 
+/** Obsolete read-validation triggers must be gone before typed writers open. */
+export function retireResumeReadValidation(database: DatabaseSync): void {
+  for (const row of database
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'row_validations_%'",
+    )
+    .all())
+    database.exec(`DROP TRIGGER ${String(row.name)}`);
+  database.exec("DROP TABLE IF EXISTS row_validations");
+}
+
 /** Drafts and history decode either shape between bounded transactions. */
 export function* migrateResumeStorageSteps(
   database: DatabaseSync,
@@ -65,13 +76,7 @@ export function* migrateResumeStorageSteps(
     }
   }
   transaction(() => {
-    for (const row of database
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'row_validations_%'",
-      )
-      .all())
-      database.exec(`DROP TRIGGER ${String(row.name)}`);
-    database.exec("DROP TABLE IF EXISTS row_validations");
+    retireResumeReadValidation(database);
   });
   for (let offset = 0; offset < drafts.length; offset += 4) {
     transaction(() => {
