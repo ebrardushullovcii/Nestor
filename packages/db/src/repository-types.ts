@@ -22,6 +22,7 @@ import type {
   SavedJobPlanAssessmentPatch,
   JobFinderDiscoveryState,
   DiscoveryBootstrapState,
+  DiscoveryHomeState,
   DiscoveryRunStateProjection,
   JobFinderActivityControl,
   ApplyQueue,
@@ -710,6 +711,11 @@ export interface JobFinderRepository
    */
   readDiscoveryDisplayProjection(): Promise<DiscoveryDisplayProjection>;
   readDiscoveryBootstrapProjection(): Promise<DiscoveryBootstrapState>;
+  /** Display runs without checkpoints and indexed activity for the requested saved jobs only. */
+  readDiscoveryHomeProjection(
+    jobIds: readonly string[],
+    planId?: string | null,
+  ): Promise<DiscoveryHomeState>;
   readDiscoveryRunStates(): Promise<readonly DiscoveryRunStateProjection[]>;
   /**
    * Atomically applies a synchronous transform to the currently stored

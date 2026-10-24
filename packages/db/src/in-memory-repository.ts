@@ -65,6 +65,7 @@ import {
 } from "@nestor/contracts";
 
 import { cloneValue } from "./internal/state";
+import { projectDiscoveryJobViews } from "@nestor/job-list-policy";
 import { freezeProjection } from "./internal/saved-job-projection";
 import {
   toDiscoveryDisplayProjection,
@@ -2524,6 +2525,42 @@ export function createInMemoryJobFinderRepository(
               : [],
         ),
       );
+    },
+    readDiscoveryHomeProjection(jobIds, planId = null) {
+      const display = toDiscoveryDisplayProjection(state.discovery);
+      const selected = new Set(jobIds);
+      const savedIds = new Set(state.savedJobs.map((job) => job.id));
+      const jobs = [
+        ...state.savedJobs,
+        ...state.discovery.pendingDiscoveryJobs.filter(
+          (job) => !savedIds.has(job.id),
+        ),
+      ].map((job) => ({
+        ...job,
+        matchAssessment:
+          (planId ? job.planAssessments?.[planId] : null) ??
+          job.matchAssessment,
+      }));
+      const projected = projectDiscoveryJobViews({
+        jobs,
+        discoveryLedger: state.discovery.discoveryLedger,
+        listingSignals: state.intelligence.safeguards.listingSignals,
+        applicationAttempts: state.applicationAttempts,
+      });
+      return Promise.resolve({
+        sessions: display.sessions,
+        runState: display.runState,
+        activeRun: display.activeRun,
+        recentRuns: display.recentRuns,
+        activeSourceDebugRun: display.activeSourceDebugRun,
+        recentSourceDebugRuns: display.recentSourceDebugRuns,
+        listingActivities: projected
+          .filter((job) => selected.has(job.id) && savedIds.has(job.id))
+          .map((job) => ({
+            jobId: job.id,
+            listingActivity: cloneValue(job.listingActivity),
+          })),
+      });
     },
     readDiscoveryDisplayProjection() {
       if (
