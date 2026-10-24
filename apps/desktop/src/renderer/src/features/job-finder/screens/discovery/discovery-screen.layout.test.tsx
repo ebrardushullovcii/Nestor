@@ -23,6 +23,7 @@ vi.mock("../../hooks/use-job-detail", () => ({
     retry: () => undefined,
   }),
   clearJobDetailCache: () => undefined,
+  prefetchJobDetail: () => undefined,
 }));
 
 vi.mock(
@@ -55,23 +56,26 @@ vi.mock("./discovery-filters-panel", () => ({
     <section aria-label="Current search">Current search</section>
   ),
 }));
-vi.mock("./discovery-results-panel", () => ({
+vi.mock("./discovery-results-panel", async () => {
+  const { useFixtureListReport } = await import(
+    "./find-jobs-list-report.test-support"
+  );
+  return {
   DISCOVERY_OFFLINE_CATALOG_NOTICE_ID: "discovery-offline-catalog-notice",
   DISCOVERY_SEARCH_SETUP_BLOCKER_ID: "discovery-search-setup-blocker",
-  DiscoveryResultsPanel: ({
-    browserSession,
-    hiddenJobsControl,
-    jobs,
-    searchSetupBlocker,
-  }: {
-    browserSession: BrowserSessionState;
-    hiddenJobsControl?: ReactNode;
-    jobs: readonly SavedJob[];
-    searchSetupBlocker?: {
-      actionLabel?: string | null;
-      title: string;
-    } | null;
-  }) => (
+  DiscoveryResultsPanel: (
+    props: Parameters<typeof useFixtureListReport>[0] & {
+      browserSession: BrowserSessionState;
+      hiddenJobsControl?: ReactNode;
+      searchSetupBlocker?: {
+        actionLabel?: string | null;
+        title: string;
+      } | null;
+    },
+  ) => {
+    const jobs = useFixtureListReport(props);
+    const { browserSession, hiddenJobsControl, searchSetupBlocker } = props;
+    return (
     <section aria-label="Job results">
       Job results
       {hiddenJobsControl}
@@ -91,10 +95,15 @@ vi.mock("./discovery-results-panel", () => ({
         </div>
       ) : null}
     </section>
-  ),
-}));
+    );
+  },
+  };
+});
 
-import { DiscoveryScreen } from "./discovery-screen";
+import {
+  DiscoveryScreenWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site",
@@ -145,13 +154,13 @@ function createJob(
   } as unknown as SavedJob;
 }
 
-function renderEstablishedResults() {
+async function renderEstablishedResults() {
   const selectedJob = createJob("strong", "strong_fit");
   const hiddenMismatch = createJob("mismatch", "skip");
 
-  return render(
+  const rendered = render(
     <MemoryRouter>
-      <DiscoveryScreen
+      <DiscoveryScreenWithJobs
         actionState={{ message: null }}
         activeRun={null}
         browserSession={browserSession}
@@ -178,6 +187,8 @@ function renderEstablishedResults() {
       />
     </MemoryRouter>,
   );
+  await flushFindJobsQueries();
+  return rendered;
 }
 
 afterEach(() => {
@@ -185,12 +196,12 @@ afterEach(() => {
 });
 
 describe("DiscoveryScreen established-results layout", () => {
-  it("keeps populated offline provenance on one results surface and describes disabled search", () => {
+  it("keeps populated offline provenance on one results surface and describes disabled search", async () => {
     const catalogJob = createJob("catalog", "review_before_applying");
 
     render(
       <MemoryRouter>
-        <DiscoveryScreen
+        <DiscoveryScreenWithJobs
           actionState={{ message: null }}
           activeRun={null}
           browserSession={{
@@ -221,6 +232,7 @@ describe("DiscoveryScreen established-results layout", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
 
     const offlineNotice = document.getElementById(
       "discovery-offline-catalog-notice",
@@ -238,11 +250,11 @@ describe("DiscoveryScreen established-results layout", () => {
     );
   });
 
-  it("keeps the zero-result source blocker on one surface with a valid search description", () => {
+  it("keeps the zero-result source blocker on one surface with a valid search description", async () => {
     const selectedJob = createJob("strong", "strong_fit");
     const view = render(
       <MemoryRouter>
-        <DiscoveryScreen
+        <DiscoveryScreenWithJobs
           actionState={{ message: null }}
           activeRun={null}
           browserSession={browserSession}
@@ -269,12 +281,13 @@ describe("DiscoveryScreen established-results layout", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
 
     // Results mode stays mounted while the last visible job disappears, which
     // is the path that previously rendered the same source blocker twice.
     view.rerender(
       <MemoryRouter>
-        <DiscoveryScreen
+        <DiscoveryScreenWithJobs
           actionState={{ message: null }}
           activeRun={null}
           browserSession={browserSession}
@@ -301,6 +314,7 @@ describe("DiscoveryScreen established-results layout", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
 
     const searchButton = screen.getByRole("button", { name: "Search now" });
     const blocker = document.getElementById("discovery-search-setup-blocker");
@@ -316,7 +330,7 @@ describe("DiscoveryScreen established-results layout", () => {
     expect(screen.queryByRole("region", { name: "Job details" })).toBeNull();
   });
 
-  it("offers exact employer reversal separately from restoring a hidden job", () => {
+  it("offers exact employer reversal separately from restoring a hidden job", async () => {
     const onRemoveEmployerExclusion = vi.fn();
     const onRestoreDismissedJob = vi.fn();
     const hiddenJob = {
@@ -337,7 +351,7 @@ describe("DiscoveryScreen established-results layout", () => {
     } as SavedJob;
     render(
       <MemoryRouter>
-        <DiscoveryScreen
+        <DiscoveryScreenWithJobs
           actionState={{ message: null }}
           activeRun={null}
           browserSession={browserSession}
@@ -365,12 +379,15 @@ describe("DiscoveryScreen established-results layout", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
     fireEvent.click(screen.getByText(/^Hidden \(\d+\)$/u));
+    await flushFindJobsQueries();
     fireEvent.click(
       screen.getByRole("button", {
         name: "Allow this employer in future searches",
       }),
     );
+    await flushFindJobsQueries();
     expect(onRemoveEmployerExclusion).toHaveBeenCalledWith({
       jobId: "hidden",
       normalizedCompanyName: "example co",
@@ -378,8 +395,8 @@ describe("DiscoveryScreen established-results layout", () => {
     expect(onRestoreDismissedJob).not.toHaveBeenCalled();
   });
 
-  it("defaults to a two-pane results workspace and opens search setup as a separate mode", () => {
-    renderEstablishedResults();
+  it("defaults to a two-pane results workspace and opens search setup as a separate mode", async () => {
+    await renderEstablishedResults();
 
     const resultsPane = screen.getByRole("region", {
       name: "Job results",
@@ -413,12 +430,13 @@ describe("DiscoveryScreen established-results layout", () => {
 
     // Search setup is a disclosure opened from the bar, not a peer tab.
     fireEvent.click(screen.getByRole("button", { name: "Roles, places & sources" }));
+    await flushFindJobsQueries();
     expect(screen.getByRole("region", { name: "Current search" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Job results" })).toBeNull();
   });
 
-  it("renders the shared header grammar: stack, one divider, one interactive search bar", () => {
-    const view = renderEstablishedResults();
+  it("renders the shared header grammar: stack, one divider, one interactive search bar", async () => {
+    const view = await renderEstablishedResults();
 
     const main = view.container.querySelector("main");
     if (!main) {

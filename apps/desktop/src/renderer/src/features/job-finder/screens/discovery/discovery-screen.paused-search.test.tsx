@@ -42,13 +42,21 @@ vi.mock("./discovery-filters-panel", () => ({
     </section>
   ),
 }));
-vi.mock("./discovery-results-panel", () => ({
-  DiscoveryResultsPanel: () => (
-    <section aria-label="Job results">Job results</section>
-  ),
-}));
+vi.mock("./discovery-results-panel", async () => {
+  const { useFixtureListReport } = await import(
+    "./find-jobs-list-report.test-support"
+  );
+  return {
+    DiscoveryResultsPanel: (props: Parameters<typeof useFixtureListReport>[0]) => {
+      useFixtureListReport(props);
+      return <section aria-label="Job results">Job results</section>;
+    },
+  };
+});
 
-import { DiscoveryScreen } from "./discovery-screen";
+import {
+  DiscoveryScreenWithJobs,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site",
@@ -110,7 +118,7 @@ function buildScreen(overrides?: {
 }) {
   return (
     <MemoryRouter>
-      <DiscoveryScreen
+      <DiscoveryScreenWithJobs
         actionState={{ message: null }}
         {...(overrides?.activityPaused ? { activityPaused: true } : {})}
         activeRun={null}

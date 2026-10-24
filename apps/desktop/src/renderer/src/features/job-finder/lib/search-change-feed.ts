@@ -8,13 +8,20 @@ import { JOB_FINDER_ROUTE_PATHS } from "./job-finder-route-hrefs";
 
 /**
  * While a search runs, the window follows the database's change feed instead
- * of syncing the whole workspace for every progress event (ADR 0071). Screens
- * that show the search (its jobs, fit scores or progress) sync at most once
- * per `SEARCH_SYNC_INTERVAL_MS`; every other screen only refreshes the list
- * counts behind the sidebar badges, and catches up when the person opens a
- * search screen or the search ends.
+ * of syncing the whole workspace for every progress event (ADR 0071). Find
+ * jobs reads its list from the database and refetches it from the feed, so
+ * the workspace snapshot only needs a sync where a screen shows what is not
+ * queried yet: Home for the search's jobs and progress, and Find jobs, Search
+ * plans and Profile for its progress. Those sync at most once per
+ * `SEARCH_SYNC_INTERVAL_MS`; everywhere else only the list counts behind the
+ * sidebar badges refresh, and a screen catches up when it opens.
  */
 export const SEARCH_SYNC_INTERVAL_MS = 1_500;
+/**
+ * Progress alone (a source finished, a page read) syncs less often: the
+ * search's own events already move the live progress line.
+ */
+export const SEARCH_PROGRESS_SYNC_INTERVAL_MS = 4_000;
 const SEARCH_COUNTS_INTERVAL_MS = 1_000;
 
 /** Tables a search writes its jobs, scores and plan membership to. */
@@ -25,12 +32,18 @@ const SEARCH_JOB_TABLES = new Set([
   "job_plan_assessments",
 ]);
 
+const HOME_PATH = "/job-finder/home";
+/** Screens that show the search's progress from the workspace snapshot. */
 const SEARCH_VIEW_PATHS = [
-  "/job-finder/home",
+  HOME_PATH,
   JOB_FINDER_ROUTE_PATHS.discovery,
   JOB_FINDER_ROUTE_PATHS.campaigns,
   JOB_FINDER_ROUTE_PATHS.profile,
 ];
+
+function routePath(route: string): string {
+  return route.split("?")[0] ?? "";
+}
 
 export function isSearchRunning(
   workspace: JobFinderRendererWorkspaceSnapshot | null,
@@ -41,12 +54,17 @@ export function isSearchRunning(
   );
 }
 
-/** Find jobs, Home, Search plans and Profile (job sources) show the search. */
+/** Home, Find jobs, Search plans and Profile (job sources) show the search. */
 export function isSearchViewRoute(route: string): boolean {
-  const path = route.split("?")[0] ?? "";
+  const path = routePath(route);
   return SEARCH_VIEW_PATHS.some(
     (view) => path === view || path.startsWith(`${view}/`),
   );
+}
+
+/** Home still lists the search's jobs from the workspace snapshot. */
+export function isSearchJobsViewRoute(route: string): boolean {
+  return routePath(route) === HOME_PATH;
 }
 
 /**
@@ -109,18 +127,26 @@ export function createSearchChangeFeedFollower(options: {
   let lastSyncAt = Number.NEGATIVE_INFINITY;
   let lastCountsAt = Number.NEGATIVE_INFINITY;
   let syncTimer: unknown = null;
+  let syncDueAt = 0;
   let countsTimer: unknown = null;
   // Jobs changed while the person was on a screen that does not show them.
   let behind = false;
   let disposed = false;
 
-  const sync = () => {
-    if (disposed || syncTimer !== null) return;
-    const wait = lastSyncAt + SEARCH_SYNC_INTERVAL_MS - now();
+  const sync = (interval = SEARCH_SYNC_INTERVAL_MS) => {
+    if (disposed) return;
+    const wait = lastSyncAt + interval - now();
+    if (syncTimer !== null) {
+      // A sooner reason replaces a later timer.
+      if (wait >= syncDueAt - now()) return;
+      clearTimer(syncTimer);
+      syncTimer = null;
+    }
     if (wait > 0) {
+      syncDueAt = now() + wait;
       syncTimer = setTimer(() => {
         syncTimer = null;
-        sync();
+        sync(interval);
       }, wait);
       return;
     }
@@ -143,8 +169,11 @@ export function createSearchChangeFeedFollower(options: {
   };
   const follow = (jobs: boolean, run: boolean, other = false) => {
     if (!jobs && !run && !other) return;
-    if (other || isSearchViewRoute(options.currentRoute())) sync();
-    else if (jobs) {
+    const route = options.currentRoute();
+    if (other || (jobs && isSearchJobsViewRoute(route))) sync();
+    else if (run && isSearchViewRoute(route))
+      sync(SEARCH_PROGRESS_SYNC_INTERVAL_MS);
+    if (jobs && !isSearchJobsViewRoute(route)) {
       behind = true;
       counts();
     }
@@ -162,7 +191,7 @@ export function createSearchChangeFeedFollower(options: {
     },
     onRouteChange() {
       if (disposed || !behind) return;
-      if (isSearchViewRoute(options.currentRoute())) sync();
+      if (isSearchJobsViewRoute(options.currentRoute())) sync();
     },
     dispose() {
       disposed = true;

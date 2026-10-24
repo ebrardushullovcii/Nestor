@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { JobListRow, FitJudgmentProgress } from "@nestor/contracts";
+import { useEffect, useRef, useState } from "react";
+import type { FitJudgmentProgress } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
-import { isDiscoveryUncheckedResult } from "./discovery-result-groups";
 
 /**
  * Whether this app session already judged the jobs left without a fit score.
@@ -25,16 +24,14 @@ export function resetDiscoveryAutoJudgeForTests() {
  */
 export function DiscoveryAssessmentContinuation(props: {
   className?: string;
-  jobs: readonly JobListRow[];
+  /** Listed jobs without a fit score yet (the unchecked band). */
+  uncheckedCount: number;
   isSearchRunning: boolean;
   /** Judges every unjudged job in batches, in main, saving as it goes. */
   onJudgeAll?: () => Promise<unknown>;
   fitJudgmentProgress?: FitJudgmentProgress | null;
 }) {
-  const unreadCount = useMemo(
-    () => props.jobs.filter(isDiscoveryUncheckedResult).length,
-    [props.jobs],
-  );
+  const unreadCount = props.uncheckedCount;
   const [failed, setFailed] = useState(false);
   const [isJudgingAll, setIsJudgingAll] = useState(false);
   const [localStartedAt, setLocalStartedAt] = useState<number | null>(null);

@@ -17,7 +17,7 @@ import {
   getDiscoveryResultFacets,
   matchesDiscoveryJobSearch,
   sortDiscoveryResults,
-} from "./discovery-results-view";
+} from "./discovery-results-view.test-support";
 
 // mulberry32: a tiny deterministic PRNG so every run checks the same rows.
 function createRandom(seed: number): () => number {

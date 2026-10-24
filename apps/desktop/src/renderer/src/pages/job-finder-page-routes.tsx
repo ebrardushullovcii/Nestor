@@ -1531,7 +1531,7 @@ export function JobFinderDiscoveryRoute() {
         )}
         isActivityPausePending={activityPausePending}
         discoverySessions={context.workspace.discoverySessions}
-        jobs={jobs}
+        planJobCount={jobs.length}
         dismissedJobs={dismissedJobs}
         liveEvents={context.liveDiscoveryEvents}
         isJobPending={(jobId) =>

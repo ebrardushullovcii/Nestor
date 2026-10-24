@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { WorkspaceChanges } from "@nestor/contracts";
 import {
+  SEARCH_PROGRESS_SYNC_INTERVAL_MS,
   SEARCH_SYNC_INTERVAL_MS,
   classifySearchChanges,
   createSearchChangeFeedFollower,
@@ -86,7 +87,7 @@ describe("search change feed", () => {
   });
 
   it("syncs a search screen at most once per interval, ending on the latest state", () => {
-    const h = harness("/job-finder/discovery");
+    const h = harness("/job-finder/home");
     h.follower.onChanges(batch(["saved_jobs"]));
     h.follower.onChanges(batch(["saved_jobs"]));
     h.follower.onChanges(batch(["discovery_runs"]));
@@ -105,9 +106,23 @@ describe("search change feed", () => {
     h.follower.onChanges(batch(["discovery_run_activity"]));
     expect(h.requestSync).not.toHaveBeenCalled();
     expect(h.refreshCounts).toHaveBeenCalledTimes(1);
-    h.state.route = "/job-finder/discovery";
+    h.state.route = "/job-finder/home";
     h.follower.onRouteChange();
     expect(h.requestSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves Find jobs' list to the feed and syncs it only for progress", () => {
+    const h = harness("/job-finder/discovery");
+    h.follower.onChanges(batch(["saved_jobs"]));
+    expect(h.requestSync).not.toHaveBeenCalled();
+    expect(h.refreshCounts).toHaveBeenCalledTimes(1);
+    h.follower.onChanges(batch(["discovery_runs"]));
+    expect(h.requestSync).toHaveBeenCalledTimes(1);
+    h.follower.onChanges(batch(["discovery_runs"]));
+    h.advance(SEARCH_SYNC_INTERVAL_MS);
+    expect(h.requestSync).toHaveBeenCalledTimes(1);
+    h.advance(SEARCH_PROGRESS_SYNC_INTERVAL_MS - SEARCH_SYNC_INTERVAL_MS);
+    expect(h.requestSync).toHaveBeenCalledTimes(2);
   });
 
   it("follows other work on every screen, since main holds its notices", () => {
@@ -124,7 +139,7 @@ describe("search change feed", () => {
   });
 
   it("stops its timers when disposed", () => {
-    const h = harness("/job-finder/discovery");
+    const h = harness("/job-finder/home");
     h.follower.onChanges(batch(["saved_jobs"]));
     h.follower.onChanges(batch(["saved_jobs"]));
     h.follower.dispose();

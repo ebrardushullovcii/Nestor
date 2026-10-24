@@ -604,6 +604,7 @@ export function createWorkspaceQueryRepository(
               (_, index) => (Number(workModeMask) & (1 << index)) !== 0,
             ),
             judged: unjudged === 0,
+            provisional: provisional !== 0,
             scoreWithheld: unjudged !== 0 || provisional !== 0,
             scoreIsUpperBound: scoreUpper === 1,
             listingActivity: JSON.parse(
@@ -629,7 +630,32 @@ export function createWorkspaceQueryRepository(
           }),
         ) as unknown as WorkspaceJobListRow[];
         const ids = rows.map((row) => row.id);
+        const ordered =
+          query.include?.outline || query.include?.ids
+            ? (database
+                .prepare(
+                  `SELECT i.id, i.result_group AS resultGroup ${from}
+          JOIN workspace_page_order r ON r.plan_id=i.plan_id AND r.origin=i.origin AND r.id=i.id AND r.sort='${query.sort}'
+          WHERE ${condition} ORDER BY r.position`,
+                )
+                .all(...args) as Array<{ id: string; resultGroup: string }>)
+            : null;
+        const outline: QueryJobListResult["outline"] = [];
+        if (query.include?.outline)
+          for (const entry of ordered ?? []) {
+            const last = outline.at(-1);
+            if (last?.group === entry.resultGroup) last.count += 1;
+            else
+              outline.push({
+                group: entry.resultGroup as WorkspaceJobListRow["resultGroup"],
+                count: 1,
+              });
+          }
         return {
+          ...(query.include?.outline ? { outline } : {}),
+          ...(query.include?.ids
+            ? { ids: (ordered ?? []).map((entry) => entry.id) }
+            : {}),
           rows,
           total,
           counts: counts(planId),

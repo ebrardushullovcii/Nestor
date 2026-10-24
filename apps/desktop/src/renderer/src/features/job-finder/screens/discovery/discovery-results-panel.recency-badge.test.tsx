@@ -5,9 +5,12 @@ import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  DiscoveryResultsPanel,
   getDiscoveryListingDateBadge,
 } from "./discovery-results-panel";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site" as const,
@@ -110,15 +113,16 @@ describe("DiscoveryResultsPanel relative-label recency truth", () => {
       title: "Dated older role",
     });
 
-  it("marks a relative-label row as not date-ranked instead of implying Newest precision", () => {
+  it("marks a relative-label row as not date-ranked instead of implying Newest precision", async () => {
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         jobs={[relativeFresh()]}
         onSelectJob={vi.fn()}
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     // The badge keeps the source's own words; the ranking caveat lives in
     // the tooltip instead of being printed on every such row.
@@ -130,20 +134,22 @@ describe("DiscoveryResultsPanel relative-label recency truth", () => {
     );
   });
 
-  it("never ranks the three-field row above an older dated row under Newest", () => {
+  it("never ranks the three-field row above an older dated row under Newest", async () => {
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         jobs={[relativeFresh(), datedOld()]}
         onSelectJob={vi.fn()}
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     // Best match puts the higher-scoring relative-label row first…
     expect(visibleRowIds()).toEqual(["relative-fresh", "dated-old"]);
 
     sortByRecent();
+    await flushFindJobsQueries();
 
     // …but Newest must not rank it by the hidden provider-update time.
     expect(visibleRowIds()).toEqual(["dated-old", "relative-fresh"]);
@@ -152,9 +158,9 @@ describe("DiscoveryResultsPanel relative-label recency truth", () => {
     expect(screen.getByText("Posted 01 Jun 2026")).toBeTruthy();
   });
 
-  it("keeps rankable rows unmarked", () => {
+  it("keeps rankable rows unmarked", async () => {
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         jobs={[
           createJob("dated", {
@@ -177,6 +183,7 @@ describe("DiscoveryResultsPanel relative-label recency truth", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     expect(screen.getByText("Posted 01 Jun 2026").textContent).toBe(
       "Posted 01 Jun 2026",
@@ -246,15 +253,16 @@ describe("getDiscoveryListingDateBadge", () => {
   });
 });
 
-it("says the posting date as plain text on the meta line, not as a badge", () => {
+it("says the posting date as plain text on the meta line, not as a badge", async () => {
   render(
-    <DiscoveryResultsPanel
+    <DiscoveryResultsPanelWithJobs
       browserSession={browserSession}
       jobs={[createJob("one", { postedAtText: "2 days ago" })]}
       onSelectJob={vi.fn()}
       selectedJob={null}
     />,
   );
+  await flushFindJobsQueries();
   const date = screen.getByText("Posted 2 days ago");
   expect(date.closest('[data-slot="badge"]')).toBeNull();
   expect(date.getAttribute("data-testid")).toBe("discovery-result-date-one");

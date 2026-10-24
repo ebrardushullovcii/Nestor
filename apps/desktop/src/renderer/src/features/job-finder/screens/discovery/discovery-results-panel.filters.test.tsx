@@ -13,7 +13,10 @@ import {
 } from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DiscoveryResultsPanel } from "./discovery-results-panel";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site" as const,
@@ -81,7 +84,7 @@ function createJob(
   };
 }
 
-function renderResults(
+async function renderResults(
   jobs: readonly JobListRow[],
   options?: {
     facetScopeId?: string | null;
@@ -89,8 +92,8 @@ function renderResults(
     selectedJob?: SavedJob | null;
   },
 ) {
-  return render(
-    <DiscoveryResultsPanel
+  const rendered = render(
+    <DiscoveryResultsPanelWithJobs
       browserSession={browserSession}
       discoveryTargets={[primarySource, longSource]}
       facetScopeId={options?.facetScopeId ?? null}
@@ -106,6 +109,8 @@ function renderResults(
       selectedJob={options?.selectedJob ?? null}
     />,
   );
+  await flushFindJobsQueries();
+  return rendered;
 }
 
 function openFilters() {
@@ -118,7 +123,7 @@ afterEach(() => {
 });
 
 describe("DiscoveryResultsPanel triage filters", () => {
-  it("shows a one-view note when listing evidence changes the score", () => {
+  it("shows a one-view note when listing evidence changes the score", async () => {
     const base = createJob("rescored", "strong_fit", ["remote"], primarySource);
     const rescored: SavedJob = {
       ...base,
@@ -165,7 +170,7 @@ describe("DiscoveryResultsPanel triage filters", () => {
         ],
       },
     };
-    const { container } = renderResults([
+    const { container } = await renderResults([
       { ...rescored, rescoredAfterListingRead: true },
     ]);
 
@@ -175,17 +180,18 @@ describe("DiscoveryResultsPanel triage filters", () => {
     );
     expect(row).not.toBeNull();
     fireEvent.click(row as HTMLButtonElement);
+    await flushFindJobsQueries();
     expect(screen.queryByText("Rescored after reading the listing")).toBeNull();
   });
 
-  it("shortlists selected rows and every shown row with keyboard-operable controls", () => {
+  it("shortlists selected rows and every shown row with keyboard-operable controls", async () => {
     const jobs = [
       createJob("one", "strong_fit", ["remote"], primarySource),
       createJob("two", "review_before_applying", ["hybrid"], longSource),
     ];
     const onShortlistJobs = vi.fn();
     const { unmount } = render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         discoveryTargets={[primarySource, longSource]}
         hasCompletedSearch
@@ -195,20 +201,24 @@ describe("DiscoveryResultsPanel triage filters", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     const first = screen.getByRole("checkbox", { name: "Select Engineer one" });
     first.focus();
     fireEvent.keyDown(first, { key: " " });
+    await flushFindJobsQueries();
     fireEvent.click(first);
+    await flushFindJobsQueries();
     fireEvent.click(
       screen.getByRole("button", { name: /^Shortlist \d+ selected$/u }),
     );
+    await flushFindJobsQueries();
     expect(onShortlistJobs).toHaveBeenCalledWith(["one"]);
 
     unmount();
     onShortlistJobs.mockClear();
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         discoveryTargets={[primarySource, longSource]}
         hasCompletedSearch
@@ -218,6 +228,7 @@ describe("DiscoveryResultsPanel triage filters", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
     // Bulk actions appear only while a row is ticked, in place of the
     // toolbar, so ticking a row never moves the list.
     expect(
@@ -226,15 +237,18 @@ describe("DiscoveryResultsPanel triage filters", () => {
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Select Engineer two" }),
     );
+    await flushFindJobsQueries();
     const bar = screen.getByRole("group", { name: "Bulk shortlist actions" });
     expect(bar.textContent).toContain("1 selected");
     expect(screen.queryByRole("searchbox")).toBeNull();
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Select the 2 jobs on this page" }),
     );
+    await flushFindJobsQueries();
     fireEvent.click(
       screen.getByRole("button", { name: "Shortlist 2 selected" }),
     );
+    await flushFindJobsQueries();
     expect(onShortlistJobs).toHaveBeenCalledWith(["one", "two"]);
   });
 
@@ -245,7 +259,7 @@ describe("DiscoveryResultsPanel triage filters", () => {
     ];
     const onDismissJobs = vi.fn(() => Promise.resolve());
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         discoveryTargets={[primarySource, longSource]}
         hasCompletedSearch
@@ -256,23 +270,27 @@ describe("DiscoveryResultsPanel triage filters", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Select Engineer one" }),
     );
+    await flushFindJobsQueries();
     fireEvent.click(screen.getByRole("button", { name: "Select all 2" }));
+    await flushFindJobsQueries();
     fireEvent.click(
       screen.getByRole("button", {
         name: "Mark 2 selected as not interested",
       }),
     );
+    await flushFindJobsQueries();
     await vi.waitFor(() =>
       expect(onDismissJobs).toHaveBeenCalledExactlyOnceWith(["one", "two"]),
     );
   });
 
-  it("clears the selection and brings the search toolbar back", () => {
+  it("clears the selection and brings the search toolbar back", async () => {
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         discoveryTargets={[primarySource, longSource]}
         hasCompletedSearch
@@ -282,18 +300,21 @@ describe("DiscoveryResultsPanel triage filters", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Select Engineer one" }),
     );
+    await flushFindJobsQueries();
     fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+    await flushFindJobsQueries();
     expect(
       screen.queryByRole("group", { name: "Bulk shortlist actions" }),
     ).toBeNull();
     expect(screen.getByRole("searchbox")).toBeTruthy();
   });
 
-  it("combines categories with AND and selections within a category with OR", () => {
+  it("combines categories with AND and selections within a category with OR", async () => {
     const jobs = [
       createJob("strong-remote", "strong_fit", ["remote"], primarySource),
       createJob(
@@ -304,15 +325,19 @@ describe("DiscoveryResultsPanel triage filters", () => {
       ),
       createJob("strong-hybrid", "strong_fit", ["hybrid"], longSource),
     ];
-    const { container } = renderResults(jobs);
+    const { container } = await renderResults(jobs);
     openFilters();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Strong fit" }));
+    await flushFindJobsQueries();
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Review before applying" }),
     );
+    await flushFindJobsQueries();
     fireEvent.click(screen.getByRole("checkbox", { name: "Primary board" }));
+    await flushFindJobsQueries();
     fireEvent.click(screen.getByRole("checkbox", { name: "Remote" }));
+    await flushFindJobsQueries();
 
     expect(screen.getByLabelText("4 active filters")).toBeTruthy();
     expect(screen.getByText("2 of 3 jobs")).toBeTruthy();
@@ -326,16 +351,18 @@ describe("DiscoveryResultsPanel triage filters", () => {
     ).toEqual(["review-remote", "strong-remote"]);
   });
 
-  it("shows a truthful no-results state and clears every filter", () => {
+  it("shows a truthful no-results state and clears every filter", async () => {
     const jobs = [
       createJob("remote", "strong_fit", ["remote"], primarySource),
       createJob("hybrid", "review_before_applying", ["hybrid"], longSource),
     ];
-    const { container } = renderResults(jobs);
+    const { container } = await renderResults(jobs);
     openFilters();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Primary board" }));
+    await flushFindJobsQueries();
     fireEvent.click(screen.getByRole("checkbox", { name: "Hybrid" }));
+    await flushFindJobsQueries();
 
     expect(screen.getByText("0 of 2 jobs")).toBeTruthy();
     expect(screen.getByText("No jobs match these filters")).toBeTruthy();
@@ -346,6 +373,7 @@ describe("DiscoveryResultsPanel triage filters", () => {
     fireEvent.click(
       screen.getAllByRole("button", { name: "Clear filters" })[0]!,
     );
+    await flushFindJobsQueries();
 
     expect(screen.queryByText("No jobs match these filters")).toBeNull();
     expect(
@@ -354,10 +382,10 @@ describe("DiscoveryResultsPanel triage filters", () => {
     expect(screen.queryByLabelText(/active filters?/u)).toBeNull();
   });
 
-  it("keeps long source labels complete and filterable", () => {
+  it("keeps long source labels complete and filterable", async () => {
     const job = createJob("specialist", "strong_fit", ["remote"], longSource);
     // A second source, or the facet has nothing to narrow and is not offered.
-    renderResults([
+    await renderResults([
       job,
       createJob("generalist", "strong_fit", ["remote"], primarySource),
     ]);
@@ -373,11 +401,12 @@ describe("DiscoveryResultsPanel triage filters", () => {
       "break-words",
     );
     fireEvent.click(sourceCheckbox);
+    await flushFindJobsQueries();
     expect(screen.getByText("1 of 2 jobs")).toBeTruthy();
   });
 
-  it("opens filters outside the toolbar and searches long source lists without clearing selections", () => {
-    const { container } = renderResults([
+  it("opens filters outside the toolbar and searches long source lists without clearing selections", async () => {
+    const { container } = await renderResults([
       createJob("specialist", "strong_fit", ["remote"], longSource),
       createJob("generalist", "strong_fit", ["remote"], primarySource),
     ]);
@@ -391,10 +420,12 @@ describe("DiscoveryResultsPanel triage filters", () => {
         .querySelectorAll("fieldset"),
     ).toHaveLength(1);
     fireEvent.click(screen.getByRole("checkbox", { name: "Primary board" }));
+    await flushFindJobsQueries();
     fireEvent.change(
       screen.getByRole("searchbox", { name: "Search sources" }),
       { target: { value: "specialist" } },
     );
+    await flushFindJobsQueries();
     expect(
       screen.queryByRole("checkbox", { name: "Primary board" }),
     ).toBeNull();
@@ -403,11 +434,12 @@ describe("DiscoveryResultsPanel triage filters", () => {
     ).toBeTruthy();
     expect(screen.getByText("1 of 2 jobs")).toBeTruthy();
     fireEvent.keyDown(document, { key: "Escape" });
+    await flushFindJobsQueries();
     expect(screen.queryByRole("dialog", { name: "Filter jobs" })).toBeNull();
     expect(document.activeElement).toBe(trigger);
     expect(screen.getByText("1 of 2 jobs")).toBeTruthy();
   });
-  it("resets pagination and retains a selected job that matches the filter", () => {
+  it("resets pagination and retains a selected job that matches the filter", async () => {
     const jobs = Array.from({ length: 55 }, (_, index) =>
       createJob(
         `page-${index.toString().padStart(2, "0")}`,
@@ -418,7 +450,7 @@ describe("DiscoveryResultsPanel triage filters", () => {
     );
     const onDisplayedSelectedJobIdChange = vi.fn();
     const selectedJob = jobs[54]!;
-    const { container } = renderResults(jobs, {
+    const { container } = await renderResults(jobs, {
       onDisplayedSelectedJobIdChange,
       selectedJob,
     });
@@ -427,6 +459,7 @@ describe("DiscoveryResultsPanel triage filters", () => {
     openFilters();
     onDisplayedSelectedJobIdChange.mockClear();
     fireEvent.click(screen.getByRole("checkbox", { name: longSource.label }));
+    await flushFindJobsQueries();
 
     expect(
       screen.queryByRole("navigation", { name: "Job result pages" }),
@@ -439,7 +472,7 @@ describe("DiscoveryResultsPanel triage filters", () => {
     expect(onDisplayedSelectedJobIdChange).not.toHaveBeenCalledWith(null);
   });
 
-  it("filters all five activity states and combines activity with other categories", () => {
+  it("filters all five activity states and combines activity with other categories", async () => {
     const activities: readonly ListingActivity[] = [
       {
         status: "active",
@@ -482,7 +515,7 @@ describe("DiscoveryResultsPanel triage filters", () => {
         activity,
       ),
     );
-    const { container } = renderResults(jobs);
+    const { container } = await renderResults(jobs);
     expect(
       screen.getByLabelText(
         /Closed listing status observed .*Reported closed by the job site's own listing feed on .*The provider marked it closed\./i,
@@ -494,7 +527,9 @@ describe("DiscoveryResultsPanel triage filters", () => {
       expect(screen.getByRole("checkbox", { name: label })).toBeTruthy();
     }
     fireEvent.click(screen.getByRole("checkbox", { name: "Inactive" }));
+    await flushFindJobsQueries();
     fireEvent.click(screen.getByRole("checkbox", { name: "Stale" }));
+    await flushFindJobsQueries();
     expect(screen.getByText("2 of 5 jobs")).toBeTruthy();
     expect(
       Array.from(
@@ -506,10 +541,12 @@ describe("DiscoveryResultsPanel triage filters", () => {
     ).toEqual(["inactive", "stale"]);
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Strong fit" }));
+    await flushFindJobsQueries();
     expect(screen.getByLabelText("3 active filters")).toBeTruthy();
     fireEvent.click(
       screen.getAllByRole("button", { name: "Clear filters" })[0]!,
     );
+    await flushFindJobsQueries();
     expect(
       container.querySelectorAll("button[data-job-result-id]"),
     ).toHaveLength(5);
@@ -535,8 +572,8 @@ function readFacetScopesById(): Record<string, Record<string, unknown>> {
 }
 
 describe("DiscoveryResultsPanel facet target size", () => {
-  it("gives every facet checkbox a >=24px square hit area inside spaced rows", () => {
-    renderResults([
+  it("gives every facet checkbox a >=24px square hit area inside spaced rows", async () => {
+    await renderResults([
       createJob("strong-remote", "strong_fit", ["remote"], primarySource),
       createJob(
         "review-hybrid",
@@ -581,7 +618,7 @@ describe("DiscoveryResultsPanel facet persistence", () => {
 
   function planPanelElement(facetScopeId: string) {
     return (
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         discoveryTargets={[primarySource, longSource]}
         facetScopeId={facetScopeId}
@@ -597,11 +634,13 @@ describe("DiscoveryResultsPanel facet persistence", () => {
     return render(planPanelElement(facetScopeId));
   }
 
-  it("restores facet selections per plan across remount and clears them truthfully", () => {
-    renderResults(persistenceJobs, { facetScopeId: "plan-a" });
+  it("restores facet selections per plan across remount and clears them truthfully", async () => {
+    await renderResults(persistenceJobs, { facetScopeId: "plan-a" });
     openFilters();
     fireEvent.click(screen.getByRole("checkbox", { name: "Strong fit" }));
+    await flushFindJobsQueries();
     fireEvent.click(screen.getByRole("checkbox", { name: "Remote" }));
+    await flushFindJobsQueries();
     expect(screen.getByText("1 of 2 jobs")).toBeTruthy();
 
     expect(readFacetScopesById()["plan-a"]).toEqual({
@@ -613,7 +652,7 @@ describe("DiscoveryResultsPanel facet persistence", () => {
     });
 
     cleanup();
-    renderResults(persistenceJobs, { facetScopeId: "plan-a" });
+    await renderResults(persistenceJobs, { facetScopeId: "plan-a" });
     expect(screen.getByLabelText("2 active filters")).toBeTruthy();
     expect(screen.getByText("1 of 2 jobs")).toBeTruthy();
     openFilters();
@@ -629,6 +668,7 @@ describe("DiscoveryResultsPanel facet persistence", () => {
     fireEvent.click(
       screen.getAllByRole("button", { name: "Clear filters" })[0]!,
     );
+    await flushFindJobsQueries();
     // Clearing stays truthful: the plan's own stored selection empties too.
     expect(readFacetScopesById()["plan-a"]).toEqual({
       id: "plan-a",
@@ -642,7 +682,7 @@ describe("DiscoveryResultsPanel facet persistence", () => {
     expect(screen.getByText("2 jobs")).toBeTruthy();
   });
 
-  it("restores only facets still valid and present, dropping the rest everywhere", () => {
+  it("restores only facets still valid and present, dropping the rest everywhere", async () => {
     window.localStorage.setItem(
       FACET_FILTERS_STORAGE_KEY,
       JSON.stringify({
@@ -659,7 +699,7 @@ describe("DiscoveryResultsPanel facet persistence", () => {
       }),
     );
 
-    renderResults(persistenceJobs, { facetScopeId: "plan-seed" });
+    await renderResults(persistenceJobs, { facetScopeId: "plan-seed" });
     openFilters();
 
     // Still offered by a visible result: applied.
@@ -696,15 +736,18 @@ describe("DiscoveryResultsPanel facet persistence", () => {
     });
   });
 
-  it("keeps each plan's facets isolated across remounts and live plan switches", () => {
+  it("keeps each plan's facets isolated across remounts and live plan switches", async () => {
     const mountedPanel = renderPlanPanel("plan-a");
+    await flushFindJobsQueries();
     openFilters();
     fireEvent.click(screen.getByRole("checkbox", { name: "Strong fit" }));
+    await flushFindJobsQueries();
     expect(screen.getByLabelText("1 active filter")).toBeTruthy();
 
     // A live plan switch on the mounted panel restores plan B's own (empty)
     // set instead of inheriting plan A's selection.
     mountedPanel.rerender(planPanelElement("plan-b"));
+    await flushFindJobsQueries();
     expect(screen.queryByLabelText(/active filters?/u)).toBeNull();
     expect(
       screen.getByRole<HTMLInputElement>("checkbox", { name: "Strong fit" })
@@ -715,7 +758,9 @@ describe("DiscoveryResultsPanel facet persistence", () => {
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Review before applying" }),
     );
+    await flushFindJobsQueries();
     mountedPanel.rerender(planPanelElement("plan-a"));
+    await flushFindJobsQueries();
     expect(screen.getByLabelText("1 active filter")).toBeTruthy();
     expect(
       screen.getByRole<HTMLInputElement>("checkbox", { name: "Strong fit" })
@@ -735,7 +780,7 @@ describe("DiscoveryResultsPanel facet persistence", () => {
     cleanup();
 
     // A remount under plan B restores B's persisted set, never A's.
-    renderResults(persistenceJobs, { facetScopeId: "plan-b" });
+    await renderResults(persistenceJobs, { facetScopeId: "plan-b" });
     openFilters();
     expect(screen.getByLabelText("1 active filter")).toBeTruthy();
     expect(
@@ -749,7 +794,7 @@ describe("DiscoveryResultsPanel facet persistence", () => {
     ).toBe(false);
   });
 
-  it("migrates the legacy unscoped snapshot into the active plan once", () => {
+  it("migrates the legacy unscoped snapshot into the active plan once", async () => {
     window.localStorage.setItem(
       LEGACY_FACET_FILTERS_STORAGE_KEY,
       JSON.stringify({
@@ -760,7 +805,7 @@ describe("DiscoveryResultsPanel facet persistence", () => {
       }),
     );
 
-    renderResults(persistenceJobs, { facetScopeId: "plan-migrated" });
+    await renderResults(persistenceJobs, { facetScopeId: "plan-migrated" });
     expect(screen.getByLabelText("3 active filters")).toBeTruthy();
 
     // The scoped snapshot now owns the migrated values...
@@ -777,15 +822,17 @@ describe("DiscoveryResultsPanel facet persistence", () => {
     ).toBeNull();
   });
 
-  it("never prunes a facet because another active facet hides its rows", () => {
-    renderResults(persistenceJobs, { facetScopeId: "plan-prune" });
+  it("never prunes a facet because another active facet hides its rows", async () => {
+    await renderResults(persistenceJobs, { facetScopeId: "plan-prune" });
     openFilters();
     // Primary board offers only the remote job; Hybrid excludes every
     // Primary-board row. Options derive from the unfiltered scoped
     // collection, so both selections must survive together as a truthful
     // zero-result state instead of being silently erased.
     fireEvent.click(screen.getByRole("checkbox", { name: "Primary board" }));
+    await flushFindJobsQueries();
     fireEvent.click(screen.getByRole("checkbox", { name: "Hybrid" }));
+    await flushFindJobsQueries();
     expect(screen.getByText("0 of 2 jobs")).toBeTruthy();
     expect(
       screen.getByRole<HTMLInputElement>("checkbox", { name: "Primary board" })
@@ -803,8 +850,8 @@ describe("DiscoveryResultsPanel facet persistence", () => {
 });
 
 describe("DiscoveryResultsPanel toolbar", () => {
-  it("offers no density switch: one row shape, one less decision", () => {
-    renderResults([
+  it("offers no density switch: one row shape, one less decision", async () => {
+    await renderResults([
       createJob("strong-remote", "strong_fit", ["remote"], primarySource),
     ]);
 
@@ -813,8 +860,8 @@ describe("DiscoveryResultsPanel toolbar", () => {
 });
 
 describe("DiscoveryResultsPanel facet saved views", () => {
-  it("offers no saved-view chrome and keeps the plan's own facet snapshot", () => {
-    renderResults(
+  it("offers no saved-view chrome and keeps the plan's own facet snapshot", async () => {
+    await renderResults(
       [
         createJob("strong-remote", "strong_fit", ["remote"], primarySource),
         createJob(
@@ -828,7 +875,9 @@ describe("DiscoveryResultsPanel facet saved views", () => {
     );
     openFilters();
     fireEvent.click(screen.getByRole("checkbox", { name: "Strong fit" }));
+    await flushFindJobsQueries();
     fireEvent.click(screen.getByRole("checkbox", { name: "Primary board" }));
+    await flushFindJobsQueries();
     expect(screen.getByText("1 of 2 jobs")).toBeTruthy();
 
     // Named views were list-management chrome on a handful of rows; the

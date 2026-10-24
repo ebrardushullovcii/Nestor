@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { JobListRow, ReviewQueueItem } from "@nestor/contracts";
+import type {
+  ReviewQueueItem,
+  WorkspaceJobListRow,
+} from "@nestor/contracts";
 import type { JobFinderQueuedJobOutcome } from "../../lib/job-finder-types";
 import { prefetchJobDetail } from "../../hooks/use-job-detail";
 import { hasOpenJobFinderOverlays } from "../../lib/job-finder-overlay-ownership";
 import { isImeComposingEvent } from "../../lib/job-finder-shortcuts";
-import { isDiscoveryAlsoFoundResult } from "./discovery-result-groups";
 import { useEffectWhileKeptRouteShown } from "../../lib/kept-route-visibility";
 
 /**
@@ -78,11 +80,21 @@ export function findNextTriageJobId(
 
 export function useDiscoveryTriage(input: {
   enabled: boolean;
-  jobs: readonly JobListRow[];
+  /** The page on screen: titles and statuses of the rows it shows. */
+  rows: readonly WorkspaceJobListRow[];
+  /** The whole list in order, across pages. */
   orderedJobIds: readonly string[];
-  inspectedJob: JobListRow | null;
+  /** A listed job's band. */
+  groupOf: (jobId: string) => WorkspaceJobListRow["resultGroup"] | undefined;
+  inspectedJob: {
+    id: string;
+    title: string;
+    detailRevision?: string | undefined;
+  } | null;
   reviewQueue: readonly ReviewQueueItem[];
   campaignId: string | null;
+  /** The inspector's cache key part for a job, so a prefetch is reused. */
+  detailRevision?: (jobId: string) => string;
   onSelectJob: (jobId: string) => void;
   onQueueJob: (
     jobId: string,
@@ -99,28 +111,28 @@ export function useDiscoveryTriage(input: {
   const [last, setLast] = useState<LastDecision | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const jobsById = useMemo(
-    () => new Map(input.jobs.map((job) => [job.id, job] as const)),
-    [input.jobs],
+    () => new Map(input.rows.map((job) => [job.id, job] as const)),
+    [input.rows],
   );
   const shortlistedIds = useMemo(
     () => new Set(input.reviewQueue.map((item) => item.jobId)),
     [input.reviewQueue],
   );
-  const weakerIds = useMemo(
-    () =>
-      new Set(
-        input.jobs.filter(isDiscoveryAlsoFoundResult).map((job) => job.id),
-      ),
-    [input.jobs],
-  );
+  const groupOf = input.groupOf;
+  const isWeaker = (jobId: string) => {
+    const group = groupOf(jobId);
+    return group === "weaker" || group === "mismatches";
+  };
+  // Every listed job waits on a decision; a row on this page also says
+  // whether it was decided meanwhile.
   const isOpen = (jobId: string) => {
     if (decided.has(jobId) || shortlistedIds.has(jobId)) return false;
     const job = jobsById.get(jobId);
-    return Boolean(job) && !SHORTLISTED_STATUSES.has(job!.status);
+    return !job || !SHORTLISTED_STATUSES.has(job.status);
   };
   const current = input.inspectedJob;
   const currentId = current?.id ?? null;
-  const currentWeaker = currentId !== null && weakerIds.has(currentId);
+  const currentWeaker = currentId !== null && isWeaker(currentId);
   // Open jobs in each group, counted once per change to the list or the
   // decisions. Counted on every render, moving to the next job walked all
   // 6,000 rows again.
@@ -131,12 +143,13 @@ export function useDiscoveryTriage(input: {
     for (const jobId of orderedJobIds) {
       if (decided.has(jobId) || shortlistedIds.has(jobId)) continue;
       const job = jobsById.get(jobId);
-      if (!job || SHORTLISTED_STATUSES.has(job.status)) continue;
-      if (weakerIds.has(jobId)) weaker += 1;
+      if (job && SHORTLISTED_STATUSES.has(job.status)) continue;
+      const group = groupOf(jobId);
+      if (group === "weaker" || group === "mismatches") weaker += 1;
       else stronger += 1;
     }
     return { weaker, stronger };
-  }, [decided, jobsById, orderedJobIds, shortlistedIds, weakerIds]);
+  }, [decided, groupOf, jobsById, orderedJobIds, shortlistedIds]);
   const openCount = currentWeaker ? openCounts.weaker : openCounts.stronger;
   const decidedCount = [...decided.values()].filter(
     (weaker) => weaker === currentWeaker,
@@ -145,7 +158,7 @@ export function useDiscoveryTriage(input: {
   const previousId = findNextTriageJobId(
     input.orderedJobIds,
     currentId,
-    (jobId) => jobsById.has(jobId),
+    () => true,
     -1,
   );
   const currentIsOpen = currentId !== null && isOpen(currentId);
@@ -153,7 +166,7 @@ export function useDiscoveryTriage(input: {
   const markDecided = (jobId: string, value: boolean) =>
     setDecided((previous) => {
       const next = new Map(previous);
-      if (value) next.set(jobId, weakerIds.has(jobId));
+      if (value) next.set(jobId, isWeaker(jobId));
       else next.delete(jobId);
       return next;
     });
@@ -222,7 +235,8 @@ export function useDiscoveryTriage(input: {
     setFailure(null);
   };
   const onSelectJob = input.onSelectJob;
-  const reopenRowListed = reopenJobId !== null && jobsById.has(reopenJobId);
+  const reopenRowListed =
+    reopenJobId !== null && input.orderedJobIds.includes(reopenJobId);
   useEffect(() => {
     if (!reopenJobId || !reopenRowListed) return;
     onSelectJob(reopenJobId);
@@ -283,14 +297,19 @@ export function useDiscoveryTriage(input: {
   // Read the next job while this one is being read.
   const nextRow = nextId ? (jobsById.get(nextId) ?? null) : null;
   const campaignId = input.campaignId;
+  const detailRevision = input.detailRevision;
   useEffect(() => {
-    if (!enabled || !nextRow) return undefined;
+    if (!enabled || !nextId) return undefined;
     const timer = window.setTimeout(
-      () => prefetchJobDetail(nextRow, campaignId),
+      () =>
+        prefetchJobDetail(
+          { id: nextId, detailRevision: detailRevision?.(nextId) ?? "0" },
+          campaignId,
+        ),
       250,
     );
     return () => window.clearTimeout(timer);
-  }, [campaignId, enabled, nextRow]);
+  }, [campaignId, detailRevision, enabled, nextId]);
 
   if (!enabled || !current) return null;
   return {

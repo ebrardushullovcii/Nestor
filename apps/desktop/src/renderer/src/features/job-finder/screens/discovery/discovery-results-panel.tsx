@@ -10,7 +10,6 @@ import {
   formatDiscoveryRunReportLabel,
   getDiscoveryRunReportCounts,
 } from "../../lib/discovery-run-count-label";
-import { joinUniqueSentences } from "../../lib/sentence-copy";
 import {
   memo,
   useCallback,
@@ -28,10 +27,11 @@ import type {
   BrowserSessionState,
   DiscoveryRunRecord,
   FitJudgmentProgress,
+  FitRecommendation,
   JobDiscoveryTarget,
   ListingActivity,
-  JobListRow,
   WorkMode,
+  WorkspaceJobListRow,
 } from "@nestor/contracts";
 import {
   describeInterruptedDiscoveryRun,
@@ -77,7 +77,6 @@ import { Link } from "react-router-dom";
 import { JOB_FINDER_ROUTE_PATHS } from "@renderer/features/job-finder/lib/job-finder-route-hrefs";
 import {
   formatJobEmployerLocationLine,
-  scrubJobAbsencePlaceholders,
 } from "@renderer/features/job-finder/lib/job-employer-location-display";
 import { cn } from "@renderer/lib/cn";
 import {
@@ -86,11 +85,7 @@ import {
   formatWorkModeLabel,
   getPostedDateLabel,
 } from "@renderer/features/job-finder/lib/job-finder-utils";
-import {
-  describeMatchTieBreakReason,
-  fitRecommendationCopy,
-  getMatchAssessmentPresentation,
-} from "@renderer/features/job-finder/lib/match-assessment-presentation";
+import { fitRecommendationCopy } from "@renderer/features/job-finder/lib/match-assessment-presentation";
 import {
   listingActivityStatuses,
   presentListingActivity,
@@ -100,27 +95,27 @@ import {
   focusDiscoveryDetailAfterKeyboardSelection,
   revealDiscoveryDetailAfterPointerSelection,
 } from "./discovery-accessibility";
+import { buildRunHeadedGroups, buildRunHeadings } from "./discovery-result-groups";
 import {
-  buildDiscoveryHeadedGroupByJobId,
-  buildDiscoveryResultGroupHeadings,
-} from "./discovery-result-groups";
+  getDiscoveryRowView,
+  isDiscoveryRowInPipeline,
+} from "./discovery-row-view";
+import {
+  stabilizeFindJobsPage,
+  type PageStability,
+} from "./find-jobs-page-stability";
+import {
+  useFindJobsList,
+  type FindJobsListRequest,
+  type FindJobsPoolBands,
+} from "./use-find-jobs-list";
 // One name for that window, from the one module that owns it.
 import { JOB_FINDER_BROWSER_NAME } from "@renderer/features/job-finder/lib/job-finder-browser-handoff-copy";
 import {
   type DiscoveryResultsSortField,
   useDiscoveryResultsSort,
 } from "./discovery-results-sort";
-import {
-  getDiscoveryResultFacets,
-  matchesDiscoveryJobSearch,
-  SOURCE_UNAVAILABLE_FILTER,
-  sortDiscoveryResults,
-  WORK_MODE_UNSPECIFIED_FILTER,
-} from "./discovery-results-view";
-import {
-  createIdentityMemo,
-  createPerObjectCache,
-} from "../../lib/identity-memo";
+import { WORK_MODE_UNSPECIFIED_FILTER } from "./discovery-filter-values";
 import { getDiscoveryListingRecencyKey } from "@nestor/job-finder/discovery-ordering";
 import type { DiscoveryLatestRunVerdict } from "./discovery-run-feedback";
 import { useAssistantContextSource } from "../../assistant/assistant-provider";
@@ -145,7 +140,6 @@ interface DiscoveryResultsPanelProps {
   planName?: string | null;
   onJudgeUnjudgedJobs?: () => Promise<void>;
   fitJudgmentProgress?: FitJudgmentProgress | null;
-  alsoFoundCount?: number;
   areAlsoFoundShown?: boolean;
   browserSession: BrowserSessionState;
   discoveryTargets?: readonly JobDiscoveryTarget[];
@@ -155,21 +149,23 @@ interface DiscoveryResultsPanelProps {
   // filters instead of leaking them across plans.
   facetScopeId?: string | null;
   hasCompletedSearch?: boolean;
-  hiddenAlsoFoundCount?: number;
-  hiddenAlsoFoundJobs?: readonly JobListRow[];
-  inAreaJobCount?: number;
-  pendingLocationJobCount?: number;
+  /** The open job the person just decided, kept in its place (ADR 0071). */
+  heldJobId?: string | null;
   isSearchInProgress?: boolean;
+  /** The plan whose jobs are listed; omitted means the active plan. */
+  planId?: string | null;
+  /** The selected job was opened by a link: it stays open when unlisted. */
+  preserveSelectedJob?: boolean;
+  /** The search in progress: its page keeps rows where they appeared. */
+  searchRunId?: string | null;
   /**
    * What the running search is doing right now, in the agent's words: the
    * source it is on, its latest note and how long ago it said it. A search
    * takes minutes per source, so the page must never look idle meanwhile.
    */
   liveStatusLine?: string | null;
-  jobs: readonly JobListRow[];
   preferredLocations?: readonly string[];
   remoteIncluded?: boolean;
-  totalLocationJobCount?: number;
   editPlanHref?: string | null;
   /**
    * The newest run record, read for its own phase. A run the app close cut
@@ -199,10 +195,10 @@ interface DiscoveryResultsPanelProps {
   onRetrySource?: (sourceId: string) => void;
   onDisplayedSelectedJobIdChange?: (selectedJobId: string | null) => void;
   /**
-   * The rows in the order the list shows them (search, filters and sort
-   * applied), for a triage pass that moves to the next job.
+   * The page on screen and the whole list's order (search, filters and sort
+   * applied), for the inspector and a triage pass that moves to the next job.
    */
-  onOrderedJobIdsChange?: (jobIds: readonly string[]) => void;
+  onListChange?: (list: DiscoveryListSnapshot) => void;
   onRecoveryAction?: (() => void) | null;
   onShowAlsoFound?: (() => void) | null;
   onToggleAlsoFound?: (() => void) | null;
@@ -220,12 +216,29 @@ interface DiscoveryResultsPanelProps {
     actionHref?: string | null;
     nextStep?: string | null;
   } | null;
-  selectedJob: DiscoveryResultJob | null;
+  /** Only its id is read: the job may be on another page or unlisted. */
+  selectedJob: { id: string } | null;
 }
 
-type DiscoveryResultJob = JobListRow;
+/** A Find jobs row: list columns from the database, never a whole job. */
+type DiscoveryResultJob = WorkspaceJobListRow;
 
 export const DISCOVERY_RESULTS_PAGE_SIZE = JOB_LIST_PAGE_SIZE;
+const NO_ROWS: readonly WorkspaceJobListRow[] = [];
+const NO_IDS: readonly string[] = [];
+
+export interface DiscoveryListSnapshot {
+  /** The first reply has arrived. */
+  ready: boolean;
+  rows: readonly WorkspaceJobListRow[];
+  orderedJobIds: readonly string[];
+  /** The band of a listed job, in any order the list is sorted by. */
+  groupOf: (jobId: string) => WorkspaceJobListRow["resultGroup"] | undefined;
+  /** Every job in the plan, decided or not. */
+  planJobCount: number;
+  pool: FindJobsPoolBands | null;
+  detailRevision: (jobId: string) => string;
+}
 export const DISCOVERY_OFFLINE_CATALOG_NOTICE_ID =
   "discovery-offline-catalog-notice";
 export const DISCOVERY_SEARCH_SETUP_BLOCKER_ID =
@@ -468,9 +481,6 @@ function pruneFilterSelection(
   return kept.length === current.size ? current : new Set(kept);
 }
 
-function getListingActivity(job: DiscoveryResultJob): ListingActivity {
-  return job.listingActivity ?? { status: "unknown" };
-}
 
 function toggleFilterValue(
   values: ReadonlySet<string>,
@@ -485,19 +495,6 @@ function toggleFilterValue(
   return next;
 }
 
-export function getDiscoveryResultsPage(
-  jobs: readonly JobListRow[],
-  page: number,
-): readonly JobListRow[] {
-  const pageCount = Math.max(
-    1,
-    Math.ceil(jobs.length / DISCOVERY_RESULTS_PAGE_SIZE),
-  );
-  const boundedPage = Math.min(Math.max(0, page), pageCount - 1);
-  const startIndex = boundedPage * DISCOVERY_RESULTS_PAGE_SIZE;
-
-  return jobs.slice(startIndex, startIndex + DISCOVERY_RESULTS_PAGE_SIZE);
-}
 
 /**
  * Truthful streaming-progress count: reports what is actually visible after
@@ -542,20 +539,6 @@ export function getDiscoveryListingDateBadge(input: {
     shown: true,
     text: `${listingDate.label} ${listingDate.value}`,
   };
-}
-
-function getSelectedJobPage(
-  jobs: readonly JobListRow[],
-  selectedJobId: string | null,
-): number {
-  if (!selectedJobId) {
-    return 0;
-  }
-
-  const selectedIndex = jobs.findIndex((job) => job.id === selectedJobId);
-  return selectedIndex < 0
-    ? 0
-    : Math.floor(selectedIndex / DISCOVERY_RESULTS_PAGE_SIZE);
 }
 
 const DISMISSED_SESSION_NOTICES_KEY = "nestor.discovery.dismissed-session-notices";
@@ -698,33 +681,6 @@ export function ResultsEmptyState(props: {
   );
 }
 
-// The tied percentages of one ordered list, kept across visits (see
-// `tiedScores` in the panel).
-const getTiedScores = createIdentityMemo(
-  (orderedJobs: readonly JobListRow[]): ReadonlySet<number> => {
-    const countsByScore = new Map<number, number>();
-    for (const job of orderedJobs) {
-      if (isRowScoreWithheld(job)) {
-        continue;
-      }
-      const score = job.matchAssessment.score;
-      countsByScore.set(score, (countsByScore.get(score) ?? 0) + 1);
-    }
-    const shared = new Set<number>();
-    for (const [score, count] of countsByScore) {
-      if (count > 1) {
-        shared.add(score);
-      }
-    }
-    return shared;
-  },
-);
-const isRowScoreWithheld = createPerObjectCache(
-  (job: JobListRow) => getMatchAssessmentPresentation(job).isScoreWithheld,
-);
-
-const NO_SOURCE_LABELS: readonly string[] = [];
-
 /** What a Find jobs row does, read through a ref so a row re-renders only
  * when what it shows changes, not on every render of the panel. */
 interface DiscoveryResultRowActions {
@@ -748,24 +704,19 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
   buttonClassName: string;
   checked: boolean;
   headedGroup: string | undefined;
-  indistinguishable: boolean;
   isNew: boolean;
   job: DiscoveryResultJob;
   rescoreAcknowledged: boolean;
   selectable: boolean;
   selected: boolean;
   showSelection: boolean;
-  sourceLabels: readonly string[];
-  tiedScore: boolean;
 }) {
   const { job } = props;
   const isSelected = props.selected;
   const recommendation =
-    fitRecommendationCopy[
-      job.matchAssessment.recommendation ??
-        "review_before_applying"
-    ];
-  const assessment = getMatchAssessmentPresentation(job);
+    fitRecommendationCopy[job.recommendation ?? "review_before_applying"];
+  const rowView = getDiscoveryRowView(job);
+  const assessment = rowView.fit;
   // A title-only row sitting under the rendered "Title matches ·
   // not yet checked" divider would otherwise repeat that exact
   // claim twice more — "Title match only" plus a two-line
@@ -787,36 +738,23 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
   // One sentence on the row saying why: what is missing when the
   // score is withheld, otherwise the hard-conflict reason. Rows
   // whose score stands on its own evidence stay quiet.
-  const rowReason =
-    (job.matchAssessment.recommendation === "skip"
-      ? scrubJobAbsencePlaceholders(
-          joinUniqueSentences([
-            job.matchAssessment.recommendationRationale ?? "",
-          ]),
-        ) || null
-      : null) ??
-    (job.matchAssessment.dimensions?.roleSuitability?.state !==
-      undefined &&
-    job.matchAssessment.dimensions.roleSuitability.state !==
-      "exact"
-      ? job.matchAssessment.gaps[0]
-      : null) ??
-    assessment.withheldReason ??
-    null;
+  const rowReason = rowView.reason;
   // Rows that share a printed percentage keep the one fact
   // behind their place as the score's tooltip. Printed under
   // every row it said "Job title matches one of your target
   // roles." down most of a 6,000-job list.
-  const tieBreakReason = props.tiedScore
-    ? describeMatchTieBreakReason(job)
-    : null;
-  const listingDateBadge = getDiscoveryListingDateBadge(job);
+  const tieBreakReason = rowView.tieBreakReason;
+  const listingDateBadge = getDiscoveryListingDateBadge({
+    postedAt: job.postedAt ?? null,
+    postedAtText: job.postedAtText ?? null,
+    providerUpdatedAt: job.providerUpdatedAt ?? null,
+  });
   const listingDateExplanation = listingDateBadge.shown
     ? listingDateBadge.rankable
       ? undefined
       : "The source shows a posting label without a full date, so Newest cannot rank this listing by its posting date."
     : undefined;
-  const sourceLabels = props.sourceLabels;
+  const sourceLabels = job.sourceLabels;
   const sourceText =
     sourceLabels.length > 0
       ? sourceLabels.join(", ")
@@ -828,7 +766,7 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
     Boolean(job.company) &&
     sourceLabels[0]?.trim().toLowerCase() ===
       job.company?.trim().toLowerCase();
-  const listingActivity = getListingActivity(job);
+  const listingActivity = job.listingActivity;
   const activity = presentListingActivity(listingActivity);
   const activityDescription =
     listingActivity.status === "inactive"
@@ -940,8 +878,7 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
                 weaker verdict earns a badge in the list; the
                 inspector keeps the full assessment. */}
               {!assessment.isScoreWithheld &&
-              job.matchAssessment.recommendation !==
-                "review_before_applying" ? (
+              job.recommendation !== "review_before_applying" ? (
                 <StatusBadge
                   tone={
                     assessment.isProvisional
@@ -1005,7 +942,7 @@ const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
                 >
                   {employerLocationLine ||
                     "Employer not listed"}
-                  {props.indistinguishable
+                  {job.indistinguishable
                     ? ` · Reference ${job.sourceJobId}`
                     : ""}
                 </span>
@@ -1171,19 +1108,18 @@ export function DiscoveryResultsPanel({
   planName = null,
   onJudgeUnjudgedJobs,
   fitJudgmentProgress,
-  alsoFoundCount = 0,
-  hiddenAlsoFoundJobs = [],
   areAlsoFoundShown = false,
   browserSession,
   discoveryTargets = [],
   emptyClassName,
   facetScopeId = null,
   hasCompletedSearch = false,
-  hiddenAlsoFoundCount = 0,
-
+  heldJobId = null,
   isSearchInProgress = false,
   liveStatusLine = null,
-  jobs,
+  planId = null,
+  preserveSelectedJob = false,
+  searchRunId = null,
   preferredLocations = [],
   remoteIncluded = false,
   editPlanHref = null,
@@ -1193,7 +1129,7 @@ export function DiscoveryResultsPanel({
   onSearchAgain = null,
   onRetrySource,
   onDisplayedSelectedJobIdChange,
-  onOrderedJobIdsChange,
+  onListChange,
   onRecoveryAction,
   onShowAlsoFound,
   onToggleAlsoFound,
@@ -1236,18 +1172,115 @@ export function DiscoveryResultsPanel({
   const [activityFilters, setActivityFilters] = useState<ReadonlySet<string>>(
     () => new Set(persistedFacetFilters.activity),
   );
-  // Source labels and the facet options are derived once per collection and
-  // kept across visits (see discovery-results-view). Like every other facet,
-  // the listing statuses are only the ones the current results carry: five
-  // checkboxes for a list where every row is "Unknown" filter nothing.
-  const {
-    activityOptions,
-    indistinguishableJobIds,
-    recommendationOptions,
-    sourceLabelsByJobId,
-    sourceOptions,
-    workModeOptions,
-  } = getDiscoveryResultFacets(jobs, discoveryTargets);
+  const resultsSort = useDiscoveryResultsSort();
+  const sortDirection = resultsSort.sort.direction;
+  const sortField = resultsSort.sort.field;
+  const normalizedQuery = normalizeCollectionSearch(deferredQuery);
+  // Jobs first seen since the person last left Find jobs: a dot on the row
+  // and one press to see only them. The rows passed are last render's page.
+  const visitRowsRef = useRef<readonly WorkspaceJobListRow[]>(NO_ROWS);
+  const previousVisitEnd = useSinceLastVisit("discovery", visitRowsRef.current);
+  const [newOnlyRequested, setNewOnly] = useState(false);
+  const selectedJobId = selectedJob?.id ?? null;
+  const [pagination, setPagination] = useState<{
+    page: number;
+    /** The selection whose page the list has already moved to. */
+    selectedJobId: string | null | undefined;
+  }>(() => ({ page: 0, selectedJobId: undefined }));
+  const [isPagePending, startPageTransition] = useTransition();
+  // What the list shows, asked of the database (ADR 0071): the filters,
+  // search, order and page are the request; facets, counts and the rows on
+  // this page come back with it.
+  const listRequest = useMemo<FindJobsListRequest>(() => {
+    const workModes = [...workModeFilters].filter(
+      (mode) => mode !== WORK_MODE_UNSPECIFIED_FILTER,
+    ) as WorkMode[];
+    return {
+      filters: {
+        ...(planId ? { planId } : {}),
+        ...(areAlsoFoundShown
+          ? { discoveryBands: ["matches", "unchecked", "weaker", "mismatches"] }
+          : {}),
+        ...(recommendationFilters.size
+          ? {
+              recommendations: [
+                ...recommendationFilters,
+              ] as FitRecommendation[],
+            }
+          : {}),
+        ...(sourceFilters.size ? { sourceLabels: [...sourceFilters] } : {}),
+        ...(workModes.length ? { workModes } : {}),
+        ...(workModeFilters.has(WORK_MODE_UNSPECIFIED_FILTER)
+          ? { workModeUnspecified: true }
+          : {}),
+        ...(activityFilters.size
+          ? {
+              activities: [...activityFilters] as ListingActivity["status"][],
+            }
+          : {}),
+        ...(previousVisitEnd ? { newSince: previousVisitEnd } : {}),
+        ...(newOnlyRequested && previousVisitEnd ? { newOnly: true } : {}),
+      },
+      sort:
+        sortField === "recent"
+          ? "newest"
+          : sortField === "company"
+            ? "company"
+            : "best_match",
+      search: normalizedQuery.slice(0, 500),
+      page: {
+        offset: pagination.page * DISCOVERY_RESULTS_PAGE_SIZE,
+        limit: DISCOVERY_RESULTS_PAGE_SIZE,
+      },
+    };
+  }, [
+    activityFilters,
+    areAlsoFoundShown,
+    newOnlyRequested,
+    normalizedQuery,
+    pagination.page,
+    planId,
+    previousVisitEnd,
+    recommendationFilters,
+    sortField,
+    sourceFilters,
+    workModeFilters,
+  ]);
+  const listRequestKey = JSON.stringify(listRequest);
+  const list = useFindJobsList(listRequest, listRequestKey, {
+    searchRunning: isSearchInProgress,
+  });
+  const listResult = list.result;
+  const orderedJobIds = listResult?.ids ?? NO_IDS;
+  const listIdSet = useMemo(() => new Set(orderedJobIds), [orderedJobIds]);
+  const facets = listResult?.facets ?? null;
+  // Like every other facet, the listing statuses are only the ones the
+  // current results carry: five checkboxes for a list where every row is
+  // "Unknown" filter nothing.
+  const recommendationOptions = useMemo(
+    () => (facets?.recommendations ?? []).map((option) => option.value),
+    [facets],
+  );
+  const sourceOptions = useMemo(
+    () => (facets?.sources ?? []).map((option) => option.value),
+    [facets],
+  );
+  const workModeOptions = useMemo(
+    () => (facets?.workModes ?? []).map((option) => option.value),
+    [facets],
+  );
+  const activityOptions = useMemo(
+    () => (facets?.activities ?? []).map((option) => option.value),
+    [facets],
+  );
+  // The jobs on this list before the panel's own filters and search.
+  const poolCount = (facets?.recommendations ?? []).reduce(
+    (total, option) => total + option.count,
+    0,
+  );
+  const poolBands = list.pool;
+  const alsoFoundCount = poolBands ? poolBands.weaker + poolBands.mismatches : 0;
+  const hiddenAlsoFoundCount = areAlsoFoundShown ? 0 : alsoFoundCount;
   // A facet with one value cannot narrow anything, so it is not offered.
   const filterGroups = {
     activity: activityOptions.length > 1,
@@ -1264,7 +1297,7 @@ export function DiscoveryResultsPanel({
   // facet changes heals values restored by a plan switch or named view; the
   // same-reference no-op keeps this from looping.
   useEffect(() => {
-    if (jobs.length === 0) return;
+    if (poolCount === 0) return;
     const recommendationScope = new Set(recommendationOptions);
     const sourceScope = new Set(sourceOptions);
     const workModeScope = new Set(workModeOptions);
@@ -1282,7 +1315,7 @@ export function DiscoveryResultsPanel({
   }, [
     activityFilters,
     activityOptions,
-    jobs.length,
+    poolCount,
     recommendationFilters,
     recommendationOptions,
     sourceFilters,
@@ -1315,115 +1348,65 @@ export function DiscoveryResultsPanel({
     sourceFilters.size +
     workModeFilters.size +
     activityFilters.size;
-  const resultsSort = useDiscoveryResultsSort();
-  const sortDirection = resultsSort.sort.direction;
-  const sortField = resultsSort.sort.field;
-  // Keep the shared fit order and result bands, including when this panel is
-  // supplied with a refreshed or independently filtered result collection.
-  // The collection is sorted once per order; search and filters only narrow
-  // the sorted list, which keeps its order.
-  const sortedJobs = sortDiscoveryResults(jobs, sortField, sortDirection);
-  const normalizedQuery = normalizeCollectionSearch(deferredQuery);
-  // Jobs first seen since the person last left Find jobs: a dot on the row
-  // and one press to see only them.
-  const previousVisitEnd = useSinceLastVisit("discovery", jobs);
-  const newJobCount = useMemo(
-    () =>
-      previousVisitEnd
-        ? jobs.filter((job) => isNewSinceVisit(job, previousVisitEnd)).length
-        : 0,
-    [jobs, previousVisitEnd],
-  );
-  const [newOnlyRequested, setNewOnly] = useState(false);
+  const newJobCount = previousVisitEnd ? (facets?.newSince ?? 0) : 0;
   const newOnly = newOnlyRequested && newJobCount > 0;
-  const filteredJobs = useMemo(() => {
-    if (
-      !newOnly &&
-      normalizedQuery === "" &&
-      recommendationFilters.size === 0 &&
-      sourceFilters.size === 0 &&
-      workModeFilters.size === 0 &&
-      activityFilters.size === 0
-    ) {
-      return sortedJobs;
-    }
-
-    return sortedJobs.filter((job) => {
-      const recommendation =
-        job.matchAssessment.recommendation ?? "review_before_applying";
-      const sourceLabels = sourceLabelsByJobId.get(job.id) ?? [
-        SOURCE_UNAVAILABLE_FILTER,
-      ];
-      const workModes =
-        job.workMode.length > 0 ? job.workMode : [WORK_MODE_UNSPECIFIED_FILTER];
-      const activity = getListingActivity(job);
-
-      return (
-        (recommendationFilters.size === 0 ||
-          recommendationFilters.has(recommendation)) &&
-        (sourceFilters.size === 0 ||
-          sourceLabels.some((label) => sourceFilters.has(label))) &&
-        (workModeFilters.size === 0 ||
-          workModes.some((workMode) => workModeFilters.has(workMode))) &&
-        (activityFilters.size === 0 || activityFilters.has(activity.status)) &&
-        (!newOnly || isNewSinceVisit(job, previousVisitEnd)) &&
-        matchesDiscoveryJobSearch(job, normalizedQuery)
-      );
-    });
-  }, [
-    activityFilters,
-    newOnly,
-    previousVisitEnd,
-    normalizedQuery,
-    recommendationFilters,
-    sortedJobs,
-    sourceFilters,
-    sourceLabelsByJobId,
-    workModeFilters,
-  ]);
-  const orderedJobs = filteredJobs;
-  /**
-   * Printed percentages that more than one row carries. A tie is the one case
-   * where the number alone cannot explain the order, so those rows have to
-   * say what separates them. Withheld scores are excluded: they print no
-   * percentage, so they cannot tie on one.
-   */
-  const tiedScores = getTiedScores(orderedJobs);
   const failedSourceCount =
     latestRun?.targetExecutions?.filter((source) => source.state === "failed")
       .length ?? 0;
-  const jobCount = filteredJobs.length;
-  const [pendingLocationJobCount, inAreaJobCount] = useMemo(() => {
-    let pending = 0;
-    let inArea = 0;
-    for (const job of filteredJobs) {
-      if (!job.matchAssessment.judgment) pending += 1;
-      else if (job.matchAssessment.locationReach === "in_area") inArea += 1;
-    }
-    return [pending, inArea];
-  }, [filteredJobs]);
+  // The filtered list's size; the page holds at most one page of it.
+  const jobCount = listResult?.total ?? 0;
+  const assessedJobCount = facets?.assessed ?? 0;
+  const inAreaJobCount =
+    facets?.locationReach.find((entry) => entry.value === "in_area")?.count ??
+    0;
+  const pendingLocationJobCount = Math.max(0, jobCount - assessedJobCount);
   const locationCountLabel =
     preferredLocations.length > 0 && !remoteIncluded
-      ? `${inAreaJobCount} of ${filteredJobs.length - pendingLocationJobCount} assessed jobs in or near ${preferredLocations.join(" or ")}${pendingLocationJobCount > 0 ? ` · ${pendingLocationJobCount} awaiting place checks` : ""}`
+      ? `${inAreaJobCount} of ${assessedJobCount} assessed jobs in or near ${preferredLocations.join(" or ")}${pendingLocationJobCount > 0 ? ` · ${pendingLocationJobCount} awaiting place checks` : ""}`
       : null;
   const pageCount = Math.max(
     1,
     Math.ceil(jobCount / DISCOVERY_RESULTS_PAGE_SIZE),
   );
-  const selectedJobId = selectedJob?.id ?? null;
-  const [pagination, setPagination] = useState(() => ({
-    page: getSelectedJobPage(orderedJobs, selectedJobId),
-    selectedJobId,
-  }));
-  const [isPagePending, startPageTransition] = useTransition();
+  // The list can shrink under the page (jobs decided elsewhere, a search's
+  // duplicates merged): ask for its last page instead of an empty one.
+  useEffect(() => {
+    if (listResult && pagination.page > pageCount - 1)
+      setPagination((current) => ({ ...current, page: pageCount - 1 }));
+  }, [listResult, pageCount, pagination.page]);
   // Tracks which plan scope the facet state currently mirrors so the restore
   // effect above only fires on real scope changes.
   const lastFacetScopeRef = useRef(facetScopeKey);
   const currentPage = Math.min(Math.max(0, pagination.page), pageCount - 1);
-  const visibleJobs = useMemo(
-    () => getDiscoveryResultsPage(orderedJobs, currentPage),
-    [currentPage, orderedJobs],
-  );
+  const stabilityRef = useRef<PageStability | null>(null);
+  // Keyed by the request the reply answers: while another page loads, the
+  // rows on screen still belong to the last one.
+  const resultRequestKey = JSON.stringify(list.request);
+  const visibleJobs = useMemo(() => {
+    const next = stabilizeFindJobsPage({
+      previous: stabilityRef.current,
+      rows: listResult?.rows ?? NO_ROWS,
+      listIds: listIdSet,
+      runId: isSearchInProgress ? searchRunId : null,
+      requestKey: resultRequestKey,
+      heldJobId,
+      pageSize: DISCOVERY_RESULTS_PAGE_SIZE,
+    });
+    stabilityRef.current = next;
+    return next.rows;
+  }, [
+    heldJobId,
+    isSearchInProgress,
+    listIdSet,
+    listResult,
+    resultRequestKey,
+    searchRunId,
+  ]);
+  visitRowsRef.current = visibleJobs;
+  // Every row this panel has shown, for bulk work on ticked rows that are on
+  // another page now (a closed listing cannot be shortlisted).
+  const seenRowsRef = useRef(new Map<string, WorkspaceJobListRow>());
+  for (const row of visibleJobs) seenRowsRef.current.set(row.id, row);
   const resultsListRef = useRef<HTMLUListElement | null>(null);
   const visibleJobIds = useMemo(
     () => visibleJobs.map((job) => job.id),
@@ -1448,7 +1431,7 @@ export function DiscoveryResultsPanel({
         listKind: "jobs",
         checkedIds: bulkSelectedJobIds,
         displayedIds: visibleJobs.map((job) => job.id),
-        filteredIds: orderedJobs.map((job) => job.id),
+        filteredIds: orderedJobIds,
         filterSummary:
           [
             deferredQuery.trim() ? `matching "${deferredQuery.trim()}"` : null,
@@ -1478,9 +1461,9 @@ export function DiscoveryResultsPanel({
   const isSelectingAny = bulkSelectedJobIds.size > 0;
   const dismissSelected = async () => {
     if (shortlistInFlight.current || !onDismissJobs) return;
-    const jobIds = orderedJobs
-      .filter((job) => bulkSelectedJobIds.has(job.id))
-      .map((job) => job.id);
+    const jobIds = orderedJobIds.filter((jobId) =>
+      bulkSelectedJobIds.has(jobId),
+    );
     if (jobIds.length === 0) return;
     shortlistInFlight.current = true;
     setIsShortlisting(true);
@@ -1496,7 +1479,7 @@ export function DiscoveryResultsPanel({
   };
   // Right-click: a ticked row acts for every ticked job, like a file list;
   // any other row acts for itself.
-  const rowMenuFor = (job: JobListRow): RowMenuEntry[] => {
+  const rowMenuFor = (job: WorkspaceJobListRow): RowMenuEntry[] => {
     const forTicked =
       bulkSelectedJobIds.has(job.id) && bulkSelectedJobIds.size > 1;
     const shortlistable = forTicked
@@ -1539,15 +1522,10 @@ export function DiscoveryResultsPanel({
   };
   // Every job the filters and search match, on every page, that a bulk
   // action can still act on.
+  // Find jobs lists jobs still waiting on a decision, so every listed job can
+  // be ticked except the decided one held open in its place.
   const selectableMatchingJobIds = isSelectingAny
-    ? orderedJobs
-        .filter(
-          (job) =>
-            !["drafting", "ready_for_review", "approved", "submitted"].includes(
-              job.status,
-            ),
-        )
-        .map((job) => job.id)
+    ? orderedJobIds.filter((jobId) => jobId !== heldJobId)
     : [];
   const selectAllMatching = () => {
     setBulkSelectedJobIds(new Set(selectableMatchingJobIds));
@@ -1556,23 +1534,20 @@ export function DiscoveryResultsPanel({
   const selectedShortlistableJobs =
     bulkSelectedJobIds.size === 0
       ? []
-      : orderedJobs.filter(
-          (job) =>
-            bulkSelectedJobIds.has(job.id) &&
-            !["drafting", "ready_for_review", "approved", "submitted"].includes(
-              job.status,
-            ) &&
-            getListingActivity(job).status !== "closed",
-        );
+      : orderedJobIds
+          .filter((jobId) => bulkSelectedJobIds.has(jobId))
+          .flatMap((jobId) => {
+            const row = seenRowsRef.current.get(jobId);
+            return row &&
+              (isDiscoveryRowInPipeline(row) ||
+                row.listingActivity.status === "closed")
+              ? []
+              : [{ id: jobId }];
+          });
   const selectedShortlistableCount = selectedShortlistableJobs.length;
   // Rows that carry a checkbox on this page, in the order shown.
   const selectablePageJobIds = visibleJobs
-    .filter(
-      (job) =>
-        !["drafting", "ready_for_review", "approved", "submitted"].includes(
-          job.status,
-        ),
-    )
+    .filter((job) => !isDiscoveryRowInPipeline(job))
     .map((job) => job.id);
   const selectionAnchorRef = useRef<string | null>(null);
   const toggleJobSelection = (jobId: string, shiftKey: boolean) => {
@@ -1616,40 +1591,54 @@ export function DiscoveryResultsPanel({
     }),
     [currentPage, sortDirection, sortField],
   );
+  const orderedGroups = useMemo(
+    () =>
+      (listResult?.outline ?? []).flatMap((run) =>
+        Array.from({ length: run.count }, () => run.group),
+      ),
+    [listResult],
+  );
   const groupHeadingsByJobId = useMemo(
     () =>
-      buildDiscoveryResultGroupHeadings(
-        orderedJobs,
+      buildRunHeadings(
+        orderedJobIds,
+        orderedGroups,
         groupHeadingOptions.ranked,
         { window: groupHeadingOptions.window },
       ),
-    [groupHeadingOptions, orderedJobs],
+    [groupHeadingOptions, orderedGroups, orderedJobIds],
   );
   // Which divider each row actually sits under, so a row can stay quiet about
   // a claim the divider above it already makes — and only then.
   const headedGroupByJobId = useMemo(
     () =>
-      buildDiscoveryHeadedGroupByJobId(
-        orderedJobs,
+      buildRunHeadedGroups(
+        orderedJobIds,
+        orderedGroups,
         groupHeadingOptions.ranked,
         { window: groupHeadingOptions.window },
       ),
-    [groupHeadingOptions, orderedJobs],
+    [groupHeadingOptions, orderedGroups, orderedJobIds],
   );
   // Arriving results, sorting and pagination must not change the action target.
   // Only filtering the selected job out requires a replacement selection.
-  const displayedSelectedJobId = orderedJobs.some(
-    (job) => job.id === selectedJobId,
-  )
-    ? selectedJobId
-    : (visibleJobs[0]?.id ?? null);
+  const displayedSelectedJobId =
+    selectedJobId !== null &&
+    (listIdSet.has(selectedJobId) ||
+      preserveSelectedJob ||
+      visibleJobs.some((job) => job.id === selectedJobId))
+      ? selectedJobId
+      : (visibleJobs[0]?.id ?? null);
 
+  // A selection made elsewhere (a link, the next job in triage) opens the
+  // page that holds it, once the list it is looked up in has arrived.
   useLayoutEffect(() => {
-    if (pagination.selectedJobId === selectedJobId) {
+    if (!listResult || pagination.selectedJobId === selectedJobId) {
       return;
     }
-
-    const selectedJobPage = getSelectedJobPage(orderedJobs, selectedJobId);
+    const index = selectedJobId ? orderedJobIds.indexOf(selectedJobId) : -1;
+    const selectedJobPage =
+      index < 0 ? currentPage : Math.floor(index / DISCOVERY_RESULTS_PAGE_SIZE);
     setPagination({
       page: selectedJobPage,
       selectedJobId,
@@ -1657,7 +1646,13 @@ export function DiscoveryResultsPanel({
     if (selectedJobPage !== currentPage && resultsScrollRegionRef.current) {
       resultsScrollRegionRef.current.scrollTop = 0;
     }
-  }, [currentPage, orderedJobs, pagination.selectedJobId, selectedJobId]);
+  }, [
+    currentPage,
+    listResult,
+    orderedJobIds,
+    pagination.selectedJobId,
+    selectedJobId,
+  ]);
 
   // Report after the page-snap effect so a freshly opened deep-linked page is
   // reported in its final position.
@@ -1674,13 +1669,33 @@ export function DiscoveryResultsPanel({
     reportedDisplayedSelectionRef.current = displayedSelectedJobId;
     onDisplayedSelectedJobIdChange(displayedSelectedJobId);
   }, [displayedSelectedJobId, onDisplayedSelectedJobIdChange]);
-  const orderedJobIdsKey = useMemo(
-    () => orderedJobs.map((job) => job.id),
-    [orderedJobs],
-  );
+  // The screen's inspector and triage read the page and the order from here.
+  const detailRevision = list.detailRevision;
+  const groupOf = useMemo(() => {
+    const groups = new Map(
+      orderedJobIds.map((jobId, index) => [jobId, orderedGroups[index]]),
+    );
+    return (jobId: string) => groups.get(jobId);
+  }, [orderedGroups, orderedJobIds]);
   useEffect(() => {
-    onOrderedJobIdsChange?.(orderedJobIdsKey);
-  }, [onOrderedJobIdsChange, orderedJobIdsKey]);
+    onListChange?.({
+      ready: listResult !== null,
+      rows: visibleJobs,
+      orderedJobIds,
+      groupOf,
+      planJobCount: listResult?.counts.all ?? 0,
+      pool: poolBands,
+      detailRevision,
+    });
+  }, [
+    detailRevision,
+    groupOf,
+    listResult,
+    onListChange,
+    orderedJobIds,
+    poolBands,
+    visibleJobs,
+  ]);
 
   const firstVisibleJobNumber =
     jobCount === 0 ? 0 : currentPage * DISCOVERY_RESULTS_PAGE_SIZE + 1;
@@ -1791,16 +1806,32 @@ export function DiscoveryResultsPanel({
   // Counted only while the no-matches note that prints it is on screen; it
   // used to run over every hidden job on every render.
   const showsTextNoMatches =
-    jobs.length > 0 && filteredJobs.length === 0 && activeFilterCount === 0;
-  const hiddenTextMatches = useMemo(
-    () =>
-      showsTextNoMatches
-        ? hiddenAlsoFoundJobs.filter((job) =>
-            matchesDiscoveryJobSearch(job, normalizedQuery),
-          ).length
-        : 0,
-    [hiddenAlsoFoundJobs, normalizedQuery, showsTextNoMatches],
-  );
+    poolCount > 0 && jobCount === 0 && activeFilterCount === 0;
+  const [hiddenTextMatches, setHiddenTextMatches] = useState(0);
+  useEffect(() => {
+    if (!showsTextNoMatches || areAlsoFoundShown || !normalizedQuery) {
+      setHiddenTextMatches(0);
+      return undefined;
+    }
+    let current = true;
+    void window.nestor.jobFinder.queries
+      .queryJobList({
+        list: "discovery",
+        filters: {
+          ...(planId ? { planId } : {}),
+          discoveryBands: ["weaker", "mismatches"],
+        },
+        search: normalizedQuery.slice(0, 500),
+        page: { offset: 0, limit: 1 },
+      })
+      .then((reply) => {
+        if (current) setHiddenTextMatches(reply.total);
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [areAlsoFoundShown, normalizedQuery, planId, showsTextNoMatches]);
   const sessionNeedsAttention =
     !isOfflineRuntime &&
     (browserSession.status === "login_required" ||
@@ -1819,7 +1850,7 @@ export function DiscoveryResultsPanel({
         text: [
           latestRun?.summary.report
             ? `${formatDiscoveryRunReportLabel(getDiscoveryRunReportCounts(latestRun))}.`
-            : `${filteredJobs.length} ${filteredJobs.length === 1 ? "result" : "results"} shown.`,
+            : `${jobCount} ${jobCount === 1 ? "result" : "results"} shown.`,
           liveStatusLine ?? "Still checking the remaining sources.",
         ].join(" "),
       }
@@ -1837,7 +1868,11 @@ export function DiscoveryResultsPanel({
               text: `${DISCOVERY_OFFLINE_RUNTIME_LABEL}. ${DISCOVERY_OFFLINE_SETUP_NOTICE}`,
             }
           : null;
-  const allResultsHidden = jobs.length === 0 && hiddenAlsoFoundCount > 0;
+  // Until the first reply the list says nothing: no empty state flashes
+  // before the rows it would contradict.
+  const listReady = listResult !== null;
+  const listEmpty = listReady && poolCount === 0;
+  const allResultsHidden = listEmpty && hiddenAlsoFoundCount > 0;
   // One number: the jobs on this list. The band arithmetic ("6 worth opening
   // · 3 title matches · 2 also found · 11 kept in this search plan") now
   // lives where it is explained — the dividers in the list and the finished
@@ -1845,19 +1880,19 @@ export function DiscoveryResultsPanel({
   // above a list that already shows them.
   const isCountFiltered =
     deferredQuery.trim().length > 0 || activeFilterCount > 0;
-  const jobNoun = jobs.length === 1 ? "job" : "jobs";
+  const jobNoun = poolCount === 1 ? "job" : "jobs";
   // With weaker matches shown the list holds both pools. The sidebar and
   // Home count only the matches, so the header names the two parts instead
   // of a third number ("Find jobs 678" beside "6284 jobs").
   const weakerShownCount = areAlsoFoundShown
-    ? Math.min(alsoFoundCount, jobs.length)
+    ? Math.min(alsoFoundCount, poolCount)
     : 0;
-  const matchCount = jobs.length - weakerShownCount;
+  const matchCount = poolCount - weakerShownCount;
   const resultCountLabel = isCountFiltered
-    ? `${filteredJobs.length} of ${jobs.length} ${jobNoun}`
+    ? `${jobCount} of ${poolCount} ${jobNoun}`
     : weakerShownCount > 0
       ? `${matchCount} ${matchCount === 1 ? "match" : "matches"} + ${weakerShownCount} weaker`
-      : `${jobs.length} ${jobNoun}`;
+      : `${poolCount} ${jobNoun}`;
   // Terminal empty-state truth: prefer the explicit newest-run verdict; when a
   // caller does not provide one, fall back to the legacy completed-search flag
   // so existing behavior is unchanged.
@@ -1876,13 +1911,13 @@ export function DiscoveryResultsPanel({
   const handleListKeyDown = useCallback(
     (event: KeyboardEvent<HTMLButtonElement>, jobId: string) => {
       const nextId = getAdjacentCollectionItemId(
-        orderedJobs.map((job) => job.id),
+        orderedJobIds,
         jobId,
         event.key,
       );
       if (!nextId) return;
 
-      const nextIndex = orderedJobs.findIndex((job) => job.id === nextId);
+      const nextIndex = orderedJobIds.indexOf(nextId);
       const nextPage = Math.floor(nextIndex / DISCOVERY_RESULTS_PAGE_SIZE);
       event.preventDefault();
       if (nextPage !== currentPage) {
@@ -1895,7 +1930,7 @@ export function DiscoveryResultsPanel({
         region: resultsScrollRegionRef.current,
       });
     },
-    [currentPage, moveToPage, onSelectJob, orderedJobs],
+    [currentPage, moveToPage, onSelectJob, orderedJobIds],
   );
   // Rows read their handlers through this ref, so the panel can hand every
   // row the same object and a row re-renders only when what it shows changes.
@@ -1930,7 +1965,7 @@ export function DiscoveryResultsPanel({
       ) : null}
       {/* An empty list explains itself below; "0 jobs" beside "Ready for
           your first search" only repeats the empty state as a number. */}
-      {jobs.length > 0 ? (
+      {poolCount > 0 ? (
         <span
           aria-atomic="true"
           aria-live="polite"
@@ -1971,7 +2006,7 @@ export function DiscoveryResultsPanel({
         : "What each source found"
     : null;
   const showsResultsStatusLine = Boolean(
-    resultsStatusLine && (jobs.length > 0 || liveStatusLine),
+    resultsStatusLine && (poolCount > 0 || liveStatusLine),
   );
 
   return (
@@ -2049,7 +2084,7 @@ export function DiscoveryResultsPanel({
               Clear
             </Button>
           </div>
-        ) : jobs.length > 0 ? (
+        ) : poolCount > 0 ? (
           <CollectionSearchToolbar
             className="border-b-0"
             compact
@@ -2068,8 +2103,8 @@ export function DiscoveryResultsPanel({
             placeholder="Search jobs"
             placement="panel"
             query={view.query}
-            totalCount={jobs.length}
-            visibleCount={filteredJobs.length}
+            totalCount={poolCount}
+            visibleCount={jobCount}
             viewActions={
               <div
                 className="flex min-w-0 flex-wrap items-start justify-between gap-2"
@@ -2079,8 +2114,8 @@ export function DiscoveryResultsPanel({
                   <DiscoveryResultFilters
                     groups={resultFilterGroups}
                     activeCount={activeFilterCount}
-                    matchingCount={filteredJobs.length}
-                    totalCount={jobs.length}
+                    matchingCount={jobCount}
+                    totalCount={poolCount}
                     onClear={clearFilters}
                   />
                 ) : null}
@@ -2209,7 +2244,7 @@ export function DiscoveryResultsPanel({
           {onJudgeUnjudgedJobs ? (
             <DiscoveryAssessmentContinuation
               className="ml-auto"
-              jobs={jobs}
+              uncheckedCount={poolBands?.unchecked ?? 0}
               isSearchRunning={isSearchInProgress}
               fitJudgmentProgress={fitJudgmentProgress ?? null}
               onJudgeAll={onJudgeUnjudgedJobs}
@@ -2273,11 +2308,11 @@ export function DiscoveryResultsPanel({
 
         {preferredLocations.length > 0 &&
         !remoteIncluded &&
-        jobs.length > 0 &&
+        poolCount > 0 &&
         !isSearchInProgress &&
         (hasCompletedSearch || latestRun?.state === "completed") &&
         inAreaJobCount === 0 &&
-        jobs.every((job) => Boolean(job.matchAssessment.judgment)) ? (
+        poolBands?.unchecked === 0 ? (
           <p
             className="px-5 py-2 text-xs text-foreground-soft"
             data-testid="discovery-no-area-matches"
@@ -2320,7 +2355,7 @@ export function DiscoveryResultsPanel({
           </div>
         ) : null}
 
-        {!allResultsHidden && searchSetupBlocker && jobs.length === 0 ? (
+        {!allResultsHidden && searchSetupBlocker && listEmpty ? (
           <div className="px-5 pt-4" id={DISCOVERY_SEARCH_SETUP_BLOCKER_ID}>
             <ResultsEmptyState
               actionHref={
@@ -2342,7 +2377,7 @@ export function DiscoveryResultsPanel({
         {!allResultsHidden &&
         !searchSetupBlocker &&
         showSearchingEmptyState &&
-        jobs.length === 0 ? (
+        listEmpty ? (
           <div className="px-5 pt-4">
             <ResultsEmptyState
               className={emptyClassName ?? "min-h-56"}
@@ -2359,7 +2394,7 @@ export function DiscoveryResultsPanel({
         !searchSetupBlocker &&
         !showSearchingEmptyState &&
         isOfflineRuntime &&
-        jobs.length === 0 ? (
+        listEmpty ? (
           <div className="px-5 pt-4">
             <ResultsEmptyState
               actionHref={JOB_FINDER_ROUTE_PATHS.profileSources}
@@ -2376,7 +2411,7 @@ export function DiscoveryResultsPanel({
         !searchSetupBlocker &&
         !isSearchInProgress &&
         sessionNeedsAttention &&
-        jobs.length === 0 ? (
+        listEmpty ? (
           <div className="px-5 pt-4">
             <ResultsEmptyState
               className={emptyClassName ?? "min-h-56"}
@@ -2400,7 +2435,7 @@ export function DiscoveryResultsPanel({
         !searchSetupBlocker &&
         !isSearchInProgress &&
         sessionWaitingOnRuntime &&
-        jobs.length === 0 ? (
+        listEmpty ? (
           <div className="px-5 pt-4">
             <ResultsEmptyState
               className={emptyClassName ?? "min-h-56"}
@@ -2410,7 +2445,7 @@ export function DiscoveryResultsPanel({
           </div>
         ) : null}
 
-        {sessionNeedsAttention && jobs.length > 0 ? (
+        {sessionNeedsAttention && poolCount > 0 ? (
           <div className="px-5 py-2">
             <SessionRecoveryLine
               description="A job site needs you to sign in before the next search."
@@ -2432,7 +2467,7 @@ export function DiscoveryResultsPanel({
         !sessionNeedsAttention &&
         !sessionWaitingOnRuntime &&
         emptyRunVerdict.kind === "interrupted" &&
-        jobs.length === 0 ? (
+        listEmpty ? (
           <div className="px-5 pt-4">
             <ResultsEmptyState
               className={emptyClassName ?? "min-h-56"}
@@ -2469,7 +2504,7 @@ export function DiscoveryResultsPanel({
         !isOfflineRuntime &&
         emptyRunVerdict.kind === "completed" &&
         alsoFoundCount === 0 &&
-        jobs.length === 0 ? (
+        listEmpty ? (
           <div className="px-5 pt-4">
             <ResultsEmptyState
               actionHref={
@@ -2492,7 +2527,7 @@ export function DiscoveryResultsPanel({
         !isOfflineRuntime &&
         emptyRunVerdict.kind === "none" &&
         alsoFoundCount === 0 &&
-        jobs.length === 0 ? (
+        listEmpty ? (
           <div className="px-5 pt-4">
             <ResultsEmptyState
               className={emptyClassName ?? "min-h-56"}
@@ -2502,7 +2537,7 @@ export function DiscoveryResultsPanel({
           </div>
         ) : null}
 
-        {jobs.length === 0 && alsoFoundCount > 0 && onToggleAlsoFound ? (
+        {listEmpty && alsoFoundCount > 0 && onToggleAlsoFound ? (
           <div className="px-5 py-4">
             <p className="mb-2 text-sm text-foreground-soft">
               Assessed jobs are in weaker matches.
@@ -2512,8 +2547,8 @@ export function DiscoveryResultsPanel({
             </Button>
           </div>
         ) : null}
-        {jobs.length > 0 &&
-        filteredJobs.length === 0 &&
+        {poolCount > 0 &&
+        jobCount === 0 &&
         activeFilterCount > 0 ? (
           <div className="px-5 pt-4">
             <ResultsEmptyState
@@ -2525,10 +2560,10 @@ export function DiscoveryResultsPanel({
               title="No jobs match these filters"
             />
           </div>
-        ) : jobs.length > 0 && filteredJobs.length === 0 ? (
+        ) : poolCount > 0 && jobCount === 0 ? (
           <div>
             <CollectionNoMatches
-              description={`This search kept ${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}. None of the shown jobs match this text. Clear the search to see ${jobs.length === 1 ? "it" : "them"}.`}
+              description={`This search kept ${poolCount} ${poolCount === 1 ? "job" : "jobs"}. None of the shown jobs match this text. Clear the search to see ${poolCount === 1 ? "it" : "them"}.`}
               noun="jobs"
               onClear={() => view.setQuery("")}
               query={view.query}
@@ -2552,7 +2587,7 @@ export function DiscoveryResultsPanel({
           </div>
         ) : null}
 
-        {filteredJobs.length > 0 ? (
+        {jobCount > 0 || visibleJobs.length > 0 ? (
           // Below the two-pane breakpoint the results panel and the inspector
           // share one page scroller, so the list must take its content height:
           // a short result set that stretches to the viewport leaves hundreds of
@@ -2590,7 +2625,6 @@ export function DiscoveryResultsPanel({
                       buttonClassName={baseButtonClasses}
                       checked={bulkSelectedJobIds.has(job.id)}
                       headedGroup={headedGroupByJobId.get(job.id)}
-                      indistinguishable={indistinguishableJobIds.has(job.id)}
                       isNew={isNewSinceVisit(job, previousVisitEnd)}
                       job={job}
                       key={job.id}
@@ -2598,10 +2632,6 @@ export function DiscoveryResultsPanel({
                       selectable={selectablePageJobIds.includes(job.id)}
                       selected={displayedSelectedJobId === job.id}
                       showSelection={Boolean(onShortlistJobs)}
-                      sourceLabels={
-                        sourceLabelsByJobId.get(job.id) ?? NO_SOURCE_LABELS
-                      }
-                      tiedScore={tiedScores.has(job.matchAssessment.score)}
                     />,
                   ];
                 })}

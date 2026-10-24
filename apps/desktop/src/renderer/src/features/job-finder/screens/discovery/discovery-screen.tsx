@@ -30,6 +30,7 @@ import type {
   ReviewQueueItem,
   SourceAccessPrompt,
   JobListRow,
+  ListingActivity,
 } from "@nestor/contracts";
 import {
   resolveCampaignSourceTargetIds,
@@ -81,6 +82,7 @@ import {
   DISCOVERY_OFFLINE_CATALOG_NOTICE_ID,
   DISCOVERY_SEARCH_SETUP_BLOCKER_ID,
   DiscoveryResultsPanel,
+  type DiscoveryListSnapshot,
 } from "./discovery-results-panel";
 import { DiscoveryRunFeedbackCallout } from "./discovery-run-feedback-callout";
 import {
@@ -88,7 +90,6 @@ import {
   getDiscoveryLatestRunVerdict,
   type DiscoveryRunFeedback,
 } from "./discovery-run-feedback";
-import { compareDiscoveryFitOrder } from "./discovery-results-sort";
 import { useDiscoveryStopState } from "@renderer/features/job-finder/lib/discovery-stop-state";
 import { DISCOVERY_STOP_UNACKNOWLEDGED_LABEL } from "@renderer/features/job-finder/lib/status-copy";
 import { getDiscoverySearchReadiness } from "./discovery-search-readiness";
@@ -164,173 +165,19 @@ export function getNewestRunForCampaign(
 }
 
 const NO_REVIEW_QUEUE: readonly ReviewQueueItem[] = [];
+const NO_LIST_ROWS: DiscoveryListSnapshot["rows"] = [];
+const NO_LIST_IDS: readonly string[] = [];
+const NO_GROUP = () => undefined;
 
-export function getDiscoveryResultVisibility(
-  jobs: readonly JobListRow[],
-  selectedJob: JobListRow | null,
-  showAlsoFound: boolean,
-  preserveSelectedJob = false,
-  stableOrderIds?: readonly string[],
-): {
-  alsoFoundCount: number;
-  hiddenAlsoFoundCount: number;
-  jobs: readonly JobListRow[];
-  selectedJob: JobListRow | null;
-} {
-  // Weaker matches and clear mismatches are one "also found" pool. Presenting
-  // them beside the leading band made the headline count describe jobs the
-  // app itself had already scored well below the saved targets.
-  const alsoFound = jobs.filter(isDiscoveryAlsoFoundResult);
-  // A deep-linked selection keeps only that job visible even when it is in the
-  // also-found pool; the rest stay hidden so the preserve path never silently
-  // reveals the whole pool.
-  const displayCandidates = showAlsoFound
-    ? jobs
-    : jobs.filter(
-        (job) =>
-          !isDiscoveryAlsoFoundResult(job) ||
-          (preserveSelectedJob && job.id === selectedJob?.id),
-      );
-  // Ordering is the canonical Best-match chain (see compareDiscoveryFitOrder),
-  // so the visible sequence always equals the rediscovery rank-audit sequence
-  // for the same candidate set instead of depending on arrival order.
-  const stableOrder = stableOrderIds
-    ? new Map(stableOrderIds.map((id, index) => [id, index]))
-    : null;
-  const visibleJobs = displayCandidates.slice().sort((left, right) => {
-    if (stableOrder) {
-      const leftIndex = stableOrder.get(left.id);
-      const rightIndex = stableOrder.get(right.id);
-      if (leftIndex !== undefined || rightIndex !== undefined) {
-        if (leftIndex === undefined) return 1;
-        if (rightIndex === undefined) return -1;
-        if (leftIndex !== rightIndex) return leftIndex - rightIndex;
-      }
-    }
-    return compareDiscoveryFitOrder(left, right);
-  });
-  const visibleSelectedJob =
-    selectedJob && visibleJobs.some((job) => job.id === selectedJob.id)
-      ? selectedJob
-      : (visibleJobs[0] ?? null);
-  const visibleJobIds = new Set(visibleJobs.map((job) => job.id));
-
-  return {
-    alsoFoundCount: alsoFound.length,
-    // Truthful hidden count: also-found rows actually absent from the
-    // displayed list, so a deep-linked row held visible counts as shown.
-    hiddenAlsoFoundCount: alsoFound.filter((job) => !visibleJobIds.has(job.id))
-      .length,
-    jobs: visibleJobs,
-    selectedJob: visibleSelectedJob,
-  };
-}
-
-export interface StableDiscoveryRunSnapshot {
-  runId: string;
-  jobIds: readonly string[];
-  /** Only the verdict each row shows; holding whole jobs kept a second copy. */
-  assessmentsById: ReadonlyMap<string, JobListRow["matchAssessment"]>;
-}
-
-/**
- * Keeps rows in the order they were first shown during a run, appends only
- * genuinely new rows, and holds each row's verdict once it has one, so a
- * rescore after a listing read does not reshuffle the list mid-search. A row
- * still waiting for its first verdict shows it as soon as the model gives it:
- * fit is judged while the search runs (ADR 0041), and freezing the unjudged
- * state hid every one of those scores until the search ended. The terminal
- * render receives the current objects once.
- */
-export function updateStableDiscoveryRunSnapshot(input: {
-  current: StableDiscoveryRunSnapshot | null;
-  jobs: readonly JobListRow[];
-  runId: string | null;
-}): {
-  jobs: readonly JobListRow[];
-  snapshot: StableDiscoveryRunSnapshot | null;
-} {
-  if (!input.runId) {
-    return { jobs: input.jobs, snapshot: null };
-  }
-
-  if (input.current?.runId !== input.runId) {
-    const ordered = input.jobs.slice().sort(compareDiscoveryFitOrder);
-    return {
-      jobs: ordered,
-      snapshot: {
-        runId: input.runId,
-        jobIds: ordered.map((job) => job.id),
-        assessmentsById: new Map(
-          ordered.map((job) => [job.id, job.matchAssessment]),
-        ),
-      },
-    };
-  }
-
-  const current = input.current;
-  const appended: JobListRow[] = [];
-  const firstVerdicts: JobListRow[] = [];
-  for (const job of input.jobs) {
-    const held = current.assessmentsById.get(job.id);
-    if (!held) appended.push(job);
-    else if (!held.judgment && job.matchAssessment.judgment) {
-      firstVerdicts.push(job);
-    }
-  }
-  const snapshot =
-    appended.length === 0 && firstVerdicts.length === 0
-      ? current
-      : {
-          runId: input.runId,
-          jobIds:
-            appended.length === 0
-              ? current.jobIds
-              : [...current.jobIds, ...appended.map((job) => job.id)],
-          assessmentsById: new Map([
-            ...current.assessmentsById,
-            ...[...appended, ...firstVerdicts].map(
-              (job) => [job.id, job.matchAssessment] as const,
-            ),
-          ]),
-        };
-  const currentJobsById = new Map(input.jobs.map((job) => [job.id, job]));
-  return {
-    jobs: snapshot.jobIds.flatMap((id) => {
-      const currentJob = currentJobsById.get(id);
-      const heldAssessment = snapshot.assessmentsById.get(id);
-      if (!currentJob || !heldAssessment) return [];
-      return heldAssessment === currentJob.matchAssessment
-        ? [currentJob]
-        : [{ ...currentJob, matchAssessment: heldAssessment }];
-    }),
-    snapshot,
-  };
-}
-
-/**
- * Resolves the job the inspector should describe. The results panel reports
- * which job it actually displays on the current filtered and paginated page;
- * until the first report arrives (`displayedJobId === undefined`), the
- * pre-existing default-selection behavior applies. An explicit `null` report
- * means the visible page is empty and the inspector must clear rather than
- * keep describing a row the user cannot see.
- */
-export function getDiscoveryInspectedJob(
-  rankedJobs: readonly JobListRow[],
-  requestedJobId: string | null,
-  displayedJobId: string | null | undefined,
-): JobListRow | null {
-  if (displayedJobId === undefined) {
-    const requested = requestedJobId
-      ? rankedJobs.find((job) => job.id === requestedJobId)
-      : undefined;
-    return requested ?? rankedJobs[0] ?? null;
-  }
-  if (displayedJobId === null) {
-    return null;
-  }
-  return rankedJobs.find((job) => job.id === displayedJobId) ?? null;
+/** The job the inspector describes; its full record is read by id. */
+interface DiscoveryInspectedJob {
+  id: string;
+  title: string;
+  company: string | null;
+  /** Changes when the job's stored facts change. */
+  detailRevision: string;
+  /** The listing status the list derives, which the stored job lacks. */
+  listingActivity?: ListingActivity;
 }
 
 /**
@@ -369,33 +216,6 @@ const resolvePlanSearchPreferences = createIdentityMemo(
   },
 );
 
-/**
- * The visible list for one collection, kept across selections and visits.
- * Selecting a row only changes which row is selected, so the list is not
- * filtered and sorted again for it; only a held deep-linked row takes part.
- */
-const getMemoizedResultVisibility = createIdentityMemo(
-  (
-    jobs: readonly JobListRow[],
-    showAlsoFound: boolean,
-    preservedSelectedJob: JobListRow | null,
-    stableOrderIds: readonly string[] | undefined,
-  ) =>
-    getDiscoveryResultVisibility(
-      jobs,
-      preservedSelectedJob,
-      showAlsoFound,
-      preservedSelectedJob !== null,
-      stableOrderIds,
-    ),
-);
-
-const getHiddenAlsoFoundJobs = createIdentityMemo(
-  (visibleJobs: readonly JobListRow[], allJobs: readonly JobListRow[]) => {
-    const visibleIds = new Set(visibleJobs.map((job) => job.id));
-    return allJobs.filter((job) => !visibleIds.has(job.id));
-  },
-);
 
 /**
  * The person's own Show/Hide weaker matches choice per plan and opening rule,
@@ -431,7 +251,8 @@ export function DiscoveryScreen(props: {
   isActivityPausePending?: boolean;
   isJobPending: (jobId: string) => boolean;
   isTargetPending: (targetId: string) => boolean;
-  jobs: readonly JobListRow[];
+  /** Jobs in the plan, from the workspace the route holds, until the list answers. */
+  planJobCount: number;
   dismissedJobs: readonly JobListRow[];
   liveEvents: readonly DiscoveryActivityEvent[];
   onBackToRapidReview?: () => void;
@@ -513,7 +334,6 @@ export function DiscoveryScreen(props: {
     isDiscoveryAllPending,
     isJobPending,
     isTargetPending,
-    jobs,
     dismissedJobs,
     liveEvents,
     onBackToRapidReview,
@@ -584,6 +404,9 @@ export function DiscoveryScreen(props: {
   // What the results panel actually displays on its current filtered and
   // paginated page. Null state means "not reported yet"; an explicit null
   // jobId means the panel is showing no results at all.
+  // The results panel's page and the list's order (ADR 0071).
+  const [list, setList] = useState<DiscoveryListSnapshot | null>(null);
+  const planJobCount = list?.ready ? list.planJobCount : props.planJobCount;
   const [displayedSelection, setDisplayedSelection] = useState<{
     jobId: string | null;
     campaignId: string | null | undefined;
@@ -755,106 +578,6 @@ export function DiscoveryScreen(props: {
   // this visit is announced: the verdict standing when the screen opens
   // describes a search that ended before, and the results already show it.
   const { showToast } = useToast();
-  const searchVisibleJobs = useRef<{
-    runId: string;
-    planId: string | null | undefined;
-    ids: Set<string>;
-  } | null>(null);
-  useEffect(() => {
-    if (activeRun?.state === "running") {
-      if (activeRun.campaignId && activeRun.campaignId !== activeCampaignId) {
-        searchVisibleJobs.current = null;
-        return;
-      }
-      if (
-        searchVisibleJobs.current?.runId !== activeRun.id ||
-        searchVisibleJobs.current.planId !== activeCampaignId
-      ) {
-        searchVisibleJobs.current = {
-          runId: activeRun.id,
-          planId: activeCampaignId,
-          ids: new Set(
-            props.jobs
-              .filter((job) => !isDiscoveryAlsoFoundResult(job))
-              .map((job) => job.id),
-          ),
-        };
-      }
-      for (const job of props.jobs) {
-        if (!isDiscoveryAlsoFoundResult(job))
-          searchVisibleJobs.current.ids.add(job.id);
-      }
-      return;
-    }
-    const previous = searchVisibleJobs.current;
-    if (!previous) return;
-    searchVisibleJobs.current = null;
-    if (previous.planId !== activeCampaignId) return;
-    const currentById = new Map(props.jobs.map((job) => [job.id, job]));
-    const left = [...previous.ids].filter((id) => !currentById.has(id)).length;
-    const moved = props.jobs.filter(
-      (job) => previous.ids.has(job.id) && isDiscoveryAlsoFoundResult(job),
-    ).length;
-    if (left > 0 || moved > 0)
-      showToast({
-        title: [
-          left > 0
-            ? `${left} ${left === 1 ? "job left" : "jobs left"} this plan after the fit check.`
-            : null,
-          moved > 0
-            ? `${moved} ${moved === 1 ? "job moved" : "jobs moved"} to weaker matches after the fit check.`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" "),
-        ...(moved > 0 && !showAlsoFound
-          ? {
-              action: {
-                label: "Show weaker matches",
-                onClick: () => setShowAlsoFound(true),
-              },
-            }
-          : {}),
-      });
-  }, [activeRun, activeCampaignId, props.jobs, showAlsoFound, showToast]);
-  const assessedRequest = useRef<{
-    id: string;
-    previous: JobListRow["matchAssessment"];
-  } | null>(null);
-  const assessJobWithFeedback = onAssessJobListing
-    ? async (id: string) => {
-        const job = props.jobs.find((job) => job.id === id);
-        if (job)
-          assessedRequest.current = { id, previous: job.matchAssessment };
-        try {
-          await onAssessJobListing(id);
-        } catch (error) {
-          assessedRequest.current = null;
-          throw error;
-        }
-      }
-    : undefined;
-  useEffect(() => {
-    const request = assessedRequest.current;
-    if (!request) return;
-    const job = props.jobs.find((job) => job.id === request.id);
-    if (
-      !job ||
-      job.matchAssessment === request.previous ||
-      job.matchAssessment.judgment?.judgedAt ===
-        request.previous.judgment?.judgedAt
-    )
-      return;
-    assessedRequest.current = null;
-    if (!showAlsoFound && isDiscoveryAlsoFoundResult(job))
-      showToast({
-        title: `Assessed: ${job.matchAssessment.score}% fit, moved to weaker matches`,
-        action: {
-          label: "Show weaker matches",
-          onClick: () => setShowAlsoFound(true),
-        },
-      });
-  }, [props.jobs, showAlsoFound, showToast]);
   const announcedFeedbackKeyRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (announcedFeedbackKeyRef.current === undefined) {
@@ -964,14 +687,14 @@ export function DiscoveryScreen(props: {
   // first successful search is never hidden behind the setup tab. The flag is
   // latched, so later empty→nonempty transitions stay wherever the user
   // navigated instead of yanking them back.
-  const hasRevealedFirstResultsRef = useRef(jobs.length > 0);
+  const hasRevealedFirstResultsRef = useRef(planJobCount > 0);
   const firstResultRevealPendingRef = useRef(false);
   useLayoutEffect(() => {
     // Detect the first arrival in the same layout phase as settlement. A
     // passive effect can otherwise set the pending ref after this effect has
     // already run; when the user is already on Results, its no-op state update
     // would not produce another commit to settle the route header.
-    if (!hasRevealedFirstResultsRef.current && jobs.length > 0) {
+    if (!hasRevealedFirstResultsRef.current && planJobCount > 0) {
       hasRevealedFirstResultsRef.current = true;
       firstResultRevealPendingRef.current = true;
 
@@ -1012,10 +735,7 @@ export function DiscoveryScreen(props: {
     }
     const frame = window.requestAnimationFrame(settleRouteHeader);
     return () => window.cancelAnimationFrame(frame);
-  }, [jobs.length, setWorkspaceMode, workspaceMode]);
-  const stableReadStageSnapshotRef = useRef<StableDiscoveryRunSnapshot | null>(
-    null,
-  );
+  }, [planJobCount, setWorkspaceMode, workspaceMode]);
   const stableRunId = activeRun?.state === "running" ? activeRun.id : null;
   // Find jobs lists the jobs still waiting on a decision. The open job stays
   // in its place when it is decided here (a bulk shortlist that included it),
@@ -1038,76 +758,224 @@ export function DiscoveryScreen(props: {
       openedUndecidedJobIdRef.current === selectedJob.id)
       ? selectedJob.id
       : null;
-  const undecidedJobs = useMemo(
-    () =>
-      jobs.filter(
-        (job) =>
-          job.id === heldDecidedJobId ||
-          !isDiscoveryDecidedJob(job, shortlistedJobIds),
-      ),
-    [heldDecidedJobId, jobs, shortlistedJobIds],
-  );
-  // Recomputed only when the jobs or the run change: live search events
-  // re-render this screen several times a second, and a new list each time
-  // made the results re-filter and re-sort every job.
-  const stableReadStage = useMemo(() => {
-    const next = updateStableDiscoveryRunSnapshot({
-      current: stableReadStageSnapshotRef.current,
-      jobs: undecidedJobs,
-      runId: stableRunId,
-    });
-    stableReadStageSnapshotRef.current = next.snapshot;
-    return next;
-  }, [undecidedJobs, stableRunId]);
-  const stableJobs = stableReadStage.jobs;
-  const stableSelectedJob = selectedJob
-    ? (stableJobs.find((job) => job.id === selectedJob.id) ?? selectedJob)
-    : null;
-  const listVisibility = getMemoizedResultVisibility(
-    stableJobs,
-    showAlsoFound,
-    preserveSelectedJob ? stableSelectedJob : null,
-    stableReadStage.snapshot?.jobIds,
-  );
-  const resultVisibility = useMemo(
-    () => ({
-      ...listVisibility,
-      selectedJob:
-        stableSelectedJob &&
-        listVisibility.jobs.some((job) => job.id === stableSelectedJob.id)
-          ? stableSelectedJob
-          : (listVisibility.jobs[0] ?? null),
-    }),
-    [listVisibility, stableSelectedJob],
-  );
-  const hiddenAlsoFoundJobs = getHiddenAlsoFoundJobs(
-    resultVisibility.jobs,
-    stableJobs,
-  );
-  const [inAreaJobCount, pendingLocationJobCount] = useMemo(() => {
-    let inArea = 0;
-    let pending = 0;
-    for (const job of stableJobs) {
-      if (!job.matchAssessment.judgment) pending += 1;
-      else if (job.matchAssessment.locationReach === "in_area") inArea += 1;
-    }
-    return [inArea, pending];
-  }, [stableJobs]);
-  const inspectedJob = getDiscoveryInspectedJob(
-    resultVisibility.jobs,
-    selectedJob?.id ?? null,
+  // The page the results panel shows and the list's order, read from the
+  // database (ADR 0071); the open job's full record comes by id.
+  const listRows = list?.rows ?? NO_LIST_ROWS;
+  const listOrderedJobIds = list?.orderedJobIds ?? NO_LIST_IDS;
+  const listDetailRevision = list?.detailRevision;
+  const displayedJobId =
     displayedSelection?.campaignId === activeCampaignId
       ? displayedSelection?.jobId
-      : undefined,
+      : undefined;
+  // Rows shown on earlier pages, so the open job can stay open. Bounded by
+  // what the person paged through.
+  const seenRows = useMemo(() => new Map<string, (typeof listRows)[number]>(), []);
+  for (const row of listRows) seenRows.set(row.id, row);
+  const inspectedJob = useMemo<DiscoveryInspectedJob | null>(() => {
+    const fromRow = (row: {
+      id: string;
+      title: string;
+      company: string | null;
+      listingActivity?: ListingActivity | undefined;
+    }): DiscoveryInspectedJob => ({
+      id: row.id,
+      title: row.title,
+      company: row.company,
+      detailRevision: listDetailRevision?.(row.id) ?? "0",
+      ...(row.listingActivity ? { listingActivity: row.listingActivity } : {}),
+    });
+    const find = (jobId: string | null | undefined) => {
+      if (!jobId) return null;
+      // A selected job stays inspected after its page is left.
+      const row =
+        listRows.find((candidate) => candidate.id === jobId) ??
+        seenRows.get(jobId);
+      if (row) return fromRow(row);
+      // A job opened by a link stays open even when the list does not show
+      // it (a weaker match while those are hidden).
+      return preserveSelectedJob && selectedJob?.id === jobId
+        ? fromRow(selectedJob)
+        : null;
+    };
+    if (displayedJobId === undefined)
+      return find(selectedJob?.id) ?? (listRows[0] ? fromRow(listRows[0]) : null);
+    if (displayedJobId === null) return null;
+    return find(displayedJobId);
+  }, [
+    displayedJobId,
+    listDetailRevision,
+    listRows,
+    preserveSelectedJob,
+    seenRows,
+    selectedJob,
+  ]);
+  // Only the id and revision key the read; list columns are not job fields.
+  const inspectedDetailRow = useMemo(
+    () =>
+      inspectedJob
+        ? {
+            id: inspectedJob.id,
+            detailRevision: inspectedJob.detailRevision,
+            ...(inspectedJob.listingActivity
+              ? { listingActivity: inspectedJob.listingActivity }
+              : {}),
+          }
+        : null,
+    [inspectedJob],
   );
-  const inspectedDetail = useJobDetail(inspectedJob, activeCampaignId);
-  // The list's own order (search, filters, sort), for moving to the next job.
-  const [orderedJobIds, setOrderedJobIds] = useState<readonly string[]>([]);
+  const inspectedDetail = useJobDetail(inspectedDetailRow, activeCampaignId);
+  // The matches a search showed, so its end can say how many left the plan
+  // or moved to weaker matches after the fit check. Read from the database:
+  // every match when the run starts, then only jobs first seen since.
+  const searchVisibleJobs = useRef<{
+    runId: string;
+    planId: string | null | undefined;
+    ids: Set<string>;
+  } | null>(null);
+  const runningRunId =
+    activeRun?.state === "running" &&
+    (!activeRun.campaignId || activeRun.campaignId === activeCampaignId)
+      ? activeRun.id
+      : null;
+  const runStartedAt = activeRun?.startedAt ?? null;
+  useEffect(() => {
+    const queries = window.nestor?.jobFinder?.queries;
+    if (!queries) return;
+    if (runningRunId) {
+      const current = searchVisibleJobs.current;
+      const fresh =
+        current?.runId !== runningRunId || current.planId !== activeCampaignId;
+      const record = fresh
+        ? { runId: runningRunId, planId: activeCampaignId, ids: new Set<string>() }
+        : current;
+      searchVisibleJobs.current = record;
+      void queries
+        .queryJobList({
+          list: "discovery",
+          filters:
+            fresh || !runStartedAt
+              ? {}
+              : { newSince: runStartedAt, newOnly: true },
+          page: { offset: 0, limit: 1 },
+          include: { ids: true },
+        })
+        .then((reply) => {
+          for (const id of reply.ids ?? []) record.ids.add(id);
+        })
+        .catch(() => undefined);
+      return;
+    }
+    const previous = searchVisibleJobs.current;
+    if (!previous) return;
+    searchVisibleJobs.current = null;
+    if (previous.planId !== activeCampaignId || previous.ids.size === 0) return;
+    void queries
+      .queryJobList({
+        list: "all",
+        page: { offset: 0, limit: 1 },
+        include: { ids: true, outline: true },
+      })
+      .then((reply) => {
+        const groups = (reply.outline ?? []).flatMap((run) =>
+          Array.from({ length: run.count }, () => run.group),
+        );
+        const present = new Map(
+          (reply.ids ?? []).map((id, index) => [id, groups[index]]),
+        );
+        const left = [...previous.ids].filter((id) => !present.has(id)).length;
+        const moved = [...previous.ids].filter((id) => {
+          const group = present.get(id);
+          return group === "weaker" || group === "mismatches";
+        }).length;
+        if (left > 0 || moved > 0)
+          showToast({
+            title: [
+              left > 0
+                ? `${left} ${left === 1 ? "job left" : "jobs left"} this plan after the fit check.`
+                : null,
+              moved > 0
+                ? `${moved} ${moved === 1 ? "job moved" : "jobs moved"} to weaker matches after the fit check.`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" "),
+            ...(moved > 0 && !showAlsoFound
+              ? {
+                  action: {
+                    label: "Show weaker matches",
+                    onClick: () => setShowAlsoFound(true),
+                  },
+                }
+              : {}),
+          });
+      })
+      .catch(() => undefined);
+  }, [
+    activeCampaignId,
+    list,
+    runStartedAt,
+    runningRunId,
+    showAlsoFound,
+    showToast,
+  ]);
+  const assessedRequest = useRef<{
+    id: string;
+    previousJudgedAt: string | null;
+  } | null>(null);
+  const assessJobWithFeedback = onAssessJobListing
+    ? async (id: string) => {
+        const job =
+          inspectedDetail.job?.id === id ? inspectedDetail.job : null;
+        assessedRequest.current = {
+          id,
+          previousJudgedAt: job?.matchAssessment.judgment?.judgedAt ?? null,
+        };
+        try {
+          await onAssessJobListing(id);
+        } catch (error) {
+          assessedRequest.current = null;
+          throw error;
+        }
+      }
+    : undefined;
+  // A new verdict can move the job out of this list, so it is read by id
+  // whenever the list changes while an assessment is waiting.
+  useEffect(() => {
+    const request = assessedRequest.current;
+    const readDetail = window.nestor?.jobFinder?.getJobDetail;
+    if (!request || typeof readDetail !== "function") return;
+    let current = true;
+    void readDetail(request.id, activeCampaignId)
+      .then((detail) => {
+        const job = detail?.job;
+        if (!current || !job || assessedRequest.current !== request) return;
+        if (
+          (job.matchAssessment.judgment?.judgedAt ?? null) ===
+          request.previousJudgedAt
+        )
+          return;
+        assessedRequest.current = null;
+        if (!showAlsoFound && isDiscoveryAlsoFoundResult(job))
+          showToast({
+            title: `Assessed: ${job.matchAssessment.score}% fit, moved to weaker matches`,
+            action: {
+              label: "Show weaker matches",
+              onClick: () => setShowAlsoFound(true),
+            },
+          });
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [activeCampaignId, list, showAlsoFound, showToast]);
   const triage = useDiscoveryTriage({
     enabled: !isSetupOpen && inspectedJob !== null,
-    jobs: resultVisibility.jobs,
-    orderedJobIds,
+    rows: listRows,
+    orderedJobIds: listOrderedJobIds,
+    groupOf: list?.groupOf ?? NO_GROUP,
     inspectedJob,
+    ...(listDetailRevision ? { detailRevision: listDetailRevision } : {}),
     reviewQueue,
     campaignId: activeCampaignId,
     onSelectJob,
@@ -1184,9 +1052,12 @@ export function DiscoveryScreen(props: {
             isListableCompanyName(company.canonicalName),
         )?.id ?? null)
       : null;
-  const hiddenJobCount = resultVisibility.hiddenAlsoFoundCount;
+  const alsoFoundCount = list?.pool
+    ? list.pool.weaker + list.pool.mismatches
+    : 0;
+  const hiddenJobCount = showAlsoFound ? 0 : alsoFoundCount;
 
-  const showEmptyDiscoveryState = jobs.length === 0;
+  const showEmptyDiscoveryState = planJobCount === 0;
   // Newest-run truth for the results panel's empty states, so a failed or
   // cancelled latest attempt never renders as "no matches" or "first search".
   const latestRunVerdict = useMemo(
@@ -1225,7 +1096,7 @@ export function DiscoveryScreen(props: {
     browserSession,
   );
   const hasOfflineCatalogRows =
-    runtimeProjection.isOffline && resultVisibility.jobs.length > 0;
+    runtimeProjection.isOffline && listRows.length > 0;
   let primaryRecoveryAction: {
     label: string;
     pending: boolean;
@@ -1476,7 +1347,7 @@ export function DiscoveryScreen(props: {
           type="button"
           variant="secondary"
         >
-          {jobs.length > 0 ? "Back to results" : "Close search setup"}
+          {planJobCount > 0 ? "Back to results" : "Close search setup"}
         </Button>
       }
     />
@@ -1581,7 +1452,6 @@ export function DiscoveryScreen(props: {
                   ?.name ?? null)
               : null
           }
-          alsoFoundCount={resultVisibility.alsoFoundCount}
           areAlsoFoundShown={showAlsoFound}
           browserSession={browserSession}
           discoveryTargets={searchPreferences.discovery.targets}
@@ -1596,10 +1466,9 @@ export function DiscoveryScreen(props: {
             activeRun.campaignId === activeCampaignId
           }
           liveStatusLine={liveStatusLine}
-          hiddenAlsoFoundCount={hiddenJobCount}
-          hiddenAlsoFoundJobs={hiddenAlsoFoundJobs}
-          inAreaJobCount={inAreaJobCount}
-          jobs={resultVisibility.jobs}
+          heldJobId={heldDecidedJobId}
+          planId={activeCampaignId}
+          searchRunId={stableRunId}
           latestRun={
             activeRun?.state === "running" &&
             activeRun.campaignId === activeCampaignId
@@ -1613,8 +1482,6 @@ export function DiscoveryScreen(props: {
           }
           preferredLocations={searchPreferences.locations}
           remoteIncluded={searchPreferences.workModes.includes("remote")}
-          totalLocationJobCount={stableJobs.length}
-          pendingLocationJobCount={pendingLocationJobCount}
           editPlanHref={
             activeCampaignId
               ? campaignPlanEditorHref(activeCampaignId)
@@ -1627,7 +1494,7 @@ export function DiscoveryScreen(props: {
           onDisplayedSelectedJobIdChange={(jobId) =>
             setDisplayedSelection({ jobId, campaignId: activeCampaignId })
           }
-          onOrderedJobIdsChange={setOrderedJobIds}
+          onListChange={setList}
           onShowAlsoFound={() => setShowAlsoFound(true)}
           onToggleAlsoFound={() => setShowAlsoFound((current) => !current)}
           onSelectJob={(jobId) => {
@@ -1654,7 +1521,8 @@ export function DiscoveryScreen(props: {
           }}
           {...(onDismissJobs ? { onDismissJobs } : {})}
           searchSetupBlocker={searchSetupBlocker}
-          selectedJob={resultVisibility.selectedJob}
+          preserveSelectedJob={preserveSelectedJob ?? false}
+          selectedJob={selectedJob}
           {...recoveryActionProps}
         />
       </div>

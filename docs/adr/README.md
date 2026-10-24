@@ -67,6 +67,7 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0058](0058-one-apply-press-queues-the-whole-choice.md) | accepted | One Apply press over selected, page or all ready jobs is a saved queue of ten-job runs inside the daily limit; it waits for midnight and carries on after a restart |
 | [0063](0063-command-scoped-browser-focus.md) | accepted | Hidden reads wake without rendering; only pending frame-dependent commands and requested screenshots receive temporary focus |
 | [0068](0068-discovery-commands-return-run-facts.md) | accepted | Search and Stop return run facts; query screens follow commits while legacy refreshes wait for search completion |
+| [0071](0071-find-jobs-reads-its-page-from-queries.md) | accepted | Find jobs reads its page, facets and order from queries and follows the change feed; during a search the snapshot syncs only where a screen still needs it |
 
 ## Policy
 
