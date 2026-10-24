@@ -362,3 +362,51 @@ test("display ledger follows in-place edits, appends, removals and moves in stor
   expect((await ids())[0]).toBe("a@2026-10-15T10:00:00.000Z");
   expect(await ids()).toEqual(await canonicalIds());
 });
+
+test("display refreshes consume repeated changes without losing later edits or caching a rollback", async () => {
+  const temp = await createTempRepository("nestor-discovery-display-repeated-");
+  cleanup.push(temp.cleanup);
+  const repo = await temp.createRepository();
+  cleanup.push(() => repo.close());
+  await repo.commitDiscoveryStateUpdate(() => discoveryFixture());
+  const db = new DatabaseSync(temp.filePath);
+  cleanup.push(() => db.close());
+  const read = createDiscoveryDisplayProjectionReader(
+    db,
+    createSeed().discovery,
+  );
+  const initial = await read();
+  const title = db.prepare(
+    "UPDATE discovery_ledger SET value = json_set(value, '$.title', ?) WHERE id = 'ledger_display'",
+  );
+  title.run("First synthetic edit");
+  title.run("Latest synthetic edit");
+  const updated = await read();
+  expect(updated.discoveryLedger[0]?.title).toBe("Latest synthetic edit");
+  expect(initial.discoveryLedger[0]?.title).toBe("Ledger listing");
+  expect(await read()).toBe(updated);
+
+  db.exec("BEGIN");
+  title.run("Rolled back synthetic edit");
+  expect((await read()).discoveryLedger[0]?.title).toBe(
+    "Rolled back synthetic edit",
+  );
+  db.exec("ROLLBACK");
+  expect((await read()).discoveryLedger[0]?.title).toBe(
+    "Latest synthetic edit",
+  );
+  title.run("Next committed synthetic edit");
+  expect((await read()).discoveryLedger[0]?.title).toBe(
+    "Next committed synthetic edit",
+  );
+  db.exec("DELETE FROM discovery_ledger WHERE id = 'ledger_display'");
+  expect((await read()).discoveryLedger).toEqual([]);
+  const recreated = {
+    ...discoveryFixture().discoveryLedger[0]!,
+    title: "Recreated synthetic listing",
+  };
+  db.prepare(
+    "INSERT INTO discovery_ledger(id, position, value) VALUES (?, ?, ?)",
+  ).run(recreated.id, 0, JSON.stringify(recreated));
+  expect((await read()).discoveryLedger).toEqual([recreated]);
+});

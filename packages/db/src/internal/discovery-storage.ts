@@ -606,7 +606,7 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
     const ranks = new Map(rankedIds.length ? statement(database,
       "SELECT id, position FROM discovery_ledger WHERE id IN (SELECT value FROM json_each(?))")
       .all(JSON.stringify(rankedIds)).map((row) => [String(row.id), Number(row.position)]) : []);
-    const writes: Array<readonly [string, number, T]> = [];
+    const writes: Array<readonly [string, number, string]> = [];
     let maximum: number | null = null;
     for (const { index, previousIndex, moveToEnd } of patch.rows) {
       const row = after[index]!;
@@ -631,16 +631,20 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
           );
           position = ++maximum;
         }
-        writes.push([row.id, position, parsed]);
+        writes.push([row.id, position, JSON.stringify(parsed)]);
         result[index] = parsed;
       }
       frozen(row);
       aliases.set(row, result[index]);
     }
-    if (writes.length)
+    // Bind each serialized row directly. Wrapping rows in another JSON array
+    // made SQLite parse and re-encode every ledger value before storing it.
+    // Bounded VALUES lists retain batching without that second JSON format.
+    for (let start = 0; start < writes.length; start += 100) {
+      const batch = writes.slice(start, start + 100);
       statement(database, `INSERT OR REPLACE INTO discovery_ledger (id, position, value)
-        SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')
-        FROM json_each(?)`).run(JSON.stringify(writes));
+        VALUES ${batch.map(() => "(?, ?, ?)").join(", ")}`).run(...batch.flat());
+    }
     // Existing ranks did not move. Appends invalidate the generic writer's
     // position cache; it can rebuild that cache if a later write reorders rows.
     positionCache?.delete(`${table}\u0000`);
