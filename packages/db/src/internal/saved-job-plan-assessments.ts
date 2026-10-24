@@ -1,14 +1,6 @@
-import type { DatabaseSync, StatementSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import type { SavedJob, SavedJobPlanAssessmentPatch } from "@nestor/contracts";
-
-const statements = new WeakMap<
-  DatabaseSync,
-  {
-    put: StatementSync;
-    remove: StatementSync;
-    presence: StatementSync;
-  }
->();
+import { prepareStatement } from "./sqlite-statements";
 
 /** Only verdict rows and optional-map presence change; listing bodies are never read. */
 export function writeSavedJobPlanAssessments(
@@ -24,23 +16,21 @@ export function writeSavedJobPlanAssessments(
       patch,
     ]),
   );
-  let prepared = statements.get(db);
-  if (!prepared) {
-    prepared = {
-      put: db.prepare(`INSERT INTO job_plan_assessments(job_id,plan_id,value,score)
+  const put = prepareStatement(
+    db,
+    `INSERT INTO job_plan_assessments(job_id,plan_id,value,score)
     SELECT ?,?,?,? WHERE EXISTS (SELECT 1 FROM saved_jobs WHERE id = ?)
     ON CONFLICT(job_id,plan_id) DO UPDATE SET value=excluded.value,score=excluded.score
-    WHERE value IS NOT excluded.value`),
-      remove: db.prepare(
-        "DELETE FROM job_plan_assessments WHERE job_id = ? AND plan_id = ?",
-      ),
-      presence: db.prepare(
-        "UPDATE saved_jobs SET has_plan_assessments = 1 WHERE id = ? AND has_plan_assessments IS NOT 1",
-      ),
-    };
-    statements.set(db, prepared);
-  }
-  const { put, remove, presence } = prepared;
+    WHERE value IS NOT excluded.value`,
+  );
+  const remove = prepareStatement(
+    db,
+    "DELETE FROM job_plan_assessments WHERE job_id = ? AND plan_id = ?",
+  );
+  const presence = prepareStatement(
+    db,
+    "UPDATE saved_jobs SET has_plan_assessments = 1 WHERE id = ? AND has_plan_assessments IS NOT 1",
+  );
   let changed = 0;
   for (const patch of patches.values()) {
     if (patch.assessment === null)

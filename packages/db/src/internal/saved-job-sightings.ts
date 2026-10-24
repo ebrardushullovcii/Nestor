@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { SavedJob, SavedJobSightingPatch } from "@nestor/contracts";
+import { prepareStatement } from "./sqlite-statements";
 
 export const savedJobSightingColumns = {
   firstSeenAt: "first_seen_at",
@@ -33,15 +34,14 @@ export function writeSavedJobSightings(
     throw new Error("Saved-job sightings require the job transaction.");
   const fields = Object.entries(savedJobSightingColumns);
   return Number(
-    db
-      .prepare(
-        `UPDATE saved_jobs AS job SET
+    prepareStatement(
+      db,
+      `UPDATE saved_jobs AS job SET
     ${fields.map(([field, column]) => `${column} = CASE WHEN json_type(patch.value, '$.${field}') IS NULL THEN job.${column} ELSE json_extract(patch.value, '$.${field}') END`).join(", ")}
     FROM json_each(?) AS patch WHERE job.id = json_extract(patch.value, '$.id') AND job.assessment_id IS NOT NULL
     AND (${fields.map(([field, column]) => `(json_type(patch.value, '$.${field}') IS NOT NULL AND job.${column} IS NOT json_extract(patch.value, '$.${field}'))`).join(" OR ")})
   `,
-      )
-      .run(JSON.stringify(coalesce(updates))).changes,
+    ).run(JSON.stringify(coalesce(updates))).changes,
   );
 }
 

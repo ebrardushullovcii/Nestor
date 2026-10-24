@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { DatabaseSync, StatementSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import {
   isLikelyUtilityShortlistJob,
   resolveSavedJobCompany,
@@ -17,6 +17,7 @@ import {
 import { notifyWorkspaceCommit } from "../workspace-commits";
 import { writeSavedJobPlanAssessments } from "./saved-job-plan-assessments";
 import { refreshSavedJobReadIndex } from "./workspace-read-index";
+import { prepareStatement as statement } from "./sqlite-statements";
 
 export const savedJobSalarySelectSql = `, (SELECT salary_prepared FROM job_listing_texts WHERE id = saved_jobs.description_id) AS body_salary_prepared,
   (SELECT salary_evidence FROM job_listing_texts WHERE id = saved_jobs.description_id) AS body_salary_range`;
@@ -76,15 +77,6 @@ export function ensureSavedJobRelations(db: DatabaseSync): void {
     );
   if (!textColumns.has("salary_evidence"))
     db.exec("ALTER TABLE job_listing_texts ADD COLUMN salary_evidence TEXT");
-}
-// Prepared SQL belongs to the connection, not to each changed job.
-const statements = new WeakMap<DatabaseSync, Map<string, StatementSync>>();
-function statement(db: DatabaseSync, sql: string): StatementSync {
-  let cache = statements.get(db);
-  if (!cache) statements.set(db, (cache = new Map<string, StatementSync>()));
-  let prepared = cache.get(sql);
-  if (!prepared) cache.set(sql, (prepared = db.prepare(sql)));
-  return prepared;
 }
 function intern(
   db: DatabaseSync,
