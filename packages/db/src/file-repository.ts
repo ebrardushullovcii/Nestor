@@ -1,3 +1,9 @@
+import {
+  parseSavedJobWithPreparation,
+  parseSavedJobsWithPreparation,
+  cloneSavedJobWithPreparation,
+  readSavedJobFingerprintBatch,
+} from "./internal/saved-job-fingerprints";
 import { isDeepStrictEqual } from "node:util";
 import {
   PreparedApplicationFormSchema,
@@ -1281,6 +1287,9 @@ export async function createFileJobFinderRepository(
         }),
       );
     },
+    readSavedJobDiscoveryFingerprints(jobIds) {
+      return Promise.resolve(readSavedJobFingerprintBatch(database, jobIds));
+    },
     commitSavedJobDelta({
       upserts = [],
       upsertsFromDiscovery,
@@ -1293,7 +1302,7 @@ export async function createFileJobFinderRepository(
       updateDiscoveryState,
     }) {
       try {
-        const suppliedUpserts = SavedJobSchema.array().parse([...upserts]);
+        const suppliedUpserts = parseSavedJobsWithPreparation(upserts);
         let committedDiscovery: JobFinderDiscoveryState | null = null;
 
         runImmediateTransaction(database, () => {
@@ -1306,12 +1315,12 @@ export async function createFileJobFinderRepository(
           const normalizedUpserts = [
             ...suppliedUpserts,
             ...(upsertsFromDiscovery && currentDiscoveryState
-              ? SavedJobSchema.array().parse(
+              ? parseSavedJobsWithPreparation(
                   upsertsFromDiscovery(cloneValue(currentDiscoveryState)),
                 )
               : []),
             ...(upsertsFromBorrowedDiscovery && currentDiscoveryState
-              ? SavedJobSchema.array().parse(
+              ? parseSavedJobsWithPreparation(
                   upsertsFromBorrowedDiscovery(currentDiscoveryState),
                 )
               : []),
@@ -1357,11 +1366,11 @@ export async function createFileJobFinderRepository(
               : listValues(database, "saved_jobs", SavedJobSchema);
             for (const currentJob of currentJobs) {
               existingJobIds.add(currentJob.id);
-              const nextJob = SavedJobSchema.parse(
+              const nextJob = parseSavedJobWithPreparation(
                 update(
                   borrowCurrentJobs
                     ? freezeProjection(currentJob)
-                    : cloneValue(currentJob),
+                    : cloneSavedJobWithPreparation(currentJob),
                 ),
               );
               if (nextJob.id !== currentJob.id) {
@@ -1598,9 +1607,7 @@ export async function createFileJobFinderRepository(
       }
     },
     replaceSavedJobs(savedJobs) {
-      const normalizedJobs = SavedJobSchema.array().parse(
-        cloneValue([...savedJobs]),
-      );
+      const normalizedJobs = parseSavedJobsWithPreparation(savedJobs);
       runImmediateTransaction(database, () => {
         replaceCollection(database, "saved_jobs", normalizedJobs);
       });
@@ -1608,9 +1615,7 @@ export async function createFileJobFinderRepository(
       return secureDatabaseFile(options.filePath);
     },
     replaceSavedJobsAndDiscoveryState({ savedJobs, discoveryState }) {
-      const normalizedJobs = SavedJobSchema.array().parse(
-        cloneValue([...savedJobs]),
-      );
+      const normalizedJobs = parseSavedJobsWithPreparation(savedJobs);
       const normalizedDiscoveryState = JobFinderDiscoveryStateSchema.parse(
         cloneValue(discoveryState),
       );
@@ -1628,9 +1633,7 @@ export async function createFileJobFinderRepository(
       staleReason,
       tailoredAsset,
     }) {
-      const normalizedJobs = SavedJobSchema.array().parse(
-        cloneValue([...savedJobs]),
-      );
+      const normalizedJobs = parseSavedJobsWithPreparation(savedJobs);
       const normalizedDraft = ResumeDraftSchema.parse(
         cloneValue({
           ...draft,
@@ -1702,15 +1705,24 @@ export async function createFileJobFinderRepository(
       );
     },
     getPreparedApplicationForm(resultId) {
-      const forms = listCollectionValues(database, "prepared_application_forms", PreparedApplicationFormSchema,
-        { orderBySql: "id", whereSql: "id = ?", params: [resultId] });
+      const forms = listCollectionValues(
+        database,
+        "prepared_application_forms",
+        PreparedApplicationFormSchema,
+        { orderBySql: "id", whereSql: "id = ?", params: [resultId] },
+      );
       return Promise.resolve(forms[0] ?? null);
     },
     upsertPreparedApplicationForm(form) {
-      return context.upsertPersistedValue("prepared_application_forms", PreparedApplicationFormSchema.parse(form));
+      return context.upsertPersistedValue(
+        "prepared_application_forms",
+        PreparedApplicationFormSchema.parse(form),
+      );
     },
     deletePreparedApplicationForm(resultId) {
-      database.prepare("DELETE FROM prepared_application_forms WHERE id = ?").run(resultId);
+      database
+        .prepare("DELETE FROM prepared_application_forms WHERE id = ?")
+        .run(resultId);
       return secureDatabaseFile(options.filePath);
     },
     upsertApplyJobResult(result) {

@@ -17,6 +17,7 @@ import type {
   ApplicationReplayCheckpoint,
   ApplicationReplayCheckpointInput,
   CandidateProfile,
+  DiscoveryListingFingerprints,
   JobFinderDiscoveryState,
   JobFinderActivityControl,
   ApplyQueue,
@@ -305,6 +306,10 @@ export interface JobFinderRepository
   listSavedJobIds(): Promise<readonly string[]>;
   /** The saved jobs with these ids, in `listSavedJobs` order. */
   listSavedJobsByIds(jobIds: readonly string[]): Promise<readonly SavedJob[]>;
+  /** Stored prepared fingerprints in one indexed batch; listing bodies are not read. */
+  readSavedJobDiscoveryFingerprints(
+    jobIds: readonly string[],
+  ): Promise<ReadonlyMap<string, DiscoveryListingFingerprints>>;
   /**
    * Atomically applies row-local saved-job updates and/or inserts without
    * replacing rows that the caller did not intend to change.
@@ -479,7 +484,9 @@ export interface JobFinderRepository
     applicationRecordId?: string;
   }): Promise<readonly ApplyJobResult[]>;
   upsertApplyJobResult(result: ApplyJobResultInput): Promise<void>;
-  getPreparedApplicationForm(resultId: string): Promise<PreparedApplicationForm | null>;
+  getPreparedApplicationForm(
+    resultId: string,
+  ): Promise<PreparedApplicationForm | null>;
   upsertPreparedApplicationForm(form: PreparedApplicationForm): Promise<void>;
   deletePreparedApplicationForm(resultId: string): Promise<void>;
   markApplicationPreparationStarted(input: {

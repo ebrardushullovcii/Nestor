@@ -288,11 +288,8 @@ test("targeted SQLite promotion never parses unrelated saved rows, and a saved-o
       ...current,
       pendingDiscoveryJobs: [pending],
     }));
-    other
-      .prepare(
-        "UPDATE saved_jobs SET value='unreadable unrelated row' WHERE id=?",
-      )
-      .run("unrelated_saved");
+    expect(() => other.prepare("UPDATE saved_jobs SET value='unreadable unrelated row' WHERE id=?")
+      .run("unrelated_saved")).toThrow("malformed JSON");
     await promote(repo, [pending.id, target.id]);
     expect(
       (await repo.listSavedJobsByIds([pending.id, target.id])).map(

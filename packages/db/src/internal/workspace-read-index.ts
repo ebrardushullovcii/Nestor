@@ -1,3 +1,4 @@
+import { ensureSavedJobFingerprintStorage } from "./saved-job-fingerprints";
 import type { DatabaseSync } from "node:sqlite";
 
 const VERSION = "3";
@@ -53,6 +54,7 @@ function indexJobSql(table: string, where = ""): string {
 
 /** Additive metadata only: existing JSON and schema migration versions stay intact. */
 export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
+  ensureSavedJobFingerprintStorage(database);
   database.exec("PRAGMA busy_timeout = 5000");
   database.exec(
     `CREATE TABLE IF NOT EXISTS workspace_read_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,

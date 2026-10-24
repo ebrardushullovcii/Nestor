@@ -44,3 +44,5 @@ export * from "./personal-workspace-export";
 export * from "./submission-confirmation";
 export * from "./resume-computation";
 export * from "./workspace-query";
+
+export * from "./discovery-preparation";

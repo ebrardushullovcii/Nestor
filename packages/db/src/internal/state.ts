@@ -1,3 +1,5 @@
+import { writeSavedJobFingerprints } from "./saved-job-fingerprints";
+import type { SavedJob } from "@nestor/contracts";
 import {
   resumeDraftValueSql,
   resumeDraftUpdatedAtSql,
@@ -555,6 +557,8 @@ export function replaceCollection(
 
   for (const value of values) {
     statement.run(value.id, JSON.stringify(value));
+    if (tableName === "saved_jobs")
+      writeSavedJobFingerprints(database, value as SavedJob);
   }
 }
 
@@ -636,6 +640,8 @@ export function upsertCollectionValue(
       `INSERT OR REPLACE INTO ${stateTableNames[tableName]} (id, value) VALUES (?, ?)`,
     )
     .run(value.id, JSON.stringify(value));
+  if (tableName === "saved_jobs")
+    writeSavedJobFingerprints(database, value as SavedJob);
 }
 
 /**
@@ -707,7 +713,11 @@ export function writeState(
     }
     initSingletonValue(database, "activity_control", state.activityControl);
     initSingletonValue(database, "intelligence_state", state.intelligence);
-    replaceCollection(database, "prepared_application_forms", state.preparedApplicationForms ?? []);
+    replaceCollection(
+      database,
+      "prepared_application_forms",
+      state.preparedApplicationForms ?? [],
+    );
     replaceCollection(database, "saved_jobs", state.savedJobs);
     replaceCollection(database, "tailored_assets", state.tailoredAssets);
     replaceIndexedCollection(
@@ -1296,7 +1306,11 @@ export function readState(
         orderBySql: APPLY_COLLECTION_ORDER_BY_SQL.application_artifact_refs,
       },
     ),
-    preparedApplicationForms: listValues(database, "prepared_application_forms", PreparedApplicationFormSchema),
+    preparedApplicationForms: listValues(
+      database,
+      "prepared_application_forms",
+      PreparedApplicationFormSchema,
+    ),
     applicationReplayCheckpoints: listCollectionValues(
       database,
       "application_replay_checkpoints",
