@@ -5,7 +5,7 @@ Status: accepted (2026-10-24).
 ## Decision
 
 The temporary startup worker still releases header and inventory reads before
-evidence conversion. Saved-job conversion now commits sets of 50 jobs. Resume
+evidence conversion. Saved-job conversion now commits sets of 500 jobs. Resume
 conversion commits four drafts or one historical revision at a time. The worker
 yields between these transactions. The canonical service continues to wait for
 conversion; bounded screen queries have no dependency on that service.

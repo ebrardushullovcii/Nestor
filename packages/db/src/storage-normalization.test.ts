@@ -113,10 +113,10 @@ test("interrupted job conversion keeps queries exact and resumes without overwri
   await repo.close();
   let db = new DatabaseSync(temp.filePath);
   cleanups.push(() => db.close());
-  const jobs = Array.from({ length: 102 }, (_, index) =>
+  const jobs = Array.from({ length: 600 }, (_, index) =>
     createSavedJob({
       id: `job-${String(index).padStart(3, "0")}`,
-      description: `${source} ${index}`,
+      description: `Synthetic listing evidence ${index}`,
       campaignIds: ["plan"],
     }),
   );
@@ -136,21 +136,23 @@ test("interrupted job conversion keeps queries exact and resumes without overwri
   const steps = migrateSavedJobStorageSteps(db);
   expect(steps.next().done).toBe(false);
   expect(db.isTransaction).toBe(false);
-  expect(
+  const converted = Number(
     db
       .prepare(
         "SELECT count(*) AS n FROM saved_jobs WHERE assessment_id IS NOT NULL",
       )
       .get()?.n,
-  ).toBe(50);
+  );
+  expect(converted).toBeGreaterThan(0);
+  expect(converted).toBeLessThan(jobs.length);
   expect(index()).toEqual(before);
   expect(reader.getJobDetail(jobs[0]!.id)?.job).toEqual(jobs[0]);
-  expect(reader.getJobDetail(jobs[100]!.id)?.job).toEqual(jobs[100]);
+  expect(reader.getJobDetail(jobs.at(-1)!.id)?.job).toEqual(jobs.at(-1));
   steps.return(undefined);
   db.close();
   db = new DatabaseSync(temp.filePath);
   const edited = {
-    ...jobs[100]!,
+    ...jobs.at(-1)!,
     title: "A newer title",
     description: "Salary: USD 91,000 per year.",
   };

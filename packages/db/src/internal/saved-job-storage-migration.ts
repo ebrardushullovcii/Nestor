@@ -70,7 +70,7 @@ export function* migrateSavedJobStorageSteps(
       ? 1
       : 0,
   );
-  for (let offset = 0; offset < ids.length; offset += 50) {
+  for (let offset = 0; offset < ids.length; offset += 500) {
     db.exec("BEGIN IMMEDIATE");
     try {
       const count = db.prepare("SELECT count(*) AS n FROM saved_jobs").get()!.n;
@@ -87,7 +87,7 @@ export function* migrateSavedJobStorageSteps(
       db.prepare(
         "INSERT INTO migration_ids SELECT value FROM json_each(?)",
       ).run(
-        JSON.stringify(ids.slice(offset, offset + 50).map((row) => row.id)),
+        JSON.stringify(ids.slice(offset, offset + 500).map((row) => row.id)),
       );
       db.exec(`
       CREATE TEMP TABLE migration_jobs AS
