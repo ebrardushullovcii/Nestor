@@ -495,39 +495,51 @@ describe("resume claim checks before a draft is kept (ADR 0041)", () => {
       },
     );
 
-    test("without a profile summary, an empty fix preserves the text the model saw and its verdict", async () => {
-      const { profile, job } = context();
-      profile.summary = null;
-      const previous =
-        "Synthetic summary retained without inventing a fallback (no-profile-summary).";
-      const draft = draftWith([]);
-      draft.sections[0]!.text = previous;
-      const checkResumeClaims = vi.fn((input: ResumeClaimCheckInput) =>
-        Promise.resolve(
-          input.claims.map((claim) => ({
-            id: claim.id,
-            verdict: "unsupported" as const,
-            reason: "Synthetic model verdict stays authoritative.",
-            evidenceIds: [],
-            fix: "",
-          })),
-        ),
-      );
-      const base = { aiClient: { checkResumeClaims }, job, profile };
-      const fixed = await withResumeClaimFixes({
-        ...base,
-        draft: await withResumeClaimChecks({ ...base, draft }),
-        stretchesAreThePersons: true,
-      });
-      expect(fixed.sections[0]!.text).toBe(previous);
-      expect(checkResumeClaims.mock.calls[0]![0].claims[0]!.text).toBe(
-        previous,
-      );
-      expect(fixed.claimChecks).toEqual([
-        expect.objectContaining({ verdict: "unsupported", fix: "" }),
-      ]);
-      expect(checkResumeClaims).toHaveBeenCalledOnce();
-    });
+    test.each(["empty", "duplicate"])(
+      "without a profile summary, a rejected generated summary is left off after a %s model fix (ADR 0051)",
+      async (fixKind) => {
+        const { profile, job } = context();
+        profile.summary = null;
+        const tag = `no-profile-summary-${fixKind}`;
+        const duplicate = `Maintained the synthetic project logs (${tag}).`;
+        const generated = `Invented soft claims about teamwork (${tag}).`;
+        const draft = draftWith([{ text: duplicate, origin: "ai_generated" }]);
+        draft.sections[0]!.text = generated;
+        const checkResumeClaims = vi.fn((input: ResumeClaimCheckInput) =>
+          Promise.resolve(
+            input.claims.map((claim) => ({
+              id: claim.id,
+              verdict:
+                claim.text === generated
+                  ? ("unsupported" as const)
+                  : ("supported" as const),
+              reason: "The evidence does not show these claims.",
+              evidenceIds: [],
+              fix:
+                claim.text === generated
+                  ? fixKind === "duplicate"
+                    ? duplicate
+                    : ""
+                  : null,
+            })),
+          ),
+        );
+        const base = { aiClient: { checkResumeClaims }, job, profile };
+        const fixed = await withResumeClaimFixes({
+          ...base,
+          draft: await withResumeClaimChecks({ ...base, draft }),
+          stretchesAreThePersons: true,
+        });
+        expect(fixed.sections[0]!.text).toBeNull();
+        expect(buildResumeRenderDocument(profile, fixed)).toEqual(
+          buildResumeRenderDocument(
+            profile,
+            sanitizeResumeDraft({ draft: fixed, profile, job }),
+          ),
+        );
+        expect(checkResumeClaims).toHaveBeenCalledOnce();
+      },
+    );
 
     // Verdicts are remembered for the session, so each test words its own lines.
     function lines(tag: string) {

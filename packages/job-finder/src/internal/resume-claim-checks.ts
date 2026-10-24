@@ -433,8 +433,8 @@ export function settleResumeClaimLines(input: {
   // A rejected summary falls back to the person's saved summary, as the
   // sanitizer does before checking. Keep that text on the saved draft too:
   // otherwise a later preview restores it while the editor stays empty.
-  // Without a saved summary, retain the text the model saw and its verdict;
-  // retaining a rejected line does not approve it or invent a replacement.
+  // Without a saved summary it is left off (ADR 0051): keeping the rejected
+  // text would leave the person to repair the app's own line before approval.
   const fixText = (
     text: string | null,
     origin: ResumeLine["origin"],
@@ -465,7 +465,7 @@ export function settleResumeClaimLines(input: {
               "section_text",
               section.id,
               section.kind === "summary"
-                ? input.profile?.summary?.trim() || section.text
+                ? input.profile?.summary?.trim() || null
                 : null,
             ),
             bullets: fixBullets(section.bullets, "section_bullet", section.id),
