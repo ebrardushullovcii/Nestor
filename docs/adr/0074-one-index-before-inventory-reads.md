@@ -1,4 +1,4 @@
-# ADR 0071: Build one index before inventory reads
+# ADR 0074: Build one index before inventory reads
 
 Status: accepted (2026-10-24).
 

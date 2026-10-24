@@ -2,7 +2,7 @@
 
 Status: accepted (2026-10-24).
 
-The original-row read fallback below is superseded by ADR 0071. Earlier writer
+The original-row read fallback below is superseded by ADR 0074. Earlier writer
 readiness and the evidence-conversion rules remain accepted.
 
 An update can start with no scalar index. Waiting for its rebuild made counts
