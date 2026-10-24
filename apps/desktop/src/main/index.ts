@@ -14,6 +14,7 @@ import {
 } from "./setup/user-data-directory";
 import { resolveBrandIconPaths } from "./setup/brand-icons";
 import { createMainWindow } from "./setup/window-shell";
+import { createWorkspaceQueryHost } from "./setup/workspace-query-host";
 import { registerFinishedWorkWindow } from "./setup/finished-work-notifier-instance";
 import { runShutdownWithTimeout } from "./setup/shutdown-with-timeout";
 import { createDeferredBackgroundInitController } from "./setup/deferred-background-init";
@@ -125,6 +126,7 @@ function loadInterviewSessionControlsModule() {
 }
 
 let closeInterviewOverlayWindows = () => {};
+let workspaceQueryHost: ReturnType<typeof createWorkspaceQueryHost> | null = null;
 let disposeInterviewSessionControls = () => {};
 
 // The 500ms deferred service initialization owns the background eager loads.
@@ -137,7 +139,7 @@ let disposeInterviewSessionControls = () => {};
 // their own services on demand.
 const deferredBackgroundInit = createDeferredBackgroundInitController({
   // Counted from the window's page load, not its creation; see below.
-  scheduleDelayMs: 150,
+  scheduleDelayMs: process.env.NESTOR_QUERY_LISTS === "1" ? 2_000 : 150,
   advancedInterviewSurfacesEnabled,
   loadJobFinderServices,
   loadCampaignSchedulerModule,
@@ -196,6 +198,7 @@ function loadLiveAssistantRoutes(): Promise<void> {
 function createMainWindowSafely(): BrowserWindow | null {
   try {
     const window = createMainWindow(currentDir);
+    workspaceQueryHost?.attach(window);
     getEmbeddedBrowser().attachWindow(window);
     registerFinishedWorkWindow(window);
     return window;
@@ -286,6 +289,7 @@ void app
       if (brandIcons) app.dock?.setIcon(brandIcons.appIcon);
     }
     Menu.setApplicationMenu(null);
+    workspaceQueryHost = createWorkspaceQueryHost();
     recordStartupDiagnostic("creating main window");
     const mainWindow = createMainWindowSafely();
     if (!mainWindow) {
@@ -307,7 +311,7 @@ void app
     };
     const backgroundInitFallback = setTimeout(
       scheduleBackgroundInit,
-      hasStartupWorkspaceView() ? 3_000 : 350,
+      process.env.NESTOR_QUERY_LISTS === "1" || hasStartupWorkspaceView() ? 3_000 : 350,
     );
     mainWindow.webContents.once("did-finish-load", scheduleBackgroundInit);
     mainWindow.on("closed", () => {

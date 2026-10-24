@@ -124,7 +124,7 @@ export async function shutdownJobFinderWorkspaceService(
     return;
   }
 
-  const startupView = options.saveStartupView
+  const startupView = options.saveStartupView && process.env.NESTOR_QUERY_LISTS !== "1"
     ? await captureStartupWorkspaceView(service).catch((error: unknown) => {
         console.warn("[Desktop] Could not read the startup view.", error);
         return null;

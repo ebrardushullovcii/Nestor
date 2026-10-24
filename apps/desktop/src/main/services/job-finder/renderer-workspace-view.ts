@@ -412,16 +412,17 @@ export function toRendererRun(
 }
 
 /**
- * Every job identity stays available; only selected panels read full evidence.
+ * Legacy windows retain job identities until all screens use the query API.
  */
 export function toRendererWorkspaceSnapshot(
   snapshot: JobFinderWorkspaceSnapshot,
 ): JobFinderRendererWorkspaceSnapshot {
-  const discoveryJobs = toRendererJobs(snapshot.discoveryJobs);
-  const dismissedDiscoveryJobs = toRendererJobs(
+  const queryLists = process.env.NESTOR_QUERY_LISTS === "1";
+  const discoveryJobs = queryLists ? [] : toRendererJobs(snapshot.discoveryJobs);
+  const dismissedDiscoveryJobs = queryLists ? [] : toRendererJobs(
     snapshot.dismissedDiscoveryJobs,
   );
-  const companyJobs = toRendererJobs(snapshot.companyJobs);
+  const companyJobs = queryLists ? [] : toRendererJobs(snapshot.companyJobs);
   const activeDiscoveryRun = snapshot.activeDiscoveryRun
     ? toRendererRun(snapshot.activeDiscoveryRun)
     : null;

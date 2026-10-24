@@ -141,6 +141,10 @@ export function waitForSavedStartupWorkspace(): Promise<void> | null {
  * the file a clean close left. Opening it changes that.
  */
 export function captureStartupWorkspaceView(): void {
+  if (process.env.NESTOR_QUERY_LISTS === "1") {
+    discardStartupWorkspaceView();
+    return;
+  }
   try {
     startupDatabase = readCleanCloseFingerprint(
       getJobFinderWorkspaceFilePath(),
@@ -153,6 +157,7 @@ export function captureStartupWorkspaceView(): void {
 
 /** Whether this start may open on a saved view (checked again when read). */
 export function hasStartupWorkspaceView(): boolean {
+  if (process.env.NESTOR_QUERY_LISTS === "1") return false;
   return startupDatabase !== null && existsSync(viewPath());
 }
 
@@ -223,6 +228,10 @@ export function discardStartupWorkspaceView(): void {
 export function writeStartupWorkspaceView(
   view: StartupWorkspaceView | null,
 ): void {
+  if (process.env.NESTOR_QUERY_LISTS === "1") {
+    discardStartupWorkspaceView();
+    return;
+  }
   try {
     const database = readCleanCloseFingerprint(getJobFinderWorkspaceFilePath());
     if (!view || !database) {
