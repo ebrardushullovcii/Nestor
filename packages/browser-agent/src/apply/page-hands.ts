@@ -333,6 +333,7 @@ export function createApplyPageHands(
   mechanics: ApplyRawPageHands,
   now: () => Date = () => new Date(),
 ): ApplyPageHands {
+  const readLinkedText = mechanics.readLinkedText;
   return {
     observe: async () =>
       buildApplyFormObservation(
@@ -346,6 +347,7 @@ export function createApplyPageHands(
     wait: (milliseconds) => mechanics.wait(milliseconds),
     goBack: () => mechanics.goBack(),
     readText: (ref) => mechanics.readText(ref),
+    ...(readLinkedText ? { readLinkedText: () => readLinkedText() } : {}),
     fillText: (ref, value) => mechanics.fillText(ref, value),
     chooseOption: (ref, optionLabel) =>
       mechanics.chooseOption(ref, optionLabel),

@@ -1950,7 +1950,8 @@ describe("playwright browser runtime", () => {
     },
   );
 
-  test("runAgentDiscovery hands the page reader the search's goals and keeps its rejections", async () => {
+  test.each([false, true])("runAgentDiscovery keeps page-reader goals and rejections after a starting navigation (timeout=%s)", async (timeout) => {
+    vi.resetModules();
     const userDataDir = await mkdtemp(
       join(tmpdir(), "nestor-browser-runtime-agent-selection-context-"),
     );
@@ -1974,13 +1975,16 @@ describe("playwright browser runtime", () => {
       const chromeExecutablePath = join(userDataDir, "chrome.exe");
       await writeFile(chromeExecutablePath, "", "utf8");
       const debugPort = await reserveFreePort();
+      let pageUrl = "about:blank";
       const page = {
         bringToFront: vi.fn().mockResolvedValue(undefined),
         close: vi.fn().mockResolvedValue(undefined),
         evaluate: vi.fn().mockResolvedValue(200),
-        goto: vi.fn().mockResolvedValue({ status: () => 200 }),
+        goto: vi.fn().mockImplementation((url: string) => { pageUrl = url; return timeout
+          ? Promise.reject(Object.assign(new Error("Navigation timed out"), { name: "TimeoutError" }))
+          : Promise.resolve({ status: () => 200 }); }),
         isClosed: () => false,
-        url: () => "about:blank",
+        url: () => pageUrl,
       };
       const fakeContext = {
         newPage: vi.fn().mockResolvedValue(page),
@@ -2017,7 +2021,7 @@ describe("playwright browser runtime", () => {
         debugPort,
         jobExtractor,
       });
-      await runtime.runAgentDiscovery!("target_site", {
+      const discoveryResult = await runtime.runAgentDiscovery!("target_site", {
         maxSteps: 3,
         targetJobCount: 1,
         userProfile: createTestProfile(),
@@ -2025,8 +2029,9 @@ describe("playwright browser runtime", () => {
         startingUrls: ["https://example.com/jobs"],
         navigationHostnames: ["example.com"],
         siteLabel: "Example Jobs",
-        sourceCatalog: [createTestJob()],
       });
+      expect(discoveryResult.warning).toBeNull();
+      expect(page.goto).toHaveBeenCalled();
       expect(jobExtractor).toHaveBeenCalledWith(
         expect.objectContaining({
           selectionContext: '{"targetRoles":["Engineer"]}',

@@ -60,6 +60,31 @@ describe("reading the choices of lists the page draws itself", () => {
     browser = await chromium.launch({ headless: true });
   }, 60_000);
 
+  test("full text and link reads retain the tail of a long listing page", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`<body>${"<p>Visible listing text</p>".repeat(3000)}${Array.from({ length: 405 }, (_, index) => `<a href="https://example.test/${index}">Link ${index}</a>`).join("")}<p>Last vacancy</p></body>`);
+      const mechanics = createPlaywrightApplyPageMechanics(page);
+      expect(await mechanics.readText()).toContain("Last vacancy");
+      const raw = await mechanics.readPage();
+      expect(raw.links).toHaveLength(405);
+      expect(raw.links.at(-1)?.href).toBe("https://example.test/404");
+      expect(await mechanics.readLinkedText?.()).toContain("Link 404 → https://example.test/404");
+    } finally { await page.close(); }
+  });
+
+  test("keeps repeated labels, their URLs and adjacent status text inside separate page items", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`<article><p>First employer</p><h2><a href="https://example.test/one">Engineer</a></h2><p>Closed</p></article><article><p>Second employer</p><h2><a href="https://example.test/two">Engineer</a></h2><p>Open</p></article><p hidden>Hidden employer</p><script>const secretText='Not page evidence';</script>`);
+      const text = await createPlaywrightApplyPageMechanics(page).readLinkedText?.();
+      expect(text).toContain("First employer\nEngineer → https://example.test/one\nClosed\n[End page item 1]");
+      expect(text).toContain("[Page item 2]\nSecond employer\nEngineer → https://example.test/two\nOpen");
+      expect(text).not.toContain("Hidden employer");
+      expect(text).not.toContain("Not page evidence");
+    } finally { await page.close(); }
+  });
+
   test("keeps the outer step legend on a nested skills group", async () => {
     const page = await browser.newPage();
     try {
