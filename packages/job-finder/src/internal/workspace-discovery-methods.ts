@@ -47,6 +47,7 @@ import {
   type AiJobSearchBehavior,
   AiBehaviorPreferenceSchema,
   type JobFinderWorkspaceSnapshot,
+  type JobFinderDiscoveryCommandReply,
   type JobPosting,
   type JobSearchPreferences,
   type JobSource,
@@ -1540,7 +1541,10 @@ export function createWorkspaceDiscoveryMethods(
   ctx: WorkspaceServiceContext,
 ): Pick<
   JobFinderWorkspaceService,
-  "runDiscovery" | "runAgentDiscovery" | "runDiscoveryForTarget"
+  | "runDiscovery"
+  | "runAgentDiscovery"
+  | "runAgentDiscoveryCommand"
+  | "runDiscoveryForTarget"
 > & {
   runCampaignDiscovery(
     campaign: CampaignRunContext,
@@ -1563,9 +1567,15 @@ export function createWorkspaceDiscoveryMethods(
     return promise;
   }
 
-  async function executeDiscoveryPipeline(
+  function executeDiscoveryPipeline(
+    options: DiscoveryTargetPipelineOptions & { commandOnly: true },
+  ): Promise<JobFinderDiscoveryCommandReply>;
+  function executeDiscoveryPipeline(
     options: DiscoveryTargetPipelineOptions,
-  ) {
+  ): Promise<JobFinderWorkspaceSnapshot>;
+  async function executeDiscoveryPipeline(
+    options: DiscoveryTargetPipelineOptions & { commandOnly?: boolean },
+  ): Promise<JobFinderWorkspaceSnapshot | JobFinderDiscoveryCommandReply> {
     if (ctx.activeDiscoveryAbortControllerRef.current) {
       // Second-run guard. A Stop that has not finished yet still holds this
       // controller, so the UI can re-enable "Search now" before the first
@@ -2342,8 +2352,10 @@ export function createWorkspaceDiscoveryMethods(
     const olderJobs = allJobs();
     const pickedOlderJobIds = new Set<string>();
     const olderEligible = await mapInTurns(olderJobs, (job) => {
-      const eligible = belongsToSearchPlan(job) &&
-        jobNeedsListingDetail(job) && canReadListingUrlNow(job.canonicalUrl);
+      const eligible =
+        belongsToSearchPlan(job) &&
+        jobNeedsListingDetail(job) &&
+        canReadListingUrlNow(job.canonicalUrl);
       if (eligible && personPickedJob(job)) pickedOlderJobIds.add(job.id);
       return eligible;
     });
@@ -2351,7 +2363,8 @@ export function createWorkspaceDiscoveryMethods(
       .filter((_job, index) => olderEligible[index])
       .sort(
         (left, right) =>
-          Number(pickedOlderJobIds.has(right.id)) - Number(pickedOlderJobIds.has(left.id)) ||
+          Number(pickedOlderJobIds.has(right.id)) -
+            Number(pickedOlderJobIds.has(left.id)) ||
           compareMatchRecommendationPriority(
             left.matchAssessment,
             right.matchAssessment,
@@ -4306,16 +4319,20 @@ export function createWorkspaceDiscoveryMethods(
       );
       const pickedEnrichmentJobIds = new Set<string>();
       const enrichmentEligible = await mapInTurns(enrichmentJobs, (job) => {
-        const eligible = belongsToSearchPlan(job) &&
-          jobNeedsListingDetail(job) && canReadListingUrl(job.canonicalUrl);
-        if (eligible && personPickedJob(job)) pickedEnrichmentJobIds.add(job.id);
+        const eligible =
+          belongsToSearchPlan(job) &&
+          jobNeedsListingDetail(job) &&
+          canReadListingUrl(job.canonicalUrl);
+        if (eligible && personPickedJob(job))
+          pickedEnrichmentJobIds.add(job.id);
         return eligible;
       });
       const enrichmentCandidates = enrichmentJobs
         .filter((_job, index) => enrichmentEligible[index])
         .sort(
           (left, right) =>
-            Number(pickedEnrichmentJobIds.has(right.id)) - Number(pickedEnrichmentJobIds.has(left.id)) ||
+            Number(pickedEnrichmentJobIds.has(right.id)) -
+              Number(pickedEnrichmentJobIds.has(left.id)) ||
             Number(runRetainedJobIds.has(right.id)) -
               Number(runRetainedJobIds.has(left.id)) ||
             compareMatchRecommendationPriority(
@@ -4955,6 +4972,12 @@ export function createWorkspaceDiscoveryMethods(
     // again here would find the same verifying request and await its own
     // in-flight promise forever. The outer user action performs the recovered
     // snapshot after this exact continuation completes.
+    if (options.commandOnly)
+      return {
+        outcome: terminalStatus === "cancelled" ? "cancelled" : "completed",
+        runId: activeRun.id,
+        newJobs: activeRun.summary.jobsPersisted + activeRun.summary.jobsStaged,
+      };
     return (ctx.readWorkspaceProjection ?? ctx.readWorkspaceSnapshot)();
   }
 
@@ -4976,6 +4999,20 @@ export function createWorkspaceDiscoveryMethods(
           scope: "run_all",
           allowInactiveMarking: true,
           useAgentRuntime: false,
+        }),
+      );
+    },
+    async runAgentDiscoveryCommand(onActivity, targetId, searchRequest) {
+      return trackDiscoveryPromise(
+        executeDiscoveryPipeline({
+          ...(targetId
+            ? { scope: "single_target", targetId }
+            : { scope: "run_all" }),
+          ...(onActivity ? { onActivity } : {}),
+          ...(searchRequest ? { searchRequest } : {}),
+          allowInactiveMarking: !targetId,
+          useAgentRuntime: true,
+          commandOnly: true,
         }),
       );
     },

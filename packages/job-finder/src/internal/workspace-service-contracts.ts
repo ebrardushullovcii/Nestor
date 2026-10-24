@@ -1,4 +1,6 @@
 import type {
+  JobFinderDiscoveryCommandReply,
+  JobFinderDiscoveryCancellationReply,
   ResumeDraftProcessor,
   AddBrowserJobResult,
   ApplicationDocumentRevision,
@@ -327,6 +329,14 @@ export interface JobFinderWorkspaceService {
     targetId?: string,
     searchRequest?: JobFinderSearchRequest,
   ): Promise<JobFinderWorkspaceSnapshot>;
+  runAgentDiscoveryCommand(
+    onActivity?: (event: DiscoveryActivityEvent) => void,
+    targetId?: string,
+    searchRequest?: JobFinderSearchRequest,
+  ): Promise<JobFinderDiscoveryCommandReply>;
+  cancelDiscoveryRunCommand(
+    runId: string,
+  ): Promise<JobFinderDiscoveryCancellationReply>;
   runDiscoveryForTarget(
     targetId: string,
     onActivity?: (event: DiscoveryActivityEvent) => void,
