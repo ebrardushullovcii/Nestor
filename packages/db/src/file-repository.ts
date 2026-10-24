@@ -1298,7 +1298,9 @@ export async function createFileJobFinderRepository(
             : 0,
         );
       } catch (error) {
-        return Promise.reject(error);
+        return Promise.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        );
       }
     },
     updateSavedJobPlanAssessments(updates) {
@@ -1311,7 +1313,9 @@ export async function createFileJobFinderRepository(
             : 0,
         );
       } catch (error) {
-        return Promise.reject(error);
+        return Promise.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        );
       }
     },
     commitSavedJobDelta({
