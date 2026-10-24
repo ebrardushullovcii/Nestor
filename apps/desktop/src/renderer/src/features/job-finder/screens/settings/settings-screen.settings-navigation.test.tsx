@@ -365,6 +365,11 @@ describe("SettingsScreen information architecture", () => {
           <SettingsScreen {...baseProps} />
         </MemoryRouter>,
       );
+      // The observer reports after layout, as the browser does.
+      act(() => {
+        for (const callback of capturedCallbacks)
+          callback([], {} as ResizeObserver);
+      });
 
       const appDeviceRegion = screen.getByRole("region", {
         name: "App & device",

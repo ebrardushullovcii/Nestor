@@ -11,6 +11,7 @@ import {
 } from "../../lib/discovery-run-count-label";
 import { joinUniqueSentences } from "../../lib/sentence-copy";
 import {
+  memo,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -20,6 +21,7 @@ import {
   useState,
   useTransition,
   type KeyboardEvent,
+  type MouseEvent,
 } from "react";
 import type {
   BrowserSessionState,
@@ -705,6 +707,449 @@ const getTiedScores = createIdentityMemo(
 const isRowScoreWithheld = createPerObjectCache(
   (job: JobListRow) => getMatchAssessmentPresentation(job).isScoreWithheld,
 );
+
+const NO_SOURCE_LABELS: readonly string[] = [];
+
+/** What a Find jobs row does, read through a ref so a row re-renders only
+ * when what it shows changes, not on every render of the panel. */
+interface DiscoveryResultRowActions {
+  acknowledgeRescore: (jobId: string) => void;
+  handleListKeyDown: (
+    event: KeyboardEvent<HTMLButtonElement>,
+    jobId: string,
+  ) => void;
+  openRowMenu: (event: MouseEvent, job: DiscoveryResultJob) => void;
+  selectJob: (jobId: string) => void;
+  toggleJobSelection: (jobId: string, shiftKey: boolean) => void;
+}
+
+/**
+ * One Find jobs result. Its own component so a shortlist, a hide or the
+ * next job's detail loading re-renders the rows that changed, not all 50:
+ * built inline, every panel render rebuilt every row (about 600 components).
+ */
+const DiscoveryResultRow = memo(function DiscoveryResultRow(props: {
+  actions: { readonly current: DiscoveryResultRowActions };
+  buttonClassName: string;
+  checked: boolean;
+  headedGroup: string | undefined;
+  indistinguishable: boolean;
+  isNew: boolean;
+  job: DiscoveryResultJob;
+  rescoreAcknowledged: boolean;
+  selectable: boolean;
+  selected: boolean;
+  showSelection: boolean;
+  sourceLabels: readonly string[];
+  tiedScore: boolean;
+}) {
+  const { job } = props;
+  const isSelected = props.selected;
+  const recommendation =
+    fitRecommendationCopy[
+      job.matchAssessment.recommendation ??
+        "review_before_applying"
+    ];
+  const assessment = getMatchAssessmentPresentation(job);
+  // A title-only row sitting under the rendered "Title matches ·
+  // not yet checked" divider would otherwise repeat that exact
+  // claim twice more — "Title match only" plus a two-line
+  // caption — on every row of a band that can be the whole list.
+  // The divider states it once for the run; the row drops the
+  // visible restatement and keeps an assistive-technology line,
+  // because a row button is reachable by keyboard without ever
+  // reading the divider. Provisional rows share this band but
+  // not its claim, so they keep their own verdict, and a
+  // title-only row banded as a mismatch keeps it too: no divider
+  // above it says the title was all that was read.
+  const isCoveredByUncheckedBand =
+    assessment.isNotJudged &&
+    // An unbound assessment is title-only by evidence depth but
+    // presents as "Fit not assessed", which is a different claim
+    // from the one the divider makes; it keeps its own verdict.
+    !assessment.isProvisional &&
+    props.headedGroup === "unchecked";
+  // One sentence on the row saying why: what is missing when the
+  // score is withheld, otherwise the hard-conflict reason. Rows
+  // whose score stands on its own evidence stay quiet.
+  const rowReason =
+    (job.matchAssessment.recommendation === "skip"
+      ? scrubJobAbsencePlaceholders(
+          joinUniqueSentences([
+            job.matchAssessment.recommendationRationale ?? "",
+          ]),
+        ) || null
+      : null) ??
+    (job.matchAssessment.dimensions?.roleSuitability?.state !==
+      undefined &&
+    job.matchAssessment.dimensions.roleSuitability.state !==
+      "exact"
+      ? job.matchAssessment.gaps[0]
+      : null) ??
+    assessment.withheldReason ??
+    null;
+  // Rows that share a printed percentage keep the one fact
+  // behind their place as the score's tooltip. Printed under
+  // every row it said "Job title matches one of your target
+  // roles." down most of a 6,000-job list.
+  const tieBreakReason = props.tiedScore
+    ? describeMatchTieBreakReason(job)
+    : null;
+  const listingDateBadge = getDiscoveryListingDateBadge(job);
+  const listingDateExplanation = listingDateBadge.shown
+    ? listingDateBadge.rankable
+      ? undefined
+      : "The source shows a posting label without a full date, so Newest cannot rank this listing by its posting date."
+    : undefined;
+  const sourceLabels = props.sourceLabels;
+  const sourceText =
+    sourceLabels.length > 0
+      ? sourceLabels.join(", ")
+      : "Source unavailable";
+  // A careers-site source repeats the employer's own name; the
+  // meta line then read "Canonical • Remote · Canonical".
+  const sourceRepeatsEmployer =
+    sourceLabels.length === 1 &&
+    Boolean(job.company) &&
+    sourceLabels[0]?.trim().toLowerCase() ===
+      job.company?.trim().toLowerCase();
+  const listingActivity = getListingActivity(job);
+  const activity = presentListingActivity(listingActivity);
+  const activityDescription =
+    listingActivity.status === "inactive"
+      ? `Not found in a source inventory observation on ${activity.observedDate}. This does not prove the listing is closed. ${listingActivity.explanation}`
+      : activity.description;
+
+  const wasRescoredAfterRead =
+    !props.rescoreAcknowledged && Boolean(job.rescoredAfterListingRead);
+
+  return (
+    <li className="relative min-w-0 pl-10">
+      {props.showSelection ? (
+        props.selectable ? (
+          <ListRowSelectionCell
+            checked={props.checked}
+            label={`Select ${job.title}`}
+            onToggle={({ shiftKey }) =>
+              props.actions.current.toggleJobSelection(job.id, shiftKey)
+            }
+          />
+        ) : (
+          // Jobs already in Shortlisted keep the checkbox
+          // column filled, so the list reads as one grid.
+          <ListRowSelectionCell
+            checked={false}
+            disabled
+            label={`${job.title} is already in Shortlisted`}
+            onToggle={() => undefined}
+          />
+        )
+      ) : null}
+      <SelectableRow
+        aria-controls={DISCOVERY_DETAIL_REGION_ID}
+        data-job-result-id={job.id}
+        className={props.buttonClassName}
+        aria-keyshortcuts="ArrowUp ArrowDown Home End"
+        data-collection-item-id={job.id}
+        onContextMenu={(event) =>
+          props.actions.current.openRowMenu(event, job)
+        }
+        onClick={(event) => {
+          if (
+            props.showSelection &&
+            isSelectionClick(event) &&
+            props.selectable
+          ) {
+            event.preventDefault();
+            props.actions.current.toggleJobSelection(job.id, event.shiftKey);
+            return;
+          }
+          if (wasRescoredAfterRead) {
+            props.actions.current.acknowledgeRescore(job.id);
+          }
+          props.actions.current.selectJob(job.id);
+          if (event.detail === 0) {
+            focusDiscoveryDetailAfterKeyboardSelection();
+          } else {
+            revealDiscoveryDetailAfterPointerSelection();
+          }
+        }}
+        onKeyDown={(event) => props.actions.current.handleListKeyDown(event, job.id)}
+        selected={isSelected}
+      >
+        {/* One shared line rhythm for all three lists: title line (with
+          the one trailing badge slot), then meta, then status. */}
+        <div className={jobFinderListRowLinesClassName}>
+          <div className={jobFinderListRowTitleLineClassName}>
+            <strong
+              className={jobFinderListRowTitleClassName}
+              title={job.title}
+            >
+              {props.isNew ? (
+                <span
+                  className="mr-1.5 inline-block size-2 rounded-full bg-(--info-text) align-middle"
+                  data-new-since-visit
+                  title="New since your last visit"
+                >
+                  <span className="sr-only">New: </span>
+                </span>
+              ) : null}
+              {job.title}
+            </strong>
+            {/* One slot, one verdict: the fit and, when it is
+              not the default, its badge. Shortlisted, the
+              posting date and a listing that went quiet are
+              plain facts on the meta line below; three
+              stacked badges used to squeeze the title into a
+              narrow column three lines tall. */}
+            <div className={jobFinderListRowBadgeSlotClassName}>
+              {isCoveredByUncheckedBand ? null : (
+                <span
+                  aria-label={assessment.headlineScoreAriaLabel}
+                  className={cn(
+                    "text-(length:--text-small) font-semibold tabular-nums",
+                    assessment.isScoreWithheld
+                      ? "text-foreground-soft"
+                      : "text-(--text-headline)",
+                  )}
+                  data-testid={`discovery-result-fit-${job.id}`}
+                  {...(tieBreakReason
+                    ? { title: tieBreakReason }
+                    : {})}
+                >
+                  {assessment.headlineScoreLabel}
+                </span>
+              )}
+              {/* The default "review before applying" verdict is the
+                baseline for every row, so only a stronger or
+                weaker verdict earns a badge in the list; the
+                inspector keeps the full assessment. */}
+              {!assessment.isScoreWithheld &&
+              job.matchAssessment.recommendation !==
+                "review_before_applying" ? (
+                <StatusBadge
+                  tone={
+                    assessment.isProvisional
+                      ? "neutral"
+                      : recommendation.tone
+                  }
+                >
+                  {recommendation.label}
+                </StatusBadge>
+              ) : null}
+            </div>
+          </div>
+          {(() => {
+            const employerLocationLine =
+              formatJobEmployerLocationLine({
+                company: job.company,
+                location: job.location,
+                canonicalUrl: job.canonicalUrl,
+                separator: " • ",
+              });
+            const pipelineLabel = [
+              "drafting",
+              "ready_for_review",
+              "approved",
+              "submitted",
+            ].includes(job.status)
+              ? job.status === "submitted"
+                ? formatStatusLabel(job.status)
+                : "Shortlisted"
+              : null;
+            // One meta line: employer and location, the
+            // source it was found on, then the plain facts
+            // (posting date, a listing that went quiet,
+            // Shortlisted). A source on its own line read as
+            // a second, unexplained company name. Exactly one
+            // accessible source mention per row: the visible
+            // separator is decorative and the sr-only prefix
+            // completes the sentence.
+            return (
+              <span
+                className={cn(
+                  jobFinderListRowMetaClassName,
+                  "flex min-w-0 flex-nowrap items-baseline gap-x-1.5",
+                )}
+                {...(employerLocationLine
+                  ? {}
+                  : {
+                      "data-testid": `discovery-result-source-${job.id}`,
+                      title: `Employer not listed · ${sourceText}`,
+                    })}
+              >
+                <span
+                  className={cn(
+                    "min-w-0 truncate",
+                    employerLocationLine
+                      ? "font-medium"
+                      : "shrink-0",
+                  )}
+                  data-testid={`discovery-result-employer-${job.id}`}
+                  title={employerLocationLine || undefined}
+                >
+                  {employerLocationLine ||
+                    "Employer not listed"}
+                  {props.indistinguishable
+                    ? ` · Reference ${job.sourceJobId}`
+                    : ""}
+                </span>
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "shrink-0",
+                    sourceRepeatsEmployer &&
+                      employerLocationLine &&
+                      "sr-only",
+                  )}
+                >
+                  {" · "}
+                </span>
+                <span
+                  className={cn(
+                    "flex min-w-0 max-w-[45%] shrink-0",
+                    sourceRepeatsEmployer &&
+                      employerLocationLine &&
+                      "sr-only",
+                  )}
+                  {...(employerLocationLine
+                    ? {
+                        "data-testid": `discovery-result-source-${job.id}`,
+                        title: `Found on ${sourceText}`,
+                      }
+                    : {})}
+                >
+                  <span className="sr-only">Found on </span>
+                  <span className="min-w-0 truncate">
+                    {sourceText}
+                  </span>
+                </span>
+                {listingDateBadge.shown ? (
+                  <span className="shrink-0 whitespace-nowrap text-foreground-muted">
+                    <span aria-hidden="true">{"· "}</span>
+                    <span
+                      data-testid={`discovery-result-date-${job.id}`}
+                      {...(listingDateExplanation
+                        ? { title: listingDateExplanation }
+                        : {})}
+                    >
+                      {listingDateBadge.text}
+                    </span>
+                  </span>
+                ) : null}
+                {listingActivity.status !== "active" ? (
+                  <span
+                    aria-label={`${activity.label} listing status${activity.observedDate ? ` observed ${activity.observedDate}` : ""}. ${activityDescription}`}
+                    className="shrink-0 whitespace-nowrap text-(--warning-text)"
+                    title={activityDescription}
+                  >
+                    <span aria-hidden="true">{"· "}</span>
+                    <span aria-hidden="true">
+                      {activity.label}
+                      {activity.observedDate
+                        ? ` · ${activity.observedDate}`
+                        : ""}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="sr-only">
+                    {`${activity.label} listing status${activity.observedDate ? ` observed ${activity.observedDate}` : ""}. ${activityDescription}`}
+                  </span>
+                )}
+                {pipelineLabel ? (
+                  <span
+                    className="shrink-0 whitespace-nowrap font-medium text-primary"
+                    data-testid={`discovery-result-pipeline-${job.id}`}
+                  >
+                    <span aria-hidden="true">{"· "}</span>
+                    {pipelineLabel}
+                  </span>
+                ) : null}
+              </span>
+            );
+          })()}
+
+          {/* The fit verdict sits on the title line beside its
+          badge (see the badge slot above). The reason behind
+          it is a comfortable-density line only; compact rows
+          stay two lines. When the evidence behind the number
+          is only the listing title the number is withheld and
+          kept inside "How this was scored" with its evidence. */}
+          {isCoveredByUncheckedBand ? (
+            <span
+              className="sr-only"
+              data-testid={`discovery-result-fit-sr-${job.id}`}
+            >
+              {rowReason
+                ? `${assessment.headlineScoreAriaLabel}. ${rowReason}`
+                : assessment.headlineScoreAriaLabel}
+            </span>
+          ) : (
+            // Every row keeps the reason line, empty or not,
+            // so rows are one height down the list.
+            <span
+              className={cn(
+                jobFinderListRowStatusClassName,
+                "min-h-[1lh] text-foreground-soft",
+              )}
+              {...(rowReason
+                ? {
+                    "data-testid": `discovery-result-fit-reason-${job.id}`,
+                  }
+                : {})}
+            >
+              {rowReason}
+            </span>
+          )}
+          {wasRescoredAfterRead ? (
+            <span className="text-(length:--text-tiny) text-foreground-soft">
+              Rescored after reading the listing
+            </span>
+          ) : null}
+        </div>
+
+        {/* Below xl the inspector stacks under this list, so a
+          highlighted row is the only sign that anything more
+          exists — and it sits past the fold. This names the
+          pane by its own visible heading; it does not promise
+          listing detail the app may not have read.
+
+          Rendered on every row so the slot is reserved and
+          selection can never reflow the list (see
+          SelectableRow), and revealed on the selected row
+          through this element's OWN `data-details-cue`.
+
+          That attribute, rather than a `group-data-*` variant
+          keyed on the row's selected state, is deliberate. The
+          group form left both rows carrying byte-identical
+          class strings, so whether the cue actually painted
+          depended entirely on a stylesheet the renderer tests
+          never load: a DOM query passed while every row showed
+          the cue on screen. State that decides what is painted
+          has to be observable in the DOM, so both the shown
+          and the hidden case can be pinned.
+
+          Decorative: the row already exposes the detail region
+          through `aria-controls`, so this is not announced a
+          second time. Nothing here scrolls — the default
+          selection is not a user action, and only an explicit
+          click reveals the detail region. */}
+        <span
+          aria-hidden="true"
+          className="invisible flex items-center gap-1 text-(length:--text-tiny) font-medium text-foreground-soft data-[details-cue=visible]:visible xl:hidden"
+          data-details-cue={isSelected ? "visible" : "hidden"}
+          data-testid={`discovery-result-details-below-${job.id}`}
+        >
+          <ChevronDown
+            aria-hidden="true"
+            className="size-3.5"
+          />
+          Job details below
+        </span>
+      </SelectableRow>
+    </li>
+  );
+});
 
 export function DiscoveryResultsPanel({
   hiddenJobsControl,
@@ -1430,6 +1875,17 @@ export function DiscoveryResultsPanel({
     },
     [currentPage, moveToPage, onSelectJob, orderedJobs],
   );
+  // Rows read their handlers through this ref, so the panel can hand every
+  // row the same object and a row re-renders only when what it shows changes.
+  const rowActionsRef = useRef<DiscoveryResultRowActions>(null!);
+  rowActionsRef.current = {
+    acknowledgeRescore: (jobId) =>
+      setAcknowledgedRescoreJobIds((current) => new Set(current).add(jobId)),
+    handleListKeyDown,
+    openRowMenu: (event, job) => openRowContextMenu(event, rowMenuFor(job)),
+    selectJob: onSelectJob,
+    toggleJobSelection,
+  };
 
   const resultsTitle = (
     <div className="flex min-w-0 shrink-0 items-baseline gap-x-2 whitespace-nowrap">
@@ -2091,89 +2547,7 @@ export function DiscoveryResultsPanel({
                 className={cn(jobFinderListRegionClassName, "xl:min-h-full")}
               >
                 {visibleJobs.flatMap((job) => {
-                  const isSelected = displayedSelectedJobId === job.id;
-                  const recommendation =
-                    fitRecommendationCopy[
-                      job.matchAssessment.recommendation ??
-                        "review_before_applying"
-                    ];
-                  const assessment = getMatchAssessmentPresentation(job);
-                  // A title-only row sitting under the rendered "Title matches ·
-                  // not yet checked" divider would otherwise repeat that exact
-                  // claim twice more — "Title match only" plus a two-line
-                  // caption — on every row of a band that can be the whole list.
-                  // The divider states it once for the run; the row drops the
-                  // visible restatement and keeps an assistive-technology line,
-                  // because a row button is reachable by keyboard without ever
-                  // reading the divider. Provisional rows share this band but
-                  // not its claim, so they keep their own verdict, and a
-                  // title-only row banded as a mismatch keeps it too: no divider
-                  // above it says the title was all that was read.
-                  const isCoveredByUncheckedBand =
-                    assessment.isNotJudged &&
-                    // An unbound assessment is title-only by evidence depth but
-                    // presents as "Fit not assessed", which is a different claim
-                    // from the one the divider makes; it keeps its own verdict.
-                    !assessment.isProvisional &&
-                    headedGroupByJobId.get(job.id) === "unchecked";
-                  // One sentence on the row saying why: what is missing when the
-                  // score is withheld, otherwise the hard-conflict reason. Rows
-                  // whose score stands on its own evidence stay quiet.
-                  const rowReason =
-                    (job.matchAssessment.recommendation === "skip"
-                      ? scrubJobAbsencePlaceholders(
-                          joinUniqueSentences([
-                            job.matchAssessment.recommendationRationale ?? "",
-                          ]),
-                        ) || null
-                      : null) ??
-                    (job.matchAssessment.dimensions?.roleSuitability?.state !==
-                      undefined &&
-                    job.matchAssessment.dimensions.roleSuitability.state !==
-                      "exact"
-                      ? job.matchAssessment.gaps[0]
-                      : null) ??
-                    assessment.withheldReason ??
-                    null;
-                  // Rows that share a printed percentage keep the one fact
-                  // behind their place as the score's tooltip. Printed under
-                  // every row it said "Job title matches one of your target
-                  // roles." down most of a 6,000-job list.
-                  const tieBreakReason = tiedScores.has(
-                    job.matchAssessment.score,
-                  )
-                    ? describeMatchTieBreakReason(job)
-                    : null;
-                  const listingDateBadge = getDiscoveryListingDateBadge(job);
-                  const listingDateExplanation = listingDateBadge.shown
-                    ? listingDateBadge.rankable
-                      ? undefined
-                      : "The source shows a posting label without a full date, so Newest cannot rank this listing by its posting date."
-                    : undefined;
-                  const sourceLabels = sourceLabelsByJobId.get(job.id) ?? [];
-                  const sourceText =
-                    sourceLabels.length > 0
-                      ? sourceLabels.join(", ")
-                      : "Source unavailable";
-                  // A careers-site source repeats the employer's own name; the
-                  // meta line then read "Canonical • Remote · Canonical".
-                  const sourceRepeatsEmployer =
-                    sourceLabels.length === 1 &&
-                    Boolean(job.company) &&
-                    sourceLabels[0]?.trim().toLowerCase() ===
-                      job.company?.trim().toLowerCase();
-                  const listingActivity = getListingActivity(job);
-                  const activity = presentListingActivity(listingActivity);
-                  const activityDescription =
-                    listingActivity.status === "inactive"
-                      ? `Not found in a source inventory observation on ${activity.observedDate}. This does not prove the listing is closed. ${listingActivity.explanation}`
-                      : activity.description;
-
                   const groupHeading = groupHeadingsByJobId.get(job.id);
-                  const wasRescoredAfterRead =
-                    !acknowledgedRescoreJobIds.has(job.id) &&
-                    Boolean(job.rescoredAfterListingRead);
-
                   return [
                     groupHeading ? (
                       <li
@@ -2186,332 +2560,24 @@ export function DiscoveryResultsPanel({
                         </span>
                       </li>
                     ) : null,
-                    <li key={job.id} className="relative min-w-0 pl-10">
-                      {onShortlistJobs ? (
-                        selectablePageJobIds.includes(job.id) ? (
-                          <ListRowSelectionCell
-                            checked={bulkSelectedJobIds.has(job.id)}
-                            label={`Select ${job.title}`}
-                            onToggle={({ shiftKey }) =>
-                              toggleJobSelection(job.id, shiftKey)
-                            }
-                          />
-                        ) : (
-                          // Jobs already in Shortlisted keep the checkbox
-                          // column filled, so the list reads as one grid.
-                          <ListRowSelectionCell
-                            checked={false}
-                            disabled
-                            label={`${job.title} is already in Shortlisted`}
-                            onToggle={() => undefined}
-                          />
-                        )
-                      ) : null}
-                      <SelectableRow
-                        aria-controls={DISCOVERY_DETAIL_REGION_ID}
-                        data-job-result-id={job.id}
-                        className={baseButtonClasses}
-                        aria-keyshortcuts="ArrowUp ArrowDown Home End"
-                        data-collection-item-id={job.id}
-                        onContextMenu={(event) =>
-                          openRowContextMenu(event, rowMenuFor(job))
-                        }
-                        onClick={(event) => {
-                          if (
-                            onShortlistJobs &&
-                            isSelectionClick(event) &&
-                            selectablePageJobIds.includes(job.id)
-                          ) {
-                            event.preventDefault();
-                            toggleJobSelection(job.id, event.shiftKey);
-                            return;
-                          }
-                          if (wasRescoredAfterRead) {
-                            setAcknowledgedRescoreJobIds((current) =>
-                              new Set(current).add(job.id),
-                            );
-                          }
-                          onSelectJob(job.id);
-                          if (event.detail === 0) {
-                            focusDiscoveryDetailAfterKeyboardSelection();
-                          } else {
-                            revealDiscoveryDetailAfterPointerSelection();
-                          }
-                        }}
-                        onKeyDown={(event) => handleListKeyDown(event, job.id)}
-                        selected={isSelected}
-                      >
-                        {/* One shared line rhythm for all three lists: title line (with
-                          the one trailing badge slot), then meta, then status. */}
-                        <div className={jobFinderListRowLinesClassName}>
-                          <div className={jobFinderListRowTitleLineClassName}>
-                            <strong
-                              className={jobFinderListRowTitleClassName}
-                              title={job.title}
-                            >
-                              {isNewSinceVisit(job, previousVisitEnd) ? (
-                                <span
-                                  className="mr-1.5 inline-block size-2 rounded-full bg-(--info-text) align-middle"
-                                  data-new-since-visit
-                                  title="New since your last visit"
-                                >
-                                  <span className="sr-only">New: </span>
-                                </span>
-                              ) : null}
-                              {job.title}
-                            </strong>
-                            {/* One slot, one verdict: the fit and, when it is
-                              not the default, its badge. Shortlisted, the
-                              posting date and a listing that went quiet are
-                              plain facts on the meta line below; three
-                              stacked badges used to squeeze the title into a
-                              narrow column three lines tall. */}
-                            <div className={jobFinderListRowBadgeSlotClassName}>
-                              {isCoveredByUncheckedBand ? null : (
-                                <span
-                                  aria-label={assessment.headlineScoreAriaLabel}
-                                  className={cn(
-                                    "text-(length:--text-small) font-semibold tabular-nums",
-                                    assessment.isScoreWithheld
-                                      ? "text-foreground-soft"
-                                      : "text-(--text-headline)",
-                                  )}
-                                  data-testid={`discovery-result-fit-${job.id}`}
-                                  {...(tieBreakReason
-                                    ? { title: tieBreakReason }
-                                    : {})}
-                                >
-                                  {assessment.headlineScoreLabel}
-                                </span>
-                              )}
-                              {/* The default "review before applying" verdict is the
-                                baseline for every row, so only a stronger or
-                                weaker verdict earns a badge in the list; the
-                                inspector keeps the full assessment. */}
-                              {!assessment.isScoreWithheld &&
-                              job.matchAssessment.recommendation !==
-                                "review_before_applying" ? (
-                                <StatusBadge
-                                  tone={
-                                    assessment.isProvisional
-                                      ? "neutral"
-                                      : recommendation.tone
-                                  }
-                                >
-                                  {recommendation.label}
-                                </StatusBadge>
-                              ) : null}
-                            </div>
-                          </div>
-                          {(() => {
-                            const employerLocationLine =
-                              formatJobEmployerLocationLine({
-                                company: job.company,
-                                location: job.location,
-                                canonicalUrl: job.canonicalUrl,
-                                separator: " • ",
-                              });
-                            const pipelineLabel = [
-                              "drafting",
-                              "ready_for_review",
-                              "approved",
-                              "submitted",
-                            ].includes(job.status)
-                              ? job.status === "submitted"
-                                ? formatStatusLabel(job.status)
-                                : "Shortlisted"
-                              : null;
-                            // One meta line: employer and location, the
-                            // source it was found on, then the plain facts
-                            // (posting date, a listing that went quiet,
-                            // Shortlisted). A source on its own line read as
-                            // a second, unexplained company name. Exactly one
-                            // accessible source mention per row: the visible
-                            // separator is decorative and the sr-only prefix
-                            // completes the sentence.
-                            return (
-                              <span
-                                className={cn(
-                                  jobFinderListRowMetaClassName,
-                                  "flex min-w-0 flex-nowrap items-baseline gap-x-1.5",
-                                )}
-                                {...(employerLocationLine
-                                  ? {}
-                                  : {
-                                      "data-testid": `discovery-result-source-${job.id}`,
-                                      title: `Employer not listed · ${sourceText}`,
-                                    })}
-                              >
-                                <span
-                                  className={cn(
-                                    "min-w-0 truncate",
-                                    employerLocationLine
-                                      ? "font-medium"
-                                      : "shrink-0",
-                                  )}
-                                  data-testid={`discovery-result-employer-${job.id}`}
-                                  title={employerLocationLine || undefined}
-                                >
-                                  {employerLocationLine ||
-                                    "Employer not listed"}
-                                  {indistinguishableJobIds.has(job.id)
-                                    ? ` · Reference ${job.sourceJobId}`
-                                    : ""}
-                                </span>
-                                <span
-                                  aria-hidden="true"
-                                  className={cn(
-                                    "shrink-0",
-                                    sourceRepeatsEmployer &&
-                                      employerLocationLine &&
-                                      "sr-only",
-                                  )}
-                                >
-                                  {" · "}
-                                </span>
-                                <span
-                                  className={cn(
-                                    "flex min-w-0 max-w-[45%] shrink-0",
-                                    sourceRepeatsEmployer &&
-                                      employerLocationLine &&
-                                      "sr-only",
-                                  )}
-                                  {...(employerLocationLine
-                                    ? {
-                                        "data-testid": `discovery-result-source-${job.id}`,
-                                        title: `Found on ${sourceText}`,
-                                      }
-                                    : {})}
-                                >
-                                  <span className="sr-only">Found on </span>
-                                  <span className="min-w-0 truncate">
-                                    {sourceText}
-                                  </span>
-                                </span>
-                                {listingDateBadge.shown ? (
-                                  <span className="shrink-0 whitespace-nowrap text-foreground-muted">
-                                    <span aria-hidden="true">{"· "}</span>
-                                    <span
-                                      data-testid={`discovery-result-date-${job.id}`}
-                                      {...(listingDateExplanation
-                                        ? { title: listingDateExplanation }
-                                        : {})}
-                                    >
-                                      {listingDateBadge.text}
-                                    </span>
-                                  </span>
-                                ) : null}
-                                {listingActivity.status !== "active" ? (
-                                  <span
-                                    aria-label={`${activity.label} listing status${activity.observedDate ? ` observed ${activity.observedDate}` : ""}. ${activityDescription}`}
-                                    className="shrink-0 whitespace-nowrap text-(--warning-text)"
-                                    title={activityDescription}
-                                  >
-                                    <span aria-hidden="true">{"· "}</span>
-                                    <span aria-hidden="true">
-                                      {activity.label}
-                                      {activity.observedDate
-                                        ? ` · ${activity.observedDate}`
-                                        : ""}
-                                    </span>
-                                  </span>
-                                ) : (
-                                  <span className="sr-only">
-                                    {`${activity.label} listing status${activity.observedDate ? ` observed ${activity.observedDate}` : ""}. ${activityDescription}`}
-                                  </span>
-                                )}
-                                {pipelineLabel ? (
-                                  <span
-                                    className="shrink-0 whitespace-nowrap font-medium text-primary"
-                                    data-testid={`discovery-result-pipeline-${job.id}`}
-                                  >
-                                    <span aria-hidden="true">{"· "}</span>
-                                    {pipelineLabel}
-                                  </span>
-                                ) : null}
-                              </span>
-                            );
-                          })()}
-
-                          {/* The fit verdict sits on the title line beside its
-                          badge (see the badge slot above). The reason behind
-                          it is a comfortable-density line only; compact rows
-                          stay two lines. When the evidence behind the number
-                          is only the listing title the number is withheld and
-                          kept inside "How this was scored" with its evidence. */}
-                          {isCoveredByUncheckedBand ? (
-                            <span
-                              className="sr-only"
-                              data-testid={`discovery-result-fit-sr-${job.id}`}
-                            >
-                              {rowReason
-                                ? `${assessment.headlineScoreAriaLabel}. ${rowReason}`
-                                : assessment.headlineScoreAriaLabel}
-                            </span>
-                          ) : (
-                            // Every row keeps the reason line, empty or not,
-                            // so rows are one height down the list.
-                            <span
-                              className={cn(
-                                jobFinderListRowStatusClassName,
-                                "min-h-[1lh] text-foreground-soft",
-                              )}
-                              {...(rowReason
-                                ? {
-                                    "data-testid": `discovery-result-fit-reason-${job.id}`,
-                                  }
-                                : {})}
-                            >
-                              {rowReason}
-                            </span>
-                          )}
-                          {wasRescoredAfterRead ? (
-                            <span className="text-(length:--text-tiny) text-foreground-soft">
-                              Rescored after reading the listing
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {/* Below xl the inspector stacks under this list, so a
-                          highlighted row is the only sign that anything more
-                          exists — and it sits past the fold. This names the
-                          pane by its own visible heading; it does not promise
-                          listing detail the app may not have read.
-
-                          Rendered on every row so the slot is reserved and
-                          selection can never reflow the list (see
-                          SelectableRow), and revealed on the selected row
-                          through this element's OWN `data-details-cue`.
-
-                          That attribute, rather than a `group-data-*` variant
-                          keyed on the row's selected state, is deliberate. The
-                          group form left both rows carrying byte-identical
-                          class strings, so whether the cue actually painted
-                          depended entirely on a stylesheet the renderer tests
-                          never load: a DOM query passed while every row showed
-                          the cue on screen. State that decides what is painted
-                          has to be observable in the DOM, so both the shown
-                          and the hidden case can be pinned.
-
-                          Decorative: the row already exposes the detail region
-                          through `aria-controls`, so this is not announced a
-                          second time. Nothing here scrolls — the default
-                          selection is not a user action, and only an explicit
-                          click reveals the detail region. */}
-                        <span
-                          aria-hidden="true"
-                          className="invisible flex items-center gap-1 text-(length:--text-tiny) font-medium text-foreground-soft data-[details-cue=visible]:visible xl:hidden"
-                          data-details-cue={isSelected ? "visible" : "hidden"}
-                          data-testid={`discovery-result-details-below-${job.id}`}
-                        >
-                          <ChevronDown
-                            aria-hidden="true"
-                            className="size-3.5"
-                          />
-                          Job details below
-                        </span>
-                      </SelectableRow>
-                    </li>,
+                    <DiscoveryResultRow
+                      actions={rowActionsRef}
+                      buttonClassName={baseButtonClasses}
+                      checked={bulkSelectedJobIds.has(job.id)}
+                      headedGroup={headedGroupByJobId.get(job.id)}
+                      indistinguishable={indistinguishableJobIds.has(job.id)}
+                      isNew={isNewSinceVisit(job, previousVisitEnd)}
+                      job={job}
+                      key={job.id}
+                      rescoreAcknowledged={acknowledgedRescoreJobIds.has(job.id)}
+                      selectable={selectablePageJobIds.includes(job.id)}
+                      selected={displayedSelectedJobId === job.id}
+                      showSelection={Boolean(onShortlistJobs)}
+                      sourceLabels={
+                        sourceLabelsByJobId.get(job.id) ?? NO_SOURCE_LABELS
+                      }
+                      tiedScore={tiedScores.has(job.matchAssessment.score)}
+                    />,
                   ];
                 })}
               </ul>

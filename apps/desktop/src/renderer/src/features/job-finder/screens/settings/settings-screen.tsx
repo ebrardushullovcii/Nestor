@@ -143,19 +143,27 @@ export const SETTINGS_SUBNAV_OFFSET_VARIABLE = "--settings-subnav-offset";
 
 const SUBNAV_EDGE_FADE = "2.5rem";
 
-function subnavEdgeMask(edges: {
-  after: boolean;
-  before: boolean;
-}): CSSProperties | undefined {
-  if (!edges.before && !edges.after) return undefined;
-  const start = edges.before
-    ? `transparent, black ${SUBNAV_EDGE_FADE}`
-    : "black";
-  const end = edges.after
+/**
+ * Fades the edge of the sideways-scrolling section row that has more sections
+ * past it. Written to the row directly: it changes with every scroll, and as
+ * React state it re-rendered the whole Settings screen each time.
+ */
+function paintSubnavEdges(row: HTMLElement | null): void {
+  if (!row) return;
+  const before = row.scrollLeft > 1;
+  const after = row.scrollLeft + row.clientWidth < row.scrollWidth - 1;
+  if (before) row.dataset.moreBefore = "true";
+  else delete row.dataset.moreBefore;
+  if (after) row.dataset.moreAfter = "true";
+  else delete row.dataset.moreAfter;
+  const start = before ? `transparent, black ${SUBNAV_EDGE_FADE}` : "black";
+  const end = after
     ? `black calc(100% - ${SUBNAV_EDGE_FADE}), transparent`
     : "black";
-  const mask = `linear-gradient(to right, ${start}, ${end})`;
-  return { maskImage: mask, WebkitMaskImage: mask };
+  const mask =
+    before || after ? `linear-gradient(to right, ${start}, ${end})` : "";
+  row.style.maskImage = mask;
+  row.style.setProperty("-webkit-mask-image", mask);
 }
 
 // The unsaved-changes bar is sticky to the bottom of the same scroller, so the
@@ -218,30 +226,13 @@ export function SettingsScreen(props: {
     settings,
   } = props;
 
+  // Measured sizes are written to these elements from ResizeObservers, which
+  // report after layout: measuring before paint forced the whole screen's
+  // layout early, and keeping the numbers in state rendered it all again.
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const subnavRef = useRef<HTMLElement | null>(null);
   const subnavRowRef = useRef<HTMLDivElement | null>(null);
-  const [subnavEdges, setSubnavEdges] = useState({
-    after: false,
-    before: false,
-  });
-  const measureSubnavEdges = () => {
-    const row = subnavRowRef.current;
-    if (!row) return;
-    const before = row.scrollLeft > 1;
-    const after = row.scrollLeft + row.clientWidth < row.scrollWidth - 1;
-    setSubnavEdges((current) =>
-      current.before === before && current.after === after
-        ? current
-        : { after, before },
-    );
-  };
   const unsavedBarRef = useRef<HTMLDivElement | null>(null);
-  const [sectionScrollOffsetPx, setSectionScrollOffsetPx] = useState(
-    SETTINGS_SUBNAV_SCROLL_OFFSET_FALLBACK_PX,
-  );
-  const [unsavedBarClearancePx, setUnsavedBarClearancePx] = useState(
-    SETTINGS_UNSAVED_BAR_CLEARANCE_FALLBACK_PX,
-  );
   // Seven labels at one colour with no current-item marker are a list, not
   // navigation. The active section is tracked so the nav can say where the
   // reader is.
@@ -325,33 +316,26 @@ export function SettingsScreen(props: {
     return () => observer.disconnect();
   }, []);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const subnav = subnavRef.current;
-    if (!subnav) {
+    if (!subnav || typeof ResizeObserver === "undefined") {
       return;
     }
-
-    const measureSubnavOffset = () => {
+    const observer = new ResizeObserver(() => {
       // The row inside resizes with the band, so its faded edges are
       // re-measured here too.
-      measureSubnavEdges();
+      paintSubnavEdges(subnavRowRef.current);
       const height = subnav.getBoundingClientRect().height;
-      // Unmeasured layouts (jsdom, pre-first-paint) report 0px; keep the
-      // raised wrap-aware floor so a wrapped subnav can never cover the
-      // headings it scrolls to.
+      // Unmeasured layouts (jsdom) report 0px; keep the raised wrap-aware
+      // floor so a wrapped subnav can never cover the headings it scrolls to.
       if (height <= 0) {
         return;
       }
-      setSectionScrollOffsetPx(
-        Math.ceil(height) + SETTINGS_SUBNAV_BOTTOM_GAP_PX,
+      rootRef.current?.style.setProperty(
+        SETTINGS_SUBNAV_OFFSET_VARIABLE,
+        `${Math.ceil(height) + SETTINGS_SUBNAV_BOTTOM_GAP_PX}px`,
       );
-    };
-
-    measureSubnavOffset();
-    if (typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const observer = new ResizeObserver(measureSubnavOffset);
+    });
     observer.observe(subnav);
     return () => observer.disconnect();
   }, []);
@@ -371,38 +355,30 @@ export function SettingsScreen(props: {
         row.scrollLeft = end - row.clientWidth;
       }
     }
-    measureSubnavEdges();
+    paintSubnavEdges(row ?? null);
   }, [activeSectionId]);
 
-  useLayoutEffect(() => {
+  const hasUnsavedBar = dirtySections.length > 0;
+  useEffect(() => {
     const bar = unsavedBarRef.current;
-    if (!bar) {
-      setUnsavedBarClearancePx(0);
+    if (!bar || typeof ResizeObserver === "undefined") {
       return;
     }
-
-    setUnsavedBarClearancePx(SETTINGS_UNSAVED_BAR_CLEARANCE_FALLBACK_PX);
-    const measureUnsavedBarClearance = () => {
+    const observer = new ResizeObserver(() => {
       const height = bar.getBoundingClientRect().height;
-      // Unmeasured layouts (jsdom, pre-first-paint) report 0px; keep the
-      // wrap-aware floor so the last card can always be scrolled clear of the
-      // sticky bar.
+      // Unmeasured layouts (jsdom) report 0px; keep the wrap-aware floor so
+      // the last card can always be scrolled clear of the sticky bar.
       if (height <= 0) {
         return;
       }
-      setUnsavedBarClearancePx(
-        Math.ceil(height) + SETTINGS_UNSAVED_BAR_BOTTOM_GAP_PX,
+      rootRef.current?.style.setProperty(
+        SETTINGS_UNSAVED_BAR_CLEARANCE_VARIABLE,
+        `${Math.ceil(height) + SETTINGS_UNSAVED_BAR_BOTTOM_GAP_PX}px`,
       );
-    };
-
-    measureUnsavedBarClearance();
-    if (typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const observer = new ResizeObserver(measureUnsavedBarClearance);
+    });
     observer.observe(bar);
     return () => observer.disconnect();
-  }, [dirtySections.length > 0]);
+  }, [hasUnsavedBar]);
 
   const handleSectionAnchorClick = (event: MouseEvent<HTMLAnchorElement>) => {
     const isUnmodifiedPrimaryActivation =
@@ -444,10 +420,14 @@ export function SettingsScreen(props: {
         "grid min-w-0 gap-3",
         SHELL_SCROLLING_ROUTE_BOTTOM_GUTTER_CANCEL_CLASS,
       )}
+      ref={rootRef}
       style={
         {
-          [SETTINGS_SUBNAV_OFFSET_VARIABLE]: `${sectionScrollOffsetPx}px`,
-          [SETTINGS_UNSAVED_BAR_CLEARANCE_VARIABLE]: `${unsavedBarClearancePx}px`,
+          // Floors until the observers report the real sizes.
+          [SETTINGS_SUBNAV_OFFSET_VARIABLE]: `${SETTINGS_SUBNAV_SCROLL_OFFSET_FALLBACK_PX}px`,
+          [SETTINGS_UNSAVED_BAR_CLEARANCE_VARIABLE]: hasUnsavedBar
+            ? `${SETTINGS_UNSAVED_BAR_CLEARANCE_FALLBACK_PX}px`
+            : "0px",
         } as CSSProperties
       }
     >
@@ -485,11 +465,8 @@ export function SettingsScreen(props: {
           // stretching the page; only the row scrolls.
           className="flex min-w-0 items-center gap-1 overflow-x-auto overflow-y-hidden px-3 scroll-px-3 [scrollbar-width:none]"
           data-settings-subnav-row
-          data-more-after={subnavEdges.after || undefined}
-          data-more-before={subnavEdges.before || undefined}
-          onScroll={measureSubnavEdges}
+          onScroll={(event) => paintSubnavEdges(event.currentTarget)}
           ref={subnavRowRef}
-          style={subnavEdgeMask(subnavEdges)}
         >
           {settingsSections.map((section) => {
             const isActive = section.id === activeSectionId;
@@ -526,7 +503,7 @@ export function SettingsScreen(props: {
                     row.scrollLeft = Math.max(0, start - 12);
                   else if (end > row.scrollLeft + row.clientWidth)
                     row.scrollLeft = end - row.clientWidth;
-                  measureSubnavEdges();
+                  paintSubnavEdges(row);
                 }}
                 onClick={handleSectionAnchorClick}
               >

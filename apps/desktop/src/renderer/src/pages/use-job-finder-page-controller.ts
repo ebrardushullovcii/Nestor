@@ -253,7 +253,10 @@ export function useJobFinderPageController() {
   // an action that navigates as part of its own completion can stay visible on
   // the destination route.
   const navigate = useCallback(
-    (path: string, options?: { replace?: boolean; state?: unknown }) => {
+    (
+      path: string,
+      options?: { flushSync?: boolean; replace?: boolean; state?: unknown },
+    ) => {
       noteJobFinderNavigation(path);
       void routerNavigate(path, options);
     },
@@ -1246,7 +1249,10 @@ export function useJobFinderPageController() {
   // question whenever unsaved work is actually at risk.
   const navigateFromShell = useCallback(
     (path: string) => {
-      void navigate(path);
+      // The router wraps a plain navigate in a transition, which rendered the
+      // next screen in 5 ms slices over several frames; a click should land
+      // in the next frame.
+      void navigate(path, { flushSync: true });
     },
     [navigate],
   );
