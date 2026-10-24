@@ -26,10 +26,6 @@ export type DiscoveryPostingPreparation = {
   fingerprints: DiscoveryListingFingerprints;
   content: { digest: string; packed: Uint8Array } | null;
   screeningContent: { digest: string; packed: Uint8Array } | null;
-  aliases: {
-    local: readonly DiscoveryJobIdentityAlias[];
-    acrossSources: readonly DiscoveryJobIdentityAlias[];
-  };
 };
 
 export type DiscoveryJobIdentityAlias = {
@@ -48,6 +44,10 @@ export type DiscoveryJobIdentityAlias = {
 
 /** Internal repository index: candidates still pass the existing identity policy. */
 export interface DiscoveryIdentityStore {
+  read(
+    signature: string,
+    build: () => readonly DiscoveryJobIdentityAlias[],
+  ): readonly DiscoveryJobIdentityAlias[];
   put(
     id: number,
     signature: string,

@@ -16,6 +16,10 @@ test("persisted exact-input aliases are reused across run indexes and candidates
   first.put(1, "identity_v1:one", build);
   first.put(2, "identity_v1:one", build);
   expect(build).toHaveBeenCalledTimes(1);
+  expect(first.read("identity_v1:one", build)).toEqual(
+    build.mock.results[0]!.value,
+  );
+  expect(build).toHaveBeenCalledTimes(1);
   expect(first.find(["listing-url:https://example.test/one"])).toEqual([
     { key: "listing-url:https://example.test/one", id: 1 },
     { key: "listing-url:https://example.test/one", id: 2 },

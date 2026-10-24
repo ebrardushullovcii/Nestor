@@ -194,10 +194,6 @@ describe("public provider ATS acceptance matrix", () => {
         expect(evidence.fingerprints).toEqual(
           createDiscoveryListingFingerprints(expected[index]!),
         );
-        expect(evidence.aliases.local).toEqual(buildJobIdentityAliases(job));
-        expect(evidence.aliases.acrossSources).toEqual(
-          buildJobIdentityAliases({ ...job, matchAcrossSources: true }),
-        );
         expect(evidence.content).toEqual(
           prepareListingContent(job.description),
         );

@@ -32,6 +32,10 @@ queries fetch only matching keys and row tokens. The existing intersection,
 cross-source compatibility and exact-content collision checks still decide the
 match. Cache tables contain derived keys, never listing bodies; run indexes are
 dropped when the run ends. Other hosts retain the same in-memory implementation.
+SQLite-backed runs do not construct the in-memory alias maps or retain alias
+arrays in global caches. Queries read the stored alias columns. Feed workers
+prepare content digests but no longer build and transfer two alias arrays per
+posting. A short identity signature replaces the former body-and-alias cache.
 
 Typed discovery updates and saved-job deltas trust their domain values. Decode
 stored JSON without another schema walk in these paths. Migrations, imports,

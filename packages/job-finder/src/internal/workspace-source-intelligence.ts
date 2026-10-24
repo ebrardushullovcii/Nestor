@@ -31,9 +31,6 @@ import { toProviderAwarePosting } from "./discovery-posting-normalization";
 import {
   prepareListingContent,
   rememberPreparedListingContent,
-  buildJobIdentityAliases,
-  rememberPreparedJobIdentity,
-  hasSameJobIdentity,
 } from "./job-identity";
 import {
   createDiscoveryListingFingerprints,
@@ -1894,10 +1891,6 @@ export async function preparePublicProviderFeed(
     jobs.push(raw);
     if (task.prepareForDiscovery) {
       const content = prepareListingContent(posting.description);
-      const acrossSources = buildJobIdentityAliases({
-        ...posting,
-        matchAcrossSources: true,
-      });
       const normalized: Partial<JobPosting> = {};
       for (const field of Object.keys(posting) as Array<keyof JobPosting>) {
         if (!isDeepStrictEqual(raw[field], posting[field]))
@@ -1907,12 +1900,6 @@ export async function preparePublicProviderFeed(
         normalized,
         fingerprints: createDiscoveryListingFingerprints(posting),
         content,
-        aliases: {
-          local: acrossSources.filter(
-            (alias) => alias.kind !== "cross_source_listing_facts",
-          ),
-          acrossSources,
-        },
         screeningContent:
           raw.description === posting.description
             ? content
@@ -2056,9 +2043,6 @@ export async function collectPublicProviderJobs(input: {
           preparation.screeningContent,
         );
         rememberDiscoveryListingFingerprints(job, preparation.fingerprints);
-        if (hasSameJobIdentity(raw, job))
-          rememberPreparedJobIdentity(raw, preparation.aliases);
-        rememberPreparedJobIdentity(job, preparation.aliases);
       }
 
       return {

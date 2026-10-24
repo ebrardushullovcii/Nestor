@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { DiscoveryIdentityStore } from "@nestor/contracts";
+import type {
+  DiscoveryIdentityStore,
+  DiscoveryJobIdentityAlias,
+} from "@nestor/contracts";
 
 const initialized = new WeakSet<DatabaseSync>();
 let sequence = 0;
@@ -10,10 +13,21 @@ export function createDiscoveryIdentityStore(
   database: DatabaseSync,
 ): DiscoveryIdentityStore {
   if (!initialized.has(database)) {
+    const oldColumns = database
+      .prepare("PRAGMA table_info(discovery_identity_aliases)")
+      .all();
+    if (
+      oldColumns.length &&
+      !oldColumns.some((column) => column.name === "position")
+    )
+      database.exec(
+        "DROP TABLE discovery_identity_aliases; DROP TABLE discovery_identity_keys",
+      );
     database.exec(`
       CREATE TABLE IF NOT EXISTS discovery_identity_keys (identity_hash TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS discovery_identity_aliases (
         identity_hash TEXT NOT NULL, alias_key TEXT NOT NULL,
+        kind TEXT NOT NULL, confidence TEXT NOT NULL, priority INTEGER NOT NULL, position INTEGER NOT NULL,
         PRIMARY KEY (identity_hash, alias_key)
       ) WITHOUT ROWID;
       CREATE INDEX IF NOT EXISTS discovery_identity_alias_key ON discovery_identity_aliases(alias_key);
@@ -30,7 +44,10 @@ export function createDiscoveryIdentityStore(
     "INSERT INTO discovery_identity_keys VALUES (?)",
   );
   const addAlias = database.prepare(
-    "INSERT OR IGNORE INTO discovery_identity_aliases VALUES (?, ?)",
+    "INSERT OR IGNORE INTO discovery_identity_aliases VALUES (?, ?, ?, ?, ?, ?)",
+  );
+  const readAliases = database.prepare(
+    "SELECT alias_key, kind, confidence, priority FROM discovery_identity_aliases WHERE identity_hash = ? ORDER BY position",
   );
   const remove = database.prepare(`DELETE FROM ${table} WHERE id = ?`);
   const put = database.prepare(
@@ -54,14 +71,39 @@ export function createDiscoveryIdentityStore(
       throw error;
     }
   };
+  const ensure = (
+    signature: string,
+    build: () => readonly DiscoveryJobIdentityAlias[],
+  ) => {
+    const hash = createHash("sha256").update(signature).digest("hex");
+    if (!known.get(hash))
+      batch(() => {
+        addKey.run(hash);
+        build().forEach((alias, position) =>
+          addAlias.run(
+            hash,
+            alias.key,
+            alias.kind,
+            alias.confidence,
+            alias.priority,
+            position,
+          ),
+        );
+      });
+    return hash;
+  };
   return {
+    read(signature, build) {
+      const hash = ensure(signature, build);
+      return readAliases.all(hash).map((row) => ({
+        key: String(row.alias_key),
+        kind: row.kind as DiscoveryJobIdentityAlias["kind"],
+        confidence: row.confidence as DiscoveryJobIdentityAlias["confidence"],
+        priority: Number(row.priority),
+      }));
+    },
     put(id, signature, build) {
-      const hash = createHash("sha256").update(signature).digest("hex");
-      if (!known.get(hash))
-        batch(() => {
-          addKey.run(hash);
-          for (const alias of build()) addAlias.run(hash, alias.key);
-        });
+      const hash = ensure(signature, build);
       remove.run(id);
       put.run(id, hash);
     },

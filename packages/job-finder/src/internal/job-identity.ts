@@ -650,8 +650,7 @@ function readAliasBasis(input: JobIdentityInput): AliasBasis {
     input.company,
     input.location,
     // Owned postings already retain this string. Comparing it directly avoids
-    // hashing the complete body again for each lookup. Lazy immutable rows use
-    // immutableAliases instead of retaining a second body in this basis.
+    // hashing the complete body again for each lookup.
     input.description,
     input.exactContent?.digest,
     input.postedAt,
@@ -678,84 +677,34 @@ export function hasSameJobIdentity(
   );
 }
 
-/**
- * Aliases already built for an indexed value. A search builds several
- * indexes over every saved job at each checkpoint, and normalizing each
- * job's whole description every time took seconds at a few thousand jobs.
- * Entries go with their values, and a value whose identity fields changed
- * gets its aliases built again.
- */
-const indexedAliasCache = new WeakMap<
-  object,
-  { basis: AliasBasis; aliases: readonly JobIdentityAlias[] }[]
->();
-const immutableAliases = new WeakMap<
+// Only a short cache key stays beside an input, never its alias array. Mutable
+// input objects are checked against their exact fields before reusing the key.
+const identitySignatures = new WeakMap<
   JobIdentityInput,
-  readonly JobIdentityAlias[]
+  { basis: AliasBasis; signature: string }
 >();
-// Different immutable views of one listing have the same aliases. Peers are
-// weak: this hint cannot keep an old job, its body or its run alive.
-const aliasPeers = new Map<string, WeakRef<object>>();
-const ALIAS_PEER_LIMIT = 20_000;
 
-/** Aliases were prepared from these exact immutable facts by the feed worker. */
-export function rememberPreparedJobIdentity(
-  posting: JobIdentityInput,
-  aliases: DiscoveryPostingPreparation["aliases"],
-  input: JobIdentityInput = posting,
-): void {
-  indexedAliasCache.set(posting, [
-    {
-      basis: readAliasBasis({ ...input, matchAcrossSources: false }),
-      aliases: aliases.local,
-    },
-    {
-      basis: readAliasBasis({ ...input, matchAcrossSources: true }),
-      aliases: aliases.acrossSources,
-    },
-  ]);
-  const peerKey = `${posting.source}\u0000${posting.sourceJobId}\u0000${posting.canonicalUrl}`;
-  if (aliasPeers.size >= ALIAS_PEER_LIMIT)
-    aliasPeers.delete(aliasPeers.keys().next().value!);
-  aliasPeers.set(peerKey, new WeakRef(posting));
-}
-
-function readIndexedAliases(
-  value: object,
-  input: JobIdentityInput,
-): readonly JobIdentityAlias[] {
+function readIdentitySignature(input: JobIdentityInput): string {
+  const cached = identitySignatures.get(input);
   if (
+    cached &&
     Object.isFrozen(input) &&
     (!input.alternateListingUrls || Object.isFrozen(input.alternateListingUrls))
-  ) {
-    const cached = immutableAliases.get(input);
-    if (cached) return cached;
-    const aliases = buildJobIdentityAliases(input);
-    immutableAliases.set(input, aliases);
-    return aliases;
-  }
+  )
+    return cached.signature;
   const basis = readAliasBasis(input);
-  const entries = indexedAliasCache.get(value);
-  const cached = entries?.find((entry) => sameAliasBasis(entry.basis, basis));
-  if (cached) return cached.aliases;
-  const peerKey = `${input.source}\u0000${input.sourceJobId}\u0000${input.canonicalUrl}`;
-  const peer = aliasPeers.get(peerKey)?.deref();
-  const peerEntry = peer
-    ? indexedAliasCache
-        .get(peer)
-        ?.find((entry) => sameAliasBasis(entry.basis, basis))
-    : undefined;
-  const aliases = peerEntry?.aliases ?? buildJobIdentityAliases(input);
-  // One value is indexed with and without cross-source matching.
-  indexedAliasCache.set(value, [
-    { basis, aliases },
-    ...(entries ?? []).slice(0, 1),
-  ]);
-  aliasPeers.delete(peerKey);
-  if (aliasPeers.size >= ALIAS_PEER_LIMIT)
-    aliasPeers.delete(aliasPeers.keys().next().value!);
-  aliasPeers.set(peerKey, new WeakRef(value));
-  return aliases;
+  if (cached && sameAliasBasis(cached.basis, basis)) return cached.signature;
+  const prepared = readPreparedContent(input);
+  const content = prepared
+    ? null
+    : normalizeListingContentIdentity(input.description);
+  const key = [...basis];
+  key[10] =
+    prepared?.digest ?? (content ? digestListingContent(content) : null);
+  key[11] = null;
+  const signature = `identity_aliases_v2:${JSON.stringify(key)}`;
+  identitySignatures.set(input, { basis, signature });
+  return signature;
 }
 
 export function createJobIdentityIndex<T extends object>(
@@ -764,13 +713,15 @@ export function createJobIdentityIndex<T extends object>(
   include?: (value: T) => boolean,
   storage?: DiscoveryIdentityStore,
 ): JobIdentityIndex<T> {
-  const valuesByAlias = new Map<string, Set<T>>();
-  const aliasesByValue = new Map<T, readonly JobIdentityAlias[]>();
+  const valuesByAlias = storage ? null : new Map<string, Set<T>>();
+  const aliasesByValue = storage
+    ? null
+    : new Map<T, readonly JobIdentityAlias[]>();
   const tokens = new WeakMap<T, number>();
   const valuesByToken = new Map<number, T>();
   let nextToken = 0;
   const matchesFor = (key: string, stored?: Map<string, Set<T>>) => {
-    const matches = (stored ?? valuesByAlias).get(key);
+    const matches = (stored ?? valuesByAlias)?.get(key);
     return include && matches ? new Set([...matches].filter(include)) : matches;
   };
 
@@ -780,21 +731,19 @@ export function createJobIdentityIndex<T extends object>(
       const token = tokens.get(value) ?? ++nextToken;
       tokens.set(value, token);
       valuesByToken.set(token, value);
-      storage.put(
-        token,
-        `identity_aliases_v1:${JSON.stringify(readAliasBasis(input))}`,
-        () => readIndexedAliases(value, input),
+      storage.put(token, readIdentitySignature(input), () =>
+        buildJobIdentityAliases(input),
       );
       return;
     }
-    const aliases = readIndexedAliases(value, input);
-    aliasesByValue.set(value, aliases);
+    const aliases = buildJobIdentityAliases(input);
+    aliasesByValue!.set(value, aliases);
     for (const alias of aliases) {
-      const matches = valuesByAlias.get(alias.key);
+      const matches = valuesByAlias!.get(alias.key);
       if (matches) {
         matches.add(value);
       } else {
-        valuesByAlias.set(alias.key, new Set([value]));
+        valuesByAlias!.set(alias.key, new Set([value]));
       }
     }
   };
@@ -805,25 +754,27 @@ export function createJobIdentityIndex<T extends object>(
       if (token !== undefined) {
         storage.remove(token);
         valuesByToken.delete(token);
+        tokens.delete(value);
       }
       return;
     }
-    const aliases = aliasesByValue.get(value) ?? [];
+    const aliases = aliasesByValue!.get(value) ?? [];
     for (const alias of aliases) {
-      const matches = valuesByAlias.get(alias.key);
+      const matches = valuesByAlias!.get(alias.key);
       matches?.delete(value);
       if (matches?.size === 0) {
-        valuesByAlias.delete(alias.key);
+        valuesByAlias!.delete(alias.key);
       }
     }
-    aliasesByValue.delete(value);
+    aliasesByValue!.delete(value);
   };
 
   const resolve = (identity: JobIdentityInput): JobIdentityResolution<T> => {
-    // A query copy can borrow its worker-prepared peer's aliases too. Every
-    // identity field is checked against the cached basis, including mutable
-    // queries: edits invalidate the hint before a match is considered.
-    const aliases = readIndexedAliases(identity, identity);
+    const aliases = storage
+      ? storage.read(readIdentitySignature(identity), () =>
+          buildJobIdentityAliases(identity),
+        )
+      : buildJobIdentityAliases(identity);
     const storedMatches = storage ? new Map<string, Set<T>>() : undefined;
     if (storage && storedMatches)
       for (const row of storage.find(aliases.map((alias) => alias.key))) {
