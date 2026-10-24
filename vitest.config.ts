@@ -7,6 +7,30 @@ const currentDir = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   resolve: {
     alias: {
+      "@nestor/job-list-policy/text": path.resolve(
+        currentDir,
+        "packages/job-list-policy/src/shared.ts",
+      ),
+      "@nestor/job-list-policy/identity": path.resolve(
+        currentDir,
+        "packages/job-list-policy/src/job-identity.ts",
+      ),
+      "@nestor/job-list-policy/tie-break-reason": path.resolve(
+        currentDir,
+        "packages/job-list-policy/src/tie-break-reason.ts",
+      ),
+      "@nestor/job-list-policy/ordering": path.resolve(
+        currentDir,
+        "packages/job-list-policy/src/ordering.ts",
+      ),
+      "@nestor/job-list-policy/sources": path.resolve(
+        currentDir,
+        "packages/job-list-policy/src/sources.ts",
+      ),
+      "@nestor/job-list-policy": path.resolve(
+        currentDir,
+        "packages/job-list-policy/src/index.ts",
+      ),
       "@nestor/ai-providers": path.resolve(
         currentDir,
         "packages/ai-providers/src/index.ts",

@@ -1,5 +1,5 @@
 import type { DatabaseSync, StatementSync } from "node:sqlite";
-import { existsSync } from "node:fs";
+import { backupBeforeStorageMigration } from "./storage-migration-backup";
 import { isDeepStrictEqual } from "node:util";
 import {
   BrowserAgentRunCheckpointSchema,
@@ -172,11 +172,8 @@ export function replaceDiscoveryStorage(database: DatabaseSync, state: JobFinder
 export function migrateDiscoveryStorage(database: DatabaseSync): void {
   const progressMigrated = Boolean(database.prepare("SELECT 1 FROM schema_migrations WHERE version = 29").get());
   if (!progressMigrated) {
-    const file = database.prepare("PRAGMA database_list").all().find((row) => row.name === "main")?.file;
-    if (typeof file === "string" && file && database.prepare("SELECT 1 FROM singleton_state LIMIT 1").get()) {
-      const backup = `${file}.before-discovery-progress.sqlite`;
-      if (!existsSync(backup)) database.prepare("VACUUM main INTO ?").run(backup);
-    }
+    if (database.prepare("SELECT 1 FROM singleton_state LIMIT 1").get())
+      backupBeforeStorageMigration(database, "discovery-progress");
   }
   database.exec("BEGIN IMMEDIATE");
   try {

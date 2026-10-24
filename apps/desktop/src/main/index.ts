@@ -2,16 +2,14 @@ import { app, BrowserWindow, Menu, ipcMain, powerMonitor } from "electron";
 import { appendFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadDesktopEnvironment } from "./setup/env";
 import { configureInterviewMediaPermissions } from "./setup/interview-media-permissions";
 import { areAdvancedInterviewSurfacesEnabled } from "./setup/interview-surface-mode";
 import { registerCoreDesktopRoutes } from "./setup/register-core-routes";
 import { getEmbeddedBrowser } from "./services/browser/embedded-browser";
-import { migrateLegacyDesktopUserData } from "./setup/legacy-user-data-migration";
 import {
-  configureDesktopUserDataDirectory,
-  getDesktopStartupDiagnosticsPath,
-} from "./setup/user-data-directory";
+  hasSingleInstanceLock,
+  startupDiagnosticsPath,
+} from "./setup/desktop-startup";
 import { resolveBrandIconPaths } from "./setup/brand-icons";
 import { createMainWindow } from "./setup/window-shell";
 import { createWorkspaceQueryHost } from "./setup/workspace-query-host";
@@ -26,21 +24,6 @@ import type { CampaignScheduler } from "./services/job-finder/campaign-scheduler
 import type * as CampaignSchedulerApi from "./services/job-finder/campaign-scheduler";
 import type * as JobFinderServicesApi from "./services/job-finder";
 import type * as LiveAssistantApi from "./services/live-assistant";
-
-loadDesktopEnvironment();
-const configuredUserDataDirectory = configureDesktopUserDataDirectory(app);
-try {
-  // Before the single-instance lock, the first thing that touches userData.
-  migrateLegacyDesktopUserData(app, {
-    configuredDirectory: configuredUserDataDirectory,
-  });
-} catch (error) {
-  // A failed rename leaves the old directory whole; the app still opens.
-  console.warn("Could not move the pre-rename user data directory.", error);
-}
-
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
-const startupDiagnosticsPath = getDesktopStartupDiagnosticsPath();
 
 function recordStartupDiagnostic(message: string, error?: unknown) {
   if (!startupDiagnosticsPath || process.env.ELECTRON_ENABLE_LOGGING !== "1") {
@@ -118,7 +101,9 @@ function loadInterviewSessionControlsModule() {
 }
 
 let closeInterviewOverlayWindows = () => {};
-const workspaceQueryHost = hasSingleInstanceLock ? createWorkspaceQueryHost() : null;
+const workspaceQueryHost = hasSingleInstanceLock
+  ? createWorkspaceQueryHost()
+  : null;
 let disposeInterviewSessionControls = () => {};
 
 // The 500ms deferred service initialization owns the background eager loads.
@@ -414,11 +399,11 @@ app.on("before-quit", (event) => {
   deferredBackgroundInit.commitQuitTeardown();
   // The read connection must release the WAL before the writer closes and
   // records its clean-close fingerprint.
-  workspaceQueryHost?.close();
   jobFinderShutdownInFlight = true;
   event.preventDefault();
   void runShutdownWithTimeout(
     async () => {
+      await workspaceQueryHost?.close();
       // The assistant or scheduler may itself be waiting for the opening view.
       // Cancel that wait before awaiting either service's shutdown.
       if (jobFinderServicesPromise) {

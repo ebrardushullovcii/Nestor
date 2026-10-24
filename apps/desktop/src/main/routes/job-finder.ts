@@ -148,6 +148,7 @@ import {
 import { collectJobFinderPerformanceSnapshot } from "../services/job-finder/collect-performance-snapshot";
 import { createJobFinderWorkspaceDeltaTracker } from "../services/job-finder/workspace-delta";
 import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-workspace-view";
+import { usesWorkspaceQueryUpdates } from "../services/job-finder/query-update-mode";
 import {
   notifyJobFinderWorkspaceListeners,
   publishJobFinderWorkspaceUpdate,
@@ -1105,6 +1106,7 @@ async function readWorkspaceProjection(
 
 function rendererSnapshotResponse(
   snapshot: JobFinderWorkspaceSnapshot,
+  queryLists?: boolean,
 ): JobFinderRendererWorkspaceSnapshot {
   const candidate = snapshot as unknown;
   const isWorkspaceSnapshotShape =
@@ -1124,7 +1126,7 @@ function rendererSnapshotResponse(
     );
   }
 
-  return toRendererWorkspaceSnapshot(snapshot);
+  return toRendererWorkspaceSnapshot(snapshot, queryLists);
 }
 
 /** Returned to any caller of the retired Profile and Resume chat writes. */
@@ -1249,8 +1251,14 @@ export function registerJobFinderRouteHandlers(
   const workspaceMutationResponse = (
     sender: object | null | undefined,
     snapshot: JobFinderWorkspaceSnapshot,
-  ): JobFinderWorkspaceSyncResult =>
-    workspaceDeltaTracker.respond(sender, rendererSnapshotResponse(snapshot));
+  ): JobFinderWorkspaceSyncResult => {
+    const queryLists = sender && "id" in sender &&
+      typeof sender.id === "number" && usesWorkspaceQueryUpdates(sender.id);
+    return workspaceDeltaTracker.respond(
+      sender,
+      rendererSnapshotResponse(snapshot, queryLists ? true : undefined),
+    );
+  };
   ipcMain.handle(
     "job-finder:note-workspace-revision",
     (event, payload: unknown) => {
@@ -1357,14 +1365,17 @@ export function registerJobFinderRouteHandlers(
 
       return workspaceDeltaTracker.synchronize(
         input.baseRevision,
-        toRendererWorkspaceSnapshot(snapshot),
+        toRendererWorkspaceSnapshot(
+          snapshot,
+          usesWorkspaceQueryUpdates(event.sender.id) ? true : undefined,
+        ),
       );
     },
   );
 
   ipcMain.handle(
     "job-finder:mutate-workspace-entities",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = JobFinderWorkspaceEntityMutationInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot = await (async () => {
@@ -1455,7 +1466,10 @@ export function registerJobFinderRouteHandlers(
       })();
       return workspaceDeltaTracker.synchronize(
         input.baseRevision,
-        toRendererWorkspaceSnapshot(snapshot),
+        toRendererWorkspaceSnapshot(
+          snapshot,
+          usesWorkspaceQueryUpdates(event.sender.id) ? true : undefined,
+        ),
       );
     },
   );
