@@ -59,6 +59,18 @@ export function registerJobFinderBootstrapDesktopRoutes(ipcMain: IpcMain) {
     );
   });
 
+  ipcMain.handle("job-finder:get-workspace-home", async (event) => {
+    await waitForOpeningHold();
+    const workspaceService = await getJobFinderWorkspaceService();
+    const home = await workspaceService.getWorkspaceHomeSnapshot?.();
+    return home
+      ? toRendererWorkspaceSnapshot(
+          home,
+          usesWorkspaceQueryUpdates(event.sender.id) ? true : undefined,
+        )
+      : null;
+  });
+
   ipcMain.handle("job-finder:get-workspace-bootstrap", async (event) => {
     await waitForOpeningHold();
     const workspaceService = await getJobFinderWorkspaceService();

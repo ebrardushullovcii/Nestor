@@ -1293,6 +1293,19 @@ export async function createFileJobFinderRepository(
         }),
       );
     },
+    listCuratedSavedJobIds() {
+      // The read index carries each job's status, so no listing body is read.
+      return Promise.resolve(
+        database
+          .prepare(
+            `SELECT DISTINCT id FROM workspace_job_index
+             WHERE origin = 'saved_jobs' AND status NOT IN ('discovered', 'archived')
+             ORDER BY id`,
+          )
+          .all()
+          .map((row) => String(row.id)),
+      );
+    },
     readSavedJobDiscoveryFingerprints(jobIds) {
       return Promise.resolve(readSavedJobFingerprintBatch(database, jobIds));
     },

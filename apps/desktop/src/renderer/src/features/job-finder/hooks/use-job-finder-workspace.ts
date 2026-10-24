@@ -115,6 +115,9 @@ type JobFinderWorkspaceState =
       startupDatabaseRecovery: JobFinderStartupDatabaseRecoveryBlockedFact | null;
     };
 
+/** How long a press made before the full workspace landed waits for it. */
+const HYDRATION_ACTION_WAIT_MS = 120_000;
+
 function markJobFinderTiming(markName: string, startMarkName?: string) {
   const performanceApi = globalThis.performance;
   if (!performanceApi?.mark) {
@@ -204,12 +207,30 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     return workspaceRequestSequenceRef.current === sequence;
   }, []);
 
-  const assertWorkspaceHydrated = useCallback(() => {
-    if (workspaceRef.current?.hydration?.phase === "bootstrap") {
-      throw new Error(
-        "Job Finder is still finishing its initial load. Please wait a moment and try again.",
-      );
-    }
+  // Home can show its buttons before the full snapshot lands (ADR 0073). A
+  // press then waits for it quietly instead of failing; only a load that
+  // never finishes answers with the error.
+  const hydrationWaitersRef = useRef(new Set<() => void>());
+  // Null when nothing is pending, so a press on a loaded workspace still
+  // reaches main in the same turn.
+  const waitForWorkspaceHydrated = useCallback((): Promise<void> | null => {
+    if (workspaceRef.current?.hydration?.phase !== "bootstrap") return null;
+    const waiters = hydrationWaitersRef.current;
+    return new Promise<void>((resolve, reject) => {
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        waiters.delete(done);
+        reject(
+          new Error(
+            "Job Finder is still finishing its initial load. Please wait a moment and try again.",
+          ),
+        );
+      }, HYDRATION_ACTION_WAIT_MS);
+      waiters.add(done);
+    });
   }, []);
 
   const commitWorkspace = useCallback(
@@ -234,6 +255,11 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       }
       workspaceCommitVersionRef.current += 1;
       workspaceRef.current = workspace;
+      if (workspace.hydration?.phase !== "bootstrap") {
+        const waiters = [...hydrationWaitersRef.current];
+        hydrationWaitersRef.current.clear();
+        for (const done of waiters) done();
+      }
       // Main answers this window's next change relative to what it shows.
       // Test hosts and an older preload may not offer the notice.
       const noteRevision = window.nestor.jobFinder.noteWorkspaceRevision;
@@ -344,7 +370,8 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       options?: { allowDuringBootstrap?: boolean },
     ): Promise<JobFinderRendererWorkspaceSnapshot> => {
       if (!options?.allowDuringBootstrap) {
-        assertWorkspaceHydrated();
+        const hydrating = waitForWorkspaceHydrated();
+        if (hydrating) await hydrating;
       }
       const sequence = beginWorkspaceRequest();
       let response:
@@ -394,7 +421,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       return workspace;
     },
     [
-      assertWorkspaceHydrated,
+      waitForWorkspaceHydrated,
       beginWorkspaceRequest,
       commitWorkspace,
       commitWorkspaceSyncResult,
@@ -587,7 +614,8 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
 
   const runWorkspaceEntityMutation = useCallback(
     async (mutation: JobFinderWorkspaceEntityMutation) => {
-      assertWorkspaceHydrated();
+      const hydrating = waitForWorkspaceHydrated();
+      if (hydrating) await hydrating;
       const sequence = beginWorkspaceRequest();
       const baseRevision = workspaceRevisionRef.current || null;
       const result = await window.nestor.jobFinder.mutateWorkspaceEntities({
@@ -612,7 +640,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       beginWorkspaceRequest,
       commitWorkspaceSyncResult,
       recoverFullWorkspaceOnce,
-      assertWorkspaceHydrated,
+      waitForWorkspaceHydrated,
       isCurrentWorkspaceRequest,
       scheduleConvergenceFetch,
     ],
@@ -712,7 +740,8 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         jobId: string,
         intent: ResumePdfExportIntent = "download",
       ) => {
-        assertWorkspaceHydrated();
+        const hydrating = waitForWorkspaceHydrated();
+        if (hydrating) await hydrating;
         const sequence = beginWorkspaceRequest();
         const { workspace, ...outcome } =
           await window.nestor.jobFinder.exportResumePdf(jobId, intent);
@@ -1283,6 +1312,25 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         // hydration request is fenced like every other workspace request so a
         // later user action can never be overwritten by a stale full snapshot.
         if (bootstrap.hydration?.phase === "bootstrap") {
+          // Home's first view (ADR 0073): every collection but the Find jobs
+          // lists, read before the full snapshot so Home does not wait for
+          // it. It is still a bootstrap snapshot, so actions wait as before.
+          let shownBootstrap = bootstrap;
+          const readHome = window.nestor.jobFinder.getWorkspaceHome;
+          if (typeof readHome === "function") {
+            const homeSequence = beginWorkspaceRequest();
+            const home = await readHome().catch(() => null);
+            if (
+              home &&
+              !cancelled &&
+              isCurrentWorkspaceRequest(homeSequence) &&
+              workspaceRef.current === bootstrap
+            ) {
+              commitWorkspace(home);
+              shownBootstrap = home;
+              markJobFinderTiming("job-finder:workspace:home:ready");
+            }
+          }
           const hydrationSequence = beginWorkspaceRequest();
           markJobFinderTiming(`${performancePrefix}:hydration:start`);
           markJobFinderTiming("job-finder:workspace:hydration:start");
@@ -1351,7 +1399,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
               if (
                 cancelled ||
                 !isCurrentWorkspaceRequest(hydrationSequence) ||
-                workspaceRef.current !== bootstrap
+                workspaceRef.current !== shownBootstrap
               ) {
                 // This failure was superseded: an action owns the surface or
                 // a newer request already replaced the bootstrap snapshot.

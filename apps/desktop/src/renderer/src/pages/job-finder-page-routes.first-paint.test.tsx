@@ -2,12 +2,22 @@
 
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { JobSearchCampaignSchema } from "@nestor/contracts";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+} from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Suspense } from "react";
 import type { ReactElement } from "react";
 import { createDiscoveryRunInterruptedFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
+import {
+  startLaunchReads,
+  useLaunchReads,
+} from "@renderer/features/job-finder/lib/launch-reads";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import {
   JobFinderApplicationsRoute,
@@ -464,6 +474,47 @@ describe("canonical route first paint", () => {
 
     expect(screen.getByText("Loading your workspace")).toBeTruthy();
     expect(screen.queryByText("Run your first search")).toBeNull();
+  });
+
+  it("shows the full Home on its first view, with Find jobs' counts from the database", async () => {
+    const page = (total: number) => ({ rows: [], total });
+    Object.defineProperty(window, "nestor", {
+      configurable: true,
+      value: {
+        jobFinder: {
+          queries: {
+            getHomeSummary: () => new Promise(() => {}),
+            getListCounts: () => new Promise(() => {}),
+            getStartupContext: () => new Promise(() => {}),
+            queryJobList: (input: { filters?: unknown }) =>
+              Promise.resolve(input.filters ? page(31) : page(7)),
+          },
+        },
+      },
+    });
+    startLaunchReads();
+    const reads = renderHook(() => useLaunchReads());
+    await vi.waitFor(() =>
+      expect(reads.result.current.findJobs).not.toBeNull(),
+    );
+    reads.unmount();
+    const context = createContext();
+    context.workspace = {
+      ...context.workspace,
+      discoveryJobs: [],
+      hydration: {
+        phase: "bootstrap",
+        deferredCollections: ["discovery_jobs"],
+      },
+    };
+    renderCanonicalRoute("/job-finder", <JobFinderHomeRoute />, context);
+
+    expect(screen.queryByText("Loading your workspace")).toBeNull();
+    expect(screen.getByTestId("home-next-step")).toBeTruthy();
+    const findJobs = screen.getByRole("button", { name: /^Find jobs/u });
+    expect(findJobs.textContent).toContain("7");
+    expect(findJobs.textContent).toContain("+ 24 weaker");
+    Reflect.deleteProperty(window, "nestor");
   });
 
   it("mounts the real Your profile heading immediately without a suspense fallback or deferred surface timer", () => {

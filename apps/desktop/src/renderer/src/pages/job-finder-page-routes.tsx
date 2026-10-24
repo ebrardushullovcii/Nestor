@@ -763,10 +763,26 @@ export function JobFinderHomeRoute() {
 
   // Home reads every collection: on the bootstrap snapshot (no saved search
   // runs or jobs yet) it told a person with thousands of jobs to "Run your
-  // first search" for several seconds after launch.
+  // first search" for several seconds after launch. Its first view (ADR
+  // 0073) has all of them but the Find jobs lists, whose two numbers Home
+  // takes from the database until the lists land.
+  const findJobsCounts =
+    launchReads.findJobs &&
+    isJobFinderHydratingCollections(context.workspace, ["discovery_jobs"])
+      ? {
+          visible: launchReads.findJobs.focused.total,
+          weaker: Math.max(
+            0,
+            launchReads.findJobs.wide.total -
+              launchReads.findJobs.focused.total,
+          ),
+        }
+      : null;
   return (
     <JobFinderHydrationGate
-      collections={HOME_REQUIRED_COLLECTIONS}
+      collections={
+        findJobsCounts ? HOME_FIRST_VIEW_COLLECTIONS : HOME_REQUIRED_COLLECTIONS
+      }
       launchView={
         launchReads.counts ? (
           <JobSearchHomeLaunch
@@ -778,6 +794,7 @@ export function JobFinderHomeRoute() {
       workspace={context.workspace}
     >
       <JobSearchHomeScreen
+        findJobsCounts={findJobsCounts}
         actionState={context.actionState}
         activityPending={activityPending}
         applicationAutomationMode={
@@ -862,6 +879,15 @@ const HOME_REQUIRED_COLLECTIONS = [
   "review_queue",
   "applications",
   "source_history",
+] as const;
+
+/** Everything Home reads apart from the Find jobs lists. */
+const HOME_FIRST_VIEW_COLLECTIONS = [
+  "review_queue",
+  "applications",
+  "source_history",
+  "documents",
+  "intelligence",
 ] as const;
 
 export function JobFinderCampaignsRoute() {
@@ -1409,9 +1435,7 @@ export function JobFinderDiscoveryRoute() {
     return (
       <JobFinderHydrationGate
         collections={["discovery_jobs"]}
-        launchView={
-          launchPage ? <FindJobsLaunch {...launchPage} /> : undefined
-        }
+        launchView={launchPage ? <FindJobsLaunch {...launchPage} /> : undefined}
         workspace={context.workspace}
       >
         {null}

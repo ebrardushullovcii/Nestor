@@ -934,6 +934,13 @@ export function createJobFinderWorkspaceService(
         activeDiscoveryAbortControllerRef.current)
     )
       return lastDisplayProjection;
+    await waitForUserActionRecovery();
+    return borrowValidatedJobs
+      ? readDisplayProjection()
+      : snapshotProfileMethods.getWorkspaceSnapshot();
+  }
+
+  async function waitForUserActionRecovery() {
     // Recovery starts or joins the continuation of every verifying step, and
     // a continuation drives the browser for minutes. Quick verifications
     // still land in this snapshot; a long continuation carries on in the
@@ -959,13 +966,15 @@ export function createJobFinderWorkspaceService(
       ]).finally(() => {
         if (timer) clearTimeout(timer);
       });
-    return borrowValidatedJobs
-      ? readDisplayProjection()
-      : snapshotProfileMethods.getWorkspaceSnapshot();
   }
 
   async function getWorkspaceBootstrap() {
     return snapshotProfileMethods.getWorkspaceBootstrap();
+  }
+
+  async function getWorkspaceHomeSnapshot() {
+    await waitForUserActionRecovery();
+    return (await snapshotProfileMethods.getWorkspaceHomeSnapshot?.()) ?? null;
   }
 
   // Mutation results are display reads. Canonical snapshots stay available
@@ -1845,6 +1854,7 @@ export function createJobFinderWorkspaceService(
       };
     },
     getWorkspaceBootstrap,
+    getWorkspaceHomeSnapshot,
     mutateSafeguards: safeguardMethods.mutateSafeguards,
     getSafeguardsOverview: safeguardMethods.getSafeguardsOverview,
     evaluateApplicationSafeguardBlockers:

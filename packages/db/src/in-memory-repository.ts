@@ -602,6 +602,16 @@ export function createInMemoryJobFinderRepository(
           .map(cloneSavedJobWithPreparation),
       );
     },
+    listCuratedSavedJobIds() {
+      return Promise.resolve(
+        state.savedJobs
+          .filter(
+            (job) => job.status !== "discovered" && job.status !== "archived",
+          )
+          .map((job) => job.id)
+          .sort((left, right) => left.localeCompare(right)),
+      );
+    },
     readSavedJobDiscoveryFingerprints(jobIds) {
       const wanted = new Set(jobIds);
       return Promise.resolve(
