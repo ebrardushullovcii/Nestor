@@ -47,6 +47,7 @@ vi.mock("../job-finder/test-api", () => ({
   isDesktopTestApiEnabled: () => false,
 }));
 vi.mock("../job-finder/workspace-updates", () => ({
+  createSearchProgressPublisher: vi.fn(() => vi.fn()),
   publishJobFinderWorkspaceUpdate: vi.fn(),
 }));
 vi.mock("../job-finder/workspace-service", () => ({
@@ -64,6 +65,7 @@ import type { JobFinderWorkspaceService } from "@nestor/job-finder";
 import { getJobFinderRepositoryForWorkspaceService } from "../job-finder/create-workspace-service";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
+import { createSearchProgressPublisher } from "../job-finder/workspace-updates";
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { createAssistantHostPorts } from "./assistant-ports";
@@ -314,6 +316,10 @@ describe("assistant interactive workspace reads", () => {
       message: "The search started.",
     });
     expect(getWorkspaceProjection).toHaveBeenCalledTimes(1);
+    expect(createSearchProgressPublisher).toHaveBeenCalledTimes(1);
+    expect(
+      vi.mocked(createSearchProgressPublisher).mock.results[0]?.value,
+    ).toHaveBeenCalledTimes(1);
     expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
     expect(runAgentDiscovery).toHaveBeenCalledWith(
       expect.any(Function),
