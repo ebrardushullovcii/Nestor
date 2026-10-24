@@ -17,6 +17,8 @@ export function prefersMotion(): boolean {
 }
 
 const EASE_OUT = "cubic-bezier(0.2, 0, 0, 1)";
+/** About one list pane of rows; the rest move off screen. */
+const MAX_ANIMATED_ROWS = 12;
 
 export function animateIn(
   element: Element | null | undefined,
@@ -84,6 +86,18 @@ export function useListMoveMotion(
       animateIn(list, { opacity: 0.6 }, 140);
       return;
     }
+    // Only the rows from the first change on move, and a screenful of those
+    // is all anyone sees; animating all 50 promoted 50 layers and doubled
+    // the frame that lands the decision.
+    let firstChange = 0;
+    while (
+      firstChange < ids.length &&
+      firstChange < before.length &&
+      ids[firstChange] === before[firstChange]
+    ) {
+      firstChange += 1;
+    }
+    const lastAnimated = firstChange + MAX_ANIMATED_ROWS;
     const rowById = new Map<string, HTMLElement>();
     for (const element of list.querySelectorAll<HTMLElement>(
       "[data-collection-item-id]",
@@ -97,6 +111,7 @@ export function useListMoveMotion(
       if (id && row.parentElement === list) rowById.set(id, row);
     }
     ids.forEach((id, index) => {
+      if (index < firstChange || index >= lastAnimated) return;
       const row = rowById.get(id);
       if (!row || typeof row.animate !== "function") return;
       const previous = beforeIndex.get(id);
