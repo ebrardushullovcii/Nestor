@@ -293,6 +293,8 @@ for (const storage of ["memory", "file"] as const) {
       const { repo, run, close } = await fixture(storage);
       try {
         let intercept = true;
+        const recoveryRead = vi.spyOn(repo, "readDiscoveryBootstrapProjection");
+        const displayRead = vi.spyOn(repo, "readDiscoveryDisplayProjection");
         const wrapped: JobFinderRepository = {
           ...repo,
           commitDiscoveryStateUpdate: async (update) => {
@@ -325,7 +327,11 @@ for (const storage of ["memory", "file"] as const) {
             ?.agentCheckpoint,
         ).toBeNull();
         expect(activeBootstrap.recentDiscoveryRuns).toEqual([]);
+        recoveryRead.mockClear();
+        displayRead.mockClear();
         const display = await workspace.getWorkspaceProjection();
+        expect(recoveryRead).toHaveBeenCalledOnce();
+        expect(displayRead).toHaveBeenCalledOnce();
         const recovered = display.recentDiscoveryRuns.find(
           (item) => item.id === run.id,
         );

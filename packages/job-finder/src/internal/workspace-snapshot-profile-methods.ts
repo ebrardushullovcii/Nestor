@@ -1337,11 +1337,10 @@ export function createWorkspaceSnapshotProfileMethods(
     }
 
     const recoveryPromise = (async () => {
-      // Every refresh runs this check. The discovery projection is cached and
-      // answers "was anything running?"; the plan state and search settings
-      // (hundreds of KB with a large search) are read only when it was.
+      // Recovery needs only current run ownership, not the ledger, pending
+      // listings or history. Read full canonical state only inside its commit.
       const discoveryState =
-        await ctx.repository.readDiscoveryDisplayProjection();
+        await ctx.repository.readDiscoveryBootstrapProjection();
       if (
         ctx.activeDiscoveryAbortControllerRef.current ||
         ctx.activeDiscoveryPromiseRef.current
