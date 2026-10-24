@@ -119,7 +119,12 @@ export function createDiscoverySavedJobWriter(input: {
       committedReferences.set(id, job);
       if (pending.get(id) === job) pending.delete(id);
     };
+    let turnStarted = performance.now();
     for (const [id, job] of captured) {
+      if (performance.now() - turnStarted >= 8) {
+        await yieldToEventLoop();
+        turnStarted = performance.now();
+      }
       if (committedReferences.get(id) === job) continue;
       const intended = input.toStoredJob(job);
       intendedRows.set(id, intended);
@@ -200,7 +205,12 @@ export function createDiscoverySavedJobWriter(input: {
   };
 
   const enqueue = (run: () => Promise<void>): Promise<void> => {
-    const result = tail.then(run);
+    const result = tail.then(async () => {
+      // Empty saved-job batches still write run/ledger changes. A chain of
+      // resolved commits must not starve Electron's input and timer phase.
+      await yieldToEventLoop();
+      return run();
+    });
     // A failed atomic write leaves both the baseline and dirty references
     // intact for the final pass; it must not poison subsequent writes.
     tail = result.catch(() => {});

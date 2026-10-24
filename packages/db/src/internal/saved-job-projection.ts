@@ -22,7 +22,7 @@ import {
 } from "./saved-job-details";
 
 /** Saved jobs parsed per turn of the event loop on a full projection read. */
-const PROJECTION_PAGE_ROWS = 200;
+const PROJECTION_PAGE_ROWS = 12;
 
 type ProjectionChanges = {
   before: readonly SavedJob[];
@@ -159,7 +159,7 @@ export function createSavedJobProjectionReader(
   const details = options.sqliteDetails
     ? createSavedJobDetails(database)
     : null;
-  const pageRows = details ? 50 : PROJECTION_PAGE_ROWS;
+  const pageRows = PROJECTION_PAGE_ROWS;
   database.exec(`
     CREATE TEMP TABLE saved_job_projection_epoch (revision INTEGER NOT NULL);
     INSERT INTO saved_job_projection_epoch VALUES (0);
@@ -318,7 +318,7 @@ export function createSavedJobProjectionReader(
       }
       if (rows.length < pageRows) return jobs;
       after = String(rows.at(-1)!.id);
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
   }
 
@@ -346,7 +346,7 @@ export function createSavedJobProjectionReader(
       const next = ids.length > pageRows ? new Map(jobsById) : jobsById;
       for (let start = 0; start < ids.length; start += pageRows) {
         if (start > 0)
-          await new Promise<void>((resolve) => setImmediate(resolve));
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
         const pageIds = ids.slice(start, start + pageRows);
         if (details && readChangedFacts) {
           const found = new Set<string>();

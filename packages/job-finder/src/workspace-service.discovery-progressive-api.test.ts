@@ -487,7 +487,7 @@ describe("progressive public API discovery", () => {
       outcome: "completed",
     });
     expect((await repository.listSavedJobs()).every((job) =>
-      job.campaignIds?.includes(livePlan.activeCampaignId ?? ""),
+      job.campaignIds?.includes(livePlan?.activeCampaignId ?? ""),
     )).toBe(true);
   });
 

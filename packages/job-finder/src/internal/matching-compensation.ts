@@ -1,4 +1,5 @@
 import { extractSalaryRangeFromListingBody } from "@nestor/contracts";
+import { yieldToEventLoop } from "@nestor/core";
 export { extractSalaryRangeFromListingBody } from "@nestor/contracts";
 import {
   annualizeCompensationAmount,
@@ -496,6 +497,8 @@ export function reconcileSalaryTextWithPreparedBody(
 ): string | null {
   if (!stated) return salaryText ?? null;
   if (!salaryText) return stated;
+  // Both branches below return this same value; no body is needed.
+  if (salaryText === stated) return stated;
   return isSalaryTextStatedInBody(readDescription(), salaryText)
     ? salaryText
     : stated;
@@ -528,36 +531,50 @@ export interface SalaryFurnitureCandidate {
  * one job's pay. Compare a job's `salaryText` against the returned set before
  * storing or printing it.
  */
-export function findSiteFurnitureSalaryTexts(
+export async function findSiteFurnitureSalaryTexts(
   postings: readonly SalaryFurnitureCandidate[],
-): ReadonlySet<string> {
+): Promise<ReadonlySet<string>> {
   const furniture = new Set<string>();
   if (postings.length < SITE_FURNITURE_SALARY_MIN_RESULTS) {
     return furniture;
   }
 
-  const byBand = new Map<string, { count: number; statedInBody: number }>();
+  const byBand = new Map<string, SalaryFurnitureCandidate[]>();
+  let turnStarted = performance.now();
   for (const posting of postings) {
+    if (performance.now() - turnStarted >= 8) {
+      await yieldToEventLoop();
+      turnStarted = performance.now();
+    }
     const key = comparableSalaryText(posting.salaryText);
     if (!key) {
       continue;
     }
-    const entry = byBand.get(key) ?? { count: 0, statedInBody: 0 };
-    entry.count += 1;
-    if (isSalaryTextStatedInBody(posting.description, posting.salaryText)) {
-      entry.statedInBody += 1;
-    }
-    byBand.set(key, entry);
+    const group = byBand.get(key);
+    if (group) group.push(posting);
+    else byBand.set(key, [posting]);
   }
 
   const threshold = Math.max(
     SITE_FURNITURE_SALARY_MIN_RESULTS,
     Math.ceil(postings.length * SITE_FURNITURE_SALARY_SHARE),
   );
-  for (const [key, entry] of byBand) {
+  for (const [key, group] of byBand) {
+    // The existing policy can only reject a band this common. Other bands'
+    // bodies cannot change the result, so leave them in SQLite.
+    if (group.length < threshold) continue;
+    let statedInBody = 0;
+    for (const posting of group) {
+      if (performance.now() - turnStarted >= 8) {
+        await yieldToEventLoop();
+        turnStarted = performance.now();
+      }
+      if (isSalaryTextStatedInBody(posting.description, posting.salaryText))
+        statedInBody += 1;
+    }
     // A band most of the run shares AND that almost none of the listing
     // bodies actually state is the page's, not the jobs'.
-    if (entry.count >= threshold && entry.statedInBody * 2 < entry.count) {
+    if (statedInBody * 2 < group.length) {
       furniture.add(key);
     }
   }

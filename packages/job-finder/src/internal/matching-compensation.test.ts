@@ -39,6 +39,9 @@ describe("compensation normalization and fit truth", () => {
     expect(
       reconcileSalaryTextWithPreparedBody(null, "EUR 96,000 per year", read),
     ).toBe("EUR 96,000 per year");
+    expect(
+      reconcileSalaryTextWithPreparedBody("EUR 96,000 per year", "EUR 96,000 per year", read),
+    ).toBe("EUR 96,000 per year");
   });
   test.each(["EUR 96,000 per year", "USD 99,000 per year"])(
     "reads an explicit amount and period without a salary label: %s",
@@ -246,8 +249,17 @@ describe("findSiteFurnitureSalaryTexts", () => {
     }));
   }
 
-  it("drops a band most of one run shares and none of the listings state", () => {
-    const furniture = findSiteFurnitureSalaryTexts(
+  it("does not open bodies whose band cannot meet the existing threshold", async () => {
+    const readBody = () => { throw new Error("An ineligible band opened its body"); };
+    const postings = Array.from({ length: 10 }, (_, index) => ({
+      get description(): string { return readBody(); },
+      salaryText: `$${80000 + index * 1000} per year`,
+    }));
+    expect(await findSiteFurnitureSalaryTexts(postings)).toEqual(new Set());
+  });
+
+  it("drops a band most of one run shares and none of the listings state", async () => {
+    const furniture = await findSiteFurnitureSalaryTexts(
       run([
         "Pay: $22.00 per hour for this warehouse role.",
         "We are hiring a receptionist.",
@@ -259,8 +271,8 @@ describe("findSiteFurnitureSalaryTexts", () => {
     expect(isSiteFurnitureSalaryText(houseBand, furniture)).toBe(true);
   });
 
-  it("keeps a band the listings themselves state", () => {
-    const furniture = findSiteFurnitureSalaryTexts(
+  it("keeps a band the listings themselves state", async () => {
+    const furniture = await findSiteFurnitureSalaryTexts(
       run([
         "Base pay is $80,000 - $150,000 depending on experience.",
         "Base pay is $80,000 - $150,000 depending on experience.",
@@ -272,15 +284,15 @@ describe("findSiteFurnitureSalaryTexts", () => {
     expect(isSiteFurnitureSalaryText(houseBand, furniture)).toBe(false);
   });
 
-  it("proves nothing from a run too small to be evidence", () => {
-    const furniture = findSiteFurnitureSalaryTexts(
+  it("proves nothing from a run too small to be evidence", async () => {
+    const furniture = await findSiteFurnitureSalaryTexts(
       run(["Receptionist wanted.", "Driver wanted."]),
     );
     expect(isSiteFurnitureSalaryText(houseBand, furniture)).toBe(false);
   });
 
-  it("leaves a salary only one job carries alone", () => {
-    const furniture = findSiteFurnitureSalaryTexts([
+  it("leaves a salary only one job carries alone", async () => {
+    const furniture = await findSiteFurnitureSalaryTexts([
       { description: "Warehouse role.", salaryText: "$22.00 per hour" },
       ...run([
         "Receptionist wanted.",

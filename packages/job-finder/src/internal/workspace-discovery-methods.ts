@@ -4796,12 +4796,9 @@ export function createWorkspaceDiscoveryMethods(
         // none of the listing bodies state is the page's furniture; it is
         // dropped so the row says the pay was not stated rather than stating
         // someone else's.
-        const furnitureSalaries = findSiteFurnitureSalaryTexts(
-          retainedRunJobs.map((job) => ({
-            description: job.description,
-            salaryText: job.salaryText,
-          })),
-        );
+        // Pass lazy rows through; only salary-bearing candidates need a body.
+        const furnitureSalaries =
+          await findSiteFurnitureSalaryTexts(retainedRunJobs);
         if (furnitureSalaries.size > 0) {
           let droppedSalaryCount = 0;
           const sanitizeFurnitureSalary = (
@@ -4827,11 +4824,11 @@ export function createWorkspaceDiscoveryMethods(
               matchAssessment: assessDiscoveryPosting(sanitizedJob),
             };
           };
-          workingSavedJobs = workingSavedJobs.map((job) => {
+          workingSavedJobs = await mapInTurns(workingSavedJobs, (job) => {
             const next = sanitizeFurnitureSalary(job, touchedSavedJobIds);
             return next !== job ? touchSavedJob(next) : job;
           });
-          workingPendingJobs = workingPendingJobs.map((job) =>
+          workingPendingJobs = await mapInTurns(workingPendingJobs, (job) =>
             sanitizeFurnitureSalary(job, touchedPendingJobIds),
           );
           if (droppedSalaryCount > 0) {

@@ -137,12 +137,13 @@ test("a post-commit caller cannot join an older projection still parsing its row
   const { put, read } = fixture();
   for (let i = 0; i < 250; i++) put(String(i));
   const reading = read();
-  put("249", "Updated during parsing");
+  // This row was read in the first page, regardless of the page's size.
+  put("0", "Updated during parsing");
   const afterCommit = read();
   expect(afterCommit).not.toBe(reading);
   const initial = await reading;
-  expect(initial.find((job) => job.id === "249")?.title).toBe("249");
-  expect((await afterCommit).find((job) => job.id === "249")?.title).toBe(
+  expect(initial.find((job) => job.id === "0")?.title).toBe("0");
+  expect((await afterCommit).find((job) => job.id === "0")?.title).toBe(
     "Updated during parsing",
   );
   expect(await read()).toBe(await afterCommit);

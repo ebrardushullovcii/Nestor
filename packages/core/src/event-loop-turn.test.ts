@@ -1,14 +1,14 @@
 import { expect, test } from "vitest";
 import { yieldToEventLoop } from "./event-loop-turn";
 
-test("concurrent CPU continuations leave an event-loop turn between each other", async () => {
+test("concurrent CPU continuations leave a timer turn between each other", async () => {
   let turn = 0;
   let observing = true;
   const observe = () => {
     turn += 1;
-    if (observing) setImmediate(observe);
+    if (observing) setTimeout(observe, 0);
   };
-  setImmediate(observe);
+  setTimeout(observe, 0);
   const turns = await Promise.all(
     Array.from({ length: 8 }, async () => {
       await yieldToEventLoop();
