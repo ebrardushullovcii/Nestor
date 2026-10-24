@@ -182,6 +182,12 @@ export const SETTINGS_UNSAVED_BAR_CLEARANCE_FALLBACK_PX =
 export const SETTINGS_UNSAVED_BAR_CLEARANCE_VARIABLE =
   "--settings-unsaved-bar-clearance";
 
+// Every section after the first starts below the fold. The browser skips
+// their layout and paint until they come near the screen, and remembers the
+// real height once shown, so the page does not move under the person.
+const SETTINGS_LATER_SECTION_CLASS =
+  "scroll-mt-(--settings-subnav-offset) min-w-0 [content-visibility:auto] [contain-intrinsic-size:auto_720px]";
+
 export function SettingsScreen(props: {
   availableResumeTemplates: readonly ResumeTemplateDefinition[];
   browserSession: BrowserSessionState;
@@ -535,7 +541,7 @@ export function SettingsScreen(props: {
 
         <section
           aria-labelledby="settings-ai-behavior-heading"
-          className="scroll-mt-(--settings-subnav-offset) min-w-0"
+          className={SETTINGS_LATER_SECTION_CLASS}
           id="settings-ai-behavior"
           tabIndex={-1}
         >
@@ -552,7 +558,7 @@ export function SettingsScreen(props: {
 
         <section
           aria-labelledby="settings-application-defaults-heading"
-          className="scroll-mt-(--settings-subnav-offset) min-w-0"
+          className={SETTINGS_LATER_SECTION_CLASS}
           id="settings-application-defaults"
           tabIndex={-1}
         >
@@ -569,7 +575,7 @@ export function SettingsScreen(props: {
 
         <section
           aria-labelledby="settings-application-authority-heading"
-          className="scroll-mt-(--settings-subnav-offset) min-w-0"
+          className={SETTINGS_LATER_SECTION_CLASS}
           id="settings-application-authority"
           tabIndex={-1}
         >
@@ -605,7 +611,7 @@ export function SettingsScreen(props: {
 
         <section
           aria-labelledby="settings-workspace-behavior-heading"
-          className="scroll-mt-(--settings-subnav-offset) min-w-0"
+          className={SETTINGS_LATER_SECTION_CLASS}
           id="settings-workspace-behavior"
           tabIndex={-1}
         >
@@ -621,7 +627,7 @@ export function SettingsScreen(props: {
 
         <section
           aria-labelledby="settings-tracker-heading"
-          className="scroll-mt-(--settings-subnav-offset) min-w-0"
+          className={SETTINGS_LATER_SECTION_CLASS}
           id="settings-tracker"
           tabIndex={-1}
         >
@@ -647,7 +653,7 @@ export function SettingsScreen(props: {
 
         <section
           aria-labelledby="settings-diagnostics-heading"
-          className="scroll-mt-(--settings-subnav-offset) min-w-0"
+          className={SETTINGS_LATER_SECTION_CLASS}
           id="settings-diagnostics"
           tabIndex={-1}
         >

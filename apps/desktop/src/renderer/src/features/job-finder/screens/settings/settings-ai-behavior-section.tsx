@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 import { SETTINGS_AI_JOB_SEARCH_ANCHOR_ID } from "../../lib/job-finder-route-hrefs";
 import {
@@ -313,15 +313,18 @@ export function SettingsAiBehaviorSection({
   const saved = toDraft(settings, searchPreferences);
   const savedKey = JSON.stringify(toSavedInput(saved));
   const [draft, setDraft] = useState<AiBehaviorDraft>(saved);
+  const [seededKey, setSeededKey] = useState(savedKey);
   const { resetSectionSave, runSectionSave, saveState } =
     useSettingsSectionSave();
 
   // Reseed only when the persisted values actually change, so an unrelated
   // settings refresh never throws away a staged choice. The key is the saved
-  // input serialized, so the effect runs on a real change and nothing else.
-  useEffect(() => {
-    setDraft(toDraft(settings, searchPreferences));
-  }, [savedKey]);
+  // input serialized. Done during render, so mounting does not render the
+  // whole section a second time the way an effect did.
+  if (seededKey !== savedKey) {
+    setSeededKey(savedKey);
+    setDraft(saved);
+  }
 
   const isSavePending = saveState.status === "saving";
   const hasUnsavedChanges = JSON.stringify(toSavedInput(draft)) !== savedKey;

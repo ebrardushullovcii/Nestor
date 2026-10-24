@@ -3,9 +3,17 @@ import {
   hasSearchPlanChoice,
   SearchPlanScope,
 } from "@renderer/features/job-finder/screens/campaigns/search-plan-scope";
-import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createElement,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { projectPlanSafeguardPauses } from "@nestor/job-finder/plan-safeguard-pauses";
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
 import { describeSavedResumeLevel } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
 import {
@@ -96,9 +104,37 @@ import { createIdentityMemo } from "@renderer/features/job-finder/lib/identity-m
 // first visit is explicit and recoverable instead of rendering a blank page.
 function createSharedRouteLoader<T>(load: () => Promise<T>) {
   let promise: Promise<T> | null = null;
-  return () => {
-    promise ??= load();
-    return promise;
+  const loader = Object.assign(
+    () => {
+      promise ??= load().then((module) => {
+        loader.loaded = module;
+        return module;
+      });
+      return promise;
+    },
+    { loaded: null as T | null },
+  );
+  return loader;
+}
+
+/**
+ * A lazy screen that renders at once when its code has already arrived (the
+ * idle preload below). `React.lazy` suspends on its first render even then,
+ * and React keeps a fallback it revealed for about 300 ms, so a preloaded
+ * screen still opened ~340 ms after the click. The choice is made once per
+ * mount, so a screen never swaps component type under its own state.
+ */
+function lazyScreen<P extends object>(
+  loader: ReturnType<
+    typeof createSharedRouteLoader<{ default: ComponentType<P> }>
+  >,
+): ComponentType<P> {
+  const Lazy = lazy(loader) as unknown as ComponentType<P>;
+  return function LazyScreen(props: P) {
+    const [Screen] = useState<ComponentType<P>>(
+      () => loader.loaded?.default ?? Lazy,
+    );
+    return createElement(Screen, props);
   };
 }
 
@@ -198,18 +234,18 @@ if (import.meta.env.MODE !== "test" && typeof window !== "undefined") {
   else window.setTimeout(preloadScreens, 2000);
 }
 
-const ProfileSetupScreen = lazy(loadProfileSetupScreen);
-const CampaignsScreen = lazy(loadCampaignsScreen);
-const CompaniesScreen = lazy(loadCompaniesScreen);
-const CompanyDetailScreen = lazy(loadCompanyDetailScreen);
-const JobSearchHomeScreen = lazy(loadJobSearchHomeScreen);
-const ActionsScreen = lazy(loadActionsScreen);
-const OutcomeAnalyticsScreen = lazy(loadOutcomeAnalyticsScreen);
-const ResumeStrategiesScreen = lazy(loadResumeStrategiesScreen);
-const RapidReviewScreen = lazy(loadRapidReviewScreen);
-const ResumeWorkspaceScreen = lazy(loadResumeWorkspaceScreen);
-const SettingsScreen = lazy(loadSettingsScreen);
-const SafeguardsScreen = lazy(loadSafeguardsScreen);
+const ProfileSetupScreen = lazyScreen(loadProfileSetupScreen);
+const CampaignsScreen = lazyScreen(loadCampaignsScreen);
+const CompaniesScreen = lazyScreen(loadCompaniesScreen);
+const CompanyDetailScreen = lazyScreen(loadCompanyDetailScreen);
+const JobSearchHomeScreen = lazyScreen(loadJobSearchHomeScreen);
+const ActionsScreen = lazyScreen(loadActionsScreen);
+const OutcomeAnalyticsScreen = lazyScreen(loadOutcomeAnalyticsScreen);
+const ResumeStrategiesScreen = lazyScreen(loadResumeStrategiesScreen);
+const RapidReviewScreen = lazyScreen(loadRapidReviewScreen);
+const ResumeWorkspaceScreen = lazyScreen(loadResumeWorkspaceScreen);
+const SettingsScreen = lazyScreen(loadSettingsScreen);
+const SafeguardsScreen = lazyScreen(loadSafeguardsScreen);
 
 // The empty-input parse is a constant, so it belongs outside the render path
 // instead of re-running a schema parse on every Applications render.

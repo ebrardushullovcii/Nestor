@@ -192,7 +192,9 @@ describe("SettingsEditableDefaults", () => {
       selectTriggers.every((trigger) => trigger.className.includes("min-w-0")),
     ).toBe(true);
     expect(previewFrame?.className).toContain("min-w-0");
-    expect(previewFrame?.className).toContain("max-w-full");
+    expect(
+      container.querySelector("[data-resume-preview-box]")?.className,
+    ).toContain("max-w-");
     expect(previewFrame?.parentElement?.className).toContain("min-w-0");
   });
 

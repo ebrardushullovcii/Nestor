@@ -66,19 +66,20 @@ describe("LockedScreenLayout pointer-owned scrolling", () => {
     expect(grid()?.dataset.lockedScreenContentHeight).toBe("locked");
   });
 
-  test("resets a browser-restored route scroll position before paint", () => {
+  test("mounts without writing a scroll position, so it forces no layout", () => {
     vi.stubGlobal("innerWidth", 1440);
+    const writes: number[] = [];
     const originalScrollTopDescriptor = Object.getOwnPropertyDescriptor(
       HTMLDivElement.prototype,
       "scrollTop",
     );
-    let restoredScrollTop = 84;
+    const measured = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
 
     Object.defineProperty(HTMLDivElement.prototype, "scrollTop", {
       configurable: true,
-      get: () => restoredScrollTop,
+      get: () => 0,
       set: (value: number) => {
-        restoredScrollTop = value;
+        writes.push(value);
       },
     });
 
@@ -92,7 +93,9 @@ describe("LockedScreenLayout pointer-owned scrolling", () => {
         "[data-locked-screen-scroll-area]",
       );
 
-      expect(outerScroller?.scrollTop).toBe(0);
+      // A new scroll owner already starts at the top; anchoring is still off.
+      expect(writes).toEqual([]);
+      expect(measured).not.toHaveBeenCalled();
       expect(outerScroller?.style.overflowAnchor).toBe("none");
     } finally {
       if (originalScrollTopDescriptor) {

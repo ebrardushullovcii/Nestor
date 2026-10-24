@@ -29,9 +29,24 @@ const kindLabels: Record<JobFinderGlobalSearchKind, string> = {
 
 export const JOB_FINDER_GLOBAL_SEARCH_LABEL = "Search your workspace";
 
+/**
+ * The entries, or a function that builds them. Indexing every saved job took
+ * ~50 ms at 12k jobs, so the palette opens first and builds its index once
+ * the window is idle or a query needs it, whichever comes first.
+ */
+export type JobFinderGlobalSearchEntries =
+  | readonly JobFinderGlobalSearchEntry[]
+  | (() => readonly JobFinderGlobalSearchEntry[]);
+
+function resolveEntries(
+  entries: JobFinderGlobalSearchEntries,
+): readonly JobFinderGlobalSearchEntry[] {
+  return typeof entries === "function" ? entries() : entries;
+}
+
 export function JobFinderGlobalSearch(props: {
   campaignId?: string | null;
-  entries: readonly JobFinderGlobalSearchEntry[];
+  entries: JobFinderGlobalSearchEntries;
   onNavigate: (entry: JobFinderGlobalSearchEntry) => void;
   resultsLayout?: "overlay" | "in-flow";
 }) {
@@ -46,7 +61,7 @@ export function JobFinderGlobalSearch(props: {
   const groups = useMemo(
     () =>
       isQueryLongEnough
-        ? searchJobFinderEntries(props.entries, deferredQuery, {
+        ? searchJobFinderEntries(resolveEntries(props.entries), deferredQuery, {
             ...(props.campaignId !== undefined
               ? { campaignId: props.campaignId }
               : {}),
@@ -290,7 +305,7 @@ function getDialogFocusableElements(root: HTMLElement): HTMLElement[] {
 
 export function JobFinderGlobalSearchDialog(props: {
   campaignId?: string | null;
-  entries: readonly JobFinderGlobalSearchEntry[];
+  entries: JobFinderGlobalSearchEntries;
   focusRequest: number;
   onClose: () => void;
   onNavigate: (entry: JobFinderGlobalSearchEntry) => void;
@@ -330,6 +345,19 @@ export function JobFinderGlobalSearchDialog(props: {
       }
     };
   }, [focusSearchInput]);
+
+  useEffect(() => {
+    const { entries } = props;
+    if (typeof entries !== "function") return undefined;
+    if (typeof window.requestIdleCallback !== "function") {
+      const timer = window.setTimeout(entries, 50);
+      return () => window.clearTimeout(timer);
+    }
+    const handle = window.requestIdleCallback(() => entries(), {
+      timeout: 500,
+    });
+    return () => window.cancelIdleCallback(handle);
+  }, [props.entries]);
 
   useEffect(() => {
     if (props.focusRequest === 0) {

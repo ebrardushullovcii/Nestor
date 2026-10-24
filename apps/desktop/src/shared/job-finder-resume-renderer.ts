@@ -2041,7 +2041,9 @@ export function renderResumeTemplateHtml(
     }
     .catalog-shell-panel .page {
       margin: 0;
-      min-height: auto;
+      /* A whole letter page, so the preview box can hold a fixed page
+         ratio instead of measuring the sample and resizing after paint. */
+      min-height: 11in;
       box-shadow: 0 20px 60px var(--resume-shadow-color);
     }
     .catalog-body-panel .page-classic { padding: var(--resume-catalog-page-padding-classic); }

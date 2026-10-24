@@ -236,7 +236,12 @@ export function ProfileScreen(props: {
     return () => onProfileSurfaceDirtyChange(false);
   }, [hasUserDraftChanges, onProfileSurfaceDirtyChange]);
 
+  // A freshly mounted section already starts at the top; resetting it on
+  // mount only forced a layout of the whole new screen.
+  const scrolledSectionRef = useRef(activeSection);
   useEffect(() => {
+    if (scrolledSectionRef.current === activeSection) return;
+    scrolledSectionRef.current = activeSection;
     resetProfileSectionScroll();
   }, [activeSection]);
 
@@ -909,7 +914,10 @@ export function ProfileScreen(props: {
                   />
                 </fieldset>
                 {activeSection === "basics" ? (
-                  <div className="mt-6" data-profile-resume-review>
+                  <div
+                    className="mt-6 [content-visibility:auto] [contain-intrinsic-size:auto_480px]"
+                    data-profile-resume-review
+                  >
                     <ProfileResumePanel
                       importDisabledReason={importResumeGuardMessage}
                       isProfileReady={profileSetupState.status === "completed"}
