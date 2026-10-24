@@ -5672,6 +5672,7 @@ export function createWorkspaceApplicationMethods(
       ctx.aiClient.getStatus().kind === "openai_compatible" &&
       writesResumesOnShortlist(await ctx.repository.getSettings()),
     isPaused: async () => (await ctx.repository.getActivityControl()).paused,
+    isClosing: () => ctx.isWorkspaceClosing?.() === true,
     needingResume: async (jobIds) =>
       (await ctx.repository.listSavedJobsByIds(jobIds))
         .filter(

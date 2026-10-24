@@ -15,6 +15,11 @@ export interface ResumeOnShortlistDeps {
   /** The person's switch and a configured AI; checked on every request. */
   isEnabled: () => Promise<boolean>;
   isPaused: () => Promise<boolean>;
+  /**
+   * Job Finder is shutting down. Closing aborts the jobs being written and
+   * those waiting their turn; they stay requested for the next start.
+   */
+  isClosing: () => boolean;
   /** Of these jobs, the ones still shortlisted, without a resume, not Original. */
   needingResume: (jobIds: readonly string[]) => Promise<readonly string[]>;
   readQueue: () => Promise<readonly string[]>;
@@ -62,12 +67,13 @@ export function createResumeOnShortlist(
   const run = async (jobId: string) => {
     let result: ResumeBatchGenerationResult | null = null;
     try {
-      result = await deps.generate(
-        jobId,
-        () => withdrawn.has(jobId) || paused,
-      );
+      result = await deps.generate(jobId, () => withdrawn.has(jobId) || paused);
     } catch {
       // A failed resume is recorded on the job as today ("Needs a resume").
+    }
+    if (deps.isClosing()) {
+      active.delete(jobId);
+      return;
     }
     // Not started: paused, or the AI service was busy. The request stays.
     const keep = result?.outcome === "not_started" && !withdrawn.has(jobId);
@@ -77,7 +83,7 @@ export function createResumeOnShortlist(
 
   const startWaiting = async () => {
     paused = await deps.isPaused();
-    if (paused) return;
+    if (paused || deps.isClosing()) return;
     for (const jobId of await deps.readQueue()) {
       if (active.has(jobId)) continue;
       active.add(jobId);

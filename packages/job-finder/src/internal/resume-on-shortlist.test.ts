@@ -7,14 +7,20 @@ import {
 
 type Outcome = ResumeBatchGenerationResult["outcome"];
 
-function harness(options: {
-  enabled?: boolean;
-  paused?: boolean;
-  needing?: (ids: readonly string[]) => readonly string[];
-  queue?: string[];
-} = {}) {
+function harness(
+  options: {
+    enabled?: boolean;
+    paused?: boolean;
+    needing?: (ids: readonly string[]) => readonly string[];
+    queue?: string[];
+  } = {},
+) {
   let queue = [...(options.queue ?? [])];
-  const state = { enabled: options.enabled ?? true, paused: options.paused ?? false };
+  const state = {
+    enabled: options.enabled ?? true,
+    paused: options.paused ?? false,
+    closing: false,
+  };
   const writes = new Map<
     string,
     { resolve: (outcome: Outcome) => void; shouldStop: () => boolean }
@@ -23,6 +29,7 @@ function harness(options: {
   const deps: ResumeOnShortlistDeps = {
     isEnabled: () => Promise.resolve(state.enabled),
     isPaused: () => Promise.resolve(state.paused),
+    isClosing: () => state.closing,
     needingResume: (ids) => Promise.resolve(options.needing?.(ids) ?? ids),
     readQueue: () => Promise.resolve([...queue]),
     updateQueue: (change) => {
@@ -70,7 +77,9 @@ function harness(options: {
 
 describe("resumes written on shortlist", () => {
   it("starts every shortlisted job that needs a resume and keeps it until written", async () => {
-    const h = harness({ needing: (ids) => ids.filter((id) => id !== "original") });
+    const h = harness({
+      needing: (ids) => ids.filter((id) => id !== "original"),
+    });
     await h.controller.request(["a", "b", "original"]);
     await h.settle();
     expect(h.queue()).toEqual(["a", "b"]);
@@ -153,6 +162,19 @@ describe("resumes written on shortlist", () => {
     await h.controller.continue();
     await h.settle();
     expect([...h.writes.keys()]).toEqual(["a", "b"]);
+  });
+
+  it("keeps the jobs a shutdown aborted, so the next start writes them", async () => {
+    const h = harness();
+    await h.controller.request(["a", "b", "c"]);
+    await h.settle();
+    await h.finish("a");
+    h.state.closing = true;
+    // Closing aborts the one being written and the ones waiting their turn.
+    await h.finish("b", "cancelled");
+    await h.finish("c", "failed");
+    expect(h.queue()).toEqual(["b", "c"]);
+    expect(h.retries).toHaveLength(0);
   });
 
   it("tries again later when the AI service turned the job away", async () => {
