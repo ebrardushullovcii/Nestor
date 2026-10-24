@@ -1912,7 +1912,7 @@ test("cached search judgments preserve prior listing details and do not share mu
   );
 });
 
-test("unchanged complete browser indices reuse previous model judgments after one fresh index read", async () => {
+test("complete browser index reuse requires matching plain and linked reads", async () => {
   const source = rawPage({
     actions: [],
     links: [
@@ -1943,6 +1943,8 @@ test("unchanged complete browser indices reuse previous model judgments after on
   };
   const resultCache = createSearchResultCache();
   const pageHands = hands({ current: source });
+  let linkedText = source.bodyText;
+  pageHands.readLinkedText = () => Promise.resolve(linkedText);
   const input = config();
   const first = await runJobSearchAgent({
     config: input,
@@ -1976,6 +1978,16 @@ test("unchanged complete browser indices reuse previous model judgments after on
   expect(observe).toHaveBeenCalledOnce();
   expect(judge).not.toHaveBeenCalled();
   expect(readListings).not.toHaveBeenCalled();
+  linkedText += " [Changed semantic item boundary]";
+  await runJobSearchAgent({
+    config: input,
+    hands: pageHands,
+    llmClient: model,
+    jobExtractor: indexExtractor,
+    resultCache,
+  });
+  expect(judge).toHaveBeenCalledOnce();
+  judge.mockClear();
   source.bodyText += " A changed listing or a new job.";
   await runJobSearchAgent({
     config: input,

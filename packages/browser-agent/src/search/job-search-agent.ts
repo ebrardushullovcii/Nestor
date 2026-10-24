@@ -582,6 +582,7 @@ export async function runJobSearchAgent(
   }
 
   let initialIndex: ApplyFormObservation | null = null;
+  let initialIndexFingerprint: string | null = null;
   let steps = 0;
   let lastProgressStep = 0;
   const emit = (currentAction: string, message: string): void => {
@@ -1217,8 +1218,17 @@ export async function runJobSearchAgent(
     await checkBotCheck();
     initialIndex = landed;
     const fingerprint = indexFingerprint(landed);
-    const reusedIndex = fingerprint
-      ? input.resultCache?.read(config, fingerprint)
+    // Item boundaries can change which card a badge belongs to without
+    // changing plain innerText. Reuse requires the linked read to match too.
+    initialIndexFingerprint =
+      fingerprint && hands.readLinkedText
+        ? JSON.stringify({
+            view: fingerprint,
+            linkedText: await hands.readLinkedText(),
+          })
+        : fingerprint;
+    const reusedIndex = initialIndexFingerprint
+      ? input.resultCache?.read(config, initialIndexFingerprint)
       : null;
     if (reusedIndex) {
       const reason =
@@ -1463,7 +1473,7 @@ export async function runJobSearchAgent(
         (link) => sanitizeUrl(link.href) === sanitizeUrl(job.canonicalUrl),
       ),
     )
-      ? indexFingerprint(initialIndex)
+      ? initialIndexFingerprint
       : null;
   input.resultCache?.write(config, result, completeIndex ?? undefined);
   return result;
