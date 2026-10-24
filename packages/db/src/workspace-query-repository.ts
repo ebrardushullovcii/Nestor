@@ -485,9 +485,10 @@ export function createWorkspaceQueryRepository(
         const columns = database
           .prepare(
             `WITH page AS MATERIALIZED (
-          SELECT i.origin,i.id,i.plan_id,r.position ${from}
-          JOIN workspace_page_order r ON r.plan_id=i.plan_id AND r.origin=i.origin AND r.id=i.id AND r.sort='${query.sort}'
-          WHERE ${condition} ORDER BY r.position LIMIT ? OFFSET ?)
+          SELECT i.origin,i.id,i.plan_id,r.position FROM workspace_page_order r
+          CROSS JOIN workspace_job_index i ON i.plan_id=r.plan_id AND i.origin=r.origin AND i.id=r.id
+          CROSS JOIN workspace_listing_activity a ON a.plan_id=i.plan_id AND a.origin=i.origin AND a.id=i.id
+          WHERE r.plan_id=? AND r.sort='${query.sort}' AND ${condition} ORDER BY r.position LIMIT ? OFFSET ?)
           SELECT i.id, i.status, i.title, i.company, i.location, i.source,
           i.source_job_id AS sourceJobId, i.canonical_url AS canonicalUrl, i.application_url AS applicationUrl,
           i.work_mode AS workModeMask, i.posted_at AS postedAt, i.posted_text AS postedAtText,
@@ -509,7 +510,7 @@ export function createWorkspaceQueryRepository(
             AND plan_verdict.job_id = i.id AND plan_verdict.plan_id = i.plan_id
           ORDER BY p.position`,
           )
-          .all(...args, query.page.limit, query.page.offset);
+          .all(planId, ...args, query.page.limit, query.page.offset);
         const rows = columns.map(
           ({
             workModeMask,

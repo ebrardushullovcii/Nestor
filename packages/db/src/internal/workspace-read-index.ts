@@ -41,23 +41,38 @@ function workspaceJobIndexSelectSql(
     table === "saved_jobs"
       ? `COALESCE((SELECT verdict_plan.value FROM job_plan_assessments verdict_plan
         WHERE verdict_plan.job_id = j.id AND verdict_plan.plan_id = p.value),
-      (SELECT verdict.value FROM json_each(j.value, '$.planAssessments') verdict WHERE verdict.key = p.value),
-      (SELECT value FROM job_fit_assessments WHERE id = j.assessment_id), jsonb_extract(j.value, '$.matchAssessment'))`
-      : `COALESCE((SELECT verdict.value FROM json_each(j.value, '$.planAssessments') verdict WHERE verdict.key = p.value),
-      jsonb_extract(j.value, '$.matchAssessment'))`;
+      (SELECT verdict.value FROM json_each(j.plan_assessments) verdict WHERE verdict.key = p.value),
+      (SELECT value FROM job_fit_assessments WHERE id = j.assessment_id), j.assessment)`
+      : `COALESCE((SELECT verdict.value FROM json_each(j.plan_assessments) verdict WHERE verdict.key = p.value),
+      j.assessment)`;
+  // Materialize screen facts before evaluating them repeatedly for each plan.
+  // Full assessment evidence stays in canonical storage, outside these scans.
   return `WITH raw_jobs AS MATERIALIZED (SELECT id, jsonb_remove(jsonb(value),
       '$.description', '$.summary', '$.responsibilities', '$.minimumQualifications',
       '$.preferredQualifications', '$.keywordSignals', '$.latestMatchAssessmentAudit') AS value ${storedColumns}
       FROM ${table} ${where.replaceAll("j.id", "id")}),
     jobs AS MATERIALIZED (SELECT id, jsonb_remove(value, '$.description', '$.provenance', '$.summary',
-      '$.responsibilities', '$.minimumQualifications', '$.preferredQualifications', '$.keywordSignals', '$.latestMatchAssessmentAudit') AS value,
+      '$.responsibilities', '$.minimumQualifications', '$.preferredQualifications', '$.keywordSignals', '$.latestMatchAssessmentAudit',
+      '$.matchAssessment', '$.planAssessments') AS value,
+      jsonb_extract(value, '$.matchAssessment') AS assessment,
+      jsonb_extract(value, '$.planAssessments') AS plan_assessments,
       ${metadata},
       CASE WHEN json_type(value,'$.provenance')='array' THEN
         (SELECT json_group_array(json_remove(jsonb_extract(raw_jobs.value,'$.provenance['||p.key||']'),'$.listingFacts')) FROM json_each(raw_jobs.value,'$.provenance') p)
         ${table === "saved_jobs" ? "ELSE (SELECT json_group_array(json_remove(p.value,'$.listingFacts')) FROM (SELECT value FROM job_provenance WHERE job_id=raw_jobs.id ORDER BY position) p)" : "ELSE '[]'"}
       END AS source_provenance FROM raw_jobs),
-    verdicts AS MATERIALIZED (SELECT j.id, p.value AS plan_id, jsonb(${assessment}) AS verdict
-      FROM jobs j, json_each(jsonb_insert(${plans}, '$[#]', '')) p)
+    full_verdicts AS MATERIALIZED (SELECT j.id, p.value AS plan_id, jsonb(${assessment}) AS value
+      FROM jobs j, json_each(jsonb_insert(${plans}, '$[#]', '')) p),
+    verdicts AS MATERIALIZED (SELECT id, plan_id, jsonb_object(
+      ${["score", "recommendation", "contextFingerprint", "postingFingerprint", "locationReach", "titleFamilyMatch", "scoreIsUpperBound", "recommendationRationale"].map((field) => `'${field}', jsonb_extract(value, '$.${field}')`).join(",")},
+      'judgment', CASE WHEN json_type(value, '$.judgment') = 'object' THEN jsonb_object(
+        'listingClosed', jsonb_extract(value, '$.judgment.listingClosed'),
+        'listingClosedEvidence', jsonb_extract(value, '$.judgment.listingClosedEvidence')) ELSE NULL END,
+      'gaps', jsonb_array(jsonb_extract(value, '$.gaps[0]')),
+      'dimensions', jsonb_object('roleSuitability', jsonb_object('state', jsonb_extract(value, '$.dimensions.roleSuitability.state'))),
+      'requirements', (SELECT jsonb_group_array(jsonb_object('category', json_extract(r.value, '$.category'),
+        'status', json_extract(r.value, '$.status'))) FROM json_each(full_verdicts.value, '$.requirements') r),
+      'reasons', jsonb_array(jsonb_extract(value, '$.reasons[0]'))) AS verdict FROM full_verdicts)
     SELECT '${table}', j.id, v.plan_id,
       json_extract(j.value, '$.status'),
       COALESCE(json_extract(j.value, '$.source'), ''),
@@ -112,7 +127,7 @@ function workspaceJobIndexSelectSql(
       json_extract(j.value,'$.seniority'), COALESCE(json_extract(j.value,'$.rescoredAfterListingRead'),0),
       j.source_provenance, j.last_verified_active_at, json_extract(v.verdict,'$.judgment.listingClosedEvidence'),
       json_object(${["source", "sourceJobId", "canonicalUrl", "applicationUrl", "providerKey", "providerBoardToken", "providerIdentifier", "title", "seniority", "company", "location", "postedAt", "postedAtText"].map((field) => `'${field}',json_extract(j.value,'$.${field}')`).join(",")}),
-      (SELECT json_group_array(json_object('category',json_extract(v.verdict,'$.requirements['||r.key||'].category'),'status',json_extract(v.verdict,'$.requirements['||r.key||'].status'))) FROM json_each(v.verdict,'$.requirements') r), json_extract(v.verdict,'$.reasons[0]'), j.last_seen_at
+      json_extract(v.verdict,'$.requirements'), json_extract(v.verdict,'$.reasons[0]'), j.last_seen_at
     FROM verdicts v JOIN jobs j ON j.id = v.id`;
 }
 
@@ -293,6 +308,7 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
       DROP INDEX IF EXISTS workspace_job_date_idx;
       DROP INDEX IF EXISTS workspace_job_company_idx;
       CREATE INDEX IF NOT EXISTS workspace_job_identity_idx ON workspace_job_index(id, plan_id);
+      CREATE INDEX IF NOT EXISTS workspace_job_collation_idx ON workspace_job_index(plan_id,title,company,id);
       CREATE INDEX IF NOT EXISTS workspace_ledger_activity_idx ON discovery_ledger(
         json_extract(value,'$.latestStatus'));
     `);
@@ -422,7 +438,13 @@ function ensureActivityRevision(database: DatabaseSync): void {
     BEGIN ${bump} END`);
   for (const event of ["insert", "update", "delete"]) {
     const ref = event === "delete" ? "OLD" : "NEW";
-    if (database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='discovery_ledger_observations'").get())
+    if (
+      database
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='discovery_ledger_observations'",
+        )
+        .get()
+    )
       database.exec(`CREATE TRIGGER IF NOT EXISTS workspace_activity_ledger_observations_${event}
       AFTER ${event.toUpperCase()} ON discovery_ledger_observations
       WHEN EXISTS (SELECT 1 FROM discovery_ledger WHERE id=${ref}.id
