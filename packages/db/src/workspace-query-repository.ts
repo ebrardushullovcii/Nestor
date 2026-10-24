@@ -54,7 +54,7 @@ export function prepareWorkspaceQueryDatabase(filePath: string): void {
   const database = new DatabaseSync(filePath);
   try {
     database.exec(
-      "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY; BEGIN IMMEDIATE",
+      "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY; BEGIN IMMEDIATE",
     );
     validateWorkspaceSettingsFile(database);
     ensureResumeApprovalState(database);
