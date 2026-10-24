@@ -476,6 +476,8 @@ export interface ApplyAgentConfig {
    * classification on the observation stands.
    */
   modelQuestionClassification?: boolean;
+  /** Reuse complete, identical model question reads within this AI client. */
+  questionReadCacheScope?: object;
   /** Latest saved answers while other applications in this batch are open. */
   readReusableAnswers?: () => Promise<readonly CandidateReusableAnswer[]>;
   /** The guard and worker checks for this page. Absent only in tests. */

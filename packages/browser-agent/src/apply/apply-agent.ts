@@ -311,7 +311,11 @@ async function runMeasuredApplyAgent(
   let stuckFinishNudged = false;
   const guardState = createApplyGuardState();
   const classifyQuestions = config.modelQuestionClassification
-    ? createQuestionClassifier({ client: llmClient, signal: config.signal })
+    ? createQuestionClassifier({
+        client: llmClient,
+        signal: config.signal,
+        cacheScope: config.questionReadCacheScope,
+      })
     : undefined;
   const documentCatalog: ApplyDocument[] = [...config.sources.documents];
   const runConfig: ApplyAgentConfig = {
