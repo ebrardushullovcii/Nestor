@@ -78,31 +78,27 @@ function prepareQuerySchema(database: DatabaseSync): void {
       SELECT c.id, j.value, j.key FROM campaigns c, json_each(c.jobs) j`);
 }
 
-/** Header reads need only additive schema, never an inventory scan. */
-export function prepareWorkspaceQuerySchema(filePath: string): void {
-  const database = new DatabaseSync(filePath);
-  try {
-    database.exec(
-      "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; BEGIN IMMEDIATE",
-    );
-    prepareQuerySchema(database);
-    database.exec("COMMIT");
-  } catch (error) {
-    if (database.isTransaction) database.exec("ROLLBACK");
-    throw error;
-  } finally {
-    database.close();
-  }
-}
-
 /** Prepare screen facts only. Evidence conversion is not a prerequisite. */
-export function prepareWorkspaceQueryDatabase(filePath: string): void {
+export function prepareWorkspaceQueryDatabase(
+  filePath: string,
+  onContextReady?: () => void,
+): void {
   const database = new DatabaseSync(filePath);
   try {
     database.exec(
-      "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY; BEGIN IMMEDIATE",
+      "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA temp_store = MEMORY; PRAGMA wal_autocheckpoint = 0",
     );
+    if (!onContextReady) database.exec("PRAGMA synchronous = NORMAL");
+    database.exec("BEGIN IMMEDIATE");
     prepareQuerySchema(database);
+    if (onContextReady) {
+      // Keep this connection alive: closing between the two gates checkpoints
+      // the entire legacy WAL before the index can even start. The canonical
+      // checkpoint worker owns checkpoint scheduling once the writer opens.
+      database.exec("COMMIT");
+      onContextReady();
+      database.exec("PRAGMA synchronous = NORMAL; BEGIN IMMEDIATE");
+    }
     ensureWorkspaceReadIndex(database);
     database.exec("COMMIT");
   } catch (error) {

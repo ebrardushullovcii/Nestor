@@ -21,7 +21,6 @@ import {
 import {
   createWorkspaceQueryRepository,
   prepareWorkspaceQueryDatabase,
-  prepareWorkspaceQuerySchema,
 } from "./workspace-query-repository";
 import { subscribeWorkspaceCommits } from "./workspace-commits";
 import { ensureWorkspaceReadIndex } from "./internal/workspace-read-index";
@@ -164,8 +163,26 @@ describe("independent workspace queries", () => {
     raw.exec(`DROP TABLE workspace_job_index; DROP TABLE workspace_entity_index;
       DROP TABLE workspace_company_index; DROP TABLE workspace_company_jobs;
       DELETE FROM schema_migrations WHERE version IN (26,27,28,29); DELETE FROM workspace_read_meta`);
-    prepareWorkspaceQuerySchema(temp.filePath);
-    prepareWorkspaceQueryDatabase(temp.filePath);
+    let headerReady = false;
+    prepareWorkspaceQueryDatabase(temp.filePath, () => {
+      headerReady = true;
+      expect(
+        raw
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE name='workspace_job_index'",
+          )
+          .get(),
+      ).toBeUndefined();
+      const headerReader = createWorkspaceQueryRepository(temp.filePath);
+      try {
+        expect(headerReader.getStartupContext().activeCampaignId).toBe(
+          campaigns?.activeCampaignId ?? null,
+        );
+      } finally {
+        headerReader.close();
+      }
+    });
+    expect(headerReady).toBe(true);
     const reader = createWorkspaceQueryRepository(temp.filePath);
     cleanups.push(() => reader.close());
     for (const { query, page } of before.values()) {
