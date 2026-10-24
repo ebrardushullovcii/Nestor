@@ -93,6 +93,12 @@ function equalInput(left: unknown, right: unknown): boolean {
     left.length !== right.length
   )
     return false;
+  if (
+    Array.isArray(left) &&
+    Array.isArray(right) &&
+    left.length !== right.length
+  )
+    return false;
   const keys = Object.keys(left);
   return (
     keys.length === Object.keys(right).length &&
@@ -110,6 +116,7 @@ export function readPreparedDiscoveryFingerprints(
 ): DiscoveryListingFingerprints | null {
   const prepared = readDiscoveryPreparation(posting)?.fingerprints;
   if (!prepared) return null;
+  if (prepared.owner && !Object.isFrozen(prepared.owner)) return null;
   if (prepared.owner === posting) return prepared.value;
   const source = prepared.basis ?? prepared.owner;
   return source &&

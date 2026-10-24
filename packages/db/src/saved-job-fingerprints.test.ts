@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { expect, test, vi } from "vitest";
 import {
   readPreparedDiscoveryFingerprints,
+  DISCOVERY_FINGERPRINT_FIELDS,
   writeDiscoveryPreparation,
   type DiscoveryListingFingerprints,
 } from "@nestor/contracts";
@@ -34,6 +35,7 @@ for (const storage of ["file", "memory"] as const)
           fingerprints: { owner: job, value: fingerprint },
         }),
       ).toBe(true);
+      Object.freeze(job);
       await repo.commitSavedJobDelta({ upserts: [job] });
       expect(
         await repo.readSavedJobDiscoveryFingerprints([
@@ -106,4 +108,26 @@ test("carried preparation survives a spread but never JSON or structuredClone", 
     ),
   ).toBeNull();
   expect(readPreparedDiscoveryFingerprints(structuredClone(job))).toBeNull();
+});
+
+test("mutable owners cannot bypass exact-input checks", () => {
+  const job = createSavedJob();
+  writeDiscoveryPreparation(job, {
+    fingerprints: { owner: job, value: fingerprint },
+  });
+  expect(readPreparedDiscoveryFingerprints(job)).toBeNull();
+  const basis = structuredClone(
+    Object.fromEntries(
+      DISCOVERY_FINGERPRINT_FIELDS.map((field) => [
+        field,
+        Reflect.get(job, field),
+      ]),
+    ),
+  );
+  writeDiscoveryPreparation(job, {
+    fingerprints: { basis, value: fingerprint },
+  });
+  expect(readPreparedDiscoveryFingerprints(job)).toEqual(fingerprint);
+  job.title = "Edited in place";
+  expect(readPreparedDiscoveryFingerprints(job)).toBeNull();
 });

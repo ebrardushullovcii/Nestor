@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   SavedJobSchema,
+  DISCOVERY_FINGERPRINT_FIELDS,
   readPreparedDiscoveryFingerprints,
   writeDiscoveryPreparation,
   type DiscoveryListingFingerprints,
@@ -54,14 +55,32 @@ export function writeSavedJobFingerprints(
   ).run(job.id, JSON.stringify(value));
 }
 
+function capturedFingerprintBasis(
+  row: object,
+): Readonly<Record<string, unknown>> {
+  return structuredClone(
+    Object.fromEntries(
+      DISCOVERY_FINGERPRINT_FIELDS.map((field) => [
+        field,
+        Reflect.get(row, field),
+      ]),
+    ),
+  );
+}
+
 /** Transitional legacy write validation preserves the new carried metadata. */
 export function parseSavedJobWithPreparation(job: SavedJob): SavedJob {
   const row = SavedJobSchema.parse(job);
   const value = readPreparedDiscoveryFingerprints(job);
   if (value) {
-    writeDiscoveryPreparation(row, {fingerprints: {owner: job, value}});
-    const exact = readPreparedDiscoveryFingerprints(row);
-    writeDiscoveryPreparation(row, {fingerprints: exact ? {owner: row, value: {...exact}} : undefined});
+    writeDiscoveryPreparation(row, {
+      fingerprints: {
+        basis: capturedFingerprintBasis(job),
+        value: { ...value },
+      },
+    });
+    if (!readPreparedDiscoveryFingerprints(row))
+      writeDiscoveryPreparation(row, { fingerprints: undefined });
   }
   return row;
 }
@@ -74,6 +93,11 @@ export function cloneSavedJobWithPreparation(job: SavedJob): SavedJob {
   const row = structuredClone(job);
   const value = readPreparedDiscoveryFingerprints(job);
   if (value)
-    writeDiscoveryPreparation(row, { fingerprints: { owner: row, value: {...value} } });
+    writeDiscoveryPreparation(row, {
+      fingerprints: {
+        basis: capturedFingerprintBasis(row),
+        value: { ...value },
+      },
+    });
   return row;
 }
