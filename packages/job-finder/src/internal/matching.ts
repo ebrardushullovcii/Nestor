@@ -1,6 +1,5 @@
 import type { JobFinderAiClient } from "@nestor/ai-providers";
 import {
-  SavedJobDiscoveryProvenanceSchema,
   jobPostingDetailQualityValues,
   type ApplicationStatus,
   type CandidateProfile,
@@ -1408,8 +1407,7 @@ function uniqueProvenance(
 ): SavedJobDiscoveryProvenance[] {
   const kept = new Map<string, SavedJobDiscoveryProvenance>();
 
-  for (const value of values) {
-    const parsed = SavedJobDiscoveryProvenanceSchema.parse(value);
+  for (const parsed of values) {
     const key = `${parsed.targetId}:${parsed.adapterKind}:${parsed.resolvedAdapterKind ?? "none"}:${parsed.startingUrl}`;
     const first = kept.get(key);
     if (!first) {

@@ -17,14 +17,12 @@ import {
   personPickedJob,
   personSuppliedJob,
 } from "./plan-assessment";
+import { parseNormalizedCompensation } from "./matching-compensation";
 import { searchPreferencesForCampaignRun } from "./campaign-dashboard";
 import {
-  JobSearchCampaignCollectionSchema,
   DISCOVERY_NO_JOB_SITES_MESSAGE,
   DISCOVERY_RUN_ALREADY_ACTIVE_MESSAGE,
-  DiscoveryRunRecordSchema,
   DiscoveryAgentMetadataSchema,
-  SavedJobSchema,
   type CandidateProfile,
   type DiscoveryActivityEvent,
   type DiscoveryIdentityStore,
@@ -737,8 +735,18 @@ function createInitialRunRecord(input: {
   previousRuns?: readonly DiscoveryRunRecord[];
   searchRequest?: JobFinderSearchRequest;
 }): DiscoveryRunRecord {
-  return DiscoveryRunRecordSchema.parse({
+  const emptyDigest = () => ({
+    new: 0,
+    unchanged: 0,
+    changed: 0,
+    reactivated: 0,
+    inactive: 0,
+    known: 0,
+    skipped: 0,
+  });
+  return {
     id: input.id,
+    runPhase: null,
     campaignId: input.campaignId,
     state: "running",
     scope: input.scope,
@@ -779,6 +787,8 @@ function createInitialRunRecord(input: {
       duplicatesMerged: 0,
       invalidSkipped: 0,
       warning: null,
+      encounteredJobIds: [],
+      changeDigest: emptyDigest(),
       compactionState: null,
       compactionUsedFallbackTrigger: false,
       timing: null,
@@ -804,17 +814,20 @@ function createInitialRunRecord(input: {
       outcome: "running",
       browserCloseout: null,
       timing: null,
+      report: null,
+      sourceHealth: [],
+      warnings: [],
+      changeDigest: emptyDigest(),
     },
-  });
+  };
 }
 
 function updateRunSummary(
   run: DiscoveryRunRecord,
   patch: Partial<DiscoveryRunRecord["summary"]>,
 ): DiscoveryRunRecord {
-  // This is the service-owned run accumulator. The repository validates the
-  // changed metadata when it commits; reparsing here copied its full activity
-  // and checkpoint history on every summary increment.
+  // This is the service-owned run accumulator. Reparsing it copied its full
+  // activity and checkpoint history on every summary increment.
   return {
     ...run,
     summary: {
@@ -3115,19 +3128,17 @@ export function createWorkspaceDiscoveryMethods(
               for (const jobId of jobIds) attachedPlanJobIds.add(jobId);
               return;
             }
-            await ctx.repository.saveCampaignState(
-              JobSearchCampaignCollectionSchema.parse({
-                ...state,
-                campaigns: state.campaigns.map((candidate) =>
-                  candidate.id === campaignId
-                    ? {
-                        ...candidate,
-                        jobIds: [...candidate.jobIds, ...missing],
-                      }
-                    : candidate,
-                ),
-              }),
-            );
+            await ctx.repository.saveCampaignState({
+              ...state,
+              campaigns: state.campaigns.map((candidate) =>
+                candidate.id === campaignId
+                  ? {
+                      ...candidate,
+                      jobIds: [...candidate.jobIds, ...missing],
+                    }
+                  : candidate,
+              ),
+            });
             for (const jobId of jobIds) attachedPlanJobIds.add(jobId);
           });
         };
@@ -3650,9 +3661,7 @@ export function createWorkspaceDiscoveryMethods(
                     job.status === "archived"
                   ? "discovered"
                   : null;
-            return status
-              ? touchSavedJob(SavedJobSchema.parse({ ...job, status }))
-              : job;
+            return status ? touchSavedJob({ ...job, status }) : job;
           });
           jobsPutAwayByScreen.clear();
           jobsBroughtBackByScreen.clear();
@@ -4285,13 +4294,11 @@ export function createWorkspaceDiscoveryMethods(
           const winner = selectCanonicalSighting(job.provenance);
           let next = job;
           if (winner?.listingUrl && winner.listingUrl !== job.canonicalUrl) {
-            const routed = SavedJobSchema.parse(
-              applySightingRoute(job, winner),
-            );
-            next = SavedJobSchema.parse({
+            const routed = applySightingRoute(job, winner);
+            next = {
               ...routed,
               matchAssessment: assessDiscoveryPosting(routed),
-            });
+            };
             if (routed.canonicalUrl !== job.canonicalUrl) switchedCount += 1;
           }
           if (next !== originalById.get(job.id)) {
@@ -4477,15 +4484,15 @@ export function createWorkspaceDiscoveryMethods(
         if (salaryText === job.salaryText) return job;
         correctedSalaryCount += 1;
         touchedJobIds.add(job.id);
-        const correctedJob = SavedJobSchema.parse({
+        const correctedJob: SavedJob = {
           ...job,
           salaryText,
-          normalizedCompensation: {},
-        });
-        return SavedJobSchema.parse({
+          normalizedCompensation: parseNormalizedCompensation(null),
+        };
+        return {
           ...correctedJob,
           matchAssessment: assessDiscoveryPosting(correctedJob),
-        });
+        };
       };
       // Each job's whole listing is searched for its pay; with thousands of
       // jobs that held main for a second, so it goes a slice per turn.
@@ -4547,15 +4554,15 @@ export function createWorkspaceDiscoveryMethods(
             }
             droppedSalaryCount += 1;
             touchedJobIds.add(job.id);
-            const sanitizedJob = SavedJobSchema.parse({
+            const sanitizedJob: SavedJob = {
               ...job,
               salaryText: null,
-              normalizedCompensation: {},
-            });
-            return SavedJobSchema.parse({
+              normalizedCompensation: parseNormalizedCompensation(null),
+            };
+            return {
               ...sanitizedJob,
               matchAssessment: assessDiscoveryPosting(sanitizedJob),
-            });
+            };
           };
           workingSavedJobs = workingSavedJobs.map((job) => {
             const next = sanitizeFurnitureSalary(job, touchedSavedJobIds);

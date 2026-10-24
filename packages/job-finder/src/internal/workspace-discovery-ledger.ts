@@ -1,5 +1,4 @@
 import {
-  DiscoveryLedgerEntrySchema,
   type DiscoveryLedgerEntry,
   type DiscoveryListingFingerprints,
   type DiscoveryTitleTriageOutcome,
@@ -555,7 +554,7 @@ export function buildDiscoveryLedgerEntry(
       ? (existingEntry?.fingerprints ?? incomingFingerprints)
       : incomingFingerprints;
 
-  return DiscoveryLedgerEntrySchema.parse({
+  return {
     id: existingEntry?.id ?? createUniqueId("discovery_ledger"),
     canonicalUrl: normalizeLedgerUrl(input.posting.canonicalUrl),
     applicationUrl:
@@ -599,7 +598,7 @@ export function buildDiscoveryLedgerEntry(
       input.listingScreen !== undefined
         ? input.listingScreen
         : (existingEntry?.listingScreen ?? null),
-  });
+  };
 }
 
 export function markSavedJobStatusInLedger(input: {
@@ -771,11 +770,11 @@ export function applyInactiveLedgerMarks(input: {
       return entry;
     }
 
-    return DiscoveryLedgerEntrySchema.parse({
+    return {
       ...entry,
-      latestStatus: "inactive",
+      latestStatus: "inactive" as const,
       inactiveAt: input.occurredAt,
-    });
+    };
   });
 }
 
