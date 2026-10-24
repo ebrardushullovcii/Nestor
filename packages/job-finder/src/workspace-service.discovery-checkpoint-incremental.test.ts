@@ -1,5 +1,10 @@
 import type { JudgeJobFitsInput } from "@nestor/ai-providers";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
+import { createFileJobFinderRepository } from "@nestor/db";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createJobFinderWorkspaceService } from "./index";
 import {
   JobPostingSchema,
   DiscoveryRunResultSchema,
@@ -13,6 +18,8 @@ import {
   createSeed,
   createSavedJob,
   createWorkspaceServiceHarness,
+  createDocumentManager,
+  createResearchAdapter,
 } from "./workspace-service.test-support";
 import type { AgentDiscoveryOptions } from "@nestor/browser-runtime";
 import * as discoverySavedJobWriter from "./internal/discovery-saved-job-writer";
@@ -85,6 +92,7 @@ function createIncrementalRuntime(input: {
   checkpoints: Array<ReturnType<typeof JobPostingSchema.parse>[]>;
   finalJobs: ReturnType<typeof JobPostingSchema.parse>[];
   failAfterCheckpoints?: boolean;
+  agentMetadata?: { pagesCovered: number; coveredPageUrls?: string[] };
 }): BrowserSessionRuntime {
   return {
     ...createAgentBrowserRuntime([]),
@@ -114,7 +122,7 @@ function createIncrementalRuntime(input: {
         throw new DOMException("Aborted", "AbortError");
       }
 
-      return {
+      return DiscoveryRunResultSchema.parse({
         source,
         startedAt: "2026-03-20T10:00:00.000Z",
         completedAt: "2026-03-20T10:00:05.000Z",
@@ -122,8 +130,8 @@ function createIncrementalRuntime(input: {
         inventoryCompleteness: "partial" as const,
         warning: null,
         jobs: input.finalJobs,
-        agentMetadata: null,
-      };
+        agentMetadata: input.agentMetadata ?? null,
+      });
     },
   };
 }
@@ -150,6 +158,94 @@ function createHarness(seedOverrides?: { discoveryOnly?: boolean }) {
 }
 
 describe("discovery checkpoint incremental persistence", () => {
+  test.each([
+    {
+      checkpoints: 1,
+      agentMetadata: { pagesCovered: 2 },
+    },
+    {
+      checkpoints: 1,
+      agentMetadata: {
+        pagesCovered: 2,
+        coveredPageUrls: [
+          "https://example.com/jobs",
+          "https://example.com/jobs?page=2",
+        ],
+      },
+    },
+    { checkpoints: 2, agentMetadata: { pagesCovered: 2 } },
+  ])(
+    "finishes browser page accounting after frozen checkpoint saves: %j",
+    async ({ checkpoints, agentMetadata }) => {
+      const first = createCollectedJob({ token: "first-page" });
+      const second = createCollectedJob({ token: "second-page" });
+      const events: DiscoveryActivityEvent[] = [];
+      const browserRuntime = createIncrementalRuntime({
+        checkpoints: checkpoints === 1 ? [[first]] : [[first], [first, second]],
+        finalJobs: checkpoints === 1 ? [first] : [first, second],
+        agentMetadata,
+        // Real browser tool calls give the queued checkpoint write time to
+        // finish. A tight fixture loop otherwise accounts pages before save.
+        onCheckpointSaved: async (revision) => {
+          await vi.waitFor(() =>
+            expect(
+              events.filter(
+                (event) =>
+                  event.stage === "persistence" &&
+                  (event.jobsPersisted ?? 0) > 0,
+              ).length,
+            ).toBeGreaterThanOrEqual(revision),
+          );
+        },
+      });
+      const { seed } = createHarness();
+      const directory = await mkdtemp(
+        path.join(os.tmpdir(), "nestor-checkpoint-counts-"),
+      );
+      const repository = await createFileJobFinderRepository({
+        filePath: path.join(directory, "workspace.sqlite"),
+        seed,
+      });
+      try {
+        const workspaceService = createJobFinderWorkspaceService({
+          repository,
+          browserRuntime,
+          aiClient: createAgentAiClient(),
+          documentManager: createDocumentManager(),
+          researchAdapter: createResearchAdapter(),
+          exportFileVerifier: { exists: () => Promise.resolve(true) },
+        });
+        const snapshot = await workspaceService.runDiscoveryForTarget(
+          "target_incremental",
+          (event) => events.push(event),
+          new AbortController().signal,
+        );
+        const run = snapshot.recentDiscoveryRuns[0]!;
+        expect(run.state).toBe("completed");
+        expect(run.targetExecutions[0]!.state).toBe("completed");
+        expect(
+          run.targetExecutions[0]!.sourceCounts!.reduce(
+            (n, row) => n + (row.pagesCovered ?? 0),
+            0,
+          ),
+        ).toBe(2);
+        expect(
+          events.filter(
+            (event) =>
+              event.stage === "persistence" && (event.jobsPersisted ?? 0) > 0,
+          ).length,
+        ).toBeGreaterThanOrEqual(checkpoints);
+      } finally {
+        await repository.close();
+        await rm(directory, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 100,
+        });
+      }
+    },
+  );
   test("reads a completed source while another collects, without applying facts early or reading twice", async () => {
     const job = createCollectedJob({ token: "read_ahead" });
     const { seed } = createHarness();

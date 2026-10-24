@@ -29,6 +29,10 @@ import {
   useLaunchReads,
 } from "@renderer/features/job-finder/lib/launch-reads";
 import { JobSearchHomeLaunch } from "@renderer/features/job-finder/screens/job-search-home/job-search-home-launch";
+import {
+  FindJobsLaunch,
+  selectFindJobsLaunchPage,
+} from "@renderer/features/job-finder/screens/discovery/find-jobs-launch";
 import { JobFinderShellBrand } from "@renderer/features/job-finder/components/job-finder-shell-brand";
 import { SourceCheckQueueRunner } from "@renderer/features/job-finder/lib/source-check-queue-runner";
 import { LockedScreenLayout } from "@renderer/features/job-finder/components/locked-screen-layout";
@@ -405,6 +409,10 @@ function JobFinderOpeningShell() {
   const isWindows = platform === "win32";
   const openingRouteLabel = getOpeningRouteLabel(location.pathname);
   const isOpeningHomeRoute = openingRouteLabel === "Home";
+  const findJobsLaunchPage =
+    location.pathname === "/job-finder/discovery" && !location.search
+      ? selectFindJobsLaunchPage(launchReads)
+      : null;
   const isLockedOpeningRoute = isOpeningRouteLocked(location.pathname);
   const dragRegionStyle = { WebkitAppRegion: "drag" } as CSSProperties;
   const noDragRegionStyle = { WebkitAppRegion: "no-drag" } as CSSProperties;
@@ -913,7 +921,9 @@ function JobFinderOpeningShell() {
                 and snapped it down on hydration on Profile, Find jobs and
                 Applications, which is why it is the component and not another
                 copied class string. */}
-            {isLockedOpeningRoute ? (
+            {findJobsLaunchPage ? (
+              <FindJobsLaunch page={findJobsLaunchPage} />
+            ) : isLockedOpeningRoute ? (
               <LockedScreenLayout
                 topContent={
                   <div className="grid min-w-0 gap-5">{openingHeaderBlock}</div>

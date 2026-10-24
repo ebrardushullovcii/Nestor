@@ -1,6 +1,7 @@
 import type { WorkspaceListCounts } from "@nestor/contracts";
 import { PageHeaderStack } from "../../components/page-header";
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
+import { readRememberedNextStepHeight } from "./home-next-step-size";
 
 /**
  * Home while the full workspace still loads: the same header, an empty Next
@@ -33,6 +34,9 @@ export function JobSearchHomeLaunch(props: {
     },
   ];
   const showStages = stages.some((stage) => stage.count > 0);
+  // The real card is often taller than this frame; holding its last height
+  // keeps the tiles where they will be.
+  const nextStepHeight = readRememberedNextStepHeight();
 
   return (
     <section
@@ -48,8 +52,9 @@ export function JobSearchHomeLaunch(props: {
       />
       <section
         aria-hidden="true"
-        className="surface-panel-shell grid min-w-0 gap-3 rounded-(--radius-panel) border border-primary/40 bg-primary/10 p-5"
+        className="surface-panel-shell grid min-w-0 content-start gap-3 rounded-(--radius-panel) border border-primary/40 bg-primary/10 p-5"
         data-testid="home-next-step-launch"
+        style={nextStepHeight ? { minHeight: nextStepHeight } : undefined}
       >
         <p className="text-(length:--text-small) font-semibold leading-5 text-muted-foreground">
           Next step

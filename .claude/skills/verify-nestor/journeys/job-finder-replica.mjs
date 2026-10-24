@@ -76,12 +76,25 @@ const STAGES = {
     return { resumeImportRun: imports[0].id };
   },
 
-  async search({ click, shot, waitFor, see, db, ai }) {
+  async search({ click, shot, waitFor, see, db, ai, page, workspace, sites }) {
     if (ai !== "live")
       throw new Error(
         "Search needs live AI: run bin/down, then bin/up --ai live.",
       );
-    await click("Finish setup and find jobs");
+    const submissionsBefore = sites.submissions().length;
+    if (
+      await (await page)
+        .getByRole("button", {
+          name: "Finish setup and find jobs",
+          exact: true,
+        })
+        .isVisible()
+    ) {
+      await click("Finish setup and find jobs");
+    } else {
+      await click("Find jobs", { role: "button" });
+      await click("Search now", { role: "button" });
+    }
     await waitFor("Find jobs", 30, { role: "heading" });
     await waitFor("/^(Stop search|Searching)$/", 30, { role: "button" }).catch(
       () => {},
@@ -94,13 +107,40 @@ const STAGES = {
       throw new Error(
         "The search stopped early; read the alert in the last screenshot.",
       );
-    const fits = [
-      ...tree.matchAll(/Overall fit: (\d+) percent/g),
-    ].map((m) => `${m[1]}%`);
+    const fits = [...tree.matchAll(/Overall fit: (\d+) percent/g)].map(
+      (m) => `${m[1]}%`,
+    );
     assert.ok(fits.length > 0, "search results carry model fit verdicts");
     const runs = db("discovery_runs", { limit: 1 });
     const jobs = db("saved_jobs", { limit: 20 });
-    return { discoveryRun: runs[0]?.id, savedJobs: jobs.length, fits };
+    const run = (await workspace()).recentDiscoveryRuns[0];
+    assert.equal(run?.state, "completed", "the real search completed");
+    assert.ok(
+      run.targetExecutions.every((target) => target.state === "completed"),
+      "each replica source completed",
+    );
+    assert.ok(
+      run.targetExecutions.some((target) =>
+        target.sourceCounts?.some((source) => (source.pagesCovered ?? 0) > 0),
+      ),
+      "page accounting finished after browser checkpoints",
+    );
+    assert.ok(
+      run.activity.some(
+        (event) =>
+          event.stage === "persistence" &&
+          (event.jobsPersisted ?? 0) > 0 &&
+          !event.terminalState,
+      ),
+      "the browser search committed a live checkpoint",
+    );
+    assert.equal(sites.submissions().length, submissionsBefore);
+    return {
+      discoveryRun: runs[0]?.id,
+      state: run.state,
+      savedJobs: jobs.length,
+      fits,
+    };
   },
 
   async shortlist({ page, click, shot, waitFor, db }) {

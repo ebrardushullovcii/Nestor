@@ -54,6 +54,14 @@ function isCollectionDensity(value: unknown): value is CollectionDensity {
   return value === "compact" || value === "comfortable" || value === "detailed";
 }
 
+/** The search text a collection reopens with, without mounting it. */
+export function readPersistedCollectionQuery(name: string): string {
+  return readCollectionView(
+    `nestor.job-finder.collection.${name}.v1`,
+    "comfortable",
+  ).query;
+}
+
 function readCollectionView(
   storageKey: string,
   defaultDensity: CollectionDensity,

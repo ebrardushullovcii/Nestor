@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import type {
   ApplicationAutomationMode,
@@ -30,6 +30,7 @@ import {
   type HomeAction,
   type HomeButton,
 } from "./job-search-home-model";
+import { useRememberNextStepHeight } from "./home-next-step-size";
 
 export { buildInterruptedSearchRetryRequest } from "./job-search-home-model";
 
@@ -240,6 +241,8 @@ export function rememberDismissedHomeProblem(
 
 export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
   const [now, setNow] = useState(Date.now);
+  const nextStepRef = useRef<HTMLElement>(null);
+  useRememberNextStepHeight(nextStepRef);
   const [dismissedProblemKeys, setDismissedProblemKeys] =
     useState<DismissedHomeProblems>(readDismissedHomeProblems);
   useEffect(() => {
@@ -666,6 +669,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
         className="surface-panel-shell grid min-w-0 gap-3 rounded-(--radius-panel) border border-primary/40 bg-primary/10 p-5"
         data-home-next-step={model.next.id}
         data-testid="home-next-step"
+        ref={nextStepRef}
       >
         <p className="text-(length:--text-small) font-semibold leading-5 text-muted-foreground">
           Next step

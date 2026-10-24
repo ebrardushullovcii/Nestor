@@ -97,6 +97,10 @@ import { applicationSignInContinuesOnItsOwn } from "@renderer/features/job-finde
 import { createIdentityMemo } from "@renderer/features/job-finder/lib/identity-memo";
 import { useLaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
 import { JobSearchHomeLaunch } from "@renderer/features/job-finder/screens/job-search-home/job-search-home-launch";
+import {
+  FindJobsLaunch,
+  selectFindJobsLaunchPage,
+} from "@renderer/features/job-finder/screens/discovery/find-jobs-launch";
 
 // The canonical workflow surfaces (Profile, Find jobs, Shortlisted,
 // Applications) are part of the initial-route bundle so their real headings
@@ -1261,6 +1265,7 @@ const selectPlanDiscoveryJobs = createIdentityMemo(
 
 export function JobFinderDiscoveryRoute() {
   const context = useJobFinderPageContext();
+  const launchReads = useLaunchReads();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigationContext = readJobFinderNavigationContext(searchParams);
   const rapidReviewReturnRoute = readJobFinderReturnRoute(searchParams);
@@ -1384,9 +1389,15 @@ export function JobFinderDiscoveryRoute() {
   );
 
   if (isHydrating) {
+    const launchPage = navigationContext.jobId
+      ? null
+      : selectFindJobsLaunchPage(launchReads);
     return (
       <JobFinderHydrationGate
         collections={["discovery_jobs"]}
+        launchView={
+          launchPage ? <FindJobsLaunch page={launchPage} /> : undefined
+        }
         workspace={context.workspace}
       >
         {null}

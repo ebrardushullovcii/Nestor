@@ -402,6 +402,20 @@ function readScopedFacetFilters(
   return EMPTY_PERSISTED_FACET_FILTERS;
 }
 
+/** Whether Find jobs reopens filtered for this plan. */
+export function hasPersistedDiscoveryFacetFilters(
+  facetScopeId: string | null | undefined,
+): boolean {
+  const filters = readScopedFacetFilters(normalizeFacetScopeKey(facetScopeId));
+  return (
+    filters.activity.length +
+      filters.recommendation.length +
+      filters.source.length +
+      filters.workMode.length >
+    0
+  );
+}
+
 function writeScopedFacetFilters(
   scopeKey: string,
   filters: PersistedDiscoveryFacetFilters,

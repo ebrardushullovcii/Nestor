@@ -26,7 +26,11 @@ import { inferSourceIntelligenceFromTarget } from "./workspace-source-intelligen
 import * as compensation from "./matching-compensation";
 import * as contracts from "@nestor/contracts";
 import { copyView } from "@nestor/core";
-import { applySavedJobDelta } from "./workspace-discovery-methods";
+import {
+  applySavedJobDelta,
+  prepareSavedJobForSearch,
+} from "./workspace-discovery-methods";
+import { createDiscoverySavedJobWriter } from "./discovery-saved-job-writer";
 import {
   carryPreparedDiscoveryPosting,
   rememberPreparedDiscoveryPosting,
@@ -45,6 +49,57 @@ const preparedJob = () =>
       detailQuality: "partial_detail",
     }),
   );
+
+test("preparing a legacy job preserves lazy fields for plan-only writes and releases raw preparation", async () => {
+  const legacy = structuredClone(preparedJob());
+  const read = vi.fn(() => body);
+  Object.defineProperty(legacy, "description", {
+    enumerable: true,
+    configurable: true,
+    get: read,
+  });
+  Object.freeze(legacy);
+  const { prepared, working } = prepareSavedJobForSearch(legacy);
+  expect(Object.getOwnPropertyDescriptor(working, "description")).toMatchObject(
+    { get: read },
+  );
+  expect(
+    Object.getOwnPropertyDescriptor(prepared, "description"),
+  ).toMatchObject({ value: body });
+  expect(readDiscoveryPreparation(working)?.content).toBeUndefined();
+  expect(
+    readDiscoveryPreparation(working)?.fingerprints?.basis,
+  ).toBeUndefined();
+  expect(
+    readDiscoveryPreparation(working)?.savedIdentity?.basis,
+  ).toBeUndefined();
+  const reads = read.mock.calls.length;
+  expect(contracts.readPreparedSavedJobIdentity(working)).not.toBeNull();
+  const commit = vi.fn().mockResolvedValue(undefined);
+  const writer = createDiscoverySavedJobWriter({
+    persistedJobs: [legacy],
+    toStoredJob: (job) => job,
+    merge: applySavedJobDelta,
+    commit,
+    persistDiscovery: () => Promise.resolve(),
+  });
+  writer.stage(
+    copyView(working, {
+      planAssessments: { test: { ...working.matchAssessment, score: 71 } },
+    }),
+  );
+  await writer.persist();
+  expect(commit).toHaveBeenCalledWith(
+    expect.objectContaining({
+      upserts: [],
+      updateJobIds: [],
+      planAssessments: [
+        expect.objectContaining({ jobId: legacy.id, planId: "test" }),
+      ],
+    }),
+  );
+  expect(read).toHaveBeenCalledTimes(reads);
+});
 
 test("triage and merge carry the same computed screening hints", () => {
   const first = enrichDiscoveredPosting(preparedJob(), undefined);

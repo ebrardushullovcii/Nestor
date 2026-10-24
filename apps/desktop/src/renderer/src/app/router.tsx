@@ -52,8 +52,11 @@ function withInterviewFallback(element: ReactNode) {
 
 export const appRouter = createHashRouter([
   {
+    // Straight to Home: "/job-finder" lands on its index redirect, which
+    // renders nothing for a frame once the loaded shell mounts, so the page
+    // area went blank between the opening shell and Home.
     path: "/",
-    element: <Navigate replace to="/job-finder" />,
+    element: <Navigate replace to="/job-finder/home" />,
   },
   {
     path: "/live-assistant",
@@ -166,6 +169,6 @@ export const appRouter = createHashRouter([
   },
   {
     path: "*",
-    element: <Navigate replace to="/job-finder" />,
+    element: <Navigate replace to="/job-finder/home" />,
   },
 ]);
