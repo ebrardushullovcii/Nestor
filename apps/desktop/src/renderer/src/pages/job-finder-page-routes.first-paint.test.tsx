@@ -543,6 +543,54 @@ describe("canonical route first paint", () => {
     expect(surfaceTimerCalls(setTimeoutSpy.mock.calls)).toEqual([]);
   });
 
+  it.each([
+    [
+      "/job-finder/review-queue",
+      "Shortlisted",
+      <JobFinderReviewQueueRoute key="q" />,
+    ],
+    [
+      "/job-finder/applications",
+      "Applications",
+      <JobFinderApplicationsRoute key="a" />,
+    ],
+  ] as const)(
+    "opens %s from Home's first view while every job is still loading",
+    (path, heading, element) => {
+      // A long conversion holds the full load for a minute; these screens
+      // read only the jobs past Find jobs, which the first view has.
+      const firstView = createContext();
+      firstView.workspace = {
+        ...firstView.workspace,
+        hydration: {
+          phase: "bootstrap",
+          deferredCollections: ["discovery_jobs"],
+        },
+      };
+      renderCanonicalRoute(path, element, firstView);
+      expect(
+        screen.getByRole("heading", { level: 1, name: heading }),
+      ).toBeTruthy();
+      expect(screen.queryByText("Loading your workspace")).toBeNull();
+      cleanup();
+
+      const bootstrap = createContext();
+      bootstrap.workspace = {
+        ...bootstrap.workspace,
+        hydration: {
+          phase: "bootstrap",
+          deferredCollections: [
+            "discovery_jobs",
+            "review_queue",
+            "applications",
+          ],
+        },
+      };
+      renderCanonicalRoute(path, element, bootstrap);
+      expect(screen.getByText("Loading your workspace")).toBeTruthy();
+    },
+  );
+
   it("mounts the real Shortlisted heading immediately with no placeholder, suspense fallback, or deferred surface timer", () => {
     const { setTimeoutSpy } = renderCanonicalRoute(
       "/job-finder/review-queue",

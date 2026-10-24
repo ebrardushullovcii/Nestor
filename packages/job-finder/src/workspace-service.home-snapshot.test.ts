@@ -19,7 +19,26 @@ describe("Home's first view (ADR 0077)", () => {
       phase: "bootstrap",
       deferredCollections: ["discovery_jobs"],
     });
-    expect(home.discoveryJobs).toEqual([]);
+    // The rows of the jobs past Find jobs, as the full list has them.
+    const byId = (rows: readonly { id: string }[]) =>
+      [...rows].sort((left, right) => left.id.localeCompare(right.id));
+    const shortlistedIds = new Set(home.reviewQueue.map((item) => item.jobId));
+    expect(home.discoveryJobs.length).toBeGreaterThan(0);
+    expect(home.discoveryJobs.every((job) => job.status !== "discovered")).toBe(
+      true,
+    );
+    expect(byId(home.discoveryJobs)).toEqual(
+      byId(
+        full.discoveryJobs.filter((job) =>
+          home.discoveryJobs.some((row) => row.id === job.id),
+        ),
+      ),
+    );
+    expect(
+      [...shortlistedIds].every((id) =>
+        home.discoveryJobs.some((job) => job.id === id),
+      ),
+    ).toBe(true);
     expect(home.dismissedDiscoveryJobs).toEqual([]);
     expect(home.companyJobs).toEqual([]);
     expect(full.reviewQueue.length).toBeGreaterThan(0);

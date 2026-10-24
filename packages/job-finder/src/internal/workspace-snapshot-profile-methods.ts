@@ -263,6 +263,33 @@ function buildJobViews(
   };
 }
 
+/**
+ * Home's first view (ADR 0077) holds only the jobs past Find jobs. Their rows
+ * are projected as the full list projects them, so Shortlisted and
+ * Applications can open from it; nothing is ranked, so the full list's
+ * ordering caches stay its own.
+ */
+function buildHomeTierJobViews(
+  input: Omit<JobViewInput, "pendingDiscoveryJobs" | "companies">,
+) {
+  const savedJobs = input.rawSavedJobs.map((job) =>
+    readPlanAssessment(job, input.planId),
+  );
+  const discoveryJobs = projectDiscoveryJobViews({
+    jobs: selectVisibleDiscoveryJobs(savedJobs),
+    identityJobs: input.rawSavedJobs,
+    discoveryLedger: input.discoveryLedger,
+    listingSignals: input.listingSignals,
+    applicationAttempts: input.applicationAttempts,
+  });
+  return {
+    savedJobs,
+    discoveryJobs,
+    projectedDismissedDiscoveryJobs: [],
+    companyJobs: [],
+  };
+}
+
 // What a display read still validates once the collections it borrows are
 // left out. Search preferences and plans were validated when they were
 // normalized and reconciled above. Built once: a fresh schema per refresh
@@ -1802,14 +1829,13 @@ export function createWorkspaceSnapshotProfileMethods(
       projectedDismissedDiscoveryJobs,
       companyJobs,
     } = homeTier
-      ? {
-          savedJobs: rawSavedJobs.map((job) =>
-            readPlanAssessment(job, snapshotPlanId),
-          ),
-          discoveryJobs: [],
-          projectedDismissedDiscoveryJobs: [],
-          companyJobs: [],
-        }
+      ? buildHomeTierJobViews({
+          rawSavedJobs,
+          planId: snapshotPlanId,
+          discoveryLedger: discovery.discoveryLedger,
+          listingSignals: intelligence.safeguards.listingSignals,
+          applicationAttempts,
+        })
       : deriveJobViews({
           rawSavedJobs,
           planId: snapshotPlanId,
