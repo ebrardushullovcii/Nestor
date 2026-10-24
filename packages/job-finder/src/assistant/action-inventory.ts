@@ -445,6 +445,38 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
 
   // Applications
   {
+    id: "apply.queue",
+    screen: "Shortlisted / Applications",
+    action: "Queue the whole selection, pause, continue, stop or remove waiting jobs",
+    channels: [
+      "job-finder:start-apply-queue",
+      "job-finder:control-apply-queue",
+      "job-finder:remove-from-apply-queue",
+      "job-finder:approve-resumes",
+    ],
+    coverage: excluded("Durable queue controls and bulk approval are missing from the assistant."),
+  },
+  {
+    id: "apply.move_back",
+    screen: "Applications",
+    action: "Move an unsent application back to Shortlisted, or undo the move",
+    channels: [
+      "job-finder:return-application-to-shortlist",
+      "job-finder:undo-return-application-to-shortlist",
+    ],
+    coverage: excluded("The assistant cannot yet move an application back."),
+  },
+  {
+    id: "apply.reopen",
+    screen: "Applications",
+    action: "Read kept page state and reopen a closed application page",
+    channels: [
+      "job-finder:get-application-page-states",
+      "job-finder:reopen-application-page",
+    ],
+    coverage: excluded("Page recovery is missing from the assistant."),
+  },
+  {
     id: "apply.start",
     screen: "Shortlisted / Applications",
     action: "Apply, Apply to all, Try again",
