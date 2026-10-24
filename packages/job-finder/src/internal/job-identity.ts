@@ -191,6 +191,10 @@ export function prepareListingContent(description: string): PackedContent {
     : null;
 }
 
+export function readPackedListingContent(packed: Uint8Array): string {
+  return inflateRawSync(packed).toString();
+}
+
 function readPreparedContent(
   input: JobIdentityInput,
 ): JobIdentityInput["exactContent"] | null {

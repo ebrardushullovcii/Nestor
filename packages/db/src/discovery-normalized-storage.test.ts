@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { performance } from "node:perf_hooks";
+import { rm } from "node:fs/promises";
 import {
   BrowserAgentRunCheckpointSchema,
   DiscoveryActivityEventSchema,
@@ -62,6 +63,97 @@ function activity(runId: string, index: number) {
 }
 
 describe("normalized discovery storage", () => {
+  test("migration 29 backs up and preserves complete legacy run metadata once", async () => {
+    const temp = await createTempRepository("nestor-run-progress-migration-");
+    try {
+      const repo = await temp.createRepository();
+      const legacy = {
+        ...run("legacy_progress", 3),
+        summary: { ...run("legacy_progress", 3).summary, jobsPersisted: 7, sourceHealth: [{ targetId: "synthetic_target", health: "warning" as const, durationMs: 27, warnings: ["Synthetic warning"] }] },
+        activity: [activity("legacy_progress", 1)],
+      };
+      await repo.commitDiscoveryStateUpdate((current) => ({ ...current, activeRun: legacy, runState: "running" }));
+      await repo.close();
+      const backupPath = `${temp.filePath}.before-discovery-progress.sqlite`;
+      await rm(backupPath, { force: true });
+      const raw = new DatabaseSync(temp.filePath);
+      try {
+        const { activity: _activity, targetExecutions: _targets, ...metadata } = legacy;
+        raw.prepare("UPDATE discovery_runs SET value = ?, progress = '{}' WHERE id = ?").run(JSON.stringify(metadata), legacy.id);
+        raw.exec("DELETE FROM discovery_run_source_health; DELETE FROM schema_migrations WHERE version = 29");
+      } finally { raw.close(); }
+      const migrated = await temp.createRepository();
+      try {
+        expect((await migrated.getDiscoveryState()).activeRun).toEqual(legacy);
+        const backup = new DatabaseSync(backupPath, { readOnly: true });
+        try {
+          expect(backup.prepare("SELECT progress FROM discovery_runs WHERE id = ?").get(legacy.id)?.progress).toBe("{}");
+          expect(backup.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
+        } finally { backup.close(); }
+      } finally { await migrated.close(); }
+      const again = await temp.createRepository();
+      try { expect((await again.getDiscoveryState()).activeRun).toEqual(legacy); }
+      finally { await again.close(); }
+    } finally { await cleanupTempDirectoryWithRetry(temp.tempDirectory); }
+  });
+
+  test("progress updates leave the large run header unchanged and retain recovery and source history", async () => {
+    const temp = await createTempRepository("nestor-run-progress-");
+    try {
+      const repo = await temp.createRepository();
+      const initial = {
+        ...run("progress", 1),
+        targetIds: Array.from({ length: 742 }, (_, index) => `synthetic_source_${index}`),
+        summary: {
+          ...run("progress", 1).summary,
+          sourceHealth: Array.from({ length: 742 }, (_, index) => ({ targetId: `synthetic_source_${index}`, health: "pending" as const, durationMs: 0, warnings: [] })),
+        },
+      };
+      await repo.commitDiscoveryStateUpdate((current) => ({ ...current, activeRun: initial, runState: "running" }));
+      const raw = new DatabaseSync(temp.filePath);
+      try {
+        const header = raw.prepare("SELECT value FROM discovery_runs WHERE id = 'progress'").get()?.value;
+        raw.exec(`CREATE TABLE synthetic_run_writes (kind TEXT, bytes INTEGER);
+          CREATE TRIGGER synthetic_header AFTER UPDATE OF value ON discovery_runs BEGIN INSERT INTO synthetic_run_writes VALUES ('header', length(NEW.value)); END;
+          CREATE TRIGGER synthetic_progress AFTER UPDATE OF progress ON discovery_runs BEGIN INSERT INTO synthetic_run_writes VALUES ('progress', length(NEW.progress)); END;
+          CREATE TRIGGER synthetic_health AFTER UPDATE ON discovery_run_source_health BEGIN INSERT INTO synthetic_run_writes VALUES ('health', length(NEW.value)); END;`);
+        const displayBefore = await repo.readDiscoveryDisplayProjection();
+        await repo.commitDiscoveryStateUpdate((current) => ({
+          ...current,
+          activeRun: {
+            ...current.activeRun!,
+            targetExecutions: [{ ...current.activeRun!.targetExecutions[0]!, agentCheckpoint: checkpoint(2) }],
+            activity: [activity("progress", 1)],
+            summary: {
+              ...current.activeRun!.summary,
+              jobsPersisted: 1,
+              sourceHealth: current.activeRun!.summary.sourceHealth.map((value, index) => index === 0 ? { ...value, health: "healthy" } : value),
+            },
+          },
+        }));
+        expect(raw.prepare("SELECT value FROM discovery_runs WHERE id = 'progress'").get()?.value).toBe(header);
+        expect(raw.prepare("SELECT COUNT(*) AS n FROM synthetic_run_writes WHERE kind = 'header'").get()?.n).toBe(0);
+        expect(raw.prepare("SELECT COUNT(*) AS n FROM synthetic_run_writes WHERE kind = 'health'").get()?.n).toBe(1);
+        expect(Number(raw.prepare("SELECT SUM(bytes) AS n FROM synthetic_run_writes").get()?.n)).toBeLessThan(2000);
+        const display = await repo.readDiscoveryDisplayProjection();
+        expect(display.activeRun?.summary.jobsPersisted).toBe(1);
+        expect(display.activeRun?.summary.sourceHealth[0]?.health).toBe("healthy");
+        expect(display.activeRun?.summary.sourceHealth[1]).toBe(displayBefore.activeRun?.summary.sourceHealth[1]);
+        expect(display.activeRun?.activity).toHaveLength(1);
+      } finally { raw.close(); await repo.close(); }
+      const reopened = await temp.createRepository();
+      try {
+        const state = await reopened.getDiscoveryState();
+        expect(state.activeRun?.targetIds).toEqual(initial.targetIds);
+        expect(state.activeRun?.targetExecutions[0]?.agentCheckpoint?.revision).toBe(2);
+        expect(state.activeRun?.summary.jobsPersisted).toBe(1);
+        expect(state.activeRun?.summary.sourceHealth).toHaveLength(742);
+        expect(state.activeRun?.summary.sourceHealth[0]?.health).toBe("healthy");
+        expect(state.activeRun?.activity).toHaveLength(1);
+      } finally { await reopened.close(); }
+    } finally { await cleanupTempDirectoryWithRetry(temp.tempDirectory); }
+  });
+
   test("prunes complete run rows atomically without reporting every retired child as a display edit", async () => {
     const temp = await createTempRepository("nestor-discovery-retirement-");
     try {

@@ -71,7 +71,9 @@ export function prepareBodySalaryRange(
   const carried = readPreparedBodySalaryRange(posting);
   if (carried !== undefined) return carried;
   const value = extractSalaryRangeFromListingBody(posting.description);
-  createDiscoveryListingFingerprints(posting);
-  rememberPreparedBodySalaryRange(posting, value);
+  if (Object.isExtensible(posting)) {
+    createDiscoveryListingFingerprints(posting);
+    rememberPreparedBodySalaryRange(posting, value);
+  }
   return value;
 }

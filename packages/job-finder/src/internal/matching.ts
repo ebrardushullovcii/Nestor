@@ -1,6 +1,8 @@
 import type { JobFinderAiClient } from "@nestor/ai-providers";
 import {
+  captureDiscoverySavedIdentityBasis,
   readDiscoveryPreparation,
+  readPreparedSavedJobIdentity,
   writeDiscoveryPreparation,
   jobPostingDetailQualityValues,
   type ApplicationStatus,
@@ -34,6 +36,8 @@ import {
   createJobIdentityDigest,
   createJobIdentityIndex,
   compactJobIdentity,
+  rememberPreparedJobIdentity,
+  readPackedListingContent,
   type JobIdentityInput,
   hasEquivalentListingContentIdentity,
   type JobIdentityIndex,
@@ -1471,6 +1475,7 @@ export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
   const immutable = Object.isFrozen(job);
   const cached = immutable ? sightingIdentities.get(job) : undefined;
   if (cached) return cached;
+  const saved = readPreparedSavedJobIdentity(job);
   const identity: JobIdentityInput = {
     source: job.source,
     sourceJobId: job.sourceJobId,
@@ -1483,7 +1488,16 @@ export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
     seniority: job.seniority,
     company: job.company,
     location: job.location,
-    description: job.description,
+    ...(saved
+      ? saved.content
+        ? {
+            exactContent: {
+              ...saved.content,
+              read: () => readPackedListingContent(saved.content!.packed),
+            },
+          }
+        : {}
+      : { description: job.description }),
     postedAt: job.postedAt,
     postedAtText: job.postedAtText,
     matchAcrossSources: true,
@@ -1493,8 +1507,9 @@ export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
         : [],
     ),
   };
+  if (saved) rememberPreparedJobIdentity(identity, saved);
   const preparation = readDiscoveryPreparation(job);
-  if (preparation)
+  if (preparation && !saved)
     writeDiscoveryPreparation(identity, {
       ...(preparation.content ? { content: preparation.content } : {}),
       ...(preparation.identity ? { identity: preparation.identity } : {}),
@@ -1503,6 +1518,23 @@ export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
   // its unrelated fingerprints/normalized posting. Compressed evidence is
   // inflated only to prove an actual content-alias collision.
   const compact = compactJobIdentity(identity);
+  if (!saved && !immutable) {
+    const content = compact.exactContent;
+    const keys = readDiscoveryPreparation(compact)!.identity!;
+    writeDiscoveryPreparation(job, {
+      savedIdentity: {
+        basis: captureDiscoverySavedIdentityBasis(job),
+        value: {
+          version: 1,
+          local: keys.local,
+          acrossSources: keys.acrossSources,
+          content: content?.packed
+            ? { digest: content.digest, packed: content.packed }
+            : null,
+        },
+      },
+    });
+  }
   if (immutable) {
     sightingIdentities.set(job, compact);
   }

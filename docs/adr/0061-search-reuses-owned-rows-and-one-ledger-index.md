@@ -51,7 +51,12 @@ rows retain their identities.
 Keep complete activity, source accounting, checkpoints used for restart, and
 run reports: the Activity screen and search decisions read them. No history
 pruning or new process is part of this decision. Sources, plans and query-column
-normalization remain a separate storage change.
+normalization remain a separate storage change. Migration 29 separates each
+run's static header from its small changing progress column and stores source
+health in individual rows. A progress update writes neither the target-id
+list nor unchanged source health. The canonical reader reconstructs the same
+run, with Activity and recovery checkpoints intact. A database backup precedes
+the forward migration.
 
 ## Verification
 

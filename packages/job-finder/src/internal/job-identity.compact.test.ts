@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import {
   readDiscoveryPreparation,
+  readPreparedSavedJobIdentity,
   writeDiscoveryPreparation,
 } from "@nestor/contracts";
 import { createSeed } from "../workspace-service.test-fixtures";
@@ -56,6 +57,40 @@ test("saved-job indexes retain compressed identity evidence without posting carr
   expect(preparation.normalizedPosting).toBeUndefined();
   expect(preparation.identity!.basis).not.toContain(job.description);
   expect(hasEquivalentListingContentIdentity(job, identity)).toBe(true);
+});
+
+test("saved identity round trips without opening a stored body and invalidates changed evidence", () => {
+  const job = prepareDiscoveryPosting({
+    ...createSeed().savedJobs[0]!,
+    description: posting.description!,
+  });
+  const expected = toSightingIdentityInput(job);
+  const saved = readPreparedSavedJobIdentity(job)!;
+  expect(saved).not.toBeNull();
+  const lazy = { ...job };
+  writeDiscoveryPreparation(lazy, { savedIdentity: { owner: lazy, value: saved } });
+  Object.defineProperty(lazy, "description", {
+    enumerable: true,
+    get() { throw new Error("Stored identity opened the body"); },
+  });
+  Object.freeze(lazy);
+  const actual = toSightingIdentityInput(lazy);
+  expect(buildJobIdentityAliases(actual)).toEqual(buildJobIdentityAliases(expected));
+  expect(hasEquivalentListingContentIdentity(actual, expected)).toBe(true);
+  expect(actual.description).toBeUndefined();
+  for (const change of [
+    { title: "Different role" },
+    { company: "Different company" },
+    { canonicalUrl: "https://example.test/changed" },
+    { description: "Different body" },
+    { provenance: [...job.provenance, { ...job.provenance[0]!, listingUrl: "https://example.test/alternate" }] },
+  ]) {
+    const changed = { ...job, ...change };
+    expect(readPreparedSavedJobIdentity(changed)).toBeNull();
+    expect(buildJobIdentityAliases(toSightingIdentityInput(changed))).toEqual(
+      buildJobIdentityAliases({ ...changed, alternateListingUrls: changed.provenance.flatMap((entry) => entry.listingUrl && entry.listingUrl !== changed.canonicalUrl ? [entry.listingUrl] : []), matchAcrossSources: true }),
+    );
+  }
 });
 
 test("compacting digest-only preparation releases its raw text too", () => {

@@ -1,4 +1,5 @@
 import type { DatabaseSync, StatementSync } from "node:sqlite";
+import { existsSync } from "node:fs";
 import {
   BrowserAgentRunCheckpointSchema,
   DiscoveryActivityEventSchema,
@@ -31,6 +32,39 @@ const TARGET_METADATA = DiscoveryTargetExecutionSchema.omit({
 
 type TargetMetadata = ReturnType<typeof TARGET_METADATA.parse>;
 type Target = DiscoveryRunRecord["targetExecutions"][number];
+type RunMetadata = ReturnType<typeof RUN_METADATA.parse>;
+type RunProgress = Pick<RunMetadata, "state" | "runPhase" | "completedAt" | "cancellationRequestedAt"> & {
+  summary: Omit<RunMetadata["summary"], "sourceHealth">;
+};
+
+function splitRun(run: RunMetadata) {
+  const { state, runPhase, completedAt, cancellationRequestedAt, summary, ...header } = run;
+  const { sourceHealth, ...counters } = summary;
+  return {
+    header,
+    progress: { state, runPhase, completedAt, cancellationRequestedAt, summary: counters } satisfies RunProgress,
+    sourceHealth,
+  };
+}
+
+function writeSourceHealth(database: DatabaseSync, runId: string, before: RunMetadata["summary"]["sourceHealth"], after: RunMetadata["summary"]["sourceHealth"]): void {
+  after.forEach((value, position) => {
+    if (value === before[position]) return;
+    const text = JSON.stringify(value);
+    if (before[position] && text === JSON.stringify(before[position])) return;
+    statement(database, `INSERT INTO discovery_run_source_health (run_id, id, position, value) VALUES (?, ?, ?, ?)
+      ON CONFLICT(run_id, id) DO UPDATE SET value = excluded.value`).run(runId, String(position), position, text);
+  });
+  if (after.length < before.length)
+    statement(database, "DELETE FROM discovery_run_source_health WHERE run_id = ? AND position >= ?").run(runId, after.length);
+}
+
+function insertRun(database: DatabaseSync, run: RunMetadata, key: string, position: number, active: boolean): void {
+  const { header, progress, sourceHealth } = splitRun(run);
+  statement(database, "INSERT OR REPLACE INTO discovery_runs (id, position, active, value, progress) VALUES (?, ?, ?, ?, ?)")
+    .run(key, position, active ? 1 : 0, JSON.stringify(header), JSON.stringify(progress));
+  writeSourceHealth(database, key, [], sourceHealth);
+}
 
 // Compiled statements per connection. A search saves several times a second
 // and each save writes many rows; compiling the same INSERT for every row
@@ -96,7 +130,7 @@ function replaceRow(database: DatabaseSync, table: string, keys: readonly (strin
 }
 
 function clearRows(database: DatabaseSync): void {
-  for (const table of ["discovery_run_checkpoints", "discovery_run_activity", "discovery_run_targets", "discovery_runs", "discovery_ledger", "discovery_pending_jobs"]) {
+  for (const table of ["discovery_run_checkpoints", "discovery_run_activity", "discovery_run_targets", "discovery_run_source_health", "discovery_runs", "discovery_ledger", "discovery_pending_jobs"]) {
     database.exec(`DELETE FROM ${table}`);
   }
 }
@@ -122,7 +156,7 @@ export function replaceDiscoveryStorage(database: DatabaseSync, state: JobFinder
   writeSmall(database, complete);
   const runs = keyedRows([complete.activeRun, ...complete.recentRuns].filter((run): run is DiscoveryRunRecord => run !== null));
   for (const [position, { key, row: run }] of runs.entries()) {
-    replaceRow(database, "discovery_runs", [key, position, position === 0 && complete.activeRun ? 1 : 0], RUN_METADATA.parse(run));
+    insertRun(database, RUN_METADATA.parse(run), key, position, position === 0 && complete.activeRun !== null);
     keyedRows(run.targetExecutions.map((target) => ({ id: target.targetId, target }))).forEach(({ key: targetKey, row: { target } }, index) => {
       replaceRow(database, "discovery_run_targets", [key, targetKey, index], TARGET_METADATA.parse(target));
       if (target.agentCheckpoint) replaceRow(database, "discovery_run_checkpoints", [key, targetKey], BrowserAgentRunCheckpointSchema.parse(target.agentCheckpoint));
@@ -135,6 +169,14 @@ export function replaceDiscoveryStorage(database: DatabaseSync, state: JobFinder
 
 /** Transactional, repeatable migration of the existing complete singleton. */
 export function migrateDiscoveryStorage(database: DatabaseSync): void {
+  const progressMigrated = Boolean(database.prepare("SELECT 1 FROM schema_migrations WHERE version = 29").get());
+  if (!progressMigrated) {
+    const file = database.prepare("PRAGMA database_list").all().find((row) => row.name === "main")?.file;
+    if (typeof file === "string" && file && database.prepare("SELECT 1 FROM singleton_state LIMIT 1").get()) {
+      const backup = `${file}.before-discovery-progress.sqlite`;
+      if (!existsSync(backup)) database.prepare("VACUUM main INTO ?").run(backup);
+    }
+  }
   database.exec("BEGIN IMMEDIATE");
   try {
     const migrated = Boolean(database.prepare("SELECT 1 FROM schema_migrations WHERE version = 20").get());
@@ -145,6 +187,8 @@ export function migrateDiscoveryStorage(database: DatabaseSync): void {
     database.exec(`
       CREATE TABLE IF NOT EXISTS discovery_runs (id TEXT PRIMARY KEY, position INTEGER NOT NULL, active INTEGER NOT NULL, value TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS discovery_runs_position_idx ON discovery_runs(active DESC, position);
+      CREATE TABLE IF NOT EXISTS discovery_run_source_health (run_id TEXT NOT NULL, id TEXT NOT NULL, position INTEGER NOT NULL, value TEXT NOT NULL, PRIMARY KEY (run_id, id));
+      CREATE INDEX IF NOT EXISTS discovery_run_source_health_position_idx ON discovery_run_source_health(run_id, position);
       CREATE TABLE IF NOT EXISTS discovery_run_targets (run_id TEXT NOT NULL, id TEXT NOT NULL, position INTEGER NOT NULL, value TEXT NOT NULL, PRIMARY KEY (run_id, id));
       CREATE INDEX IF NOT EXISTS discovery_run_targets_position_idx ON discovery_run_targets(run_id, position);
       CREATE TABLE IF NOT EXISTS discovery_run_checkpoints (run_id TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (run_id, id));
@@ -155,6 +199,8 @@ export function migrateDiscoveryStorage(database: DatabaseSync): void {
       CREATE TABLE IF NOT EXISTS discovery_pending_jobs (id TEXT PRIMARY KEY, position INTEGER NOT NULL, value TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS discovery_pending_jobs_position_idx ON discovery_pending_jobs(position);
     `);
+    if (!database.prepare("PRAGMA table_info(discovery_runs)").all().some((column) => column.name === "progress"))
+      database.exec("ALTER TABLE discovery_runs ADD COLUMN progress TEXT NOT NULL DEFAULT '{}'");
     if (!migrated) {
       const row = database.prepare("SELECT value FROM singleton_state WHERE key = 'discovery_state'").get();
       if (row) {
@@ -162,6 +208,17 @@ export function migrateDiscoveryStorage(database: DatabaseSync): void {
         replaceDiscoveryStorage(database, legacy);
       }
       database.prepare("INSERT INTO schema_migrations (version, name) VALUES (20, 'normalized_discovery_storage')").run();
+    }
+    if (!progressMigrated) {
+      const rows = database.prepare("SELECT id, position, active, value, progress FROM discovery_runs").all();
+      for (const row of rows) {
+        if (row.progress !== "{}") continue;
+        const run = RUN_METADATA.parse(JSON.parse(String(row.value)));
+        insertRun(database, run, String(row.id), Number(row.position), Number(row.active) === 1);
+      }
+      if (Number(database.prepare("SELECT COUNT(*) AS n FROM discovery_runs").get()?.n) !== rows.length)
+        throw new Error("Discovery progress migration changed the run count.");
+      database.prepare("INSERT INTO schema_migrations (version, name) VALUES (29, 'discovery_run_progress_rows')").run();
     }
     database.exec("COMMIT");
   } catch (error) {
@@ -183,7 +240,7 @@ export interface DiscoveryDisplayRowCache {
   scopes: Map<string, CachedScope>;
   dirty: Map<string, Set<string>>;
   /** Display runs by id, with the stored metadata text they were read from. */
-  runs?: Map<string, { raw: string; run: DiscoveryRunRecord }>;
+  runs?: Map<string, { raw: string; progress: string; run: DiscoveryRunRecord }>;
 }
 
 export function discoveryRowScope(table: string, runId = ""): string {
@@ -340,29 +397,35 @@ function readRows<T>(database: DatabaseSync, table: string, where = "", params: 
   return values;
 }
 
-function readRun(database: DatabaseSync, row: { id: unknown; value: unknown }, includeCheckpoints: boolean, cache?: DiscoveryDisplayRowCache): DiscoveryRunRecord {
+function readRun(database: DatabaseSync, row: { id: unknown; value: unknown; progress: unknown }, includeCheckpoints: boolean, cache?: DiscoveryDisplayRowCache): DiscoveryRunRecord {
   const id = String(row.id);
   // A display run whose own row, sources and log are unchanged is the run
   // read last time: same object, so later identity checks stay cheap.
   const raw = String(row.value);
+  const progressText = String(row.progress);
   const previous = !includeCheckpoints ? cache?.runs?.get(id) : undefined;
   if (
     previous &&
     previous.raw === raw &&
+    previous.progress === progressText &&
+    !cache?.dirty.has(discoveryRowScope("discovery_run_source_health", id)) &&
     !cache?.dirty.has(discoveryRowScope("discovery_run_targets", id)) &&
     !cache?.dirty.has(discoveryRowScope("discovery_run_activity", id)) &&
     cache?.scopes.get(discoveryRowScope("discovery_run_targets", id))?.ordered &&
     cache?.scopes.get(discoveryRowScope("discovery_run_activity", id))?.ordered
   )
     return previous.run;
-  const metadata = parseRow<ReturnType<typeof RUN_METADATA.parse>>("discovery_runs", id, row.value);
+  const header = parseRow<Omit<RunMetadata, keyof RunProgress>>("discovery_runs", id, raw);
+  const progress = parseRow<RunProgress>("discovery_runs.progress", id, progressText);
+  const sourceHealth = readRows<RunMetadata["summary"]["sourceHealth"][number]>(database, "discovery_run_source_health", "WHERE run_id = ?", [id], cache);
+  const metadata = { ...header, ...progress, summary: { ...progress.summary, sourceHealth } };
   const targets = readKeyedRows<TargetMetadata>(database, "discovery_run_targets", "WHERE run_id = ?", [id], cache);
   const checkpointRows = includeCheckpoints ? database.prepare("SELECT id, value FROM discovery_run_checkpoints WHERE run_id = ?").all(id) : [];
   const checkpoints = new Map(checkpointRows.map((checkpoint) => [String(checkpoint.id), frozen(parseRow<BrowserAgentRunCheckpoint>("discovery_run_checkpoints", `${id}/${String(checkpoint.id)}`, checkpoint.value))]));
   const executions = targets.map(({ key, value }) => frozen({ ...value, agentCheckpoint: checkpoints.get(key) ?? null }));
   const activity = readRows<DiscoveryActivityEvent>(database, "discovery_run_activity", "WHERE run_id = ?", [id], cache);
   const run = frozen({ ...metadata, targetExecutions: executions, activity });
-  if (cache && !includeCheckpoints) (cache.runs ??= new Map()).set(id, { raw, run });
+  if (cache && !includeCheckpoints) (cache.runs ??= new Map()).set(id, { raw, progress: progressText, run });
   return run;
 }
 
@@ -375,7 +438,7 @@ export function readDiscoveryStorage(database: DatabaseSync, fallback: JobFinder
     return frozen(JobFinderDiscoveryStateSchema.parse(fallback));
   }
   const small = parseRow<SmallState>("singleton_state", "discovery_state", row.value);
-  const runs = database.prepare("SELECT id, active, value FROM discovery_runs ORDER BY active DESC, position").all() as Array<{ id: string; active: number; value: string }>;
+  const runs = database.prepare("SELECT id, active, value, progress FROM discovery_runs ORDER BY active DESC, position").all() as Array<{ id: string; active: number; value: string; progress: string }>;
   if (cache) {
     const presentRuns = new Set(runs.map((run) => String(run.id)));
     for (const [scope, value] of cache.scopes) {
@@ -619,10 +682,6 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
   return result;
 }
 
-// The run metadata text a stored run was written with, so the next save
-// compares against it without validating the stored run again.
-const storedRunMetadataText = new WeakMap<object, string>();
-
 function runMetadata(run: DiscoveryRunRecord): ReturnType<typeof RUN_METADATA.parse> {
   const metadata: Partial<DiscoveryRunRecord> = { ...run };
   delete metadata.targetExecutions;
@@ -638,14 +697,24 @@ function targetMetadata(target: Target): TargetMetadata {
 
 function writeRun(database: DatabaseSync, before: DiscoveryRunRecord | null, next: DiscoveryRunRecord, key: string, position: number, active: boolean, aliases: WeakMap<object, object>, positionCache?: PositionCache): DiscoveryRunRecord {
   const metadata = runMetadata(next);
-  const metadataText = JSON.stringify(metadata);
-  const oldMetadataText = before
-    ? (storedRunMetadataText.get(before) ?? JSON.stringify(runMetadata(before)))
-    : null;
-  if (oldMetadataText === null || oldMetadataText !== metadataText) {
-    replaceRow(database, "discovery_runs", [key, position, active ? 1 : 0], metadata);
+  const parts = splitRun(metadata);
+  const previous = before ? splitRun(runMetadata(before)) : null;
+  if (!previous) {
+    insertRun(database, metadata, key, position, active);
   } else {
-    statement(database, "UPDATE discovery_runs SET position = ?, active = ? WHERE id = ? AND (position <> ? OR active <> ?)").run(position, active ? 1 : 0, key, position, active ? 1 : 0);
+    if (Object.keys(parts.header).some((field) => {
+      const value: unknown = Reflect.get(parts.header, field);
+      const old: unknown = Reflect.get(previous.header, field);
+      return value !== old && JSON.stringify(value) !== JSON.stringify(old);
+    }) || Object.keys(parts.header).length !== Object.keys(previous.header).length)
+      statement(database, "UPDATE discovery_runs SET value = ? WHERE id = ?").run(JSON.stringify(parts.header), key);
+    const progress = JSON.stringify(parts.progress);
+    if (progress !== JSON.stringify(previous.progress) || !before || before.state !== next.state)
+      statement(database, "UPDATE discovery_runs SET position = ?, active = ?, progress = ? WHERE id = ?")
+        .run(position, active ? 1 : 0, progress, key);
+    else
+      statement(database, "UPDATE discovery_runs SET position = ?, active = ? WHERE id = ? AND (position <> ? OR active <> ?)").run(position, active ? 1 : 0, key, position, active ? 1 : 0);
+    writeSourceHealth(database, key, previous.sourceHealth, parts.sourceHealth);
   }
   const oldTargets = before?.targetExecutions ?? [];
   const oldById = new Map(keyedRows(oldTargets.map((target) => ({ id: target.targetId, target }))).map(({ key: targetKey, row: { target } }, index) => [targetKey, { target, index }]));
@@ -691,7 +760,6 @@ function writeRun(database: DatabaseSync, before: DiscoveryRunRecord | null, nex
   }
   const activity = writeChangedRows(database, "discovery_run_activity", before?.activity ?? [], next.activity, aliases, key, positionCache);
   const stored = frozen({ ...metadata, targetExecutions: targets, activity });
-  storedRunMetadataText.set(stored, metadataText);
   return stored;
 }
 
@@ -716,7 +784,7 @@ export function updateDiscoveryStorage(database: DatabaseSync, before: JobFinder
     // Removing the header invalidates the whole run. Its child rows no longer
     // need thousands of individual display/cache notifications as they go.
     database.prepare("DELETE FROM discovery_runs WHERE id = ?").run(id);
-    for (const table of ["discovery_run_checkpoints", "discovery_run_activity", "discovery_run_targets"]) database.prepare(`DELETE FROM ${table} WHERE run_id = ?`).run(id);
+    for (const table of ["discovery_run_checkpoints", "discovery_run_activity", "discovery_run_targets", "discovery_run_source_health"]) database.prepare(`DELETE FROM ${table} WHERE run_id = ?`).run(id);
   }
   const ledger = writeChangedRows(database, "discovery_ledger", before.discoveryLedger, proposed.discoveryLedger, aliases, undefined, positionCache);
   const pending = writeChangedRows(database, "discovery_pending_jobs", before.pendingDiscoveryJobs, proposed.pendingDiscoveryJobs, aliases, undefined, positionCache);
@@ -737,7 +805,7 @@ export function createDiscoveryStorage(database: DatabaseSync, fallback: JobFind
       WHEN ${condition}
       BEGIN UPDATE discovery_canonical_epoch SET revision = revision + 1; END`);
   }
-  for (const table of ["discovery_runs", "discovery_run_targets", "discovery_run_checkpoints", "discovery_run_activity", "discovery_ledger", "discovery_pending_jobs"]) {
+  for (const table of ["discovery_runs", "discovery_run_targets", "discovery_run_checkpoints", "discovery_run_activity", "discovery_run_source_health", "discovery_ledger", "discovery_pending_jobs"]) {
     for (const event of ["INSERT", "UPDATE", "DELETE"]) {
       const retiredChild = event === "DELETE" && table.startsWith("discovery_run_");
       database.exec(`CREATE TEMP TRIGGER discovery_canonical_${table}_${event.toLowerCase()}
