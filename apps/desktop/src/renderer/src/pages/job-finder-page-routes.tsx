@@ -8,6 +8,7 @@ import {
   lazy,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -99,7 +100,9 @@ import { useLaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
 import { JobSearchHomeLaunch } from "@renderer/features/job-finder/screens/job-search-home/job-search-home-launch";
 import {
   FindJobsLaunch,
+  forgetLaunchClickedJob,
   selectFindJobsLaunchPage,
+  useLaunchClickedJobId,
 } from "@renderer/features/job-finder/screens/discovery/find-jobs-launch";
 
 // The canonical workflow surfaces (Profile, Find jobs, Shortlisted,
@@ -1371,6 +1374,17 @@ export function JobFinderDiscoveryRoute() {
     requestedJob,
   ]);
 
+  // A row clicked on the launch page opens here. Selecting it while the list
+  // still loads makes it the held pick, so the first full render opens it
+  // (the selection only keeps a pick the loaded list still has). Layout
+  // effect: a pick made after the list is ready lands before that paint.
+  const launchClickedJobId = useLaunchClickedJobId();
+  useLayoutEffect(() => {
+    if (launchClickedJobId === null) return;
+    context.onSelectDiscoveryJob(launchClickedJobId);
+    if (!isHydrating) forgetLaunchClickedJob();
+  }, [context.onSelectDiscoveryJob, isHydrating, launchClickedJobId]);
+
   const handleSelectJob = useCallback(
     (jobId: string) => {
       context.onSelectDiscoveryJob(jobId);
@@ -1396,7 +1410,7 @@ export function JobFinderDiscoveryRoute() {
       <JobFinderHydrationGate
         collections={["discovery_jobs"]}
         launchView={
-          launchPage ? <FindJobsLaunch page={launchPage} /> : undefined
+          launchPage ? <FindJobsLaunch {...launchPage} /> : undefined
         }
         workspace={context.workspace}
       >

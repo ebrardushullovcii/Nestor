@@ -4,8 +4,10 @@ import {
   type WorkspaceJobListRow,
   type WorkspaceStartupContext,
 } from "@nestor/contracts";
+import { useSyncExternalStore } from "react";
 import { SelectableRow } from "@renderer/components/ui";
 import { cn } from "@renderer/lib/cn";
+import { readInspectedSelectionId } from "@renderer/pages/use-job-finder-page-controller-helpers";
 import { LIST_DETAIL_COLUMNS_CLASS } from "../../components/list-detail-columns";
 import {
   jobFinderListRegionClassName,
@@ -37,10 +39,14 @@ import { resolveDiscoveryListOpensWide } from "./discovery-screen";
  * leading band of judged matches (no band heading above it, every score
  * printed as is). The read-path comparison on both owner-size copies matched
  * that page row for row. Otherwise the screen keeps its loading state.
+ *
+ * The open row is the one the person clicks here, else the job Find jobs
+ * remembers from last time, else the first. A remembered job on a later page
+ * would open that page, so then this page is not shown either.
  */
 export function selectFindJobsLaunchPage(
   reads: Pick<LaunchReads, "context" | "findJobs">,
-): QueryJobListResult | null {
+): FindJobsLaunchPage | null {
   const { context, findJobs } = reads;
   if (!context || !findJobs) return null;
   if (readPersistedSort().field !== "fit") return null;
@@ -51,7 +57,48 @@ export function selectFindJobsLaunchPage(
   const leadingMatches = page.rows.every(
     (row) => row.resultGroup === "matches" && row.judged,
   );
-  return leadingMatches ? page : null;
+  if (!leadingMatches) return null;
+  const remembered = readInspectedSelectionId({
+    storage: window.localStorage,
+    surface: "discovery",
+    campaignId: context.activeCampaignId,
+  });
+  if (remembered === null) return { page, openJobId: page.rows[0]!.id };
+  return page.rows.some((row) => row.id === remembered)
+    ? { page, openJobId: remembered }
+    : null;
+}
+
+export interface FindJobsLaunchPage {
+  page: QueryJobListResult;
+  /** The row open in the details pane before any click. */
+  openJobId: string;
+}
+
+// The row clicked on the launch page. Find jobs' route selects it as soon as
+// it is mounted and forgets it once the full list has landed, so a later
+// visit never reopens it.
+let clickedJobId: string | null = null;
+const clickListeners = new Set<() => void>();
+
+function setClickedJobId(jobId: string | null): void {
+  if (clickedJobId === jobId) return;
+  clickedJobId = jobId;
+  for (const listener of clickListeners) listener();
+}
+
+function subscribeClickedJob(listener: () => void): () => void {
+  clickListeners.add(listener);
+  return () => clickListeners.delete(listener);
+}
+
+export function useLaunchClickedJobId(): string | null {
+  return useSyncExternalStore(subscribeClickedJob, () => clickedJobId);
+}
+
+/** Called by Find jobs once its full list is on screen. */
+export function forgetLaunchClickedJob(): void {
+  setClickedJobId(null);
 }
 
 function opensWide(context: WorkspaceStartupContext): boolean {
@@ -72,12 +119,17 @@ function fitLabel(row: WorkspaceJobListRow): string {
 
 /**
  * Same frame as the loaded screen: header, the search bar's space, the list
- * with its rows where the real rows land, and the details pane. Rows cannot
- * be acted on yet; the full screen replaces this in place.
+ * with its rows where the real rows land, and the details pane. A click on a
+ * row opens it here and Find jobs keeps it open when the full screen replaces
+ * this in place; ticks and actions wait for the full list.
  */
-export function FindJobsLaunch(props: { page: QueryJobListResult }) {
+export function FindJobsLaunch(props: FindJobsLaunchPage) {
   const previousVisitEnd = readVisit("discovery");
-  const first = props.page.rows[0]!;
+  const clicked = useLaunchClickedJobId();
+  const open =
+    props.page.rows.find((row) => row.id === clicked) ??
+    props.page.rows.find((row) => row.id === props.openJobId) ??
+    props.page.rows[0]!;
   return (
     <LockedScreenLayout
       contentClassName="xl:overflow-hidden"
@@ -123,12 +175,12 @@ export function FindJobsLaunch(props: { page: QueryJobListResult }) {
               role="region"
             >
               <ul className={cn(jobFinderListRegionClassName, "xl:min-h-full")}>
-                {props.page.rows.map((row, index) => (
+                {props.page.rows.map((row) => (
                   <FindJobsLaunchRow
                     isNew={isNewSinceVisit(row, previousVisitEnd)}
                     key={row.id}
                     row={row}
-                    selected={index === 0}
+                    selected={row.id === open.id}
                   />
                 ))}
               </ul>
@@ -142,7 +194,7 @@ export function FindJobsLaunch(props: { page: QueryJobListResult }) {
           className="surface-panel-shell hidden min-h-0 min-w-0 rounded-(--radius-panel) border border-(--surface-panel-border) p-6 xl:block"
         >
           <h2 className="min-w-0 break-words text-(length:--text-section-title) font-semibold tracking-[-0.03em] text-(--text-headline)">
-            {first.title}
+            {open.title}
           </h2>
         </section>
       </div>
@@ -175,9 +227,9 @@ function FindJobsLaunchRow(props: {
         onToggle={() => undefined}
       />
       <SelectableRow
-        aria-disabled="true"
         className={jobFinderListRowClassName}
         data-launch-job-id={row.id}
+        onClick={() => setClickedJobId(row.id)}
         selected={props.selected}
       >
         <div className={jobFinderListRowLinesClassName}>

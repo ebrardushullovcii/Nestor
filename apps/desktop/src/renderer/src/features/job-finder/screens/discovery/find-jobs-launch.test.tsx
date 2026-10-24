@@ -1,18 +1,43 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type {
   QueryJobListResult,
   WorkspaceJobListRow,
   WorkspaceStartupContext,
 } from "@nestor/contracts";
-import { FindJobsLaunch, selectFindJobsLaunchPage } from "./find-jobs-launch";
+import {
+  FindJobsLaunch,
+  forgetLaunchClickedJob,
+  selectFindJobsLaunchPage,
+  useLaunchClickedJobId,
+} from "./find-jobs-launch";
+import { writeInspectedSelectionId } from "@renderer/pages/use-job-finder-page-controller-helpers";
 
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  rememberOpenJob(null);
+  forgetLaunchClickedJob();
 });
+
+// Through the selection's own writer: it caches what it last read or wrote.
+function rememberOpenJob(jobId: string | null) {
+  writeInspectedSelectionId({
+    storage: localStorage,
+    surface: "discovery",
+    campaignId: "plan_1",
+    jobId,
+  });
+}
 
 function row(
   id: string,
@@ -82,14 +107,26 @@ describe("Find jobs while the workspace loads", () => {
     const wide = page([row("b")]);
     expect(
       selectFindJobsLaunchPage({ context, findJobs: { focused, wide } }),
-    ).toBe(focused);
+    ).toEqual({ page: focused, openJobId: "a" });
     const scale = {
       ...context,
       campaigns: [{ id: "plan_1", mode: "scale" }],
     } as unknown as WorkspaceStartupContext;
     expect(
       selectFindJobsLaunchPage({ context: scale, findJobs: { focused, wide } }),
-    ).toBe(wide);
+    ).toEqual({ page: wide, openJobId: "b" });
+  });
+
+  it("opens the job Find jobs remembers, and stays away if it is on another page", () => {
+    const rows = page([row("a"), row("b")]);
+    const findJobs = { focused: rows, wide: rows };
+    rememberOpenJob("b");
+    expect(selectFindJobsLaunchPage({ context, findJobs })).toEqual({
+      page: rows,
+      openJobId: "b",
+    });
+    rememberOpenJob("z");
+    expect(selectFindJobsLaunchPage({ context, findJobs })).toBeNull();
   });
 
   it("stays on the loading state when it cannot be the same page", () => {
@@ -149,6 +186,7 @@ describe("Find jobs while the workspace loads", () => {
   it("shows each row's title, employer and fit with the first one open", () => {
     render(
       <FindJobsLaunch
+        openJobId="a"
         page={page([
           row("a"),
           row("b", { score: 64, scoreIsUpperBound: true }),
@@ -167,5 +205,22 @@ describe("Find jobs while the workspace loads", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: "Backend Engineer a" }),
     ).toBeTruthy();
+  });
+
+  it("opens a clicked row at once and hands it to Find jobs", () => {
+    const clicked = renderHook(() => useLaunchClickedJobId());
+    render(<FindJobsLaunch openJobId="a" page={page([row("a"), row("b")])} />);
+    const second = document.querySelector('[data-launch-job-id="b"]')!;
+    fireEvent.click(second);
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Backend Engineer b" }),
+    ).toBeTruthy();
+    expect(second.getAttribute("data-selected")).toBe("true");
+    expect(
+      document
+        .querySelector('[data-launch-job-id="a"]')!
+        .getAttribute("data-selected"),
+    ).not.toBe("true");
+    expect(clicked.result.current).toBe("b");
   });
 });
