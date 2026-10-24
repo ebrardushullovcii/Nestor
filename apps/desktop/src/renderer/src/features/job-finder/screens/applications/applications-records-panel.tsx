@@ -621,11 +621,15 @@ export function ApplicationsRecordsPanel({
               isApplicationTrackedAsSentByPerson(record.crm) ||
               isApplicationWithdrawnByPerson(record.crm)
                 ? nextTrackerStepLabel(record)
-                : preparationNextStep;
+                : queueHold?.waitingForChoice
+                  ? "Choose in Safeguards"
+                  : preparationNextStep;
             // A form that closed before a send was seen is not a failed
             // application, whatever stage the run left on the tracker.
             const rowStageLabel =
-              applyState?.kind === "applied" || applyState?.formClosed
+              applyState?.kind === "applied" ||
+              applyState?.formClosed ||
+              queueHold
                 ? stage.label
                 : applicationCrmStageLabelForView(record, customStages);
             const formAction =
