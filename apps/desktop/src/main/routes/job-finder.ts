@@ -1302,7 +1302,12 @@ export function registerJobFinderRouteHandlers(
     const result = await executeJobFinderAction(name, value, { service: await getJobFinderWorkspaceService() });
     if (["save-settings", "update-application-defaults", "set-activity-control"].includes(name)) applyQueueRunner?.nudge();
     if (JOB_FINDER_ACTIONS[name].safety !== "read") publishJobFinderWorkspaceUpdate(event.sender);
-    return JOB_FINDER_ACTIONS[name].safety === "read" || typeof result === "boolean"
+    // Some changes answer with their own record (application details, a
+    // recommendation); only a workspace snapshot becomes a sync response.
+    const isWorkspaceSnapshot =
+      typeof result === "object" && result !== null &&
+      (result as { module?: unknown }).module === "job-finder";
+    return JOB_FINDER_ACTIONS[name].safety === "read" || !isWorkspaceSnapshot
       ? result : workspaceMutationResponse(event.sender, result as JobFinderWorkspaceSnapshot);
   };
   for (const name of ["save-profile","save-search-preferences","save-campaign","save-profile-setup-state","save-settings","update-application-defaults","update-workspace-behavior","update-ai-behavior","update-appearance-theme","update-tracker-crm","save-resume-draft","restore-resume-draft-revision","undo-resume-assistant-edit","apply-resume-patch"] as const) {
