@@ -2339,16 +2339,19 @@ export function createWorkspaceDiscoveryMethods(
       LISTING_DETAIL_READS_PER_RUN,
       OLDER_LISTING_READS_PER_SOURCE * runSourceCount,
     );
-    const olderReadCandidates = allJobs()
-      .filter(
-        (job) =>
-          belongsToSearchPlan(job) &&
-          jobNeedsListingDetail(job) &&
-          canReadListingUrlNow(job.canonicalUrl),
-      )
+    const olderJobs = allJobs();
+    const pickedOlderJobIds = new Set<string>();
+    const olderEligible = await mapInTurns(olderJobs, (job) => {
+      const eligible = belongsToSearchPlan(job) &&
+        jobNeedsListingDetail(job) && canReadListingUrlNow(job.canonicalUrl);
+      if (eligible && personPickedJob(job)) pickedOlderJobIds.add(job.id);
+      return eligible;
+    });
+    const olderReadCandidates = olderJobs
+      .filter((_job, index) => olderEligible[index])
       .sort(
         (left, right) =>
-          Number(personPickedJob(right)) - Number(personPickedJob(left)) ||
+          Number(pickedOlderJobIds.has(right.id)) - Number(pickedOlderJobIds.has(left.id)) ||
           compareMatchRecommendationPriority(
             left.matchAssessment,
             right.matchAssessment,
@@ -4297,19 +4300,22 @@ export function createWorkspaceDiscoveryMethods(
         0,
         LISTING_DETAIL_READS_PER_RUN - listingReadAhead.readsStarted,
       );
-      const enrichmentCandidates = mergeSavedJobs(
+      const enrichmentJobs = mergeSavedJobs(
         workingSavedJobs,
         workingPendingJobs,
-      )
-        .filter(
-          (job) =>
-            belongsToSearchPlan(job) &&
-            jobNeedsListingDetail(job) &&
-            canReadListingUrl(job.canonicalUrl),
-        )
+      );
+      const pickedEnrichmentJobIds = new Set<string>();
+      const enrichmentEligible = await mapInTurns(enrichmentJobs, (job) => {
+        const eligible = belongsToSearchPlan(job) &&
+          jobNeedsListingDetail(job) && canReadListingUrl(job.canonicalUrl);
+        if (eligible && personPickedJob(job)) pickedEnrichmentJobIds.add(job.id);
+        return eligible;
+      });
+      const enrichmentCandidates = enrichmentJobs
+        .filter((_job, index) => enrichmentEligible[index])
         .sort(
           (left, right) =>
-            Number(personPickedJob(right)) - Number(personPickedJob(left)) ||
+            Number(pickedEnrichmentJobIds.has(right.id)) - Number(pickedEnrichmentJobIds.has(left.id)) ||
             Number(runRetainedJobIds.has(right.id)) -
               Number(runRetainedJobIds.has(left.id)) ||
             compareMatchRecommendationPriority(
