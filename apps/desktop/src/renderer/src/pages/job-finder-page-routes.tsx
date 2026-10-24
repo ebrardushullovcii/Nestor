@@ -1693,12 +1693,21 @@ function JobFinderReviewQueueRouteContent() {
     requestedItem,
   ]);
 
+  // A resume shortlisting asked for is being written too (ADR 0072): the
+  // row says so and nothing offers to write it a second time.
+  const shortlistResumeJobIds =
+    context.workspace.intelligence.resumeOnShortlistJobIds;
+  const writingOnShortlist = useMemo(
+    () => new Set(shortlistResumeJobIds ?? []),
+    [shortlistResumeJobIds],
+  );
   // One identity while nothing starts or finishes, so the list's per-job
   // statuses are not worked out again on every render.
   const isReviewJobPending = useCallback(
     (jobId: string) =>
+      writingOnShortlist.has(jobId) ||
       context.isPending(jobFinderPendingActions.resumeJob(jobId)),
-    [context.isPending],
+    [context.isPending, writingOnShortlist],
   );
   const handleSelectItem = useCallback(
     (jobId: string) => {

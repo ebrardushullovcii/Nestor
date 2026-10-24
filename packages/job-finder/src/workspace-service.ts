@@ -281,6 +281,7 @@ export function createJobFinderWorkspaceService(
     onActivityControlChanged,
     onDetachedApplyRunFinished,
     onResumeEvidenceFinished,
+    onShortlistResumeChanged,
     onListingAssessmentFinished,
     onSavedJobsRescored,
     onExplicitUserStart,
@@ -488,6 +489,7 @@ export function createJobFinderWorkspaceService(
     activeResumeVisionRunIds,
     activeResumeEvidenceRunIds,
     ...(onResumeEvidenceFinished ? { onResumeEvidenceFinished } : {}),
+    ...(onShortlistResumeChanged ? { onShortlistResumeChanged } : {}),
     getWorkspaceSnapshot: () =>
       Promise.reject(new Error("Workspace snapshot method not initialized.")),
     readWorkspaceSnapshot: () =>
@@ -1532,6 +1534,7 @@ export function createJobFinderWorkspaceService(
     });
     await repository.saveActivityControl(control);
     await onActivityControlChanged?.(control);
+    applicationMethods.resumeOnShortlistPauseChanged(control.paused);
     // Home's Pause new work lets the current application reach a safe
     // boundary. The queue waits between jobs and Resume continues that same
     // run. Browser takeover and shutdown still abort immediately.
@@ -1963,6 +1966,8 @@ export function createJobFinderWorkspaceService(
       trackWorkspaceOperation("shortlisting jobs", () =>
         applicationMethods.queueJobsForReview!(jobIds),
       ),
+    continueResumesOnShortlist: () =>
+      applicationMethods.continueResumesOnShortlist(),
     recordApplicationsSentByPerson: () =>
       recordApplicationsSentByPerson(context),
     judgeUnjudgedJobs: () => {

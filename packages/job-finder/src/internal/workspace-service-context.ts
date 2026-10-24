@@ -89,6 +89,7 @@ export interface WorkspaceServiceContext {
   isWorkspaceClosing?: () => boolean;
   fitJudgmentProgressRef?: MutableRef<FitJudgmentProgress | null>;
   onListingAssessmentFinished?: () => void;
+  onShortlistResumeChanged?: () => void;
   onSavedJobsRescored?: () => void;
   activeDiscoveryAbortControllerRef: MutableRef<AbortController | null>;
   /**

@@ -925,6 +925,11 @@ export const JobFinderSettingsSchema = z.object({
    * it): read it through `collapsesSideMenuWithAssistant`.
    */
   collapseSideMenuWithAssistant: z.boolean().optional(),
+  /**
+   * Start writing a job's resume as soon as it is shortlisted (ADR 0072).
+   * Absent means on: read it through `writesResumesOnShortlist`.
+   */
+  writeResumesOnShortlist: z.boolean().optional(),
   humanReviewRequired: z.boolean(),
   allowAutoSubmitOverride: z.boolean(),
   /** The person's ordinary default for new application runs. */
@@ -942,6 +947,13 @@ export const JobFinderSettingsSchema = z.object({
   aiBehavior: AiBehaviorPreferenceSchema.default({}).optional(),
 });
 export type JobFinderSettings = z.infer<typeof JobFinderSettingsSchema>;
+
+/** On unless the person turned it off. */
+export function writesResumesOnShortlist(
+  settings: Pick<JobFinderSettings, "writeResumesOnShortlist">,
+): boolean {
+  return settings.writeResumesOnShortlist !== false;
+}
 
 /** On unless the person turned it off. */
 export function collapsesSideMenuWithAssistant(
@@ -1995,6 +2007,7 @@ export const UpdateWorkspaceBehaviorInputSchema = z.object({
   keepSessionAlive: z.boolean().optional(),
   discoveryOnly: z.boolean().optional(),
   collapseSideMenuWithAssistant: z.boolean().optional(),
+  writeResumesOnShortlist: z.boolean().optional(),
 });
 export type UpdateWorkspaceBehaviorInput = z.infer<
   typeof UpdateWorkspaceBehaviorInputSchema

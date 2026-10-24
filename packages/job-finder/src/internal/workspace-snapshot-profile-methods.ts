@@ -2991,6 +2991,7 @@ export function createWorkspaceSnapshotProfileMethods(
         discoveryOnly: parsedInput.discoveryOnly,
         collapseSideMenuWithAssistant:
           parsedInput.collapseSideMenuWithAssistant,
+        writeResumesOnShortlist: parsedInput.writeResumesOnShortlist,
       });
       await ctx.repository.commitSettingsUpdate((current) =>
         JobFinderSettingsSchema.parse({ ...current, ...behaviorFields }),

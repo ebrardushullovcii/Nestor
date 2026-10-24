@@ -4,6 +4,7 @@ import { SETTINGS_AI_JOB_SEARCH_ANCHOR_ID } from "../../lib/job-finder-route-hre
 import {
   AiBehaviorPreferenceSchema,
   CoverLetterPreferenceSchema,
+  writesResumesOnShortlist,
   type AiBehaviorPreference,
   type ApplicationAttestationKind,
   type CoverLetterLength,
@@ -17,6 +18,7 @@ import {
   type ProfileAssistantReplyStyle,
   type ResumeApproach,
   type UpdateAiBehaviorInput,
+  type UpdateWorkspaceBehaviorInput,
   type WrittenAnswerLength,
 } from "@nestor/contracts";
 import { Field, FieldLabel } from "@renderer/components/ui/field";
@@ -301,6 +303,10 @@ interface SettingsAiBehaviorSectionProps {
     input: UpdateAiBehaviorInput,
     options?: { undo?: () => void },
   ) => Promise<boolean | void> | void;
+  /** Saves a switch at once, like the other switches in Settings. */
+  onUpdateWorkspaceBehavior?: (
+    input: UpdateWorkspaceBehaviorInput,
+  ) => Promise<boolean | void> | void;
   searchPreferences: Pick<JobSearchPreferences, "tailoringMode">;
   settings: JobFinderSettings;
 }
@@ -308,9 +314,36 @@ interface SettingsAiBehaviorSectionProps {
 export function SettingsAiBehaviorSection({
   onSettingsDraftEdited,
   onUpdateAiBehavior,
+  onUpdateWorkspaceBehavior,
   searchPreferences,
   settings,
 }: SettingsAiBehaviorSectionProps) {
+  const savedWritesOnShortlist = writesResumesOnShortlist(settings);
+  const [writeOnShortlist, setWriteOnShortlist] = useState(
+    savedWritesOnShortlist,
+  );
+  const [writeOnShortlistFailed, setWriteOnShortlistFailed] = useState(false);
+  useEffect(() => {
+    setWriteOnShortlist(savedWritesOnShortlist);
+  }, [savedWritesOnShortlist]);
+  // A switch acts when flipped and goes back if the save fails.
+  const updateWriteOnShortlist = (checked: boolean) => {
+    setWriteOnShortlist(checked);
+    setWriteOnShortlistFailed(false);
+    const revert = () => {
+      setWriteOnShortlist(!checked);
+      setWriteOnShortlistFailed(true);
+    };
+    try {
+      void Promise.resolve(
+        onUpdateWorkspaceBehavior?.({ writeResumesOnShortlist: checked }),
+      ).then((saved) => {
+        if (saved === false) revert();
+      }, revert);
+    } catch {
+      revert();
+    }
+  };
   const toneId = useId();
   const lengthId = useId();
   const languageId = useId();
@@ -593,6 +626,19 @@ export function SettingsAiBehaviorSection({
           <p className="text-sm leading-6 text-(--warning-text)" role="status">
             {STRONG_REWRITE_WARNING}
           </p>
+        ) : null}
+        {onUpdateWorkspaceBehavior ? (
+          <ToggleField
+            checked={writeOnShortlist}
+            description="A job's resume starts writing at this level as soon as you shortlist it, so it is ready when you open it."
+            hint={
+              writeOnShortlistFailed
+                ? "This was not saved. Try the switch again."
+                : "Off: create resumes yourself from Shortlisted."
+            }
+            label="Write resumes when I shortlist"
+            onCheckedChange={updateWriteOnShortlist}
+          />
         ) : null}
       </article>
 

@@ -433,6 +433,8 @@ export interface JobFinderWorkspaceService {
   queueJobForReview(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
   /** One row-local shortlist commit, without constructing a workspace per job. */
   queueJobsForReview?(jobIds: readonly string[]): Promise<void>;
+  /** Starts resumes that shortlisting asked for and a restart left waiting. */
+  continueResumesOnShortlist?(): Promise<void>;
   saveResumeBatchCheckpoint(checkpoint: ResumeBatchCheckpoint): Promise<void>;
   setJobResumeApplicationMode(
     jobId: string,
@@ -972,6 +974,8 @@ export interface CreateJobFinderWorkspaceServiceOptions {
   /** Publishes the terminal snapshot of a queue resumed after restart. */
   onDetachedApplyRunFinished?: () => void;
   onResumeEvidenceFinished?: () => void;
+  /** A resume started by shortlisting was queued, written or withdrawn. */
+  onShortlistResumeChanged?: () => void;
   onListingAssessmentFinished?: () => void;
   /** Saved jobs were rescored in the background after a profile or goal save. */
   onSavedJobsRescored?: () => void;
