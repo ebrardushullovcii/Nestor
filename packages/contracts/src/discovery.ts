@@ -2782,6 +2782,15 @@ export const DiscoveryRunRecordSchema = z.object({
 });
 export type DiscoveryRunRecord = z.infer<typeof DiscoveryRunRecordSchema>;
 
+/** Recovery checks phases before loading the canonical run and its evidence. */
+export const DiscoveryRunStateProjectionSchema = DiscoveryRunRecordSchema.pick({
+  state: true,
+  runPhase: true,
+}).extend({ isActive: z.boolean() });
+export type DiscoveryRunStateProjection = z.infer<
+  typeof DiscoveryRunStateProjectionSchema
+>;
+
 /**
  * The run's phase, deriving an honest value for records written before the
  * field existed: a run still marked running is in progress, and any terminal

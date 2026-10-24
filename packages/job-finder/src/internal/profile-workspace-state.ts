@@ -122,13 +122,13 @@ export async function deriveAndPersistProfileSetupState(
       searchPreferences: input.searchPreferences,
     }),
   });
-  const discoveryState = await ctx.repository.readDiscoveryDisplayProjection();
+  const discoveryRuns = await ctx.repository.readDiscoveryRunStates();
   const derivedState = deriveProfileSetupState(
     input.profile,
     input.searchPreferences,
     {
       currentState: nextState,
-      hasRunSearch: discoveryState.recentRuns.length > 0,
+      hasRunSearch: discoveryRuns.some((run) => !run.isActive),
       now,
     },
   );

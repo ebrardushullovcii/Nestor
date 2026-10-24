@@ -62,7 +62,10 @@ import {
 
 import { cloneValue } from "./internal/state";
 import { freezeProjection } from "./internal/saved-job-projection";
-import { toDiscoveryDisplayProjection } from "./internal/discovery-display-projection";
+import {
+  toDiscoveryDisplayProjection,
+  toDiscoveryBootstrapProjection,
+} from "./internal/discovery-display-projection";
 import { createApplicationAnswerSnapshotRepositoryMethods } from "./application-answer-snapshot-repository";
 import { createApplicationAuthorityRepositoryMethods } from "./application-authority-repository";
 import {
@@ -2476,6 +2479,25 @@ export function createInMemoryJobFinderRepository(
           error instanceof Error ? error : new Error(String(error)),
         );
       }
+    },
+    readDiscoveryBootstrapProjection() {
+      return Promise.resolve(toDiscoveryBootstrapProjection(state.discovery));
+    },
+    readDiscoveryRunStates() {
+      return Promise.resolve(
+        [state.discovery.activeRun, ...state.discovery.recentRuns].flatMap(
+          (run, index) =>
+            run
+              ? [
+                  {
+                    state: run.state,
+                    runPhase: run.runPhase,
+                    isActive: index === 0,
+                  },
+                ]
+              : [],
+        ),
+      );
     },
     readDiscoveryDisplayProjection() {
       if (

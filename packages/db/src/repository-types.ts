@@ -21,6 +21,8 @@ import type {
   SavedJobSightingPatch,
   SavedJobPlanAssessmentPatch,
   JobFinderDiscoveryState,
+  DiscoveryBootstrapState,
+  DiscoveryRunStateProjection,
   JobFinderActivityControl,
   ApplyQueue,
   JobFinderRepositoryState,
@@ -705,6 +707,8 @@ export interface JobFinderRepository
    * use getDiscoveryState or the transaction-current commit updater instead.
    */
   readDiscoveryDisplayProjection(): Promise<DiscoveryDisplayProjection>;
+  readDiscoveryBootstrapProjection(): Promise<DiscoveryBootstrapState>;
+  readDiscoveryRunStates(): Promise<readonly DiscoveryRunStateProjection[]>;
   /**
    * Atomically applies a synchronous transform to the currently stored
    * discovery state. The updater borrows frozen canonical rows and must return

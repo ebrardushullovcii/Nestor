@@ -5,12 +5,7 @@ import {
   type DiscoveryRunRecord,
   type JobFinderDiscoveryState,
 } from "@nestor/contracts";
-import type { JobFinderRepository } from "@nestor/db";
 import { describe, expect, it } from "vitest";
-
-type DiscoveryDisplayProjection = Awaited<
-  ReturnType<JobFinderRepository["readDiscoveryDisplayProjection"]>
->;
 
 import { recoverInterruptedDiscoveryRuns } from "./recover-interrupted-discovery-runs";
 
@@ -46,8 +41,20 @@ function repositoryOver(state: JobFinderDiscoveryState) {
   const repository = {
     commits: 0,
     read: () => current,
-    readDiscoveryDisplayProjection: () =>
-      Promise.resolve(current as DiscoveryDisplayProjection),
+    readDiscoveryRunStates: () =>
+      Promise.resolve(
+        [current.activeRun, ...current.recentRuns].flatMap((run, index) =>
+          run
+            ? [
+                {
+                  state: run.state,
+                  runPhase: run.runPhase,
+                  isActive: index === 0,
+                },
+              ]
+            : [],
+        ),
+      ),
     commitDiscoveryStateUpdate: (
       update: (value: JobFinderDiscoveryState) => JobFinderDiscoveryState,
     ) => {

@@ -147,6 +147,8 @@ import { createDiscoveryDisplayProjectionReader } from "./internal/discovery-dis
 import {
   createDiscoveryStorage,
   replaceDiscoveryStorage,
+  readDiscoveryBootstrapStorage,
+  readDiscoveryRunStates,
 } from "./internal/discovery-storage";
 import { createIntelligenceProjectionReader } from "./internal/intelligence-projection";
 import { createDisplayCollectionsReader } from "./internal/display-collections";
@@ -432,8 +434,6 @@ export async function createFileJobFinderRepository(
     }
 
     validateWorkspaceSettingsFile(database);
-    // Complete interrupted approval folds before serving the workspace.
-    await createResumeApprovalFolder(database).flush();
     context = createFileRepositoryContext({
       database,
       filePath: options.filePath,
@@ -453,6 +453,9 @@ export async function createFileJobFinderRepository(
       readDisplayCollections.prepareResumeStateFold,
       readDisplayCollections.draftHasApproval,
     );
+    // Every canonical and display read already composes pending approval
+    // metadata. Fold its bodies in the background; close still flushes them.
+    approvalFolder.schedule();
     const readDiscoveryDisplay = createDiscoveryDisplayProjectionReader(
       database,
       normalizedSeed.discovery,
@@ -2500,6 +2503,14 @@ export async function createFileJobFinderRepository(
       }
     },
     readDiscoveryDisplayProjection,
+    readDiscoveryBootstrapProjection() {
+      return Promise.resolve(
+        readDiscoveryBootstrapStorage(database, normalizedSeed.discovery),
+      );
+    },
+    readDiscoveryRunStates() {
+      return Promise.resolve(readDiscoveryRunStates(database));
+    },
     getDiscoveryState() {
       return Promise.resolve(cloneValue(discoveryStorage.read()));
     },

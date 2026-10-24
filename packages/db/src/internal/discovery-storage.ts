@@ -6,6 +6,8 @@ import {
   DiscoveryActivityEventSchema,
   DiscoveryLedgerEntrySchema,
   DiscoveryRunRecordSchema,
+  DiscoveryBootstrapStateSchema,
+  DiscoveryRunStateProjectionSchema,
   DiscoveryTargetExecutionSchema,
   JobFinderDiscoveryStateSchema,
   SavedJobSchema,
@@ -15,9 +17,12 @@ import {
   type SavedJob,
   type BrowserAgentRunCheckpoint,
   type JobFinderDiscoveryState,
+  type DiscoveryBootstrapState,
+  type DiscoveryRunStateProjection,
 } from "@nestor/contracts";
 import { normalizeLegacyDiscoveryState } from "./legacy";
 import { adoptDiscoveryLedgerIndex, discoveryLedgerPatches } from "./discovery-ledger-patch";
+import { parsePersistedRowValue } from "./state";
 
 // The singleton contains only the small, frequently changed discovery fields.
 // Run activity, target execution/checkpoints, ledger and pending jobs are rows.
@@ -449,6 +454,69 @@ function readRun(database: DatabaseSync, row: { id: unknown; value: unknown; pro
   const run = frozen({ ...metadata, targetExecutions: executions, activity });
   if (cache && !includeCheckpoints) (cache.runs ??= new Map()).set(id, { raw, progress: progressText, run });
   return run;
+}
+
+/** These readers run after the required discovery schema migrations. */
+export function readDiscoveryRunStates(
+  database: DatabaseSync,
+): readonly DiscoveryRunStateProjection[] {
+  return database
+    .prepare(
+      `SELECT id, active, json_object(
+    'state', json_extract(progress, '$.state'),
+    'runPhase', json_extract(progress, '$.runPhase')) AS value
+    FROM discovery_runs ORDER BY position`,
+    )
+    .all()
+    .map((row) => ({
+      ...parsePersistedRowValue({
+        tableName: "discovery_runs",
+        rowId: String(row.id),
+        rawValue: String(row.value),
+        schema: DiscoveryRunStateProjectionSchema.omit({ isActive: true }),
+      }),
+      isActive: Number(row.active) === 1,
+    }));
+}
+
+export function readDiscoveryBootstrapStorage(
+  database: DatabaseSync,
+  fallback: JobFinderDiscoveryState,
+): DiscoveryBootstrapState {
+  const row = database
+    .prepare(
+      `SELECT json_object(
+    'sessions', json_extract(value, '$.sessions'),
+    'runState', json_extract(value, '$.runState'),
+    'activeSourceDebugRun', json_extract(value, '$.activeSourceDebugRun')) AS value
+    FROM singleton_state WHERE key = 'discovery_state'`,
+    )
+    .get();
+  const active = database
+    .prepare(
+      "SELECT id, value, progress FROM discovery_runs WHERE active = 1 ORDER BY position LIMIT 1",
+    )
+    .get();
+  const small = row
+    ? parsePersistedRowValue({
+        tableName: "singleton_state",
+        rowId: "discovery_state",
+        rawValue: String(row.value),
+        schema: DiscoveryBootstrapStateSchema.omit({ activeRun: true }),
+      })
+    : DiscoveryBootstrapStateSchema.parse(fallback);
+  return frozen({
+    sessions: small.sessions,
+    runState: small.runState,
+    activeSourceDebugRun: small.activeSourceDebugRun,
+    activeRun: active
+      ? readRun(
+          database,
+          { id: active.id, value: active.value, progress: active.progress },
+          false,
+        )
+      : null,
+  });
 }
 
 export function readDiscoveryStorage(database: DatabaseSync, fallback: JobFinderDiscoveryState, includeCheckpoints = true, cache?: DiscoveryDisplayRowCache): JobFinderDiscoveryState {

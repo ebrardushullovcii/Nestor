@@ -2153,7 +2153,7 @@ export function createWorkspaceSnapshotProfileMethods(
     ] = await Promise.all([
       getCurrentSetupStateContext(),
       ctx.repository.getSettings(),
-      ctx.repository.readDiscoveryDisplayProjection(),
+      ctx.repository.readDiscoveryBootstrapProjection(),
       ctx.repository.getCampaignState(),
       ctx.repository.listUserActionRequests(),
       ctx.repository.getActivityControl(),
@@ -2223,12 +2223,10 @@ export function createWorkspaceSnapshotProfileMethods(
       applyRuns: [],
       userActionRequests: bootstrapUserActionRequests,
       discovery: {
-        ...discovery,
+        runState: discovery.runState,
         activeRun: discovery.activeRun,
         recentRuns: [],
         activeSourceDebugRun: discovery.activeSourceDebugRun,
-        recentSourceDebugRuns: [],
-        sessions: discovery.sessions,
       },
       searchPreferences: bootstrapSearchPreferences,
     });

@@ -153,6 +153,43 @@ test("malformed discovery rows fail without disclosing their contents", async ()
   await expect(read()).rejects.toThrow("Corrupted persisted row");
 });
 
+test("bootstrap and recovery checks do not load deferred history, pending jobs or ledger", async () => {
+  const temp = await createTempRepository("nestor-discovery-bootstrap-");
+  cleanup.push(temp.cleanup);
+  const repo = await temp.createRepository();
+  cleanup.push(() => repo.close());
+  const state = discoveryFixture();
+  await repo.commitDiscoveryStateUpdate(() => state);
+  const raw = new DatabaseSync(temp.filePath);
+  cleanup.push(() => raw.close());
+  for (const row of raw
+    .prepare(
+      `SELECT name FROM sqlite_master WHERE type='trigger'
+    AND tbl_name IN ('discovery_runs','discovery_ledger','discovery_pending_jobs')`,
+    )
+    .all())
+    raw.exec(`DROP TRIGGER "${String(row.name).replaceAll('"', '""')}"`);
+  raw.exec("DROP INDEX workspace_ledger_activity_idx");
+  // Deferred corruption must still fail a canonical read, but must not force
+  // the shell or phase check to read unrelated history and listing bodies.
+  raw.exec(`UPDATE discovery_runs SET value='private-invalid-history' WHERE active=0;
+    UPDATE discovery_ledger SET value='private-invalid-ledger';
+    UPDATE discovery_pending_jobs SET value='private-invalid-pending'`);
+  const bootstrap = await repo.readDiscoveryBootstrapProjection();
+  expect(bootstrap.activeRun?.id).toBe(state.activeRun?.id);
+  expect(bootstrap.activeRun?.targetExecutions[0]?.agentCheckpoint).toBeNull();
+  expect(bootstrap).not.toHaveProperty("recentRuns");
+  expect(bootstrap).not.toHaveProperty("discoveryLedger");
+  expect(bootstrap).not.toHaveProperty("pendingDiscoveryJobs");
+  expect(await repo.readDiscoveryRunStates()).toEqual([
+    { state: "running", runPhase: null, isActive: true },
+    { state: "failed", runPhase: null, isActive: false },
+  ]);
+  await expect(async () => repo.getDiscoveryState()).rejects.toThrow(
+    "Corrupted persisted row",
+  );
+});
+
 for (const storage of ["memory", "file"] as const) {
   describe(`${storage} discovery display/canonical parity`, () => {
     async function repository(): Promise<JobFinderRepository> {
@@ -171,6 +208,17 @@ for (const storage of ["memory", "file"] as const) {
       await repo.commitDiscoveryStateUpdate(() => canonical);
       const display = await repo.readDiscoveryDisplayProjection();
       expect(await repo.readDiscoveryDisplayProjection()).toBe(display);
+      const bootstrap = await repo.readDiscoveryBootstrapProjection();
+      expect(bootstrap).toEqual({
+        sessions: display.sessions,
+        runState: display.runState,
+        activeRun: display.activeRun,
+        activeSourceDebugRun: display.activeSourceDebugRun,
+      });
+      expect(await repo.readDiscoveryRunStates()).toEqual([
+        { state: "running", runPhase: null, isActive: true },
+        { state: "failed", runPhase: null, isActive: false },
+      ]);
       expect(
         display.activeRun?.targetExecutions[0]?.agentCheckpoint,
       ).toBeNull();

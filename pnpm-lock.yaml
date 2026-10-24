@@ -274,6 +274,9 @@ importers:
       '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@nestor/core':
+        specifier: workspace:*
+        version: link:../core
       '@nestor/job-list-policy':
         specifier: workspace:*
         version: link:../job-list-policy
