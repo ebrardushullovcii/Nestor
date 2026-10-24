@@ -18,13 +18,12 @@ export function withPlanAssessment<T extends SavedJob>(
       : job.matchAssessment === assessment
   )
     return job;
-  return {
-    ...job,
+  return copyView(job, {
     matchAssessment: planId ? job.matchAssessment : assessment,
     ...(planId
       ? { planAssessments: { ...job.planAssessments, [planId]: assessment } }
       : {}),
-  };
+  });
 }
 export function readPlanAssessment<T extends SavedJob>(
   job: T,

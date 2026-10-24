@@ -9,7 +9,6 @@ import {
 import {
   applyInactiveLedgerMarks,
   buildDiscoveryLedgerEntry,
-  createDiscoveryLedgerIndex,
   type DiscoveryLedgerIndex,
   type DiscoveryLedgerSighting,
 } from "./workspace-discovery-ledger";
@@ -135,7 +134,6 @@ export function createRunDiscoveryLedger(
   };
   initial.forEach(addTarget);
   let snapshot: readonly DiscoveryLedgerEntry[] | null = initial;
-  let index: DiscoveryLedgerIndex | null = null;
   let version = 0;
   let sequence = 0;
   let acknowledged = 0;
@@ -184,8 +182,25 @@ export function createRunDiscoveryLedger(
 
   const entries = (): readonly DiscoveryLedgerEntry[] =>
     (snapshot ??= [...byId.values()]);
-  const ledgerIndex = (): DiscoveryLedgerIndex =>
-    (index ??= createDiscoveryLedgerIndex(entries()));
+  const createHistoryIndex = () =>
+    createJobIdentityIndex(
+      [],
+      (entry: DiscoveryLedgerEntry) => entry,
+      (entry) =>
+        ranges
+          .get(entry)
+          ?.some(
+            (range) => range.from <= lookupVersion && lookupVersion < range.to,
+          ) === true,
+    );
+  const currentIndex = () => {
+    if (!historyIndex) {
+      historyIndex = createHistoryIndex();
+      for (const entry of byId.values()) observe(entry);
+    }
+    lookupVersion = sequence;
+    return historyIndex;
+  };
   const changed = () => {
     snapshot = null;
     version += 1;
@@ -195,28 +210,15 @@ export function createRunDiscoveryLedger(
     /** The ledger as it stands; an array handed out is never changed later. */
     entries,
     async warm() {
-      if (index && historyIndex) return;
-      const built = createDiscoveryLedgerIndex([]);
-      historyIndex ??= createJobIdentityIndex(
-        [],
-        (entry: DiscoveryLedgerEntry) => entry,
-        (entry) =>
-          ranges
-            .get(entry)
-            ?.some(
-              (range) =>
-                range.from <= lookupVersion && lookupVersion < range.to,
-            ) === true,
-      );
+      if (historyIndex) return;
+      historyIndex = createHistoryIndex();
       const rows = entries();
       for (let start = 0; start < rows.length; start += 100) {
         for (const entry of rows.slice(start, start + 100)) {
-          built.add(entry);
           observe(entry);
         }
         await yieldToEventLoop();
       }
-      index = built;
     },
     captureSnapshot() {
       if (!historyIndex)
@@ -258,22 +260,16 @@ export function createRunDiscoveryLedger(
     get version() {
       return version;
     },
-    /** The index over `entries()`. */
-    index: ledgerIndex,
     find(posting: Parameters<DiscoveryLedgerIndex["find"]>[0]) {
-      return ledgerIndex().find(posting);
+      return currentIndex().find(posting);
     },
     record(sighting: DiscoveryLedgerSighting): DiscoveryLedgerEntry {
-      const currentIndex = ledgerIndex();
-      const existing = currentIndex.find(sighting.posting);
+      const existing = currentIndex().find(sighting.posting);
       const next = buildDiscoveryLedgerEntry(sighting, existing);
       if (existing) {
-        currentIndex.replace(existing, next);
         byId.delete(existing.id);
         if (existing.targetId !== next.targetId)
           byTarget.get(existing.targetId)?.delete(existing.id);
-      } else {
-        currentIndex.add(next);
       }
       byId.set(next.id, next);
       addTarget(next);
@@ -298,7 +294,6 @@ export function createRunDiscoveryLedger(
         if (!previous || previous === entry) return;
         moved = true;
         if (previous.latestStatus !== "inactive") newlyInactive += 1;
-        index?.replace(previous, entry);
         byId.set(entry.id, entry);
         noteChange(entry);
       });
@@ -322,7 +317,6 @@ export function createRunDiscoveryLedger(
       // by a queued save. Re-publish the restored values on the next save.
       for (const entry of previous) noteChange(entry);
       snapshot = previous;
-      index = null;
       version += 1;
     },
   };

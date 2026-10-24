@@ -1,6 +1,10 @@
-import { createConcurrencyLimiter, yieldToEventLoop } from "@nestor/core";
-import { warmDiscoveryInventory } from "./discovery-inventory-preparation";
+import {
+  copyView,
+  createConcurrencyLimiter,
+  yieldToEventLoop,
+} from "@nestor/core";
 import { isDeepStrictEqual } from "node:util";
+import { channel } from "node:diagnostics_channel";
 import { patchDiscoveryLedger } from "@nestor/db";
 import {
   createDiscoverySavedJobWriter,
@@ -123,7 +127,6 @@ import { createDiscoveryRefreshDecision } from "./workspace-discovery-refresh-sc
 import {
   createDiscoveryFreshnessDigestInTurns,
   createDiscoveryListingFingerprints,
-  warmDiscoveryLedgerIndex,
 } from "./workspace-discovery-ledger";
 import { rebaseDiscoveryLedgerEntry } from "./workspace-discovery-state-helpers";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
@@ -195,6 +198,7 @@ export {
 export { normalizeListingText };
 
 const DISCOVERY_ACTIVITY_SAMPLE_LIMIT = 3;
+const bookkeeping = channel("nestor.discovery.bookkeeping");
 /**
  * Every job a search keeps is judged (ADR 0041). Older jobs of the plan
  * that need a new verdict, after the profile or goals changed, are judged
@@ -217,8 +221,8 @@ const SEARCH_FIT_MAX_BATCH_WAIT_MS = 90_000;
  * Feeds a search holds at once: downloading, waiting for the listing screen,
  * or ready to merge. Downloads themselves run a few at a time.
  */
-const PUBLIC_API_PREFETCH_CONCURRENCY = 8;
-const PUBLIC_API_DOWNLOAD_CONCURRENCY = 8;
+const PUBLIC_API_PREFETCH_CONCURRENCY = 24;
+const PUBLIC_API_DOWNLOAD_CONCURRENCY = 24;
 /** Feed listings looked up against the run's jobs per event-loop turn. */
 const SCREEN_LOOKUPS_PER_TURN = 40;
 /**
@@ -251,7 +255,7 @@ const DISCOVERY_SOURCE_CONCURRENCY = (() => {
 const MULTI_SOURCE_TARGET_TIME_BUDGET_MS = 20 * 60_000;
 const DISCOVERY_STALL_STEP_WINDOW = MAX_DISCOVERY_AGENT_NO_PROGRESS_STEPS;
 const RESUME_STALENESS_FLUSH_MS = 2 * 60_000;
-const DISCOVERY_SAVE_COALESCE_MS = 250;
+const DISCOVERY_SAVE_COALESCE_MS = 4;
 /** Saved jobs a search's setup prepares per event-loop turn. */
 const SETUP_JOBS_PER_TURN = 50;
 /** Postings a source's final pass triages and merges per event-loop turn. */
@@ -303,6 +307,19 @@ function applySavedJobDelta(
 ): SavedJob {
   const changedFields: Record<string, unknown> = {};
   for (const key of Object.keys(intendedJob) as Array<keyof SavedJob>) {
+    const intendedDescriptor = Object.getOwnPropertyDescriptor(
+      intendedJob,
+      key,
+    );
+    const baselineDescriptor = Object.getOwnPropertyDescriptor(
+      baselineJob,
+      key,
+    );
+    if (
+      intendedDescriptor?.get &&
+      intendedDescriptor.get === baselineDescriptor?.get
+    )
+      continue;
     if (!isDeepStrictEqual(intendedJob[key], baselineJob[key])) {
       if (key === "planAssessments") {
         const assessments = { ...currentJob.planAssessments };
@@ -1586,7 +1603,7 @@ export function createWorkspaceDiscoveryMethods(
           previous)
         : previous;
       return assessmentSession.assess(
-        { ...posting, matchAssessment: assessment ?? null },
+        copyView(posting, { matchAssessment: assessment ?? null }),
         runJudgments.get(toSavedJobId(posting)) ?? assessment?.judgment ?? null,
       );
     };
@@ -1638,25 +1655,6 @@ export function createWorkspaceDiscoveryMethods(
       throw new Error(DISCOVERY_NO_JOB_SITES_MESSAGE);
     }
 
-    // Revalidate the local inventory before consulting the discovery ledger.
-    // Exact scorer, profile/preference, and posting fingerprints reuse a
-    // persisted assessment; any relevant change misses safely and recomputes.
-    // Thousands of saved jobs are checked a slice per turn: in one go the
-    // search's first seconds froze the window.
-    await warmDiscoveryInventory(startingSavedJobs, executionSignal).catch(
-      (error: unknown) => {
-        if (executionSignal.aborted) {
-          clearActiveController();
-          throw error;
-        }
-        // A reader failing cannot strand the search before its run exists.
-        // Unprepared rows retain the existing main-process calculation path.
-        console.warn(
-          "[Job Finder] Inventory preparation fell back to main.",
-          error,
-        );
-      },
-    );
     let workingSavedJobs = await mapInTurns(
       startingSavedJobs,
       (job) => {
@@ -1666,7 +1664,7 @@ export function createWorkspaceDiscoveryMethods(
         );
         return matchAssessment === job.matchAssessment
           ? job
-          : { ...job, matchAssessment };
+          : Object.freeze(copyView(job, { matchAssessment }));
       },
       SETUP_JOBS_PER_TURN,
     );
@@ -1795,12 +1793,11 @@ export function createWorkspaceDiscoveryMethods(
       const cached = storedJobs.get(job);
       if (cached) return cached;
       const stored = withPlanAssessment(
-        {
-          ...job,
+        copyView(job, {
           matchAssessment:
             originalJobsById.get(job.id)?.matchAssessment ??
             job.matchAssessment,
-        },
+        }),
         assessmentPlanId,
         job.matchAssessment,
       );
@@ -1818,23 +1815,15 @@ export function createWorkspaceDiscoveryMethods(
       startingDiscovery.pendingDiscoveryJobs.map((job) => job.id),
     );
 
-    const warmFeedbackLedger = async () => {
-      if (!ctx.repository.readDiscoveryStateForRun) return;
-      const state = await ctx.repository.readDiscoveryStateForRun();
-      await warmDiscoveryLedgerIndex(state.discoveryLedger);
-    };
     const savedJobWriter = createDiscoverySavedJobWriter({
       persistedJobs: startingSavedJobs,
       toStoredJob: storedJob,
       merge: applySavedJobDelta,
       commit: async (input) => {
         await ctx.repository.commitSavedJobDelta(input);
-        if (input.updateDiscoveryState)
-          await warmFeedbackLedger().catch(() => undefined);
       },
       persistDiscovery: async (update) => {
         await ctx.persistDiscoveryState(update);
-        await warmFeedbackLedger().catch(() => undefined);
       },
       // A search of many sources saves several times a second; those saves
       // share a transaction. A small search saves each one at once.
@@ -2630,6 +2619,7 @@ export function createWorkspaceDiscoveryMethods(
           skippedByLedger: number;
           skippedByTitleTriage: number;
         } => {
+          const startedAt = performance.now();
           const keptPostings: JobPosting[] = [];
           // Re-observations of identities already processed by an earlier
           // phase whose content changed (richer re-extractions), plus
@@ -2677,7 +2667,7 @@ export function createWorkspaceDiscoveryMethods(
             }
 
             checkpointState.inspectedCount += 1;
-            const posting = JobPostingSchema.parse(rawPosting);
+            const posting = rawPosting;
             const knownInspection = inspectionIdentityIndex.find({
               ...posting,
               matchAcrossSources: true,
@@ -2792,6 +2782,12 @@ export function createWorkspaceDiscoveryMethods(
 
           checkpointState.skippedByLedger += phaseSkippedByLedger;
           checkpointState.skippedByTitleTriage += phaseSkippedByTitleTriage;
+          if (bookkeeping.hasSubscribers)
+            bookkeeping.publish({
+              phase: "triage",
+              rows: rawPostings.length,
+              ms: performance.now() - startedAt,
+            });
           return {
             keptPostings,
             keptUpgradePostings,
@@ -2809,6 +2805,7 @@ export function createWorkspaceDiscoveryMethods(
           jobsPersisted: number;
           jobsStaged: number;
         } => {
+          const startedAt = performance.now();
           // Greedy budget applies only to genuinely new identities: each
           // consumes one of the target's remaining slots. Upgrades of already
           // retained identities update existing saved/staged rows and consume
@@ -2992,6 +2989,12 @@ export function createWorkspaceDiscoveryMethods(
           checkpointState.duplicatesMerged += mergeResult.duplicatesMerged;
           checkpointState.invalidSkipped += mergeResult.invalidSkipped;
 
+          if (bookkeeping.hasSubscribers)
+            bookkeeping.publish({
+              phase: "merge",
+              rows: budgetedPostings.length,
+              ms: performance.now() - startedAt,
+            });
           return { budgetedPostings, mergeResult, jobsPersisted, jobsStaged };
         };
 

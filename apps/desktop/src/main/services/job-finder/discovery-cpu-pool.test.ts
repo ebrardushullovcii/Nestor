@@ -9,10 +9,6 @@ const entry = new URL(
   `data:text/javascript,${encodeURIComponent(`
   import { parentPort } from 'node:worker_threads';
   parentPort.on('message', async ({id, task:wire}) => {
-    if (wire.kind === 'inventory') {
-      parentPort.postMessage({id,result:{kind:'inventory',result:[]}});
-      return;
-    }
     const task = wire.input;
     const text = typeof task.payload === 'string' ? task.payload : new TextDecoder().decode(task.payload);
     if (text === 'crash') process.exit(2);
@@ -40,15 +36,6 @@ describe("discovery CPU reader pool", () => {
     const result = await p.run(task(bytes));
     expect(result.skippedMalformedCount).toBe(10);
     expect(bytes.byteLength).toBe(0);
-  });
-  test("shares the bounded readers between inventory and feed tasks", async () => {
-    const p = pool();
-    const [feed, inventory] = await Promise.all([
-      p.run(task("9")),
-      p.runInventory([]),
-    ]);
-    expect(feed.skippedMalformedCount).toBe(9);
-    expect(inventory).toEqual([]);
   });
   test("routes queued responses to the right request and reuses the reader", async () => {
     const p = pool();

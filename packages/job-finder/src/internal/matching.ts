@@ -1288,7 +1288,7 @@ export function mergeDiscoveredPostings(
     const matchAssessment = assessPosting
       ? assessPosting(enrichedPosting)
       : createMatchAssessment(profile, searchPreferences, enrichedPosting);
-    let mergedJob = SavedJobSchema.parse({
+    let mergedJob: SavedJob = {
       ...assembleMergedDiscoveredJob({
         matchAssessment,
         enrichedPosting,
@@ -1296,7 +1296,7 @@ export function mergeDiscoveredPostings(
         existingJob,
       }),
       provenance: mergedProvenance,
-    });
+    };
 
     if (!existingJob && nextJobsById.has(mergedJob.id)) {
       const baseId = `${mergedJob.id}_${createJobIdentityDigest(posting)}`;
@@ -1306,7 +1306,7 @@ export function mergeDiscoveredPostings(
         availableId = `${baseId}_${collisionIndex}`;
         collisionIndex += 1;
       }
-      mergedJob = SavedJobSchema.parse({ ...mergedJob, id: availableId });
+      mergedJob = { ...mergedJob, id: availableId };
     }
 
     if (existingJob) {
@@ -1451,8 +1451,13 @@ function uniqueProvenance(
  * A saved job's identity for matching new sightings: its own fields plus the
  * listing links its other sources showed.
  */
+const sightingIdentities = new WeakMap<SavedJob, JobIdentityInput>();
+
 export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
-  return {
+  const immutable = Object.isFrozen(job);
+  const cached = immutable ? sightingIdentities.get(job) : undefined;
+  if (cached) return cached;
+  const identity: JobIdentityInput = {
     source: job.source,
     sourceJobId: job.sourceJobId,
     canonicalUrl: job.canonicalUrl,
@@ -1474,6 +1479,13 @@ export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
         : [],
     ),
   };
+  if (immutable) {
+    if (identity.alternateListingUrls)
+      Object.freeze(identity.alternateListingUrls);
+    Object.freeze(identity);
+    sightingIdentities.set(job, identity);
+  }
+  return identity;
 }
 
 const SIGHTING_ROUTE_FIELDS = [

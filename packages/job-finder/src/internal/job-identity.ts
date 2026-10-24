@@ -648,11 +648,10 @@ function readAliasBasis(input: JobIdentityInput): AliasBasis {
     input.title,
     input.company,
     input.location,
-    // The alias memo needs change detection, never another retained listing
-    // body. SHA-256 also keeps its keys bounded for very large descriptions.
-    input.description == null
-      ? input.description
-      : createHash("sha256").update(input.description).digest("base64url"),
+    // Owned postings already retain this string. Comparing it directly avoids
+    // hashing the complete body again for each lookup. Lazy immutable rows use
+    // immutableAliases instead of retaining a second body in this basis.
+    input.description,
     input.exactContent?.digest,
     input.postedAt,
     input.postedAtText,
@@ -689,6 +688,10 @@ const indexedAliasCache = new WeakMap<
   object,
   { basis: AliasBasis; aliases: readonly JobIdentityAlias[] }[]
 >();
+const immutableAliases = new WeakMap<
+  JobIdentityInput,
+  readonly JobIdentityAlias[]
+>();
 // Different immutable views of one listing have the same aliases. Peers are
 // weak: this hint cannot keep an old job, its body or its run alive.
 const aliasPeers = new Map<string, WeakRef<object>>();
@@ -720,6 +723,16 @@ function readIndexedAliases(
   value: object,
   input: JobIdentityInput,
 ): readonly JobIdentityAlias[] {
+  if (
+    Object.isFrozen(input) &&
+    (!input.alternateListingUrls || Object.isFrozen(input.alternateListingUrls))
+  ) {
+    const cached = immutableAliases.get(input);
+    if (cached) return cached;
+    const aliases = buildJobIdentityAliases(input);
+    immutableAliases.set(input, aliases);
+    return aliases;
+  }
   const basis = readAliasBasis(input);
   const entries = indexedAliasCache.get(value);
   const cached = entries?.find((entry) => sameAliasBasis(entry.basis, basis));

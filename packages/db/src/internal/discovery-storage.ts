@@ -8,6 +8,10 @@ import {
   JobFinderDiscoveryStateSchema,
   SavedJobSchema,
   type DiscoveryRunRecord,
+  type DiscoveryActivityEvent,
+  type DiscoveryLedgerEntry,
+  type SavedJob,
+  type BrowserAgentRunCheckpoint,
   type JobFinderDiscoveryState,
 } from "@nestor/contracts";
 import { normalizeLegacyDiscoveryState } from "./legacy";
@@ -15,12 +19,8 @@ import { adoptDiscoveryLedgerIndex, discoveryLedgerPatches } from "./discovery-l
 
 // The singleton contains only the small, frequently changed discovery fields.
 // Run activity, target execution/checkpoints, ledger and pending jobs are rows.
-const SMALL_STATE = JobFinderDiscoveryStateSchema.omit({
-  activeRun: true,
-  recentRuns: true,
-  discoveryLedger: true,
-  pendingDiscoveryJobs: true,
-});
+type SmallState = Omit<JobFinderDiscoveryState,
+  "activeRun" | "recentRuns" | "discoveryLedger" | "pendingDiscoveryJobs">;
 const RUN_METADATA = DiscoveryRunRecordSchema.omit({
   targetExecutions: true,
   activity: true,
@@ -66,16 +66,17 @@ function frozen<T>(value: T): T {
   return value;
 }
 
-function parseRow<T>(table: string, id: string, value: unknown, parser: { parse(value: unknown): T }): T {
+function parseRow<T>(table: string, id: string, value: unknown): T {
   try {
-    return parser.parse(JSON.parse(String(value)) as unknown);
+    return JSON.parse(String(value)) as T;
   } catch {
     throw new Error(`Corrupted persisted row in table "${table}" (row "${id}").`);
   }
 }
 
 function smallValue(state: JobFinderDiscoveryState) {
-  return SMALL_STATE.parse(state);
+  return { sessions: state.sessions, runState: state.runState,
+    activeSourceDebugRun: state.activeSourceDebugRun, recentSourceDebugRuns: state.recentSourceDebugRuns };
 }
 
 function writeSmall(database: DatabaseSync, state: JobFinderDiscoveryState): void {
@@ -157,7 +158,7 @@ export function migrateDiscoveryStorage(database: DatabaseSync): void {
     if (!migrated) {
       const row = database.prepare("SELECT value FROM singleton_state WHERE key = 'discovery_state'").get();
       if (row) {
-        const legacy = parseRow("singleton_state", "discovery_state", row.value, { parse: normalizeLegacyDiscoveryState });
+        const legacy = normalizeLegacyDiscoveryState(JSON.parse(String(row.value)) as unknown);
         replaceDiscoveryStorage(database, legacy);
       }
       database.prepare("INSERT INTO schema_migrations (version, name) VALUES (20, 'normalized_discovery_storage')").run();
@@ -200,7 +201,6 @@ export function discoveryRowScope(table: string, runId = ""): string {
 function readChangedRowsInPlace<T>(
   database: DatabaseSync,
   table: string,
-  parser: { parse(value: unknown): T },
   params: string[],
   cached: CachedScope & {
     ordered: Array<{ key: string; value: unknown }>;
@@ -250,12 +250,12 @@ function readChangedRowsInPlace<T>(
       ordered.push(entry);
       continue;
     }
-    const value = frozen(parseRow(table, entry.key, replaced.get(entry.key), parser));
+    const value = frozen(parseRow<T>(table, entry.key, replaced.get(entry.key)));
     cached.values.set(entry.key, value);
     ordered.push({ key: entry.key, value });
   }
   for (const { id, position, raw } of appended) {
-    const value = frozen(parseRow(table, id, raw, parser));
+    const value = frozen(parseRow<T>(table, id, raw));
     cached.values.set(id, value);
     cached.positions.set(id, position);
     ordered.push({ key: id, value });
@@ -269,7 +269,7 @@ function readChangedRowsInPlace<T>(
   return ordered;
 }
 
-function readKeyedRows<T>(database: DatabaseSync, table: string, parser: { parse(value: unknown): T }, where = "", params: string[] = [], cache?: DiscoveryDisplayRowCache): Array<{ key: string; value: T }> {
+function readKeyedRows<T>(database: DatabaseSync, table: string, where = "", params: string[] = [], cache?: DiscoveryDisplayRowCache): Array<{ key: string; value: T }> {
   const runId = params[0] ?? "";
   const scope = discoveryRowScope(table, runId);
   const cached = cache?.scopes.get(scope);
@@ -281,7 +281,7 @@ function readKeyedRows<T>(database: DatabaseSync, table: string, parser: { parse
   if (cached?.ordered && !dirtyIds)
     return cached.ordered as Array<{ key: string; value: T }>;
   if (cached?.ordered && cached.positions && cached.maxPosition !== undefined && dirtyIds) {
-    const updated = readChangedRowsInPlace(database, table, parser, params, cached as Parameters<typeof readChangedRowsInPlace>[4], dirtyIds);
+    const updated = readChangedRowsInPlace<T>(database, table, params, cached as Parameters<typeof readChangedRowsInPlace>[3], dirtyIds);
     if (updated) return updated as Array<{ key: string; value: T }>;
   }
   const cold = !cached;
@@ -309,7 +309,7 @@ function readKeyedRows<T>(database: DatabaseSync, table: string, parser: { parse
     if (!cold && !dirty?.has(id) && valuesById.has(id))
       return { key: id, value: valuesById.get(id) as T };
     const raw = cold ? row.value : rawById.get(id);
-    const parsed = frozen(parseRow(table, id, raw, parser));
+    const parsed = frozen(parseRow<T>(table, id, raw));
     valuesById.set(id, parsed);
     return { key: id, value: parsed };
   });
@@ -326,8 +326,8 @@ function readKeyedRows<T>(database: DatabaseSync, table: string, parser: { parse
 
 const rowValueLists = new WeakMap<object, unknown[]>();
 
-function readRows<T>(database: DatabaseSync, table: string, parser: { parse(value: unknown): T }, where = "", params: string[] = [], cache?: DiscoveryDisplayRowCache): T[] {
-  const keyed = readKeyedRows(database, table, parser, where, params, cache);
+function readRows<T>(database: DatabaseSync, table: string, where = "", params: string[] = [], cache?: DiscoveryDisplayRowCache): T[] {
+  const keyed = readKeyedRows<T>(database, table, where, params, cache);
   // An unchanged scope returns the same keyed list; keep its value list too.
   let values = rowValueLists.get(keyed) as T[] | undefined;
   if (!values) {
@@ -355,12 +355,12 @@ function readRun(database: DatabaseSync, row: { id: unknown; value: unknown }, i
     cache?.scopes.get(discoveryRowScope("discovery_run_activity", id))?.ordered
   )
     return previous.run;
-  const metadata = parseRow("discovery_runs", id, row.value, RUN_METADATA);
-  const targets = readKeyedRows(database, "discovery_run_targets", TARGET_METADATA, "WHERE run_id = ?", [id], cache);
+  const metadata = parseRow<ReturnType<typeof RUN_METADATA.parse>>("discovery_runs", id, row.value);
+  const targets = readKeyedRows<TargetMetadata>(database, "discovery_run_targets", "WHERE run_id = ?", [id], cache);
   const checkpointRows = includeCheckpoints ? database.prepare("SELECT id, value FROM discovery_run_checkpoints WHERE run_id = ?").all(id) : [];
-  const checkpoints = new Map(checkpointRows.map((checkpoint) => [String(checkpoint.id), frozen(parseRow("discovery_run_checkpoints", `${id}/${String(checkpoint.id)}`, checkpoint.value, BrowserAgentRunCheckpointSchema))]));
+  const checkpoints = new Map(checkpointRows.map((checkpoint) => [String(checkpoint.id), frozen(parseRow<BrowserAgentRunCheckpoint>("discovery_run_checkpoints", `${id}/${String(checkpoint.id)}`, checkpoint.value))]));
   const executions = targets.map(({ key, value }) => frozen({ ...value, agentCheckpoint: checkpoints.get(key) ?? null }));
-  const activity = readRows(database, "discovery_run_activity", DiscoveryActivityEventSchema, "WHERE run_id = ?", [id], cache);
+  const activity = readRows<DiscoveryActivityEvent>(database, "discovery_run_activity", "WHERE run_id = ?", [id], cache);
   const run = frozen({ ...metadata, targetExecutions: executions, activity });
   if (cache && !includeCheckpoints) (cache.runs ??= new Map()).set(id, { raw, run });
   return run;
@@ -374,7 +374,7 @@ export function readDiscoveryStorage(database: DatabaseSync, fallback: JobFinder
     cache?.runs?.clear();
     return frozen(JobFinderDiscoveryStateSchema.parse(fallback));
   }
-  const small = parseRow("singleton_state", "discovery_state", row.value, SMALL_STATE);
+  const small = parseRow<SmallState>("singleton_state", "discovery_state", row.value);
   const runs = database.prepare("SELECT id, active, value FROM discovery_runs ORDER BY active DESC, position").all() as Array<{ id: string; active: number; value: string }>;
   if (cache) {
     const presentRuns = new Set(runs.map((run) => String(run.id)));
@@ -394,8 +394,8 @@ export function readDiscoveryStorage(database: DatabaseSync, fallback: JobFinder
     ...small,
     activeRun: active ? readRun(database, active, includeCheckpoints, cache) : null,
     recentRuns: recent.map((run) => readRun(database, run, includeCheckpoints, cache)),
-    discoveryLedger: readRows(database, "discovery_ledger", DiscoveryLedgerEntrySchema, "", [], cache),
-    pendingDiscoveryJobs: readRows(database, "discovery_pending_jobs", SavedJobSchema, "", [], cache),
+    discoveryLedger: readRows<DiscoveryLedgerEntry>(database, "discovery_ledger", "", [], cache),
+    pendingDiscoveryJobs: readRows<SavedJob>(database, "discovery_pending_jobs", "", [], cache),
   });
 }
 
@@ -508,7 +508,7 @@ function orderedRanks(keys: readonly string[], previous: Map<string, number>): n
   return ranks;
 }
 
-function writeChangedRows<T extends { id: string }>(database: DatabaseSync, table: string, before: readonly T[], after: readonly T[], parser: { parse(value: unknown): T }, aliases: WeakMap<object, object>, runId?: string, positionCache?: PositionCache): T[] {
+function writeChangedRows<T extends { id: string }>(database: DatabaseSync, table: string, before: readonly T[], after: readonly T[], aliases: WeakMap<object, object>, runId?: string, positionCache?: PositionCache): T[] {
   if (before === after) return before as T[];
   const patch =
     table === "discovery_ledger"
@@ -523,7 +523,7 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
       const parsed =
         old === row || (old && aliases.get(row) === old)
           ? old
-          : frozen(parser.parse(row));
+          : frozen(row);
       if (old && !moveToEnd && JSON.stringify(old) === JSON.stringify(parsed)) {
         result[index] = old;
       } else {
@@ -588,7 +588,7 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
       resultByKey.set(key, old);
       return;
     }
-    const parsed = frozen(parser.parse(row));
+    const parsed = frozen(row);
     const same = old && JSON.stringify(old) === JSON.stringify(parsed);
     if (!same) {
       replaceRow(database, table, runId ? [runId, key, position] : [key, position], parsed);
@@ -623,11 +623,24 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
 // compares against it without validating the stored run again.
 const storedRunMetadataText = new WeakMap<object, string>();
 
+function runMetadata(run: DiscoveryRunRecord): ReturnType<typeof RUN_METADATA.parse> {
+  const metadata: Partial<DiscoveryRunRecord> = { ...run };
+  delete metadata.targetExecutions;
+  delete metadata.activity;
+  return metadata as ReturnType<typeof RUN_METADATA.parse>;
+}
+
+function targetMetadata(target: Target): TargetMetadata {
+  const metadata: Partial<Target> = { ...target };
+  delete metadata.agentCheckpoint;
+  return metadata as TargetMetadata;
+}
+
 function writeRun(database: DatabaseSync, before: DiscoveryRunRecord | null, next: DiscoveryRunRecord, key: string, position: number, active: boolean, aliases: WeakMap<object, object>, positionCache?: PositionCache): DiscoveryRunRecord {
-  const metadata = frozen(RUN_METADATA.parse(next));
+  const metadata = runMetadata(next);
   const metadataText = JSON.stringify(metadata);
   const oldMetadataText = before
-    ? (storedRunMetadataText.get(before) ?? JSON.stringify(RUN_METADATA.parse(before)))
+    ? (storedRunMetadataText.get(before) ?? JSON.stringify(runMetadata(before)))
     : null;
   if (oldMetadataText === null || oldMetadataText !== metadataText) {
     replaceRow(database, "discovery_runs", [key, position, active ? 1 : 0], metadata);
@@ -648,15 +661,9 @@ function writeRun(database: DatabaseSync, before: DiscoveryRunRecord | null, nex
       targets.push(old);
       return;
     }
-    const parsedMetadata: TargetMetadata = TARGET_METADATA.parse(target);
+    const parsedMetadata = targetMetadata(target);
     // A stored target is its validated metadata plus its checkpoint.
-    const oldParsedMetadata: TargetMetadata | undefined = old
-      ? (() => {
-          const stored: Partial<Target> = { ...old };
-          delete stored.agentCheckpoint;
-          return stored as TargetMetadata;
-        })()
-      : undefined;
+    const oldParsedMetadata = old ? targetMetadata(old) : undefined;
     if (!oldParsedMetadata || JSON.stringify(oldParsedMetadata) !== JSON.stringify(parsedMetadata))
       replaceRow(database, "discovery_run_targets", [key, targetKey, index], parsedMetadata);
     else if (previousTarget?.index !== index)
@@ -669,7 +676,7 @@ function writeRun(database: DatabaseSync, before: DiscoveryRunRecord | null, nex
         if (oldCheckpoint) statement(database, "DELETE FROM discovery_run_checkpoints WHERE run_id = ? AND id = ?").run(key, targetKey);
         storedCheckpoint = null;
       } else if (!oldCheckpoint || checkpoint.revision !== oldCheckpoint.revision || checkpoint.savedAt !== oldCheckpoint.savedAt || JSON.stringify(checkpoint) !== JSON.stringify(oldCheckpoint)) {
-        storedCheckpoint = frozen(BrowserAgentRunCheckpointSchema.parse(checkpoint));
+        storedCheckpoint = frozen(checkpoint);
         replaceRow(database, "discovery_run_checkpoints", [key, targetKey], storedCheckpoint);
       }
     }
@@ -682,7 +689,7 @@ function writeRun(database: DatabaseSync, before: DiscoveryRunRecord | null, nex
     database.prepare("DELETE FROM discovery_run_targets WHERE run_id = ? AND id = ?").run(key, targetKey);
     database.prepare("DELETE FROM discovery_run_checkpoints WHERE run_id = ? AND id = ?").run(key, targetKey);
   }
-  const activity = writeChangedRows(database, "discovery_run_activity", before?.activity ?? [], next.activity, DiscoveryActivityEventSchema, aliases, key, positionCache);
+  const activity = writeChangedRows(database, "discovery_run_activity", before?.activity ?? [], next.activity, aliases, key, positionCache);
   const stored = frozen({ ...metadata, targetExecutions: targets, activity });
   storedRunMetadataText.set(stored, metadataText);
   return stored;
@@ -711,8 +718,8 @@ export function updateDiscoveryStorage(database: DatabaseSync, before: JobFinder
     database.prepare("DELETE FROM discovery_runs WHERE id = ?").run(id);
     for (const table of ["discovery_run_checkpoints", "discovery_run_activity", "discovery_run_targets"]) database.prepare(`DELETE FROM ${table} WHERE run_id = ?`).run(id);
   }
-  const ledger = writeChangedRows(database, "discovery_ledger", before.discoveryLedger, proposed.discoveryLedger, DiscoveryLedgerEntrySchema, aliases, undefined, positionCache);
-  const pending = writeChangedRows(database, "discovery_pending_jobs", before.pendingDiscoveryJobs, proposed.pendingDiscoveryJobs, SavedJobSchema, aliases, undefined, positionCache);
+  const ledger = writeChangedRows(database, "discovery_ledger", before.discoveryLedger, proposed.discoveryLedger, aliases, undefined, positionCache);
+  const pending = writeChangedRows(database, "discovery_pending_jobs", before.pendingDiscoveryJobs, proposed.pendingDiscoveryJobs, aliases, undefined, positionCache);
   return frozen({ ...small, activeRun: proposed.activeRun ? storedRuns[0] ?? null : null, recentRuns: proposed.activeRun ? storedRuns.slice(1) : storedRuns, discoveryLedger: ledger, pendingDiscoveryJobs: pending });
 }
 
@@ -790,9 +797,9 @@ export function createDiscoveryStorage(database: DatabaseSync, fallback: JobFind
       const cacheWasCurrent = cached !== null && epoch() === cachedEpoch && version() === cachedVersion;
       const row = database.prepare("SELECT value FROM singleton_state WHERE key = 'discovery_state'").get();
       const small = row
-        ? parseRow("singleton_state", "discovery_state", row.value, SMALL_STATE)
+        ? parseRow<SmallState>("singleton_state", "discovery_state", row.value)
         : smallValue(JobFinderDiscoveryStateSchema.parse(fallback));
-      const sessions = frozen(SMALL_STATE.shape.sessions.parse(change(small.sessions)));
+      const sessions = frozen(change(small.sessions));
       writeSmall(database, { ...small, sessions } as JobFinderDiscoveryState);
       if (cacheWasCurrent && cached) {
         pendingSessionCache = frozen({ ...cached, sessions });

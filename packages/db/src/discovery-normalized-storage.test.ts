@@ -113,14 +113,19 @@ describe("normalized discovery storage", () => {
         expect(committed.activeRun?.summary.jobsPersisted).toBe(1);
         expect(await repo.listSavedJobsByIds(["paired_job"])).toHaveLength(1);
 
+        const failing = new DatabaseSync(temp.filePath);
+        failing.exec(`CREATE TRIGGER fail_synthetic_checkpoint AFTER INSERT ON discovery_run_checkpoints
+          WHEN json_extract(NEW.value, '$.revision') = 2
+          BEGIN SELECT RAISE(ABORT, 'synthetic checkpoint failure'); END`);
+        failing.close();
         await expect(repo.commitSavedJobDelta({
           upserts: [createSavedJob({ id: "rolled_back_job" })],
           updateDiscoveryState: (current) => ({
             ...current,
             activeRun: { ...current.activeRun!, targetExecutions: [{ ...current.activeRun!.targetExecutions[0]!, agentCheckpoint: checkpoint(2) }] },
             discoveryLedger: [...current.discoveryLedger, ledger("rolled_back_ledger")],
-            pendingDiscoveryJobs: [{ id: "invalid_pending" }],
-          }) as never,
+            pendingDiscoveryJobs: [],
+          }),
         })).rejects.toThrow();
         expect(await repo.getDiscoveryState()).toEqual(committed);
         expect(await repo.listSavedJobsByIds(["rolled_back_job"])).toEqual([]);

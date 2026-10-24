@@ -99,7 +99,18 @@ export function createDiscoverySavedJobWriter(input: {
       const intended = input.toStoredJob(job);
       intendedRows.set(id, intended);
       const baseline = persisted.get(id);
-      if (!baseline || !isDeepStrictEqual(baseline, intended))
+      if (
+        !baseline ||
+        Object.keys(intended).some((key) => {
+          const left = Object.getOwnPropertyDescriptor(baseline, key);
+          const right = Object.getOwnPropertyDescriptor(intended, key);
+          if (left?.get && left.get === right?.get) return false;
+          return !isDeepStrictEqual(
+            Reflect.get(baseline, key),
+            Reflect.get(intended, key),
+          );
+        })
+      )
         changedIds.push(id);
     }
 
