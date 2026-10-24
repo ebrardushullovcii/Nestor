@@ -323,6 +323,8 @@ const RESULT_DATA_LIMIT_CHARS = 12_000;
 
 function renderResult(result: AssistantToolResult): string {
   const lines = [result.summary];
+  const changes = result.parts?.flatMap((part) => part.type === "change" ? [{ receiptId: part.receiptId, summary: part.summary, status: part.status }] : []);
+  if (changes?.length) lines.push(JSON.stringify({ changes }));
   if (result.data !== undefined) {
     let data = JSON.stringify(result.data);
     if (data.length > RESULT_DATA_LIMIT_CHARS) {

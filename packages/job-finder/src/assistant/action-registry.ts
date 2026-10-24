@@ -532,7 +532,7 @@ export const JOB_FINDER_ACTIONS = {
     "approve-resumes",
     C.JobFinderApproveResumesInputSchema,
     "resume",
-    "confirm",
+    "local",
     "Approve the current resumes for selected jobs; unresolved claims still block approval.",
   ),
   "get-application-page-states": desktopAction(
@@ -1092,7 +1092,7 @@ export const JOB_FINDER_ACTIONS = {
   "approve-resume": action(
     C.JobFinderApproveResumeInputSchema,
     "resume",
-    "confirm",
+    "local",
     "Approve the exact exported resume.",
     (i, c) => c.service.approveResume(i.jobId, i.exportId),
   ),

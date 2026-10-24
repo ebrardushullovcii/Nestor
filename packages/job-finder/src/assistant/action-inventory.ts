@@ -698,9 +698,9 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
   {
     id: "settings.theme",
     screen: "Settings",
-    action: "Appearance theme",
+    action: "Appearance theme and text size",
     channels: ["job-finder:update-appearance-theme"],
-    coverage: tools("set_appearance"),
+    coverage: tools("set_appearance", "action_zoom"),
   },
   {
     id: "settings.safeguards",

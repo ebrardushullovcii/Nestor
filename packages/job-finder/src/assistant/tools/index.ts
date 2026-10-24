@@ -52,6 +52,7 @@ export type AssistantCatalogMode = "flat" | "grouped";
 const COMMON_TOOLS = [
   "read_profile", "edit_profile", "get_job", "query_jobs", "shortlist_jobs",
   "remove_from_shortlist", "list_sources", "update_sources", "undo_change",
+  "action_read_action_state",
 ];
 const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
   home: ["get_workspace_summary", "list_needs_you", "list_tracker_agenda"],
@@ -87,7 +88,7 @@ export const loadToolsTool = defineTool({
   execute(input) {
     return Promise.resolve({
       summary: `Loaded: ${[...input.groups, ...(input.names ?? [])].join(", ")}. They are available from your next step.`,
-      data: { groups: input.groups, names: input.names ?? [] },
+      data: { groups: input.groups, names: [...new Set([...input.groups.flatMap(group => ASSISTANT_TOOL_GROUPS[group].map(tool => tool.name)), ...(input.names ?? [])])] },
     });
   },
 });

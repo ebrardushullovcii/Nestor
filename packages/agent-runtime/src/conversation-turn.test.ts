@@ -82,6 +82,19 @@ function tool(
 }
 
 describe("runConversationTurn", () => {
+  it("retries an empty model response and never reports it as a completed action", async () => {
+    const model = scripted([{}, { content: "Nothing has changed; there is no queue left to pause." }]);
+    const result = await runConversationTurn({ model, tools: [], assembleMessages: async turn => [...turn] });
+    expect(result.modelCalls).toBe(2);
+    expect(result.reply).toContain("Nothing has changed");
+    expect(model.seen[1]?.some(message => message.role === "user" && message.content.includes("no text or executable tool call"))).toBe(true);
+  });
+
+  it("reports repeated empty responses as a model failure", async () => {
+    const result = await runConversationTurn({ model: scripted([{}, {}]), tools: [], assembleMessages: async turn => [...turn] });
+    expect(result.ending).toBe("model_failed");
+    expect(result.reply).toBeNull();
+  });
   it("can reply from a verified tool receipt without another model call and retains its facts", async () => {
     const model = scripted([{ toolCalls: [call("one", "edit")] }]);
     const events: ConversationTurnEvent[] = [];

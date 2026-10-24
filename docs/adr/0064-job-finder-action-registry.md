@@ -41,6 +41,9 @@ requests that take 3–5 seconds.
   call to paraphrase a saved result. Conflicts, partial work, explanations,
   other calls and earlier failures still return to the model. The full result
   and reply remain in the transcript.
+- Empty provider replies are retried once and otherwise reported as a model
+  failure. They never become a fabricated "Done". Tool results include Undo
+  receipt ids and explicit Shortlisted-tab membership for accurate follow-ups.
 - Shortlist time is stored when a job enters Shortlisted, so “last shortlisted”
   is not guessed from posting dates. Older undated jobs stay explicitly undated.
   Triage and source edits record exact Undo receipts; later changes are retained.

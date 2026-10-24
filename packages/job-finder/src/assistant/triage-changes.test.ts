@@ -76,7 +76,7 @@ describe("assistant move receipts", () => {
     expect((await service.getWorkspaceSnapshot()).reviewQueue.some(job => job.jobId === id)).toBe(false);
     session.createResultSet = input => Promise.resolve(AssistantResultSetSchema.parse({ ...input, id: "result", conversationId: "conversation", createdAt: "2026-10-24T00:00:00.000Z" }));
     const found = await queryJobsTool.execute(queryJobsTool.input.parse({ scope: "found", onlyIds: [id], show: false }), context);
-    expect(found.data).toMatchObject({ jobs: [{ id }] });
+    expect(found.data).toMatchObject({ jobs: [{ id, inShortlist: false }] });
     expect((await shortlistJobsTool.execute(shortlist, context)).summary).toContain("Shortlisted 1 job");
     expect((await service.getWorkspaceSnapshot()).reviewQueue.some(job => job.jobId === id)).toBe(true);
   });
