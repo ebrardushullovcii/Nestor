@@ -2743,6 +2743,12 @@ export function createWorkspaceDiscoveryMethods(
           }
           return counts;
         };
+        // Copies for the run record: saving it freezes what it was given, and
+        // these counts keep growing on the next page.
+        const copySourceCounts = (): DiscoverySourceListingCounts[] =>
+          [...checkpointState.sourceCounts.values()].map((counts) => ({
+            ...counts,
+          }));
         const getDiscoveryCheckpointFingerprintKey = (
           posting: JobPosting,
         ): string => {
@@ -3452,7 +3458,7 @@ export function createWorkspaceDiscoveryMethods(
               target.id,
               (entry) => ({
                 ...entry,
-                sourceCounts: [...checkpointState.sourceCounts.values()],
+                sourceCounts: copySourceCounts(),
                 inspectedJobIds: [...checkpointState.inspectedJobIds],
                 jobsInspected: checkpointState.inspectedCount,
                 rejectedListings: [...checkpointState.rejectedListings],
@@ -3622,7 +3628,7 @@ export function createWorkspaceDiscoveryMethods(
             // committed jobs durably, so the failed execution must report what
             // was actually kept rather than zeros. jobsFound is the distinct
             // retained total (persisted + staged), matching the summary.
-            sourceCounts: [...checkpointState.sourceCounts.values()],
+            sourceCounts: copySourceCounts(),
             inspectedJobIds: [...checkpointState.inspectedJobIds],
             jobsInspected: checkpointState.inspectedCount,
             rejectedListings: [...checkpointState.rejectedListings],
@@ -4011,7 +4017,7 @@ export function createWorkspaceDiscoveryMethods(
             // the run summary so user-facing found/kept claims stay truthful.
             uniqueInspectionsKnown:
               unreadable.length === 0 && deferredPageUrls.length === 0,
-            sourceCounts: [...checkpointState.sourceCounts.values()],
+            sourceCounts: copySourceCounts(),
             inspectedJobIds: [...checkpointState.inspectedJobIds],
             jobsInspected: checkpointState.inspectedCount,
             rejectedListings: [...checkpointState.rejectedListings],
