@@ -27,7 +27,6 @@ import {
   SubmissionOutcomeRecordSchema,
   SubmissionPreflightRecordSchema,
   CandidateProfileSchema,
-  ApplyQueueSchema,
   JobFinderActivityControlSchema,
   JobFinderIntelligenceStateSchema,
   JobFinderRepositoryStateSchema,
@@ -788,16 +787,10 @@ export function writeState(
   database: DatabaseSync,
   state: JobFinderRepositoryState,
 ): void {
-  // A reset ends any Apply queue; a restore brings back the one it exported.
+  // A reset or restore ends any Apply queue; it is not part of the seed.
   database
     .prepare(`DELETE FROM ${stateTableNames.singleton_state} WHERE key = ?`)
     .run("apply_queue");
-  if (state.applyQueue)
-    saveSingletonValue(
-      database,
-      "apply_queue",
-      ApplyQueueSchema.parse(state.applyQueue),
-    );
   assertPersistableCampaignPointer(state);
   const activeAuthorityCount = state.applicationAuthorityEnvelopes.filter(
     (envelope) => envelope.status === "active",
@@ -1553,9 +1546,5 @@ export function readState(
       campaignState?.notifications ?? fallbackSeed.campaignNotifications,
     activityControl,
     intelligence,
-    applyQueue:
-      getSingletonValue(database, "apply_queue", ApplyQueueSchema, {
-        onInvalid: "fallback",
-      }) ?? null,
   });
 }

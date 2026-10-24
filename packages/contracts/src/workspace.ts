@@ -1062,11 +1062,6 @@ const JobFinderRepositoryStateShape = {
   campaignNotifications: z.array(CampaignNotificationSchema).default([]),
   activityControl: JobFinderActivityControlSchema.default({}),
   intelligence: JobFinderIntelligenceStateSchema.default({}),
-  /**
-   * The saved Apply queue (ADR 0058). An export carries it and a restore
-   * keeps it, held by the restore's pause; resetting everything has none.
-   */
-  applyQueue: ApplyQueueSchema.nullable().default(null),
 };
 
 const JobFinderRepositoryStateObjectSchema: z.ZodObject<
@@ -1119,10 +1114,9 @@ type JobFinderRepositoryStateOutput = z.infer<
  */
 export type JobFinderRepositoryState = Omit<
   JobFinderRepositoryStateOutput,
-  "applicationAnswerSnapshots" | "applyQueue"
+  "applicationAnswerSnapshots"
 > & {
   applicationAnswerSnapshots?: JobFinderRepositoryStateOutput["applicationAnswerSnapshots"];
-  applyQueue?: JobFinderRepositoryStateOutput["applyQueue"];
 };
 export type JobFinderRepositoryStateInput = z.input<
   typeof JobFinderRepositoryStateSchema
