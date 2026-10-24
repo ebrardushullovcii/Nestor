@@ -167,6 +167,8 @@ export interface ApplyRawPageHands {
   setToggle: (ref: string, checked: boolean) => Promise<ApplyWriteResult>;
   uploadFile: (ref: string, file: ApplyUploadFile) => Promise<ApplyWriteResult>;
   clickAction: (ref: string) => Promise<ApplyWriteResult>;
+  /** Scroll to an action and report obstruction without pressing it. */
+  checkAction?: (ref: string) => Promise<ApplyWriteResult>;
   /**
    * Opens what one of the page's links points at, in the same tab.
    *

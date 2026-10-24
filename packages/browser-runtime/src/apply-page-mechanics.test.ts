@@ -503,10 +503,10 @@ describe("reading the choices of lists the page draws itself", () => {
     }
   });
 
-  test("checks an enabled radio even when another element covers its pointer target", async () => {
+  test("checks an off-screen enabled radio even when another element covers its pointer target", async () => {
     const page = await browser.newPage();
     await page.setContent(`
-      <fieldset>
+      <fieldset style="margin-top:2000px">
         <legend>Are you authorized to work here?</legend>
         <label><input id="authorized" type="radio" name="authorized" required /> Yes</label>
         <label><input type="radio" name="authorized" /> No</label>
@@ -520,9 +520,30 @@ describe("reading the choices of lists the page draws itself", () => {
       observedValue: "checked",
     });
     expect(await page.locator("#authorized").isChecked()).toBe(true);
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
 
     await page.close();
   }, 15_000);
+
+  test("keeps nearby actions reachable when scrolling an off-screen native toggle", async () => {
+    const page = await browser.newPage({ viewport: { width: 900, height: 640 } });
+    try {
+      await page.setContent(`
+        <div style="height:1600px"></div>
+        <label><input type="checkbox"> Confirm these synthetic answers</label>
+        <button id="send" style="display:block;margin-top:20px">Send application</button>
+        <div style="height:900px"></div>
+        <aside style="position:fixed;bottom:0;left:0;right:0;height:180px;background:white">Page overlay</aside>
+      `);
+      await expect(createPlaywrightApplyPageMechanics(page).setToggle("c0", true)).resolves.toMatchObject({ ok: true });
+      expect(await page.evaluate(() => {
+        const rect = document.getElementById("send")!.getBoundingClientRect();
+        return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)?.id;
+      })).toBe("send");
+    } finally {
+      await page.close();
+    }
+  });
 
   test("reads and operates accessible shadow-root and iframe forms", async () => {
     const page = await browser.newPage();
@@ -596,5 +617,27 @@ describe("reading the choices of lists the page draws itself", () => {
     ).toBe("yes");
 
     await page.close();
+  });
+
+  test("reports a covering dialog without pressing Send, then verifies the cleared button", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`
+        <button id="send">Send application</button>
+        <aside role="dialog" style="position:fixed;inset:0;z-index:2">Cookie choices <button id="close">Reject optional</button></aside>
+        <script>window.sends=0;document.getElementById('send').onclick=()=>window.sends++;document.getElementById('close').onclick=()=>document.querySelector('aside').remove();</script>
+      `);
+      const mechanics = createPlaywrightApplyPageMechanics(page);
+      const blocked = await mechanics.checkAction!("a0");
+      expect(blocked.ok).toBe(false);
+      if (blocked.ok) throw new Error("An obstructed button was reported reachable");
+      expect(blocked.error).toContain("Cookie choices");
+      expect(await page.evaluate("window.sends")).toBe(0);
+      await page.locator("#close").click();
+      await expect(mechanics.checkAction!("a0")).resolves.toMatchObject({ ok: true });
+      expect(await page.evaluate("window.sends")).toBe(0);
+    } finally {
+      await page.close();
+    }
   });
 });

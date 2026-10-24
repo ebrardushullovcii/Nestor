@@ -82,6 +82,7 @@ export interface AgentApplicationPreparationInput {
   applicationRecordId?: string;
   searchPreferences?: JobSearchPreferences | undefined;
   llmClient: LLMClient;
+  questionReadCacheScope?: object;
   startedAt: string;
   /** What the person would call this site. */
   siteLabel: string;
@@ -556,6 +557,9 @@ export async function runAgentApplicationPreparation(
     hands: createApplyPageHands(input.session, now),
     safety: input.session,
     modelQuestionClassification: true,
+    ...(input.questionReadCacheScope
+      ? { questionReadCacheScope: input.questionReadCacheScope }
+      : {}),
     ...(input.readReusableAnswers
       ? { readReusableAnswers: input.readReusableAnswers }
       : {}),
@@ -880,6 +884,7 @@ export function createApplyFormPreparer(input: {
         : {}),
       searchPreferences: input.searchPreferences,
       llmClient,
+      questionReadCacheScope: input.aiClient,
       ...(input.readReusableAnswers
         ? { readReusableAnswers: input.readReusableAnswers }
         : {}),
