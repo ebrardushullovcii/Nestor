@@ -47,11 +47,7 @@ export function compactSearchObservation(
     const label = firstLine(link.label, LABEL_CHARS);
     if (!label) return [];
     // "Skip to content", "#" and other jumps within this same page.
-    if (
-      page &&
-      link.href.includes("#") &&
-      withoutFragment(link.href) === page
-    )
+    if (page && link.href.includes("#") && withoutFragment(link.href) === page)
       return [];
     if (seenHrefs.has(link.href)) return [];
     seenHrefs.add(link.href);
@@ -82,9 +78,13 @@ export function compactSearchObservation(
 export function describeSearchObservation(
   observation: ApplyFormObservation,
 ): string {
-  return describeObservation(compactSearchObservation(observation), {
+  const compact = compactSearchObservation(observation);
+  const view = describeObservation(compact, {
     linkLimit: LINK_LIMIT,
   });
+  return compact.links.length > LINK_LIMIT
+    ? `${view}\n\nShowing ${LINK_LIMIT} of ${compact.links.length} page links. list_links reads the rest, including controls below the listings; it does not select jobs for you.`
+    : view;
 }
 
 /**

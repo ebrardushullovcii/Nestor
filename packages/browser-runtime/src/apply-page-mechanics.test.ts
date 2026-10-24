@@ -60,6 +60,18 @@ describe("reading the choices of lists the page draws itself", () => {
     browser = await chromium.launch({ headless: true });
   }, 60_000);
 
+  test("full text and link reads retain the tail of a long listing page", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`<body>${"<p>Visible listing text</p>".repeat(3000)}${Array.from({ length: 405 }, (_, index) => `<a href="https://example.test/${index}">Link ${index}</a>`).join("")}<p>Last vacancy</p></body>`);
+      const mechanics = createPlaywrightApplyPageMechanics(page);
+      expect(await mechanics.readText()).toContain("Last vacancy");
+      const raw = await mechanics.readPage();
+      expect(raw.links).toHaveLength(405);
+      expect(raw.links.at(-1)?.href).toBe("https://example.test/404");
+    } finally { await page.close(); }
+  });
+
   test("keeps the outer step legend on a nested skills group", async () => {
     const page = await browser.newPage();
     try {

@@ -144,6 +144,55 @@ function scripted(
   };
 }
 
+test("unmatched pages can progress past the no-saves window", async () => {
+  const pages = { current: rawPage() };
+  const liveHands = hands(pages);
+  liveHands.navigate = (url) => {
+    pages.current = rawPage({ url, bodyText: `A different page of unrelated vacancies: ${url}` });
+    return Promise.resolve({ ok: true, url });
+  };
+  const turns = Array.from({ length: 10 }, (_, index) => [
+    { name: "navigate", args: { url: `https://jobs.example.test/search?page=${index}` } },
+    { name: "extract_jobs", args: { pageType: "search_results" } },
+  ]).flat();
+  const result = await runJobSearchAgent({
+    hands: liveHands,
+    config: config({ runControl: { noProgressStepLimit: 3 } }),
+    llmClient: scripted([...turns, { name: "finish", args: { reason: "Results exhausted." } }]),
+    jobExtractor: { extractJobsFromPage: () => Promise.resolve([]) },
+  });
+  expect(result.steps).toBe(21);
+  expect(result.incomplete).toBe(false);
+});
+
+test("lists links after the view's limit and advances via the selected page control", async () => {
+  const pages = { current: rawPage({ links: Array.from({ length: 205 }, (_, index) => ({
+    index, label: `Page link ${index}`, href: `https://jobs.example.test/link/${index}`,
+    visible: true, target: "", topOffset: index,
+  })) }) };
+  const liveHands = hands(pages);
+  const click = vi.spyOn(liveHands, "clickElement");
+  let answer = "";
+  const model = scripted([
+    { name: "list_links", args: { offset: 200 } },
+    { name: "next_page", args: { ref: "a0" } },
+    { name: "finish", args: { reason: "Last page." } },
+  ]);
+  const result = await runJobSearchAgent({
+    hands: liveHands, config: config(), jobExtractor: extractor,
+    llmClient: { chatWithTools: (messages, tools, options) => {
+      const last = messages.at(-1);
+      if (last?.role === "tool" && last.content.includes('"nextOffset"')) answer = last.content;
+      return model.chatWithTools(messages, tools, options);
+    } },
+  });
+  expect(JSON.parse(answer)).toMatchObject({ total: 205, nextOffset: null, links: [
+    { ref: "l200" }, { ref: "l201" }, { ref: "l202" }, { ref: "l203" }, { ref: "l204" },
+  ] });
+  expect(click).toHaveBeenCalledWith("a0");
+  expect(result.incomplete).toBe(false);
+});
+
 function posting(title: string, company: string, id: string) {
   return {
     sourceJobId: id,
@@ -1287,7 +1336,7 @@ describe("what the person sees while it runs", () => {
     });
     expect(result.jobs).toHaveLength(2);
     expect(result.steps).toBe(8);
-    expect(result.error).toBe("Stopped: no new jobs on the last 3 page reads.");
+    expect(result.error).toBe("Stopped: no new page content or listings in the last 6 steps.");
   });
 
   test("counts only repeated catalog pages in the stall warning window", async () => {
@@ -1315,7 +1364,7 @@ describe("what the person sees while it runs", () => {
     });
     expect(result.steps).toBe(12);
     expect(result.jobs).toEqual([]);
-    expect(result.error).toBe("Stopped: no new jobs on the last 6 page reads.");
+    expect(result.error).toBe("Stopped: no new page content or listings in the last 6 steps.");
   });
 
   test("unread catalog details keep progressing, but repeated details stall", async () => {
@@ -1342,7 +1391,7 @@ describe("what the person sees while it runs", () => {
       jobExtractor: extractor,
     });
     expect(result.steps).toBe(12);
-    expect(result.error).toBe("Stopped: no new jobs in the last 6 steps.");
+    expect(result.error).toBe("Stopped: no new page content or listings in the last 6 steps.");
   });
 
   test("identical observations still stall", async () => {
@@ -1353,7 +1402,7 @@ describe("what the person sees while it runs", () => {
       jobExtractor: extractor,
     });
     expect(result.steps).toBe(6);
-    expect(result.error).toBe("Stopped: no new jobs in the last 6 steps.");
+    expect(result.error).toBe("Stopped: no new page content or listings in the last 6 steps.");
   });
 
   test("turn notes are rewritten without tool names or handles", async () => {
@@ -1453,7 +1502,7 @@ describe("what the person sees while it runs", () => {
     // The first read is new content; the next six repeated reads still stall.
     expect(result.steps).toBe(7);
     expect(result.jobs).toEqual([]);
-    expect(result.error).toBe("Stopped: no new jobs on the last 6 page reads.");
+    expect(result.error).toBe("Stopped: no new page content or listings in the last 6 steps.");
   });
 
   test("stops scrolling without saved jobs and reports the step window", async () => {
@@ -1464,7 +1513,7 @@ describe("what the person sees while it runs", () => {
       jobExtractor: extractor,
     });
     expect(result.steps).toBe(6);
-    expect(result.error).toBe("Stopped: no new jobs in the last 6 steps.");
+    expect(result.error).toBe("Stopped: no new page content or listings in the last 6 steps.");
   });
 
   test("the wall-clock safety ceiling still stops a productive search", async () => {
@@ -2288,6 +2337,52 @@ describe("reading pages for less", () => {
       expect(call.pageText.length).toBeLessThan(8_000);
       expect(call.maxJobs).toBe(12);
     }
+  });
+
+  test("a timed-out part keeps successful reads and retries only the missing part before finishing", async () => {
+    vi.useFakeTimers();
+    try {
+      const reader = linkReader();
+      let slowSignal: AbortSignal | undefined;
+      let slowText = "";
+      let attempts = 0;
+      const wrapped = vi.fn<JobExtractor["extractJobsFromPage"]>((input) => {
+        if (!slowText && input.pageText.includes("→ https://jobs.example.test/jobs/0\n")) slowText = input.pageText;
+        if (input.pageText === slowText) {
+          attempts += 1;
+          if (attempts === 1) {
+            slowSignal = input.signal;
+            return new Promise(() => undefined);
+          }
+        }
+        return reader(input);
+      });
+      const answers: string[] = [];
+      const model = scripted([
+        { name: "extract_jobs", args: { pageType: "search_results" } },
+        { name: "extract_jobs", args: { pageType: "search_results" } },
+        { name: "finish", args: { reason: "All parts read." } },
+      ]);
+      const running = runJobSearchAgent({
+        hands: hands({ current: longBoard(45) }), config: config({ retainAllFound: true }),
+        jobExtractor: { extractJobsFromPage: wrapped },
+        llmClient: { chatWithTools: (messages, tools, options) => {
+          const last = messages.at(-1);
+          if (last?.role === "tool") answers.push(last.content);
+          return model.chatWithTools(messages, tools, options);
+        } },
+      });
+      await vi.advanceTimersByTimeAsync(45_001);
+      const result = await running;
+      expect(slowSignal?.aborted).toBe(true);
+      expect(result.jobs).toHaveLength(45);
+      expect(attempts).toBe(2);
+      expect(answers.some((answer) => answer.includes("could not be read this time"))).toBe(true);
+      const counts = new Map<string, number>();
+      for (const [call] of wrapped.mock.calls) counts.set(call.pageText, (counts.get(call.pageText) ?? 0) + 1);
+      for (const [text, count] of counts) expect(count).toBe(text === slowText ? 2 : 1);
+      expect(result.incomplete).toBe(false);
+    } finally { vi.useRealTimers(); }
   });
 
   test("reading an unchanged page again costs no page read and says so", async () => {

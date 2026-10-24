@@ -14,7 +14,6 @@
 export const PART_TEXT_CHARS = 3_000;
 const PART_OVERLAP_CHARS = 300;
 const PART_LINK_CHARS = 3_500;
-export const MAX_PAGE_PARTS = 24;
 const MIN_LABEL_CHARS = 4;
 
 export interface PageLink {
@@ -160,9 +159,9 @@ export function partSizeFor(
 
 /**
  * The texts to hand the page reader for one results page, in page order.
- * Parts with no posting link in them (menus, footers) are left out; a page
- * where no link label appears in the text at all is read as one part, as
- * before.
+ * Keep every window, including text without an anchor: a clickable card can
+ * contain a vacancy too. Calls are bounded by the reader, not by silently
+ * dropping the end of the page.
  */
 export function pagePartsForReading(input: {
   pageText: string;
@@ -173,30 +172,16 @@ export function pagePartsForReading(input: {
   const windows = splitPageText(
     input.pageText,
     input.size ?? partSizeFor(input.pageText, input.links, input.pageUrl),
-  ).slice(
-    0,
-    MAX_PAGE_PARTS,
   );
-  const withLinks = windows
-    .map((window) => ({
-      window,
-      links: linksInText(window, input.links, input.pageUrl),
-    }))
-    .filter((part) => part.links.length > 0);
-  if (withLinks.length === 0) {
-    const window = windows.slice(0, 2).join("\n");
-    return [
-      {
-        window,
-        text: formatPagePart(window, [], { index: 1, total: 1 }),
-      },
-    ];
-  }
-  return withLinks.map((part, index) => ({
+  const parts = windows.map((window) => ({
+    window,
+    links: linksInText(window, input.links, input.pageUrl),
+  }));
+  return parts.map((part, index) => ({
     window: part.window,
     text: formatPagePart(part.window, part.links, {
       index: index + 1,
-      total: withLinks.length,
+      total: parts.length,
     }),
   }));
 }

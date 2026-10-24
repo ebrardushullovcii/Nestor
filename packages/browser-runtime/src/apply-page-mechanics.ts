@@ -14,10 +14,7 @@ import type {
   RawApplyLink,
   RawApplyPage,
 } from "@nestor/contracts";
-import {
-  describeBrowserError,
-  isPageReplacedError,
-} from "@nestor/contracts";
+import { describeBrowserError, isPageReplacedError } from "@nestor/contracts";
 import type { Frame, Locator, Page } from "playwright";
 
 import {
@@ -780,8 +777,7 @@ async function readRawApplyPageOnce(page: Page): Promise<RawApplyPage> {
       page
         .locator(APPLY_LINK_SELECTOR)
         .evaluateAll((elements): RawApplyLink[] =>
-          // More links than this on one page are never the way to a form.
-          elements.slice(0, 400).map((element, index) => {
+          elements.map((element, index) => {
             const html = element as HTMLElement;
             const anchor =
               element instanceof HTMLAnchorElement ? element : null;
@@ -1745,11 +1741,7 @@ export function createPlaywrightApplyPageMechanics(
     },
     readText: async (ref) => {
       if (!ref) {
-        return page
-          .locator("body")
-          .innerText({ timeout: 5_000 })
-          .then((text) => text.slice(0, 40_000))
-          .catch(() => "");
+        return page.locator("body").innerText({ timeout: 5_000 });
       }
       const locator =
         controlLocator(page, ref) ??
@@ -1759,10 +1751,7 @@ export function createPlaywrightApplyPageMechanics(
       if (!locator) {
         return "";
       }
-      return locator
-        .innerText({ timeout: 5_000 })
-        .then((text) => text.slice(0, 40_000))
-        .catch(() => "");
+      return locator.innerText({ timeout: 5_000 });
     },
   };
 }

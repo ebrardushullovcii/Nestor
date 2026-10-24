@@ -75,14 +75,15 @@ describe("reading a long results page in parts", () => {
     expect(Math.max(...windows.map((window) => window.length))).toBeLessThanOrEqual(3_300);
   });
 
-  test("a part with no posting link in it is left out, a page without any is read once", () => {
+  test("keeps unlinked text alongside links and beyond the former 24-part limit", () => {
     const { text, links } = board(30);
     const parts = pagePartsForReading({
       pageText: `${"Menu line\n".repeat(400)}${text}`,
       links,
       pageUrl,
     });
-    expect(parts.every((part) => part.text.includes("→ https://jobs.example.test/jobs/"))).toBe(true);
+    expect(parts[0]?.window).toContain("Menu line");
+    expect(parts.some((part) => part.text.includes("→ https://jobs.example.test/jobs/"))).toBe(true);
 
     const bare = pagePartsForReading({
       pageText: "Engineer at Northwind. Analyst at Contoso.",
@@ -91,6 +92,12 @@ describe("reading a long results page in parts", () => {
     });
     expect(bare).toHaveLength(1);
     expect(bare[0]?.text).toContain("Engineer at Northwind.");
+    const unlinked = pagePartsForReading({
+      pageText: `${"Vacancy card without an anchor\n".repeat(3000)}Last vacancy`,
+      links: [], pageUrl,
+    });
+    expect(unlinked.length).toBeGreaterThan(24);
+    expect(unlinked.at(-1)?.window).toContain("Last vacancy");
   });
 
   test("links are matched by their first label line and listed once", () => {

@@ -28,16 +28,18 @@ import type { ApplyFormObservation, ApplyPageHands } from "../apply/types";
 import { createPageTools } from "../page-tools";
 import {
   SEARCH_KEEP_WHOLE_ANSWERS,
+  compactSearchObservation,
   createSearchViewDescriber,
 } from "./search-observation";
-import { linksInText, mapWithLimit, pagePartsForReading } from "./page-read-parts";
+import {
+  linksInText,
+  mapWithLimit,
+  pagePartsForReading,
+} from "./page-read-parts";
 import type { AgentConfig, AgentProgress, AgentResult } from "../types";
 import type { SearchResultCache } from "./search-result-cache";
 import { createSearchCatalogTools } from "./job-search-catalog-tools";
-import {
-  normalizeExtractedJobSourceId,
-  sanitizeUrl,
-} from "./job-identity";
+import { normalizeExtractedJobSourceId, sanitizeUrl } from "./job-identity";
 import {
   createJobSearchPrompts,
   describeRemoteHandling,
@@ -284,6 +286,42 @@ const PART_SPLIT_BEFORE_MS = 30_000;
 const PAGE_READ_CONCURRENCY = 8;
 /** New parts one extract_jobs call reads: one round, well inside the 90-second tool deadline. */
 const PAGE_READ_PARTS_PER_CALL = 8;
+const PAGE_PART_TIMEOUT_MS = 45_000;
+
+/** A timed-out part must not hold successful siblings past the tool deadline. */
+async function readWithDeadline<T>(
+  read: (signal: AbortSignal) => Promise<T>,
+  parent?: AbortSignal,
+): Promise<T> {
+  const deadline = new AbortController();
+  const signal = parent
+    ? AbortSignal.any([parent, deadline.signal])
+    : deadline.signal;
+  signal.throwIfAborted();
+  const timer = setTimeout(() => deadline.abort(), PAGE_PART_TIMEOUT_MS);
+  let abort: () => void = () => undefined;
+  try {
+    return await Promise.race([
+      read(signal),
+      new Promise<never>((_resolve, reject) => {
+        abort = () => {
+          const reason: unknown = parent?.reason;
+          reject(
+            parent?.aborted && reason instanceof Error
+              ? reason
+              : new Error(
+                  "This part took too long to read. Read the page again to retry only its unread parts.",
+                ),
+          );
+        };
+        signal.addEventListener("abort", abort, { once: true });
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", abort);
+  }
+}
 
 /** A posting's own page, read whole: its links first, then its text. */
 function detailReadText(
@@ -398,6 +436,12 @@ export async function runJobSearchAgent(
   // Different filter routes can show identical cards. Reuse only exact text
   // and absolute link evidence, with every returned posting linked there.
   const linkedPartReads = new Map<string, ExtractedJobs>();
+  const pendingPageReads = new Map<string, number>();
+  const seenPageContent = new Set<string>();
+  const seenPartContent = new Set<string>();
+  const seenLinkReads = new Set<string>();
+  let pageContentRevision = 0;
+  let readContentRevision = 0;
   const savedCount = () =>
     collected.filter((job) => !job.searchRejection).length;
   const keep = (job: JobPosting): boolean => {
@@ -447,6 +491,20 @@ export async function runJobSearchAgent(
           observation = await hands.observe();
         }
         observationRevision += 1;
+        const view = compactSearchObservation(observation);
+        // A new URL alone is not progress. New cards, controls, or filter
+        // values are evidence even when no listing has been kept yet.
+        const content = JSON.stringify({
+          text: view.bodyTextExcerpt,
+          links: view.links.map(({ label, href }) => ({ label, href })),
+          controls: view.controls,
+          actions: view.actions,
+          clickables: view.clickables,
+        });
+        if (!seenPageContent.has(content)) {
+          seenPageContent.add(content);
+          pageContentRevision += 1;
+        }
         return observation;
       },
     },
@@ -496,6 +554,7 @@ export async function runJobSearchAgent(
           "click",
           "go_back",
           "follow_link",
+          "next_page",
           "press_key",
           "select",
         ].includes(tool.definition.function.name)
@@ -524,7 +583,6 @@ export async function runJobSearchAgent(
   let initialIndex: ApplyFormObservation | null = null;
   let steps = 0;
   let lastProgressStep = 0;
-  let pagesWithoutNewJobs = 0;
   const emit = (currentAction: string, message: string): void => {
     input.onProgress?.({
       currentUrl:
@@ -609,10 +667,9 @@ export async function runJobSearchAgent(
       type: "function",
       function: {
         name: "extract_jobs",
-        description:
-          isSourceCheck
-            ? "Read every job posting on the current page and save the suitable ones. Supply rejected listing URLs with a reason category and a plain reason for every listing you ruled out; those decisions are recorded, not saved as matches. Tells you what was saved, rejected and already known."
-            : "Read every job posting on the current page, including listings below the part on screen, and save the suitable ones. Supply rejected listing URLs with a reason category and a plain reason for every listing you ruled out; those decisions are recorded, not saved as matches. The page reader also checks each listing against the person's goals and records the ones that do not fit. Tells you what was saved, rejected and already known.",
+        description: isSourceCheck
+          ? "Read every job posting on the current page and save the suitable ones. Supply rejected listing URLs with a reason category and a plain reason for every listing you ruled out; those decisions are recorded, not saved as matches. Tells you what was saved, rejected and already known."
+          : "Read every job posting on the current page, including listings below the part on screen, and save the suitable ones. Supply rejected listing URLs with a reason category and a plain reason for every listing you ruled out; those decisions are recorded, not saved as matches. The page reader also checks each listing against the person's goals and records the ones that do not fit. Tells you what was saved, rejected and already known.",
         parameters: {
           type: "object",
           properties: {
@@ -715,16 +772,25 @@ export async function runJobSearchAgent(
             })),
           )
         : null;
+      const readDeadline = AbortSignal.timeout(65_000);
+      const readSignal = context.signal
+        ? AbortSignal.any([context.signal, readDeadline])
+        : readDeadline;
       const read = (pageText: string, jobs: number) =>
-        input.jobExtractor.extractJobsFromPage({
-          pageText,
-          pageUrl: observation.url!,
-          pageType,
-          maxJobs: jobs,
-          ...(selectionContext ? { selectionContext } : {}),
-          ...(context.signal ? { signal: context.signal } : {}),
-        });
+        readWithDeadline(
+          (signal) =>
+            input.jobExtractor.extractJobsFromPage({
+              pageText,
+              pageUrl: observation.url!,
+              pageType,
+              maxJobs: jobs,
+              ...(selectionContext ? { selectionContext } : {}),
+              signal,
+            }),
+          readSignal,
+        );
       emit("extract_jobs", `Reading the jobs on ${observation.url}.`);
+      pendingPageReads.set(observation.url, 1);
       const pageRead =
         pageType === "job_detail"
           ? {
@@ -734,6 +800,9 @@ export async function runJobSearchAgent(
               rereadOnly: false,
             }
           : await readResultsPage(observation, pageText, read);
+      const unread = pageRead.unreadParts + pageRead.remainingParts;
+      if (unread > 0) pendingPageReads.set(observation.url, unread);
+      else pendingPageReads.delete(observation.url);
       const found = pageRead.found;
       // A rejection whose address matches nothing read here is reported back,
       // never a reason to drop the rest of the page's saves.
@@ -785,7 +854,11 @@ export async function runJobSearchAgent(
           });
         } else if (keep(posting)) {
           // A later read can recover an identity rejected on an earlier page.
-          for (let index = unreadableListings.length - 1; index >= 0; index -= 1) {
+          for (
+            let index = unreadableListings.length - 1;
+            index >= 0;
+            index -= 1
+          ) {
             if (unreadableListings[index]?.url === posting.canonicalUrl) {
               unreadableListings.splice(index, 1);
             }
@@ -817,7 +890,9 @@ export async function runJobSearchAgent(
         content:
           found.length === 0
             ? [
-                "No job postings could be read from this page. If jobs are visible, they may load on scroll or sit behind a control; if not, this is not a listings page.",
+                unread > 0
+                  ? "This page read is incomplete; it does not establish that there are no jobs. Call extract_jobs again to retry unread parts."
+                  : "No job postings could be read from this page. If jobs are visible, they may load on scroll or sit behind a control; if not, this is not a listings page.",
                 ...notes,
               ]
                 .filter((line): line is string => line !== null)
@@ -1153,7 +1228,7 @@ export async function runJobSearchAgent(
     isSourceCheck ? `Checking ${siteLabel}.` : `Searching ${siteLabel}.`,
   );
 
-  const tools = [
+  const tools: AgentLoopTool[] = [
     ...pageTools.tools.map((tool) => {
       if (!["observe", "read_text"].includes(tool.definition.function.name))
         return withBotCheckHandoff(tool);
@@ -1197,24 +1272,82 @@ export async function runJobSearchAgent(
         },
       });
     }),
+    {
+      definition: {
+        type: "function" as const,
+        function: {
+          name: "list_links",
+          description:
+            "List the current page's links, including links below the visible excerpt. This is page evidence, not a job classifier: decide which links are postings or pagination yourself.",
+          parameters: {
+            type: "object" as const,
+            properties: {
+              offset: {
+                type: "number",
+                description:
+                  "Default 0. Returns up to 100 links; continue at nextOffset.",
+              },
+            },
+          },
+        },
+      },
+      execute: async (raw: string) => {
+        const args = parseToolArguments(raw);
+        const offset =
+          typeof args.offset === "number" && Number.isFinite(args.offset)
+            ? Math.max(0, Math.floor(args.offset))
+            : 0;
+        const view = compactSearchObservation(await pageTools.observe());
+        const links = view.links.slice(offset, offset + 100);
+        const key = JSON.stringify(links);
+        const progress = links.length > 0 && !seenLinkReads.has(key);
+        seenLinkReads.add(key);
+        return {
+          kind: "ok" as const,
+          progress,
+          content: JSON.stringify({
+            url: view.url,
+            total: view.links.length,
+            nextOffset:
+              offset + links.length < view.links.length
+                ? offset + links.length
+                : null,
+            links: links.map(({ ref, label, href }) => ({ ref, label, href })),
+          }),
+        };
+      },
+    },
+    withBotCheckHandoff({
+      ...pageTools.tools.find(
+        (tool) => tool.definition.function.name === "click",
+      )!,
+      definition: {
+        type: "function" as const,
+        function: {
+          name: "next_page",
+          description:
+            "Press the forward page or Load more control you chose from the current view. Supply its exact ref; never invent a page URL. Returns the next view, or explains if the control did not change the page. Read its listings before advancing again.",
+          parameters: {
+            type: "object" as const,
+            properties: { ref: { type: "string" } },
+            required: ["ref"],
+          },
+        },
+      },
+    }),
     ...catalogTools,
     withBotCheckHandoff(extractTool),
     savedTool,
     withBotCheckHandoff(pageApiTool),
     finishTool,
   ];
-  // Reads that look at a page of jobs; a run of them with nothing new saved
-  // is what "no new jobs on the last N page reads" counts.
-  const pageReadToolNames = new Set([
-    extractTool.definition.function.name,
-    "list_catalog_jobs",
-  ]);
   // These tools report progress only for rows/details not previously read.
   // Page movement tools also report progress, but a new URL alone does not
   // prove that duplicate-only pagination found anything new.
   const unreadContentToolNames = new Set([
     "list_catalog_jobs",
     "read_catalog_job",
+    "list_links",
   ]);
   const loop = await runAgentLoop({
     messages,
@@ -1226,21 +1359,24 @@ export async function runJobSearchAgent(
             ...tool,
             execute: async (raw, context) => {
               const savedBefore = collected.length;
+              const contentBefore = pageContentRevision;
+              const readsBefore = readContentRevision;
               const outcome = await tool.execute(raw, context);
               if (outcome.kind !== "ok") return outcome;
               const savedNewJobs = collected.length > savedBefore;
               const readUnreadContent =
                 outcome.progress === true &&
                 unreadContentToolNames.has(tool.definition.function.name);
-              const madeProgress = savedNewJobs || readUnreadContent;
+              const madeProgress =
+                savedNewJobs ||
+                readUnreadContent ||
+                pageContentRevision > contentBefore ||
+                readContentRevision > readsBefore;
               if (madeProgress) {
                 lastProgressStep = context.step;
-                pagesWithoutNewJobs = 0;
-              } else if (pageReadToolNames.has(tool.definition.function.name)) {
-                pagesWithoutNewJobs += 1;
               }
-              // Moving to another URL, scrolling, or reading the same feed again
-              // cannot keep duplicate-only pagination alive indefinitely.
+              // Repeating the same evidence still stalls. An empty or fully
+              // rejected page does not end a search that is reaching new content.
               return { ...outcome, progress: madeProgress };
             },
           }),
@@ -1293,10 +1429,7 @@ export async function runJobSearchAgent(
   });
 
   if (!isSourceCheck && loop.ending === "stalled") {
-    loop.reason =
-      pagesWithoutNewJobs > 0
-        ? `Stopped: no new jobs on the last ${pagesWithoutNewJobs} page reads.`
-        : `Stopped: no new jobs in the last ${loop.steps - lastProgressStep} steps.`;
+    loop.reason = `Stopped: no new page content or listings in the last ${loop.steps - lastProgressStep} steps.`;
   }
   emit("finish", loop.reason);
   const result = buildResult(loop);
@@ -1356,6 +1489,11 @@ export async function runJobSearchAgent(
       }
       freshReads += 1;
       let jobs = await read(part.text, PART_MAX_JOBS);
+      const contentKey = `${new URL(pageUrl).origin}\n${part.text}`;
+      if (!seenPartContent.has(contentKey)) {
+        seenPartContent.add(contentKey);
+        readContentRevision += 1;
+      }
       const full =
         jobs.length >= PART_MAX_JOBS &&
         depth < PART_SPLIT_DEPTH &&
@@ -1373,7 +1511,8 @@ export async function runJobSearchAgent(
         });
         if (halves.length > 1) {
           const more: ExtractedJobs = [];
-          for (const half of halves) more.push(...(await readPart(half, depth + 1)));
+          for (const half of halves)
+            more.push(...(await readPart(half, depth + 1)));
           jobs = [...jobs, ...more];
         }
       }
@@ -1392,14 +1531,17 @@ export async function runJobSearchAgent(
     // the tool deadline; the rest wait for the next call on this page, which
     // starts where this one stopped (parts already read come from the cache).
     const unread = parts.filter(
-      (part) => !pageReadCache.has(`${pageUrl}
+      (part) =>
+        !pageReadCache.has(`${pageUrl}
 ${part.text}`),
     );
+    pendingPageReads.set(pageUrl, unread.length);
     const now = new Set(unread.slice(0, PAGE_READ_PARTS_PER_CALL));
     const settled = await mapWithLimit(
       parts.filter(
         (part) =>
-          now.has(part) || pageReadCache.has(`${pageUrl}
+          now.has(part) ||
+          pageReadCache.has(`${pageUrl}
 ${part.text}`),
       ),
       PAGE_READ_CONCURRENCY,
@@ -1409,9 +1551,11 @@ ${part.text}`),
       entry.status === "rejected" ? [entry.reason as unknown] : [],
     );
     const remainingParts =
-      parts.filter((part) => !pageReadCache.has(`${pageUrl}
-${part.text}`))
-        .length - failures.length;
+      parts.filter(
+        (part) =>
+          !pageReadCache.has(`${pageUrl}
+${part.text}`),
+      ).length - failures.length;
     const aborted = failures.find(
       (reason) =>
         (reason instanceof DOMException && reason.name === "AbortError") ||
@@ -1421,11 +1565,6 @@ ${part.text}`))
       throw aborted instanceof Error
         ? aborted
         : new DOMException("The run was stopped.", "AbortError");
-    if (failures.length === settled.length && failures.length > 0) {
-      throw failures[0] instanceof Error
-        ? failures[0]
-        : new Error(String(failures[0]));
-    }
     const seen = new Set<string>();
     const found: ExtractedJobs = [];
     for (const entry of settled) {
@@ -1488,6 +1627,16 @@ ${part.text}`))
       finish &&
       !finish.stuck &&
       !finish.needsPerson;
+    const unfinishedReads =
+      pendingPageReads.size > 0 &&
+      (isSourceCheck ||
+        config.retainAllFound ||
+        savedCount() < config.targetJobCount);
+    if (unfinishedReads) {
+      notes.push(
+        `Some page reads were left unfinished: ${[...pendingPageReads].map(([url, parts]) => `${url} (${parts} unread parts)`).join("; ")}.`,
+      );
+    }
     const blocker = finish?.needsPerson
       ? (toBlockerReason(finish.data.blockedBy, pageTools.state.observation) ??
         "manual_step_required")
@@ -1595,7 +1744,7 @@ ${part.text}`))
       pagesCovered: coveredPageUrls.length,
       jobs: [...collected],
       steps,
-      incomplete: !finishedCleanly,
+      incomplete: !finishedCleanly || unfinishedReads,
       ...(error ? { error } : {}),
       ...(notes.length > 0 ? { warning: notes.join(" ") } : {}),
       transcriptMessageCount: 0,

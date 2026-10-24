@@ -2070,6 +2070,7 @@ export function createBrowserAgentRuntime(
     const retainedApplicationPages = await getProtectedApplicationPages(context);
     const prepared = await prepareAutomationPageForTarget(context, {
       targetUrl: navigationTarget,
+      acceptTargetOriginAfterTimeout: true,
       bringToFront: currentSessionState.status !== "ready",
       closeOtherPages: !agentOptions.dedicatedPage,
       ...(agentOptions.dedicatedPage ? { reuseExistingPage: false } : {}),
@@ -3596,6 +3597,11 @@ export function createBrowserAgentRuntime(
           if (navigationTarget) {
             const response = await page.goto(navigationTarget, {
               waitUntil: "domcontentloaded",
+            }).catch((error: unknown) => {
+              // A navigation deadline does not mean the page is unusable.
+              // Let the agent inspect it and wait or retry, keeping its work.
+              if (error instanceof Error && error.name === "TimeoutError") return null;
+              throw error;
             });
             const status = response?.status() ?? null;
             if (status === 404 || status === 410) {
