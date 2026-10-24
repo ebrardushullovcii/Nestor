@@ -1101,7 +1101,13 @@ export const JOB_FINDER_ACTIONS = {
     "resume",
     "local",
     "Move a resume back to draft review.",
-    (i, c) => c.service.clearResumeApproval(i.jobId),
+    // Undo of an approval puts back the status it replaced.
+    (i, c) =>
+      i.restoreStatus
+        ? c.service.clearResumeApproval(i.jobId, {
+            restoreStatus: i.restoreStatus,
+          })
+        : c.service.clearResumeApproval(i.jobId),
   ),
   "set-work-history-review-acknowledgment": action(
     C.JobFinderSetWorkHistoryReviewAcknowledgmentInputSchema,

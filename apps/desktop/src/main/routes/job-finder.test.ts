@@ -1213,6 +1213,40 @@ describe("single application live workspace updates", () => {
     },
   );
 
+  it("publishes fit scores while Judge fit waits on the model", async () => {
+    vi.useFakeTimers();
+    let complete!: (value: ReturnType<typeof createEmptyWorkspace>) => void;
+    const judge = vi.fn(
+      () =>
+        new Promise<ReturnType<typeof createEmptyWorkspace>>((resolve) => {
+          complete = resolve;
+        }),
+    );
+    mockGetJobFinderWorkspaceService.mockResolvedValue({
+      judgeUnjudgedJobs: judge,
+    });
+    const handlers = new Map<string, RegisteredHandler>();
+    registerJobFinderRouteHandlers({
+      handle: vi.fn((key: string, handler: RegisteredHandler) => {
+        handlers.set(key, handler);
+      }),
+    } as unknown as IpcMain);
+    const send = vi.fn();
+    const response = handlers.get("job-finder:judge-unjudged-jobs")!(
+      { sender: { send } },
+      undefined,
+    );
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(judge).toHaveBeenCalledTimes(1);
+    // Within a second of the start and on the 3 s beat, before it finishes.
+    expect(send).toHaveBeenCalledTimes(2);
+    complete(createEmptyWorkspace("2026-09-26T10:00:00.000Z"));
+    await response;
+    const sent = send.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(send).toHaveBeenCalledTimes(sent);
+  });
+
   it.each([false, true])(
     "cleans up a rejected preparation with destroyed sender=%s",
     async (destroyed) => {
@@ -2758,6 +2792,22 @@ describe("job-finder scoped settings routes", () => {
     expect(mockUpdateApplicationDefaults).toHaveBeenCalledOnce();
     expect(mockUpdateApplicationDefaults).toHaveBeenCalledWith(input);
     expect(answeredView(result)).toEqual(snapshot);
+  });
+
+  it("answers a change with its delta and does not ask the same window to sync again", async () => {
+    const snapshot = createEmptyWorkspace("2026-08-22T10:00:30.000Z");
+    mockUpdateApplicationDefaults.mockResolvedValue(snapshot);
+    mockGetJobFinderWorkspaceService.mockResolvedValue({
+      updateApplicationDefaults: mockUpdateApplicationDefaults,
+    });
+    const send = vi.fn();
+    await registerAndFindHandler("job-finder:update-application-defaults")(
+      { sender: { send, isDestroyed: () => false } },
+      UpdateApplicationDefaultsInputSchema.parse({
+        resumeApplicationMode: "original_resume",
+      }),
+    );
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("routes tracker CRM payloads to updateTrackerCrm and never through saveSettings", async () => {

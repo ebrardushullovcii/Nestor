@@ -151,6 +151,7 @@ import {
   noteStartupWorkspaceRevisionHeld,
 } from "../services/job-finder/startup-workspace-view";
 import {
+  notifyJobFinderWorkspaceListeners,
   publishJobFinderWorkspaceUpdate,
   scheduleAnswerDraftWorkspaceUpdate,
   withJobFinderWorkspaceUpdates,
@@ -864,7 +865,11 @@ async function requireApplyQueueRepository() {
 let applyQueueRunner: ApplyQueueRunner | null = null;
 
 /** Shared by the buttons and the registered assistant actions. */
-export async function executeApplyQueueAction(actionId: string, input: unknown) {
+export async function executeApplyQueueAction(
+  actionId: string,
+  input: unknown,
+  options: { onApproveProgress?: (done: number) => void } = {},
+) {
   const { service, repository } = await requireApplyQueueRepository();
   if (actionId === "start-apply-queue") {
     const value = JobFinderStartApplyQueueInputSchema.parse(input);
@@ -878,7 +883,10 @@ export async function executeApplyQueueAction(actionId: string, input: unknown) 
   } else if (actionId === "remove-from-apply-queue") {
     await getApplyQueueRunner().remove(JobFinderRemoveFromApplyQueueInputSchema.parse(input).jobIds);
   } else if (actionId === "approve-resumes") {
-    await approveApplicationResumes(service, JobFinderApproveResumesInputSchema.parse(input).jobIds, { personApproved: true });
+    await approveApplicationResumes(service, JobFinderApproveResumesInputSchema.parse(input).jobIds, {
+      personApproved: true,
+      ...(options.onApproveProgress ? { onProgress: options.onApproveProgress } : {}),
+    });
   } else {
     throw new Error("Unknown Apply queue action.");
   }
@@ -1299,14 +1307,25 @@ export function registerJobFinderRouteHandlers(
   const runRegisteredAction = async (name: JobFinderActionId, event: IpcMainInvokeEvent, payload: unknown) => {
     const value = name === "disable-resume-strategy" ? { strategyId: payload }
       : name === "update-appearance-theme" ? { appearanceTheme: payload } : payload ?? {};
-    const result = await executeJobFinderAction(name, value, { service: await getJobFinderWorkspaceService() });
+    const service = await getJobFinderWorkspaceService();
+    const run = () => executeJobFinderAction(name, value, { service });
+    // Minutes of model calls: keep scores arriving on screen meanwhile.
+    const result = name === "judge-unjudged-jobs"
+      ? await withJobFinderWorkspaceUpdates(event.sender, run) : await run();
     if (["save-settings", "update-application-defaults", "set-activity-control"].includes(name)) applyQueueRunner?.nudge();
-    if (JOB_FINDER_ACTIONS[name].safety !== "read") publishJobFinderWorkspaceUpdate(event.sender);
     // Some changes answer with their own record (application details, a
     // recommendation); only a workspace snapshot becomes a sync response.
     const isWorkspaceSnapshot =
       typeof result === "object" && result !== null &&
       (result as { module?: unknown }).module === "job-finder";
+    // A change answered with its delta needs no second sync of the whole
+    // workspace in this window; main's listeners still hear of it. Shortlist
+    // starts a draft and Stop ends a search, so those keep the follow-up.
+    if (JOB_FINDER_ACTIONS[name].safety !== "read") {
+      if (!isWorkspaceSnapshot || name === "queue-job-for-review" || name === "cancel-discovery-run")
+        publishJobFinderWorkspaceUpdate(event.sender);
+      else notifyJobFinderWorkspaceListeners();
+    }
     return JOB_FINDER_ACTIONS[name].safety === "read" || !isWorkspaceSnapshot
       ? result : workspaceMutationResponse(event.sender, result as JobFinderWorkspaceSnapshot);
   };
@@ -2838,8 +2857,13 @@ export function registerJobFinderRouteHandlers(
   ipcMain.handle(
     "job-finder:approve-resumes",
     async (event, payload: unknown) => {
+      // Approvals land on screen ten at a time while the rest finish.
+      const onApproveProgress = (done: number) => {
+        if (done > 0 && done % 10 === 0) publishJobFinderWorkspaceUpdate(event.sender);
+      };
       const snapshot = await executeJobFinderAction("approve-resumes", payload, {
-        service: await getJobFinderWorkspaceService(), host: executeApplyQueueAction,
+        service: await getJobFinderWorkspaceService(),
+        host: (actionId, input) => executeApplyQueueAction(actionId, input, { onApproveProgress }),
       });
       return workspaceMutationResponse(event.sender, snapshot as JobFinderWorkspaceSnapshot);
     },

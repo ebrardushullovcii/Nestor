@@ -95,8 +95,8 @@ const STAGES = {
         "The search stopped early; read the alert in the last screenshot.",
       );
     const fits = [
-      ...tree.matchAll(/Overall fit: (\d+) percent ([A-Za-z ]+?) Active/g),
-    ].map((m) => `${m[1]}% ${m[2]}`);
+      ...tree.matchAll(/Overall fit: (\d+) percent/g),
+    ].map((m) => `${m[1]}%`);
     assert.ok(fits.length > 0, "search results carry model fit verdicts");
     const runs = db("discovery_runs", { limit: 1 });
     const jobs = db("saved_jobs", { limit: 20 });

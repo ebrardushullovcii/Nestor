@@ -54,6 +54,12 @@ describe("registered user actions", () => {
       ["j"],
     ],
     ["clear-resume-approval", { jobId: "j" }, "clearResumeApproval", ["j"]],
+    [
+      "clear-resume-approval",
+      { jobId: "j", restoreStatus: "needs_review" },
+      "clearResumeApproval",
+      ["j", { restoreStatus: "needs_review" }],
+    ],
     ["judge-unjudged-jobs", {}, "judgeUnjudgedJobs", []],
     ["cancel-source-debug", { runId: "r" }, "cancelSourceDebug", ["r"]],
     ["get-source-debug-run", { runId: "r" }, "getSourceDebugRun", ["r"]],

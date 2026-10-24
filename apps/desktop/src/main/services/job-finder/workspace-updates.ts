@@ -14,8 +14,8 @@ export function onJobFinderWorkspaceUpdate(listener: () => void): () => void {
   return () => workspaceUpdateListeners.delete(listener);
 }
 
-/** Tells mounted renderers to converge through the existing delta sync. */
-export function publishJobFinderWorkspaceUpdate(target?: WebContents): void {
+/** Tells only the main-process listeners; no window is asked to sync. */
+export function notifyJobFinderWorkspaceListeners(): void {
   for (const listener of workspaceUpdateListeners) {
     try {
       listener();
@@ -23,6 +23,11 @@ export function publishJobFinderWorkspaceUpdate(target?: WebContents): void {
       // A listener never blocks the renderer update.
     }
   }
+}
+
+/** Tells mounted renderers to converge through the existing delta sync. */
+export function publishJobFinderWorkspaceUpdate(target?: WebContents): void {
+  notifyJobFinderWorkspaceListeners();
   if (target) {
     const canSend = typeof target.send === "function";
     const isDestroyed =
