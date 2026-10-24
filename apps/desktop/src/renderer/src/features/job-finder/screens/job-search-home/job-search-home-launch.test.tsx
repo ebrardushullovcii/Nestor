@@ -23,6 +23,34 @@ const counts = {
 };
 
 describe("Home while the workspace loads", () => {
+  it("holds the Next step card's last height at the same window width", () => {
+    localStorage.setItem(
+      "nestor.job-finder.home.next-step-size.v1",
+      JSON.stringify({ height: 237, windowWidth: window.innerWidth }),
+    );
+    try {
+      render(
+        <JobSearchHomeLaunch counts={counts} onNavigate={() => undefined} />,
+      );
+      expect(screen.getByTestId("home-next-step-launch").style.minHeight).toBe(
+        "237px",
+      );
+      cleanup();
+      localStorage.setItem(
+        "nestor.job-finder.home.next-step-size.v1",
+        JSON.stringify({ height: 237, windowWidth: window.innerWidth + 400 }),
+      );
+      render(
+        <JobSearchHomeLaunch counts={counts} onNavigate={() => undefined} />,
+      );
+      expect(screen.getByTestId("home-next-step-launch").style.minHeight).toBe(
+        "",
+      );
+    } finally {
+      localStorage.removeItem("nestor.job-finder.home.next-step-size.v1");
+    }
+  });
+
   it("shows the three list counts where the full Home puts them", () => {
     render(
       <JobSearchHomeLaunch counts={counts} onNavigate={() => undefined} />,
