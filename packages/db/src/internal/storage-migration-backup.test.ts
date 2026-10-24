@@ -68,3 +68,24 @@ test("a resumed batch preserves old backups and takes a fresh recovery point", (
     database.close();
   }
 });
+
+test("yielded conversions share one pre-batch recovery point", async () => {
+  const { database, file } = fixture();
+  try {
+    await withStorageMigrationBackups(database, async () => {
+      backupBeforeStorageMigration(database, 27);
+      database.exec("UPDATE facts SET value = 'preferences converted'");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      backupBeforeStorageMigration(database, 28);
+      database.exec("UPDATE facts SET value = 'jobs converted'");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      backupBeforeStorageMigration(database, 26);
+    });
+    for (const version of [26, 27, 28])
+      expect(fact(`${file}.before-v${version}.sqlite`)).toBe("original");
+    backupBeforeStorageMigration(database, 30);
+    expect(fact(`${file}.before-v30.sqlite`)).toBe("jobs converted");
+  } finally {
+    database.close();
+  }
+});

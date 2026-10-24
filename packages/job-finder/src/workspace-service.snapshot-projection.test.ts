@@ -136,8 +136,14 @@ for (const storage of ["memory", "file"] as const) {
         const after = await workspace.getWorkspaceProjection();
         const canonical = await workspace.getWorkspaceSnapshot();
         expect(after.companyJobs.map((job) => job.id)).toEqual([chosen.id]);
-        expect(after.companyJobs).toEqual(canonical.companyJobs);
-        expect(after.discoveryJobs).toEqual(before.discoveryJobs);
+        // Compare the public IPC shape while lazy getters still have an open
+        // repository. Internal preparation symbols may differ between reads.
+        expect(structuredClone(after.companyJobs)).toEqual(
+          structuredClone(canonical.companyJobs),
+        );
+        expect(structuredClone(after.discoveryJobs)).toEqual(
+          structuredClone(before.discoveryJobs),
+        );
         if (storage === "file")
           for (const row of after.discoveryJobs)
             expect(row).toBe(
@@ -200,8 +206,12 @@ for (const storage of ["memory", "file"] as const) {
           original.dismissedDiscoveryJobs.map((row) => row.id),
         );
         const canonical = await workspace.getWorkspaceSnapshot();
-        expect(restored.discoveryJobs).toEqual(canonical.discoveryJobs);
-        expect(restored.companyJobs).toEqual(canonical.companyJobs);
+        expect(structuredClone(restored.discoveryJobs)).toEqual(
+          structuredClone(canonical.discoveryJobs),
+        );
+        expect(structuredClone(restored.companyJobs)).toEqual(
+          structuredClone(canonical.companyJobs),
+        );
       } finally {
         await close();
       }
@@ -283,6 +293,8 @@ for (const storage of ["memory", "file"] as const) {
       const { repo, run, close } = await fixture(storage);
       try {
         let intercept = true;
+        const recoveryRead = vi.spyOn(repo, "readDiscoveryBootstrapProjection");
+        const displayRead = vi.spyOn(repo, "readDiscoveryDisplayProjection");
         const wrapped: JobFinderRepository = {
           ...repo,
           commitDiscoveryStateUpdate: async (update) => {
@@ -315,7 +327,11 @@ for (const storage of ["memory", "file"] as const) {
             ?.agentCheckpoint,
         ).toBeNull();
         expect(activeBootstrap.recentDiscoveryRuns).toEqual([]);
+        recoveryRead.mockClear();
+        displayRead.mockClear();
         const display = await workspace.getWorkspaceProjection();
+        expect(recoveryRead).toHaveBeenCalledOnce();
+        expect(displayRead).toHaveBeenCalledOnce();
         const recovered = display.recentDiscoveryRuns.find(
           (item) => item.id === run.id,
         );
@@ -361,8 +377,12 @@ for (const storage of ["memory", "file"] as const) {
         const first = await workspace.getWorkspaceProjection();
         const second = await workspace.getWorkspaceProjection();
         expect(readCanonical).not.toHaveBeenCalled();
-        expect(first.discoveryJobs).toEqual(canonical.discoveryJobs);
-        expect(second.discoveryJobs).toEqual(first.discoveryJobs);
+        expect(structuredClone(first.discoveryJobs)).toEqual(
+          structuredClone(canonical.discoveryJobs),
+        );
+        expect(structuredClone(second.discoveryJobs)).toEqual(
+          structuredClone(first.discoveryJobs),
+        );
         expect(
           first.discoveryJobs.filter((job) => job.id === pending.id),
         ).toHaveLength(1);

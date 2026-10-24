@@ -5,6 +5,7 @@ import {
 } from "./saved-job-fingerprints";
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
+import { yieldToEventLoop } from "@nestor/core";
 import {
   savedJobSalarySelectSql,
   attachStoredSavedJobSalary,
@@ -21,8 +22,9 @@ import {
   savedJobDetailFields,
 } from "./saved-job-details";
 
-/** Saved jobs parsed per turn of the event loop on a full projection read. */
+/** Keep each SQLite read bounded even for unusually large old rows. */
 const PROJECTION_PAGE_ROWS = 12;
+const PROJECTION_SLICE_MS = 8;
 
 type ProjectionChanges = {
   before: readonly SavedJob[];
@@ -293,6 +295,7 @@ export function createSavedJobProjectionReader(
   async function readAllRowsInPages(): Promise<Map<string, SavedJob>> {
     const jobs = new Map<string, SavedJob>();
     let after = "";
+    let sliceStarted = performance.now();
     for (;;) {
       const rows = (readFactsPage ?? readPage).all(after, pageRows);
       for (const row of rows) {
@@ -315,10 +318,13 @@ export function createSavedJobProjectionReader(
               share,
             );
         jobs.set(job.id, job);
+        if (performance.now() - sliceStarted >= PROJECTION_SLICE_MS) {
+          await yieldToEventLoop();
+          sliceStarted = performance.now();
+        }
       }
       if (rows.length < pageRows) return jobs;
       after = String(rows.at(-1)!.id);
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
   }
 
@@ -344,9 +350,12 @@ export function createSavedJobProjectionReader(
       // write landing between pages keeps its marker for the next read.
       const ids = changes.map((row) => String(row.id));
       const next = ids.length > pageRows ? new Map(jobsById) : jobsById;
+      let sliceStarted = performance.now();
       for (let start = 0; start < ids.length; start += pageRows) {
-        if (start > 0)
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        if (performance.now() - sliceStarted >= PROJECTION_SLICE_MS) {
+          await yieldToEventLoop();
+          sliceStarted = performance.now();
+        }
         const pageIds = ids.slice(start, start + pageRows);
         if (details && readChangedFacts) {
           const found = new Set<string>();
@@ -384,9 +393,15 @@ export function createSavedJobProjectionReader(
     }
     externalVersion = version;
     // A write arriving during chunked parsing belongs to the next projection.
-    database
-      .prepare("DELETE FROM saved_job_projection_changes WHERE revision <= ?")
-      .run(revision);
+    if (Number(readRevision.get()?.revision) === revision) {
+      // No local write arrived during the paged read. Consume all markers
+      // with SQLite's bulk clear instead of deleting each index entry.
+      database.exec("DELETE FROM saved_job_projection_changes");
+    } else {
+      database
+        .prepare("DELETE FROM saved_job_projection_changes WHERE revision <= ?")
+        .run(revision);
+    }
     snapshot = Object.freeze(
       [...jobsById.values()].sort((left, right) =>
         left.id < right.id ? -1 : left.id > right.id ? 1 : 0,

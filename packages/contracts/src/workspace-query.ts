@@ -15,7 +15,26 @@ import type {
 import type { JobSearchCampaign } from "./job-search-campaigns";
 import type { CandidateProfile } from "./profile";
 import type { CompanyEntity } from "./job-finder-intelligence";
-import type { JobFinderRendererWorkspaceSnapshot } from "./workspace";
+import type {
+  JobFinderDiscoveryState,
+  JobFinderRendererWorkspaceSnapshot,
+} from "./workspace";
+
+export interface WorkspaceJobListingActivity {
+  jobId: string;
+  listingActivity: ListingActivity;
+}
+
+/** Home's discovery facts; listing bodies, pending jobs and ledger are absent. */
+export type DiscoveryHomeState = Pick<
+  JobFinderDiscoveryState,
+  | "sessions"
+  | "runState"
+  | "activeRun"
+  | "recentRuns"
+  | "activeSourceDebugRun"
+  | "recentSourceDebugRuns"
+> & { listingActivities: WorkspaceJobListingActivity[] };
 
 export const WorkspaceJobListSchema = z.enum([
   "discovery",

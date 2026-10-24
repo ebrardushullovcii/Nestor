@@ -24,7 +24,10 @@ import {
   type WorkspaceRecoveryEnvironment,
   type WorkspaceRecoveryValidationOverrides,
 } from "./file-repository-recovery";
-import { getWorkspaceDatabaseBackupPaths } from "./file-repository-backup";
+import {
+  createWorkspaceDatabaseBackup,
+  getWorkspaceDatabaseBackupPaths,
+} from "./file-repository-backup";
 import { openDatabaseFile, runMigrations } from "./internal/migrations";
 import { hasPersistedState, listValues } from "./internal/state";
 import { createSeed } from "./test-fixtures";
@@ -92,7 +95,6 @@ async function appendSnapshotGeneration(
   const repository = await createFileJobFinderRepository({
     filePath: fixture.filePath,
     seed: createSeed(),
-    automaticBackup: { onClose: true },
   });
   if (savedJobIds.length > 0) {
     await repository.commitSavedJobDelta({
@@ -101,6 +103,7 @@ async function appendSnapshotGeneration(
       ),
     });
   }
+  await createWorkspaceDatabaseBackup({ filePath: fixture.filePath });
   await repository.close();
 }
 

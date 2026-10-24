@@ -25,31 +25,12 @@ const normalizeLedgerUrl = normalizeJobIdentityUrl;
 
 type DiscoveryFingerprintPosting = Pick<
   JobPosting,
-  | "applicationUrl"
-  | "title"
-  | "company"
-  | "location"
-  | "workMode"
-  | "applyPath"
-  | "easyApplyEligible"
-  | "postedAt"
-  | "postedAtText"
-  | "providerUpdatedAt"
-  | "salaryText"
-  | "employmentType"
-  | "department"
-  | "team"
-  | "detailQuality"
-  | "summary"
-  | "description"
-  | "keySkills"
-  | "responsibilities"
-  | "minimumQualifications"
-  | "preferredQualifications"
-  | "seniority"
-  | "screeningHints"
-  | "benefits"
->;
+  Exclude<
+    (typeof DISCOVERY_FINGERPRINT_FIELDS)[number],
+    "keywordSignals" | "atsProvider"
+  >
+> &
+  Partial<Pick<JobPosting, "keywordSignals" | "atsProvider">>;
 
 function selectLatestProviderUpdatedAt(
   incoming: string | null,
@@ -90,6 +71,7 @@ const fingerprintFields = DISCOVERY_FINGERPRINT_FIELDS;
 function memoFingerprints(
   posting: DiscoveryFingerprintPosting,
   fingerprints: DiscoveryListingFingerprints,
+  matchAssessmentPostingFingerprint?: string,
 ): void {
   const basis = Object.fromEntries(
     fingerprintFields.map((field) => {
@@ -103,7 +85,14 @@ function memoFingerprints(
     }),
   ) as DiscoveryFingerprintPosting;
   const prepared = { basis, value: { ...fingerprints } };
-  if (!writeDiscoveryPreparation(posting, { fingerprints: prepared }))
+  if (
+    !writeDiscoveryPreparation(posting, {
+      fingerprints: prepared,
+      ...(matchAssessmentPostingFingerprint
+        ? { matchAssessmentPostingFingerprint }
+        : {}),
+    })
+  )
     frozenFingerprints.set(posting, prepared);
 }
 
@@ -111,13 +100,14 @@ function memoFingerprints(
 export function rememberDiscoveryListingFingerprints(
   posting: JobPosting,
   fingerprints: DiscoveryListingFingerprints,
+  matchAssessmentPostingFingerprint?: string,
 ): void {
   const freeze = (value: unknown): void => {
     if (!value || typeof value !== "object" || Object.isFrozen(value)) return;
     for (const child of Object.values(value)) freeze(child);
     Object.freeze(value);
   };
-  memoFingerprints(posting, fingerprints);
+  memoFingerprints(posting, fingerprints, matchAssessmentPostingFingerprint);
   freeze(posting);
 }
 
@@ -127,7 +117,12 @@ export function createDiscoveryListingFingerprints(
   const carried = readPreparedDiscoveryFingerprints(posting);
   if (carried) {
     const owner = readDiscoveryPreparation(posting)?.fingerprints?.owner;
-    if (owner && owner !== posting) memoFingerprints(posting, carried);
+    if (owner && owner !== posting)
+      memoFingerprints(
+        posting,
+        carried,
+        readDiscoveryPreparation(posting)?.matchAssessmentPostingFingerprint,
+      );
     return { ...carried };
   }
   const frozen = frozenFingerprints.get(posting);

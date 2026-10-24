@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type {
   JobFinderDiscoveryState,
   DiscoveryRunRecord,
+  DiscoveryBootstrapState,
 } from "@nestor/contracts";
 import { normalizeLegacyDiscoveryState } from "./legacy";
 import { cloneValue, parsePersistedRowValue } from "./state";
@@ -17,13 +18,6 @@ import type { DiscoveryDisplayProjection } from "../repository-types";
 export function toDiscoveryDisplayProjection(
   state: JobFinderDiscoveryState,
 ): DiscoveryDisplayProjection {
-  const displayRun = (run: DiscoveryRunRecord): DiscoveryRunRecord => ({
-    ...run,
-    targetExecutions: run.targetExecutions.map((execution) => ({
-      ...execution,
-      agentCheckpoint: null,
-    })),
-  });
   return freezeProjection(
     cloneValue({
       ...state,
@@ -31,6 +25,29 @@ export function toDiscoveryDisplayProjection(
       recentRuns: state.recentRuns.map(displayRun),
     }),
   ) as unknown as DiscoveryDisplayProjection;
+}
+
+function displayRun(run: DiscoveryRunRecord): DiscoveryRunRecord {
+  return {
+    ...run,
+    targetExecutions: run.targetExecutions.map((execution) => ({
+      ...execution,
+      agentCheckpoint: null,
+    })),
+  };
+}
+
+export function toDiscoveryBootstrapProjection(
+  state: JobFinderDiscoveryState,
+): DiscoveryBootstrapState {
+  return freezeProjection(
+    cloneValue({
+      sessions: state.sessions,
+      runState: state.runState,
+      activeRun: state.activeRun ? displayRun(state.activeRun) : null,
+      activeSourceDebugRun: state.activeSourceDebugRun,
+    }),
+  );
 }
 
 /** Remove checkpoint payloads inside SQLite, before JSON crosses into JS. */
@@ -75,24 +92,36 @@ export function createDiscoveryDisplayProjectionReader(
   if (normalized) {
     database.exec(`CREATE TEMP TABLE discovery_display_changes (
       table_name TEXT NOT NULL, run_id TEXT NOT NULL, id TEXT NOT NULL,
-      revision INTEGER NOT NULL, PRIMARY KEY (table_name, run_id, id)
+      PRIMARY KEY (table_name, run_id, id)
     )`);
     // Checkpoint bodies are absent from this projection. A checkpoint-only
     // commit must keep the same display object and avoid rebuilding history.
-    for (const table of ["discovery_runs", "discovery_run_targets", "discovery_run_activity", "discovery_run_source_health", "discovery_ledger", "discovery_pending_jobs"]) {
+    for (const table of [
+      "discovery_runs",
+      "discovery_run_targets",
+      "discovery_run_activity",
+      "discovery_run_source_health",
+      "discovery_ledger",
+      "discovery_ledger_observations",
+      "discovery_pending_jobs",
+    ]) {
       for (const event of ["INSERT", "UPDATE", "DELETE"]) {
         const row = event === "DELETE" ? "OLD" : "NEW";
-        const runId = table === "discovery_run_targets" || table === "discovery_run_activity" || table === "discovery_run_source_health"
-          ? `${row}.run_id` : "''";
+        const runId =
+          table === "discovery_run_targets" ||
+          table === "discovery_run_activity" ||
+          table === "discovery_run_source_health"
+            ? `${row}.run_id`
+            : "''";
         const retiredChild = event === "DELETE" && runId !== "''";
         database.exec(`CREATE TEMP TRIGGER discovery_display_${table}_${event.toLowerCase()}
           AFTER ${event} ON main.${table}
           ${retiredChild ? "WHEN EXISTS (SELECT 1 FROM discovery_runs WHERE id = OLD.run_id)" : ""}
           BEGIN
             UPDATE discovery_display_epoch SET revision = revision + 1;
-            INSERT INTO discovery_display_changes (table_name, run_id, id, revision)
-              VALUES ('${table}', ${runId}, ${row}.id, (SELECT revision FROM discovery_display_epoch))
-              ON CONFLICT(table_name, run_id, id) DO UPDATE SET revision = excluded.revision;
+            INSERT INTO discovery_display_changes (table_name, run_id, id)
+              VALUES ('${table === "discovery_ledger_observations" ? "discovery_ledger" : table}', ${runId}, ${row}.id)
+              ON CONFLICT(table_name, run_id, id) DO NOTHING;
           END`);
       }
     }
@@ -135,9 +164,9 @@ export function createDiscoveryDisplayProjectionReader(
       rowCache.dirty.clear();
       for (const row of database
         .prepare(
-          "SELECT table_name, run_id, id FROM discovery_display_changes WHERE revision > ?",
+          "SELECT table_name, run_id, id FROM discovery_display_changes",
         )
-        .all(cachedRevision ?? -1)) {
+        .all()) {
         const scope = discoveryRowScope(
           String(row.table_name),
           String(row.run_id),
@@ -190,8 +219,11 @@ export function createDiscoveryDisplayProjectionReader(
       rowCache?.dirty.clear();
       if (normalized)
         database
-          .prepare("DELETE FROM discovery_display_changes WHERE revision <= ?")
-          .run(revision);
+          // This connection-local table cannot change during the synchronous
+          // read above. All its changes are consumed, so SQLite can clear it
+          // without visiting and deleting each row and index entry in turn.
+          .prepare("DELETE FROM discovery_display_changes")
+          .run();
     }
     return projection;
   }

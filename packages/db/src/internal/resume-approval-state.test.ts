@@ -330,7 +330,7 @@ test("approval changes reach legacy SQL before returning; cached bodies stay sha
   }
 });
 
-test("startup and close fold pending draft and asset state; later body writes win", async () => {
+test("startup reads pending approval state before its background fold; close flushes and later body writes win", async () => {
   const temp = await createTempRepository("nestor-approval-fold-lifecycle-");
   let repo = await temp.createRepository();
   const db = new DatabaseSync(temp.filePath);
@@ -363,12 +363,29 @@ test("startup and close fold pending draft and asset state; later body writes wi
       staleAt,
     );
     repo = await temp.createRepository();
-    expect(
-      db.prepare("SELECT count(*) n FROM resume_draft_approval_state").get()!.n,
-    ).toBe(0);
-    expect(
-      db.prepare("SELECT count(*) n FROM tailored_asset_file_state").get()!.n,
-    ).toBe(0);
+    expect((await repo.listResumeDrafts())[0]).toMatchObject({
+      status: "stale",
+      staleReason: reason,
+      approvedAt: null,
+      approvedExportId: null,
+    });
+    expect((await repo.listTailoredAssets())[0]).toMatchObject({
+      storagePath: null,
+      updatedAt: staleAt,
+    });
+    const display = await repo.readDisplayCollections!();
+    expect(display.resumeDrafts[0]?.status).toBe("stale");
+    expect(display.tailoredAssets[0]?.storagePath).toBeNull();
+    expect((await repo.exportState()).resumeDrafts[0]?.status).toBe("stale");
+    await vi.waitFor(() => {
+      expect(
+        db.prepare("SELECT count(*) n FROM resume_draft_approval_state").get()!
+          .n,
+      ).toBe(0);
+      expect(
+        db.prepare("SELECT count(*) n FROM tailored_asset_file_state").get()!.n,
+      ).toBe(0);
+    });
     expect(
       JSON.parse(
         String(db.prepare("SELECT value FROM resume_drafts").get()!.value),

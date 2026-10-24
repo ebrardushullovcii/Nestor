@@ -50,7 +50,7 @@ import { createLocalJobFinderDocumentManager } from "../../adapters/job-finder-d
 import { createResumeDraftProcessor } from "../../adapters/resume-draft-processor";
 import { createLocalResumeExportFileVerifier } from "../../adapters/job-finder-export-file-verifier";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
-import { waitForWorkspaceDatabaseMigrations } from "../../setup/workspace-database-startup";
+import { prepareWorkspaceWriter } from "../../setup/workspace-database-startup";
 import { createDesktopResumeResearchAdapter } from "../../adapters/job-finder-research-adapter";
 import { adoptPristineWorkspaceStarterSources } from "./pristine-starter-source-adoption";
 import {
@@ -73,7 +73,10 @@ import {
 } from "./test-api";
 import { migrateLegacyResumeSource } from "./migrate-resume-source";
 import { recoverInterruptedDiscoveryRuns } from "./recover-interrupted-discovery-runs";
-import { recoverPendingJobFinderWorkspaceReset } from "./reset-workspace";
+import {
+  getJobFinderStartupResetRecoveryFact,
+  recoverPendingJobFinderWorkspaceReset,
+} from "./reset-workspace";
 import { getCandidateAssetLibrary } from "./candidate-asset-library-instance";
 import { installAutomaticApplicationAccessResume } from "./automatic-application-access-resume";
 import { installAutomaticSourceAccessResume } from "./automatic-source-access-resume";
@@ -113,7 +116,7 @@ const deterministicTestTimestamp = "2026-03-20T10:00:00.000Z";
 
 /**
  * Database-only recovery snapshots written next to the live workspace
- * database. Graceful shutdown rotates `<workspace>.backup` (prior generation
+ * database. Background maintenance rotates `<workspace>.backup` (prior generation
  * preserved as `.backup.prev`); destructive resets snapshot into the
  * dedicated `<workspace>.reset-backup` while they run. A successful reset
  * deletes every snapshot, because the person asked for permanent deletion.
@@ -125,7 +128,7 @@ const deterministicTestTimestamp = "2026-03-20T10:00:00.000Z";
  * non-fatal and never block shutdown or reset.
  */
 export const DESKTOP_AUTOMATIC_DATABASE_BACKUP_OPTIONS = {
-  onClose: true,
+  inBackground: true,
   beforeReset: true,
 } as const;
 
@@ -589,12 +592,13 @@ export async function createJobFinderWorkspaceServiceAsync(
   };
   const desktopTestApiEnabled = isDesktopTestApiEnabled(env);
   await ensureJobFinderUserDataDirectory();
-  await waitForWorkspaceDatabaseMigrations();
+  const backgroundEvidenceConversion = await prepareWorkspaceWriter();
   let jobFinderRepository: JobFinderRepository;
   try {
     jobFinderRepository = await createFileJobFinderRepository({
       filePath: getJobFinderWorkspaceFilePath(),
       seed: createEmptyJobFinderRepositoryState(),
+      deferEvidenceConversion: backgroundEvidenceConversion,
       automaticBackup: DESKTOP_AUTOMATIC_DATABASE_BACKUP_OPTIONS,
       recoveryTelemetry: {
         onRestored: recordRestoredStartupDatabaseRecoveryEvent,
@@ -641,11 +645,20 @@ export async function createJobFinderWorkspaceServiceAsync(
     renderResumeHtml: (input) => resumeDraftProcessor.render(input),
     inspectPdf: (filePath) => resumeDraftProcessor.inspectPdf(filePath),
     outputDirectory: getGeneratedResumeDocumentsDirectory(),
+    // An ambiguous reset preserves its files for recovery. Do not classify
+    // unreferenced exports as obsolete while the reset could not be reconciled.
+    ...(getJobFinderStartupResetRecoveryFact().status === "degraded"
+      ? {}
+      : {
+          retainedResumePaths: () =>
+            jobFinderRepository.listRetainedResumeExportPaths(),
+        }),
     previewTestMode: desktopTestApiEnabled
       ? getResumePreviewTestMode(env)
       : "ok",
   });
   const exportFileVerifier = createLocalResumeExportFileVerifier();
+  void documentManager.pruneGeneratedResumeFiles?.();
   const researchAdapter = desktopTestApiEnabled
     ? undefined
     : createDesktopResumeResearchAdapter();

@@ -48,6 +48,7 @@ export * from "./workspace-query";
 export * from "./job-list-visibility";
 
 export * from "./discovery-preparation";
+export * from "./match-assessment-input";
 
 export * from "./listing-salary-evidence";
 export * from "./saved-job-sightings";

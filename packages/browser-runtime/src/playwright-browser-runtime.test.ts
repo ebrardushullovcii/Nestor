@@ -3767,11 +3767,11 @@ describe("managed context active service worker gate", () => {
     const userDataDir = await mkdtemp(join(tmpdir(), "nestor-runtime-tab-reservation-"));
     try {
       const harness = createGateHarness({ activeServiceWorkers: () => [] });
-      // A form page, not the idle startup tab (that one may be closed for room).
+      // A blank tab can belong to another worker still opening its page.
       await harness.fakePage.goto("https://held.example/primary");
       const otherPages = Array.from({ length: 5 }, (_, index) => ({
         isClosed: () => false,
-        url: () => `https://held.example/${index}`,
+        url: () => index === 0 ? "about:blank" : `https://held.example/${index}`,
         close: vi.fn().mockResolvedValue(undefined),
       }));
       let resolveNewPage!: (page: typeof harness.secondaryPage) => void;

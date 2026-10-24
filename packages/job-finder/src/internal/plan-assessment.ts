@@ -1,6 +1,7 @@
 import {
   readPreparedDiscoveryFingerprints,
   readPreparedSavedJobIdentity,
+  readPreparedMatchAssessmentPostingFingerprint,
   readPreparedBodySalaryRange,
   writeDiscoveryPreparation,
   type SavedJob,
@@ -53,6 +54,8 @@ export function readPlanAssessment<T extends SavedJob>(
     // so later salary/identity reads do not open unchanged listing bodies.
     const fingerprints = readPreparedDiscoveryFingerprints(job);
     const identity = readPreparedSavedJobIdentity(job);
+    const matchAssessmentPostingFingerprint =
+      readPreparedMatchAssessmentPostingFingerprint(job);
     const bodySalaryRange = fingerprints
       ? readPreparedBodySalaryRange(job)
       : undefined;
@@ -61,6 +64,9 @@ export function readPlanAssessment<T extends SavedJob>(
         ? { fingerprints: { owner: view, value: fingerprints } }
         : {}),
       ...(identity ? { savedIdentity: { owner: view, value: identity } } : {}),
+      ...(matchAssessmentPostingFingerprint
+        ? { matchAssessmentPostingFingerprint }
+        : {}),
       ...(bodySalaryRange !== undefined ? { bodySalaryRange } : {}),
     });
     Object.freeze(view);

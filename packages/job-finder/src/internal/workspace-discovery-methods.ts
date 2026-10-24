@@ -29,6 +29,8 @@ import {
   DiscoveryAgentMetadataSchema,
   readPreparedBodySalaryRange,
   readPreparedDiscoveryFingerprints,
+  readPreparedMatchAssessmentPostingFingerprint,
+  computeMatchAssessmentPostingFingerprint,
   readPreparedSavedJobIdentity,
   DISCOVERY_FINGERPRINT_FIELDS,
   DISCOVERY_PREPARATION,
@@ -362,8 +364,13 @@ export function applySavedJobDelta(
     : readPreparedDiscoveryFingerprints(currentJob);
   if (fingerprints) {
     const bodySalaryRange = readPreparedBodySalaryRange(currentJob);
+    const matchAssessmentPostingFingerprint =
+      readPreparedMatchAssessmentPostingFingerprint(currentJob);
     writeDiscoveryPreparation(next, {
       fingerprints: { owner: next, value: fingerprints },
+      ...(matchAssessmentPostingFingerprint
+        ? { matchAssessmentPostingFingerprint }
+        : {}),
       ...(bodySalaryRange !== undefined ? { bodySalaryRange } : {}),
     });
     if (
@@ -390,6 +397,12 @@ export function applySavedJobDelta(
       bodySalaryRange = intendedRange;
   }
   createDiscoveryListingFingerprints(next);
+  writeDiscoveryPreparation(next, {
+    matchAssessmentPostingFingerprint:
+      readPreparedMatchAssessmentPostingFingerprint(next, intendedJob) ??
+      readPreparedMatchAssessmentPostingFingerprint(next, currentJob) ??
+      computeMatchAssessmentPostingFingerprint(next),
+  });
   if (bodySalaryRange !== undefined)
     writeDiscoveryPreparation(next, { bodySalaryRange });
   toSightingIdentityInput(next);
@@ -411,6 +424,8 @@ export function prepareSavedJobForSearch(job: SavedJob): {
   toSightingIdentityInput(prepared);
   const fingerprints = readPreparedDiscoveryFingerprints(prepared)!;
   const savedIdentity = readPreparedSavedJobIdentity(prepared)!;
+  const matchAssessmentPostingFingerprint =
+    readPreparedMatchAssessmentPostingFingerprint(prepared);
   const bodySalaryRange = readPreparedBodySalaryRange(prepared);
   const working = copyView(job, {});
   // No raw body or captured basis stays alive through the run's working rows.
@@ -418,6 +433,9 @@ export function prepareSavedJobForSearch(job: SavedJob): {
   writeDiscoveryPreparation(working, {
     fingerprints: { owner: working, value: fingerprints },
     savedIdentity: { owner: working, value: savedIdentity },
+    ...(matchAssessmentPostingFingerprint
+      ? { matchAssessmentPostingFingerprint }
+      : {}),
     ...(bodySalaryRange !== undefined ? { bodySalaryRange } : {}),
   });
   return { prepared: Object.freeze(prepared), working: Object.freeze(working) };
@@ -1759,17 +1777,7 @@ export function createWorkspaceDiscoveryMethods(
       throw new Error(DISCOVERY_NO_JOB_SITES_MESSAGE);
     }
 
-    let workingSavedJobs = await mapInTurns(
-      startingSavedJobs,
-      (job) => {
-        const matchAssessment = assessmentSession.assessPersisted(
-          job,
-          readPlanAssessment(job, assessmentPlanId).matchAssessment,
-        );
-        return readPlanAssessment(job, assessmentPlanId, matchAssessment);
-      },
-      SETUP_JOBS_PER_TURN,
-    );
+    let workingSavedJobs = startingSavedJobs.slice();
     // Upgrade old rows as they are prepared, without rewriting their bodies.
     // Subsequent runs read the persisted compact facts instead of normalizing again.
     for (
@@ -1782,14 +1790,23 @@ export function createWorkspaceDiscoveryMethods(
       const rows = await mapInTurns(
         workingSavedJobs.slice(start, start + SETUP_JOBS_PER_TURN),
         (job) => {
+          let working = job;
           if (
-            readPreparedDiscoveryFingerprints(job) &&
-            readPreparedSavedJobIdentity(job)
-          )
-            return job;
-          const next = prepareSavedJobForSearch(job);
-          prepared.push(next.prepared);
-          return next.working;
+            !(
+              readPreparedDiscoveryFingerprints(job) &&
+              readPreparedSavedJobIdentity(job) &&
+              readPreparedMatchAssessmentPostingFingerprint(job)
+            )
+          ) {
+            const next = prepareSavedJobForSearch(job);
+            prepared.push(next.prepared);
+            working = next.working;
+          }
+          const matchAssessment = assessmentSession.assessPersisted(
+            working,
+            readPlanAssessment(working, assessmentPlanId).matchAssessment,
+          );
+          return readPlanAssessment(working, assessmentPlanId, matchAssessment);
         },
         SETUP_JOBS_PER_TURN,
       );

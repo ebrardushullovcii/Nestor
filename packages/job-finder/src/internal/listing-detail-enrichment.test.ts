@@ -6,6 +6,8 @@ import {
   type SavedJob,
 } from "@nestor/contracts";
 import { createSavedJob } from "../workspace-service.test-fixtures";
+import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
+import { toSightingIdentityInput } from "./matching";
 import {
   applyListingDetailToJob,
   createDefaultListingHtmlFetcher,
@@ -233,6 +235,10 @@ describe("jobNeedsListingDetail", () => {
       jobNeedsListingDetail(
         cardOnlyJob({
           detailQuality: "detail_enriched",
+          description:
+            "Build accessible interfaces and reliable services with our product team. ".repeat(
+              12,
+            ),
           listingDetailFetch: {
             attemptedAt: "2026-09-05T09:30:00.000Z",
             outcome: "enriched",
@@ -281,6 +287,68 @@ describe("jobNeedsListingDetail", () => {
 });
 
 describe("enrichSavedJobListingDetails", () => {
+  it.each([false, true])(
+    "repairs a title-only merged row despite an old successful read (forced: %s)",
+    async (force) => {
+      const job = cardOnlyJob({
+        detailQuality: "detail_enriched",
+        responsibilities: [
+          "A responsibility retained from the earlier source.",
+        ],
+        listingDetailFetch: {
+          attemptedAt: NOW,
+          outcome: "enriched",
+          method: "page_text",
+          detail: "Read the earlier source.",
+        },
+      });
+      expect(jobNeedsListingDetail(job, NOW)).toBe(true);
+      const fetchHtml = fakeFetcher({
+        [job.canonicalUrl]: { html: RECORD_PAGE },
+      });
+      const result = await enrichSavedJobListingDetails({
+        jobs: [job],
+        fetchHtml,
+        assess,
+        now: () => NOW,
+        ignoreRetryBackoff: force,
+      });
+      expect(fetchHtml.calls).toEqual([job.canonicalUrl]);
+      expect(result.jobs[0]!.description.length).toBeGreaterThan(500);
+      expect(result.jobs[0]!.listingDetailFetch?.outcome).toBe("enriched");
+      expect(jobNeedsListingDetail(result.jobs[0]!, NOW)).toBe(false);
+    },
+  );
+
+  it("checks the actual body when preparation is stale or lost", () => {
+    const job = prepareDiscoveryPosting(
+      cardOnlyJob({
+        detailQuality: "detail_enriched",
+        description:
+          "Build accessible interfaces and reliable services with our product team. ".repeat(
+            12,
+          ),
+        listingDetailFetch: {
+          attemptedAt: NOW,
+          outcome: "enriched",
+          method: "page_text",
+          detail: null,
+        },
+      }),
+    );
+    toSightingIdentityInput(job);
+    expect(jobNeedsListingDetail(job, NOW)).toBe(false);
+    expect(jobNeedsListingDetail({ ...job, description: job.title }, NOW)).toBe(
+      true,
+    );
+    expect(
+      jobNeedsListingDetail(
+        structuredClone({ ...job, description: job.title }),
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
   it("retries a body that ends mid-word once and records partial listing text", async () => {
     const job = cardOnlyJob();
     const incompleteDescription = `${"Build reliable TypeScript services with a senior product team. ".repeat(12)}Coordinate delivery across th`;
@@ -702,6 +770,10 @@ describe("enrichSavedJobListingDetails", () => {
     const enriched = cardOnlyJob({
       id: "job_done",
       detailQuality: "detail_enriched",
+      description:
+        "Build accessible interfaces and reliable services with our product team. ".repeat(
+          12,
+        ),
       listingDetailFetch: {
         attemptedAt: "2026-09-05T09:30:00.000Z",
         outcome: "enriched",

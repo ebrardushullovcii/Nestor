@@ -92,7 +92,7 @@ import {
   writeCleanCloseMarker,
 } from "./internal/clean-close-marker";
 import {
-  createWorkspaceCloseDatabaseBackup,
+  scheduleWorkspaceDatabaseBackups,
   createWorkspaceResetDatabaseBackup,
   getWorkspaceDatabaseBackupPaths,
   removeWorkspaceDatabaseBackups,
@@ -147,8 +147,12 @@ import { createDiscoveryDisplayProjectionReader } from "./internal/discovery-dis
 import {
   createDiscoveryStorage,
   replaceDiscoveryStorage,
+  readDiscoveryBootstrapStorage,
+  readDiscoveryHomeStorage,
+  readDiscoveryRunStates,
 } from "./internal/discovery-storage";
 import { createIntelligenceProjectionReader } from "./internal/intelligence-projection";
+import { createWorkspaceListActivityReader } from "./internal/workspace-list-activity";
 import { createDisplayCollectionsReader } from "./internal/display-collections";
 import { createSingletonProjectionReader } from "./internal/singleton-projection";
 import { createResumeApprovalFolder } from "./internal/resume-approval-fold";
@@ -241,7 +245,9 @@ export async function createFileJobFinderRepository(
     }
 
     try {
-      runMigrations(database);
+      runMigrations(database, {
+        deferEvidenceConversion: options.deferEvidenceConversion ?? false,
+      });
       if (!closedCleanly && !passesStartupIntegrityCheck(database)) {
         throw new Error(
           "Workspace database failed the startup integrity check.",
@@ -367,6 +373,9 @@ export async function createFileJobFinderRepository(
   }
 
   const database = await openWorkspaceDatabaseWithRecovery();
+  let homeActivity:
+    | ReturnType<typeof createWorkspaceListActivityReader>
+    | undefined;
   let writeReader: ReturnType<typeof createSavedJobWriteReader> | null = null;
   const readJobsForWrite = (ids: readonly string[]) =>
     (writeReader ??= createSavedJobWriteReader(database))(ids);
@@ -430,8 +439,6 @@ export async function createFileJobFinderRepository(
     }
 
     validateWorkspaceSettingsFile(database);
-    // Complete interrupted approval folds before serving the workspace.
-    await createResumeApprovalFolder(database).flush();
     context = createFileRepositoryContext({
       database,
       filePath: options.filePath,
@@ -451,6 +458,9 @@ export async function createFileJobFinderRepository(
       readDisplayCollections.prepareResumeStateFold,
       readDisplayCollections.draftHasApproval,
     );
+    // Every canonical and display read already composes pending approval
+    // metadata. Fold its bodies in the background; close still flushes them.
+    approvalFolder.schedule();
     const readDiscoveryDisplay = createDiscoveryDisplayProjectionReader(
       database,
       normalizedSeed.discovery,
@@ -516,6 +526,19 @@ export async function createFileJobFinderRepository(
     searchPreferences: normalizedSeed.searchPreferences,
     settings: normalizedSeed.settings,
   });
+
+  const startBackups = () =>
+    automaticBackup.inBackground
+      ? scheduleWorkspaceDatabaseBackups({
+          filePath: options.filePath,
+          schemaVersion: Number(
+            database
+              .prepare("SELECT MAX(version) AS version FROM schema_migrations")
+              .get()?.version,
+          ),
+        })
+      : async () => {};
+  let stopBackups = startBackups();
 
   /**
    * The authority and answer-snapshot repositories only touch their own
@@ -923,18 +946,7 @@ export async function createFileJobFinderRepository(
       Promise.resolve(cloneValue(readState(database, normalizedSeed))),
     async close() {
       await approvalFolder.flush();
-      if (automaticBackup.onClose) {
-        const backup = await createWorkspaceCloseDatabaseBackup({
-          database,
-          filePath: options.filePath,
-        });
-        if (backup.status === "skipped") {
-          console.warn(
-            "[JobFinderRepository] Skipped graceful-close database backup.",
-            backup.reason,
-          );
-        }
-      }
+      await stopBackups();
       await stopWalCheckpoints();
       database.close();
       writeCleanCloseMarker(options.filePath);
@@ -943,26 +955,53 @@ export async function createFileJobFinderRepository(
       const nextState = JobFinderRepositoryStateSchema.parse(
         cloneValue(nextSeed),
       );
-      if (automaticBackup.beforeReset) {
-        const backup = await createWorkspaceResetDatabaseBackup({
-          database,
-          filePath: options.filePath,
-        });
-        if (backup.status === "skipped") {
-          console.warn(
-            "[JobFinderRepository] Skipped pre-reset database backup.",
-            backup.reason,
-          );
+      await stopBackups();
+      try {
+        if (automaticBackup.beforeReset) {
+          const backup = await createWorkspaceResetDatabaseBackup({
+            database,
+            filePath: options.filePath,
+          });
+          if (backup.status === "skipped") {
+            console.warn(
+              "[JobFinderRepository] Skipped pre-reset database backup.",
+              backup.reason,
+            );
+          }
         }
+        writeState(database, nextState);
+        // Shared evidence has no row owner after an empty reset. Leaving it
+        // behind would retain the deleted person's text in an otherwise empty DB.
+        if (
+          !nextState.resumeDrafts.length &&
+          !nextState.resumeDraftRevisions.length
+        )
+          database.exec(
+            "DELETE FROM resume_sources; DELETE FROM resume_source_texts",
+          );
+        if (
+          !nextState.savedJobs.length &&
+          !nextState.discovery.pendingDiscoveryJobs.length
+        )
+          database.exec(
+            "DELETE FROM job_provenance; DELETE FROM job_plan_assessments; DELETE FROM job_listing_texts; DELETE FROM job_fit_assessments",
+          );
+        database.exec(`DELETE FROM search_preference_sets WHERE id NOT IN (
+          SELECT preference_id FROM job_search_plans UNION
+          SELECT json_extract(value, '$.preferenceId') FROM singleton_state
+            WHERE key = 'search_preferences' AND json_extract(value, '$.preferenceId') IS NOT NULL);
+          DELETE FROM search_preference_sources WHERE preference_id NOT IN (SELECT id FROM search_preference_sets);
+          DELETE FROM job_sources WHERE id NOT IN (SELECT source_version_id FROM search_preference_sources);`);
+        // Rebuild the file so the deleted rows do not linger in free pages,
+        // then fold the WAL back in and empty it: it holds the old pages too.
+        database.exec("VACUUM");
+        database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+        await secureDatabaseFile(options.filePath);
+        await removeWorkspaceDatabaseBackups(options.filePath);
+        await removeWorkspaceRecoveryArtifacts(options.filePath);
+      } finally {
+        stopBackups = startBackups();
       }
-      writeState(database, nextState);
-      // Rebuild the file so the deleted rows do not linger in free pages,
-      // then fold the WAL back in and empty it: it holds the old pages too.
-      database.exec("VACUUM");
-      database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-      await secureDatabaseFile(options.filePath);
-      await removeWorkspaceDatabaseBackups(options.filePath);
-      await removeWorkspaceRecoveryArtifacts(options.filePath);
     },
     // Singleton reads return their own copy already; only the shared seed
     // needs copying. Copying twice cost about 10 ms of every refresh.
@@ -2511,6 +2550,39 @@ export async function createFileJobFinderRepository(
       }
     },
     readDiscoveryDisplayProjection,
+    readDiscoveryBootstrapProjection() {
+      return Promise.resolve(
+        readDiscoveryBootstrapStorage(database, normalizedSeed.discovery),
+      );
+    },
+    readDiscoveryHomeProjection(jobIds, planId = null) {
+      const ownTransaction = !database.isTransaction;
+      try {
+        homeActivity ??= createWorkspaceListActivityReader(database, true);
+        if (ownTransaction) database.exec("BEGIN");
+        const discovery = readDiscoveryHomeStorage(
+          database,
+          normalizedSeed.discovery,
+        );
+        const result = {
+          ...discovery,
+          listingActivities: homeActivity.read(jobIds, planId),
+        };
+        if (ownTransaction) database.exec("COMMIT");
+        return Promise.resolve(result);
+      } catch (error) {
+        if (ownTransaction && database.isTransaction) database.exec("ROLLBACK");
+        homeActivity?.invalidate();
+        return Promise.reject(
+          error instanceof Error
+            ? error
+            : new Error("The Home discovery projection could not be read."),
+        );
+      }
+    },
+    readDiscoveryRunStates() {
+      return Promise.resolve(readDiscoveryRunStates(database));
+    },
     getDiscoveryState() {
       return Promise.resolve(cloneValue(discoveryStorage.read()));
     },

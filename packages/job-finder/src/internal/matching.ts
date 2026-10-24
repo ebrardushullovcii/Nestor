@@ -27,7 +27,6 @@ import {
   createFitVerdictFingerprint,
   createMatchAssessmentPostingFingerprint,
 } from "./match-assessment-session";
-import { createMatchAssessmentPostingInput } from "./match-assessment-posting-input";
 import { preserveCompletedAssessment } from "./fit-judgment-apply";
 import { applyFitJudgment, toFitJudgment } from "./fit-judgment";
 import { buildBookkeepingDimensions } from "./matching-dimensions";
@@ -1078,9 +1077,7 @@ export async function createMatchAssessmentAsync(
         profile,
         searchPreferences,
       ),
-      postingFingerprint: createMatchAssessmentPostingFingerprint(
-        createMatchAssessmentPostingInput(posting),
-      ),
+      postingFingerprint: createMatchAssessmentPostingFingerprint(posting),
     },
   );
   const completed = applyFitJudgment(withRequirements, judgment);

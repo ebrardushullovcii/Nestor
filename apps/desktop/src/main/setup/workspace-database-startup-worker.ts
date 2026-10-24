@@ -1,18 +1,26 @@
 import { parentPort, workerData } from "node:worker_threads";
 import {
   prepareWorkspaceQueryDatabase,
-  prepareWorkspaceQuerySchema,
   completeWorkspaceDatabaseMigrations,
 } from "@nestor/db";
 
-if (!parentPort) throw new Error("Workspace preparation requires a worker.");
-try {
-  prepareWorkspaceQuerySchema(String(workerData));
-  parentPort.postMessage("context-ready");
-  prepareWorkspaceQueryDatabase(String(workerData));
-  parentPort.postMessage("queries-ready");
-  completeWorkspaceDatabaseMigrations(String(workerData));
-  parentPort.postMessage("complete");
-} finally {
-  parentPort.close();
+async function prepare() {
+  const port = parentPort;
+  if (!port) throw new Error("Workspace preparation requires a worker.");
+  try {
+    prepareWorkspaceQueryDatabase(String(workerData), () =>
+      port.postMessage("context-ready"),
+    );
+    port.postMessage("index-ready");
+    port.postMessage("queries-ready");
+    await completeWorkspaceDatabaseMigrations(String(workerData), () =>
+      port.postMessage("writer-ready"),
+    );
+    port.postMessage("complete");
+  } finally {
+    port.close();
+  }
 }
+void prepare().catch((error: unknown) => {
+  throw error;
+});

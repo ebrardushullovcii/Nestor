@@ -96,3 +96,63 @@ test("ledger patches trust typed rows, retain order, roll back and preserve exte
     await cleanupTempDirectoryWithRetry(temp.tempDirectory);
   }
 });
+
+test("large ledger patches preserve exact text and roll back earlier batches when a later row fails", async () => {
+  const temp = await createTempRepository("nestor-ledger-batch-rollback-");
+  let repo = await temp.createRepository();
+  const raw = new DatabaseSync(temp.filePath);
+  try {
+    const initial = Array.from({ length: 260 }, (_, index) =>
+      entry(`ledger_${index}`),
+    );
+    await repo.commitDiscoveryStateUpdate((current) => ({
+      ...current,
+      discoveryLedger: initial,
+    }));
+    const text = 'Synthetic "role" \\ path\nUnicode: 日本語 🚀\u0000end';
+    const changes = initial.map((row) => ({
+      id: row.id,
+      update: (current: typeof row | null) => ({ ...current!, title: text }),
+    }));
+    const revision = () =>
+      Number(
+        raw
+          .prepare(
+            "SELECT COALESCE(MAX(revision), 0) AS revision FROM workspace_changes",
+          )
+          .get()!.revision,
+      );
+    raw.exec(`CREATE TRIGGER fail_late_ledger_patch BEFORE INSERT ON discovery_ledger
+      WHEN NEW.id = 'ledger_250' BEGIN SELECT RAISE(ABORT, 'late patch failed'); END;`);
+    const beforeRevision = revision();
+    await expect(
+      repo.commitDiscoveryStateUpdate((current) => ({
+        ...current,
+        discoveryLedger: patchDiscoveryLedger(current.discoveryLedger, changes),
+      })),
+    ).rejects.toThrow("late patch failed");
+    expect((await repo.getDiscoveryState()).discoveryLedger).toEqual(initial);
+    expect(revision()).toBe(beforeRevision);
+    raw.exec("DROP TRIGGER fail_late_ledger_patch");
+    await repo.commitDiscoveryStateUpdate((current) => ({
+      ...current,
+      discoveryLedger: patchDiscoveryLedger(current.discoveryLedger, changes),
+    }));
+    const expected = initial.map((row) => ({ ...row, title: text }));
+    expect((await repo.getDiscoveryState()).discoveryLedger).toEqual(expected);
+    const changedIds = raw
+      .prepare(
+        "SELECT item_id FROM workspace_changes WHERE revision > ? AND table_name = 'discovery_ledger'",
+      )
+      .all(beforeRevision)
+      .map((row) => row.item_id);
+    expect(changedIds).toEqual(initial.map((row) => row.id));
+    await repo.close();
+    repo = await temp.createRepository();
+    expect((await repo.getDiscoveryState()).discoveryLedger).toEqual(expected);
+  } finally {
+    raw.close();
+    await repo.close();
+    await cleanupTempDirectoryWithRetry(temp.tempDirectory);
+  }
+});

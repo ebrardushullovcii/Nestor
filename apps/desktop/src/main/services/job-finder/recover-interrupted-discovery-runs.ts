@@ -20,21 +20,19 @@ import type { JobFinderRepository } from "@nestor/db";
  * Idempotent: a run already carrying a terminal phase is returned untouched,
  * so re-running this on the next start changes nothing.
  *
- * The display read decides first whether anything was left running. It is the
- * read the first workspace refresh makes anyway; the canonical update reads
- * every source checkpoint and log row of every kept run, which on a 900-source
- * search cost about 400 ms of every start for nothing.
+ * Read only each run's state and phase to decide whether recovery is needed.
+ * The canonical update loads evidence only when something was left running.
  */
 export async function recoverInterruptedDiscoveryRuns(
   repository: Pick<
     JobFinderRepository,
-    "commitDiscoveryStateUpdate" | "readDiscoveryDisplayProjection"
+    "commitDiscoveryStateUpdate" | "readDiscoveryRunStates"
   >,
   now: string = new Date().toISOString(),
 ): Promise<void> {
-  const display = await repository.readDiscoveryDisplayProjection();
-  const leftRunning = [display.activeRun, ...display.recentRuns].some(
-    (run) => run !== null && getDiscoveryRunPhase(run) === "in_progress",
+  const states = await repository.readDiscoveryRunStates();
+  const leftRunning = states.some(
+    (run) => getDiscoveryRunPhase(run) === "in_progress",
   );
   if (!leftRunning) return;
 

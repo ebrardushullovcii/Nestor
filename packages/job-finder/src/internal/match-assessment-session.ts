@@ -1,5 +1,12 @@
 import { buildFitVerdictContext } from "@nestor/ai-providers";
-import { fnv1a64 } from "@nestor/core";
+import {
+  MATCH_ASSESSMENT_LOGIC_REVISION,
+  computeMatchAssessmentPostingFingerprint,
+  createMatchAssessmentInputFingerprint as createFingerprint,
+  readPreparedDiscoveryFingerprints,
+  readPreparedMatchAssessmentPostingFingerprint,
+  writeDiscoveryPreparation,
+} from "@nestor/contracts";
 import type {
   CandidateProfile,
   FitJudgment,
@@ -58,7 +65,6 @@ import {
 // Version 18: evidence points within the absolute bands. Revision 15 and 16
 // hashed identical evidence; their model verdicts remain current automatically.
 export const MATCH_ASSESSMENT_SCORER_VERSION = 18;
-const MATCH_ASSESSMENT_LOGIC_REVISION = 16;
 
 /** Only the rubric changed between these two stamps, not their hashed inputs. */
 export function sameFitEvidenceFingerprint(
@@ -72,27 +78,6 @@ export function sameFitEvidenceFingerprint(
       "$1_logic16_",
     ) === current
   );
-}
-
-function stableSerialize(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map((entry) => stableSerialize(entry)).join(",")}]`;
-  }
-
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`)
-    .join(",")}}`;
-}
-
-function createFingerprint(prefix: string, value: unknown): string {
-  const serialized = stableSerialize(value);
-  return `${prefix}_${fnv1a64(serialized)}`;
 }
 
 /**
@@ -170,27 +155,14 @@ export function rebindLegacyVerdict<
 export function createMatchAssessmentPostingFingerprint(
   posting: MatchAssessmentPostingInput,
 ): string {
-  const prepared = Object.isFrozen(posting)
-    ? preparedPostingFingerprints.get(posting)
-    : undefined;
+  const prepared = readPreparedMatchAssessmentPostingFingerprint(posting);
   if (prepared) return prepared;
-  const fingerprint = createFingerprint(
-    `match_posting_v4_logic${MATCH_ASSESSMENT_LOGIC_REVISION}`,
-    createMatchAssessmentPostingInput(posting),
-  );
-  if (Object.isFrozen(posting))
-    preparedPostingFingerprints.set(posting, fingerprint);
+  const fingerprint = computeMatchAssessmentPostingFingerprint(posting);
+  if (readPreparedDiscoveryFingerprints(posting))
+    writeDiscoveryPreparation(posting, {
+      matchAssessmentPostingFingerprint: fingerprint,
+    });
   return fingerprint;
-}
-
-const preparedPostingFingerprints = new WeakMap<object, string>();
-/** Only frozen repository rows may reuse an inventory worker's exact digest. */
-export function rememberMatchAssessmentPostingFingerprint(
-  posting: MatchAssessmentPostingInput,
-  fingerprint: string,
-): void {
-  if (Object.isFrozen(posting))
-    preparedPostingFingerprints.set(posting, fingerprint);
 }
 
 function assessmentCacheKey(
@@ -270,7 +242,6 @@ export function createMatchAssessmentSession(input: {
           previous.judgment.postingFingerprint === carried.postingFingerprint))
     )
       return previous;
-    const postingInput = createMatchAssessmentPostingInput(posting);
     const postingFingerprint =
       knownPostingFingerprint ??
       createMatchAssessmentPostingFingerprint(posting);
@@ -281,6 +252,7 @@ export function createMatchAssessmentSession(input: {
     }
 
     computationCount += 1;
+    const postingInput = createMatchAssessmentPostingInput(posting);
     const calculated = {
       ...input.calculate(input.profile, input.searchPreferences, postingInput),
       scorerVersion: MATCH_ASSESSMENT_SCORER_VERSION,

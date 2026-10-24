@@ -11,9 +11,14 @@ export function withStorageMigrationBackups<T>(
   if (batches.has(database)) return migrate();
   batches.set(database, {});
   try {
-    return migrate();
-  } finally {
+    const result = migrate();
+    if (result instanceof Promise)
+      return result.finally(() => batches.delete(database)) as T;
     batches.delete(database);
+    return result;
+  } catch (error) {
+    batches.delete(database);
+    throw error;
   }
 }
 

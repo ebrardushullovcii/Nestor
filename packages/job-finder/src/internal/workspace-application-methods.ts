@@ -276,6 +276,7 @@ import {
   createModelListingPageReader,
   enrichSavedJobListingDetails,
   jobNeedsListingDetail,
+  hasCompleteListingDetail,
 } from "./listing-detail-enrichment";
 import { jobNeedsFitJudgment } from "./fit-judgment";
 import { createMatchAssessmentSession } from "./match-assessment-session";
@@ -1002,9 +1003,7 @@ export function createWorkspaceApplicationMethods(
       }
       if (!listingReadCurrent(generation)) return;
       const isPending = savedJobs.length === 0;
-      const alreadyRead =
-        job.detailQuality === "detail_enriched" &&
-        job.listingDetailFetch?.outcome === "enriched";
+      const alreadyRead = hasCompleteListingDetail(job);
       // Resume writing needs the captured posting body, not another fit
       // verdict. Explicit assessment controls still request a fresh judgment.
       if (options.resumeWriterOwnsSlot && alreadyRead) return;
@@ -4526,6 +4525,7 @@ export function createWorkspaceApplicationMethods(
               templateId: template.id,
               settings,
             });
+            await ctx.documentManager.discardResumeArtifact?.(rendered);
             const previewValidation = validateResumeDraft({
               draft: previewResumeDraft,
               job,
@@ -4871,6 +4871,7 @@ export function createWorkspaceApplicationMethods(
             tailoredAsset: nextAsset,
           });
         }
+        void ctx.documentManager.pruneGeneratedResumeFiles?.();
         await ctx.updateJob(jobId, (currentJob) => ({
           ...currentJob,
           status: removedResumeJobIds.has(jobId)
@@ -5538,6 +5539,7 @@ export function createWorkspaceApplicationMethods(
       validation: validationWithReviewGuidance,
       tailoredAsset: nextAsset,
     });
+    void ctx.documentManager.pruneGeneratedResumeFiles?.();
     return exportArtifact;
   }
 
@@ -7291,6 +7293,7 @@ export function createWorkspaceApplicationMethods(
             templateId: measuredDraft.templateId,
             settings: workspaceState.settings,
           });
+          await ctx.documentManager.discardResumeArtifact?.(rendered);
           return {
             pageCount: rendered.pageCount ?? null,
             targetPageCount: measuredDraft.targetPageCount,

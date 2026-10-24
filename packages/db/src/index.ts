@@ -69,7 +69,6 @@ export { subscribeWorkspaceCommits } from "./workspace-commits";
 export {
   createWorkspaceQueryRepository,
   prepareWorkspaceQueryDatabase,
-  prepareWorkspaceQuerySchema,
   type WorkspaceQueryRepository,
 } from "./workspace-query-repository";
 export { readSavedJobProjectionChanges } from "./internal/saved-job-projection";

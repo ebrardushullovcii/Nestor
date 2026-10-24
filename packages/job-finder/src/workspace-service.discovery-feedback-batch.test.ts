@@ -127,7 +127,9 @@ test("100 assistant hides and restores use one terminal display each, no canonic
   expect(restored.summary).toBe("Restored 100 jobs.");
   expect(restored.data).toHaveLength(100);
   expect(restoreSingle).not.toHaveBeenCalled();
-  expect(reads.display).toHaveBeenCalledOnce();
+  // The undo receipt needs the state before restoring, just as Hide does.
+  expect(reads.display).toHaveBeenCalledTimes(2);
+  expect(before).toHaveBeenCalledTimes(2);
   expect(context.publishWorkspaceUpdate).toHaveBeenCalledOnce();
   expect(canonicalWorkspace).not.toHaveBeenCalled();
   expect(reads.canonicalJobs).not.toHaveBeenCalled();

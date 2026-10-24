@@ -9,6 +9,9 @@ import {
   SavedJobDiscoveryProvenanceSchema,
   ResumeDraftSchema,
   type SavedJob,
+  type QueryJobListInput,
+  type QueryJobListResult,
+  type WorkspaceListCounts,
 } from "@nestor/contracts";
 import { afterEach, describe, expect, test } from "vitest";
 import {
@@ -63,6 +66,148 @@ async function fixture() {
   return { ...temp, writer, reader };
 }
 describe("independent workspace queries", () => {
+  test("a legacy rebuild preserves the typed first fifty rows, order and counts for every sort", async () => {
+    const temp = await createTempRepository("nestor-index-startup-");
+    cleanups.push(temp.cleanup);
+    const writer = await temp.createRepository();
+    let writerClosed = false;
+    cleanups.push(() => (writerClosed ? undefined : writer.close()));
+    const jobs = Array.from({ length: 75 }, (_, index) =>
+      assessedJob({
+        id: `startup-${index}`,
+        title: index % 2 ? `Engineer (${index})` : `Engineer - ${index}`,
+        company: index % 2 ? "10Company" : "2Company",
+        status:
+          index === 10
+            ? "ready_for_review"
+            : index === 11
+              ? "approved"
+              : "discovered",
+        postedAt: index % 3 ? null : "2026-10-21T00:00:00.000Z",
+        postedAtText: index % 3 ? "Posted 3 months ago" : null,
+        matchAssessment: {
+          ...assessedJob().matchAssessment,
+          score: 50 + (index % 45),
+        },
+      }),
+    );
+    jobs.push(
+      assessedJob({
+        id: "utility",
+        title: "Search jobs",
+        company: "Unknown company",
+        canonicalUrl: "https://example.test/jobs",
+      }),
+    );
+    await writer.commitSavedJobDelta({ upserts: jobs });
+    const beforeReader = createWorkspaceQueryRepository(temp.filePath);
+    const before = new Map<
+      string,
+      { query: QueryJobListInput; page: QueryJobListResult }
+    >();
+    let counts: WorkspaceListCounts | undefined;
+    try {
+      for (const list of [
+        "discovery",
+        "shortlisted",
+        "applications",
+        "all",
+      ] as const)
+        for (const sort of [
+          "best_match",
+          "newest",
+          "company",
+          "title",
+          "recently_seen",
+        ] as const) {
+          const query = {
+            list,
+            sort,
+            filters: { planId: null },
+            page: { offset: 0, limit: 50 },
+          };
+          before.set(`${list}:${sort}`, {
+            query,
+            page: beforeReader.queryJobList(query),
+          });
+        }
+      counts = beforeReader.getListCounts({ planId: null });
+    } finally {
+      beforeReader.close();
+    }
+    expect(counts).toMatchObject({ all: jobs.length, shortlisted: 2 });
+    const preferences = await writer.getSearchPreferences();
+    const campaigns = await writer.getCampaignState();
+    await writer.close();
+    writerClosed = true;
+    const raw = new DatabaseSync(temp.filePath);
+    cleanups.push(() => raw.close());
+    const put =
+      raw.prepare(`UPDATE saved_jobs SET value=?,assessment_id=NULL,description_id=NULL,
+      list_visible=NULL,display_company=NULL,display_location=NULL,first_seen_at=NULL,last_seen_at=NULL,last_verified_active_at=NULL WHERE id=?`);
+    for (const job of jobs) put.run(JSON.stringify(job), job.id);
+    raw
+      .prepare(
+        "UPDATE singleton_state SET value=? WHERE key='search_preferences'",
+      )
+      .run(JSON.stringify(preferences));
+    raw
+      .prepare("UPDATE singleton_state SET value=? WHERE key='campaign_state'")
+      .run(JSON.stringify(campaigns));
+    for (const { name } of raw
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'workspace_%'",
+      )
+      .all())
+      raw.exec(`DROP TRIGGER ${String(name)}`);
+    raw.exec(`DROP TABLE workspace_job_index; DROP TABLE workspace_entity_index;
+      DROP TABLE workspace_company_index; DROP TABLE workspace_company_jobs;
+      DELETE FROM schema_migrations WHERE version IN (26,27,28,29); DELETE FROM workspace_read_meta`);
+    let headerReady = false;
+    prepareWorkspaceQueryDatabase(temp.filePath, () => {
+      headerReady = true;
+      expect(
+        raw
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE name='workspace_job_index'",
+          )
+          .get(),
+      ).toBeUndefined();
+      const headerReader = createWorkspaceQueryRepository(temp.filePath);
+      try {
+        expect(headerReader.getStartupContext().activeCampaignId).toBe(
+          campaigns?.activeCampaignId ?? null,
+        );
+      } finally {
+        headerReader.close();
+      }
+    });
+    expect(headerReady).toBe(true);
+    const reader = createWorkspaceQueryRepository(temp.filePath);
+    cleanups.push(() => reader.close());
+    for (const { query, page } of before.values()) {
+      const { revision: ignoredBeforeRevision, ...expected } = page;
+      const { revision: ignoredAfterRevision, ...actual } =
+        reader.queryJobList(query);
+      expect(actual).toEqual(expected);
+      expect(ignoredAfterRevision).toBeGreaterThanOrEqual(
+        ignoredBeforeRevision,
+      );
+    }
+    expect(reader.getListCounts({ planId: null })).toEqual(counts);
+    raw
+      .prepare(
+        "UPDATE saved_jobs SET value=json_set(value,'$.title','Changed after switch') WHERE id=?",
+      )
+      .run(jobs[0]!.id);
+    expect(
+      reader.queryJobList({
+        list: "all",
+        filters: { planId: null },
+        search: "Changed after switch",
+      }).rows[0]?.id,
+    ).toBe(jobs[0]!.id);
+  });
   test("plan ordering preserves indexed job facts; actual membership changes update them", async () => {
     const { writer, reader, filePath } = await fixture();
     await writer.commitSavedJobDelta({
@@ -80,22 +225,42 @@ describe("independent workspace queries", () => {
     // An existing database gets only the corrected trigger, without a rebuild.
     ensureWorkspaceReadIndex(db);
     expect(db.prepare("SELECT * FROM query_index_writes").all()).toEqual([]);
-    const ids = (planId: string) => reader.queryJobList({
-      list: "all", filters: { planId },
-    }).rows.map((job) => job.id).sort();
+    const ids = (planId: string) =>
+      reader
+        .queryJobList({
+          list: "all",
+          filters: { planId },
+        })
+        .rows.map((job) => job.id)
+        .sort();
     expect(ids("p")).toEqual(["a", "b"]);
     const canonical = await writer.listSavedJobs();
-    db.exec("UPDATE plan_job_memberships SET position = 1 - position WHERE plan_id = 'p'");
+    db.exec(
+      "UPDATE plan_job_memberships SET position = 1 - position WHERE plan_id = 'p'",
+    );
     expect(db.prepare("SELECT * FROM query_index_writes").all()).toEqual([]);
     expect(ids("p")).toEqual(["a", "b"]);
     expect(await writer.listSavedJobs()).toEqual(canonical);
-    expect(db.prepare("SELECT item_id FROM plan_job_memberships WHERE plan_id = 'p' ORDER BY position").all().map((row) => row.item_id)).toEqual(["b", "a"]);
-    db.exec("UPDATE plan_job_memberships SET item_id = 'c' WHERE plan_id = 'p' AND item_id = 'a'");
+    expect(
+      db
+        .prepare(
+          "SELECT item_id FROM plan_job_memberships WHERE plan_id = 'p' ORDER BY position",
+        )
+        .all()
+        .map((row) => row.item_id),
+    ).toEqual(["b", "a"]);
+    db.exec(
+      "UPDATE plan_job_memberships SET item_id = 'c' WHERE plan_id = 'p' AND item_id = 'a'",
+    );
     expect(ids("p")).toEqual(["b", "c"]);
     expect(ids("q")).toEqual(["a"]);
-    db.exec("BEGIN; DELETE FROM plan_job_memberships WHERE plan_id = 'p'; ROLLBACK");
+    db.exec(
+      "BEGIN; DELETE FROM plan_job_memberships WHERE plan_id = 'p'; ROLLBACK",
+    );
     expect(ids("p")).toEqual(["b", "c"]);
-    db.exec("DELETE FROM plan_job_memberships WHERE plan_id = 'p' AND item_id = 'b'");
+    db.exec(
+      "DELETE FROM plan_job_memberships WHERE plan_id = 'p' AND item_id = 'b'",
+    );
     expect(ids("p")).toEqual(["c"]);
   });
 
@@ -628,6 +793,43 @@ describe("independent workspace queries", () => {
         )
         .all(),
     ).toEqual([]);
+  });
+  test("a bulk index rebuild bumps order/activity once and retains subsequent row updates", async () => {
+    const { writer, reader, filePath } = await fixture();
+    await writer.commitSavedJobDelta({
+      upserts: Array.from({ length: 12 }, (_, index) =>
+        assessedJob({ id: `bulk-${index}` }),
+      ),
+    });
+    const raw = new DatabaseSync(filePath);
+    cleanups.push(() => raw.close());
+    const epochs = () =>
+      raw
+        .prepare(
+          "SELECT key, CAST(value AS INTEGER) AS value FROM workspace_read_meta WHERE key IN ('activity_revision','sort_revision') ORDER BY key",
+        )
+        .all();
+    const beforeRows = reader.queryJobList({
+      list: "all",
+      filters: { planId: null },
+    }).rows;
+    const before = epochs();
+    raw.exec("DELETE FROM workspace_read_meta WHERE key = 'version'");
+    ensureWorkspaceReadIndex(raw);
+    expect(epochs()).toEqual(
+      before.map((row) => ({ ...row, value: Number(row.value) + 1 })),
+    );
+    expect(
+      reader.queryJobList({ list: "all", filters: { planId: null } }).rows,
+    ).toEqual(beforeRows);
+    await writer.commitSavedJobDelta({
+      updateJobIds: ["bulk-0"],
+      update: (current) => ({ ...current, title: "Updated after rebuild" }),
+    });
+    expect(reader.getJobDetail("bulk-0")?.job.title).toBe(
+      "Updated after rebuild",
+    );
+    expect(epochs()).not.toEqual(before);
   });
   test("closing the query connection before the writer permits a clean-close marker", async () => {
     const temp = await createTempRepository("nestor-query-close-");

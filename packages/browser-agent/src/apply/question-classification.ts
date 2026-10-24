@@ -250,11 +250,31 @@ export type QuestionClassifier = ((
   ) => ReadonlyMap<string, ApplyQuestionClassification> | undefined;
 };
 
+// Only complete model readings, never answers or permissions. The AI client
+// owns the lifetime; unchanged request data can be reused across applications.
+const sharedQuestionReads = new WeakMap<
+  object,
+  Map<string, ReadonlyMap<string, ApplyQuestionClassification>>
+>();
+
+function copyReadings(
+  readings: ReadonlyMap<string, ApplyQuestionClassification>,
+) {
+  return new Map([...readings].map(([key, value]) => [key, { ...value }]));
+}
+
 /** Cache each question, including in-flight reads, and ask only about new identities. */
 export function createQuestionClassifier(input: {
   client: LLMClient;
   signal?: AbortSignal | undefined;
+  cacheScope?: object | undefined;
 }): QuestionClassifier {
+  const shared = input.cacheScope
+    ? (sharedQuestionReads.get(input.cacheScope) ??
+      new Map<string, ReadonlyMap<string, ApplyQuestionClassification>>())
+    : undefined;
+  if (shared && input.cacheScope)
+    sharedQuestionReads.set(input.cacheScope, shared);
   const byQuestion = new Map<string, Promise<ApplyQuestionClassification>>();
   const settledByQuestion = new Map<string, ApplyQuestionClassification>();
   const bySet = new Map<
@@ -262,6 +282,12 @@ export function createQuestionClassifier(input: {
     Promise<ReadonlyMap<string, ApplyQuestionClassification>>
   >();
   const classify = (controls: readonly ApplyFormControl[]) => {
+    if (input.signal?.aborted)
+      return Promise.reject(
+        input.signal.reason instanceof Error
+          ? input.signal.reason
+          : new Error("The question read was stopped."),
+      );
     const questions = classifiableQuestions(controls);
     const setKey = JSON.stringify(
       questions.map((question) => question.identity),
@@ -272,13 +298,27 @@ export function createQuestionClassifier(input: {
       (question) => !byQuestion.has(question.identity),
     );
     if (missing.length) {
-      const batch = classifyApplicationQuestions({
-        client: input.client,
-        questions: missing,
-        signal: input.signal,
-      }).then((readings) => {
+      // Includes the whole request: order, wording, groups, control kinds,
+      // all choices and native required flags. New questions still use AI.
+      const readKey = JSON.stringify(missing);
+      const reused = shared?.get(readKey);
+      const batch = (
+        reused
+          ? Promise.resolve(copyReadings(reused))
+          : classifyApplicationQuestions({
+              client: input.client,
+              questions: missing,
+              signal: input.signal,
+            })
+      ).then((readings) => {
+        input.signal?.throwIfAborted();
         if (missing.some((question) => !readings.has(question.identity)))
           throw new Error("The question check did not cover every question.");
+        if (shared && readKey.length <= 64_000) {
+          shared.delete(readKey);
+          shared.set(readKey, copyReadings(readings));
+          if (shared.size > 64) shared.delete(shared.keys().next().value!);
+        }
         return readings;
       });
       for (const question of missing) {

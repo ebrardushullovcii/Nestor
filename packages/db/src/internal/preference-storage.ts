@@ -9,6 +9,7 @@ import {
 } from "@nestor/contracts";
 import { backupBeforeStorageMigration } from "./storage-migration-backup";
 import { notifyWorkspaceCommit } from "../workspace-commits";
+import { orderedRanks } from "./ordered-row-positions";
 
 const digest = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -106,7 +107,12 @@ function replaceLinks(
   const put = db.prepare(
     `INSERT INTO ${table}(plan_id, item_id, position) VALUES (?, ?, ?) ON CONFLICT(plan_id, item_id) DO UPDATE SET position = excluded.position`,
   );
-  [...new Set(ids)].forEach((id, position) => {
+  // Retention inserts and reranks findings among an existing plan. Keep its
+  // already-ordered rows at their stored ranks instead of shifting them all.
+  const nextIds = [...new Set(ids)];
+  const ranks = orderedRanks(nextIds, existing);
+  nextIds.forEach((id, index) => {
+    const position = ranks[index]!;
     if (existing.get(id) !== position) put.run(planId, id, position);
     existing.delete(id);
   });

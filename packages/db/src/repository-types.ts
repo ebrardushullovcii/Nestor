@@ -21,6 +21,9 @@ import type {
   SavedJobSightingPatch,
   SavedJobPlanAssessmentPatch,
   JobFinderDiscoveryState,
+  DiscoveryBootstrapState,
+  DiscoveryHomeState,
+  DiscoveryRunStateProjection,
   JobFinderActivityControl,
   ApplyQueue,
   JobFinderRepositoryState,
@@ -441,6 +444,8 @@ export interface JobFinderRepository
     draftId?: string;
   }): Promise<readonly ResumeExportArtifact[]>;
   upsertResumeExportArtifact(artifact: ResumeExportArtifact): Promise<void>;
+  /** Current/approved exports and every resume referenced by application history. */
+  listRetainedResumeExportPaths(): Promise<readonly string[]>;
   listResumeResearchArtifacts(
     jobId?: string,
   ): Promise<readonly ResumeResearchArtifact[]>;
@@ -710,6 +715,13 @@ export interface JobFinderRepository
    * use getDiscoveryState or the transaction-current commit updater instead.
    */
   readDiscoveryDisplayProjection(): Promise<DiscoveryDisplayProjection>;
+  readDiscoveryBootstrapProjection(): Promise<DiscoveryBootstrapState>;
+  /** Display runs without checkpoints and indexed activity for the requested saved jobs only. */
+  readDiscoveryHomeProjection(
+    jobIds: readonly string[],
+    planId?: string | null,
+  ): Promise<DiscoveryHomeState>;
+  readDiscoveryRunStates(): Promise<readonly DiscoveryRunStateProjection[]>;
   /**
    * Atomically applies a synchronous transform to the currently stored
    * discovery state. The updater borrows frozen canonical rows and must return
@@ -774,11 +786,10 @@ export interface JobFinderRepository
 
 export interface AutomaticWorkspaceBackupOptions {
   /**
-   * Rotate the graceful-close snapshot into `<filePath>.backup` (previous
-   * generation preserved as `<filePath>.backup.prev`) right before the
-   * repository closes its SQLite connection (normal app shutdown).
+   * Refresh `<filePath>.backup` in the background after migrations and at
+   * most daily, retaining one previous generation. Quit cancels unfinished work.
    */
-  onClose?: boolean;
+  inBackground?: boolean;
   /**
    * Snapshot the pre-reset state into the dedicated `<filePath>.reset-backup`
    * destination right before a destructive full-state reset overwrites it.
@@ -858,6 +869,8 @@ export interface WorkspaceDatabaseRecoveryRequiredDetails {
 export interface FileJobFinderRepositoryOptions {
   filePath: string;
   seed: JobFinderRepositorySeed;
+  /** Desktop's startup worker converts evidence in slices; typed reads support both shapes. */
+  deferEvidenceConversion?: boolean;
   /**
    * Opt-in database-only recovery snapshots stored next to the live
    * database. They do not capture generated documents, candidate assets, or
