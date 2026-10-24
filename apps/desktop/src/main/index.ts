@@ -1,5 +1,5 @@
 import { app, BrowserWindow, Menu, ipcMain, powerMonitor } from "electron";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, statSync, truncateSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { configureInterviewMediaPermissions } from "./setup/interview-media-permissions";
@@ -31,6 +31,12 @@ function recordStartupDiagnostic(message: string, error?: unknown) {
   }
 
   try {
+    // Developer diagnostics are never read by a screen or a product decision.
+    if (
+      existsSync(startupDiagnosticsPath) &&
+      statSync(startupDiagnosticsPath).size > 1024 * 1024
+    )
+      truncateSync(startupDiagnosticsPath, 0);
     const detail =
       error instanceof Error
         ? `${error.name}: ${error.message}\n${error.stack ?? ""}`

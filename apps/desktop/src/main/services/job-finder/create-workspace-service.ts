@@ -113,7 +113,7 @@ const deterministicTestTimestamp = "2026-03-20T10:00:00.000Z";
 
 /**
  * Database-only recovery snapshots written next to the live workspace
- * database. Graceful shutdown rotates `<workspace>.backup` (prior generation
+ * database. Background maintenance rotates `<workspace>.backup` (prior generation
  * preserved as `.backup.prev`); destructive resets snapshot into the
  * dedicated `<workspace>.reset-backup` while they run. A successful reset
  * deletes every snapshot, because the person asked for permanent deletion.
@@ -125,7 +125,7 @@ const deterministicTestTimestamp = "2026-03-20T10:00:00.000Z";
  * non-fatal and never block shutdown or reset.
  */
 export const DESKTOP_AUTOMATIC_DATABASE_BACKUP_OPTIONS = {
-  onClose: true,
+  inBackground: true,
   beforeReset: true,
 } as const;
 
@@ -642,11 +642,14 @@ export async function createJobFinderWorkspaceServiceAsync(
     renderResumeHtml: (input) => resumeDraftProcessor.render(input),
     inspectPdf: (filePath) => resumeDraftProcessor.inspectPdf(filePath),
     outputDirectory: getGeneratedResumeDocumentsDirectory(),
+    retainedResumePaths: () =>
+      jobFinderRepository.listRetainedResumeExportPaths(),
     previewTestMode: desktopTestApiEnabled
       ? getResumePreviewTestMode(env)
       : "ok",
   });
   const exportFileVerifier = createLocalResumeExportFileVerifier();
+  void documentManager.pruneGeneratedResumeFiles?.();
   const researchAdapter = desktopTestApiEnabled
     ? undefined
     : createDesktopResumeResearchAdapter();

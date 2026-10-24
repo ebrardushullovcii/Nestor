@@ -11,7 +11,10 @@ import {
   type WorkspaceDatabaseRestoreTelemetryEvent,
   type WorkspaceRotationReconciliationEvent,
 } from "./index";
-import { getWorkspaceDatabaseBackupPaths } from "./file-repository-backup";
+import {
+  createWorkspaceDatabaseBackup,
+  getWorkspaceDatabaseBackupPaths,
+} from "./file-repository-backup";
 import { createSeed } from "./test-fixtures";
 import {
   cleanupTempDirectoryWithRetry,
@@ -89,10 +92,9 @@ async function openRepository(
   fixture: StartupFixture,
   options: OpenOptions = {},
 ): Promise<FileRepository> {
-  return createFileJobFinderRepository({
+  const repository = await createFileJobFinderRepository({
     filePath: fixture.filePath,
     seed: createSeed(),
-    automaticBackup: { onClose: true },
     ...(options.telemetry
       ? { recoveryTelemetry: options.telemetry.hooks }
       : {}),
@@ -104,6 +106,14 @@ async function openRepository(
         }
       : {}),
   });
+  // Recovery tests explicitly create generations; production close does not.
+  return {
+    ...repository,
+    async close() {
+      await createWorkspaceDatabaseBackup({ filePath: fixture.filePath });
+      await repository.close();
+    },
+  };
 }
 
 function quarantineBasenames(fixture: StartupFixture): string[] {
@@ -464,7 +474,6 @@ describe("file repository startup recovery integration", () => {
     const reopened = await createFileJobFinderRepository({
       filePath: fixture.filePath,
       seed: createSeed(),
-      automaticBackup: { onClose: true },
       recoveryTelemetry: {
         onRestored: (event) => {
           const probe = new DatabaseSync(fixture.filePath);
@@ -569,7 +578,6 @@ describe("file repository startup recovery integration", () => {
     const second = await createFileJobFinderRepository({
       filePath: fixture.filePath,
       seed: createSeed(),
-      automaticBackup: { onClose: true },
       recoveryTelemetry: {
         onRestored: (event) => {
           restoredEvents.push(event);

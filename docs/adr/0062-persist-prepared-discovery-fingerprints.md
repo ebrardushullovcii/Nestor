@@ -31,4 +31,4 @@ the same transaction, so a changed job never inherits an older identity proof.
 The table is additive and initially empty: creating it does not scan or transform
 existing saved jobs. There is no hash backfill, duplicate JSON field, downgrade
 shape or separate identity store. Forward migrations that transform the saved-job
-body remain subject to backup and count verification under ADR 0061.
+body remain subject to backup and count verification under ADR 0071.

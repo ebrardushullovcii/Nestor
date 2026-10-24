@@ -4515,6 +4515,7 @@ export function createWorkspaceApplicationMethods(
               templateId: template.id,
               settings,
             });
+            await ctx.documentManager.discardResumeArtifact?.(rendered);
             const previewValidation = validateResumeDraft({
               draft: previewResumeDraft,
               job,
@@ -4855,6 +4856,7 @@ export function createWorkspaceApplicationMethods(
             tailoredAsset: nextAsset,
           });
         }
+        void ctx.documentManager.pruneGeneratedResumeFiles?.();
         await ctx.updateJob(jobId, (currentJob) => ({
           ...currentJob,
           status: removedResumeJobIds.has(jobId)
@@ -5522,6 +5524,7 @@ export function createWorkspaceApplicationMethods(
       validation: validationWithReviewGuidance,
       tailoredAsset: nextAsset,
     });
+    void ctx.documentManager.pruneGeneratedResumeFiles?.();
     return exportArtifact;
   }
 
@@ -7213,6 +7216,7 @@ export function createWorkspaceApplicationMethods(
             templateId: measuredDraft.templateId,
             settings: workspaceState.settings,
           });
+          await ctx.documentManager.discardResumeArtifact?.(rendered);
           return {
             pageCount: rendered.pageCount ?? null,
             targetPageCount: measuredDraft.targetPageCount,
