@@ -1,4 +1,6 @@
 import {
+  type JobFinderDiscoveryCommandReply,
+  type JobFinderDiscoveryCancellationReply,
   ApplicationPageStatesInputSchema,
   ApplicationPageStatesSchema,
   ReopenApplicationPageInputSchema,
@@ -202,6 +204,36 @@ import {
 } from "@nestor/contracts";
 
 let activeAgentDiscoveryRequestId: string | null = null;
+
+function invokeAgentDiscovery<T>(
+  channel:
+    | "job-finder:run-agent-discovery"
+    | "job-finder:run-agent-discovery-command",
+  onActivity?: (event: DiscoveryActivityEvent) => void,
+  targetId?: string,
+  searchRequest?: JobFinderSearchRequest,
+): Promise<T> {
+  if (activeAgentDiscoveryRequestId)
+    return Promise.reject(new Error("Agent discovery is already running."));
+  const requestId = `agent_discovery_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const activityChannel = `job-finder:discovery-activity:${requestId}`;
+  activeAgentDiscoveryRequestId = requestId;
+  const handler = (
+    _event: Electron.IpcRendererEvent,
+    event: DiscoveryActivityEvent,
+  ) => onActivity?.(event);
+  if (onActivity) ipcRenderer.on(activityChannel, handler);
+  const payload: JobFinderAgentDiscoveryActionInput = {
+    requestId,
+    targetId: targetId ?? null,
+    ...(searchRequest ? { searchRequest } : {}),
+  };
+  return (ipcRenderer.invoke(channel, payload) as Promise<T>).finally(() => {
+    if (onActivity) ipcRenderer.off(activityChannel, handler);
+    if (activeAgentDiscoveryRequestId === requestId)
+      activeAgentDiscoveryRequestId = null;
+  });
+}
 let activeResumeImportRequestId: string | null = null;
 let activeSourceDebugRequestId: string | null = null;
 
@@ -1072,48 +1104,28 @@ const desktopApi = {
       onActivity?: (event: DiscoveryActivityEvent) => void,
       targetId?: string,
       searchRequest?: JobFinderSearchRequest,
-    ) => {
-      if (activeAgentDiscoveryRequestId) {
-        return Promise.reject(new Error("Agent discovery is already running."));
-      }
-
-      const requestId = `agent_discovery_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-      const activityChannel = `job-finder:discovery-activity:${requestId}`;
-      activeAgentDiscoveryRequestId = requestId;
-      const activityHandler = onActivity
-        ? (
-            _event: Electron.IpcRendererEvent,
-            event: DiscoveryActivityEvent,
-          ) => {
-            onActivity(event);
-          }
-        : null;
-
-      if (activityHandler) {
-        ipcRenderer.on(activityChannel, activityHandler);
-      }
-
-      const cleanup = () => {
-        if (activityHandler) {
-          ipcRenderer.off(activityChannel, activityHandler);
-        }
-        if (activeAgentDiscoveryRequestId === requestId) {
-          activeAgentDiscoveryRequestId = null;
-        }
-      };
-
-      const payload: JobFinderAgentDiscoveryActionInput = {
-        requestId,
-        targetId: targetId ?? null,
-        ...(searchRequest ? { searchRequest } : {}),
-      };
-
-      const promise = ipcRenderer
-        .invoke("job-finder:run-agent-discovery", payload)
-        .finally(cleanup) as Promise<JobFinderAgentDiscoveryReply>;
-
-      return promise;
-    },
+    ) =>
+      invokeAgentDiscovery<JobFinderAgentDiscoveryReply>(
+        "job-finder:run-agent-discovery",
+        onActivity,
+        targetId,
+        searchRequest,
+      ),
+    runAgentDiscoveryCommand: (
+      onActivity?: (event: DiscoveryActivityEvent) => void,
+      targetId?: string,
+      searchRequest?: JobFinderSearchRequest,
+    ) =>
+      invokeAgentDiscovery<JobFinderDiscoveryCommandReply>(
+        "job-finder:run-agent-discovery-command",
+        onActivity,
+        targetId,
+        searchRequest,
+      ),
+    cancelDiscoveryRunCommand: (runId: string) =>
+      ipcRenderer.invoke("job-finder:cancel-discovery-run-command", {
+        runId,
+      }) as Promise<JobFinderDiscoveryCancellationReply>,
     runSourceDebug: (
       targetId: string,
       onProgress?: (event: SourceDebugProgressEvent) => void,

@@ -1,0 +1,24 @@
+{
+  "name": "@nestor/job-list-policy",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./identity": "./src/job-identity.ts",
+    "./text": "./src/shared.ts",
+    "./ordering": "./src/ordering.ts",
+    "./sources": "./src/sources.ts",
+    "./tie-break-reason": "./src/tie-break-reason.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@nestor/contracts": "workspace:*",
+    "@nestor/core": "workspace:*"
+  }
+}

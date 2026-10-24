@@ -137,6 +137,72 @@ afterEach(() => {
 });
 
 describe("progressive public API discovery", () => {
+  test("command search and Stop keep live progress without constructing a workspace projection", async () => {
+    const pendingResponse = createDeferred<Response>();
+    vi.spyOn(globalThis, "fetch").mockReturnValue(pendingResponse.promise);
+    const { workspaceService, repository } = createProgressiveApiHarness();
+    await repository.saveActivityControl({
+      paused: true,
+      pausedAt: "2026-10-24T10:00:00.000Z",
+      reason: "person_paused",
+    });
+    const canonicalDrafts = vi.spyOn(repository, "listResumeDrafts");
+    const projection = vi.spyOn(repository, "getApplyQueue");
+    const events: DiscoveryActivityEvent[] = [];
+    const done = workspaceService.runAgentDiscoveryCommand((event) =>
+      events.push(event),
+    );
+    await vi.waitFor(() =>
+      expect(events.some((event) => event.runId)).toBe(true),
+    );
+    const runId = events.find((event) => event.runId)!.runId;
+    expect(
+      await workspaceService.cancelDiscoveryRunCommand("different_run"),
+    ).toEqual({ runId: "different_run", accepted: false });
+    expect(await workspaceService.cancelDiscoveryRunCommand(runId)).toEqual({
+      runId,
+      accepted: true,
+    });
+    expect(await done).toMatchObject({
+      runId,
+      outcome: "cancelled",
+      newJobs: 0,
+    });
+    expect(projection).not.toHaveBeenCalled();
+    expect(canonicalDrafts).not.toHaveBeenCalled();
+    expect((await repository.getDiscoveryState()).recentRuns[0]).toMatchObject({
+      id: runId,
+      state: "cancelled",
+    });
+    pendingResponse.resolve(createFailedResponse(503));
+  });
+
+  test("legacy display reads retain the previous complete view while command search runs", async () => {
+    const pendingResponse = createDeferred<Response>();
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockReturnValue(pendingResponse.promise);
+    const { workspaceService, repository } = createProgressiveApiHarness();
+    const before = await workspaceService.getWorkspaceProjection!();
+    const projection = vi.spyOn(repository, "readDisplayCollections");
+    const events: DiscoveryActivityEvent[] = [];
+    const done = workspaceService.runAgentDiscoveryCommand((event) =>
+      events.push(event),
+    );
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    for (let index = 0; index < 3; index++)
+      expect(await workspaceService.getWorkspaceProjection!()).toBe(before);
+    expect(projection).not.toHaveBeenCalled();
+    const canonical = await workspaceService.getWorkspaceSnapshot();
+    expect(canonical.activeDiscoveryRun?.state).toBe("running");
+    await workspaceService.cancelDiscoveryRunCommand(events[0]!.runId);
+    await done;
+    const after = await workspaceService.getWorkspaceProjection!();
+    expect(after).not.toBe(before);
+    expect(after.discoveryRunState).toBe("cancelled");
+    pendingResponse.resolve(createFailedResponse(503));
+  });
+
   test("cancels the service-owned run by its durable run id", async () => {
     const pendingResponse = createDeferred<Response>();
     const fetchSpy = vi
@@ -462,8 +528,9 @@ describe("progressive public API discovery", () => {
     const liveJobs = await repository.listSavedJobs();
     expect(liveJobs.map((job) => job.sourceJobId)).toContain("2002");
     const livePlan = await repository.getCampaignState();
-    expect(liveJobs.find((job) => job.sourceJobId === "2002")?.campaignIds)
-      .toContain(livePlan?.activeCampaignId);
+    expect(
+      liveJobs.find((job) => job.sourceJobId === "2002")?.campaignIds,
+    ).toContain(livePlan?.activeCampaignId);
 
     slowResponse.resolve(
       createGreenhouseResponse({
@@ -486,9 +553,11 @@ describe("progressive public API discovery", () => {
       jobsPersisted: 2,
       outcome: "completed",
     });
-    expect((await repository.listSavedJobs()).every((job) =>
-      job.campaignIds?.includes(livePlan?.activeCampaignId ?? ""),
-    )).toBe(true);
+    expect(
+      (await repository.listSavedJobs()).every((job) =>
+        job.campaignIds?.includes(livePlan?.activeCampaignId ?? ""),
+      ),
+    ).toBe(true);
   });
 
   test("keeps a completed fast batch durable when a slower provider later fails", async () => {

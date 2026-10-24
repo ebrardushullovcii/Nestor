@@ -89,6 +89,30 @@ const osIntegrationPath = path.resolve(
 );
 
 const workspaceAliases = {
+  "@nestor/job-list-policy/text": path.resolve(
+    currentDir,
+    "../../packages/job-list-policy/src/shared.ts",
+  ),
+  "@nestor/job-list-policy/identity": path.resolve(
+    currentDir,
+    "../../packages/job-list-policy/src/job-identity.ts",
+  ),
+  "@nestor/job-list-policy/tie-break-reason": path.resolve(
+    currentDir,
+    "../../packages/job-list-policy/src/tie-break-reason.ts",
+  ),
+  "@nestor/job-list-policy/ordering": path.resolve(
+    currentDir,
+    "../../packages/job-list-policy/src/ordering.ts",
+  ),
+  "@nestor/job-list-policy/sources": path.resolve(
+    currentDir,
+    "../../packages/job-list-policy/src/sources.ts",
+  ),
+  "@nestor/job-list-policy": path.resolve(
+    currentDir,
+    "../../packages/job-list-policy/src/index.ts",
+  ),
   "@nestor/ai-providers": aiProvidersPath,
   "@nestor/browser-agent": browserAgentPath,
   "@nestor/browser-runtime": browserRuntimePath,
@@ -135,8 +159,15 @@ const mainConfig = {
   build: {
     rollupOptions: {
       input: {
-        index: path.resolve(currentDir, "src/main/index.ts"),
-        "workspace-database-startup-worker": path.resolve(currentDir, "src/main/setup/workspace-database-startup-worker.ts"),
+        index: path.resolve(currentDir, "src/main/bootstrap.ts"),
+        "workspace-database-startup-worker": path.resolve(
+          currentDir,
+          "src/main/setup/workspace-database-startup-worker.ts",
+        ),
+        "workspace-query-reader": path.resolve(
+          currentDir,
+          "src/main/setup/workspace-query-reader.ts",
+        ),
         "discovery-cpu-worker": path.resolve(
           currentDir,
           "src/main/services/job-finder/discovery-cpu-worker.ts",

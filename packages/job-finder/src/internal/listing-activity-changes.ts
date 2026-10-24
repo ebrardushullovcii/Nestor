@@ -9,7 +9,7 @@ import {
 /** Identity edits can change another row's inactive evidence through ambiguity. */
 export function createListingActivityChangeResolver(
   index: NonNullable<
-    Parameters<typeof projectDiscoveryJobViews>[0]["identityIndex"]
+    Parameters<typeof projectDiscoveryJobViews<SavedJob>>[0]["identityIndex"]
   >,
 ) {
   let previous = new Set<DiscoveryLedgerEntry>();

@@ -4,6 +4,7 @@ import {
   isDesktopTestApiEnabled,
 } from "../services/job-finder/test-api";
 import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-workspace-view";
+import { usesWorkspaceQueryUpdates } from "../services/job-finder/query-update-mode";
 
 // The workspace services are a large module graph. Loading them only when a
 // handler needs them keeps the graph off the window's initial load.
@@ -48,20 +49,22 @@ export function registerJobFinderBootstrapDesktopRoutes(ipcMain: IpcMain) {
     return openingHoldPromise;
   };
 
-  ipcMain.handle("job-finder:get-workspace", async () => {
+  ipcMain.handle("job-finder:get-workspace", async (event) => {
     await waitForOpeningHold();
     const workspaceService = await getJobFinderWorkspaceService();
     return toRendererWorkspaceSnapshot(
       await (workspaceService.getWorkspaceProjection?.() ??
         workspaceService.getWorkspaceSnapshot()),
+      usesWorkspaceQueryUpdates(event.sender.id) ? true : undefined,
     );
   });
 
-  ipcMain.handle("job-finder:get-workspace-bootstrap", async () => {
+  ipcMain.handle("job-finder:get-workspace-bootstrap", async (event) => {
     await waitForOpeningHold();
     const workspaceService = await getJobFinderWorkspaceService();
     return toRendererWorkspaceSnapshot(
       await workspaceService.getWorkspaceBootstrap(),
+      usesWorkspaceQueryUpdates(event.sender.id) ? true : undefined,
     );
   });
 }

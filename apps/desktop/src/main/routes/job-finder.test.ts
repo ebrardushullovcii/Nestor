@@ -48,7 +48,9 @@ import { createResumeWorkspaceDemoState } from "../adapters/job-finder-demo-stat
 function answeredView(result: unknown): unknown {
   const answer = result as { kind?: unknown; snapshot?: unknown };
   if (answer.kind !== "snapshot")
-    throw new Error(`Expected a whole-view answer, got ${String(answer.kind)}.`);
+    throw new Error(
+      `Expected a whole-view answer, got ${String(answer.kind)}.`,
+    );
   return answer.snapshot;
 }
 
@@ -528,7 +530,10 @@ describe("interactive routes use main workspace projections", () => {
         { sender: {} },
         { jobIds: [fixture.job.id] },
       ),
-    ).resolves.toMatchObject({ kind: "snapshot", snapshot: { applyRuns: [run], selectedApplyRunId: run.id } });
+    ).resolves.toMatchObject({
+      kind: "snapshot",
+      snapshot: { applyRuns: [run], selectedApplyRunId: run.id },
+    });
     expect(startAutoApplyQueueRun).not.toHaveBeenCalled();
     expect(fixture.getWorkspaceProjection).toHaveBeenCalledTimes(1);
     expect(fixture.getWorkspaceSnapshot).not.toHaveBeenCalled();
@@ -651,7 +656,9 @@ describe("job-finder profile copilot patch-group routes", () => {
     )({ sender: {} }, { revisionId: "profile_revision_9" });
 
     expect(answeredView(result)).toEqual(snapshot);
-    expect((answeredView(result) as typeof snapshot).profile).toBe(snapshot.profile);
+    expect((answeredView(result) as typeof snapshot).profile).toBe(
+      snapshot.profile,
+    );
     expect(parseSpy).not.toHaveBeenCalled();
     parseSpy.mockRestore();
   });
@@ -1785,31 +1792,48 @@ describe("job-finder Apply to all with a resume that waits on the person", () =>
 
 describe("bulk resume approval", () => {
   it("bounds concurrent approvals, deduplicates jobs and keeps failures local", async () => {
-    const jobs = ["one", "two", "three", "four"].map(id => ({ id, title: id }));
+    const jobs = ["one", "two", "three", "four"].map((id) => ({
+      id,
+      title: id,
+    }));
     mockGetJobFinderRepositoryForWorkspaceService.mockReturnValue({
       listSavedJobs: () => Promise.resolve(jobs),
       getSettings: () => Promise.resolve({}),
-      getSearchPreferences: () => Promise.resolve({tailoringMode: "aggressive"}),
+      getSearchPreferences: () =>
+        Promise.resolve({ tailoringMode: "aggressive" }),
     } as never);
     let active = 0;
     let maximum = 0;
     const approve = vi.fn(async (id: string) => {
       maximum = Math.max(maximum, ++active);
-      await new Promise(resolve => setTimeout(resolve, 5));
+      await new Promise((resolve) => setTimeout(resolve, 5));
       active--;
       if (id === "two") throw new Error("Some lines still need your decision.");
     });
     const service = {
-      getResumeWorkspace: () => Promise.resolve({ draft: {id: "draft", status: "needs_review"}, exports: [] }),
+      getResumeWorkspace: () =>
+        Promise.resolve({
+          draft: { id: "draft", status: "needs_review" },
+          exports: [],
+        }),
       approveCurrentResume: approve,
     };
     const progress = vi.fn<(done: number) => void>();
-    const heldBack = await approveApplicationResumes(service as never,
-      [...jobs.map(j=>j.id), "one"], {personApproved:true,onProgress:progress});
+    const heldBack = await approveApplicationResumes(
+      service as never,
+      [...jobs.map((j) => j.id), "one"],
+      { personApproved: true, onProgress: progress },
+    );
     expect(maximum).toBe(2);
     expect(approve).toHaveBeenCalledTimes(4);
-    expect(heldBack).toEqual([{jobId:"two",title:"two",reason: "The resume for 'two' has a line waiting for your decision."}]);
-    expect(progress.mock.calls.map(c=>c[0])).toEqual([1,2,3,4]);
+    expect(heldBack).toEqual([
+      {
+        jobId: "two",
+        title: "two",
+        reason: "The resume for 'two' has a line waiting for your decision.",
+      },
+    ]);
+    expect(progress.mock.calls.map((c) => c[0])).toEqual([1, 2, 3, 4]);
   });
 });
 
@@ -3996,7 +4020,9 @@ describe("job-finder agent discovery outcome routes", () => {
     vi.clearAllMocks();
   });
 
-  function registerAndFindDiscoveryHandler(): RegisteredHandler {
+  function registerAndFindDiscoveryHandler(
+    channel = "job-finder:run-agent-discovery",
+  ): RegisteredHandler {
     const handlers = new Map<string, RegisteredHandler>();
     const ipcMain = {
       handle: vi.fn((channel: string, handler: RegisteredHandler) => {
@@ -4007,7 +4033,7 @@ describe("job-finder agent discovery outcome routes", () => {
     } as unknown as IpcMain;
     registerJobFinderRouteHandlers(ipcMain);
 
-    const handler = handlers.get("job-finder:run-agent-discovery");
+    const handler = handlers.get(channel);
     if (!handler) {
       throw new Error("Agent discovery handler was not registered.");
     }
@@ -4034,6 +4060,39 @@ describe("job-finder agent discovery outcome routes", () => {
   }
 
   const sender = { id: 7, send: vi.fn() };
+
+  it("answers command search and cancellation without requesting a workspace", async () => {
+    const reply = { outcome: "completed", runId: "command_run", newJobs: 12 };
+    const runAgentDiscoveryCommand = vi.fn().mockResolvedValue(reply);
+    const cancelDiscoveryRunCommand = vi
+      .fn()
+      .mockResolvedValue({ runId: "command_run", accepted: true });
+    mockGetJobFinderWorkspaceService.mockResolvedValue({
+      runAgentDiscoveryCommand,
+      cancelDiscoveryRunCommand,
+      getWorkspaceProjection: mockGetWorkspaceProjection,
+    });
+    expect(
+      await registerAndFindDiscoveryHandler(
+        "job-finder:run-agent-discovery-command",
+      )(
+        { sender },
+        { requestId: "command_request", targetId: "target_example" },
+      ),
+    ).toEqual(reply);
+    expect(runAgentDiscoveryCommand).toHaveBeenCalledWith(
+      expect.any(Function),
+      "target_example",
+      undefined,
+    );
+    expect(
+      await registerAndFindDiscoveryHandler(
+        "job-finder:cancel-discovery-run-command",
+      )({ sender }, { runId: "command_run" }),
+    ).toEqual({ runId: "command_run", accepted: true });
+    expect(mockGetWorkspaceProjection).not.toHaveBeenCalled();
+    expect(mockRunAgentDiscovery).not.toHaveBeenCalled();
+  });
 
   it("classifies a resolved cancel-after-partial-checkpoint run as cancelled", async () => {
     // The service finalizes a user-cancelled run as state `cancelled`,
@@ -4305,7 +4364,9 @@ describe("job-finder synthetic save failure route", () => {
       /could not write the campaign change/,
     );
     expect(saveCampaign).not.toHaveBeenCalled();
-    await expect(save({ sender: {} }, campaign)).resolves.toEqual(wholeViewAnswer(snapshot));
+    await expect(save({ sender: {} }, campaign)).resolves.toEqual(
+      wholeViewAnswer(snapshot),
+    );
     expect(saveCampaign).toHaveBeenCalledTimes(1);
   });
 

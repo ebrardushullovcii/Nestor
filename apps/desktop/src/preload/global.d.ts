@@ -1,4 +1,7 @@
 import type {
+  WorkspaceQueryApi,
+  JobFinderDiscoveryCommandReply,
+  JobFinderDiscoveryCancellationReply,
   ApplicationPageState,
   ApplicationPageReopenProgress,
   ReopenApplicationPageInput,
@@ -258,7 +261,7 @@ declare global {
         ) => Promise<JobFinderRendererWorkspaceSnapshot>;
       };
       jobFinder: {
-        queries: import("@nestor/contracts").WorkspaceQueryApi;
+        queries: WorkspaceQueryApi;
         getApplicationAuthorityReadiness: (
           input?: GetApplicationAuthorityReadinessInput,
         ) => Promise<ApplicationAuthorityReadiness>;
@@ -483,6 +486,14 @@ declare global {
           targetId?: string,
           searchRequest?: JobFinderSearchRequest,
         ) => Promise<JobFinderAgentDiscoveryReply>;
+        runAgentDiscoveryCommand: (
+          onActivity?: (event: DiscoveryActivityEvent) => void,
+          targetId?: string,
+          searchRequest?: JobFinderSearchRequest,
+        ) => Promise<JobFinderDiscoveryCommandReply>;
+        cancelDiscoveryRunCommand: (
+          runId: string,
+        ) => Promise<JobFinderDiscoveryCancellationReply>;
         runSourceDebug: (
           targetId: string,
           onProgress?: (event: SourceDebugProgressEvent) => void,

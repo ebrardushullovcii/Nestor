@@ -1,3 +1,5 @@
+import { JobFinderDiscoveryCancellationInputSchema } from "@nestor/contracts";
+import { holdDiscoveryWorkspaceUpdates } from "../services/job-finder/workspace-updates";
 import { buildWorkspaceFileExport } from "../services/job-finder/workspace-file-exports";
 import { readJobFinderJobDetail } from "../services/job-finder/read-job-detail";
 import { JOB_FINDER_ACTIONS, executeJobFinderAction, type JobFinderActionId } from "@nestor/job-finder";
@@ -148,6 +150,7 @@ import {
 import { collectJobFinderPerformanceSnapshot } from "../services/job-finder/collect-performance-snapshot";
 import { createJobFinderWorkspaceDeltaTracker } from "../services/job-finder/workspace-delta";
 import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-workspace-view";
+import { usesWorkspaceQueryUpdates } from "../services/job-finder/query-update-mode";
 import {
   notifyJobFinderWorkspaceListeners,
   publishJobFinderWorkspaceUpdate,
@@ -1105,6 +1108,7 @@ async function readWorkspaceProjection(
 
 function rendererSnapshotResponse(
   snapshot: JobFinderWorkspaceSnapshot,
+  queryLists?: boolean,
 ): JobFinderRendererWorkspaceSnapshot {
   const candidate = snapshot as unknown;
   const isWorkspaceSnapshotShape =
@@ -1124,7 +1128,7 @@ function rendererSnapshotResponse(
     );
   }
 
-  return toRendererWorkspaceSnapshot(snapshot);
+  return toRendererWorkspaceSnapshot(snapshot, queryLists);
 }
 
 /** Returned to any caller of the retired Profile and Resume chat writes. */
@@ -1249,8 +1253,14 @@ export function registerJobFinderRouteHandlers(
   const workspaceMutationResponse = (
     sender: object | null | undefined,
     snapshot: JobFinderWorkspaceSnapshot,
-  ): JobFinderWorkspaceSyncResult =>
-    workspaceDeltaTracker.respond(sender, rendererSnapshotResponse(snapshot));
+  ): JobFinderWorkspaceSyncResult => {
+    const queryLists = sender && "id" in sender &&
+      typeof sender.id === "number" && usesWorkspaceQueryUpdates(sender.id);
+    return workspaceDeltaTracker.respond(
+      sender,
+      rendererSnapshotResponse(snapshot, queryLists ? true : undefined),
+    );
+  };
   ipcMain.handle(
     "job-finder:note-workspace-revision",
     (event, payload: unknown) => {
@@ -1357,14 +1367,17 @@ export function registerJobFinderRouteHandlers(
 
       return workspaceDeltaTracker.synchronize(
         input.baseRevision,
-        toRendererWorkspaceSnapshot(snapshot),
+        toRendererWorkspaceSnapshot(
+          snapshot,
+          usesWorkspaceQueryUpdates(event.sender.id) ? true : undefined,
+        ),
       );
     },
   );
 
   ipcMain.handle(
     "job-finder:mutate-workspace-entities",
-    async (_event, payload: unknown) => {
+    async (event, payload: unknown) => {
       const input = JobFinderWorkspaceEntityMutationInputSchema.parse(payload);
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot = await (async () => {
@@ -1455,7 +1468,10 @@ export function registerJobFinderRouteHandlers(
       })();
       return workspaceDeltaTracker.synchronize(
         input.baseRevision,
-        toRendererWorkspaceSnapshot(snapshot),
+        toRendererWorkspaceSnapshot(
+          snapshot,
+          usesWorkspaceQueryUpdates(event.sender.id) ? true : undefined,
+        ),
       );
     },
   );
@@ -2080,6 +2096,54 @@ export function registerJobFinderRouteHandlers(
   });
 
   ipcMain.handle(
+    "job-finder:cancel-discovery-run-command",
+    async (_event, payload: unknown) => {
+      const { runId } =
+        JobFinderDiscoveryCancellationInputSchema.parse(payload);
+      return (await getJobFinderWorkspaceService()).cancelDiscoveryRunCommand(
+        runId,
+      );
+    },
+  );
+  ipcMain.handle(
+    "job-finder:run-agent-discovery-command",
+    async (event, payload: unknown) => {
+      const { requestId, targetId, searchRequest } =
+        parseAgentDiscoveryRequest(payload);
+      const service = await getJobFinderWorkspaceService();
+      const release = holdDiscoveryWorkspaceUpdates();
+      const notices = getFinishedWorkNotifier();
+      notices.progress("search", null);
+      let finishedNotice: ReturnType<typeof searchFinishedNotice> | null = null;
+      let runId: string | null = null;
+      try {
+        const result = await service.runAgentDiscoveryCommand(
+          (activity) => {
+            runId = activity.runId;
+            if (!event.sender.isDestroyed?.())
+              event.sender.send(
+                `job-finder:discovery-activity:${requestId}`,
+                DiscoveryActivityEventSchema.parse(activity),
+              );
+          },
+          targetId ?? undefined,
+          searchRequest,
+        );
+        if (result.outcome === "completed")
+          finishedNotice = searchFinishedNotice(result.newJobs);
+        return result;
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError")
+          return { outcome: "cancelled", runId, newJobs: 0 };
+        throw error;
+      } finally {
+        release();
+        notices.end("search", finishedNotice);
+      }
+    },
+  );
+
+  ipcMain.handle(
     "job-finder:run-agent-discovery",
     async (event, payload: unknown) => {
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
@@ -2088,6 +2152,7 @@ export function registerJobFinderRouteHandlers(
         parseAgentDiscoveryRequest(payload);
       const notices = getFinishedWorkNotifier();
       notices.progress("search", null);
+      const release = holdDiscoveryWorkspaceUpdates();
       let finishedNotice: ReturnType<typeof searchFinishedNotice> | null = null;
 
       try {
@@ -2143,6 +2208,7 @@ export function registerJobFinderRouteHandlers(
         }
         throw error;
       } finally {
+        release();
         notices.end("search", finishedNotice);
       }
     },

@@ -4,11 +4,13 @@ import {
   NonEmptyStringSchema,
   WorkModeSchema,
 } from "./base";
+import { FitRecommendationSchema } from "./discovery";
 import type { ApplicationStatus } from "./base";
 import type {
   SavedJob,
   JobFinderJobDetail,
   JobSearchPreferences,
+  ListingActivity,
 } from "./discovery";
 import type { JobSearchCampaign } from "./job-search-campaigns";
 import type { CandidateProfile } from "./profile";
@@ -43,6 +45,15 @@ export const QueryJobListInputSchema = z
         workModes: z.array(WorkModeSchema).max(10).optional(),
         minimumScore: z.number().min(0).max(100).optional(),
         maximumScore: z.number().min(0).max(100).optional(),
+        recommendations: z.array(FitRecommendationSchema).max(4).optional(),
+        sourceLabels: z.array(NonEmptyStringSchema).max(100).optional(),
+        activities: z
+          .array(z.enum(["active", "inactive", "stale", "closed", "unknown"]))
+          .max(5)
+          .optional(),
+        newSince: z.string().datetime().optional(),
+        newOnly: z.boolean().optional(),
+        workModeUnspecified: z.boolean().optional(),
         discoveryBands: z
           .array(z.enum(["matches", "unchecked", "weaker", "mismatches"]))
           .min(1)
@@ -75,7 +86,6 @@ export type WorkspaceJobListRow = Pick<
   | "status"
   | "title"
   | "company"
-  | "location"
   | "source"
   | "sourceJobId"
   | "canonicalUrl"
@@ -91,14 +101,30 @@ export type WorkspaceJobListRow = Pick<
   | "resumeApplicationMode"
   | "resumeTailoringMode"
 > & {
+  location: string | null;
   planId: string | null;
   score: number;
   recommendation: SavedJob["matchAssessment"]["recommendation"];
   judged: boolean;
+  scoreWithheld: boolean;
   scoreIsUpperBound: boolean;
   titleFamilyMatch: SavedJob["matchAssessment"]["titleFamilyMatch"] | null;
   locationReach: SavedJob["matchAssessment"]["locationReach"];
+  /** Unavailable compatibility flag; inactive is distinct from proven closed. */
   listingClosed: boolean;
+  listingActivity: ListingActivity;
+  providerUpdatedAt: SavedJob["providerUpdatedAt"];
+  discoveryMethod: SavedJob["discoveryMethod"];
+  applyPath: SavedJob["applyPath"];
+  sourceLabels: string[];
+  recommendationRationale: string | null;
+  firstGap: string | null;
+  roleSuitabilityState: string | null;
+  seniority: SavedJob["seniority"];
+  rescoredAfterListingRead: boolean;
+  tieBreakReason: string | null;
+  indistinguishable: boolean;
+  scoreTied: boolean;
   resultGroup: "matches" | "unchecked" | "weaker" | "mismatches";
 };
 export interface WorkspaceListCounts {
@@ -131,6 +157,22 @@ export interface QueryJobListResult {
   resumeDrafts: WorkspaceEntitySummary[];
   applications: WorkspaceEntitySummary[];
   applyResults: WorkspaceEntitySummary[];
+  facets: WorkspaceJobListFacets;
+}
+export interface WorkspaceJobListFacets {
+  recommendations: Array<{
+    value: WorkspaceJobListRow["recommendation"];
+    count: number;
+  }>;
+  sources: Array<{ value: string; count: number }>;
+  workModes: Array<{ value: string; count: number }>;
+  activities: Array<{ value: ListingActivity["status"]; count: number }>;
+  locationReach: Array<{
+    value: WorkspaceJobListRow["locationReach"];
+    count: number;
+  }>;
+  assessed: number;
+  newSince: number | null;
 }
 export interface WorkspaceHomeSummary {
   counts: WorkspaceListCounts;
@@ -259,6 +301,32 @@ export const WorkspaceReadRequestSchema = z.discriminatedUnion("method", [
   }),
 ]);
 export type WorkspaceReadRequest = z.infer<typeof WorkspaceReadRequestSchema>;
+
+/** The port stays inside preload; the renderer only receives WorkspaceQueryApi. */
+export const WorkspaceQueryPortRequestSchema = z
+  .object({
+    id: z.number().int().positive(),
+    request: WorkspaceReadRequestSchema,
+  })
+  .strict();
+export type WorkspaceQueryPortRequest = z.infer<
+  typeof WorkspaceQueryPortRequestSchema
+>;
+export type WorkspaceQueryPortMessage =
+  | { type: "reply"; id: number; ok: true; value: WorkspaceQueryValue }
+  | { type: "reply"; id: number; ok: false; error: string }
+  | { type: "changes"; value: WorkspaceChanges };
+type WorkspaceQueryValue = Awaited<
+  ReturnType<WorkspaceQueryApi[Exclude<keyof WorkspaceQueryApi, "onChanges">]>
+>;
+
+/** App-owned control messages between main and its read-only utility process. */
+export type WorkspaceReaderControl =
+  | { type: "initialize"; filePath: string }
+  | {
+      type: "context-ready" | "queries-ready" | "changed" | "attach" | "close";
+    };
+
 export interface WorkspaceQueryApi {
   setQueryUpdates(active: boolean): Promise<void>;
   getStartupContext(): Promise<WorkspaceStartupContext>;

@@ -12,6 +12,10 @@ import { recordApplicationsSentByPerson } from "./internal/application-sent-by-p
 import { judgeUnjudgedPlanJobs } from "./internal/backlog-fit-judgment";
 import { refreshAutomaticApplicationFailurePauses } from "./internal/automatic-safeguards";
 import type { JobFinderRepository } from "@nestor/db";
+import type {
+  JobFinderDiscoveryCommandReply,
+  JobFinderDiscoveryCancellationReply,
+} from "@nestor/contracts";
 import {
   ACTIVITY_PAUSED_MESSAGE,
   ApplicationRecordSchema,
@@ -875,7 +879,59 @@ export function createJobFinderWorkspaceService(
     }
   }
 
+  async function cancelDiscoveryRunCommand(
+    runId: string,
+  ): Promise<JobFinderDiscoveryCancellationReply> {
+    const input = JobFinderDiscoveryCancellationInputSchema.parse({ runId });
+    const requestedAt = new Date().toISOString();
+    let accepted = false;
+    await context.persistDiscoveryState((current) => {
+      if (
+        current.activeRun?.id !== input.runId ||
+        current.activeRun.state !== "running"
+      )
+        return current;
+      accepted = true;
+      return {
+        ...current,
+        activeRun: {
+          ...current.activeRun,
+          cancellationRequestedAt:
+            current.activeRun.cancellationRequestedAt ?? requestedAt,
+        },
+      };
+    });
+    // The live identity reaches the window before the first durable run row.
+    if (activeDiscoveryRunIdRef.current === input.runId) accepted = true;
+    if (accepted) activeDiscoveryAbortControllerRef.current?.abort();
+    return { runId: input.runId, accepted };
+  }
+
+  let lastDisplayProjection: JobFinderWorkspaceSnapshot | undefined;
+  let runningDiscoveryCommands = 0;
+  async function readDisplayProjection() {
+    // Query screens follow committed rows. Legacy readers can retain their
+    // last complete view while search writes, rather than rebuilding it per beat.
+    if (
+      lastDisplayProjection &&
+      (runningDiscoveryCommands > 0 ||
+        activeDiscoveryAbortControllerRef.current)
+    )
+      return lastDisplayProjection;
+    lastDisplayProjection =
+      await (snapshotProfileMethods.getWorkspaceProjection?.() ??
+        snapshotProfileMethods.getWorkspaceSnapshot());
+    return lastDisplayProjection;
+  }
+
   async function getWorkspaceSnapshot(borrowValidatedJobs = false) {
+    if (
+      borrowValidatedJobs &&
+      lastDisplayProjection &&
+      (runningDiscoveryCommands > 0 ||
+        activeDiscoveryAbortControllerRef.current)
+    )
+      return lastDisplayProjection;
     // Recovery starts or joins the continuation of every verifying step, and
     // a continuation drives the browser for minutes. Quick verifications
     // still land in this snapshot; a long continuation carries on in the
@@ -901,8 +957,8 @@ export function createJobFinderWorkspaceService(
       ]).finally(() => {
         if (timer) clearTimeout(timer);
       });
-    return borrowValidatedJobs && snapshotProfileMethods.getWorkspaceProjection
-      ? snapshotProfileMethods.getWorkspaceProjection()
+    return borrowValidatedJobs
+      ? readDisplayProjection()
       : snapshotProfileMethods.getWorkspaceSnapshot();
   }
 
@@ -915,9 +971,7 @@ export function createJobFinderWorkspaceService(
   context.getWorkspaceSnapshot = () => getWorkspaceSnapshot(true);
   context.readWorkspaceSnapshot = () =>
     snapshotProfileMethods.getWorkspaceSnapshot();
-  context.readWorkspaceProjection = () =>
-    snapshotProfileMethods.getWorkspaceProjection?.() ??
-    snapshotProfileMethods.getWorkspaceSnapshot();
+  context.readWorkspaceProjection = readDisplayProjection;
   const crmMethods = createWorkspaceCrmMethods({
     ctx: context,
     getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
@@ -1001,12 +1055,26 @@ export function createJobFinderWorkspaceService(
     afterCampaignRun: () => intelligenceMethods.refreshCompanyIntelligence(),
   });
 
-  async function runCampaignScopedDiscovery(
+  function runCampaignScopedDiscovery(
+    executor: (
+      campaign: CampaignRunContext,
+    ) => Promise<JobFinderDiscoveryCommandReply>,
+    requestedCampaignId: string | undefined,
+    options: { commandOnly: true },
+  ): Promise<JobFinderDiscoveryCommandReply>;
+  function runCampaignScopedDiscovery(
     executor: (
       campaign: CampaignRunContext,
     ) => Promise<JobFinderWorkspaceSnapshot>,
     requestedCampaignId?: string,
-    options: { nestedUserActionRecovery?: boolean } = {},
+    options?: { nestedUserActionRecovery?: boolean },
+  ): Promise<JobFinderWorkspaceSnapshot>;
+  async function runCampaignScopedDiscovery(
+    executor: (
+      campaign: CampaignRunContext,
+    ) => Promise<JobFinderWorkspaceSnapshot | JobFinderDiscoveryCommandReply>,
+    requestedCampaignId?: string,
+    options: { nestedUserActionRecovery?: boolean; commandOnly?: boolean } = {},
   ) {
     await requireDiscoverySafeguardClearance();
     let campaignState = await repository.getCampaignState();
@@ -1039,7 +1107,7 @@ export function createJobFinderWorkspaceService(
       );
     }
     assertCampaignCanRun(campaign);
-    await executor({
+    const result = await executor({
       campaignId: campaign.id,
       mode: campaign.mode,
       searchPreferences: searchPreferencesForCampaignRun(campaign),
@@ -1056,6 +1124,10 @@ export function createJobFinderWorkspaceService(
       beforeCampaignJobIds: campaign.jobIds,
     });
     await yieldToEventLoop();
+    if (options.commandOnly) {
+      await intelligenceMethods.refreshCompanyIntelligenceState();
+      return result;
+    }
     if (options.nestedUserActionRecovery) {
       await intelligenceMethods.refreshCompanyIntelligenceState();
       return context.readWorkspaceSnapshot();
@@ -1117,7 +1189,7 @@ export function createJobFinderWorkspaceService(
    */
   async function requireActivityEnabled(): Promise<void> {
     if ((await repository.getActivityControl()).paused) {
-      await setActivityControl({ paused: false });
+      await commitActivityControl({ paused: false });
     }
     await onExplicitUserStart?.();
   }
@@ -1444,7 +1516,7 @@ export function createJobFinderWorkspaceService(
     safeguardMethods.requireNoBlockers(blockers);
   }
 
-  async function setActivityControl(
+  async function commitActivityControl(
     rawInput: SetJobFinderActivityControlInput,
   ) {
     const input = SetJobFinderActivityControlInputSchema.parse(rawInput);
@@ -1494,6 +1566,11 @@ export function createJobFinderWorkspaceService(
         );
       }
     }
+  }
+  async function setActivityControl(
+    rawInput: SetJobFinderActivityControlInput,
+  ) {
+    await commitActivityControl(rawInput);
     return getWorkspaceSnapshot();
   }
   const applyRunStoreMethods = createWorkspaceApplyRunStoreMethods(context);
@@ -1798,37 +1875,32 @@ export function createJobFinderWorkspaceService(
           discoveryMethods.runDiscoveryForTarget(targetId, onActivity, signal),
         );
       }),
+    runAgentDiscoveryCommand: (onActivity, targetId, searchRequest) =>
+      trackWorkspaceOperation("discovery", async () => {
+        runningDiscoveryCommands += 1;
+        try {
+          await requireActivityEnabled();
+          return await runCampaignScopedDiscovery(
+            () =>
+              discoveryMethods.runAgentDiscoveryCommand(
+                onActivity,
+                targetId,
+                searchRequest,
+              ),
+            undefined,
+            { commandOnly: true },
+          );
+        } finally {
+          runningDiscoveryCommands -= 1;
+        }
+      }),
+    cancelDiscoveryRunCommand: (runId) =>
+      trackWorkspaceOperation("discovery cancellation", () =>
+        cancelDiscoveryRunCommand(runId),
+      ),
     cancelDiscoveryRun: (runId) =>
       trackWorkspaceOperation("discovery cancellation", async () => {
-        const input = JobFinderDiscoveryCancellationInputSchema.parse({
-          runId,
-        });
-        const requestedAt = new Date().toISOString();
-        let accepted = false;
-        await context.persistDiscoveryState((current) => {
-          if (
-            current.activeRun?.id !== input.runId ||
-            current.activeRun.state !== "running"
-          ) {
-            return current;
-          }
-          accepted = true;
-          return {
-            ...current,
-            activeRun: {
-              ...current.activeRun,
-              cancellationRequestedAt:
-                current.activeRun.cancellationRequestedAt ?? requestedAt,
-            },
-          };
-        });
-        // Abort whenever this is the run actually in flight, even when the
-        // stored state has not caught up (the run record is written after the
-        // pipeline starts). Matching only on stored state let a stop be
-        // accepted as a request and never reach the pipeline.
-        if (accepted || activeDiscoveryRunIdRef.current === input.runId) {
-          activeDiscoveryAbortControllerRef.current?.abort();
-        }
+        await cancelDiscoveryRunCommand(runId);
         return getWorkspaceSnapshot();
       }),
     ...sourceDebugMethods,

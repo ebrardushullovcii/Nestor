@@ -92,6 +92,15 @@ function page(rows: WorkspaceJobListRow[]): QueryJobListResult {
     resumeDrafts: [],
     applications: [],
     applyResults: [],
+    facets: {
+      recommendations: [],
+      sources: [],
+      workModes: [],
+      activities: [],
+      locationReach: [],
+      assessed: 0,
+      newSince: null,
+    },
   };
 }
 
