@@ -241,7 +241,9 @@ export async function createFileJobFinderRepository(
     }
 
     try {
-      runMigrations(database);
+      runMigrations(database, {
+        deferEvidenceConversion: options.deferEvidenceConversion ?? false,
+      });
       if (!closedCleanly && !passesStartupIntegrityCheck(database)) {
         throw new Error(
           "Workspace database failed the startup integrity check.",

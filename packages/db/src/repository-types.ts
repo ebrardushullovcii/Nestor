@@ -853,6 +853,8 @@ export interface WorkspaceDatabaseRecoveryRequiredDetails {
 export interface FileJobFinderRepositoryOptions {
   filePath: string;
   seed: JobFinderRepositorySeed;
+  /** Desktop's startup worker converts evidence in slices; typed reads support both shapes. */
+  deferEvidenceConversion?: boolean;
   /**
    * Opt-in database-only recovery snapshots stored next to the live
    * database. They do not capture generated documents, candidate assets, or

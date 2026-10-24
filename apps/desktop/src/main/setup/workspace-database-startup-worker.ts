@@ -11,9 +11,14 @@ async function prepare() {
   try {
     prepareWorkspaceQuerySchema(String(workerData));
     port.postMessage("context-ready");
-    prepareWorkspaceQueryDatabase(String(workerData));
+    // Missing indexes use the same SQL against original rows on the reader.
+    // A compatible old index remains visible while its replacement commits.
     port.postMessage("queries-ready");
-    await completeWorkspaceDatabaseMigrations(String(workerData));
+    prepareWorkspaceQueryDatabase(String(workerData));
+    port.postMessage("index-ready");
+    await completeWorkspaceDatabaseMigrations(String(workerData), () =>
+      port.postMessage("writer-ready"),
+    );
     port.postMessage("complete");
   } finally {
     port.close();

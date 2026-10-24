@@ -50,7 +50,7 @@ import { createLocalJobFinderDocumentManager } from "../../adapters/job-finder-d
 import { createResumeDraftProcessor } from "../../adapters/resume-draft-processor";
 import { createLocalResumeExportFileVerifier } from "../../adapters/job-finder-export-file-verifier";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
-import { waitForWorkspaceDatabaseMigrations } from "../../setup/workspace-database-startup";
+import { prepareWorkspaceWriter } from "../../setup/workspace-database-startup";
 import { createDesktopResumeResearchAdapter } from "../../adapters/job-finder-research-adapter";
 import { adoptPristineWorkspaceStarterSources } from "./pristine-starter-source-adoption";
 import {
@@ -589,12 +589,13 @@ export async function createJobFinderWorkspaceServiceAsync(
   };
   const desktopTestApiEnabled = isDesktopTestApiEnabled(env);
   await ensureJobFinderUserDataDirectory();
-  await waitForWorkspaceDatabaseMigrations();
+  const backgroundEvidenceConversion = await prepareWorkspaceWriter();
   let jobFinderRepository: JobFinderRepository;
   try {
     jobFinderRepository = await createFileJobFinderRepository({
       filePath: getJobFinderWorkspaceFilePath(),
       seed: createEmptyJobFinderRepositoryState(),
+      deferEvidenceConversion: backgroundEvidenceConversion,
       automaticBackup: DESKTOP_AUTOMATIC_DATABASE_BACKUP_OPTIONS,
       recoveryTelemetry: {
         onRestored: recordRestoredStartupDatabaseRecoveryEvent,

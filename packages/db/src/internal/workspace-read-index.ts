@@ -1,23 +1,49 @@
 import { ensureSavedJobFingerprintStorage } from "./saved-job-fingerprints";
 import type { DatabaseSync } from "node:sqlite";
+import { registerWorkspaceStartupListFacts } from "./workspace-startup-list-facts";
 
 const VERSION = "12";
-const jobTables = ["saved_jobs", "discovery_pending_jobs"] as const;
+export const workspaceReadIndexVersion = VERSION;
+export const workspaceJobTables = [
+  "saved_jobs",
+  "discovery_pending_jobs",
+] as const;
+const jobTables = workspaceJobTables;
 const jobFields =
   "status source work_mode title company search_text score hidden unjudged closed mismatch provisional outside title_family recency detail seen location source_job_id canonical_url application_url posted_at posted_text discovered_at first_seen_at salary_text detail_quality score_upper recommendation title_family_match location_reach resume_mode tailoring_mode visible rank_score feedback result_group provider_updated_at discovery_method apply_path recommendation_rationale first_gap role_state seniority rescored source_provenance last_verified_active_at listing_closed_evidence identity_value tie_requirements first_reason last_seen_at".split(
     " ",
   );
 
-function indexJobSql(table: string, where = ""): string {
+export const workspaceJobIndexColumns = [
+  "origin",
+  "id",
+  "plan_id",
+  ...jobFields,
+];
+
+/** Startup and stored indexes derive every scalar from this one expression. */
+export function workspaceJobIndexSelectSql(
+  table: string,
+  where = "",
+  startup = false,
+): string {
   // A global row and one row per explicit campaign membership. Verdicts belong
   // to their plan; the global assessment is only the persisted fallback.
   const plans =
     table === "saved_jobs"
       ? "COALESCE((SELECT jsonb_group_array(plan_id) FROM plan_job_memberships WHERE item_id = j.id), jsonb('[]'))"
       : "COALESCE(jsonb_extract(j.value, '$.campaignIds'), jsonb('[]'))";
+  const legacyInput =
+    "id, json_extract(value,'$.title'), json_extract(value,'$.company'), json_extract(value,'$.canonicalUrl'), json_extract(value,'$.location'), json_extract(value,'$.status')";
   const metadata =
     table === "saved_jobs"
-      ? "list_visible, display_company, display_location, assessment_id, COALESCE(first_seen_at, json_extract(value, '$.firstSeenAt')) AS first_seen_at, COALESCE(last_seen_at, json_extract(value, '$.lastSeenAt')) AS last_seen_at, COALESCE(last_verified_active_at, json_extract(value, '$.lastVerifiedActiveAt')) AS last_verified_active_at"
+      ? `${
+          startup
+            ? `COALESCE(list_visible, workspace_startup_visible(${legacyInput})) AS list_visible,
+        CASE WHEN list_visible IS NOT NULL THEN display_company ELSE workspace_startup_company(${legacyInput}) END AS display_company,
+        CASE WHEN list_visible IS NOT NULL THEN display_location ELSE workspace_startup_location(${legacyInput}) END AS display_location`
+            : "list_visible, display_company, display_location"
+        }, assessment_id, COALESCE(first_seen_at, json_extract(value, '$.firstSeenAt')) AS first_seen_at, COALESCE(last_seen_at, json_extract(value, '$.lastSeenAt')) AS last_seen_at, COALESCE(last_verified_active_at, json_extract(value, '$.lastVerifiedActiveAt')) AS last_verified_active_at`
       : "NULL AS list_visible, NULL AS display_company, NULL AS display_location, NULL AS assessment_id, json_extract(value, '$.firstSeenAt') AS first_seen_at, json_extract(value, '$.lastSeenAt') AS last_seen_at, json_extract(value, '$.lastVerifiedActiveAt') AS last_verified_active_at";
   const storedColumns =
     table === "saved_jobs"
@@ -31,8 +57,7 @@ function indexJobSql(table: string, where = ""): string {
       (SELECT value FROM job_fit_assessments WHERE id = j.assessment_id), json_extract(j.value, '$.matchAssessment'))`
       : `COALESCE((SELECT verdict.value FROM json_each(j.value, '$.planAssessments') verdict WHERE verdict.key = p.value),
       json_extract(j.value, '$.matchAssessment'))`;
-  return `INSERT INTO workspace_job_index
-    WITH raw_jobs AS MATERIALIZED (SELECT id, jsonb(value) AS value ${storedColumns}
+  return `WITH raw_jobs AS MATERIALIZED (SELECT id, jsonb(value) AS value ${storedColumns}
       FROM ${table} ${where.replaceAll("j.id", "id")}),
     jobs AS MATERIALIZED (SELECT id, jsonb_remove(value, '$.description', '$.provenance', '$.summary',
       '$.responsibilities', '$.minimumQualifications', '$.preferredQualifications', '$.keywordSignals', '$.latestMatchAssessmentAudit') AS value,
@@ -98,14 +123,48 @@ function indexJobSql(table: string, where = ""): string {
       j.source_provenance, j.last_verified_active_at, json_extract(v.verdict,'$.judgment.listingClosedEvidence'),
       json_object(${["source", "sourceJobId", "canonicalUrl", "applicationUrl", "providerKey", "providerBoardToken", "providerIdentifier", "title", "seniority", "company", "location", "postedAt", "postedAtText"].map((field) => `'${field}',json_extract(j.value,'$.${field}')`).join(",")}),
       (SELECT json_group_array(json_object('category',json_extract(r.value,'$.category'),'status',json_extract(r.value,'$.status'))) FROM json_each(v.verdict,'$.requirements') r), json_extract(v.verdict,'$.reasons[0]'), j.last_seen_at
-    FROM verdicts v JOIN jobs j ON j.id = v.id
+    FROM verdicts v JOIN jobs j ON j.id = v.id`;
+}
+
+function indexJobSql(table: string, where = "", startup = false): string {
+  return `INSERT INTO workspace_job_index ${workspaceJobIndexSelectSql(table, where, startup)}
     WHERE 1 ON CONFLICT(origin, id, plan_id) DO UPDATE SET ${jobFields.map((field) => `${field} = excluded.${field}`).join(", ")}
       WHERE ${jobFields.map((field) => `workspace_job_index.${field} IS NOT excluded.${field}`).join(" OR ")};`;
 }
 
+export const workspaceEntityIndexColumns =
+  "origin,id,job_id,status,updated_at,approved_at,approved_export_id,stale_reason,stage,returned_to_shortlist_at,run_id,last_action_label,next_action_label";
+export const workspaceEntityTables = [
+  "application_records",
+  "resume_drafts",
+  "apply_job_results",
+] as const;
+
+export function workspaceEntityIndexSelectSql(
+  table: string,
+  condition = "",
+): string {
+  return `WITH rows AS MATERIALIZED (SELECT id, jsonb_remove(jsonb(value), '$.sections', '$.visualObservationSets', '$.visualCheckpoints') AS value FROM ${table} ${condition})
+    SELECT '${table}', id, json_extract(value, '$.jobId'),
+      COALESCE(json_extract(value, '$.status'), json_extract(value, '$.state'), ''),
+      COALESCE(json_extract(value, '$.updatedAt'), json_extract(value, '$.lastUpdatedAt'), json_extract(value, '$.createdAt'), ''),
+      json_extract(value, '$.approvedAt'), json_extract(value, '$.approvedExportId'), json_extract(value, '$.staleReason'),
+      json_extract(value, '$.crm.stage'), json_extract(value, '$.returnedToShortlistAt'), json_extract(value, '$.runId'),
+      json_extract(value, '$.lastActionLabel'), json_extract(value, '$.nextActionLabel') FROM rows`;
+}
+
+export const workspaceCompanyIndexColumns =
+  "id,name,canonical_name,preference,job_count,application_count,updated_at,value";
+export const workspaceCompanyIndexSelectSql = `SELECT json_extract(c.value, '$.id'),
+  lower(json_extract(c.value, '$.canonicalName')), json_extract(c.value, '$.canonicalName'),
+  COALESCE(json_extract(c.value, '$.preference'), 'neutral'), COALESCE(json_array_length(c.value, '$.jobIds'), 0),
+  COALESCE(json_array_length(c.value, '$.applicationRecordIds'), 0), json_extract(c.value, '$.updatedAt'), c.value
+  FROM singleton_state s, json_each(s.value, '$.companies') c WHERE s.key = 'intelligence_state'`;
+
 /** Additive metadata only: existing JSON and schema migration versions stay intact. */
 export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
   ensureSavedJobFingerprintStorage(database);
+  registerWorkspaceStartupListFacts(database);
   database.exec("PRAGMA busy_timeout = 5000");
   database.exec(
     `CREATE TABLE IF NOT EXISTS workspace_read_meta (key TEXT PRIMARY KEY, value TEXT)`,
@@ -186,7 +245,7 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
         database.exec(`DROP TRIGGER ${String(name)}`);
       database.exec("DELETE FROM workspace_job_index");
       for (const table of jobTables) {
-        database.exec(indexJobSql(table));
+        database.exec(indexJobSql(table, "", true));
         for (const operation of ["insert", "update", "delete"] as const) {
           const name = `workspace_job_index_${table}_${operation}`;
           database.exec(`DROP TRIGGER IF EXISTS ${name}`);
@@ -263,22 +322,9 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
       database.exec("DROP INDEX IF EXISTS workspace_job_counts_idx");
     database.exec(`CREATE INDEX IF NOT EXISTS workspace_job_counts_idx ON workspace_job_index(
       plan_id,status,visible,feedback,result_group,hidden,origin,id)`);
-    for (const table of [
-      "application_records",
-      "resume_drafts",
-      "apply_job_results",
-    ]) {
-      const select = (
-        condition: string,
-      ) => `INSERT OR REPLACE INTO workspace_entity_index
-        WITH rows AS MATERIALIZED (SELECT id, jsonb_remove(jsonb(value), '$.sections', '$.visualObservationSets', '$.visualCheckpoints') AS value FROM ${table} ${condition})
-        SELECT '${table}', id, json_extract(value, '$.jobId'),
-          COALESCE(json_extract(value, '$.status'), json_extract(value, '$.state'), ''),
-          COALESCE(json_extract(value, '$.updatedAt'), json_extract(value, '$.lastUpdatedAt'), json_extract(value, '$.createdAt'), ''),
-          json_extract(value, '$.approvedAt'), json_extract(value, '$.approvedExportId'), json_extract(value, '$.staleReason'),
-          json_extract(value, '$.crm.stage'), json_extract(value, '$.returnedToShortlistAt'), json_extract(value, '$.runId'),
-          json_extract(value, '$.lastActionLabel'), json_extract(value, '$.nextActionLabel')
-        FROM rows;`;
+    for (const table of workspaceEntityTables) {
+      const select = (condition: string) =>
+        `INSERT OR REPLACE INTO workspace_entity_index ${workspaceEntityIndexSelectSql(table, condition)};`;
       const triggerExists = database
         .prepare("SELECT 1 FROM sqlite_master WHERE name = ?")
         .get(`workspace_entity_${table}_insert`);
@@ -292,11 +338,7 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
       }
     }
     const companies = `DELETE FROM workspace_company_jobs; DELETE FROM workspace_company_index;
-      INSERT INTO workspace_company_index SELECT json_extract(c.value, '$.id'),
-        lower(json_extract(c.value, '$.canonicalName')), json_extract(c.value, '$.canonicalName'),
-        COALESCE(json_extract(c.value, '$.preference'), 'neutral'), COALESCE(json_array_length(c.value, '$.jobIds'), 0),
-        COALESCE(json_array_length(c.value, '$.applicationRecordIds'), 0), json_extract(c.value, '$.updatedAt'), c.value
-        FROM singleton_state s, json_each(s.value, '$.companies') c WHERE s.key = 'intelligence_state';
+      INSERT INTO workspace_company_index ${workspaceCompanyIndexSelectSql};
       INSERT OR IGNORE INTO workspace_company_jobs SELECT c.id, j.value
         FROM workspace_company_index c, json_each(c.value, '$.jobIds') j;`;
     if (
