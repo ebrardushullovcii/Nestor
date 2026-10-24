@@ -31,6 +31,7 @@ import {
   readPreparedDiscoveryFingerprints,
   readPreparedSavedJobIdentity,
   DISCOVERY_FINGERPRINT_FIELDS,
+  DISCOVERY_PREPARATION,
   writeDiscoveryPreparation,
   type CandidateProfile,
   type DiscoveryActivityEvent,
@@ -392,6 +393,33 @@ export function applySavedJobDelta(
     writeDiscoveryPreparation(next, { bodySalaryRange });
   toSightingIdentityInput(next);
   return next;
+}
+
+/** The batch writer gets materialized inputs; the working view keeps lazy bodies. */
+export function prepareSavedJobForSearch(job: SavedJob): {
+  prepared: SavedJob;
+  working: SavedJob;
+} {
+  const prepared = copyView(
+    job,
+    Object.fromEntries(
+      DISCOVERY_FINGERPRINT_FIELDS.map((field) => [field, job[field]]),
+    ),
+  );
+  prepareDiscoveryPosting(prepared);
+  toSightingIdentityInput(prepared);
+  const fingerprints = readPreparedDiscoveryFingerprints(prepared)!;
+  const savedIdentity = readPreparedSavedJobIdentity(prepared)!;
+  const bodySalaryRange = readPreparedBodySalaryRange(prepared);
+  const working = copyView(job, {});
+  // No raw body or captured basis stays alive through the run's working rows.
+  Reflect.deleteProperty(working, DISCOVERY_PREPARATION);
+  writeDiscoveryPreparation(working, {
+    fingerprints: { owner: working, value: fingerprints },
+    savedIdentity: { owner: working, value: savedIdentity },
+    ...(bodySalaryRange !== undefined ? { bodySalaryRange } : {}),
+  });
+  return { prepared: Object.freeze(prepared), working: Object.freeze(working) };
 }
 
 /** Inspection counts need identity facts, not complete retained provider postings. */
@@ -1751,16 +1779,9 @@ export function createWorkspaceDiscoveryMethods(
             readPreparedSavedJobIdentity(job)
           )
             return job;
-          const next = copyView(
-            job,
-            Object.fromEntries(
-              DISCOVERY_FINGERPRINT_FIELDS.map((field) => [field, job[field]]),
-            ),
-          );
-          prepareDiscoveryPosting(next);
-          toSightingIdentityInput(next);
-          prepared.push(next);
-          return Object.freeze(next);
+          const next = prepareSavedJobForSearch(job);
+          prepared.push(next.prepared);
+          return next.working;
         },
         SETUP_JOBS_PER_TURN,
       );
