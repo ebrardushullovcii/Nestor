@@ -38,7 +38,8 @@ export type DiscoveryPreparation = {
     owner?: object;
     value: DiscoverySavedJobIdentity;
   };
-  normalizedPosting?: JobPosting;
+  normalizedPosting?: JobPosting | undefined;
+  normalizedPostingSource?: JobPosting | undefined;
 };
 
 export function readDiscoveryPreparation(
