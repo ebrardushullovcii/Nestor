@@ -414,6 +414,9 @@ app.on("before-quit", (event) => {
   // Actual service shutdown begins: the deferred-init latch is permanent
   // from here on, so no cancel or late release can resurrect it mid-teardown.
   deferredBackgroundInit.commitQuitTeardown();
+  // The read connection must release the WAL before the writer closes and
+  // records its clean-close fingerprint.
+  workspaceQueryHost?.close();
   jobFinderShutdownInFlight = true;
   event.preventDefault();
   void runShutdownWithTimeout(
