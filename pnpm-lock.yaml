@@ -263,6 +263,9 @@ importers:
 
   packages/contracts:
     dependencies:
+      '@nestor/core':
+        specifier: workspace:*
+        version: link:../core
       zod:
         specifier: ^3.24.2
         version: 3.25.76

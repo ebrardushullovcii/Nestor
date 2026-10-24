@@ -32,7 +32,11 @@ export type DiscoveryPostingPreparation = {
   screeningKeys: DiscoveryPreparedKeys;
   screeningFingerprints: DiscoveryListingFingerprints;
   bodySalaryRange: ReturnType<typeof extractSalaryRangeFromListingBody>;
-  screeningBodySalaryRange: ReturnType<typeof extractSalaryRangeFromListingBody>;
+  screeningBodySalaryRange: ReturnType<
+    typeof extractSalaryRangeFromListingBody
+  >;
+  matchAssessmentPostingFingerprint?: string;
+  screeningMatchAssessmentPostingFingerprint?: string;
 };
 
 export type DiscoveryJobIdentityAlias = {

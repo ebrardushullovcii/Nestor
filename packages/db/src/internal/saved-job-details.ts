@@ -4,6 +4,7 @@ import {
   readPreparedDiscoveryFingerprints,
   writeDiscoveryPreparation,
   readPreparedSavedJobIdentity,
+  readPreparedMatchAssessmentPostingFingerprint,
   readDiscoveryPreparation,
   type SavedJob,
   type SavedJobListFacts,
@@ -148,10 +149,15 @@ export function createSavedJobDetails(database: DatabaseSync) {
     });
     Object.freeze(row.provenance);
     const fingerprint = readPreparedDiscoveryFingerprints(job);
+    const matchAssessmentPostingFingerprint =
+      readPreparedMatchAssessmentPostingFingerprint(job);
     const bodySalaryRange = readDiscoveryPreparation(job)?.bodySalaryRange;
     if (fingerprint)
       writeDiscoveryPreparation(row, {
         fingerprints: { owner: row, value: fingerprint },
+        ...(matchAssessmentPostingFingerprint
+          ? { matchAssessmentPostingFingerprint }
+          : {}),
         ...(bodySalaryRange !== undefined ? { bodySalaryRange } : {}),
       });
     const identity = readPreparedSavedJobIdentity(job);

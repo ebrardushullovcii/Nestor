@@ -5,10 +5,11 @@ import {
   DISCOVERY_FINGERPRINT_FIELDS,
   readPreparedDiscoveryFingerprints,
   readPreparedSavedJobIdentity,
+  readPreparedMatchAssessmentPostingFingerprint,
+  computeMatchAssessmentPostingFingerprint,
   captureDiscoverySavedIdentityBasis,
   writeDiscoveryPreparation,
   readDiscoveryPreparation,
-  type DiscoveryListingFingerprints,
   type DiscoverySavedJobFingerprints,
   type SavedJob,
 } from "@nestor/contracts";
@@ -27,7 +28,7 @@ export function ensureSavedJobFingerprintStorage(db: DatabaseSync): void {
   END;`);
 }
 
-type StoredFingerprints = DiscoveryListingFingerprints & {
+type StoredFingerprints = Omit<DiscoverySavedJobFingerprints, "identity"> & {
   identity?: Omit<
     NonNullable<DiscoverySavedJobFingerprints["identity"]>,
     "content"
@@ -86,6 +87,9 @@ export function readSavedJobPreparedValue(
     card,
     detail,
     material,
+    matchAssessmentPostingFingerprint:
+      readPreparedMatchAssessmentPostingFingerprint(job) ??
+      computeMatchAssessmentPostingFingerprint(job),
     ...(identity ? { identity: structuredClone(identity) } : {}),
   };
 }
@@ -173,8 +177,8 @@ function capturedFingerprintBasis(
 }
 
 /** A codec may normalize fields; retain only preparation still valid afterward. */
-export function copySavedJobPreparation<T extends object>(
-  job: object,
+export function copySavedJobPreparation<T extends SavedJob>(
+  job: SavedJob,
   row: T,
 ): T {
   const value = readPreparedDiscoveryFingerprints(job);
@@ -187,6 +191,14 @@ export function copySavedJobPreparation<T extends object>(
     });
     if (!readPreparedDiscoveryFingerprints(row))
       delete readDiscoveryPreparation(row)!.fingerprints;
+    else {
+      const fingerprint =
+        readPreparedMatchAssessmentPostingFingerprint(row, job) ??
+        computeMatchAssessmentPostingFingerprint(row);
+      writeDiscoveryPreparation(row, {
+        matchAssessmentPostingFingerprint: fingerprint,
+      });
+    }
   }
   const identity = readPreparedSavedJobIdentity(job);
   if (identity) {
@@ -235,7 +247,8 @@ export function attachStoredSavedJobFingerprints<T>(
   freezeAfter = false,
 ): T {
   if (typeof raw === "string" && row !== null && typeof row === "object") {
-    const { identity, ...value } = decodeFingerprints(raw);
+    const { identity, matchAssessmentPostingFingerprint, ...value } =
+      decodeFingerprints(raw);
     writeDiscoveryPreparation(row, {
       fingerprints: {
         ...(freezeAfter
@@ -243,6 +256,9 @@ export function attachStoredSavedJobFingerprints<T>(
           : { basis: capturedFingerprintBasis(row) }),
         value,
       },
+      ...(matchAssessmentPostingFingerprint
+        ? { matchAssessmentPostingFingerprint }
+        : {}),
       ...(identity
         ? {
             savedIdentity: {

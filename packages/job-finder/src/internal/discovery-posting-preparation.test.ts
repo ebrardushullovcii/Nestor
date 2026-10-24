@@ -4,6 +4,8 @@ import {
   JobDiscoveryTargetSchema,
   readDiscoveryPreparation,
   readPreparedDiscoveryFingerprints,
+  readPreparedMatchAssessmentPostingFingerprint,
+  computeMatchAssessmentPostingFingerprint,
   readPreparedBodySalaryRange,
   assessJobPostingDetailQuality,
   type SavedJob,
@@ -19,7 +21,9 @@ import { applyListingDetailToJob } from "./listing-detail-enrichment";
 import {
   createDiscoveryListingFingerprints,
   createDiscoveryProvenance,
+  rememberDiscoveryListingFingerprints,
 } from "./workspace-discovery-ledger";
+import { createMatchAssessmentPostingFingerprint } from "./match-assessment-session";
 import { createJobIdentityIndex, prepareJobIdentity } from "./job-identity";
 import { toProviderAwarePosting } from "./discovery-posting-normalization";
 import { inferSourceIntelligenceFromTarget } from "./workspace-source-intelligence";
@@ -50,6 +54,57 @@ const preparedJob = () =>
     }),
   );
 
+test("unchanged postings carry the fit hash instead of serializing the fit input again", () => {
+  const compute = vi.spyOn(
+    contracts,
+    "computeMatchAssessmentPostingFingerprint",
+  );
+  try {
+    const first = preparedJob();
+    const expected = readPreparedMatchAssessmentPostingFingerprint(first);
+    expect(compute).toHaveBeenCalledTimes(1);
+    const copy = prepareDiscoveryPosting({ ...first, status: "shortlisted" });
+    expect(readPreparedMatchAssessmentPostingFingerprint(copy)).toBe(expected);
+    expect(compute).toHaveBeenCalledTimes(1);
+    const changed = prepareDiscoveryPosting({ ...copy, title: "Changed role" });
+    expect(readPreparedMatchAssessmentPostingFingerprint(changed)).not.toBe(
+      expected,
+    );
+    expect(compute).toHaveBeenCalledTimes(2);
+  } finally {
+    compute.mockRestore();
+  }
+});
+
+test("worker messages reattach the fit hash, while a missing transfer recomputes it", () => {
+  const posting = preparedJob();
+  const expected = createMatchAssessmentPostingFingerprint(posting);
+  const message = structuredClone({
+    posting,
+    fingerprints: createDiscoveryListingFingerprints(posting),
+    matchAssessmentPostingFingerprint: expected,
+  });
+  expect(readDiscoveryPreparation(message.posting)).toBeUndefined();
+  rememberDiscoveryListingFingerprints(
+    message.posting,
+    message.fingerprints,
+    message.matchAssessmentPostingFingerprint,
+  );
+  expect(readPreparedMatchAssessmentPostingFingerprint(message.posting)).toBe(
+    expected,
+  );
+  const changed = {
+    ...message.posting,
+    description: body + " Changed listing.",
+  };
+  expect(readPreparedMatchAssessmentPostingFingerprint(changed)).toBeNull();
+  expect(createMatchAssessmentPostingFingerprint(changed)).not.toBe(expected);
+  const missing = structuredClone(posting);
+  rememberDiscoveryListingFingerprints(missing, message.fingerprints);
+  expect(readPreparedMatchAssessmentPostingFingerprint(missing)).toBeNull();
+  expect(createMatchAssessmentPostingFingerprint(missing)).toBe(expected);
+});
+
 test("preparing a legacy job preserves lazy fields for plan-only writes and releases raw preparation", async () => {
   const legacy = structuredClone(preparedJob());
   const read = vi.fn(() => body);
@@ -75,6 +130,10 @@ test("preparing a legacy job preserves lazy fields for plan-only writes and rele
   ).toBeUndefined();
   const reads = read.mock.calls.length;
   expect(contracts.readPreparedSavedJobIdentity(working)).not.toBeNull();
+  expect(readPreparedMatchAssessmentPostingFingerprint(working)).toBe(
+    computeMatchAssessmentPostingFingerprint(prepared),
+  );
+  expect(read.mock.calls.length).toBe(reads);
   const commit = vi.fn().mockResolvedValue(undefined);
   const writer = createDiscoverySavedJobWriter({
     persistedJobs: [legacy],
@@ -312,6 +371,12 @@ for (const [path, apply] of Object.entries(paths))
       expect(createDiscoveryListingFingerprints(actual)).toEqual(
         createDiscoveryListingFingerprints(control),
       );
+      expect(readPreparedMatchAssessmentPostingFingerprint(actual)).toBe(
+        computeMatchAssessmentPostingFingerprint(control),
+      );
+      expect(readPreparedMatchAssessmentPostingFingerprint(actual)).toBe(
+        computeMatchAssessmentPostingFingerprint(actual),
+      );
       expect(prepareJobIdentity(actual)).toEqual(prepareJobIdentity(control));
       expect(readPreparedBodySalaryRange(actual)).toEqual(
         compensation.extractSalaryRangeFromListingBody(control.description),
@@ -333,6 +398,9 @@ test("worker, JSON and schema-shaped rows with no carrier compute identity inste
     expect(index.find(posting)).toBe(original);
     expect(createDiscoveryListingFingerprints(posting)).toEqual(
       createDiscoveryListingFingerprints(original),
+    );
+    expect(contracts.computeMatchAssessmentPostingFingerprint(posting)).toBe(
+      readPreparedMatchAssessmentPostingFingerprint(original),
     );
   }
 });

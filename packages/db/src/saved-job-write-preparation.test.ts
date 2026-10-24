@@ -4,6 +4,8 @@ import { createSeed } from "./test-fixtures";
 import { expect, test, vi } from "vitest";
 import {
   readPreparedSavedJobIdentity,
+  readPreparedMatchAssessmentPostingFingerprint,
+  computeMatchAssessmentPostingFingerprint,
   writeDiscoveryPreparation,
 } from "@nestor/contracts";
 import {
@@ -37,6 +39,8 @@ test("memory preparation follows unchanged inputs and is invalidated by a later 
 function prepared(job: ReturnType<typeof createSavedJob>) {
   writeDiscoveryPreparation(job, {
     fingerprints: { owner: job, value: fingerprints },
+    matchAssessmentPostingFingerprint:
+      computeMatchAssessmentPostingFingerprint(job),
     savedIdentity: {
       owner: job,
       value: {
@@ -92,6 +96,12 @@ test("preparation batches do not load or rewrite bodies and reject stale inputs"
       (row) => row.id === job.id,
     )!;
     expect(readPreparedSavedJobIdentity(currentProjection)).not.toBeNull();
+    expect(
+      readPreparedMatchAssessmentPostingFingerprint(currentProjection),
+    ).toBe(computeMatchAssessmentPostingFingerprint(job));
+    expect(
+      readPreparedMatchAssessmentPostingFingerprint(previousProjection),
+    ).toBeNull();
     expect(readPreparedSavedJobIdentity(previousProjection)).toBeNull();
     expect(
       inspect
@@ -110,6 +120,12 @@ test("preparation batches do not load or rewrite bodies and reject stale inputs"
       { canonicalUrl: "https://example.test/changed" },
       { description: "Changed body" },
       { minimumQualifications: ["New requirement"] },
+      {
+        keywordSignals: [
+          { id: "new", label: "New", kind: "domain" as const, weight: 3 },
+        ],
+      },
+      { atsProvider: "Changed ATS" },
     ]) {
       await repo.commitSavedJobDelta({
         upserts: [{ ...createSavedJob({ id: job.id }), ...change }],

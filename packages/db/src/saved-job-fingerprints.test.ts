@@ -4,6 +4,8 @@ import {
   readPreparedDiscoveryFingerprints,
   readPreparedBodySalaryRange,
   readPreparedSavedJobIdentity,
+  readPreparedMatchAssessmentPostingFingerprint,
+  computeMatchAssessmentPostingFingerprint,
   captureDiscoverySavedIdentityBasis,
   DISCOVERY_FINGERPRINT_FIELDS,
   writeDiscoveryPreparation,
@@ -46,10 +48,18 @@ for (const storage of ["file", "memory"] as const)
       : createInMemoryJobFinderRepository(createSeed());
     try {
       const job = createSavedJob({ id: "prepared" });
+      const matchAssessmentPostingFingerprint =
+        computeMatchAssessmentPostingFingerprint(job);
+      const preparedValue = {
+        ...fingerprint,
+        identity,
+        matchAssessmentPostingFingerprint,
+      };
       expect(
         writeDiscoveryPreparation(job, {
           fingerprints: { owner: job, value: fingerprint },
           savedIdentity: { owner: job, value: identity },
+          matchAssessmentPostingFingerprint,
         }),
       ).toBe(true);
       Object.freeze(job);
@@ -60,15 +70,21 @@ for (const storage of ["file", "memory"] as const)
           "missing",
           job.id,
         ]),
-      ).toEqual(new Map([[job.id, { ...fingerprint, identity }]]));
+      ).toEqual(new Map([[job.id, preparedValue]]));
       const [canonical] = await repo.listSavedJobsByIds([job.id]);
       expect(readPreparedDiscoveryFingerprints(canonical!)).toEqual(
         fingerprint,
       );
       expect(readPreparedSavedJobIdentity(canonical!)).toEqual(identity);
+      expect(readPreparedMatchAssessmentPostingFingerprint(canonical!)).toBe(
+        matchAssessmentPostingFingerprint,
+      );
       canonical!.title = "Changed in place";
       expect(readPreparedDiscoveryFingerprints(canonical!)).toBeNull();
       expect(readPreparedSavedJobIdentity(canonical!)).toBeNull();
+      expect(
+        readPreparedMatchAssessmentPostingFingerprint(canonical!),
+      ).toBeNull();
       const [borrowed] = await repo.readSavedJobsProjection();
       const get = vi.spyOn(StatementSync.prototype, "get");
       try {
@@ -78,6 +94,9 @@ for (const storage of ["file", "memory"] as const)
         if (storage === "file")
           expect(readPreparedBodySalaryRange(borrowed!)).toBeNull();
         expect(readPreparedSavedJobIdentity(borrowed!)).toEqual(identity);
+        expect(readPreparedMatchAssessmentPostingFingerprint(borrowed!)).toBe(
+          matchAssessmentPostingFingerprint,
+        );
         expect(get).not.toHaveBeenCalled();
       } finally {
         get.mockRestore();
@@ -92,7 +111,7 @@ for (const storage of ["file", "memory"] as const)
       ).rejects.toThrow("abort");
       expect(
         await repo.readSavedJobDiscoveryFingerprints([job.id, "rolled-back"]),
-      ).toEqual(new Map([[job.id, { ...fingerprint, identity }]]));
+      ).toEqual(new Map([[job.id, preparedValue]]));
       if (temp) {
         await repo.close();
         repo = await temp.createRepository();
@@ -100,7 +119,7 @@ for (const storage of ["file", "memory"] as const)
         try {
           expect(
             await repo.readSavedJobDiscoveryFingerprints([job.id, "missing"]),
-          ).toEqual(new Map([[job.id, { ...fingerprint, identity }]]));
+          ).toEqual(new Map([[job.id, preparedValue]]));
           expect(
             prepare.mock.calls.filter(([sql]) =>
               sql.includes(
@@ -139,7 +158,11 @@ for (const storage of ["file", "memory"] as const)
       await repo.commitSavedJobDelta({ upserts: [rerouted] });
       expect(
         (await repo.readSavedJobDiscoveryFingerprints([job.id])).get(job.id),
-      ).toEqual(fingerprint);
+      ).toEqual({
+        ...fingerprint,
+        matchAssessmentPostingFingerprint:
+          computeMatchAssessmentPostingFingerprint(rerouted),
+      });
     } finally {
       await repo.close();
       await temp?.cleanup();

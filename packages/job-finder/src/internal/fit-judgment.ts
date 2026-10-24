@@ -11,7 +11,6 @@ import type {
   MatchAssessment,
 } from "@nestor/contracts";
 
-import { createMatchAssessmentPostingInput } from "./match-assessment-posting-input";
 import {
   createMatchAssessmentPostingFingerprint,
   MATCH_ASSESSMENT_SCORER_VERSION,
@@ -123,9 +122,7 @@ export function compareFitJudgingPromise(
 
 /** What a verdict was given on: it changes when the listing does. */
 export function fitPostingFingerprint(job: JobPosting): string {
-  return createMatchAssessmentPostingFingerprint(
-    createMatchAssessmentPostingInput(job),
-  );
+  return createMatchAssessmentPostingFingerprint(job);
 }
 
 /** Batches sent to the model at once; the work happens on its servers. */
@@ -193,9 +190,7 @@ export async function judgeJobFitsInBatches<
           source: "batch",
           judgedAt,
           contextFingerprint: input.contextFingerprint,
-          postingFingerprint: createMatchAssessmentPostingFingerprint(
-            createMatchAssessmentPostingInput(job),
-          ),
+          postingFingerprint: createMatchAssessmentPostingFingerprint(job),
         }),
       );
     }
