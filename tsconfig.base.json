@@ -27,6 +27,22 @@
       "@nestor/contracts": ["packages/contracts/src/index.ts"],
       "@nestor/core": ["packages/core/src/index.ts"],
       "@nestor/db": ["packages/db/src/index.ts"],
+      "@nestor/job-list-policy": ["packages/job-list-policy/src/index.ts"],
+      "@nestor/job-list-policy/identity": [
+        "packages/job-list-policy/src/job-identity.ts"
+      ],
+      "@nestor/job-list-policy/text": [
+        "packages/job-list-policy/src/shared.ts"
+      ],
+      "@nestor/job-list-policy/ordering": [
+        "packages/job-list-policy/src/ordering.ts"
+      ],
+      "@nestor/job-list-policy/sources": [
+        "packages/job-list-policy/src/sources.ts"
+      ],
+      "@nestor/job-list-policy/tie-break-reason": [
+        "packages/job-list-policy/src/tie-break-reason.ts"
+      ],
       "@nestor/knowledge-base": ["packages/knowledge-base/src/index.ts"],
       "@nestor/job-finder/assistant-attention": [
         "packages/job-finder/src/assistant/attention.ts"
@@ -40,7 +56,9 @@
       "@nestor/job-finder/resume-record-identity": [
         "packages/job-finder/src/resume-record-identity.ts"
       ],
-      "@nestor/job-finder/plan-safeguard-pauses": ["packages/job-finder/src/plan-safeguard-pauses.ts"],
+      "@nestor/job-finder/plan-safeguard-pauses": [
+        "packages/job-finder/src/plan-safeguard-pauses.ts"
+      ],
       "@nestor/job-finder/source-health": [
         "packages/job-finder/src/source-health.ts"
       ],
@@ -48,9 +66,7 @@
         "packages/job-finder/src/source-instruction-review.ts"
       ],
       "@nestor/job-finder": ["packages/job-finder/src/index.ts"],
-      "@nestor/live-assistant": [
-        "packages/live-assistant/src/index.ts"
-      ],
+      "@nestor/live-assistant": ["packages/live-assistant/src/index.ts"],
       "@nestor/os-integration": ["packages/os-integration/src/index.ts"],
       "@nestor/testing": ["packages/testing/src/index.ts"]
     }

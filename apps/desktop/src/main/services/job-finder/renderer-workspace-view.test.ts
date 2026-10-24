@@ -74,6 +74,20 @@ function workspaceWith(discoveryJobs = [job()]): JobFinderWorkspaceSnapshot {
 }
 
 describe("renderer workspace list projection", () => {
+  it("omits queried inventories per response without changing another window's legacy projection", () => {
+    const workspace = workspaceWith();
+    workspace.companyJobs = workspace.discoveryJobs;
+    workspace.dismissedDiscoveryJobs = workspace.discoveryJobs;
+    const queried = toRendererWorkspaceSnapshot(workspace, true);
+    expect(queried.discoveryJobs).toEqual([]);
+    expect(queried.companyJobs).toEqual([]);
+    expect(queried.dismissedDiscoveryJobs).toEqual([]);
+    const legacy = toRendererWorkspaceSnapshot(workspace, false);
+    expect(legacy.discoveryJobs).toHaveLength(1);
+    expect(legacy.companyJobs).toHaveLength(1);
+    expect(legacy.dismissedDiscoveryJobs).toHaveLength(1);
+    expect(workspace.discoveryJobs).toHaveLength(1);
+  });
   it("does not open lazy listing or provenance bodies when sending list rows", () => {
     const full = job();
     const lazy = Object.freeze({

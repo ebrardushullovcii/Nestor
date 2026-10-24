@@ -1,114 +1,164 @@
-import { app, ipcMain, type BrowserWindow } from "electron";
-import { existsSync } from "node:fs";
 import {
-  createWorkspaceQueryRepository,
-  prepareWorkspaceQueryDatabase,
-  subscribeWorkspaceCommits,
-  type WorkspaceQueryRepository,
-} from "@nestor/db";
-import { WorkspaceReadRequestSchema } from "@nestor/contracts";
+  app,
+  ipcMain,
+  MessageChannelMain,
+  utilityProcess,
+  type BrowserWindow,
+  type UtilityProcess,
+} from "electron";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { subscribeWorkspaceCommits } from "@nestor/db";
+import {
+  WorkspaceReadRequestSchema,
+  type WorkspaceReaderControl,
+} from "@nestor/contracts";
 import { getJobFinderWorkspaceFilePath } from "../services/job-finder/paths";
 import { setWorkspaceQueryUpdateMode } from "../services/job-finder/query-update-mode";
 import {
   prepareWorkspaceScreenReads,
+  prepareWorkspaceStartupContextReads,
   waitForWorkspaceDatabaseMigrations,
 } from "./workspace-database-startup";
 
-/** Small SQLite reads are ordinary typed IPC; no workspace hydration is needed. */
+/** Main authorizes a private preload port; reads then bypass its busy event loop. */
 export function createWorkspaceQueryHost() {
-  const ready = prepareWorkspaceScreenReads();
-  void ready.catch(() => undefined);
-  let repository: WorkspaceQueryRepository | null = null;
-  let cursor = 0;
-  let unsubscribe: (() => void) | undefined;
-  let pendingPush: ReturnType<typeof setImmediate> | undefined;
-  let closed = false;
-  void waitForWorkspaceDatabaseMigrations().then(schedulePush);
   const windows = new Set<BrowserWindow>();
-  async function reader(): Promise<WorkspaceQueryRepository> {
-    if (closed) throw new Error("The workspace is closing.");
-    if (repository) return repository;
-    try {
-      await ready;
-    } catch {
+  const filePath = getJobFinderWorkspaceFilePath();
+  const contextReady = prepareWorkspaceStartupContextReads();
+  const queriesReady = prepareWorkspaceScreenReads();
+  let child: UtilityProcess | undefined;
+  let closed = false;
+  let stop: Promise<void> | undefined;
+  let stopped: (() => void) | undefined;
+  const send = (process: UtilityProcess, message: WorkspaceReaderControl) =>
+    process.postMessage(message);
+  const available = app.whenReady().then(() => {
+    if (closed) return;
+    child = utilityProcess.fork(
+      fileURLToPath(new URL("./workspace-query-reader.cjs", import.meta.url)),
+      [],
+      {
+        execArgv: [],
+        serviceName: "Workspace screen reads",
+        stdio: "pipe",
+      },
+    );
+    const process = child;
+    process.stderr?.on("data", (chunk: Buffer) =>
+      console.warn("Workspace reader:", chunk.toString()),
+    );
+    return new Promise<UtilityProcess>((resolve, reject) => {
+      let spawned = false;
+      process.once("exit", () => {
+        child = undefined;
+        stopped?.();
+        if (!spawned) reject(new Error("Workspace reader could not start."));
+        unavailable();
+      });
+      process.once("spawn", () => {
+        spawned = true;
+        if (!closed) send(process, { type: "initialize", filePath });
+        resolve(process);
+      });
+    });
+  });
+  let recovery: Promise<void> | undefined;
+  function recover() {
+    recovery ??= (async () => {
+      if (closed) throw new Error("The workspace is closing.");
       const { getJobFinderWorkspaceService } =
         await import("../services/job-finder");
       await getJobFinderWorkspaceService();
-    }
-    if (closed) throw new Error("The workspace is closing.");
-    if (repository) return repository;
-    const filePath = getJobFinderWorkspaceFilePath();
-    if (!existsSync(filePath)) {
-      const { getJobFinderWorkspaceService } =
-        await import("../services/job-finder");
-      await getJobFinderWorkspaceService();
+      const { prepareWorkspaceQueryDatabase } = await import("@nestor/db");
       prepareWorkspaceQueryDatabase(filePath);
-    }
-    if (closed) throw new Error("The workspace is closing.");
-    if (repository) return repository;
-    repository = createWorkspaceQueryRepository(filePath);
-    cursor = repository.getChanges(Number.MAX_SAFE_INTEGER).revision;
-    unsubscribe = subscribeWorkspaceCommits(filePath, schedulePush);
-    return repository;
+    })();
+    return recovery;
   }
-  ipcMain.handle("workspace-query:read", async (event, payload: unknown) => {
-    if (
-      ![...windows].some((window) => window.webContents === event.sender) ||
-      event.senderFrame !== event.sender.mainFrame
-    )
+  async function release(
+    prepared: Promise<void>,
+    type: "context-ready" | "queries-ready",
+  ) {
+    try {
+      await prepared;
+      if (closed) return;
+      if (!existsSync(filePath)) await recover();
+    } catch {
+      if (closed) return;
+      // Canonical opening owns corruption recovery and its disclosure.
+      await recover();
+    }
+    const process = await available;
+    if (process && !closed) send(process, { type });
+  }
+  void release(contextReady, "context-ready").catch(unavailable);
+  void release(queriesReady, "queries-ready").catch(unavailable);
+  function unavailable() {
+    if (closed) return;
+    for (const window of windows)
+      if (!window.isDestroyed())
+        window.webContents.send("workspace-query:unavailable");
+  }
+  function changed() {
+    void available
+      .then((process) => {
+        if (process && !closed) send(process, { type: "changed" });
+      })
+      .catch(unavailable);
+  }
+  const unsubscribe = subscribeWorkspaceCommits(filePath, changed);
+  void waitForWorkspaceDatabaseMigrations().then(changed);
+  const authorized = (
+    event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent,
+  ) =>
+    [...windows].some((window) => window.webContents === event.sender) &&
+    event.senderFrame === event.sender.mainFrame;
+  ipcMain.handle("workspace-query:read", (event, payload: unknown) => {
+    if (closed || !authorized(event))
       throw new Error("Workspace read is unavailable.");
     const request = WorkspaceReadRequestSchema.parse(payload);
-    if (request.method === "setQueryUpdates") {
-      setWorkspaceQueryUpdateMode(event.sender.id, request.input.active);
-      return;
-    }
-    const db = await reader();
-    switch (request.method) {
-      case "getStartupContext":
-        return db.getStartupContext();
-      case "queryJobList":
-        return db.queryJobList(request.input);
-      case "getJobDetail":
-        return db.getJobDetail(request.input.jobId, request.input.planId);
-      case "getCompanyDetail":
-        return db.getCompanyDetail(request.input.companyId);
-      case "getHomeSummary":
-        return db.getHomeSummary(request.input);
-      case "getListCounts":
-        return db.getListCounts(request.input);
-      case "queryCompanies":
-        return db.queryCompanies(request.input);
-      case "getChanges":
-        return db.getChanges(request.input.after, request.input.limit);
-    }
+    if (request.method !== "setQueryUpdates")
+      throw new Error("Workspace reads require the preload connection.");
+    setWorkspaceQueryUpdateMode(event.sender.id, request.input.active);
   });
-  function pushChanges() {
-    pendingPush = undefined;
-    if (!repository || !windows.size) return;
-    try {
-      const changes = repository.getChanges(cursor);
-      if (!changes.changes.length) return;
-      for (const window of windows)
-        if (!window.isDestroyed())
-          window.webContents.send("workspace-query:changes", changes);
-      cursor = changes.revision;
-      if (changes.hasMore) schedulePush();
-    } catch {
-      // A later commit or explicit reconnect can retry the durable cursor.
-    }
-  }
-  function schedulePush() {
-    if (closed) return;
-    pendingPush ??= setImmediate(pushChanges);
-  }
-  function close() {
-    if (closed) return;
+  ipcMain.on("workspace-query:connect", (event) => {
+    if (closed || !authorized(event)) return;
+    void available
+      .then((process) => {
+        if (
+          !process ||
+          closed ||
+          event.sender.isDestroyed() ||
+          !authorized(event)
+        )
+          return;
+        const { port1, port2 } = new MessageChannelMain();
+        process.postMessage(
+          { type: "attach" } satisfies WorkspaceReaderControl,
+          [port2],
+        );
+        event.senderFrame?.postMessage("workspace-query:port", null, [port1]);
+      })
+      .catch(unavailable);
+  });
+  function close(): Promise<void> {
+    if (stop) return stop;
     closed = true;
-    unsubscribe?.();
-    if (pendingPush) clearImmediate(pendingPush);
-    repository?.close();
+    unsubscribe();
+    if (!child) return (stop = Promise.resolve());
+    stop = new Promise<void>((resolve) => {
+      stopped = resolve;
+    });
+    void available
+      .then((process) => {
+        if (process && child === process) send(process, { type: "close" });
+      })
+      .catch(() => stopped?.());
+    return stop;
   }
-  app.once("will-quit", close);
+  app.once("will-quit", () => {
+    void close();
+  });
   return {
     close,
     attach(window: BrowserWindow) {

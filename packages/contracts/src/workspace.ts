@@ -1932,6 +1932,27 @@ export const JobFinderAgentDiscoveryReplySchema = z
   })
   .strict() as z.ZodType<JobFinderAgentDiscoveryReply>;
 
+/** Search commands answer with committed run facts, never a workspace view. */
+export const JobFinderDiscoveryCommandReplySchema = z
+  .object({
+    outcome: JobFinderAgentDiscoveryOutcomeSchema,
+    runId: NonEmptyStringSchema.nullable(),
+    newJobs: z.number().int().nonnegative(),
+  })
+  .strict();
+export type JobFinderDiscoveryCommandReply = z.infer<
+  typeof JobFinderDiscoveryCommandReplySchema
+>;
+export const JobFinderDiscoveryCancellationReplySchema = z
+  .object({
+    runId: NonEmptyStringSchema,
+    accepted: z.boolean(),
+  })
+  .strict();
+export type JobFinderDiscoveryCancellationReply = z.infer<
+  typeof JobFinderDiscoveryCancellationReplySchema
+>;
+
 export const SaveCandidateProfileInputSchema = CandidateProfileSchema;
 export type SaveCandidateProfileInput = z.infer<
   typeof SaveCandidateProfileInputSchema

@@ -29,6 +29,18 @@ import {
 import { ensureResumeApprovalState } from "./internal/resume-approval-state";
 import { ensurePreferenceStorageTables } from "./internal/preference-storage";
 import { validateWorkspaceSettingsFile } from "./internal/state";
+import { createWorkspaceListActivityReader } from "./internal/workspace-list-activity";
+import {
+  createWorkspaceListOrdering,
+  createWorkspacePageOrder,
+} from "./internal/workspace-list-ordering";
+import { createWorkspaceListFilters } from "./internal/workspace-list-filters";
+import { createWorkspaceListFacets } from "./internal/workspace-list-facets";
+import type { ListingActivity } from "@nestor/contracts";
+import {
+  describeMatchTieBreakReason,
+  type TieBreakAssessment,
+} from "@nestor/job-list-policy/tie-break-reason";
 
 export interface WorkspaceQueryRepository {
   getStartupContext(): WorkspaceStartupContext;
@@ -49,17 +61,41 @@ export interface WorkspaceQueryRepository {
   close(): void;
 }
 
+function prepareQuerySchema(database: DatabaseSync): void {
+  validateWorkspaceSettingsFile(database);
+  ensureResumeApprovalState(database);
+  ensureSavedJobRelations(database);
+  ensurePreferenceStorageTables(database);
+  database.exec(`CREATE TABLE IF NOT EXISTS workspace_changes (
+    revision INTEGER PRIMARY KEY AUTOINCREMENT, table_name TEXT, item_id TEXT,
+    operation TEXT CHECK(operation IN ('upsert', 'delete')))`);
+}
+
+/** Header reads need only additive schema, never an inventory scan. */
+export function prepareWorkspaceQuerySchema(filePath: string): void {
+  const database = new DatabaseSync(filePath);
+  try {
+    database.exec(
+      "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; BEGIN IMMEDIATE",
+    );
+    prepareQuerySchema(database);
+    database.exec("COMMIT");
+  } catch (error) {
+    if (database.isTransaction) database.exec("ROLLBACK");
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
 /** Prepare screen facts only. Evidence conversion is not a prerequisite. */
 export function prepareWorkspaceQueryDatabase(filePath: string): void {
   const database = new DatabaseSync(filePath);
   try {
     database.exec(
-      "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY; BEGIN IMMEDIATE",
+      "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY; BEGIN IMMEDIATE",
     );
-    validateWorkspaceSettingsFile(database);
-    ensureResumeApprovalState(database);
-    ensureSavedJobRelations(database);
-    ensurePreferenceStorageTables(database);
+    prepareQuerySchema(database);
     const legacy = !database
       .prepare("SELECT 1 FROM schema_migrations WHERE version = 27")
       .get();
@@ -76,12 +112,14 @@ export function prepareWorkspaceQueryDatabase(filePath: string): void {
         .get()
     ) {
       const updates = [];
+      const readDescription = database.prepare(
+        "SELECT json_extract(value, '$.description') AS description FROM saved_jobs WHERE id = ?",
+      );
       for (const row of database
         .prepare(
-          `SELECT id, json_extract(value, '$.title') AS title,
-        json_extract(value, '$.canonicalUrl') AS canonicalUrl, json_extract(value, '$.company') AS company,
-        json_extract(value, '$.location') AS location, json_extract(value, '$.description') AS description,
-        json_extract(value, '$.status') AS status FROM saved_jobs WHERE assessment_id IS NULL`,
+          `SELECT i.id, i.title, i.canonical_url AS canonicalUrl, i.company, i.location, i.status
+          FROM workspace_job_index i JOIN saved_jobs s ON s.id = i.id
+          WHERE i.origin = 'saved_jobs' AND i.plan_id = '' AND s.assessment_id IS NULL`,
         )
         .iterate()) {
         // The existing intake/display policy, with no model decision changed.
@@ -97,10 +135,21 @@ export function prepareWorkspaceQueryDatabase(filePath: string): void {
           company: row.company,
           canonicalUrl: row.canonicalUrl,
           location: row.location,
-          ...(typeof row.description === "string"
-            ? { description: row.description }
-            : {}),
         };
+        // The shared intake policy reads a body only when employer facts are
+        // absent. Other startup rows never need listing or evidence reads.
+        let description: string | undefined;
+        let descriptionRead = false;
+        Object.defineProperty(job, "description", {
+          get() {
+            if (!descriptionRead) {
+              const value = readDescription.get(row.id!)?.description;
+              description = typeof value === "string" ? value : undefined;
+              descriptionRead = true;
+            }
+            return description;
+          },
+        });
         updates.push({
           id: row.id,
           visible:
@@ -113,9 +162,17 @@ export function prepareWorkspaceQueryDatabase(filePath: string): void {
       }
       const update =
         database.prepare(`UPDATE workspace_job_index SET visible = ?, company = ?, location = ?
-        WHERE origin = 'saved_jobs' AND id = ?`);
+        WHERE origin = 'saved_jobs' AND id = ? AND (visible IS NOT ? OR company IS NOT ? OR location IS NOT ?)`);
       for (const row of updates)
-        update.run(row.visible, row.company, row.location, row.id!);
+        update.run(
+          row.visible,
+          row.company,
+          row.location,
+          row.id!,
+          row.visible,
+          row.company,
+          row.location,
+        );
     }
     database.exec("COMMIT");
   } catch (error) {
@@ -132,7 +189,10 @@ const applicationMember = `EXISTS (SELECT 1 FROM workspace_entity_index e
 // The canonical review queue includes prepared applications and excludes the
 // plain shortlisted status used when a job is moved back to Find jobs.
 const shortlistMember = `i.status IN ('drafting','ready_for_review','approved')`;
-const discoveryMember = `i.visible = 1 AND i.feedback = 0 AND i.status IN ('discovered','shortlisted')`;
+const discoveryMember = `i.visible = 1 AND i.feedback = 0 AND i.status IN ('discovered','shortlisted')
+  AND (i.origin='saved_jobs' OR EXISTS (SELECT 1 FROM discovery_pending_jobs pending WHERE pending.id=i.id
+    AND workspace_pending_visible(pending.id,json_extract(pending.value,'$.title'),json_extract(pending.value,'$.company'),
+      json_extract(pending.value,'$.canonicalUrl'),json_extract(pending.value,'$.status'))=1))`;
 function membership(list: WorkspaceJobList): string {
   switch (list) {
     case "discovery":
@@ -161,6 +221,15 @@ const allLists: WorkspaceJobList[] = [
 ];
 function affectedLists(table: string, id: string): WorkspaceJobList[] {
   if (
+    table === "discovery_ledger" ||
+    table === "application_attempts" ||
+    table === "job_sources" ||
+    table === "search_preference_sources" ||
+    (table === "singleton_state" &&
+      ["intelligence_state", "search_preferences"].includes(id))
+  )
+    return allLists;
+  if (
     table === "saved_jobs" ||
     table === "discovery_pending_jobs" ||
     table === "plan_job_memberships" ||
@@ -183,8 +252,15 @@ export function createWorkspaceQueryRepository(
 ): WorkspaceQueryRepository {
   const database = new DatabaseSync(filePath, { readOnly: true });
   database.exec(
-    "PRAGMA query_only = ON; PRAGMA busy_timeout = 100; PRAGMA cache_size = -8192",
+    "PRAGMA busy_timeout = 100; PRAGMA cache_size = -8192; PRAGMA temp_store=MEMORY",
   );
+  // The main file is opened readOnly. Only connection-local scalar TEMP tables
+  // can be written by these helpers; no canonical row can be changed.
+  const activity = createWorkspaceListActivityReader(database);
+  const prepareOrder = createWorkspaceListOrdering(database);
+  const pageOrder = createWorkspacePageOrder(database);
+  const prepareFilters = createWorkspaceListFilters(database);
+  const facets = createWorkspaceListFacets(database);
   const revision = () =>
     Number(
       database
@@ -203,6 +279,8 @@ export function createWorkspaceQueryRepository(
       return result;
     } catch (error) {
       database.exec("ROLLBACK");
+      activity.invalidate();
+      pageOrder.invalidate();
       throw error;
     }
   };
@@ -217,15 +295,18 @@ export function createWorkspaceQueryRepository(
   const plan = (input?: { planId?: string | null | undefined }) =>
     input?.planId === undefined ? (activePlan() ?? "") : (input.planId ?? "");
   function counts(planId: string): WorkspaceListCounts {
-    const count = (condition: string) =>
-      Number(
-        database
-          .prepare(
-            `SELECT count(*) AS n FROM workspace_job_index i
-      WHERE i.plan_id = ? AND ${deduplicated} AND (${condition})`,
-          )
-          .get(planId)!.n,
-      );
+    prepareFilters(
+      `${revision()}:${String(database.prepare("PRAGMA data_version").get()!.data_version)}`,
+    );
+    const totals = database
+      .prepare(
+        `SELECT
+      sum(CASE WHEN ${discoveryMember} AND i.result_group IN ('matches','unchecked') THEN 1 ELSE 0 END) AS discovery,
+      sum(CASE WHEN i.hidden=1 THEN 1 ELSE 0 END) AS dismissed,
+      sum(CASE WHEN ${shortlistMember} THEN 1 ELSE 0 END) AS shortlisted,count(*) AS total
+      FROM workspace_job_index i WHERE i.plan_id=? AND ${deduplicated}`,
+      )
+      .get(planId)!;
     const applications = Number(
       database
         .prepare(
@@ -236,28 +317,18 @@ export function createWorkspaceQueryRepository(
         .get(planId)!.n,
     );
     return {
-      discovery: count(
-        `${discoveryMember} AND i.result_group IN ('matches','unchecked')`,
-      ),
-      dismissed: count("i.hidden = 1"),
-      shortlisted: count(shortlistMember),
+      discovery: Number(totals.discovery),
+      dismissed: Number(totals.dismissed),
+      shortlisted: Number(totals.shortlisted),
       applications,
       companies: Number(
         database
           .prepare("SELECT count(*) AS total FROM workspace_company_index")
           .get()!.total,
       ),
-      all: count("1"),
+      all: Number(totals.total),
     };
   }
-  const order = {
-    best_match:
-      "i.unjudged, i.closed, i.mismatch, i.provisional, i.outside, i.rank_score DESC, i.title_family, i.recency DESC, i.detail, i.title, i.company, i.id",
-    newest: "i.recency DESC, i.id",
-    title: "i.title COLLATE NOCASE, i.company, i.id",
-    company: "i.company COLLATE NOCASE, i.title, i.id",
-    recently_seen: "i.seen DESC, i.id",
-  };
   const raw = (value: unknown): unknown => JSON.parse(String(value)) as unknown;
   function associated(table: string, ids: string[]): WorkspaceEntitySummary[] {
     if (!ids.length) return [];
@@ -364,6 +435,32 @@ export function createWorkspaceQueryRepository(
       const query = QueryJobListInputSchema.parse(input);
       return read(() => {
         const planId = plan(query.filters);
+        const version = `${revision()}:${String(database.prepare("PRAGMA data_version").get()!.data_version)}`;
+        const activityVersion = String(
+          database
+            .prepare(
+              "SELECT value FROM workspace_read_meta WHERE key='activity_revision'",
+            )
+            .get()?.value ?? "0",
+        );
+        activity.ensure(planId, activityVersion);
+        prepareOrder(activityVersion);
+        prepareFilters(version);
+        const from = `FROM workspace_job_index i JOIN workspace_listing_activity a
+          ON a.plan_id=i.plan_id AND a.origin=i.origin AND a.id=i.id`;
+        const sortRevision = String(
+          database
+            .prepare(
+              "SELECT value FROM workspace_read_meta WHERE key='sort_revision'",
+            )
+            .get()?.value ?? "0",
+        );
+        pageOrder.ensure(
+          planId,
+          query.sort,
+          `${activityVersion}:${sortRevision}`,
+          from,
+        );
         const args: SQLInputValue[] = [planId];
         const where = ["i.plan_id = ?", deduplicated, membership(query.list)];
         if (query.list === "discovery") {
@@ -374,6 +471,8 @@ export function createWorkspaceQueryRepository(
           where.push(`i.result_group IN (${bands.map(() => "?").join(",")})`);
           args.push(...bands);
         }
+        const pool = where.join(" AND "),
+          poolArgs = [...args];
         for (const [values, column] of [
           [query.filters.statuses, "status"],
           [query.filters.sources, "source"],
@@ -388,8 +487,34 @@ export function createWorkspaceQueryRepository(
             (value, mode) => value | (1 << workModeValues.indexOf(mode)),
             0,
           );
-          where.push("(i.work_mode & ?) != 0");
+          where.push(
+            query.filters.workModeUnspecified
+              ? "((i.work_mode & ?) != 0 OR i.work_mode=0)"
+              : "(i.work_mode & ?) != 0",
+          );
           args.push(mask);
+        } else if (query.filters.workModeUnspecified)
+          where.push("i.work_mode=0");
+        for (const [values, column] of [
+          [query.filters.recommendations, "i.recommendation"],
+          [query.filters.activities, "a.status"],
+        ] as const) {
+          if (values?.length) {
+            where.push(`${column} IN (${values.map(() => "?").join(",")})`);
+            args.push(...values);
+          }
+        }
+        if (query.filters.sourceLabels?.length) {
+          where.push(
+            `EXISTS (SELECT 1 FROM json_each(workspace_sources(i.source_provenance)) s WHERE s.value IN (${query.filters.sourceLabels.map(() => "?").join(",")}))`,
+          );
+          args.push(...query.filters.sourceLabels);
+        }
+        if (query.filters.newOnly && query.filters.newSince) {
+          where.push(
+            "workspace_listing_time(COALESCE(i.first_seen_at,i.discovered_at))>?",
+          );
+          args.push(Date.parse(query.filters.newSince));
         }
         if (query.filters.minimumScore !== undefined) {
           where.push("i.score >= ?");
@@ -406,42 +531,101 @@ export function createWorkspaceQueryRepository(
           args.push(query.filters.companyId);
         }
         if (query.search.trim()) {
-          where.push("instr(i.search_text, lower(?)) > 0");
+          where.push(
+            "workspace_search(i.title,i.company,i.location,i.salary_text,i.status,i.apply_path,i.work_mode,i.recommendation,a.status,?)=1",
+          );
           args.push(query.search.trim());
         }
         const condition = where.join(" AND ");
+        const countFrom =
+          query.filters.activities?.length || query.search.trim()
+            ? from
+            : "FROM workspace_job_index i";
         const total = Number(
           database
-            .prepare(
-              `SELECT count(*) AS total FROM workspace_job_index i WHERE ${condition}`,
-            )
+            .prepare(`SELECT count(*) AS total ${countFrom} WHERE ${condition}`)
             .get(...args)!.total,
+        );
+        const listFacets = facets(
+          version,
+          from,
+          pool,
+          poolArgs,
+          condition,
+          args,
+          query.filters.newSince,
         );
         const columns = database
           .prepare(
-            `SELECT i.id, i.status, i.title, i.company, i.location, i.source,
+            `WITH page AS MATERIALIZED (
+          SELECT i.origin,i.id,i.plan_id,r.position ${from}
+          JOIN workspace_page_order r ON r.plan_id=i.plan_id AND r.origin=i.origin AND r.id=i.id AND r.sort='${query.sort}'
+          WHERE ${condition} ORDER BY r.position LIMIT ? OFFSET ?)
+          SELECT i.id, i.status, i.title, i.company, i.location, i.source,
           i.source_job_id AS sourceJobId, i.canonical_url AS canonicalUrl, i.application_url AS applicationUrl,
           i.work_mode AS workModeMask, i.posted_at AS postedAt, i.posted_text AS postedAtText,
-          i.discovered_at AS discoveredAt, i.first_seen_at AS firstSeenAt, i.seen AS lastSeenAt,
+          i.discovered_at AS discoveredAt, i.first_seen_at AS firstSeenAt, i.last_seen_at AS lastSeenAt,
           i.salary_text AS salaryText, i.detail_quality AS detailQuality,
           i.resume_mode AS resumeApplicationMode, i.tailoring_mode AS resumeTailoringMode,
-          nullif(i.plan_id, '') AS planId, COALESCE(plan_verdict.score, i.score) AS score, i.recommendation, i.unjudged,
+          nullif(i.plan_id, '') AS planId, COALESCE(plan_verdict.score, i.score) AS score, i.recommendation, i.unjudged, i.provisional,
           i.score_upper AS scoreUpper, i.title_family_match AS titleFamilyMatch,
-          i.location_reach AS locationReach, i.closed, i.result_group AS resultGroup
-          FROM workspace_job_index i LEFT JOIN job_plan_assessments plan_verdict ON i.origin = 'saved_jobs'
+          i.location_reach AS locationReach, a.value AS activityJson, a.status AS activityStatus, i.result_group AS resultGroup,
+          i.provider_updated_at AS providerUpdatedAt,i.discovery_method AS discoveryMethod,i.apply_path AS applyPath,
+          workspace_sources(i.source_provenance) AS sourcesJson,i.recommendation_rationale AS recommendationRationale,
+          i.first_gap AS firstGap,i.role_state AS roleSuitabilityState,i.seniority,i.rescored,
+          i.tie_requirements AS tieRequirements,i.first_reason AS firstReason,
+          workspace_lookalike(i.title,i.company,i.location,workspace_sources(i.source_provenance)) AS lookalike,
+          workspace_score_tied(i.score,i.unjudged,i.provisional) AS scoreTied
+          FROM page p JOIN workspace_job_index i ON i.origin=p.origin AND i.id=p.id AND i.plan_id=p.plan_id
+          JOIN workspace_listing_activity a ON a.origin=i.origin AND a.id=i.id AND a.plan_id=i.plan_id
+          LEFT JOIN job_plan_assessments plan_verdict ON i.origin = 'saved_jobs'
             AND plan_verdict.job_id = i.id AND plan_verdict.plan_id = i.plan_id
-          WHERE ${condition} ORDER BY ${order[query.sort]} LIMIT ? OFFSET ?`,
+          ORDER BY p.position`,
           )
           .all(...args, query.page.limit, query.page.offset);
         const rows = columns.map(
-          ({ workModeMask, unjudged, scoreUpper, closed, ...row }) => ({
+          ({
+            workModeMask,
+            unjudged,
+            provisional,
+            scoreUpper,
+            activityJson,
+            activityStatus,
+            sourcesJson,
+            rescored,
+            tieRequirements,
+            firstReason,
+            lookalike,
+            scoreTied,
+            ...row
+          }) => ({
             ...row,
             workMode: workModeValues.filter(
               (_, index) => (Number(workModeMask) & (1 << index)) !== 0,
             ),
             judged: unjudged === 0,
+            scoreWithheld: unjudged !== 0 || provisional !== 0,
             scoreIsUpperBound: scoreUpper === 1,
-            listingClosed: closed === 1,
+            listingActivity: JSON.parse(
+              String(activityJson),
+            ) as ListingActivity,
+            listingClosed:
+              activityStatus === "inactive" || activityStatus === "closed",
+            sourceLabels: JSON.parse(String(sourcesJson)) as string[],
+            rescoredAfterListingRead: rescored === 1,
+            indistinguishable: lookalike === 1,
+            scoreTied: scoreTied === 1,
+            tieBreakReason: describeMatchTieBreakReason({
+              titleFamilyMatch:
+                row.titleFamilyMatch as WorkspaceJobListRow["titleFamilyMatch"],
+              locationReach:
+                row.locationReach as WorkspaceJobListRow["locationReach"],
+              reasons: typeof firstReason === "string" ? [firstReason] : [],
+              gaps: typeof row.firstGap === "string" ? [row.firstGap] : [],
+              requirements: JSON.parse(
+                String(tieRequirements ?? "[]"),
+              ) as TieBreakAssessment["requirements"],
+            }),
           }),
         ) as unknown as WorkspaceJobListRow[];
         const ids = rows.map((row) => row.id);
@@ -453,6 +637,7 @@ export function createWorkspaceQueryRepository(
           resumeDrafts: associated("resume_drafts", ids),
           applications: associated("application_records", ids),
           applyResults: associated("apply_job_results", ids),
+          facets: listFacets,
         };
       });
     },
@@ -493,7 +678,8 @@ export function createWorkspaceQueryRepository(
           .prepare(
             `SELECT CASE WHEN a.draft_id IS NOT NULL THEN 'stale' ELSE e.status END AS status, count(*) AS total
           FROM workspace_entity_index e LEFT JOIN resume_draft_approval_state a ON a.draft_id = e.id
-          WHERE e.origin = 'resume_drafts' AND EXISTS (SELECT 1 FROM workspace_job_index i WHERE i.id = e.job_id AND i.plan_id = ?) GROUP BY status`,
+          WHERE e.origin = 'resume_drafts' AND EXISTS (SELECT 1 FROM workspace_job_index i WHERE i.id = e.job_id AND i.plan_id = ?)
+          GROUP BY CASE WHEN a.draft_id IS NOT NULL THEN 'stale' ELSE e.status END`,
           )
           .all(planId);
         return {

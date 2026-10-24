@@ -145,7 +145,8 @@ import { settleStoredResumeDrafts } from "./resume-settle-stored-drafts";
 import { rebindLegacyFitVerdicts } from "./legacy-fit-fingerprints";
 
 const realSetImmediate = globalThis.setImmediate;
-const nextTurn = () => new Promise<void>((resolve) => realSetImmediate(resolve));
+const nextTurn = () =>
+  new Promise<void>((resolve) => realSetImmediate(resolve));
 
 // Each list keeps its own last ordering: a refresh that changed no job reuses
 // it, and one that changed a few merges them in instead of sorting thousands
@@ -163,19 +164,21 @@ type JobViewInput = {
   planId: string | null;
   pendingDiscoveryJobs: readonly SavedJob[];
   discoveryLedger: Parameters<
-    typeof projectDiscoveryJobViews
+    typeof projectDiscoveryJobViews<SavedJob>
   >[0]["discoveryLedger"];
   listingSignals: Parameters<
-    typeof projectDiscoveryJobViews
+    typeof projectDiscoveryJobViews<SavedJob>
   >[0]["listingSignals"];
   applicationAttempts: NonNullable<
-    Parameters<typeof projectDiscoveryJobViews>[0]["applicationAttempts"]
+    Parameters<
+      typeof projectDiscoveryJobViews<SavedJob>
+    >[0]["applicationAttempts"]
   >;
   companies: readonly { canonicalName: string; jobIds: readonly string[] }[];
 };
 
 type JobViewIdentityIndex = NonNullable<
-  Parameters<typeof projectDiscoveryJobViews>[0]["identityIndex"]
+  Parameters<typeof projectDiscoveryJobViews<SavedJob>>[0]["identityIndex"]
 >;
 
 /** The workspace's job lists, from its saved and staged jobs. */

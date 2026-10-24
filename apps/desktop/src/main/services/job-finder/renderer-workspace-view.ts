@@ -416,8 +416,8 @@ export function toRendererRun(
  */
 export function toRendererWorkspaceSnapshot(
   snapshot: JobFinderWorkspaceSnapshot,
+  queryLists = process.env.NESTOR_QUERY_LISTS === "1",
 ): JobFinderRendererWorkspaceSnapshot {
-  const queryLists = process.env.NESTOR_QUERY_LISTS === "1";
   const discoveryJobs = queryLists ? [] : toRendererJobs(snapshot.discoveryJobs);
   const dismissedDiscoveryJobs = queryLists ? [] : toRendererJobs(
     snapshot.dismissedDiscoveryJobs,

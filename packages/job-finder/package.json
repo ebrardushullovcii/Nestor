@@ -30,6 +30,7 @@
     "@nestor/browser-agent": "workspace:*",
     "@nestor/browser-runtime": "workspace:*",
     "@nestor/contracts": "workspace:*",
+    "@nestor/job-list-policy": "workspace:*",
     "@nestor/core": "workspace:*",
     "@nestor/db": "workspace:*",
     "@nestor/knowledge-base": "workspace:*",
