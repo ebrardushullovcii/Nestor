@@ -436,6 +436,8 @@ export interface JobFinderRepository
     draftId?: string;
   }): Promise<readonly ResumeExportArtifact[]>;
   upsertResumeExportArtifact(artifact: ResumeExportArtifact): Promise<void>;
+  /** Current/approved exports and every resume referenced by application history. */
+  listRetainedResumeExportPaths(): Promise<readonly string[]>;
   listResumeResearchArtifacts(
     jobId?: string,
   ): Promise<readonly ResumeResearchArtifact[]>;
@@ -769,11 +771,10 @@ export interface JobFinderRepository
 
 export interface AutomaticWorkspaceBackupOptions {
   /**
-   * Rotate the graceful-close snapshot into `<filePath>.backup` (previous
-   * generation preserved as `<filePath>.backup.prev`) right before the
-   * repository closes its SQLite connection (normal app shutdown).
+   * Refresh `<filePath>.backup` in the background after migrations and at
+   * most daily, retaining one previous generation. Quit cancels unfinished work.
    */
-  onClose?: boolean;
+  inBackground?: boolean;
   /**
    * Snapshot the pre-reset state into the dedicated `<filePath>.reset-backup`
    * destination right before a destructive full-state reset overwrites it.

@@ -853,6 +853,10 @@ export interface CampaignRunContext {
 }
 
 export interface JobFinderDocumentManager {
+  /** Drops replaced managed exports after their references have committed. */
+  pruneGeneratedResumeFiles?(): Promise<void>;
+  /** Releases an unpersisted PDF/HTML produced only to measure a draft. */
+  discardResumeArtifact?(artifact: RenderedResumeArtifact): Promise<void>;
   listResumeTemplates(): readonly ResumeTemplateDefinition[];
   renderResumePreview(
     input: {

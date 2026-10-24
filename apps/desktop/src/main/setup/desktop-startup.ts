@@ -7,6 +7,8 @@ import {
 } from "./user-data-directory";
 
 loadDesktopEnvironment();
+// Chromium applies this to persistent sessions, including the embedded browser.
+app.commandLine.appendSwitch("disk-cache-size", String(64 * 1024 * 1024));
 const configuredDirectory = configureDesktopUserDataDirectory(app);
 try {
   // Preserve the existing order: resolve/migrate userData before taking its lock.

@@ -423,6 +423,8 @@ export function createJobFinderWorkspaceService(
     workspaceResetInProgress = true;
     invalidateListingReads();
     try {
+      // Finish queued document cleanup before Reset moves the managed folder.
+      await documentManager.pruneGeneratedResumeFiles?.();
       await options?.beforeStateReset?.();
       return await snapshotProfileMethods.resetWorkspace(seed);
     } finally {
