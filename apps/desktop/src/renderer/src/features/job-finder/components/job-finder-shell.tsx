@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { animateIn, ENTER_FROM_BELOW } from "@renderer/lib/motion";
 import type { RecentChange } from "../lib/recent-changes";
 import { BrowserPeek } from "./browser-peek";
 import { AssistantSidebar } from "../assistant/assistant-sidebar";
@@ -572,6 +573,8 @@ export function JobFinderShell({
   // forces a layout of the new screen, so a page already at the top is left
   // alone; scroll events land before the next frame's callbacks.
   const isMainScrolledRef = useRef(false);
+  const routeContainerRef = useRef<HTMLDivElement | null>(null);
+  const enteredPathRef = useRef(location.pathname);
   const dragRegionStyle = { WebkitAppRegion: "drag" } as CSSProperties;
   const noDragRegionStyle = { WebkitAppRegion: "no-drag" } as CSSProperties;
   const [windowControlsState, setWindowControlsState] =
@@ -1011,6 +1014,11 @@ export function JobFinderShell({
     }
     if (usesNarrowShellReflow && !hasDestinationAnchor) {
       main?.scrollIntoView({ block: "start" });
+    }
+    // The new screen is already there; it settles in over 160 ms.
+    if (enteredPathRef.current !== location.pathname) {
+      enteredPathRef.current = location.pathname;
+      animateIn(routeContainerRef.current, ENTER_FROM_BELOW);
     }
 
     const frame = window.requestAnimationFrame(() => {
@@ -1597,7 +1605,7 @@ export function JobFinderShell({
                   ? createPortal(
                       <div
                         aria-label="More"
-                        className="fixed z-[60] grid min-w-0 max-w-[calc(100vw-1rem)] grid-rows-[minmax(0,1fr)_auto] gap-1 overflow-hidden rounded-2xl border border-(--control-border) bg-(--surface-panel-raised) p-2 shadow-xl"
+                        className="fixed z-[60] grid min-w-0 max-w-[calc(100vw-1rem)] grid-rows-[minmax(0,1fr)_auto] gap-1 overflow-hidden rounded-2xl border border-(--control-border) bg-(--surface-panel-raised) p-2 shadow-xl motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-150"
                         data-job-finder-more-menu
                         data-side={moreMenuPlacement?.side ?? "bottom"}
                         style={boundedFloatingSurfaceStyle(moreMenuPlacement)}
@@ -2126,6 +2134,7 @@ export function JobFinderShell({
               usesLockedScreenLayout ? "h-full min-h-0" : "min-h-full",
             )}
             data-job-finder-route-container
+            ref={routeContainerRef}
             // One rhythm token for every route root, declared by the wrapper
             // that owns the route rather than picked per screen.
             style={SHELL_ROUTE_SECTION_GAP_STYLE}

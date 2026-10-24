@@ -1,5 +1,6 @@
 import * as React from "react";
 
+import { useEnterMotion } from "@renderer/lib/motion";
 import { cn } from "@renderer/lib/utils";
 
 /**
@@ -19,6 +20,12 @@ import { cn } from "@renderer/lib/utils";
  * The caller decides whether a count exists at all; this primitive will not
  * silently paint a zero pill on its behalf.
  */
+/** A changed figure rises into place; the badge itself does not move. */
+const COUNT_CHANGE_FROM: Keyframe = {
+  opacity: 0.2,
+  transform: "translateY(4px)",
+};
+
 export type CountVariant = "inline" | "pill" | "rail-marker";
 
 const COUNT_VARIANT_CLASS = {
@@ -43,11 +50,14 @@ function Count({
   value: number;
   variant?: CountVariant;
 }) {
+  const figureRef = React.useRef<HTMLSpanElement | null>(null);
+  const rounded = Math.floor(value);
+  useEnterMotion(figureRef, rounded, { from: COUNT_CHANGE_FROM });
+
   if (!Number.isFinite(value) || value <= 0) {
     return null;
   }
 
-  const rounded = Math.floor(value);
   // The rail marker sits on an icon's corner; "678" covered most of the
   // glyph on the collapsed sidebar. It caps at 99+ and keeps the full number
   // for assistive technology.
@@ -61,7 +71,11 @@ function Count({
       {...(capped ? { title: String(rounded) } : {})}
       {...props}
     >
-      <span aria-hidden={label || capped ? "true" : undefined}>
+      <span
+        aria-hidden={label || capped ? "true" : undefined}
+        className="inline-block"
+        ref={figureRef}
+      >
         {capped ? "99+" : rounded}
       </span>
       {label || capped ? (

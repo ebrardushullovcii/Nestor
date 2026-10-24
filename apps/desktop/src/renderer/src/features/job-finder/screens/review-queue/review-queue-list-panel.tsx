@@ -1,4 +1,5 @@
 import { APPLICATION_WORK_PAUSED_REASON } from "../../lib/application-work-paused";
+import { useListMoveMotion } from "@renderer/lib/motion";
 import { estimateResumeBatchMinutesLeft } from "@nestor/contracts";
 import type { ReviewQueueItem, TailoredAssetSummary } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui";
@@ -368,7 +369,12 @@ export function ReviewQueueListPanel({
   // A stopped checkpoint records progress, not ownership of eligible jobs.
   // Its dismissible notice must never remove the normal generation controls.
   const draftEligibleCount = eligibleResumeIds.size;
-  const pageJobIds = pagedVisibleQueue.map((item) => item.jobId);
+  const pageJobIds = useMemo(
+    () => pagedVisibleQueue.map((item) => item.jobId),
+    [pagedVisibleQueue],
+  );
+  // A job that leaves the shortlist slides the rows under it up into place.
+  useListMoveMotion(queueListRegionRef, pageJobIds);
   const filteredJobIds = visibleQueue.map((item) => item.jobId);
   // Any shortlisted job can be ticked; each action says how many of the
   // ticked jobs it applies to. Ticks stay when the page or filter changes and

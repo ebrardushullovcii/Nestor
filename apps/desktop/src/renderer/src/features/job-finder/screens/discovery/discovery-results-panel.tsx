@@ -1,4 +1,5 @@
 import { JOB_LIST_PAGE_SIZE } from "../../components/collection-pagination";
+import { useListMoveMotion } from "@renderer/lib/motion";
 import { PageNavigation } from "../../components/page-navigation";
 import {
   DiscoveryResultFilters,
@@ -1409,6 +1410,13 @@ export function DiscoveryResultsPanel({
     () => getDiscoveryResultsPage(orderedJobs, currentPage),
     [currentPage, orderedJobs],
   );
+  const resultsListRef = useRef<HTMLUListElement | null>(null);
+  const visibleJobIds = useMemo(
+    () => visibleJobs.map((job) => job.id),
+    [visibleJobs],
+  );
+  // A decided job leaves and the rows under it slide up into its place.
+  useListMoveMotion(resultsListRef, visibleJobIds);
   const [bulkSelectedJobIds, setBulkSelectedJobIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -2545,6 +2553,7 @@ export function DiscoveryResultsPanel({
               <ul
                 aria-label="Results"
                 className={cn(jobFinderListRegionClassName, "xl:min-h-full")}
+                ref={resultsListRef}
               >
                 {visibleJobs.flatMap((job) => {
                   const groupHeading = groupHeadingsByJobId.get(job.id);

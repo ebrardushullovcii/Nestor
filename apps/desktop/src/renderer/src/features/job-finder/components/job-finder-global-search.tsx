@@ -416,13 +416,13 @@ export function JobFinderGlobalSearchDialog(props: {
     <div className="fixed inset-0 z-[70]" role="presentation">
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-(--modal-scrim)"
+        className="absolute inset-0 bg-(--modal-scrim) motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150"
         onClick={props.onClose}
       />
       <section
         aria-label={JOB_FINDER_GLOBAL_SEARCH_LABEL}
         aria-modal="true"
-        className="absolute inset-x-4 top-16 mx-auto max-h-[calc(100dvh-5rem)] max-w-xl overflow-y-auto rounded-2xl border border-(--surface-panel-border) bg-(--surface-panel-raised) p-3 shadow-(--modal-shadow)"
+        className="absolute inset-x-4 top-16 mx-auto max-h-[calc(100dvh-5rem)] max-w-xl overflow-y-auto rounded-2xl border border-(--surface-panel-border) bg-(--surface-panel-raised) p-3 shadow-(--modal-shadow) motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-[0.98] motion-safe:slide-in-from-top-1 motion-safe:duration-150"
         onKeyDown={handlePanelKeyDown}
         ref={panelRef}
         role="dialog"
