@@ -5,7 +5,9 @@ import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DISCOVERY_RESULTS_PAGE_SIZE } from "./discovery-results-panel";
+import {
+  DISCOVERY_RESULTS_PAGE_SIZE,
+} from "./discovery-results-panel";
 import {
   buildDiscoveryResultGroupHeadings,
   countDiscoveryDefaultVisibleResults,

@@ -42,7 +42,7 @@ it("judges jobs without a fit score on its own, once per session", async () => {
   );
   const view = render(
     <DiscoveryAssessmentContinuation
-      uncheckedCount={unreadJobs(130).filter(isDiscoveryUncheckedResult).length}
+      uncheckedCount={(unreadJobs(130)).filter(isDiscoveryUncheckedResult).length}
       isSearchRunning={false}
       onJudgeAll={onJudgeAll}
     />,
@@ -60,7 +60,7 @@ it("judges jobs without a fit score on its own, once per session", async () => {
 
   render(
     <DiscoveryAssessmentContinuation
-      uncheckedCount={unreadJobs(130).filter(isDiscoveryUncheckedResult).length}
+      uncheckedCount={(unreadJobs(130)).filter(isDiscoveryUncheckedResult).length}
       isSearchRunning={false}
       onJudgeAll={onJudgeAll}
     />,
@@ -72,7 +72,7 @@ it("waits for a running search and judges again once it ends", () => {
   const onJudgeAll = vi.fn(() => new Promise<void>(() => undefined));
   const view = render(
     <DiscoveryAssessmentContinuation
-      uncheckedCount={unreadJobs(3).filter(isDiscoveryUncheckedResult).length}
+      uncheckedCount={(unreadJobs(3)).filter(isDiscoveryUncheckedResult).length}
       isSearchRunning
       onJudgeAll={onJudgeAll}
     />,
@@ -80,7 +80,7 @@ it("waits for a running search and judges again once it ends", () => {
   expect(onJudgeAll).not.toHaveBeenCalled();
   view.rerender(
     <DiscoveryAssessmentContinuation
-      uncheckedCount={unreadJobs(3).filter(isDiscoveryUncheckedResult).length}
+      uncheckedCount={(unreadJobs(3)).filter(isDiscoveryUncheckedResult).length}
       isSearchRunning={false}
       onJudgeAll={onJudgeAll}
     />,
@@ -95,7 +95,7 @@ it("offers one quiet retry when the pass could not run", async () => {
     .mockResolvedValueOnce(undefined);
   render(
     <DiscoveryAssessmentContinuation
-      uncheckedCount={unreadJobs(1).filter(isDiscoveryUncheckedResult).length}
+      uncheckedCount={(unreadJobs(1)).filter(isDiscoveryUncheckedResult).length}
       isSearchRunning={false}
       onJudgeAll={onJudgeAll}
     />,
@@ -125,7 +125,7 @@ it("shows backend progress after returning to the page", () => {
   const onJudgeAll = vi.fn(() => Promise.resolve());
   const view = render(
     <DiscoveryAssessmentContinuation
-      uncheckedCount={unreadJobs(110).filter(isDiscoveryUncheckedResult).length}
+      uncheckedCount={(unreadJobs(110)).filter(isDiscoveryUncheckedResult).length}
       isSearchRunning={false}
       fitJudgmentProgress={fitJudgmentProgress}
       onJudgeAll={onJudgeAll}
@@ -138,7 +138,7 @@ it("shows backend progress after returning to the page", () => {
   );
   view.rerender(
     <DiscoveryAssessmentContinuation
-      uncheckedCount={unreadJobs(90).filter(isDiscoveryUncheckedResult).length}
+      uncheckedCount={(unreadJobs(90)).filter(isDiscoveryUncheckedResult).length}
       isSearchRunning={false}
       fitJudgmentProgress={{
         ...fitJudgmentProgress,
@@ -157,7 +157,7 @@ it("keeps elapsed time moving while a model batch is pending", () => {
   vi.setSystemTime(new Date("2026-10-13T01:00:00.000Z"));
   render(
     <DiscoveryAssessmentContinuation
-      uncheckedCount={[].filter(isDiscoveryUncheckedResult).length}
+      uncheckedCount={([]).filter(isDiscoveryUncheckedResult).length}
       isSearchRunning={false}
       fitJudgmentProgress={{
         planId: "plan",
@@ -179,7 +179,7 @@ it("stays out of the way when every job has a score", () => {
   const onJudgeAll = vi.fn(() => Promise.resolve());
   const view = render(
     <DiscoveryAssessmentContinuation
-      uncheckedCount={[].filter(isDiscoveryUncheckedResult).length}
+      uncheckedCount={([]).filter(isDiscoveryUncheckedResult).length}
       isSearchRunning={false}
       onJudgeAll={onJudgeAll}
     />,

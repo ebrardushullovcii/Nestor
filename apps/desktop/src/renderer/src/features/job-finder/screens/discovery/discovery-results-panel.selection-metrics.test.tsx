@@ -47,10 +47,7 @@ function createJob(index: number): SavedJob {
   });
 }
 
-async function renderResults(
-  jobs: readonly SavedJob[],
-  selected: SavedJob | null,
-) {
+async function renderResults(jobs: readonly SavedJob[], selected: SavedJob | null) {
   const rendered = render(
     <DiscoveryResultsPanelWithJobs
       browserSession={browserSession}

@@ -102,7 +102,9 @@ export function DiscoveryResultFilters({
       <Button
         aria-expanded={open}
         aria-haspopup="dialog"
-        className={activeCount > 0 ? "has-[>svg]:px-2" : "w-8 has-[>svg]:px-0"}
+        className={
+          activeCount > 0 ? "has-[>svg]:px-2" : "w-8 has-[>svg]:px-0"
+        }
         onClick={() => setOpen((current) => !current)}
         ref={anchorRef}
         size="toolbar"
