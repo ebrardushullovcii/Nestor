@@ -1,10 +1,10 @@
 import { ensureSavedJobFingerprintStorage } from "./saved-job-fingerprints";
 import type { DatabaseSync } from "node:sqlite";
 
-const VERSION = "8";
+const VERSION = "10";
 const jobTables = ["saved_jobs", "discovery_pending_jobs"] as const;
 const jobFields =
-  "status source work_mode title company search_text score hidden unjudged closed mismatch provisional outside title_family recency detail seen location source_job_id canonical_url application_url posted_at posted_text discovered_at first_seen_at salary_text detail_quality score_upper recommendation title_family_match location_reach resume_mode tailoring_mode visible rank_score".split(
+  "status source work_mode title company search_text score hidden unjudged closed mismatch provisional outside title_family recency detail seen location source_job_id canonical_url application_url posted_at posted_text discovered_at first_seen_at salary_text detail_quality score_upper recommendation title_family_match location_reach resume_mode tailoring_mode visible rank_score feedback result_group".split(
     " ",
   );
 
@@ -17,7 +17,7 @@ function indexJobSql(table: string, where = ""): string {
       : "COALESCE(jsonb_extract(j.value, '$.campaignIds'), jsonb('[]'))";
   const metadata =
     table === "saved_jobs"
-      ? "list_visible, display_company, display_location, assessment_id, first_seen_at, last_seen_at, last_verified_active_at"
+      ? "list_visible, display_company, display_location, assessment_id, COALESCE(first_seen_at, json_extract(value, '$.firstSeenAt')) AS first_seen_at, COALESCE(last_seen_at, json_extract(value, '$.lastSeenAt')) AS last_seen_at, COALESCE(last_verified_active_at, json_extract(value, '$.lastVerifiedActiveAt')) AS last_verified_active_at"
       : "NULL AS list_visible, NULL AS display_company, NULL AS display_location, NULL AS assessment_id, json_extract(value, '$.firstSeenAt') AS first_seen_at, json_extract(value, '$.lastSeenAt') AS last_seen_at, json_extract(value, '$.lastVerifiedActiveAt') AS last_verified_active_at";
   const assessment =
     table === "saved_jobs"
@@ -28,8 +28,12 @@ function indexJobSql(table: string, where = ""): string {
       : `COALESCE((SELECT verdict.value FROM json_each(j.value, '$.planAssessments') verdict WHERE verdict.key = p.value),
       json_extract(j.value, '$.matchAssessment'))`;
   return `INSERT INTO workspace_job_index
-    WITH jobs AS MATERIALIZED (SELECT id, jsonb(value) AS value, ${metadata} FROM ${table} ${where.replaceAll("j.id", "id")})
-    SELECT '${table}', j.id, p.value,
+    WITH jobs AS MATERIALIZED (SELECT id, jsonb_remove(jsonb(value), '$.description', '$.provenance', '$.summary',
+      '$.responsibilities', '$.minimumQualifications', '$.preferredQualifications', '$.keywordSignals', '$.latestMatchAssessmentAudit') AS value,
+      ${metadata} FROM ${table} ${where.replaceAll("j.id", "id")}),
+    verdicts AS MATERIALIZED (SELECT j.id, p.value AS plan_id, jsonb(${assessment}) AS verdict
+      FROM jobs j, json_each(jsonb_insert(${plans}, '$[#]', '')) p)
+    SELECT '${table}', j.id, v.plan_id,
       json_extract(j.value, '$.status'),
       COALESCE(json_extract(j.value, '$.source'), ''),
       COALESCE((SELECT sum(CASE value WHEN 'remote' THEN 1 WHEN 'hybrid' THEN 2 WHEN 'onsite' THEN 4 WHEN 'flexible' THEN 8 ELSE 0 END) FROM json_each(j.value, '$.workMode')), 0),
@@ -37,17 +41,17 @@ function indexJobSql(table: string, where = ""): string {
       lower(COALESCE(json_extract(j.value, '$.title'), '') || ' ' ||
         COALESCE(json_extract(j.value, '$.company'), '') || ' ' ||
         COALESCE(json_extract(j.value, '$.location'), '')),
-      COALESCE(json_extract(a.value, '$.score'), 0),
+      COALESCE(json_extract(v.verdict, '$.score'), 0),
       CASE WHEN json_extract(j.value, '$.status') = 'archived'
         AND json_type(j.value, '$.discoveryFeedback') = 'object' THEN 1 ELSE 0 END,
-      CASE WHEN json_type(a.value, '$.judgment') = 'object' THEN 0 ELSE 1 END,
-      CASE WHEN json_extract(a.value, '$.judgment.listingClosed') = 1 THEN 1 ELSE 0 END,
-      CASE WHEN json_extract(a.value, '$.recommendation') = 'skip' THEN 1 ELSE 0 END,
+      CASE WHEN json_type(v.verdict, '$.judgment') = 'object' THEN 0 ELSE 1 END,
+      CASE WHEN json_extract(v.verdict, '$.judgment.listingClosed') = 1 THEN 1 ELSE 0 END,
+      CASE WHEN json_extract(v.verdict, '$.recommendation') = 'skip' THEN 1 ELSE 0 END,
       CASE WHEN json_extract(j.value, '$.discoveryMethod') = 'catalog_seed' OR
-        COALESCE(json_extract(a.value, '$.contextFingerprint'), '') = '' OR
-        COALESCE(json_extract(a.value, '$.postingFingerprint'), '') = '' THEN 1 ELSE 0 END,
-      CASE WHEN json_extract(a.value, '$.locationReach') = 'outside_area' THEN 1 ELSE 0 END,
-      CASE json_extract(a.value, '$.titleFamilyMatch') WHEN 'same_family' THEN 0
+        COALESCE(json_extract(v.verdict, '$.contextFingerprint'), '') = '' OR
+        COALESCE(json_extract(v.verdict, '$.postingFingerprint'), '') = '' THEN 1 ELSE 0 END,
+      CASE WHEN json_extract(v.verdict, '$.locationReach') = 'outside_area' THEN 1 ELSE 0 END,
+      CASE json_extract(v.verdict, '$.titleFamilyMatch') WHEN 'same_family' THEN 0
         WHEN 'adjacent' THEN 1 WHEN 'unrelated' THEN 3 ELSE 2 END,
       COALESCE(json_extract(j.value, '$.postedAt'), j.first_seen_at,
         json_extract(j.value, '$.discoveredAt'), ''),
@@ -58,16 +62,26 @@ function indexJobSql(table: string, where = ""): string {
       json_extract(j.value, '$.postedAt'), json_extract(j.value, '$.postedAtText'),
       json_extract(j.value, '$.discoveredAt'), j.first_seen_at,
       json_extract(j.value, '$.salaryText'), json_extract(j.value, '$.detailQuality'),
-      COALESCE(json_extract(a.value, '$.scoreIsUpperBound'), 0),
-      COALESCE(json_extract(a.value, '$.recommendation'), 'review'),
-      json_extract(a.value, '$.titleFamilyMatch'), json_extract(a.value, '$.locationReach'),
+      COALESCE(json_extract(v.verdict, '$.scoreIsUpperBound'), 0),
+      COALESCE(json_extract(v.verdict, '$.recommendation'), 'review'),
+      json_extract(v.verdict, '$.titleFamilyMatch'), json_extract(v.verdict, '$.locationReach'),
       json_extract(j.value, '$.resumeApplicationMode'), json_extract(j.value, '$.resumeTailoringMode'),
       COALESCE(j.list_visible, 1),
       CASE WHEN json_extract(j.value, '$.discoveryMethod') = 'catalog_seed' OR
-        COALESCE(json_extract(a.value, '$.contextFingerprint'), '') = '' OR COALESCE(json_extract(a.value, '$.postingFingerprint'), '') = ''
-        THEN 0 ELSE COALESCE(json_extract(a.value, '$.score'), 0) END
-    FROM jobs j, json_each(jsonb_insert(${plans}, '$[#]', '')) p
-    JOIN json_each(json_array(${assessment})) a
+        COALESCE(json_extract(v.verdict, '$.contextFingerprint'), '') = '' OR COALESCE(json_extract(v.verdict, '$.postingFingerprint'), '') = ''
+        THEN 0 ELSE COALESCE(json_extract(v.verdict, '$.score'), 0) END,
+      CASE WHEN json_type(j.value, '$.discoveryFeedback') = 'object' THEN 1 ELSE 0 END,
+      CASE WHEN json_extract(v.verdict, '$.judgment.listingClosed') = 1 OR json_extract(v.verdict, '$.recommendation') = 'skip'
+        THEN 'mismatches'
+        WHEN json_type(v.verdict, '$.judgment') IS NOT 'object' OR json_extract(j.value, '$.discoveryMethod') = 'catalog_seed'
+          OR trim(COALESCE(json_extract(v.verdict, '$.contextFingerprint'), '')) = ''
+          OR trim(COALESCE(json_extract(v.verdict, '$.postingFingerprint'), '')) = '' THEN 'unchecked'
+        WHEN json_extract(v.verdict, '$.score') < 35 AND NOT (
+          json_extract(v.verdict, '$.locationReach') IS 'in_area' AND COALESCE(json_extract(v.verdict, '$.titleFamilyMatch'),
+            CASE json_extract(v.verdict, '$.dimensions.roleSuitability.state') WHEN 'exact' THEN 'same_family' WHEN 'adjacent' THEN 'adjacent' ELSE '' END) IN ('same_family', 'adjacent'))
+          THEN 'mismatches'
+        WHEN json_extract(v.verdict, '$.score') < 50 THEN 'weaker' ELSE 'matches' END
+    FROM verdicts v JOIN jobs j ON j.id = v.id
     WHERE 1 ON CONFLICT(origin, id, plan_id) DO UPDATE SET ${jobFields.map((field) => `${field} = excluded.${field}`).join(", ")}
       WHERE ${jobFields.map((field) => `workspace_job_index.${field} IS NOT excluded.${field}`).join(" OR ")};`;
 }
@@ -87,7 +101,8 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
       "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'workspace_job_index_%'",
     )
     .get()?.count;
-  database.exec("BEGIN IMMEDIATE");
+  const ownTransaction = !database.isTransaction;
+  if (ownTransaction) database.exec("BEGIN IMMEDIATE");
   try {
     if (version && version !== VERSION) {
       for (const { name } of database
@@ -118,7 +133,7 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
         posted_at TEXT, posted_text TEXT, discovered_at TEXT, first_seen_at TEXT,
         salary_text TEXT, detail_quality TEXT, score_upper INTEGER,
         recommendation TEXT, title_family_match TEXT, location_reach TEXT,
-        resume_mode TEXT, tailoring_mode TEXT, visible INTEGER, rank_score REAL,
+        resume_mode TEXT, tailoring_mode TEXT, visible INTEGER, rank_score REAL, feedback INTEGER, result_group TEXT,
         PRIMARY KEY(origin, id, plan_id)
       );
       CREATE TABLE IF NOT EXISTS workspace_entity_index (
@@ -202,13 +217,14 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
       const select = (
         condition: string,
       ) => `INSERT OR REPLACE INTO workspace_entity_index
+        WITH rows AS MATERIALIZED (SELECT id, jsonb_remove(jsonb(value), '$.sections', '$.visualObservationSets', '$.visualCheckpoints') AS value FROM ${table} ${condition})
         SELECT '${table}', id, json_extract(value, '$.jobId'),
           COALESCE(json_extract(value, '$.status'), json_extract(value, '$.state'), ''),
           COALESCE(json_extract(value, '$.updatedAt'), json_extract(value, '$.lastUpdatedAt'), json_extract(value, '$.createdAt'), ''),
           json_extract(value, '$.approvedAt'), json_extract(value, '$.approvedExportId'), json_extract(value, '$.staleReason'),
           json_extract(value, '$.crm.stage'), json_extract(value, '$.returnedToShortlistAt'), json_extract(value, '$.runId'),
           json_extract(value, '$.lastActionLabel'), json_extract(value, '$.nextActionLabel')
-        FROM ${table} ${condition};`;
+        FROM rows;`;
       const triggerExists = database
         .prepare("SELECT 1 FROM sqlite_master WHERE name = ?")
         .get(`workspace_entity_${table}_insert`);
@@ -272,9 +288,9 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
             VALUES ('${table}', ${key}, '${operation === "delete" ? "delete" : "upsert"}'); END`);
       }
     }
-    database.exec("COMMIT");
+    if (ownTransaction) database.exec("COMMIT");
   } catch (error) {
-    database.exec("ROLLBACK");
+    if (ownTransaction) database.exec("ROLLBACK");
     throw error;
   }
 }
