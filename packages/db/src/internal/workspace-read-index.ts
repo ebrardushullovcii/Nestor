@@ -170,6 +170,11 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
       CREATE TABLE IF NOT EXISTS workspace_company_jobs (company_id TEXT, job_id TEXT, PRIMARY KEY(company_id, job_id));
       CREATE INDEX IF NOT EXISTS workspace_company_job_idx ON workspace_company_jobs(job_id, company_id);
     `);
+    // Initial indexing looks up every job's plans. Create this before the first
+    // inventory INSERT, otherwise a fresh database scans all memberships per job.
+    database.exec(
+      "CREATE INDEX IF NOT EXISTS plan_job_membership_job_idx ON plan_job_memberships(item_id, plan_id)",
+    );
     if (version !== VERSION || indexedTriggers !== 6) {
       database.exec("DELETE FROM workspace_job_index");
       for (const table of jobTables) {
@@ -213,9 +218,6 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
           INSERT INTO workspace_changes(table_name,item_id,operation) VALUES ('saved_jobs',${ref}.job_id,'upsert');
         END`);
     }
-    database.exec(
-      "CREATE INDEX IF NOT EXISTS plan_job_membership_job_idx ON plan_job_memberships(item_id, plan_id)",
-    );
     for (const operation of ["insert", "delete", "update"] as const) {
       database.exec(`CREATE TRIGGER IF NOT EXISTS workspace_membership_${operation} AFTER ${operation.toUpperCase()} ON plan_job_memberships BEGIN
         ${operation === "insert" ? "" : "DELETE FROM workspace_job_index WHERE origin = 'saved_jobs' AND id = OLD.item_id AND plan_id = OLD.plan_id;"}

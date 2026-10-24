@@ -159,10 +159,14 @@ const mainConfig = {
   build: {
     rollupOptions: {
       input: {
-        index: path.resolve(currentDir, "src/main/index.ts"),
+        index: path.resolve(currentDir, "src/main/bootstrap.ts"),
         "workspace-database-startup-worker": path.resolve(
           currentDir,
           "src/main/setup/workspace-database-startup-worker.ts",
+        ),
+        "workspace-query-reader": path.resolve(
+          currentDir,
+          "src/main/setup/workspace-query-reader.ts",
         ),
         "discovery-cpu-worker": path.resolve(
           currentDir,

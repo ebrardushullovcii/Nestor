@@ -301,6 +301,32 @@ export const WorkspaceReadRequestSchema = z.discriminatedUnion("method", [
   }),
 ]);
 export type WorkspaceReadRequest = z.infer<typeof WorkspaceReadRequestSchema>;
+
+/** The port stays inside preload; the renderer only receives WorkspaceQueryApi. */
+export const WorkspaceQueryPortRequestSchema = z
+  .object({
+    id: z.number().int().positive(),
+    request: WorkspaceReadRequestSchema,
+  })
+  .strict();
+export type WorkspaceQueryPortRequest = z.infer<
+  typeof WorkspaceQueryPortRequestSchema
+>;
+export type WorkspaceQueryPortMessage =
+  | { type: "reply"; id: number; ok: true; value: WorkspaceQueryValue }
+  | { type: "reply"; id: number; ok: false; error: string }
+  | { type: "changes"; value: WorkspaceChanges };
+type WorkspaceQueryValue = Awaited<
+  ReturnType<WorkspaceQueryApi[Exclude<keyof WorkspaceQueryApi, "onChanges">]>
+>;
+
+/** App-owned control messages between main and its read-only utility process. */
+export type WorkspaceReaderControl =
+  | { type: "initialize"; filePath: string }
+  | {
+      type: "context-ready" | "queries-ready" | "changed" | "attach" | "close";
+    };
+
 export interface WorkspaceQueryApi {
   setQueryUpdates(active: boolean): Promise<void>;
   getStartupContext(): Promise<WorkspaceStartupContext>;
