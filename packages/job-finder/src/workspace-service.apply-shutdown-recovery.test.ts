@@ -3,6 +3,7 @@ import {
   ApplicationRecordSchema,
   ApplicationAttemptSchema,
   SavedJobSchema,
+  jobSourceValues,
 } from "@nestor/contracts";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -26,9 +27,7 @@ function createShutdownHarness() {
     (
       _source: Parameters<BrowserSessionRuntime["executeApplicationFlow"]>[0],
       _input: Parameters<BrowserSessionRuntime["executeApplicationFlow"]>[1],
-      options?: Parameters<
-        BrowserSessionRuntime["executeApplicationFlow"]
-      >[2],
+      options?: Parameters<BrowserSessionRuntime["executeApplicationFlow"]>[2],
     ): ReturnType<BrowserSessionRuntime["executeApplicationFlow"]> => {
       releaseStarted?.();
       return new Promise((_resolve, reject) => {
@@ -61,6 +60,19 @@ function createShutdownHarness() {
 }
 
 describe("apply shutdown recovery", () => {
+  test("shutdown closes owned browser sessions without loading discovery history", async () => {
+    const runtime = createBrowserRuntime();
+    const closeSession = vi.fn(runtime.closeSession.bind(runtime));
+    const { workspaceService, repository } = createWorkspaceServiceHarness({
+      browserRuntime: { ...runtime, closeSession },
+    });
+    const readDiscovery = vi.spyOn(repository, "getDiscoveryState");
+    await workspaceService.shutdown();
+    expect(readDiscovery).not.toHaveBeenCalled();
+    for (const source of jobSourceValues)
+      expect(closeSession).toHaveBeenCalledWith(source);
+  });
+
   test("shutdown projects an active run's result, attempt, and record onto truthful failed states", async () => {
     const { workspaceService, repository, started } = createShutdownHarness();
 
@@ -70,9 +82,7 @@ describe("apply shutdown recovery", () => {
     await started;
 
     // The durable begun mark commits before the browser flow starts.
-    const stagedResult = (
-      await repository.listApplyJobResults({ runId })
-    )[0];
+    const stagedResult = (await repository.listApplyJobResults({ runId }))[0];
     if (!stagedResult?.applicationRecordId) {
       throw new Error("Expected staged exact-lineage apply result.");
     }
@@ -166,9 +176,12 @@ describe("apply shutdown recovery", () => {
       title: "Preparation stopped because the app closed",
       emphasis: "warning",
     });
-    expect(records[0]?.events.every((event, _index, all) =>
-      all.filter((candidate) => candidate.id === event.id).length === 1,
-    )).toBe(true);
+    expect(
+      records[0]?.events.every(
+        (event, _index, all) =>
+          all.filter((candidate) => candidate.id === event.id).length === 1,
+      ),
+    ).toBe(true);
   });
 
   test("concurrent and repeated shutdowns stay idempotent", async () => {
@@ -179,9 +192,7 @@ describe("apply shutdown recovery", () => {
     const approval = workspaceService.approveApplyRun(runId);
     await started;
 
-    const stagedResult = (
-      await repository.listApplyJobResults({ runId })
-    )[0];
+    const stagedResult = (await repository.listApplyJobResults({ runId }))[0];
     if (!stagedResult?.applicationRecordId) {
       throw new Error("Expected staged exact-lineage apply result.");
     }
