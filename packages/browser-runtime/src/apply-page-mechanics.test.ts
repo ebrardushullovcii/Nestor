@@ -503,10 +503,10 @@ describe("reading the choices of lists the page draws itself", () => {
     }
   });
 
-  test("checks an enabled radio even when another element covers its pointer target", async () => {
+  test("checks an off-screen enabled radio even when another element covers its pointer target", async () => {
     const page = await browser.newPage();
     await page.setContent(`
-      <fieldset>
+      <fieldset style="margin-top:2000px">
         <legend>Are you authorized to work here?</legend>
         <label><input id="authorized" type="radio" name="authorized" required /> Yes</label>
         <label><input type="radio" name="authorized" /> No</label>
@@ -520,6 +520,7 @@ describe("reading the choices of lists the page draws itself", () => {
       observedValue: "checked",
     });
     expect(await page.locator("#authorized").isChecked()).toBe(true);
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
 
     await page.close();
   }, 15_000);
