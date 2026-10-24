@@ -23,7 +23,7 @@ import {
   JobFinderActivityControlSchema,
   JobSearchCampaignCollectionSchema,
   SetJobFinderActivityControlInputSchema,
-  JobSourceSchema,
+  jobSourceValues,
   SavedJobSchema,
   type ApplyJobResult,
   type ApplyRun,
@@ -423,6 +423,8 @@ export function createJobFinderWorkspaceService(
     workspaceResetInProgress = true;
     invalidateListingReads();
     try {
+      // Finish queued document cleanup before Reset moves the managed folder.
+      await documentManager.pruneGeneratedResumeFiles?.();
       await options?.beforeStateReset?.();
       return await snapshotProfileMethods.resetWorkspace(seed);
     } finally {
@@ -1588,10 +1590,6 @@ export function createJobFinderWorkspaceService(
     resumeVerifyingUserActions: resumeVerifyingUserActionsAfterCommit,
   });
 
-  function isJobSource(value: unknown): value is JobSource {
-    return JobSourceSchema.safeParse(value).success;
-  }
-
   function describeShutdownFailure(reason: unknown): string {
     return reason instanceof Error ? reason.message : String(reason);
   }
@@ -1699,15 +1697,11 @@ export function createJobFinderWorkspaceService(
         ]);
       }
 
-      const discoveryState = await repository
-        .getDiscoveryState()
-        .catch(() => null);
-      const sessionSources = uniqueStrings(
-        (discoveryState?.sessions ?? []).map((session) => session.adapterKind),
-      ).filter(isJobSource);
       const shutdownResults = await Promise.allSettled([
         ...(resumeDraftProcessor ? [resumeDraftProcessor.close()] : []),
-        ...sessionSources.map((source) => browserRuntime.closeSession(source)),
+        // Session kinds come from the runtime contract. Reading discovery
+        // history just to close its sessions copies a large workspace at quit.
+        ...jobSourceValues.map((source) => browserRuntime.closeSession(source)),
         repository.close(),
       ]);
       const rejectedResults = shutdownResults.filter(

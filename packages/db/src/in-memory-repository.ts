@@ -1,4 +1,8 @@
 import {
+  retainedResumeExportPaths,
+  collectResumeFileReferences,
+} from "./resume-export-retention";
+import {
   parseSavedJobWithPreparation,
   parseSavedJobsWithPreparation,
   cloneSavedJobWithPreparation,
@@ -1004,6 +1008,28 @@ export function createInMemoryJobFinderRepository(
         return true;
       });
       return Promise.resolve(sortExports(cloneValue(values)));
+    },
+    listRetainedResumeExportPaths() {
+      return Promise.resolve(
+        retainedResumeExportPaths({
+          assets: state.tailoredAssets,
+          exports: state.resumeExportArtifacts,
+          references: collectResumeFileReferences([
+            state.applicationRecords,
+            state.applicationAttempts,
+            state.applyRuns,
+            state.applyJobResults,
+            state.applicationArtifactRefs,
+            state.applicationReplayCheckpoints,
+            state.applicationConsentRequests,
+            state.submissionPreflights,
+            state.submissionOutcomeRecords,
+            state.applicationAnswerSnapshots,
+            state.preparedApplicationForms,
+            state.resumeDrafts.map((draft) => draft.approvedExportId),
+          ]),
+        }),
+      );
     },
     upsertResumeExportArtifact(artifact) {
       const normalizedArtifact = ResumeExportArtifactSchema.parse(

@@ -1,4 +1,4 @@
-# ADR 0061: Store evidence once and query startup facts
+# ADR 0071: Store evidence once and query startup facts
 
 Status: accepted (2026-10-24).
 

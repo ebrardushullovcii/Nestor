@@ -6,6 +6,7 @@ import {
   AssistantMessageSchema,
 } from "./assistant";
 import { IsoDateTimeSchema } from "./base";
+import { ApplyQueueSchema, type ApplyQueue } from "./apply-queue";
 import {
   type JobFinderRepositoryState,
   JobFinderRepositoryStateSchema,
@@ -15,6 +16,8 @@ export type PersonalWorkspaceExport = {
   schemaVersion: 1;
   exportedAt: string;
   repositoryState: JobFinderRepositoryState;
+  /** Saved choices live outside the repository seed in existing exports. */
+  workspace?: { applyQueue?: ApplyQueue | null | undefined } | undefined;
   fileRoots: {
     name: "resumes" | "attachments" | "application-documents";
     directory: string;
@@ -33,6 +36,9 @@ export const PersonalWorkspaceExportSchema: z.ZodType<
   schemaVersion: z.literal(1),
   exportedAt: IsoDateTimeSchema,
   repositoryState: JobFinderRepositoryStateSchema,
+  workspace: z
+    .object({ applyQueue: ApplyQueueSchema.nullable().optional() })
+    .optional(),
   fileRoots: z
     .array(
       z.object({

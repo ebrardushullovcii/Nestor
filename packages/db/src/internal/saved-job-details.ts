@@ -4,6 +4,7 @@ import {
   readPreparedDiscoveryFingerprints,
   writeDiscoveryPreparation,
   readPreparedSavedJobIdentity,
+  readPreparedMatchAssessmentPostingFingerprint,
   readDiscoveryPreparation,
   type SavedJob,
   type SavedJobListFacts,
@@ -46,7 +47,7 @@ export function createSavedJobDetails(database: DatabaseSync) {
     json_extract(value, '$.description') AS description
     FROM saved_job_details WHERE version = ?`);
   const remove = database.prepare(
-    "DELETE FROM saved_job_details WHERE version = ?",
+    "DELETE FROM saved_job_details WHERE version IN (SELECT value FROM json_each(?))",
   );
   const cache = new Map<number, SavedJob>();
   const descriptions = new Map<number, string>();
@@ -109,11 +110,14 @@ export function createSavedJobDetails(database: DatabaseSync) {
     job: SavedJobListFacts | SavedJob,
     rawValue?: string,
   ): SavedJob {
-    for (const version of retired.splice(0)) {
+    // A search can release thousands of versions in one GC. Reclaim a bounded
+    // part per projected row, alongside the reader's existing paged yields.
+    const released = retired.splice(-DETAIL_LIMIT);
+    for (const version of released) {
       cache.delete(version);
       descriptions.delete(version);
-      remove.run(version);
     }
+    if (released.length) remove.run(JSON.stringify(released));
     const version = ++nextVersion;
     const anchor = { version };
     if (rawValue === undefined) {
@@ -148,10 +152,15 @@ export function createSavedJobDetails(database: DatabaseSync) {
     });
     Object.freeze(row.provenance);
     const fingerprint = readPreparedDiscoveryFingerprints(job);
+    const matchAssessmentPostingFingerprint =
+      readPreparedMatchAssessmentPostingFingerprint(job);
     const bodySalaryRange = readDiscoveryPreparation(job)?.bodySalaryRange;
     if (fingerprint)
       writeDiscoveryPreparation(row, {
         fingerprints: { owner: row, value: fingerprint },
+        ...(matchAssessmentPostingFingerprint
+          ? { matchAssessmentPostingFingerprint }
+          : {}),
         ...(bodySalaryRange !== undefined ? { bodySalaryRange } : {}),
       });
     const identity = readPreparedSavedJobIdentity(job);

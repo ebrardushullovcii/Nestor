@@ -2,6 +2,8 @@ import { yieldToEventLoop } from "@nestor/core";
 import { isDeepStrictEqual } from "node:util";
 import {
   readDiscoveryPreparation,
+  readPreparedMatchAssessmentPostingFingerprint,
+  computeMatchAssessmentPostingFingerprint,
   JobPostingSchema,
   SourceIntelligenceArtifactSchema,
   type CandidateProfile,
@@ -1923,6 +1925,12 @@ export async function preparePublicProviderFeed(
         screeningContent,
         bodySalaryRange: prepareBodySalaryRange(posting),
         screeningBodySalaryRange: prepareBodySalaryRange(raw),
+        matchAssessmentPostingFingerprint:
+          readPreparedMatchAssessmentPostingFingerprint(posting) ??
+          computeMatchAssessmentPostingFingerprint(posting),
+        screeningMatchAssessmentPostingFingerprint:
+          readPreparedMatchAssessmentPostingFingerprint(raw) ??
+          computeMatchAssessmentPostingFingerprint(raw),
       });
     }
   }
@@ -2065,10 +2073,15 @@ export async function collectPublicProviderJobs(input: {
           raw,
           preparation.screeningBodySalaryRange,
         );
-        rememberDiscoveryListingFingerprints(job, preparation.fingerprints);
+        rememberDiscoveryListingFingerprints(
+          job,
+          preparation.fingerprints,
+          preparation.matchAssessmentPostingFingerprint,
+        );
         rememberDiscoveryListingFingerprints(
           raw,
           preparation.screeningFingerprints,
+          preparation.screeningMatchAssessmentPostingFingerprint,
         );
       }
 

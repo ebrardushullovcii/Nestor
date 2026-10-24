@@ -393,9 +393,15 @@ export function createSavedJobProjectionReader(
     }
     externalVersion = version;
     // A write arriving during chunked parsing belongs to the next projection.
-    database
-      .prepare("DELETE FROM saved_job_projection_changes WHERE revision <= ?")
-      .run(revision);
+    if (Number(readRevision.get()?.revision) === revision) {
+      // No local write arrived during the paged read. Consume all markers
+      // with SQLite's bulk clear instead of deleting each index entry.
+      database.exec("DELETE FROM saved_job_projection_changes");
+    } else {
+      database
+        .prepare("DELETE FROM saved_job_projection_changes WHERE revision <= ?")
+        .run(revision);
+    }
     snapshot = Object.freeze(
       [...jobsById.values()].sort((left, right) =>
         left.id < right.id ? -1 : left.id > right.id ? 1 : 0,

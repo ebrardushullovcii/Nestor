@@ -111,6 +111,7 @@ export async function runResumeRevisionSpecialist(
         templateId: measured.templateId,
         settings: state.settings,
       });
+      await ctx.documentManager.discardResumeArtifact?.(rendered);
       return {
         pageCount: rendered.pageCount ?? null,
         targetPageCount: measured.targetPageCount,

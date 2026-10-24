@@ -787,7 +787,8 @@ export function writeState(
   database: DatabaseSync,
   state: JobFinderRepositoryState,
 ): void {
-  // A reset or restore ends any Apply queue; it is not part of the seed.
+  // Replacing the seed clears the old queue. Personal restore installs its
+  // exported queue separately, held by the restored global activity pause.
   database
     .prepare(`DELETE FROM ${stateTableNames.singleton_state} WHERE key = ?`)
     .run("apply_queue");

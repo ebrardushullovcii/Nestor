@@ -1,3 +1,5 @@
+import { orderedRanks } from "./ordered-row-positions";
+import { discoveryLedgerValueSql, migrateDiscoveryLedgerStorage, writeDiscoveryLedgerRows } from "./discovery-ledger-storage";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { backupBeforeStorageMigration } from "./storage-migration-backup";
 import { isDeepStrictEqual } from "node:util";
@@ -108,6 +110,7 @@ function frozen<T>(value: T): T {
 
 function parseRow<T>(table: string, id: string, value: unknown): T {
   try {
+    if (typeof value !== "string") throw new Error("Missing row value");
     return JSON.parse(String(value)) as T;
   } catch {
     throw new Error(`Corrupted persisted row in table "${table}" (row "${id}").`);
@@ -252,6 +255,7 @@ export function migrateDiscoveryStorage(database: DatabaseSync): void {
     database.exec("ROLLBACK");
     throw error;
   }
+  migrateDiscoveryLedgerStorage(database);
 }
 
 type CachedScope = {
@@ -294,7 +298,8 @@ function readChangedRowsInPlace<T>(
   dirtyIds: ReadonlySet<string>,
 ): Array<{ key: string; value: unknown }> | null {
   const ids = [...dirtyIds];
-  const rows = statement(database, `SELECT id, position, value FROM ${table} WHERE ${params.length > 0 ? "run_id = ? AND " : ""}id IN (SELECT value FROM json_each(?))`)
+  const valueSql = table === "discovery_ledger" ? discoveryLedgerValueSql() : "value";
+  const rows = statement(database, `SELECT id, position, ${valueSql} AS value FROM ${table} WHERE ${params.length > 0 ? "run_id = ? AND " : ""}id IN (SELECT value FROM json_each(?))`)
     .all(...params, JSON.stringify(ids));
   const found = new Map(rows.map((row) => [String(row.id), row]));
   const replaced = new Map<string, unknown>();
@@ -369,7 +374,8 @@ function readKeyedRows<T>(database: DatabaseSync, table: string, where = "", par
     if (updated) return updated as Array<{ key: string; value: T }>;
   }
   const cold = !cached;
-  const rows = database.prepare(`SELECT id, position${cold ? ", value" : ""} FROM ${table} ${where} ORDER BY position`).all(...params);
+  const valueSql = table === "discovery_ledger" ? discoveryLedgerValueSql() : "value";
+  const rows = database.prepare(`SELECT id, position${cold ? `, ${valueSql} AS value` : ""} FROM ${table} ${where} ORDER BY position`).all(...params);
   const valuesById = cached?.values ?? new Map<string, unknown>();
   const dirty = dirtyIds;
   const changedIds = cold ? [] : rows.map((row) => String(row.id))
@@ -377,7 +383,7 @@ function readKeyedRows<T>(database: DatabaseSync, table: string, where = "", par
   // One indexed query replaces N per-row SELECTs. Only changed bodies cross
   // into JS; the ordered id scan and unchanged object identities stay cheap.
   const changed = changedIds.length > 0
-    ? database.prepare(`SELECT id, value FROM ${table} WHERE ${params.length > 0 ? "run_id = ? AND " : ""}id IN (SELECT value FROM json_each(?))`)
+    ? database.prepare(`SELECT id, ${valueSql} AS value FROM ${table} WHERE ${params.length > 0 ? "run_id = ? AND " : ""}id IN (SELECT value FROM json_each(?))`)
       .all(...params, JSON.stringify(changedIds))
     : [];
   const rawById = new Map(changed.map((row) => [String(row.id), row.value]));
@@ -581,86 +587,6 @@ function rowsByKey<T extends { id: string }>(rows: readonly T[]): ReadonlyMap<st
   return byKey;
 }
 
-/** Keep the largest already-ordered subsequence at its persisted ranks. */
-function orderedRanks(keys: readonly string[], previous: Map<string, number>): number[] {
-  const known = keys.map((key) => previous.get(key));
-  // The usual feedback/checkpoint moves a few sightings to the end. Its
-  // ordered prefix already has valid ranks; finding an LIS for every one of
-  // 37,000 untouched rows adds work without changing the chosen anchors.
-  let prefix = 0;
-  let previousRank = -Infinity;
-  while (prefix < known.length) {
-    const rank = known[prefix];
-    if (rank === undefined || !(rank > previousRank)) break;
-    previousRank = rank;
-    prefix += 1;
-  }
-  if (prefix === known.length) return known as number[];
-  if (known.length >= 256 && prefix >= known.length * 0.9 && known.length - prefix <= 2_048 &&
-      known.slice(prefix).every((rank) => rank === undefined || rank <= previousRank)) {
-    let maximum = previousRank;
-    for (const rank of previous.values()) maximum = Math.max(maximum, rank);
-    const ranks = known.slice(0, prefix) as number[];
-    for (let index = prefix; index < known.length; index += 1)
-      ranks.push(maximum + index - prefix + 1);
-    if (
-      ranks.every(
-        (rank, index) =>
-          Number.isFinite(rank) && (index === 0 || rank > ranks[index - 1]!),
-      )
-    )
-      return ranks;
-  }
-  const tails: number[] = [];
-  // Each index's predecessor in the subsequence (-1: none), and the anchors.
-  const links = new Int32Array(keys.length).fill(-1);
-  for (const [index, rank] of known.entries()) {
-    if (rank === undefined) continue;
-    let low = 0;
-    let high = tails.length;
-    while (low < high) {
-      const middle = (low + high) >>> 1;
-      if (known[tails[middle]!]! < rank) low = middle + 1;
-      else high = middle;
-    }
-    if (low > 0) links[index] = tails[low - 1]!;
-    tails[low] = index;
-  }
-  const anchorFlags = new Uint8Array(keys.length);
-  const anchors = { has: (index: number) => anchorFlags[index] === 1 };
-  let cursor = tails.at(-1) ?? -1;
-  while (cursor >= 0) {
-    anchorFlags[cursor] = 1;
-    cursor = links[cursor]!;
-  }
-  const ranks: number[] = [];
-  let maximum = -1;
-  for (const rank of previous.values()) maximum = Math.max(maximum, rank);
-  let start = 0;
-  for (let end = 0; end <= keys.length; end += 1) {
-    if (end < keys.length && !anchors.has(end)) continue;
-    const right = end < keys.length ? known[end]! : undefined;
-    const left = start > 0 ? ranks[start - 1]! : undefined;
-    const count = end - start;
-    for (let offset = 0; offset < count; offset += 1) {
-      // SQLite's non-STRICT numeric position column accepts fractional ranks.
-      // Mid-list inserts use the existing gap without shifting later rows;
-      // append/move-to-end ranks are strictly above the previous maximum.
-      ranks[start + offset] = right === undefined
-        ? Math.max(maximum, left ?? -1) + offset + 1
-        : left === undefined ? right - count + offset
-          : left + (right - left) * ((offset + 1) / (count + 1));
-    }
-    if (right !== undefined) ranks[end] = right;
-    start = end + 1;
-  }
-  // Compact only when floating-point gaps or extreme ranks are exhausted.
-  // Never publish a rank collision that could reorder canonical state on reopen.
-  if (ranks.some((rank, index) => !Number.isFinite(rank) || (index > 0 && rank <= ranks[index - 1]!)))
-    return keys.map((_, index) => index);
-  return ranks;
-}
-
 function writeChangedRows<T extends { id: string }>(database: DatabaseSync, table: string, before: readonly T[], after: readonly T[], aliases: WeakMap<object, object>, runId?: string, positionCache?: PositionCache): T[] {
   if (before === after) return before as T[];
   const patch =
@@ -674,7 +600,7 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
     const ranks = new Map(rankedIds.length ? statement(database,
       "SELECT id, position FROM discovery_ledger WHERE id IN (SELECT value FROM json_each(?))")
       .all(JSON.stringify(rankedIds)).map((row) => [String(row.id), Number(row.position)]) : []);
-    const writes: Array<readonly [string, number, T]> = [];
+    const writes: Parameters<typeof writeDiscoveryLedgerRows>[1][number][] = [];
     let maximum: number | null = null;
     for (const { index, previousIndex, moveToEnd } of patch.rows) {
       const row = after[index]!;
@@ -699,16 +625,13 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
           );
           position = ++maximum;
         }
-        writes.push([row.id, position, parsed]);
+        writes.push({ key: row.id, position, row: parsed as unknown as DiscoveryLedgerEntry, previous: old as unknown as DiscoveryLedgerEntry | undefined });
         result[index] = parsed;
       }
       frozen(row);
       aliases.set(row, result[index]);
     }
-    if (writes.length)
-      statement(database, `INSERT OR REPLACE INTO discovery_ledger (id, position, value)
-        SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')
-        FROM json_each(?)`).run(JSON.stringify(writes));
+    writeDiscoveryLedgerRows(database, writes);
     // Existing ranks did not move. Appends invalidate the generic writer's
     // position cache; it can rebuild that cache if a later write reorders rows.
     positionCache?.delete(`${table}\u0000`);
@@ -750,7 +673,9 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
     const parsed = frozen(row);
     const same = old && JSON.stringify(old) === JSON.stringify(parsed);
     if (!same) {
-      replaceRow(database, table, runId ? [runId, key, position] : [key, position], parsed);
+      if (table === "discovery_ledger")
+        writeDiscoveryLedgerRows(database, [{ key, position, row: parsed as unknown as DiscoveryLedgerEntry, previous: old as unknown as DiscoveryLedgerEntry | undefined }]);
+      else replaceRow(database, table, runId ? [runId, key, position] : [key, position], parsed);
       positions.set(key, position);
     } else if (previousPosition !== position) {
       statement(database, `UPDATE ${table} SET position = ? WHERE ${runId ? "run_id = ? AND " : ""}id = ?`).run(...(runId ? [position, runId, key] : [position, key]));
@@ -901,7 +826,7 @@ export function createDiscoveryStorage(database: DatabaseSync, fallback: JobFind
       WHEN ${condition}
       BEGIN UPDATE discovery_canonical_epoch SET revision = revision + 1; END`);
   }
-  for (const table of ["discovery_runs", "discovery_run_targets", "discovery_run_checkpoints", "discovery_run_activity", "discovery_run_source_health", "discovery_ledger", "discovery_pending_jobs"]) {
+  for (const table of ["discovery_runs", "discovery_run_targets", "discovery_run_checkpoints", "discovery_run_activity", "discovery_run_source_health", "discovery_ledger", "discovery_ledger_observations", "discovery_pending_jobs"]) {
     for (const event of ["INSERT", "UPDATE", "DELETE"]) {
       const retiredChild = event === "DELETE" && table.startsWith("discovery_run_");
       database.exec(`CREATE TEMP TRIGGER discovery_canonical_${table}_${event.toLowerCase()}

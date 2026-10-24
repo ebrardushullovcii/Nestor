@@ -294,7 +294,7 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
       DROP INDEX IF EXISTS workspace_job_company_idx;
       CREATE INDEX IF NOT EXISTS workspace_job_identity_idx ON workspace_job_index(id, plan_id);
       CREATE INDEX IF NOT EXISTS workspace_ledger_activity_idx ON discovery_ledger(
-        json_extract(value,'$.latestStatus'),json_extract(value,'$.inactiveAt'));
+        json_extract(value,'$.latestStatus'));
     `);
     if (
       !database
@@ -422,6 +422,11 @@ function ensureActivityRevision(database: DatabaseSync): void {
     BEGIN ${bump} END`);
   for (const event of ["insert", "update", "delete"]) {
     const ref = event === "delete" ? "OLD" : "NEW";
+    if (database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='discovery_ledger_observations'").get())
+      database.exec(`CREATE TRIGGER IF NOT EXISTS workspace_activity_ledger_observations_${event}
+      AFTER ${event.toUpperCase()} ON discovery_ledger_observations
+      WHEN EXISTS (SELECT 1 FROM discovery_ledger WHERE id=${ref}.id
+        AND json_extract(value,'$.latestStatus')='inactive') BEGIN ${bump} END`);
     const inactive =
       event === "update"
         ? "(json_extract(OLD.value,'$.latestStatus')='inactive' OR json_extract(NEW.value,'$.latestStatus')='inactive') AND OLD.value IS NOT NEW.value"

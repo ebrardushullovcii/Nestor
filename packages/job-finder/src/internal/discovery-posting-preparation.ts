@@ -1,5 +1,8 @@
 import {
   extractSalaryRangeFromListingBody,
+  computeMatchAssessmentPostingFingerprint,
+  readPreparedMatchAssessmentPostingFingerprint,
+  readPreparedSavedJobIdentity,
   readDiscoveryPreparation,
   readPreparedBodySalaryRange,
   writeDiscoveryPreparation,
@@ -17,6 +20,11 @@ export function prepareDiscoveryPosting<T extends JobPosting>(
   posting: T,
   textSource?: JobPosting,
 ): T {
+  const matchAssessmentPostingFingerprint =
+    readPreparedMatchAssessmentPostingFingerprint(posting) ??
+    (textSource
+      ? readPreparedMatchAssessmentPostingFingerprint(posting, textSource)
+      : null);
   let salaryRange = readPreparedBodySalaryRange(posting);
   if (readDiscoveryPreparation(posting)?.normalizedPosting)
     writeDiscoveryPreparation(posting, {
@@ -24,6 +32,14 @@ export function prepareDiscoveryPosting<T extends JobPosting>(
       normalizedPostingSource: undefined,
     });
   let content = readDiscoveryPreparation(posting)?.content;
+  const savedIdentity = readPreparedSavedJobIdentity(posting);
+  if (
+    (!content || content.description !== posting.description) &&
+    savedIdentity
+  ) {
+    rememberPreparedListingContent(posting, savedIdentity.content);
+    content = readDiscoveryPreparation(posting)?.content;
+  }
   const needsContent = !content || content.description !== posting.description;
   const sourcePreparation = textSource
     ? readDiscoveryPreparation(textSource)
@@ -52,6 +68,11 @@ export function prepareDiscoveryPosting<T extends JobPosting>(
     );
   prepareJobIdentity(posting);
   createDiscoveryListingFingerprints(posting);
+  writeDiscoveryPreparation(posting, {
+    matchAssessmentPostingFingerprint:
+      matchAssessmentPostingFingerprint ??
+      computeMatchAssessmentPostingFingerprint(posting),
+  });
   if (salaryRange !== undefined)
     rememberPreparedBodySalaryRange(posting, salaryRange);
   else prepareBodySalaryRange(posting);

@@ -1,5 +1,6 @@
 import type { DiscoveryListingFingerprints, JobPosting } from "./discovery";
 import type { extractSalaryRangeFromListingBody } from "./listing-salary-evidence";
+import { MATCH_ASSESSMENT_LOGIC_REVISION } from "./match-assessment-input";
 
 /** Internal prepared facts travel with owned postings; JSON and IPC omit symbols. */
 export const DISCOVERY_PREPARATION = Symbol.for("nestor.discoveryPreparation");
@@ -23,8 +24,10 @@ export type DiscoverySavedJobIdentity = DiscoveryPreparedKeys & {
 };
 export type DiscoverySavedJobFingerprints = DiscoveryListingFingerprints & {
   identity?: DiscoverySavedJobIdentity;
+  matchAssessmentPostingFingerprint?: string;
 };
 export type DiscoveryPreparation = {
+  matchAssessmentPostingFingerprint?: string;
   content?: DiscoveryPreparedContent;
   identity?: DiscoveryPreparedKeys & {
     basis: readonly (string | boolean | null | undefined)[];
@@ -77,6 +80,11 @@ export function writeDiscoveryPreparation(
   const previous = readDiscoveryPreparation(value);
   const next = { ...previous, ...preparation };
   if (
+    preparation.fingerprints &&
+    !Object.hasOwn(preparation, "matchAssessmentPostingFingerprint")
+  )
+    delete next.matchAssessmentPostingFingerprint;
+  if (
     preparation.content &&
     next.screeningHints?.basis.description !== preparation.content.description
   )
@@ -127,6 +135,8 @@ export const DISCOVERY_FINGERPRINT_FIELDS = [
   "seniority",
   "screeningHints",
   "benefits",
+  "keywordSignals",
+  "atsProvider",
 ] as const satisfies readonly (keyof JobPosting)[];
 
 function equalInput(left: unknown, right: unknown): boolean {
@@ -210,7 +220,16 @@ export function readPreparedSavedJobIdentity(
 export function readPreparedDiscoveryFingerprints(
   posting: object,
 ): DiscoveryListingFingerprints | null {
-  const prepared = readDiscoveryPreparation(posting)?.fingerprints;
+  return checkedDiscoveryFingerprints(
+    posting,
+    readDiscoveryPreparation(posting)?.fingerprints,
+  );
+}
+
+function checkedDiscoveryFingerprints(
+  posting: object,
+  prepared: DiscoveryPreparation["fingerprints"],
+): DiscoveryListingFingerprints | null {
   if (!prepared) return null;
   if (prepared.owner && !Object.isFrozen(prepared.owner)) return null;
   if (prepared.owner === posting) return prepared.value;
@@ -220,6 +239,26 @@ export function readPreparedDiscoveryFingerprints(
       equalInput(Reflect.get(source, field), Reflect.get(posting, field)),
     )
     ? prepared.value
+    : null;
+}
+
+/** The fit hash uses the same exact posting-input proof as discovery preparation. */
+export function readPreparedMatchAssessmentPostingFingerprint(
+  posting: object,
+  preparationSource: object = posting,
+): string | null {
+  const value =
+    readDiscoveryPreparation(
+      preparationSource,
+    )?.matchAssessmentPostingFingerprint;
+  return value?.startsWith(
+    `match_posting_v4_logic${MATCH_ASSESSMENT_LOGIC_REVISION}_`,
+  ) &&
+    checkedDiscoveryFingerprints(
+      posting,
+      readDiscoveryPreparation(preparationSource)?.fingerprints,
+    )
+    ? value
     : null;
 }
 

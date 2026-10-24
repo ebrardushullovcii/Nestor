@@ -138,7 +138,7 @@ test("moving the first of 10k ledger rows to last and removing the first pending
       .prepare("SELECT table_name, operation, id FROM test_row_markers")
       .all();
     expect(markers).toEqual([
-      { table_name: "discovery_ledger", operation: "INSERT", id: "ledger_0" },
+      { table_name: "discovery_ledger", operation: "UPDATE", id: "ledger_0" },
       {
         table_name: "discovery_pending_jobs",
         operation: "DELETE",
@@ -184,7 +184,7 @@ test("moving the first of 10k ledger rows to last and removing the first pending
     expect(await repo.getDiscoveryState()).toEqual(expected);
     expect(await repo.readDiscoveryDisplayProjection()).toEqual(expected);
     console.info(
-      "10k ledger move + 10k pending removal: 1 ledger INSERT, 1 pending DELETE; rollback markers 0",
+      "10k ledger move + 10k pending removal: 1 ledger UPDATE, 1 pending DELETE; rollback markers 0",
     );
   } finally {
     raw.close();
@@ -311,7 +311,7 @@ test("warm display refresh batches 500 changed bodies in one indexed query and r
     const after = await read();
     const valueQueries = queries.mock.calls.filter(
       ([query]) =>
-        /^SELECT id, (position, )?value FROM discovery_ledger/.test(query),
+        /^SELECT id, /.test(query) && query.includes("AS value FROM discovery_ledger"),
     );
     expect(valueQueries).toHaveLength(1);
     expect(valueQueries[0]![0]).toContain(
