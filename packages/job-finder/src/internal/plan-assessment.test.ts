@@ -7,6 +7,33 @@ import {
   readPlanAssessment,
   withPlanAssessment,
 } from "./plan-assessment";
+
+it("stores a plan verdict and the original shared verdict without reading lazy details", () => {
+  const base = createSeed().savedJobs[0]!;
+  const shared = base.matchAssessment;
+  const assessment = { ...shared, score: 12 };
+  const job = { ...base, matchAssessment: assessment };
+  let bodyReads = 0;
+  const getDescription = () => {
+    bodyReads++;
+    return base.description;
+  };
+  Object.defineProperty(job, "description", {
+    enumerable: true,
+    configurable: true,
+    get: getDescription,
+  });
+  const stored = withPlanAssessment(job, "other", assessment, shared);
+  expect(stored.matchAssessment).toBe(shared);
+  expect(stored.planAssessments?.other).toBe(assessment);
+  expect(Object.getOwnPropertyDescriptor(stored, "description")).toMatchObject({
+    get: getDescription,
+  });
+  expect(withPlanAssessment(stored, "other", assessment, shared)).toBe(stored);
+  expect(withPlanAssessment(job, null)).toBe(job);
+  expect(bodyReads).toBe(0);
+});
+
 it("reuses immutable plan views and replaces them when the plan or saved evidence changes", () => {
   const base = createSeed().savedJobs[0]!;
   const a = { ...base.matchAssessment, score: 90 };

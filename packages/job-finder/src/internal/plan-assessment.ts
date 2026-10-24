@@ -11,16 +11,17 @@ export function withPlanAssessment<T extends SavedJob>(
   job: T,
   planId: string | null,
   assessment: MatchAssessment = job.matchAssessment,
+  sharedAssessment: MatchAssessment = job.matchAssessment,
 ): T {
-  if (
-    planId
-      ? job.planAssessments?.[planId] === assessment
-      : job.matchAssessment === assessment
-  )
+  const matchAssessment = planId ? sharedAssessment : assessment;
+  const planChanged = planId
+    ? job.planAssessments?.[planId] !== assessment
+    : false;
+  if (job.matchAssessment === matchAssessment && !planChanged)
     return job;
   return copyView(job, {
-    matchAssessment: planId ? job.matchAssessment : assessment,
-    ...(planId
+    matchAssessment,
+    ...(planChanged && planId
       ? { planAssessments: { ...job.planAssessments, [planId]: assessment } }
       : {}),
   });

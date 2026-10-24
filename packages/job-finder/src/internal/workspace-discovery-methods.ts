@@ -1846,13 +1846,10 @@ export function createWorkspaceDiscoveryMethods(
       const cached = storedJobs.get(job);
       if (cached) return cached;
       const stored = withPlanAssessment(
-        copyView(job, {
-          matchAssessment:
-            originalJobsById.get(job.id)?.matchAssessment ??
-            job.matchAssessment,
-        }),
+        job,
         assessmentPlanId,
         job.matchAssessment,
+        originalJobsById.get(job.id)?.matchAssessment ?? job.matchAssessment,
       );
       storedJobs.set(job, stored);
       return stored;
