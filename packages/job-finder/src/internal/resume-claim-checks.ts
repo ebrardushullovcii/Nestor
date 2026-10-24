@@ -430,24 +430,23 @@ export function settleResumeClaimLines(input: {
       shown.push(fix);
       return { ...bullet, text: fix };
     });
-  // An empty model fix removes a generated summary with nothing safe to keep.
+  // A rejected summary falls back to the person's saved summary, as the
+  // sanitizer does before checking. Keep that text on the saved draft too:
+  // otherwise a later preview restores it while the editor stays empty.
   const fixText = (
     text: string | null,
     origin: ResumeLine["origin"],
     field: "section_text" | "entry_summary",
     sectionId: string,
+    savedWording: string | null = null,
   ): string | null => {
     if (!text?.trim()) return text;
-    const fix = fixFor(
-      { text, origin, field, sectionId },
-      field === "section_text"
-        ? (input.profile?.summary?.trim() ?? null)
-        : null,
-    );
+    const fix = fixFor({ text, origin, field, sectionId }, savedWording);
     if (fix === null) return text;
-    if (!fix || repeatsAShownLine(fix, text)) return null;
-    shown.push(fix);
-    return fix;
+    const replacement = fix || savedWording;
+    if (!replacement || repeatsAShownLine(replacement, text)) return null;
+    shown.push(replacement);
+    return replacement;
   };
 
   const fixed: ResumeDraft = {
@@ -462,6 +461,9 @@ export function settleResumeClaimLines(input: {
               section.origin,
               "section_text",
               section.id,
+              section.kind === "summary"
+                ? input.profile?.summary?.trim() || null
+                : null,
             ),
             bullets: fixBullets(section.bullets, "section_bullet", section.id),
             entries: section.entries.map((entry) =>

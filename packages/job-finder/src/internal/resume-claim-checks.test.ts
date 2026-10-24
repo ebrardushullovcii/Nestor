@@ -11,7 +11,11 @@ import {
   withResumeClaimChecks,
   withResumeClaimFixes,
 } from "./resume-claim-checks";
-import { resumeClaimContentHash } from "./resume-workspace-helpers";
+import {
+  buildResumeRenderDocument,
+  resumeClaimContentHash,
+  sanitizeResumeDraft,
+} from "./resume-workspace-helpers";
 
 const at = "2026-10-03T10:00:00.000Z";
 
@@ -429,6 +433,46 @@ describe("resume claim checks before a draft is kept (ADR 0041)", () => {
   });
 
   describe("fixing what the check did not pass", () => {
+    test.each(["aggressive", "balanced", "conservative"])(
+      "%s keeps the saved summary in both the editor draft and later preview when the model removes its rewrite",
+      async (tailoringStrength) => {
+        const { profile, job } = context();
+        profile.summary = `Builds reliable software (${tailoringStrength}-summary-fallback).`;
+        const draft = draftWith([]);
+        draft.sections[0]!.text = `Invented executive scope (${tailoringStrength}-summary-fallback).`;
+        const checkResumeClaims = vi.fn(async (input: ResumeClaimCheckInput) =>
+          input.claims.map((claim) => ({
+            id: claim.id,
+            verdict: "unsupported" as const,
+            reason: "The evidence does not show executive scope.",
+            evidenceIds: [],
+            fix: "",
+          })),
+        );
+        const base = {
+          aiClient: { checkResumeClaims },
+          job,
+          profile,
+          tailoringStrength,
+        };
+        const fixed = await withResumeClaimFixes({
+          ...base,
+          draft: await withResumeClaimChecks({ ...base, draft }),
+          stretchesAreThePersons: tailoringStrength === "aggressive",
+        });
+        expect(fixed.sections[0]!.text).toBe(profile.summary);
+        const previewDraft = sanitizeResumeDraft({
+          draft: fixed,
+          profile,
+          job,
+        });
+        expect(buildResumeRenderDocument(profile, fixed)).toEqual(
+          buildResumeRenderDocument(profile, previewDraft),
+        );
+        expect(checkResumeClaims).toHaveBeenCalledOnce();
+      },
+    );
+
     // Verdicts are remembered for the session, so each test words its own lines.
     function lines(tag: string) {
       return {
