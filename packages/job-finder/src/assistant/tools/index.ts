@@ -74,7 +74,7 @@ export const loadToolsTool = defineTool({
   name: "load_tools",
   group: "workspace",
   description:
-    "Load tools for any task, regardless of the current screen: profile (edit profile and search preferences, Undo, setup), files (documents and resume import), resume (write, edit, approve and export), jobs (find, shortlist, hide, sources), applications (prepare, send with grants, documents), tracking (stages, reminders, interviews), settings (AI behavior, applying policy, search plans), browser (read and work in a lent tab), workspace (summary, questions, navigation). Loaded groups stay available this turn.",
+    "Load tools for any task, regardless of the current screen: profile (profile/preferences edits, Undo, setup), files (library, import, exports), resume (write, edit, approve, history, PDF), jobs (find, shortlist, hide, sources), applications (queues, prepare, send with grants, forms, letters), tracking (stages, notes, reminders, interviews, companies, outcomes), settings (applying policy, AI behavior, search plans, theme, zoom, reset), browser (read and work in a lent tab), workspace (summary, questions, navigation). Loaded groups stay available this turn.",
   parameters: json.object(
     { groups: json.array(json.enumOf(assistantToolGroupValues)), names: json.ids("Load exact tool names when known, to keep the prompt small.") },
   ),

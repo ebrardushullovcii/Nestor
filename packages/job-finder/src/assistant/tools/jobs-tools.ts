@@ -88,7 +88,7 @@ function filterJobs(
         return false;
       }
     }
-    if (input.scope === "found" && job.status !== "discovered") return false;
+    if (input.scope === "found" && !["discovered", "shortlisted"].includes(job.status)) return false;
     if (input.scope === "dismissed" && job.status !== "archived") return false;
     if (
       typeof input.minScore === "number" &&
@@ -374,7 +374,7 @@ export const shortlistJobsTool = defineTool({
           outcome: `held back: same posting as job ${caveats.alreadyAppliedAs.jobId}, already applied (${caveats.alreadyAppliedAs.status})`,
         };
       }
-      if (job.status !== "discovered") {
+      if (!["discovered", "shortlisted"].includes(job.status)) {
         return { jobId, outcome: `already ${job.status}` };
       }
       if (job.listingActivity.status === "closed") {
@@ -510,7 +510,7 @@ export const shortlistResultSetTool = defineTool({
         heldBack.push({ jobId: id, reason: "not found" });
         continue;
       }
-      if (job.status !== "discovered") {
+      if (!["discovered", "shortlisted"].includes(job.status)) {
         alreadySelected.push(id);
         continue;
       }

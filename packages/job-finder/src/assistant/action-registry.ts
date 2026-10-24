@@ -974,7 +974,7 @@ export const JOB_FINDER_ACTIONS = {
   ),
   "set-company-preference": action(
     C.SetCompanyPreferenceInputSchema,
-    "tracking",
+    "settings",
     "local",
     "Follow, prefer, exclude or reset a company.",
     (i, c) => c.service.setCompanyPreference(i),
