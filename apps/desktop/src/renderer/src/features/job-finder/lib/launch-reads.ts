@@ -2,8 +2,10 @@ import { useSyncExternalStore } from "react";
 import { toDestinationBadgeCount } from "./destination-counts";
 import { JOB_FINDER_ROUTE_PATHS } from "./job-finder-route-hrefs";
 import type {
+  QueryJobListResult,
   WorkspaceHomeSummary,
   WorkspaceListCounts,
+  WorkspaceStartupContext,
 } from "@nestor/contracts";
 
 /**
@@ -14,9 +16,26 @@ import type {
 export interface LaunchReads {
   counts: WorkspaceListCounts | null;
   home: WorkspaceHomeSummary | null;
+  context: WorkspaceStartupContext | null;
+  /**
+   * Find jobs' first page in Best match, for the list without and with the
+   * weaker matches (which one opens depends on the plan and Settings).
+   */
+  findJobs: {
+    focused: QueryJobListResult;
+    wide: QueryJobListResult;
+  } | null;
 }
 
-let reads: LaunchReads = { counts: null, home: null };
+/** The page Find jobs opens on; the same size as its pager's pages. */
+export const LAUNCH_FIND_JOBS_PAGE_SIZE = 50;
+
+let reads: LaunchReads = {
+  counts: null,
+  home: null,
+  context: null,
+  findJobs: null,
+};
 let started = false;
 const listeners = new Set<() => void>();
 
@@ -41,6 +60,24 @@ export function startLaunchReads(): void {
   void queries
     .getListCounts()
     .then((counts) => publish({ counts }))
+    .catch(() => undefined);
+  void queries
+    .getStartupContext()
+    .then((context) => publish({ context }))
+    .catch(() => undefined);
+  const page = { offset: 0, limit: LAUNCH_FIND_JOBS_PAGE_SIZE };
+  void Promise.all([
+    queries.queryJobList({ list: "discovery", sort: "best_match", page }),
+    queries.queryJobList({
+      list: "discovery",
+      sort: "best_match",
+      filters: {
+        discoveryBands: ["matches", "unchecked", "weaker", "mismatches"],
+      },
+      page,
+    }),
+  ])
+    .then(([focused, wide]) => publish({ findJobs: { focused, wide } }))
     .catch(() => undefined);
 }
 

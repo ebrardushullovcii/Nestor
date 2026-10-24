@@ -3,7 +3,8 @@ import { KeptRouteVisibilityContext } from "../lib/kept-route-visibility";
 
 const KEY_PREFIX = "nestor.job-finder.last-visit.";
 
-function readVisit(key: string): string | null {
+/** When the person last left this screen, read without starting a visit. */
+export function readVisit(key: string): string | null {
   try {
     const raw = window.localStorage.getItem(KEY_PREFIX + key);
     return raw && !Number.isNaN(Date.parse(raw)) ? raw : null;
