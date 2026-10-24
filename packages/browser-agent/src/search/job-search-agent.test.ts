@@ -193,6 +193,31 @@ test("lists links after the view's limit and advances via the selected page cont
   expect(result.incomplete).toBe(false);
 });
 
+test.each(["job_detail", "explicit"])("a later model decision can correct a duplicate's earlier rejection (%s)", async (kind) => {
+  let reads = 0;
+  const result = await runJobSearchAgent({
+    hands: hands({ current: rawPage() }), config: config(),
+    llmClient: scripted([
+      { name: "extract_jobs", args: { pageType: "search_results" } },
+      { name: "navigate", args: { url: "https://jobs.example.test/jobs/j1" } },
+      { name: "extract_jobs", args: kind === "job_detail"
+        ? { pageType: "job_detail" }
+        : { pageType: "search_results", rejected: [{ url: "https://jobs.example.test/jobs/j1", category: "place", reason: "The model now confirms a different work location." }] } },
+      { name: "finish", args: { reason: "Corrected the decision after reading more." } },
+    ]),
+    jobExtractor: { extractJobsFromPage: () => {
+      reads += 1;
+      return Promise.resolve([{ ...posting("Platform Engineer", "Northwind", "j1"),
+        searchRejection: reads === 1 ? { category: "closed" as const, reason: "Provisional card reading." } : null,
+      }]);
+    } },
+  });
+  expect(result.jobs).toHaveLength(1);
+  expect(result.jobs[0]?.searchRejection).toEqual(kind === "job_detail" ? null : {
+    category: "place", reason: "The model now confirms a different work location.",
+  });
+});
+
 function posting(title: string, company: string, id: string) {
   return {
     sourceJobId: id,

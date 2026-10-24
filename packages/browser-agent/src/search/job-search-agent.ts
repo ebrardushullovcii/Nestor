@@ -442,6 +442,7 @@ export async function runJobSearchAgent(
   const seenLinkReads = new Set<string>();
   let pageContentRevision = 0;
   let readContentRevision = 0;
+  let decisionRevision = 0;
   const savedCount = () =>
     collected.filter((job) => !job.searchRejection).length;
   const keep = (job: JobPosting): boolean => {
@@ -758,7 +759,10 @@ export async function runJobSearchAgent(
       // text, links and extraction URL to a fresh observation, not a cached
       // source page (R3-069).
       const observation = await pageTools.observe();
-      const pageText = await hands.readText();
+      const pageText =
+        pageType === "search_results" && hands.readLinkedText
+          ? await hands.readLinkedText()
+          : await hands.readText();
       if (!observation.url) {
         return { kind: "ok", content: "There is no page to read yet." };
       }
@@ -825,6 +829,22 @@ export async function runJobSearchAgent(
         // supply its own posting link. Do not count it as rejected as well.
         if (posting && known.has(jobKey(posting))) {
           const key = jobKey(posting);
+          const index = collected.findIndex((job) => jobKey(job) === key);
+          const previous = collected[index];
+          // A duplicate identity must not freeze an earlier model verdict.
+          // An explicit decision, or a model read of the posting itself,
+          // can correct a provisional result-page rejection.
+          if (
+            previous &&
+            (decision || pageType === "job_detail") &&
+            JSON.stringify(previous.searchRejection ?? null) !==
+              JSON.stringify(posting.searchRejection ?? null)
+          ) {
+            collected[index] = posting;
+            decisionRevision += 1;
+            added.push(posting);
+            continue;
+          }
           if (!duplicateKeys.has(key)) {
             duplicateKeys.add(key);
             duplicateListings += 1;
@@ -1361,6 +1381,7 @@ export async function runJobSearchAgent(
               const savedBefore = collected.length;
               const contentBefore = pageContentRevision;
               const readsBefore = readContentRevision;
+              const decisionsBefore = decisionRevision;
               const outcome = await tool.execute(raw, context);
               if (outcome.kind !== "ok") return outcome;
               const savedNewJobs = collected.length > savedBefore;
@@ -1371,7 +1392,8 @@ export async function runJobSearchAgent(
                 savedNewJobs ||
                 readUnreadContent ||
                 pageContentRevision > contentBefore ||
-                readContentRevision > readsBefore;
+                readContentRevision > readsBefore ||
+                decisionRevision > decisionsBefore;
               if (madeProgress) {
                 lastProgressStep = context.step;
               }
@@ -1508,6 +1530,7 @@ export async function runJobSearchAgent(
           links,
           pageUrl,
           size: Math.ceil(part.window.length / 2),
+          inlineLinks: Boolean(hands.readLinkedText),
         });
         if (halves.length > 1) {
           const more: ExtractedJobs = [];
@@ -1526,7 +1549,12 @@ export async function runJobSearchAgent(
         linkedPartReads.set(linkedKey, jobs);
       return jobs;
     };
-    const parts = pagePartsForReading({ pageText, links, pageUrl });
+    const parts = pagePartsForReading({
+      pageText,
+      links,
+      pageUrl,
+      inlineLinks: Boolean(hands.readLinkedText),
+    });
     // One call reads a bounded number of new parts, so it ends well inside
     // the tool deadline; the rest wait for the next call on this page, which
     // starts where this one stopped (parts already read come from the cache).

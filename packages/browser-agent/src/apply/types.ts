@@ -239,6 +239,7 @@ export interface ApplyPageHands {
   wait: (milliseconds: number) => Promise<void>;
   goBack: () => Promise<ApplyNavigationResult>;
   readText: (ref?: string) => Promise<string>;
+  readLinkedText?: () => Promise<string>;
   fillText: (ref: string, value: string) => Promise<ApplyWriteResult>;
   chooseOption: (ref: string, optionLabel: string) => Promise<ApplyWriteResult>;
   setToggle: (ref: string, checked: boolean) => Promise<ApplyWriteResult>;

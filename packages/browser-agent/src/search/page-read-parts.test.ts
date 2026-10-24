@@ -36,6 +36,12 @@ function board(count: number) {
 }
 
 describe("reading a long results page in parts", () => {
+  test("keeps each semantic page item with its own text and inline URL without repeating a separate link list", () => {
+    const items = Array.from({ length: 40 }, (_, index) => `[Page item ${index}]\nEmployer ${index}\nEngineer → https://jobs.example.test/jobs/${index}\n${"Visible card facts ".repeat(20)}\n[End page item ${index}]`);
+    const parts = pagePartsForReading({ pageText: items.join("\n"), pageUrl, links: [], inlineLinks: true, size: 1000 });
+    for (const item of items) expect(parts.some(part => part.window.includes(item))).toBe(true);
+    expect(parts.every(part => !part.text.includes("Page links in this part"))).toBe(true);
+  });
   test("every listing reaches some part with its own address", () => {
     const { text, links } = board(60);
     const parts = pagePartsForReading({ pageText: text, links, pageUrl });

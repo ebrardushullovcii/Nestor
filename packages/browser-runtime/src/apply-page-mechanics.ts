@@ -16,6 +16,7 @@ import type {
 } from "@nestor/contracts";
 import { describeBrowserError, isPageReplacedError } from "@nestor/contracts";
 import type { Frame, Locator, Page } from "playwright";
+import { readPageLinkedText } from "./page-linked-text";
 
 import {
   closePrepareOnlyAuthorizedFormActionWindow,
@@ -1364,6 +1365,7 @@ export function createPlaywrightApplyPageMechanics(
 ): ApplyRawPageHands {
   return {
     readPage: () => readRawApplyPage(page),
+    readLinkedText: () => readPageLinkedText(page),
     fillText: async (ref, value): Promise<ApplyWriteResult> => {
       const locator = controlLocator(page, ref);
       if (!locator) {
