@@ -15,6 +15,7 @@ import {
   prepareWorkspaceQueryDatabase,
 } from "./workspace-query-repository";
 import { subscribeWorkspaceCommits } from "./workspace-commits";
+import { ensureWorkspaceReadIndex } from "./internal/workspace-read-index";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -30,6 +31,42 @@ async function fixture() {
   return { ...temp, writer, reader };
 }
 describe("independent workspace queries", () => {
+  test("plan ordering preserves indexed job facts; actual membership changes update them", async () => {
+    const { writer, reader, filePath } = await fixture();
+    await writer.commitSavedJobDelta({
+      upserts: ["a", "b", "c"].map((id) => createSavedJob({ id })),
+    });
+    const db = new DatabaseSync(filePath);
+    cleanups.push(() => db.close());
+    db.exec(`INSERT INTO plan_job_memberships VALUES ('p', 'a', 0), ('p', 'b', 1), ('q', 'a', 0);
+      CREATE TEMP TABLE query_index_writes(operation TEXT);
+      CREATE TEMP TRIGGER count_query_insert AFTER INSERT ON main.workspace_job_index BEGIN INSERT INTO query_index_writes VALUES ('insert'); END;
+      CREATE TEMP TRIGGER count_query_update AFTER UPDATE ON main.workspace_job_index BEGIN INSERT INTO query_index_writes VALUES ('update'); END;
+      CREATE TEMP TRIGGER count_query_delete AFTER DELETE ON main.workspace_job_index BEGIN INSERT INTO query_index_writes VALUES ('delete'); END;
+      DROP TRIGGER workspace_membership_identity_update;
+      CREATE TRIGGER workspace_membership_update AFTER UPDATE ON plan_job_memberships BEGIN SELECT RAISE(FAIL, 'Legacy broad trigger ran'); END;`);
+    // An existing database gets only the corrected trigger, without a rebuild.
+    ensureWorkspaceReadIndex(db);
+    expect(db.prepare("SELECT * FROM query_index_writes").all()).toEqual([]);
+    const ids = (planId: string) => reader.queryJobList({
+      list: "all", filters: { planId },
+    }).rows.map((job) => job.id).sort();
+    expect(ids("p")).toEqual(["a", "b"]);
+    const canonical = await writer.listSavedJobs();
+    db.exec("UPDATE plan_job_memberships SET position = 1 - position WHERE plan_id = 'p'");
+    expect(db.prepare("SELECT * FROM query_index_writes").all()).toEqual([]);
+    expect(ids("p")).toEqual(["a", "b"]);
+    expect(await writer.listSavedJobs()).toEqual(canonical);
+    expect(db.prepare("SELECT item_id FROM plan_job_memberships WHERE plan_id = 'p' ORDER BY position").all().map((row) => row.item_id)).toEqual(["b", "a"]);
+    db.exec("UPDATE plan_job_memberships SET item_id = 'c' WHERE plan_id = 'p' AND item_id = 'a'");
+    expect(ids("p")).toEqual(["b", "c"]);
+    expect(ids("q")).toEqual(["a"]);
+    db.exec("BEGIN; DELETE FROM plan_job_memberships WHERE plan_id = 'p'; ROLLBACK");
+    expect(ids("p")).toEqual(["b", "c"]);
+    db.exec("DELETE FROM plan_job_memberships WHERE plan_id = 'p' AND item_id = 'b'");
+    expect(ids("p")).toEqual(["c"]);
+  });
+
   test("Find jobs bands keep unjudged work visible and exclude decided and weaker jobs by default", async () => {
     const { writer, reader } = await fixture();
     const base = createSavedJob({

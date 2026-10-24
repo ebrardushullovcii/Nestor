@@ -191,8 +191,13 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
     database.exec(
       "CREATE INDEX IF NOT EXISTS plan_job_membership_job_idx ON plan_job_memberships(item_id, plan_id)",
     );
+    // Older triggers rebuilt job facts even when only plan ordering changed.
+    // Replace that trigger without rebuilding the index or changing any data.
+    database.exec("DROP TRIGGER IF EXISTS workspace_membership_update");
     for (const operation of ["insert", "delete", "update"] as const) {
-      database.exec(`CREATE TRIGGER IF NOT EXISTS workspace_membership_${operation} AFTER ${operation.toUpperCase()} ON plan_job_memberships BEGIN
+      const name = operation === "update" ? "identity_update" : operation;
+      database.exec(`CREATE TRIGGER IF NOT EXISTS workspace_membership_${name} AFTER ${operation.toUpperCase()} ON plan_job_memberships
+        ${operation === "update" ? "WHEN OLD.plan_id IS NOT NEW.plan_id OR OLD.item_id IS NOT NEW.item_id" : ""} BEGIN
         ${operation === "insert" ? "" : "DELETE FROM workspace_job_index WHERE origin = 'saved_jobs' AND id = OLD.item_id AND plan_id = OLD.plan_id;"}
         ${operation === "delete" ? "" : indexJobSql("saved_jobs", "WHERE j.id = NEW.item_id")}
       END`);
