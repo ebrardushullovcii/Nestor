@@ -6,7 +6,7 @@ let startup:
   | {
       context: Promise<void>;
       queries: Promise<void>;
-      writer: Promise<void>;
+      writer: Promise<boolean>;
       complete: Promise<void>;
     }
   | undefined;
@@ -19,7 +19,7 @@ function prepare() {
     startup = {
       context: Promise.resolve(),
       queries: Promise.resolve(),
-      writer: Promise.resolve(),
+      writer: Promise.resolve(false),
       complete: Promise.resolve(),
     };
     return startup;
@@ -34,9 +34,9 @@ function prepare() {
   let rejectQueries: (error: Error) => void;
   let resolveComplete: () => void;
   let rejectComplete: (error: Error) => void;
-  let resolveWriter: () => void;
+  let resolveWriter: (ready: boolean) => void;
   let rejectWriter: (error: Error) => void;
-  const writer = new Promise<void>((resolve, reject) => {
+  const writer = new Promise<boolean>((resolve, reject) => {
     resolveWriter = resolve;
     rejectWriter = reject;
   });
@@ -55,7 +55,7 @@ function prepare() {
   worker.on("message", (message: unknown) => {
     if (message === "context-ready") resolveContext();
     if (message === "queries-ready") resolveQueries();
-    if (message === "writer-ready") resolveWriter();
+    if (message === "writer-ready") resolveWriter(true);
     if (message === "complete") resolveComplete();
   });
   worker.once("error", (reason: unknown) => {
@@ -98,5 +98,5 @@ export async function waitForWorkspaceDatabaseMigrations(): Promise<void> {
 
 export async function prepareWorkspaceWriter(): Promise<boolean> {
   // Canonical opening retains the single corruption-recovery path on failure.
-  return prepare().writer.then(() => true, () => false);
+  return prepare().writer.catch(() => false);
 }
