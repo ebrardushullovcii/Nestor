@@ -3,10 +3,14 @@ import {
   ApplyJobResultSchema,
   ApplyRunSchema,
   DiscoveryRunRecordSchema,
+  JobFinderDiscoveryStateSchema,
   SourceDebugRunRecordSchema,
   SourceDebugWorkerAttemptSchema,
 } from "@nestor/contracts";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import { createInMemoryJobFinderRepository } from "@nestor/db";
+import { createSeed } from "../workspace-service.test-fixtures";
+import { createCampaign } from "./campaign-dashboard";
 
 import {
   deriveDiscoveryFailureEvidence,
@@ -15,6 +19,7 @@ import {
   deriveSourceDebugCampaignWork,
   deriveSourceDebugFailureEvidence,
   isUserOwnedBlockerEvidence,
+  persistAutomaticDiscoverySafeguard,
   shouldPersistApplicationFailureNotification,
 } from "./automatic-safeguards";
 
@@ -367,6 +372,65 @@ describe("automatic application safeguard identity", () => {
  * attention, not a broken plan.
  */
 describe("deriveDiscoveryRunFailureEvidence", () => {
+  test("the pause decision never opens a stored run's activity history", () => {
+    const failed = discoveryRun({ id: "stored-failure", state: "failed" });
+    Object.defineProperty(failed, "activity", {
+      get() {
+        throw new Error("Failure evidence opened activity history");
+      },
+    });
+    expect(deriveDiscoveryRunFailureEvidence([failed])).toEqual([
+      {
+        attemptId: "discovery_run:stored-failure",
+        failed: true,
+        occurredAt: completedAt,
+      },
+    ]);
+  });
+
+  test("the terminal pause check borrows canonical runs without refreshing ledger/display rows", async () => {
+    const seed = createSeed();
+    const repository = createInMemoryJobFinderRepository(seed);
+    const canonical = JobFinderDiscoveryStateSchema.parse({
+      ...seed.discovery,
+      recentRuns: [discoveryRun({ id: "stored-success", state: "completed" })],
+    });
+    Object.defineProperty(canonical, "discoveryLedger", {
+      get() {
+        throw new Error("The pause check opened the ledger");
+      },
+    });
+    const readDiscoveryStateForRun = vi.fn(() => Promise.resolve(canonical));
+    const readDiscoveryDisplayProjection = vi.fn(() => {
+      throw new Error("The pause check refreshed the display");
+    });
+    const campaign = createCampaign({
+      id: "campaign-1",
+      name: "Synthetic",
+      mode: "precision",
+      searchPreferences: seed.searchPreferences,
+      now: completedAt,
+    });
+    await persistAutomaticDiscoverySafeguard({
+      ctx: {
+        repository: {
+          ...repository,
+          readDiscoveryStateForRun,
+          readDiscoveryDisplayProjection,
+        },
+        withIntelligenceTransition: async (operation) => operation(),
+      },
+      campaign,
+      now: completedAt,
+    });
+    expect(readDiscoveryStateForRun).toHaveBeenCalledOnce();
+    expect(readDiscoveryDisplayProjection).not.toHaveBeenCalled();
+    expect(
+      (await repository.getIntelligenceState()).safeguards
+        .abnormalFailurePauses,
+    ).toEqual([]);
+  });
+
   function run(
     id: string,
     executions: readonly { targetId: string; state: "completed" | "failed" }[],
