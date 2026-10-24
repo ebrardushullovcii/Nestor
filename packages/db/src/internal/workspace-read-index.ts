@@ -232,15 +232,13 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
         ${operation === "delete" ? "" : indexJobSql("saved_jobs", "WHERE j.id = NEW.item_id")}
       END`);
     }
+    // The locale-aware page order owns sorting. These earlier binary-sort
+    // indexes cannot answer it, but every conversion and job write paid for them.
     database.exec(`
-      CREATE INDEX IF NOT EXISTS workspace_job_list_idx ON workspace_job_index(
-        plan_id, hidden, status, unjudged, closed, mismatch, provisional, outside,
-        score DESC, title_family, recency DESC, detail, title, company, id);
-      CREATE INDEX IF NOT EXISTS workspace_job_fit_idx ON workspace_job_index(
-        plan_id, unjudged, closed, mismatch, provisional, outside, rank_score DESC,
-        title_family, recency DESC, detail, title, company, id);
-      CREATE INDEX IF NOT EXISTS workspace_job_date_idx ON workspace_job_index(plan_id, recency DESC, id);
-      CREATE INDEX IF NOT EXISTS workspace_job_company_idx ON workspace_job_index(plan_id, company, id);
+      DROP INDEX IF EXISTS workspace_job_list_idx;
+      DROP INDEX IF EXISTS workspace_job_fit_idx;
+      DROP INDEX IF EXISTS workspace_job_date_idx;
+      DROP INDEX IF EXISTS workspace_job_company_idx;
       CREATE INDEX IF NOT EXISTS workspace_job_identity_idx ON workspace_job_index(id, plan_id);
       CREATE INDEX IF NOT EXISTS workspace_ledger_activity_idx ON discovery_ledger(
         json_extract(value,'$.latestStatus'),json_extract(value,'$.inactiveAt'));
