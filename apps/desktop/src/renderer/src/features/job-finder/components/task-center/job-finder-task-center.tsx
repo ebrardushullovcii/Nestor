@@ -358,7 +358,7 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
           off the top of the window, and swallowed clicks on the toolbar. */}
       <section
         aria-label="Activity"
-        className="surface-popover-solid absolute right-0 top-12 grid max-h-[min(38rem,calc(100vh-8rem))] w-[min(34rem,calc(100vw-2rem))] gap-3 overflow-x-hidden overflow-y-auto rounded-(--radius-panel) border border-(--surface-panel-border) p-4 shadow-(--modal-shadow)"
+        className="surface-popover-solid absolute right-0 top-12 grid max-h-[min(38rem,calc(100vh-8rem))] w-[min(34rem,calc(100vw-2rem))] gap-3 overflow-x-hidden overflow-y-auto rounded-(--radius-panel) border border-(--surface-panel-border) p-4 shadow-(--modal-shadow) motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-150"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="grid gap-1">

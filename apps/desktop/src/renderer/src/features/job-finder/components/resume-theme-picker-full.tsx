@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ResumeTemplateDefinition,
   ResumeTemplateId,
@@ -38,57 +38,49 @@ export function ResumeThemePickerFull(props: {
     selectedThemeId,
     themes,
   } = props;
-  const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const previewBoxRef = useRef<HTMLDivElement | null>(null);
   const heroVisualTags = getResumeTemplateVisualTags(heroTemplate).slice(0, 2);
+  // The preview sits far down Settings; its sample resume is laid out only
+  // once its box comes near the screen. The box keeps a page's ratio either
+  // way, so nothing moves when it fills in.
+  const [isPreviewNear, setIsPreviewNear] = useState(
+    () => typeof IntersectionObserver === "undefined",
+  );
   // The catalog preview runs the full 2,300-line template engine. Building it
   // inline in JSX regenerated the whole document — and forced the iframe to
   // re-parse it — on every unrelated render of this screen, so saving the
   // appearance theme re-rendered a resume that has nothing to do with it.
   const heroPreviewHtml = useMemo(
     () =>
-      renderResumeTemplateCatalogPreviewHtml(heroTemplate.id, {
-        layout: "panel",
-      }),
-    [heroTemplate.id],
+      isPreviewNear
+        ? renderResumeTemplateCatalogPreviewHtml(heroTemplate.id, {
+            layout: "panel",
+          })
+        : "",
+    [heroTemplate.id, isPreviewNear],
   );
 
   useEffect(() => {
-    const iframe = previewFrameRef.current;
-
-    if (!iframe) {
-      return;
-    }
-
-    const measureHeight = () => {
-      const frameDocument = iframe.contentDocument;
-      if (!frameDocument) {
-        return;
-      }
-
-      const page = frameDocument.querySelector<HTMLElement>(".page");
-      const body = frameDocument.body;
-      const nextHeight = Math.ceil(
-        (page?.getBoundingClientRect().height ?? body?.scrollHeight ?? 0) + 8,
-      );
-
-      if (nextHeight > 0) {
-        iframe.style.height = `${nextHeight}px`;
-      }
-    };
-
-    const handleLoad = () => {
-      measureHeight();
-    };
-
-    handleLoad();
-    iframe.addEventListener("load", handleLoad);
-    window.addEventListener("resize", handleLoad);
-
-    return () => {
-      iframe.removeEventListener("load", handleLoad);
-      window.removeEventListener("resize", handleLoad);
-    };
-  }, [heroTemplate.id]);
+    const box = previewBoxRef.current;
+    if (isPreviewNear || !box) return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setIsPreviewNear(true);
+        }
+      },
+      {
+        // The page's own scroller, so the margin starts the preview a little
+        // before it scrolls into view (a viewport margin stops at its clip).
+        root: box.closest<HTMLElement>(
+          "[data-locked-screen-scroll-area], main",
+        ),
+        rootMargin: "600px 0px",
+      },
+    );
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [isPreviewNear]);
 
   return (
     <div
@@ -145,14 +137,22 @@ export function ResumeThemePickerFull(props: {
                   catalog document carries `script-src 'none'` itself, so no
                   sandbox attribute is needed and Chromium logs no blocked
                   script execution for this frame. */}
-              <iframe
-                aria-hidden="true"
-                className="block min-w-0 max-w-full w-full rounded-2xl border-0 bg-transparent"
-                ref={previewFrameRef}
-                srcDoc={heroPreviewHtml}
-                style={{ height: "34rem" }}
-                title={`${heroTemplate.label} preview`}
-              />
+              {/* One letter page (8.5 x 11) plus the frame's 0.45rem inset;
+                  at full scale the page stops growing, so the box does too. */}
+              <div
+                className="mx-auto aspect-[8.5/11] w-full max-w-[calc(8.5in+0.45rem)] min-w-0"
+                data-resume-preview-box
+                ref={previewBoxRef}
+              >
+                {isPreviewNear ? (
+                  <iframe
+                    aria-hidden="true"
+                    className="block size-full min-w-0 rounded-2xl border-0 bg-transparent"
+                    srcDoc={heroPreviewHtml}
+                    title={`${heroTemplate.label} preview`}
+                  />
+                ) : null}
+              </div>
             </div>
 
             <div className="sr-only">

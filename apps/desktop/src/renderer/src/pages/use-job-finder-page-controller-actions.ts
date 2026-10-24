@@ -190,7 +190,8 @@ type BaseActionArgs = {
     requestToken: number,
   ) => boolean;
   isCurrentResumeWorkspaceJob: (jobId: string) => boolean;
-  locationPathname: string;
+  /** The current route, read when an action runs rather than per render. */
+  getLocationPathname: () => string;
   navigate: (
     path: string,
     options?: { replace?: boolean; state?: unknown },
@@ -1028,7 +1029,7 @@ export function createPrimaryPageActions(
     importResumeGuardMessage,
     isCurrentResumeAssistantRequest,
     isCurrentResumeWorkspaceJob,
-    locationPathname,
+    getLocationPathname,
     navigate,
     profileSetupState,
     profileCopilotRequestTokenRef,
@@ -3323,7 +3324,7 @@ export function createPrimaryPageActions(
           // The workspace update changes the mounted setup step. Navigating
           // to the same URL can remount the editor and discard fields that the
           // shared forms intentionally retain between steps.
-          if (locationPathname !== "/job-finder/profile/setup") {
+          if (getLocationPathname() !== "/job-finder/profile/setup") {
             navigate("/job-finder/profile/setup");
           }
         },
@@ -3352,6 +3353,8 @@ export function createPrimaryPageActions(
         stayOnCurrentStep?: boolean;
       },
     ) => {
+      // Where the save started; it decides the hand-off once it settles.
+      const startPathname = getLocationPathname();
       // A "Next: <step>" confirmation is stale the moment the next step
       // renders — the toast then described where the user already was. The
       // save says what it did and nothing more.
@@ -3476,7 +3479,7 @@ export function createPrimaryPageActions(
                 return;
               }
 
-              if (locationPathname !== "/job-finder/profile/setup") {
+              if (startPathname !== "/job-finder/profile/setup") {
                 navigate("/job-finder/profile/setup");
               }
             });

@@ -1524,6 +1524,11 @@ describe("JobFinderShell section navigation", () => {
     expect(document.title).toBe("Find jobs | Job Finder | Nestor");
     expect(document.activeElement).toBe(initialMain);
     expect(screen.getByRole("status").textContent).toBe("Find jobs opened.");
+    // A page still at the top is left alone: writing its scroll position
+    // forced a layout of the new screen.
+    expect(scrollToMock).not.toHaveBeenCalled();
+    initialMain.scrollTop = 240;
+    fireEvent.scroll(initialMain);
 
     const navigation = screen.getByRole("navigation", {
       name: "Job Finder sections",

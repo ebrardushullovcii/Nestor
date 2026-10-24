@@ -150,7 +150,7 @@ function buildContext(overrides: {
     isCurrentResumeWorkspaceJob: () => false,
     liveDiscoveryEvents: [],
     latestWorkspaceRef: overrides.latestWorkspaceRef ?? { current: workspace },
-    locationPathname: "/job-finder/home",
+    getLocationPathname: () => "/job-finder/home",
     navigate: vi.fn(),
     navigateSafely: vi.fn(),
     profileCopilotBusy: false,

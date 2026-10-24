@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { animateIn, ENTER_FROM_BELOW } from "@renderer/lib/motion";
 import type { RecentChange } from "../lib/recent-changes";
 import { BrowserPeek } from "./browser-peek";
 import { AssistantSidebar } from "../assistant/assistant-sidebar";
@@ -198,7 +199,6 @@ const WINDOWS_CAPTION_CONTROLS_INSET = "8.5rem";
 // painted over the left edge of this header outside native fullscreen.
 const MACOS_TRAFFIC_LIGHT_INSET = "5.5rem";
 const MORE_MENU_WIDTH_PX = 264;
-const NO_GLOBAL_SEARCH_ENTRIES: readonly JobFinderGlobalSearchEntry[] = [];
 const MORE_MENU_DESIRED_HEIGHT_PX = 440;
 
 interface CompactRouteScrollEdges {
@@ -569,6 +569,12 @@ export function JobFinderShell({
     [navigate],
   );
   const mainRef = useRef<HTMLElement | null>(null);
+  // Whether the person left the page scrolled. Writing a scroll position
+  // forces a layout of the new screen, so a page already at the top is left
+  // alone; scroll events land before the next frame's callbacks.
+  const isMainScrolledRef = useRef(false);
+  const routeContainerRef = useRef<HTMLDivElement | null>(null);
+  const enteredPathRef = useRef(location.pathname);
   const dragRegionStyle = { WebkitAppRegion: "drag" } as CSSProperties;
   const noDragRegionStyle = { WebkitAppRegion: "no-drag" } as CSSProperties;
   const [windowControlsState, setWindowControlsState] =
@@ -634,16 +640,13 @@ export function JobFinderShell({
     observer.observe(actions);
     return () => observer.disconnect();
   }, []);
-  // The palette index used to be rebuilt on every workspace commit even while
-  // the palette was closed. It is only ever read by the open dialog, so it is
-  // built on demand and stays a stable empty list the rest of the time.
-  const globalSearchEntries = useMemo(
-    () =>
-      isGlobalSearchOpen
-        ? buildJobFinderGlobalSearchEntries(workspace)
-        : NO_GLOBAL_SEARCH_ENTRIES,
-    [isGlobalSearchOpen, workspace],
-  );
+  // The palette index is only ever read by the open dialog, so it is built on
+  // demand (at idle once the palette shows, or by the first query), once per
+  // workspace, and never while the palette is closed.
+  const loadGlobalSearchEntries = useMemo(() => {
+    let entries: readonly JobFinderGlobalSearchEntry[] | null = null;
+    return () => (entries ??= buildJobFinderGlobalSearchEntries(workspace));
+  }, [workspace]);
 
   const activeScreen = useMemo(
     () => getActiveScreen(location.pathname),
@@ -958,6 +961,9 @@ export function JobFinderShell({
   }, [isMoreOpen, moreMenuItemCount]);
 
   useLayoutEffect(() => {
+    // The header strip only shows below 1440px; scrolling a hidden pill into
+    // view still forced a layout of the whole new screen.
+    if (window.matchMedia?.("(min-width: 1440px)").matches) return;
     compactRouteScrollRef.current
       ?.querySelector<HTMLElement>('[aria-current="page"]')
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -1003,15 +1009,20 @@ export function JobFinderShell({
     const announcement = routeAnnouncementRef.current;
     if (announcement) announcement.textContent = "";
     if (!hasDestinationAnchor) {
-      main?.scrollTo({ top: 0 });
+      if (isMainScrolledRef.current) main?.scrollTo({ top: 0 });
       main?.focus({ preventScroll: true });
     }
     if (usesNarrowShellReflow && !hasDestinationAnchor) {
       main?.scrollIntoView({ block: "start" });
     }
+    // The new screen is already there; it settles in over 160 ms.
+    if (enteredPathRef.current !== location.pathname) {
+      enteredPathRef.current = location.pathname;
+      animateIn(routeContainerRef.current, ENTER_FROM_BELOW);
+    }
 
     const frame = window.requestAnimationFrame(() => {
-      if (!hasDestinationAnchor) {
+      if (!hasDestinationAnchor && isMainScrolledRef.current) {
         main?.scrollTo({ top: 0 });
       }
       try {
@@ -1594,7 +1605,7 @@ export function JobFinderShell({
                   ? createPortal(
                       <div
                         aria-label="More"
-                        className="fixed z-[60] grid min-w-0 max-w-[calc(100vw-1rem)] grid-rows-[minmax(0,1fr)_auto] gap-1 overflow-hidden rounded-2xl border border-(--control-border) bg-(--surface-panel-raised) p-2 shadow-xl"
+                        className="fixed z-[60] grid min-w-0 max-w-[calc(100vw-1rem)] grid-rows-[minmax(0,1fr)_auto] gap-1 overflow-hidden rounded-2xl border border-(--control-border) bg-(--surface-panel-raised) p-2 shadow-xl motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-150"
                         data-job-finder-more-menu
                         data-side={moreMenuPlacement?.side ?? "bottom"}
                         style={boundedFloatingSurfaceStyle(moreMenuPlacement)}
@@ -2059,7 +2070,7 @@ export function JobFinderShell({
 
       {isGlobalSearchOpen ? (
         <JobFinderGlobalSearchDialog
-          entries={globalSearchEntries}
+          entries={loadGlobalSearchEntries}
           focusRequest={globalSearchFocusRequest}
           onClose={() => setIsGlobalSearchOpen(false)}
           onNavigate={handleGlobalSearchNavigate}
@@ -2111,6 +2122,9 @@ export function JobFinderShell({
               ? SHELL_MAIN_LOCKED_CLASS
               : SHELL_MAIN_SCROLLING_CLASS
           }
+          onScroll={(event) => {
+            isMainScrolledRef.current = event.currentTarget.scrollTop > 0;
+          }}
           ref={mainRef}
           tabIndex={-1}
         >
@@ -2120,6 +2134,7 @@ export function JobFinderShell({
               usesLockedScreenLayout ? "h-full min-h-0" : "min-h-full",
             )}
             data-job-finder-route-container
+            ref={routeContainerRef}
             // One rhythm token for every route root, declared by the wrapper
             // that owns the route rather than picked per screen.
             style={SHELL_ROUTE_SECTION_GAP_STYLE}

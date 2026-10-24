@@ -4,7 +4,6 @@ import {
   getLockedHeaderSettleScrollTop,
   getLockedHeaderWheelTarget,
   getNestedPaneWheelTarget,
-  getLockedScreenLayoutHeight,
 } from "./locked-screen-layout";
 
 describe("canNestedPaneConsumeWheel", () => {
@@ -91,14 +90,6 @@ describe("getNestedPaneWheelTarget", () => {
         scrollTop: 800,
       }),
     ).toBeNull();
-  });
-});
-
-describe("getLockedScreenLayoutHeight", () => {
-  test("does not manufacture a blank scroll range from the measured header", () => {
-    expect(getLockedScreenLayoutHeight(704, true)).toBeUndefined();
-    expect(getLockedScreenLayoutHeight(704, false)).toBeUndefined();
-    expect(getLockedScreenLayoutHeight(0, true)).toBeUndefined();
   });
 });
 

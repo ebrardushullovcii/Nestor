@@ -1334,13 +1334,19 @@ export function useJobFinderPageController() {
   // the route that owns it. The raw state is kept intact so in-flight actions
   // can complete without racing a disposal; the ownership ref is stamped by
   // every write through `applyScopedActionState`.
-  const scopedActionState = useMemo<ActionState>(() => {
-    const ownerPath = actionMessageOwnerPathRef.current;
-    if (ownerPath !== null && ownerPath !== location.pathname) {
-      return { message: null };
-    }
-    return actionState;
-  }, [actionState, location.pathname]);
+  // Keyed on whether the message shows here, not on the route itself, so a
+  // route change leaves the page context (and every screen reading it) alone.
+  const actionOwnerPath = actionMessageOwnerPathRef.current;
+  const actionStateHiddenHere =
+    actionOwnerPath !== null && actionOwnerPath !== location.pathname;
+  const scopedActionState = useMemo<ActionState>(
+    () => (actionStateHiddenHere ? { message: null } : actionState),
+    [actionState, actionStateHiddenHere],
+  );
+  const getLocationPathname = useCallback(
+    () => latestLocationPathnameRef.current,
+    [],
+  );
 
   const context = useMemo<JobFinderPageContext | null>(() => {
     if (!readyWorkspaceState || !workspace || !actions) {
@@ -1364,7 +1370,7 @@ export function useJobFinderPageController() {
       discoveryRunFeedback,
       liveDiscoveryEvents,
       latestWorkspaceRef,
-      locationPathname: location.pathname,
+      getLocationPathname,
       navigate: (path, options) => {
         void navigate(path, options);
       },
@@ -1435,7 +1441,7 @@ export function useJobFinderPageController() {
     isCurrentResumeAssistantRequest,
     isCurrentResumeWorkspaceJob,
     liveDiscoveryEvents,
-    location.pathname,
+    getLocationPathname,
     navigate,
     navigateFromShell,
     canImportResume,
