@@ -1,6 +1,9 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import {
   workModeValues,
+  isLikelyUtilityShortlistJob,
+  resolveSavedJobCompany,
+  resolveSavedJobLocation,
   QueryJobListInputSchema,
   QueryCompaniesInputSchema,
   type WorkspaceStartupContext,
@@ -19,10 +22,12 @@ import {
   type JobFinderJobDetail,
 } from "@nestor/contracts";
 import { ensureWorkspaceReadIndex } from "./internal/workspace-read-index";
-import { savedJobValueSql } from "./internal/saved-job-storage";
-import { migrateSavedJobStorage } from "./internal/saved-job-storage-migration";
+import {
+  savedJobValueSql,
+  ensureSavedJobRelations,
+} from "./internal/saved-job-storage";
 import { ensureResumeApprovalState } from "./internal/resume-approval-state";
-import { migratePreferenceStorage } from "./internal/preference-storage";
+import { ensurePreferenceStorageTables } from "./internal/preference-storage";
 import { validateWorkspaceSettingsFile } from "./internal/state";
 
 export interface WorkspaceQueryRepository {
@@ -44,15 +49,78 @@ export interface WorkspaceQueryRepository {
   close(): void;
 }
 
-/** Install scalar read columns before opening the read-only connection. */
+/** Prepare screen facts only. Evidence conversion is not a prerequisite. */
 export function prepareWorkspaceQueryDatabase(filePath: string): void {
   const database = new DatabaseSync(filePath);
   try {
+    database.exec(
+      "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY; BEGIN IMMEDIATE",
+    );
     validateWorkspaceSettingsFile(database);
     ensureResumeApprovalState(database);
-    migratePreferenceStorage(database);
-    migrateSavedJobStorage(database);
+    ensureSavedJobRelations(database);
+    ensurePreferenceStorageTables(database);
+    const legacy = !database
+      .prepare("SELECT 1 FROM schema_migrations WHERE version = 27")
+      .get();
+    if (legacy)
+      database.exec(`INSERT OR IGNORE INTO plan_job_memberships(plan_id,item_id,position)
+      WITH campaigns AS MATERIALIZED (
+        SELECT json_extract(c.value, '$.id') AS id, jsonb_extract(jsonb(c.value), '$.jobIds') AS jobs
+        FROM singleton_state s, json_each(s.value, '$.campaigns') c WHERE s.key = 'campaign_state')
+      SELECT c.id, j.value, j.key FROM campaigns c, json_each(c.jobs) j`);
     ensureWorkspaceReadIndex(database);
+    if (
+      !database
+        .prepare("SELECT 1 FROM schema_migrations WHERE version = 28")
+        .get()
+    ) {
+      const updates = [];
+      for (const row of database
+        .prepare(
+          `SELECT id, json_extract(value, '$.title') AS title,
+        json_extract(value, '$.canonicalUrl') AS canonicalUrl, json_extract(value, '$.company') AS company,
+        json_extract(value, '$.location') AS location, json_extract(value, '$.description') AS description,
+        json_extract(value, '$.status') AS status FROM saved_jobs WHERE assessment_id IS NULL`,
+        )
+        .iterate()) {
+        // The existing intake/display policy, with no model decision changed.
+        if (
+          typeof row.title !== "string" ||
+          typeof row.company !== "string" ||
+          typeof row.canonicalUrl !== "string" ||
+          typeof row.location !== "string"
+        )
+          continue;
+        const job = {
+          title: row.title,
+          company: row.company,
+          canonicalUrl: row.canonicalUrl,
+          location: row.location,
+          ...(typeof row.description === "string"
+            ? { description: row.description }
+            : {}),
+        };
+        updates.push({
+          id: row.id,
+          visible:
+            row.status !== "discovered" || !isLikelyUtilityShortlistJob(job)
+              ? 1
+              : 0,
+          company: resolveSavedJobCompany(job),
+          location: resolveSavedJobLocation(job),
+        });
+      }
+      const update =
+        database.prepare(`UPDATE workspace_job_index SET visible = ?, company = ?, location = ?
+        WHERE origin = 'saved_jobs' AND id = ?`);
+      for (const row of updates)
+        update.run(row.visible, row.company, row.location, row.id!);
+    }
+    database.exec("COMMIT");
+  } catch (error) {
+    if (database.isTransaction) database.exec("ROLLBACK");
+    throw error;
   } finally {
     database.close();
   }
@@ -64,7 +132,7 @@ const applicationMember = `EXISTS (SELECT 1 FROM workspace_entity_index e
 // The canonical review queue includes prepared applications and excludes the
 // plain shortlisted status used when a job is moved back to Find jobs.
 const shortlistMember = `i.status IN ('drafting','ready_for_review','approved')`;
-const discoveryMember = `i.visible = 1 AND i.status IN ('discovered','shortlisted','drafting','ready_for_review','approved')`;
+const discoveryMember = `i.visible = 1 AND i.feedback = 0 AND i.status IN ('discovered','shortlisted')`;
 function membership(list: WorkspaceJobList): string {
   switch (list) {
     case "discovery":
@@ -168,7 +236,9 @@ export function createWorkspaceQueryRepository(
         .get(planId)!.n,
     );
     return {
-      discovery: count(discoveryMember),
+      discovery: count(
+        `${discoveryMember} AND i.result_group IN ('matches','unchecked')`,
+      ),
       dismissed: count("i.hidden = 1"),
       shortlisted: count(shortlistMember),
       applications,
@@ -219,9 +289,7 @@ export function createWorkspaceQueryRepository(
             .map((row) => [String(row.key), raw(row.value)]),
         );
         const normalized = !!database
-          .prepare(
-            "SELECT 1 FROM sqlite_master WHERE name = 'job_search_plans'",
-          )
+          .prepare("SELECT 1 FROM schema_migrations WHERE version = 27")
           .get();
         const preferenceRow = normalized
           ? database
@@ -298,6 +366,14 @@ export function createWorkspaceQueryRepository(
         const planId = plan(query.filters);
         const args: SQLInputValue[] = [planId];
         const where = ["i.plan_id = ?", deduplicated, membership(query.list)];
+        if (query.list === "discovery") {
+          const bands = query.filters.discoveryBands ?? [
+            "matches",
+            "unchecked",
+          ];
+          where.push(`i.result_group IN (${bands.map(() => "?").join(",")})`);
+          args.push(...bands);
+        }
         for (const [values, column] of [
           [query.filters.statuses, "status"],
           [query.filters.sources, "source"],
@@ -351,7 +427,7 @@ export function createWorkspaceQueryRepository(
           i.resume_mode AS resumeApplicationMode, i.tailoring_mode AS resumeTailoringMode,
           nullif(i.plan_id, '') AS planId, COALESCE(plan_verdict.score, i.score) AS score, i.recommendation, i.unjudged,
           i.score_upper AS scoreUpper, i.title_family_match AS titleFamilyMatch,
-          i.location_reach AS locationReach, i.closed
+          i.location_reach AS locationReach, i.closed, i.result_group AS resultGroup
           FROM workspace_job_index i LEFT JOIN job_plan_assessments plan_verdict ON i.origin = 'saved_jobs'
             AND plan_verdict.job_id = i.id AND plan_verdict.plan_id = i.plan_id
           WHERE ${condition} ORDER BY ${order[query.sort]} LIMIT ? OFFSET ?`,

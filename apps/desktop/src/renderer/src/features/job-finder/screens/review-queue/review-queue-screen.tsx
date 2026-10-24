@@ -301,14 +301,19 @@ export function ReviewQueueScreen(props: {
     () => collectInProgressApplicationJobIds(applicationRecords),
     [applicationRecords],
   );
+  const queuedJobIds = useMemo(
+    () => new Set(listApplyQueueWaitingJobIds(props.applyQueue)),
+    [props.applyQueue],
+  );
   const selectedWorkflowStatus = getReviewQueueWorkflowStatus(
     selectedItem,
     selectedAsset,
     selectedItem ? isJobPending(selectedItem.jobId) : false,
-    // Same set the Shortlisted rows read. Leaving it out gave the header its
-    // own second verdict for the job already selected in the list.
+    // Same sets the Shortlisted rows read. Leaving one out gave the header
+    // its own second verdict for the job already selected in the list.
     preparedJobIds,
     applicationPreparingJobIds,
+    queuedJobIds,
   );
   const selectedJobEmployerLocationLine = selectedJob
     ? formatJobEmployerLocationLine({
@@ -386,10 +391,6 @@ export function ReviewQueueScreen(props: {
   // queues them all, ten at a time inside the daily limit (ADR 0058). Jobs
   // already in Applications, running, or in the queue are left alone.
   const [applyAllPending, setApplyAllPending] = useState(false);
-  const queuedJobIds = useMemo(
-    () => new Set(listApplyQueueWaitingJobIds(props.applyQueue)),
-    [props.applyQueue],
-  );
   const handleApplyToJobs = useCallback(
     (jobIds: readonly string[]) => {
       const unavailable = new Set([

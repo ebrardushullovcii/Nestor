@@ -88,6 +88,12 @@ export const NEEDS_RESUME_LABEL = "Needs a resume";
 export const TO_REVIEW_LABEL = "To review";
 
 /**
+ * A ready job an Apply press queued that no run has taken yet. It read
+ * "Ready to apply" beside "Today's limit is reached", as if nothing held it.
+ */
+export const IN_APPLY_QUEUE_LABEL = "In the apply queue";
+
+/**
  * True when the job's saved resume kept the person's own wording because the
  * listing text was not there when it was written, and the person has not
  * approved it as it is. Nothing was tailored, so the job still needs its
@@ -170,6 +176,8 @@ export function getReviewQueueWorkflowStatus(
   preparedJobIds?: ReadonlySet<string>,
   /** Jobs with a preparation attempt that is still running. */
   applicationPreparingJobIds?: ReadonlySet<string>,
+  /** Jobs waiting in the Apply queue for a run to take them. */
+  queuedJobIds?: ReadonlySet<string>,
 ): ReviewQueueWorkflowStatus {
   if (!item) {
     return {
@@ -209,6 +217,10 @@ export function getReviewQueueWorkflowStatus(
       label: "In Applications",
       tone: "positive",
     };
+  }
+
+  if (queuedJobIds?.has(item.jobId)) {
+    return { label: IN_APPLY_QUEUE_LABEL, tone: "active" };
   }
 
   if (item.assetStatus === "not_started") {
@@ -970,6 +982,10 @@ const CAPTIONS_REPEATING_STATUS: Readonly<Record<string, readonly string[]>> = {
   "Resume failed": ["Resume failed — try again"],
   [TO_REVIEW_LABEL]: ["Resume ready — review it before applying"],
   "Ready to apply": ["Resume approved", "Resume ready — Apply approves it"],
+  [IN_APPLY_QUEUE_LABEL]: [
+    "Resume approved",
+    "Resume ready — Apply approves it",
+  ],
   "Out of date": ["Resume is out of date — refresh it"],
 };
 
@@ -1057,7 +1073,11 @@ export function getShortlistStatusFilter(
   )
     return "needs_resume";
   if (workflowLabel === TO_REVIEW_LABEL) return "to_review";
-  if (workflowLabel === "Ready to apply") return "ready";
+  if (
+    workflowLabel === "Ready to apply" ||
+    workflowLabel === IN_APPLY_QUEUE_LABEL
+  )
+    return "ready";
   return null;
 }
 

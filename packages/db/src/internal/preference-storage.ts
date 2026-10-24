@@ -200,18 +200,7 @@ export function migratePreferenceStorage(db: DatabaseSync): void {
     .all();
   if (rows.length) backupBeforeStorageMigration(db, 27);
   transaction(db, () => {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS job_sources(id TEXT PRIMARY KEY, source_id TEXT NOT NULL, value TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS job_sources_identity_idx ON job_sources(source_id);
-      CREATE TABLE IF NOT EXISTS search_preference_sets(id TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS search_preference_sources(preference_id TEXT NOT NULL, source_id TEXT NOT NULL, source_version_id TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY(preference_id, source_id));
-      CREATE INDEX IF NOT EXISTS search_preference_sources_order_idx ON search_preference_sources(preference_id, position);
-      CREATE TABLE IF NOT EXISTS job_search_plans(id TEXT PRIMARY KEY, preference_id TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS plan_job_memberships(plan_id TEXT NOT NULL, item_id TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY(plan_id, item_id));
-      CREATE INDEX IF NOT EXISTS plan_job_membership_order_idx ON plan_job_memberships(plan_id, position);
-      CREATE INDEX IF NOT EXISTS plan_job_membership_job_idx ON plan_job_memberships(item_id, plan_id);
-      CREATE TABLE IF NOT EXISTS plan_sources(plan_id TEXT NOT NULL, item_id TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY(plan_id, item_id));
-    `);
+    ensurePreferenceStorageTables(db);
     for (const row of rows) {
       const key = String(row.key);
       const input = decodePreferenceSingleton(
@@ -235,4 +224,19 @@ export function migratePreferenceStorage(db: DatabaseSync): void {
       "INSERT INTO schema_migrations(version, name) VALUES (27, 'normalized_sources_preferences_plans_membership')",
     ).run();
   });
+}
+
+export function ensurePreferenceStorageTables(db: DatabaseSync): void {
+  db.exec(`
+      CREATE TABLE IF NOT EXISTS job_sources(id TEXT PRIMARY KEY, source_id TEXT NOT NULL, value TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS job_sources_identity_idx ON job_sources(source_id);
+      CREATE TABLE IF NOT EXISTS search_preference_sets(id TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS search_preference_sources(preference_id TEXT NOT NULL, source_id TEXT NOT NULL, source_version_id TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY(preference_id, source_id));
+      CREATE INDEX IF NOT EXISTS search_preference_sources_order_idx ON search_preference_sources(preference_id, position);
+      CREATE TABLE IF NOT EXISTS job_search_plans(id TEXT PRIMARY KEY, preference_id TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS plan_job_memberships(plan_id TEXT NOT NULL, item_id TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY(plan_id, item_id));
+      CREATE INDEX IF NOT EXISTS plan_job_membership_order_idx ON plan_job_memberships(plan_id, position);
+      CREATE INDEX IF NOT EXISTS plan_job_membership_job_idx ON plan_job_memberships(item_id, plan_id);
+      CREATE TABLE IF NOT EXISTS plan_sources(plan_id TEXT NOT NULL, item_id TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY(plan_id, item_id));
+    `);
 }

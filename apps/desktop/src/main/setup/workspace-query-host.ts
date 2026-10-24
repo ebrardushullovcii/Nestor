@@ -9,28 +9,49 @@ import {
 import { WorkspaceReadRequestSchema } from "@nestor/contracts";
 import { getJobFinderWorkspaceFilePath } from "../services/job-finder/paths";
 import { setWorkspaceQueryUpdateMode } from "../services/job-finder/query-update-mode";
+import {
+  prepareWorkspaceScreenReads,
+  waitForWorkspaceDatabaseMigrations,
+} from "./workspace-database-startup";
 
 /** Small SQLite reads are ordinary typed IPC; no workspace hydration is needed. */
 export function createWorkspaceQueryHost() {
+  const ready = prepareWorkspaceScreenReads();
+  void ready.catch(() => undefined);
   let repository: WorkspaceQueryRepository | null = null;
   let cursor = 0;
   let unsubscribe: (() => void) | undefined;
   let pendingPush: ReturnType<typeof setImmediate> | undefined;
   let closed = false;
+  void waitForWorkspaceDatabaseMigrations().then(schedulePush);
   const windows = new Set<BrowserWindow>();
-  function reader(): WorkspaceQueryRepository {
+  async function reader(): Promise<WorkspaceQueryRepository> {
+    if (closed) throw new Error("The workspace is closing.");
+    if (repository) return repository;
+    try {
+      await ready;
+    } catch {
+      const { getJobFinderWorkspaceService } =
+        await import("../services/job-finder");
+      await getJobFinderWorkspaceService();
+    }
     if (closed) throw new Error("The workspace is closing.");
     if (repository) return repository;
     const filePath = getJobFinderWorkspaceFilePath();
-    if (!existsSync(filePath))
-      throw new Error("The workspace is opening. Try again shortly.");
-    prepareWorkspaceQueryDatabase(filePath);
+    if (!existsSync(filePath)) {
+      const { getJobFinderWorkspaceService } =
+        await import("../services/job-finder");
+      await getJobFinderWorkspaceService();
+      prepareWorkspaceQueryDatabase(filePath);
+    }
+    if (closed) throw new Error("The workspace is closing.");
+    if (repository) return repository;
     repository = createWorkspaceQueryRepository(filePath);
     cursor = repository.getChanges(Number.MAX_SAFE_INTEGER).revision;
     unsubscribe = subscribeWorkspaceCommits(filePath, schedulePush);
     return repository;
   }
-  ipcMain.handle("workspace-query:read", (event, payload: unknown) => {
+  ipcMain.handle("workspace-query:read", async (event, payload: unknown) => {
     if (
       ![...windows].some((window) => window.webContents === event.sender) ||
       event.senderFrame !== event.sender.mainFrame
@@ -41,7 +62,7 @@ export function createWorkspaceQueryHost() {
       setWorkspaceQueryUpdateMode(event.sender.id, request.input.active);
       return;
     }
-    const db = reader();
+    const db = await reader();
     switch (request.method) {
       case "getStartupContext":
         return db.getStartupContext();
@@ -77,6 +98,7 @@ export function createWorkspaceQueryHost() {
     }
   }
   function schedulePush() {
+    if (closed) return;
     pendingPush ??= setImmediate(pushChanges);
   }
   function close() {

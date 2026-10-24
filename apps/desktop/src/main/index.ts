@@ -118,8 +118,7 @@ function loadInterviewSessionControlsModule() {
 }
 
 let closeInterviewOverlayWindows = () => {};
-let workspaceQueryHost: ReturnType<typeof createWorkspaceQueryHost> | null =
-  null;
+const workspaceQueryHost = hasSingleInstanceLock ? createWorkspaceQueryHost() : null;
 let disposeInterviewSessionControls = () => {};
 
 // The 500ms deferred service initialization owns the background eager loads.
@@ -282,7 +281,6 @@ void app
       if (brandIcons) app.dock?.setIcon(brandIcons.appIcon);
     }
     Menu.setApplicationMenu(null);
-    workspaceQueryHost = createWorkspaceQueryHost();
     recordStartupDiagnostic("creating main window");
     const mainWindow = createMainWindowSafely();
     if (!mainWindow) {

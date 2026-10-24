@@ -20,8 +20,15 @@ import {
   SHELL_SIDEBAR_ROW_COLLAPSED_CLASS,
   SHELL_SIDEBAR_SHORTCUTS_BUTTON_CLASS,
   SHELL_SIDEBAR_ROW_INACTIVE_CLASS,
+  ScreenCountBadge,
   SidebarDestinationLabel,
 } from "@renderer/features/job-finder/components/job-finder-shell";
+import {
+  readLaunchDestinationCount,
+  startLaunchReads,
+  useLaunchReads,
+} from "@renderer/features/job-finder/lib/launch-reads";
+import { JobSearchHomeLaunch } from "@renderer/features/job-finder/screens/job-search-home/job-search-home-launch";
 import { JobFinderShellBrand } from "@renderer/features/job-finder/components/job-finder-shell-brand";
 import { SourceCheckQueueRunner } from "@renderer/features/job-finder/lib/source-check-queue-runner";
 import { LockedScreenLayout } from "@renderer/features/job-finder/components/locked-screen-layout";
@@ -322,6 +329,9 @@ function isOpeningDestinationActive(
   return pathname.startsWith(destinationPath);
 }
 
+// The first frame's rows are asked for before React renders anything.
+startLaunchReads();
+
 function JobFinderOpeningShell() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -336,6 +346,7 @@ function JobFinderOpeningShell() {
       isMinimizable: true,
     });
   const [isSidebarCollapsed] = useState(getInitialSidebarCollapsedState);
+  const launchReads = useLaunchReads();
 
   useLayoutEffect(() => {
     markJobFinderTiming("job-finder:opening-shell:committed");
@@ -417,6 +428,10 @@ function JobFinderOpeningShell() {
       location.pathname,
       destination.path,
     );
+    const launchCount = readLaunchDestinationCount(
+      launchReads.counts,
+      destination.path,
+    );
     return (
       <button
         aria-current={isActive ? "page" : undefined}
@@ -433,11 +448,21 @@ function JobFinderOpeningShell() {
         }}
         type="button"
       >
-        <destination.icon aria-hidden="true" className="size-4 shrink-0" />
+        {isSidebarCollapsed && launchCount !== null ? (
+          <span className="relative inline-flex shrink-0">
+            <destination.icon aria-hidden="true" className="size-4 shrink-0" />
+            <ScreenCountBadge count={launchCount} kind="inventory" markerOnly />
+          </span>
+        ) : (
+          <destination.icon aria-hidden="true" className="size-4 shrink-0" />
+        )}
         <SidebarDestinationLabel
           collapsed={isSidebarCollapsed}
           label={destination.label}
         />
+        {!isSidebarCollapsed && launchCount !== null ? (
+          <ScreenCountBadge count={launchCount} kind="inventory" />
+        ) : null}
       </button>
     );
   }
@@ -896,6 +921,13 @@ function JobFinderOpeningShell() {
               >
                 {openingPlaceholderBlock}
               </LockedScreenLayout>
+            ) : isOpeningHomeRoute && launchReads.counts ? (
+              <JobSearchHomeLaunch
+                counts={launchReads.counts}
+                onNavigate={(route) => {
+                  void navigate(route);
+                }}
+              />
             ) : (
               <section className="grid min-w-0 gap-5 pb-8">
                 {openingHeaderBlock}

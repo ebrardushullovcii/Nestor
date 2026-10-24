@@ -199,9 +199,11 @@ export async function sanitizeAndCheckResumeDraft(
     askModel?: boolean;
   } = {},
 ): Promise<ResumeDraft> {
-  const sanitized = ctx.resumeDraftProcessor
-    ? await ctx.resumeDraftProcessor.sanitize(input)
-    : sanitizeResumeDraft(input);
+  const sanitize = async (draft: ResumeDraft) =>
+    ctx.resumeDraftProcessor
+      ? await ctx.resumeDraftProcessor.sanitize({ ...input, draft })
+      : sanitizeResumeDraft({ ...input, draft });
+  const sanitized = await sanitize(input.draft);
   const tailoringStrength = await resolveEffectiveResumeTailoringStrengthForJob(
     ctx,
     input.job.id,
@@ -221,13 +223,16 @@ export async function sanitizeAndCheckResumeDraft(
     ...checkInput,
     draft: sanitized,
   });
-  return options.fixGeneratedLines
-    ? withResumeClaimFixes({
-        ...checkInput,
-        draft: checked,
-        stretchesAreThePersons: tailoringStrength === "aggressive",
-      })
-    : checked;
+  if (!options.fixGeneratedLines) return checked;
+  const fixed = await withResumeClaimFixes({
+    ...checkInput,
+    draft: checked,
+    stretchesAreThePersons: tailoringStrength === "aggressive",
+  });
+  // Settling can empty a summary that sanitizing fills with the person's own.
+  // Export sanitizes the saved draft and refuses it when the content moves,
+  // so the saved draft has to be sanitized last too.
+  return fixed === checked ? fixed : sanitize(fixed);
 }
 
 function countVisibleEntries(draft: ResumeDraft): number {

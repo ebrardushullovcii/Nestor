@@ -78,6 +78,7 @@ import {
   selectCampaignJobIds,
   toDestinationBadgeCount,
 } from "../lib/destination-counts";
+import { useLaunchReads } from "../lib/launch-reads";
 import {
   SHELL_HEADER_MASK_HEIGHT_CLASS,
   SHELL_SCROLLING_ROUTE_BOTTOM_GUTTER_CLASS,
@@ -412,7 +413,7 @@ interface ScreenCountBadgeProps {
   markerOnly?: boolean | undefined;
 }
 
-function ScreenCountBadge({
+export function ScreenCountBadge({
   count,
   kind,
   markerOnly,
@@ -671,8 +672,12 @@ export function JobFinderShell({
   // named for its population. No count is derived inline here any more: four
   // of them used to count something other than what their destination page
   // prints, and nothing could hold the two together.
+  const launchCounts = useLaunchReads().counts;
   const screenDefinitions = useMemo<readonly ShellScreenDefinition[]>(() => {
     const campaignJobIds = selectCampaignJobIds(workspace);
+    // Until the jobs load, the three list badges come from the database.
+    const openingCounts =
+      workspace.hydration?.phase === "bootstrap" ? launchCounts : null;
 
     return [
       {
@@ -693,7 +698,8 @@ export function JobFinderShell({
         id: "discovery",
         label: "Find jobs",
         count: toDestinationBadgeCount(
-          countDiscoveryVisibleJobs(workspace, campaignJobIds),
+          openingCounts?.discovery ??
+            countDiscoveryVisibleJobs(workspace, campaignJobIds),
         ),
         countKind: "inventory",
         icon: Compass,
@@ -702,7 +708,8 @@ export function JobFinderShell({
         id: "review-queue",
         label: "Shortlisted",
         count: toDestinationBadgeCount(
-          countShortlistedJobs(workspace, campaignJobIds),
+          openingCounts?.shortlisted ??
+            countShortlistedJobs(workspace, campaignJobIds),
         ),
         countKind: "inventory",
         icon: ClipboardCheck,
@@ -711,7 +718,8 @@ export function JobFinderShell({
         id: "applications",
         label: "Applications",
         count: toDestinationBadgeCount(
-          countApplicationRecords(workspace, campaignJobIds),
+          openingCounts?.applications ??
+            countApplicationRecords(workspace, campaignJobIds),
         ),
         countKind: "inventory",
         icon: FileText,
@@ -775,7 +783,7 @@ export function JobFinderShell({
         icon: Settings,
       },
     ];
-  }, [workspace]);
+  }, [launchCounts, workspace]);
 
   const actionScreen = screenDefinitions.find(
     (screen) => screen.id === "actions",

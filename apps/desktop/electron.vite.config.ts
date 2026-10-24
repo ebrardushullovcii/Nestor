@@ -136,6 +136,7 @@ const mainConfig = {
     rollupOptions: {
       input: {
         index: path.resolve(currentDir, "src/main/index.ts"),
+        "workspace-database-startup-worker": path.resolve(currentDir, "src/main/setup/workspace-database-startup-worker.ts"),
         "discovery-cpu-worker": path.resolve(
           currentDir,
           "src/main/services/job-finder/discovery-cpu-worker.ts",

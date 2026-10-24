@@ -884,6 +884,31 @@ describe("already prepared applications", () => {
     ).toBe("Ready to apply");
   });
 
+  it("says a queued ready job waits in the apply queue, under the Ready tab", () => {
+    const queue = [readyItem("a"), readyItem("b")];
+    const status = getReviewQueueWorkflowStatus(
+      queue[0]!,
+      null,
+      false,
+      new Set<string>(),
+      new Set<string>(),
+      new Set(["a"]),
+    );
+
+    expect(status).toEqual({ label: "In the apply queue", tone: "active" });
+    expect(getShortlistStatusFilter(status.label, false)).toBe("ready");
+    expect(
+      getReviewQueueWorkflowStatus(
+        queue[1]!,
+        null,
+        false,
+        new Set<string>(),
+        new Set<string>(),
+        new Set(["a"]),
+      ).label,
+    ).toBe("Ready to apply");
+  });
+
   it("keeps staged applications out of the Shortlisted apply batch", () => {
     const queue = [readyItem("a"), readyItem("b"), readyItem("c")];
     // A staged record already has a destination and recovery in Applications.

@@ -211,15 +211,39 @@ export function migrateDiscoveryStorage(database: DatabaseSync): void {
       database.prepare("INSERT INTO schema_migrations (version, name) VALUES (20, 'normalized_discovery_storage')").run();
     }
     if (!progressMigrated) {
-      const rows = database.prepare("SELECT id, position, active, value, progress FROM discovery_runs").all();
-      for (const row of rows) {
-        if (row.progress !== "{}") continue;
-        const run = RUN_METADATA.parse(JSON.parse(String(row.value)));
-        insertRun(database, run, String(row.id), Number(row.position), Number(row.active) === 1);
-      }
-      if (Number(database.prepare("SELECT COUNT(*) AS n FROM discovery_runs").get()?.n) !== rows.length)
+      const count = database
+        .prepare("SELECT COUNT(*) AS n FROM discovery_runs")
+        .get()!.n;
+      database.exec(`
+        CREATE TEMP TABLE discovery_progress_migration AS
+          SELECT id, jsonb(value) AS value FROM discovery_runs WHERE progress = '{}';
+        INSERT INTO discovery_run_source_health(run_id, id, position, value)
+          SELECT r.id, CAST(s.key AS TEXT), s.key, s.value
+          FROM discovery_progress_migration r, json_each(r.value, '$.summary.sourceHealth') s
+          WHERE 1 ON CONFLICT(run_id, id) DO UPDATE SET value = excluded.value;
+        UPDATE discovery_runs SET
+          value = json_remove(r.value, '$.state', '$.runPhase', '$.completedAt', '$.cancellationRequestedAt', '$.summary'),
+          progress = json_object('state', json_extract(r.value, '$.state'),
+            'runPhase', json_extract(r.value, '$.runPhase'),
+            'completedAt', json_extract(r.value, '$.completedAt'),
+            'cancellationRequestedAt', json_extract(r.value, '$.cancellationRequestedAt'),
+            'summary', json_remove(json_extract(r.value, '$.summary'), '$.sourceHealth'))
+          FROM discovery_progress_migration r WHERE discovery_runs.id = r.id;
+        UPDATE discovery_runs SET progress = json_remove(progress, '$.cancellationRequestedAt')
+          FROM discovery_progress_migration r WHERE discovery_runs.id = r.id
+            AND json_type(r.value, '$.cancellationRequestedAt') IS NULL;
+        DROP TABLE discovery_progress_migration;
+      `);
+      if (
+        database.prepare("SELECT COUNT(*) AS n FROM discovery_runs").get()!
+          .n !== count
+      )
         throw new Error("Discovery progress migration changed the run count.");
-      database.prepare("INSERT INTO schema_migrations (version, name) VALUES (29, 'discovery_run_progress_rows')").run();
+      database
+        .prepare(
+          "INSERT INTO schema_migrations (version, name) VALUES (29, 'discovery_run_progress_rows')",
+        )
+        .run();
     }
     database.exec("COMMIT");
   } catch (error) {
