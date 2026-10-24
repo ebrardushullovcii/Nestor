@@ -43,6 +43,11 @@ export const QueryJobListInputSchema = z
         workModes: z.array(WorkModeSchema).max(10).optional(),
         minimumScore: z.number().min(0).max(100).optional(),
         maximumScore: z.number().min(0).max(100).optional(),
+        discoveryBands: z
+          .array(z.enum(["matches", "unchecked", "weaker", "mismatches"]))
+          .min(1)
+          .max(4)
+          .optional(),
       })
       .strict()
       .default({}),
@@ -94,6 +99,7 @@ export type WorkspaceJobListRow = Pick<
   titleFamilyMatch: SavedJob["matchAssessment"]["titleFamilyMatch"] | null;
   locationReach: SavedJob["matchAssessment"]["locationReach"];
   listingClosed: boolean;
+  resultGroup: "matches" | "unchecked" | "weaker" | "mismatches";
 };
 export interface WorkspaceListCounts {
   discovery: number;

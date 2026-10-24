@@ -82,3 +82,4 @@ export {
   type AssistantRepositoryOptions,
   type AssistantTranscriptItem,
 } from "./assistant-repository";
+export { completeWorkspaceDatabaseMigrations } from "./workspace-database-startup";

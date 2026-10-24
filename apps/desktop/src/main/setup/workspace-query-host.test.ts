@@ -30,6 +30,10 @@ vi.mock("../services/job-finder/paths", () => ({
 vi.mock("../services/job-finder/query-update-mode", () => ({
   setWorkspaceQueryUpdateMode: vi.fn(),
 }));
+vi.mock("./workspace-database-startup", () => ({
+  prepareWorkspaceScreenReads: () => Promise.resolve(),
+  waitForWorkspaceDatabaseMigrations: () => Promise.resolve(),
+}));
 
 import { createWorkspaceQueryHost } from "./workspace-query-host";
 
@@ -57,14 +61,14 @@ function fixture() {
   };
 }
 
-test("shutdown releases the reader once before the writer's clean close", () => {
+test("shutdown releases the reader once before the writer's clean close", async () => {
   const { host, read } = fixture();
-  read();
+  await read();
   expect(mocks.create).toHaveBeenCalledOnce();
   host.close();
   expect(mocks.unsubscribe).toHaveBeenCalledOnce();
   expect(mocks.repository.close).toHaveBeenCalledOnce();
-  expect(read).toThrow("The workspace is closing.");
+  await expect(read()).rejects.toThrow("The workspace is closing.");
   host.close();
   const willQuit = mocks.once.mock.calls[0]![1] as () => void;
   willQuit();
@@ -72,10 +76,10 @@ test("shutdown releases the reader once before the writer's clean close", () => 
   expect(mocks.create).toHaveBeenCalledOnce();
 });
 
-test("quitting before the first query never opens a connection", () => {
+test("quitting before the first query never opens a connection", async () => {
   const { host, read } = fixture();
   host.close();
-  expect(read).toThrow("The workspace is closing.");
+  await expect(read()).rejects.toThrow("The workspace is closing.");
   expect(mocks.prepare).not.toHaveBeenCalled();
   expect(mocks.create).not.toHaveBeenCalled();
 });
