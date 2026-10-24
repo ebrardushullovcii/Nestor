@@ -73,7 +73,10 @@ import {
 } from "./test-api";
 import { migrateLegacyResumeSource } from "./migrate-resume-source";
 import { recoverInterruptedDiscoveryRuns } from "./recover-interrupted-discovery-runs";
-import { recoverPendingJobFinderWorkspaceReset } from "./reset-workspace";
+import {
+  getJobFinderStartupResetRecoveryFact,
+  recoverPendingJobFinderWorkspaceReset,
+} from "./reset-workspace";
 import { getCandidateAssetLibrary } from "./candidate-asset-library-instance";
 import { installAutomaticApplicationAccessResume } from "./automatic-application-access-resume";
 import { installAutomaticSourceAccessResume } from "./automatic-source-access-resume";
@@ -642,8 +645,12 @@ export async function createJobFinderWorkspaceServiceAsync(
     renderResumeHtml: (input) => resumeDraftProcessor.render(input),
     inspectPdf: (filePath) => resumeDraftProcessor.inspectPdf(filePath),
     outputDirectory: getGeneratedResumeDocumentsDirectory(),
-    retainedResumePaths: () =>
-      jobFinderRepository.listRetainedResumeExportPaths(),
+    // An ambiguous reset preserves its files for recovery. Do not classify
+    // unreferenced exports as obsolete while the reset could not be reconciled.
+    retainedResumePaths:
+      getJobFinderStartupResetRecoveryFact().status === "degraded"
+        ? undefined
+        : () => jobFinderRepository.listRetainedResumeExportPaths(),
     previewTestMode: desktopTestApiEnabled
       ? getResumePreviewTestMode(env)
       : "ok",
