@@ -84,6 +84,11 @@ async function main() {
       async () => {
         const browser = await host.connect();
         const page = await browser.contexts()[0]!.newPage();
+        assert.equal(
+          host.openTabCount(),
+          1,
+          "The replaced automation placeholder must close",
+        );
         await page.goto(origin);
         await host.getSession().cookies.set({
           url: `http://localhost:${address.port}`,

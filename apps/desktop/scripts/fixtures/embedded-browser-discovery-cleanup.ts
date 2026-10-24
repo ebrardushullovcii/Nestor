@@ -57,7 +57,34 @@ async function main() {
           await page.getByLabel("Unsent answer").inputValue(),
           "Retained while idle",
         );
-        assert.equal(nativePage.getBackgroundThrottling(), false);
+        assert.equal(nativePage.getBackgroundThrottling(), true);
+        await page.evaluate(() => {
+          Object.assign(window, { hiddenFrameCount: 0 });
+          const count = () => {
+            const state = window as Window & { hiddenFrameCount: number };
+            state.hiddenFrameCount += 1;
+            requestAnimationFrame(count);
+          };
+          requestAnimationFrame(count);
+        });
+        const extraPages = await Promise.all(
+          Array.from({ length: 9 }, async () => {
+            const extra = await context.newPage();
+            await extra.goto(`${url}/other-source`);
+            return extra;
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        assert.equal(
+          await page.evaluate(
+            () =>
+              (window as Window & { hiddenFrameCount: number })
+                .hiddenFrameCount,
+          ),
+          0,
+          "Adding background tabs must not restart an existing hidden tab's frames",
+        );
+        await Promise.all(extraPages.map((extra) => extra.close()));
         const popupPromise = page.waitForEvent("popup", { timeout: 5000 });
         await page.getByRole("button", { name: "Open popup" }).click();
         await (await popupPromise).waitForLoadState();

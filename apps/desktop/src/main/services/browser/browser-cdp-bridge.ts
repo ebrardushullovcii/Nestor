@@ -48,7 +48,11 @@ export interface BrowserCdpHost {
     },
   ): void;
   /** Keep hidden pages awake only while browser commands need them. */
-  onAutomationCommand?(pageId: string, active: boolean): void | Promise<void>;
+  onAutomationCommand?(
+    pageId: string,
+    active: boolean,
+    needsFocus?: boolean,
+  ): void | Promise<void>;
 }
 interface AttachedPage {
   page: BrowserCdpPage;
@@ -678,8 +682,27 @@ export class BrowserCdpBridge {
         "Page.printToPDF",
         "Page.createIsolatedWorld",
       ].includes(method);
+    const needsFocus =
+      method.startsWith("Input.") ||
+      method === "Page.captureScreenshot" ||
+      method === "Page.printToPDF";
+    let focusTimer: ReturnType<typeof setTimeout> | undefined;
+    let focusReady: Promise<void> | undefined;
     try {
-      if (wakePage) await this.host.onAutomationCommand?.(pageId, true);
+      if (wakePage)
+        await this.host.onAutomationCommand?.(pageId, true, needsFocus);
+      if (wakePage && method.startsWith("Runtime.")) {
+        // Most DOM reads return without frames. A pending script may be
+        // waiting for requestAnimationFrame (Playwright's stability checks).
+        // Give only that command focus, rather than painting on every read.
+        focusTimer = setTimeout(() => {
+          focusReady = Promise.resolve().then(() =>
+            this.host.onAutomationCommand?.(pageId, true, true),
+          );
+          void focusReady.catch(() => undefined);
+        }, 32);
+        focusTimer.unref();
+      }
       const result: unknown =
         await binding.target.page.contents.debugger.sendCommand(
           method,
@@ -688,7 +711,19 @@ export class BrowserCdpBridge {
         );
       return record(result) ? result : {};
     } finally {
-      if (wakePage) await this.host.onAutomationCommand?.(pageId, false);
+      clearTimeout(focusTimer);
+      try {
+        if (focusReady) {
+          try {
+            await focusReady;
+          } finally {
+            await this.host.onAutomationCommand?.(pageId, false, true);
+          }
+        }
+      } finally {
+        if (wakePage)
+          await this.host.onAutomationCommand?.(pageId, false, needsFocus);
+      }
     }
   }
 
@@ -717,10 +752,10 @@ export class BrowserCdpBridge {
   ): Promise<Params> {
     const pageId = binding.target.page.id;
     try {
-      await this.host.onAutomationCommand?.(pageId, true);
+      await this.host.onAutomationCommand?.(pageId, true, true);
       return await this.captureAwakeScreenshot(binding, params);
     } finally {
-      await this.host.onAutomationCommand?.(pageId, false);
+      await this.host.onAutomationCommand?.(pageId, false, true);
     }
   }
 
@@ -761,26 +796,22 @@ export class BrowserCdpBridge {
       return this.forward(binding, "Page.captureScreenshot", params);
     }
     const contents = binding.target.page.contents;
-    const throttled = contents.getBackgroundThrottling();
-    contents.setBackgroundThrottling(false);
-    let snapshot;
-    try {
-      // A previously idle hidden view needs a compositor frame before capture.
-      if (throttled)
-        await new Promise<void>((resolve) => setTimeout(resolve, 100));
-      snapshot = await contents.capturePage(
-        {
-          x: Math.round(x),
-          y: Math.round(y),
-          width: Math.round(captureWidth),
-          height: Math.round(captureHeight),
-        },
-        { stayHidden: true, stayAwake: true },
-      );
-    } finally {
-      if (!contents.isDestroyed() && throttled)
-        contents.setBackgroundThrottling(true);
-    }
+    // Focus is scoped to this screenshot by captureScreenshot. Wait for a
+    // current frame on this page without unthrottling the whole host window.
+    await this.forward(binding, "Runtime.evaluate", {
+      expression:
+        "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+      awaitPromise: true,
+    });
+    const snapshot = await contents.capturePage(
+      {
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.round(captureWidth),
+        height: Math.round(captureHeight),
+      },
+      { stayHidden: true },
+    );
     if (snapshot.isEmpty())
       throw new Error("The browser page did not produce an image.");
     const scale =

@@ -209,6 +209,7 @@ export class EmbeddedBrowser {
   };
   private readonly operations = new Map<AbortController, string>();
   private readonly automationCommands = new Map<string, number>();
+  private readonly focusedAutomationCommands = new Map<string, number>();
   private readonly automationIdleTimers = new Map<
     string,
     ReturnType<typeof setTimeout>
@@ -490,7 +491,10 @@ export class EmbeddedBrowser {
     let closed = 0;
     for (const id of this.finishedTabs) {
       if (
-        (options.keepActive && id === this.activeTabId) ||
+        (options.keepActive &&
+          id === this.activeTabId &&
+          this.presentation !== "minimized" &&
+          this.viewport.visible) ||
         this.heldTabs.has(id) ||
         this.parkedTabs.has(id) ||
         this.personTabs.has(id) ||
@@ -919,7 +923,7 @@ export class EmbeddedBrowser {
     );
   }
 
-  private shouldThrottleTab(id: string): boolean {
+  private isTabIdle(id: string): boolean {
     return (
       !this.automationCommands.has(id) && !this.automationIdleTimers.has(id)
     );
@@ -929,60 +933,57 @@ export class EmbeddedBrowser {
     id: string,
     active: boolean,
     emulateFocus = true,
+    settle = emulateFocus,
   ): Promise<void> {
     const page = this.pageMap.get(id);
     if (!page || page.contents.isDestroyed()) return Promise.resolve();
-    const previousTimer = this.automationIdleTimers.get(id);
-    if (previousTimer) clearTimeout(previousTimer);
-    this.automationIdleTimers.delete(id);
+    if (settle) {
+      const previousTimer = this.automationIdleTimers.get(id);
+      if (previousTimer) clearTimeout(previousTimer);
+      this.automationIdleTimers.delete(id);
+    }
+    if (emulateFocus) {
+      const focused = Math.max(
+        0,
+        (this.focusedAutomationCommands.get(id) ?? 0) + (active ? 1 : -1),
+      );
+      if (focused) this.focusedAutomationCommands.set(id, focused);
+      else this.focusedAutomationCommands.delete(id);
+    }
     const count = Math.max(
       0,
       (this.automationCommands.get(id) ?? 0) + (active ? 1 : -1),
     );
+    if (!active && settle) {
+      // Let field autosaves settle before freezing, without keeping focus or
+      // painting hidden tabs. Native reads do not cancel this settling window.
+      const timer = setTimeout(() => {
+        this.automationIdleTimers.delete(id);
+        if (!page.contents.isDestroyed()) this.syncTabLifecycle(page);
+      }, 10_000);
+      timer.unref();
+      this.automationIdleTimers.set(id, timer);
+    }
     if (count > 0) {
       this.automationCommands.set(id, count);
-      if (emulateFocus) page.contents.setBackgroundThrottling(false);
       return this.tabLifecycle
         .setFrozen(page.contents, false)
         .then(async () => {
           if (emulateFocus && !page.contents.isDestroyed())
             await page.contents.debugger.sendCommand(
               "Emulation.setFocusEmulationEnabled",
-              { enabled: true },
+              { enabled: this.focusedAutomationCommands.has(id) },
             );
         });
-    } else {
-      this.automationCommands.delete(id);
-      // Native DOM probes need no animation frames or focus. Once their
-      // result arrives, a waiting form can sleep again immediately.
-      if (!emulateFocus) {
-        page.contents.setBackgroundThrottling(this.shouldThrottleTab(id));
-        return Promise.resolve();
-      }
-      // Model requests can take minutes. Ads and page timers do not need to
-      // run at foreground speed while no browser command is using this page.
-      const timer = setTimeout(() => {
-        this.automationIdleTimers.delete(id);
-        if (page.contents.isDestroyed()) return;
-        if (!page.contents.isDestroyed())
-          page.contents.setBackgroundThrottling(this.shouldThrottleTab(id));
-        if (page.contents.debugger.isAttached() && this.shouldThrottleTab(id))
-          void page.contents.debugger
-            .sendCommand("Emulation.setFocusEmulationEnabled", {
-              enabled: false,
-            })
-            .catch(() => undefined);
-        // Freezing waits past the 10-second window in which a field change
-        // may still save to the employer (ADR 0024), so it never cuts a save
-        // short; a command in between keeps the tab awake.
-        const freeze = setTimeout(() => {
-          if (!page.contents.isDestroyed()) this.syncTabLifecycle(page);
-        }, 10_000);
-        freeze.unref();
-      }, 5_000);
-      timer.unref();
-      this.automationIdleTimers.set(id, timer);
     }
+    this.automationCommands.delete(id);
+    if (emulateFocus && page.contents.debugger.isAttached())
+      return page.contents.debugger
+        .sendCommand("Emulation.setFocusEmulationEnabled", {
+          enabled: this.focusedAutomationCommands.has(id),
+        })
+        .then(() => this.syncTabLifecycle(page));
+    this.syncTabLifecycle(page);
     return Promise.resolve();
   }
 
@@ -1010,7 +1011,7 @@ export class EmbeddedBrowser {
       !working &&
       !visible &&
       !page.contents.isLoading() &&
-      this.shouldThrottleTab(page.id);
+      this.isTabIdle(page.id);
     void this.tabLifecycle
       .setFrozen(page.contents, frozen)
       .catch(() => undefined);
@@ -1043,7 +1044,7 @@ export class EmbeddedBrowser {
       tabs: tabs.map((page) => ({
         tabId: page.id,
         processId: page.contents.getOSProcessId(),
-        backgroundThrottled: this.shouldThrottleTab(page.id),
+        backgroundThrottled: page.contents.getBackgroundThrottling(),
       })),
       processes: app.getAppMetrics?.() ?? [],
     });
@@ -1097,7 +1098,6 @@ export class EmbeddedBrowser {
               !this.isWaitingTab(tabId)
             )
               return;
-            page.contents.setBackgroundThrottling(true);
             // Only unreachable objects are collected. The live DOM, selected files,
             // session and form answers remain in the same tab.
             if (page.contents.debugger.isAttached()) {
@@ -1363,6 +1363,7 @@ export class EmbeddedBrowser {
       if (idleTimer) clearTimeout(idleTimer);
       this.automationIdleTimers.delete(page.id);
       this.automationCommands.delete(page.id);
+      this.focusedAutomationCommands.delete(page.id);
       this.tabLifecycle.forget(page.contents.id);
       this.applicationTabLabels.delete(page.id);
       this.pageMap.delete(page.id);
@@ -1402,6 +1403,10 @@ export class EmbeddedBrowser {
           for (const listener of this.pageListeners) listener(page);
       });
     else for (const listener of this.pageListeners) listener(page);
+    if (replacesPlaceholder && selected) {
+      this.automationPlaceholderTabId = null;
+      this.closePage(selected.id);
+    }
     this.emit();
     if (!openerId) {
       void page.contents.loadURL(destination).catch(() => undefined);
@@ -1527,7 +1532,6 @@ export class EmbeddedBrowser {
         });
         if (bounds) page.view.setBounds(bounds);
         page.view.setVisible(true);
-        page.contents.setBackgroundThrottling(this.shouldThrottleTab(page.id));
         this.syncTabLifecycle(page);
         continue;
       }
@@ -1547,10 +1551,6 @@ export class EmbeddedBrowser {
           this.viewport.visible &&
           this.activeTabId === page.id,
       );
-      // Native view visibility can hide a newly created render widget after
-      // its preferences were applied. Reassert the active-run rendering policy
-      // after visibility changes so background tabs keep animation frames.
-      page.contents.setBackgroundThrottling(this.shouldThrottleTab(page.id));
       this.syncTabLifecycle(page);
     }
   }
@@ -1770,14 +1770,14 @@ export class EmbeddedBrowser {
         },
         userAgent: () => this.getSession().getUserAgent(),
         emulateFocus: (pageId) =>
-          Boolean(pageId && !this.shouldThrottleTab(pageId)) &&
+          Boolean(pageId && this.focusedAutomationCommands.has(pageId)) &&
           !this.automationRefused(),
         onAutomationInput: (pageId, input) => {
           if (input?.pointerDown) this.agentPresses.notePress(pageId);
           if (input?.keyDown) this.agentPresses.noteKey(pageId, input.keyDown);
         },
-        onAutomationCommand: (pageId, active) =>
-          this.noteAutomationCommand(pageId, active),
+        onAutomationCommand: (pageId, active, needsFocus) =>
+          this.noteAutomationCommand(pageId, active, needsFocus, true),
       });
       this.bridge = bridge;
       const transport = await bridge.start();
@@ -1854,8 +1854,6 @@ export class EmbeddedBrowser {
             }
             this.finishedTabs.delete(tabId);
             const claimedPage = this.pageMap.get(tabId);
-            if (claimedPage && !claimedPage.contents.isDestroyed())
-              claimedPage.contents.setBackgroundThrottling(false);
             if (claimedPage)
               void this.tabLifecycle
                 .setFrozen(claimedPage.contents, false)
@@ -1875,9 +1873,6 @@ export class EmbeddedBrowser {
     this.attentionTabId = null;
     this.closed = false;
     this.releasePending = false;
-    for (const page of this.pageMap.values())
-      if (!page.contents.isDestroyed())
-        page.contents.setBackgroundThrottling(this.shouldThrottleTab(page.id));
     this.focusApp();
     this.hostPages();
     this.emit();
@@ -1902,10 +1897,6 @@ export class EmbeddedBrowser {
       this.closeIdleFinishedTabs({ keepActive: true });
       this.closeReleasedOwnedTabs();
       for (const page of this.pageMap.values()) {
-        if (!page.contents.isDestroyed())
-          page.contents.setBackgroundThrottling(
-            this.shouldThrottleTab(page.id),
-          );
         this.syncTabLifecycle(page);
       }
       void this.reduceWaitingFormMemory().catch(() => undefined);

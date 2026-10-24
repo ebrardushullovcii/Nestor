@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { WebContents } from "electron";
 import { WebSocket } from "ws";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   BrowserCdpBridge,
   type BrowserCdpPage,
@@ -17,6 +17,77 @@ type Message = {
   error?: { message: string };
 };
 const resources: Array<() => void> = [];
+
+test("a quick page read wakes without focus or a delayed focus request", async () => {
+  const activity = vi.fn();
+  const { transport } = await fixture({ onAutomationCommand: activity });
+  const client = await connect(transport);
+  await client.send("Target.setAutoAttach", { autoAttach: true });
+  const session = String(
+    client.messages.find(
+      (message) => message.method === "Target.attachedToTarget",
+    )?.params?.sessionId,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    { expression: "document.title" },
+    session,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(activity.mock.calls).toEqual([
+    ["owned-tab", true, false],
+    ["owned-tab", false, false],
+  ]);
+});
+
+test.each([false, true])(
+  "a pending script receives bounded focus and releases it on failure=%s",
+  async (fail) => {
+    const activity = vi.fn();
+    let focused!: () => void;
+    const focusRequested = new Promise<void>((resolve) => {
+      focused = resolve;
+    });
+    activity.mockImplementation(
+      (_id: string, active: boolean, needsFocus: boolean) => {
+        if (active && needsFocus) focused();
+      },
+    );
+    const { transport, page } = await fixture({
+      onAutomationCommand: activity,
+    });
+    const client = await connect(transport);
+    await client.send("Target.setAutoAttach", { autoAttach: true });
+    const session = String(
+      client.messages.find(
+        (message) => message.method === "Target.attachedToTarget",
+      )?.params?.sessionId,
+    );
+    let complete!: () => void;
+    const pending = new Promise<Record<string, unknown>>((resolve, reject) => {
+      complete = () =>
+        fail ? reject(new Error("Script failed")) : resolve({});
+    });
+    vi.spyOn(page.contents.debugger, "sendCommand").mockReturnValueOnce(
+      pending,
+    );
+    const command = client.send(
+      "Runtime.evaluate",
+      { awaitPromise: true },
+      session,
+    );
+    await focusRequested;
+    complete();
+    const reply = await command;
+    expect(Boolean(reply.error)).toBe(fail);
+    expect(activity.mock.calls).toEqual([
+      ["owned-tab", true, false],
+      ["owned-tab", true, true],
+      ["owned-tab", false, true],
+      ["owned-tab", false, false],
+    ]);
+  },
+);
 test("a stopped run does not wait for the page-claim timeout", async () => {
   const { bridge } = await fixture();
   const controller = new AbortController();
