@@ -75,6 +75,7 @@ import type {
 } from "@nestor/contracts";
 import type { JobFinderShellActions } from "../lib/job-finder-types";
 import { applyJobFinderWorkspaceDelta } from "../../../pages/job-finder-workspace-delta";
+import { whenLaunchReadsSettled } from "../lib/launch-reads";
 import {
   createSearchChangeFeedFollower,
   isSearchRunning,
@@ -1331,6 +1332,11 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
               markJobFinderTiming("job-finder:workspace:home:ready");
             }
           }
+          // The full load reads every saved job in main. It starts once the
+          // screens drawn from the launch queries are usable, not ahead of
+          // them.
+          await whenLaunchReadsSettled();
+          if (cancelled) return;
           const hydrationSequence = beginWorkspaceRequest();
           markJobFinderTiming(`${performancePrefix}:hydration:start`);
           markJobFinderTiming("job-finder:workspace:hydration:start");
