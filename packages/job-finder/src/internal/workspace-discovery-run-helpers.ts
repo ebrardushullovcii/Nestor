@@ -1,8 +1,4 @@
 import {
-  DiscoveryRunRecordSchema,
-  DiscoveryRunReportSchema,
-  DiscoveryRunSummarySchema,
-  DiscoveryTimingSummarySchema,
   DISCOVERY_RUN_JOB_BUDGET_MAX,
   browserRunWaitReasonValues,
   discoveryActivityStageValues,
@@ -10,6 +6,7 @@ import {
   type DiscoveryRunRecord,
   type DiscoveryRunReport,
   type DiscoveryTargetExecution,
+  type DiscoveryTimingSummary,
 } from "@nestor/contracts";
 
 import {
@@ -60,7 +57,7 @@ function buildDiscoveryTimingSummary(
   events: readonly DiscoveryActivityEvent[],
   startedAt: string,
   completedAt: string,
-) {
+): DiscoveryTimingSummary {
   const stageTimeline = computeTimelineSummary({
     startedAt,
     completedAt,
@@ -86,7 +83,7 @@ function buildDiscoveryTimingSummary(
       })),
   });
 
-  return DiscoveryTimingSummarySchema.parse({
+  return {
     totalDurationMs: stageTimeline.totalDurationMs,
     firstActivityMs: stageTimeline.firstEventMs,
     firstCandidateMs: calculateFirstMilestoneMs(
@@ -119,7 +116,7 @@ function buildDiscoveryTimingSummary(
         durationMs,
       }),
     ),
-  });
+  };
 }
 
 function summarizeTargetExecutions(
@@ -149,7 +146,7 @@ function summarizeTargetExecutions(
     // A source whose listing was empty is marked "warning" so Home can say,
     // neutrally, that it found nothing. Listings it skipped because they are
     // already saved count as found: a quiet re-run did find them.
-    const health =
+    const health: DiscoveryRunRecord["summary"]["sourceHealth"][number]["health"] =
       execution.state === "completed"
         ? execution.jobsFound +
             execution.duplicatesMerged +
@@ -199,26 +196,13 @@ export function completeTargetExecution(
 
   const executionSummary = summarizeTargetExecutions(nextRun.targetExecutions);
 
-  // Every source execution and log event was validated when it was put on
-  // the run (updateTargetExecution, appendDiscoveryEvent). Parsing the whole
-  // run again for each finished source copied every execution and event of
-  // a 700-source search hundreds of times, and the copies made each save
-  // compare and rewrite them all. Only the run's own fields are parsed; the
-  // validated rows are kept as they are.
-  const parsed = DiscoveryRunRecordSchema.parse({
+  return {
     ...nextRun,
-    targetExecutions: [],
-    activity: [],
     summary: {
       ...nextRun.summary,
       ...executionSummary,
       targetsCompleted: countCompletedTargetExecutions(nextRun),
     },
-  });
-  return {
-    ...parsed,
-    targetExecutions: nextRun.targetExecutions,
-    activity: nextRun.activity,
   };
 }
 
@@ -300,7 +284,7 @@ export function buildDiscoveryRunReport(
     (sum, source) => sum + (source.jobsInspected ?? 0),
     0,
   );
-  return DiscoveryRunReportSchema.parse({
+  return {
     sources: run.targetExecutions.map((source) => ({
       targetId: source.targetId,
       inspected: source.jobsInspected ?? null,
@@ -337,6 +321,7 @@ export function buildDiscoveryRunReport(
         }
       : {}),
     version: 2,
+    alreadyHere: null,
     measuredAt,
     found: counted ? inspected : found,
     unique:
@@ -366,7 +351,7 @@ export function buildDiscoveryRunReport(
           0,
         )
       : duplicates,
-  });
+  };
 }
 
 /**
@@ -390,20 +375,16 @@ export function applyDiscoveryRunRetentionCounts(
     ...run,
     summary: {
       ...run.summary,
-      report: DiscoveryRunReportSchema.parse({
+      report: {
         ...report,
         alreadyHere: counts.alreadyHere ?? report.alreadyHere,
         retained: counts.retained,
         worthOpening: counts.worthOpening,
-      }),
+      },
     },
   };
 }
 
-const TerminalRunFields = DiscoveryRunRecordSchema.pick({
-  state: true,
-  completedAt: true,
-});
 export function finalizeDiscoveryRun(
   run: DiscoveryRunRecord,
   state: "completed" | "cancelled" | "failed",
@@ -411,8 +392,9 @@ export function finalizeDiscoveryRun(
 ): DiscoveryRunRecord {
   return {
     ...run,
-    ...TerminalRunFields.parse({ state, completedAt }),
-    summary: DiscoveryRunSummarySchema.parse({
+    state,
+    completedAt,
+    summary: {
       ...run.summary,
       durationMs: calculateDurationMs(run.startedAt, completedAt),
       outcome: state,
@@ -422,7 +404,7 @@ export function finalizeDiscoveryRun(
         completedAt,
       ),
       report: buildDiscoveryRunReport(run, completedAt),
-    }),
+    },
   };
 }
 
@@ -476,10 +458,10 @@ export function recoverInterruptedDiscoveryRun(
     }),
   );
 
-  return DiscoveryRunRecordSchema.parse({
+  return {
     ...finalizeDiscoveryRun(recoveredRun, "failed", completedAt),
     runPhase: "interrupted",
-  });
+  };
 }
 
 /**

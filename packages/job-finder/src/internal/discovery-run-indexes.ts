@@ -78,15 +78,12 @@ export function createSyncedJobIdentityIndex<T extends object>(
     async warm(values) {
       if (values === syncedWith) return;
       for (let start = 0; start < values.length; start += 100) {
-        const add = () => {
-          for (const value of values.slice(start, start + 100)) {
-            if (!members.has(value)) {
-              members.add(value);
-              inner.add(value);
-            }
+        for (const value of values.slice(start, start + 100)) {
+          if (!members.has(value)) {
+            members.add(value);
+            inner.add(value);
           }
-        };
-        add();
+        }
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
       invalidate();
@@ -217,8 +214,7 @@ export function createRunDiscoveryLedger(
       historyIndex = createHistoryIndex();
       const rows = entries();
       for (let start = 0; start < rows.length; start += 100) {
-        const add = () => rows.slice(start, start + 100).forEach(observe);
-        add();
+        rows.slice(start, start + 100).forEach(observe);
         await yieldToEventLoop();
       }
     },

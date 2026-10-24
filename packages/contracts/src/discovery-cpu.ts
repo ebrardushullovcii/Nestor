@@ -5,6 +5,7 @@ import type {
   JobPosting,
 } from "./discovery";
 import type { SourceIntelligenceArtifact } from "./source-debug";
+import type { DiscoveryPreparedKeys } from "./discovery-preparation";
 
 /**
  * A feed reader that crashed or exited took its transferred bytes with it;
@@ -26,6 +27,9 @@ export type DiscoveryPostingPreparation = {
   fingerprints: DiscoveryListingFingerprints;
   content: { digest: string; packed: Uint8Array } | null;
   screeningContent: { digest: string; packed: Uint8Array } | null;
+  keys: DiscoveryPreparedKeys;
+  screeningKeys: DiscoveryPreparedKeys;
+  screeningFingerprints: DiscoveryListingFingerprints;
 };
 
 export type DiscoveryJobIdentityAlias = {

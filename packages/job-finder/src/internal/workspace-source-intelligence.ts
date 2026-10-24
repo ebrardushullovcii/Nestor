@@ -1,6 +1,7 @@
 import { yieldToEventLoop } from "@nestor/core";
 import { isDeepStrictEqual } from "node:util";
 import {
+  readDiscoveryPreparation,
   JobPostingSchema,
   SourceIntelligenceArtifactSchema,
   type CandidateProfile,
@@ -29,9 +30,11 @@ import {
 } from "./discovery-feed-executor";
 import { toProviderAwarePosting } from "./discovery-posting-normalization";
 import {
-  prepareListingContent,
   rememberPreparedListingContent,
+  prepareJobIdentity,
+  rememberPreparedJobIdentity,
 } from "./job-identity";
+import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
 import {
   createDiscoveryListingFingerprints,
   rememberDiscoveryListingFingerprints,
@@ -1878,6 +1881,7 @@ export async function preparePublicProviderFeed(
       artifact: { intelligence: task.intelligence },
     });
     if (!raw) continue;
+    if (task.prepareForDiscovery) prepareDiscoveryPosting(raw);
     const posting = task.prepareForDiscovery
       ? toProviderAwarePosting({
           posting: raw,
@@ -1890,7 +1894,16 @@ export async function preparePublicProviderFeed(
       : raw;
     jobs.push(raw);
     if (task.prepareForDiscovery) {
-      const content = prepareListingContent(posting.description);
+      const preparedContent = readDiscoveryPreparation(posting)!.content!.value;
+      const content = preparedContent
+        ? { digest: preparedContent.digest, packed: preparedContent.packed! }
+        : null;
+      const keys = prepareJobIdentity(posting);
+      const fingerprints = createDiscoveryListingFingerprints(posting);
+      const rawContent = readDiscoveryPreparation(raw)!.content!.value;
+      const screeningContent = rawContent
+        ? { digest: rawContent.digest, packed: rawContent.packed! }
+        : null;
       const normalized: Partial<JobPosting> = {};
       for (const field of Object.keys(posting) as Array<keyof JobPosting>) {
         if (!isDeepStrictEqual(raw[field], posting[field]))
@@ -1898,12 +1911,12 @@ export async function preparePublicProviderFeed(
       }
       preparations.push({
         normalized,
-        fingerprints: createDiscoveryListingFingerprints(posting),
+        fingerprints,
+        keys,
+        screeningKeys: prepareJobIdentity(raw),
+        screeningFingerprints: createDiscoveryListingFingerprints(raw),
         content,
-        screeningContent:
-          raw.description === posting.description
-            ? content
-            : prepareListingContent(raw.description),
+        screeningContent,
       });
     }
   }
@@ -2037,12 +2050,15 @@ export async function collectPublicProviderJobs(input: {
         const raw = jobs[position]!;
         const job = { ...raw, ...preparation.normalized };
         rememberPreparedDiscoveryPosting(raw, job);
-        rememberPreparedListingContent(job.description, preparation.content);
-        rememberPreparedListingContent(
-          raw.description,
-          preparation.screeningContent,
-        );
+        rememberPreparedListingContent(job, preparation.content);
+        rememberPreparedListingContent(raw, preparation.screeningContent);
+        rememberPreparedJobIdentity(job, preparation.keys);
+        rememberPreparedJobIdentity(raw, preparation.screeningKeys);
         rememberDiscoveryListingFingerprints(job, preparation.fingerprints);
+        rememberDiscoveryListingFingerprints(
+          raw,
+          preparation.screeningFingerprints,
+        );
       }
 
       return {

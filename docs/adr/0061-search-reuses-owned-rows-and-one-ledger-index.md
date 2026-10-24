@@ -28,11 +28,17 @@ build a third ledger index after every checkpoint for a future feedback action.
 One compact identity-key index is built once per run and updated for changed
 rows. Its keys retain today's exact identity logic: URLs, provider identifiers,
 listing facts and the existing content digest. Each unique key points to a
-numeric row token; only collisions allocate a set of tokens. Rich alias objects,
-duplicate global alias caches and feed alias transfers are removed. Existing
+numeric row token; only collisions allocate a set of tokens. Rich alias objects
+and duplicate global alias caches are removed. Existing
 intersection, cross-source compatibility and content collision checks still
 decide matches. No database query or transaction is needed for an identity
 lookup; no additional process is introduced.
+Postings carry prepared text, compact keys and fingerprints in an internal
+enumerable symbol slot. Ordinary copies carry it; JSON omits it. Feed workers
+transfer explicit typed preparation and main attaches it to the created rows.
+Exact input fields, including mutable arrays, invalidate preparation after a
+material change. Only foreign frozen inputs need a weak fallback. There is no
+text cache or URL peer cache. Read-path owns durable saved-job fingerprints.
 
 Typed discovery updates and saved-job deltas trust their domain values. Decode
 stored JSON without another schema walk in these paths. Migrations, imports,

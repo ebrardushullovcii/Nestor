@@ -43,3 +43,4 @@ export * from "./agent-timing";
 export * from "./personal-workspace-export";
 export * from "./submission-confirmation";
 export * from "./resume-computation";
+export * from "./discovery-preparation";

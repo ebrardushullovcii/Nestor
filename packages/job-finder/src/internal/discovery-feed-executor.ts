@@ -1,7 +1,9 @@
-import type {
-  DiscoveryFeedResult,
-  DiscoveryFeedTask,
-  JobPosting,
+import {
+  readDiscoveryPreparation,
+  writeDiscoveryPreparation,
+  type DiscoveryFeedResult,
+  type DiscoveryFeedTask,
+  type JobPosting,
 } from "@nestor/contracts";
 
 export type DiscoveryFeedExecutor = (
@@ -10,32 +12,31 @@ export type DiscoveryFeedExecutor = (
 ) => Promise<DiscoveryFeedResult>;
 
 let executor: DiscoveryFeedExecutor | null = null;
-const preparedPostings = new WeakMap<JobPosting, JobPosting>();
 
 export function rememberPreparedDiscoveryPosting(
   raw: JobPosting,
   prepared: JobPosting,
 ): void {
-  preparedPostings.set(raw, prepared);
+  writeDiscoveryPreparation(raw, { normalizedPosting: prepared });
 }
 
 export function takePreparedDiscoveryPosting(
   raw: JobPosting,
 ): JobPosting | null {
-  const prepared = preparedPostings.get(raw) ?? null;
-  preparedPostings.delete(raw);
-  return prepared;
+  return readDiscoveryPreparation(raw)?.normalizedPosting ?? null;
 }
 
 export function carryPreparedDiscoveryPosting(
   before: JobPosting,
   after: JobPosting,
 ): JobPosting {
-  const prepared = preparedPostings.get(before);
+  const prepared = readDiscoveryPreparation(before)?.normalizedPosting;
   if (prepared)
-    preparedPostings.set(after, {
-      ...prepared,
-      searchRejection: after.searchRejection,
+    writeDiscoveryPreparation(after, {
+      normalizedPosting: {
+        ...prepared,
+        searchRejection: after.searchRejection,
+      },
     });
   return after;
 }

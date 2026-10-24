@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
-import type {
-  DiscoveryPostingPreparation,
-  DiscoveryJobIdentityAlias,
+import {
+  readDiscoveryPreparation,
+  writeDiscoveryPreparation,
+  type DiscoveryCompactKeys,
+  type DiscoveryPreparedKeys,
+  type DiscoveryPreparedContent,
+  type DiscoveryPostingPreparation,
+  type DiscoveryJobIdentityAlias,
 } from "@nestor/contracts";
 
 import { normalizeText } from "./shared";
@@ -155,55 +160,25 @@ function normalizePostedDate(input: JobIdentityInput): string | null {
 
 const MIN_EXACT_CONTENT_IDENTITY_CHARACTERS = 200;
 const MIN_EXACT_CONTENT_IDENTITY_WORDS = 40;
-/**
- * Normalized descriptions by description text. Every identity lookup builds
- * the content alias of the job it looks for, and a search looks each posting
- * up several times (ledger, saved jobs, merge, landing); normalizing a whole
- * description each time was most of a big board's main-process time.
- */
-const listingContentIdentityMemo = new Map<string, string | null>();
-const LISTING_CONTENT_IDENTITY_MEMO_LIMIT = 500;
-
 function normalizeListingContentIdentity(
   description: string | null | undefined,
 ): string | null {
-  if (!description) {
-    return null;
-  }
-  const remembered = listingContentIdentityMemo.get(description);
-  if (remembered !== undefined) return remembered;
-  const normalized = computeListingContentIdentity(description);
-  if (listingContentIdentityMemo.size >= LISTING_CONTENT_IDENTITY_MEMO_LIMIT)
-    listingContentIdentityMemo.clear();
-  listingContentIdentityMemo.set(description, normalized);
-  return normalized;
+  return description ? computeListingContentIdentity(description) : null;
 }
 
 function digestListingContent(content: string): string {
   return createHash("sha256").update(content).digest("base64url");
 }
 
-function packListingContent(content: string) {
-  // zlib's result can be a small view of a much larger allocation. Retain
-  // and transfer only its bytes, rather than one whole slab per identity.
-  const packed = Uint8Array.from(deflateRawSync(content, { level: 1 }));
-  return Object.freeze({
-    digest: digestListingContent(content),
-    read: () => inflateRawSync(packed).toString(),
-  });
-}
-
 type PackedContent = DiscoveryPostingPreparation["content"];
-const preparedContent = new Map<string, PackedContent>();
 
-/** Transferred from the feed worker; the bounded memo also serves copied rows. */
 export function rememberPreparedListingContent(
-  description: string,
-  content: PackedContent,
+  posting: JobIdentityInput,
+  content: DiscoveryPreparedContent["value"],
 ): void {
-  if (preparedContent.size >= LISTING_CONTENT_IDENTITY_MEMO_LIMIT)
-    preparedContent.clear();
-  preparedContent.set(description, content);
+  writeDiscoveryPreparation(posting, {
+    content: { description: posting.description ?? "", value: content },
+  });
 }
 
 export function prepareListingContent(description: string): PackedContent {
@@ -218,28 +193,34 @@ export function prepareListingContent(description: string): PackedContent {
 
 function readPreparedContent(
   input: JobIdentityInput,
-): JobIdentityInput["exactContent"] {
+): JobIdentityInput["exactContent"] | null {
   if (input.exactContent) return input.exactContent;
-  const content = input.description
-    ? preparedContent.get(input.description)
-    : null;
-  return content
-    ? {
-        digest: content.digest,
-        read: () => inflateRawSync(content.packed).toString(),
-      }
-    : undefined;
+  const content = readDiscoveryPreparation(input)?.content;
+  if (!content || content.description !== (input.description ?? ""))
+    return undefined;
+  if (!content.value) return null;
+  const { digest, packed } = content.value;
+  const description = packed ? null : content.description;
+  return {
+    digest,
+    read: () =>
+      packed
+        ? inflateRawSync(packed).toString()
+        : normalizeListingContentIdentity(description)!,
+  };
 }
 
-/** Counting inspected identities must not retain every complete provider posting. */
 export function compactJobIdentity(input: JobIdentityInput): JobIdentityInput {
-  const content =
-    readPreparedContent(input) ??
-    (() => {
-      const normalized = normalizeListingContentIdentity(input.description);
-      return normalized ? packListingContent(normalized) : undefined;
-    })();
-  return Object.freeze({
+  let source = input;
+  if (readPreparedContent(source) === undefined) {
+    if (!Object.isExtensible(source)) source = { ...source };
+    rememberPreparedListingContent(
+      source,
+      prepareListingContent(source.description ?? ""),
+    );
+  }
+  const content = readPreparedContent(source);
+  const compact: JobIdentityInput = {
     source: input.source,
     sourceJobId: input.sourceJobId,
     canonicalUrl: input.canonicalUrl,
@@ -258,7 +239,9 @@ export function compactJobIdentity(input: JobIdentityInput): JobIdentityInput {
       : null,
     matchAcrossSources: input.matchAcrossSources ?? false,
     ...(content ? { exactContent: content } : {}),
-  });
+  };
+  rememberPreparedJobIdentity(compact, prepareJobIdentity(source));
+  return Object.freeze(compact);
 }
 
 function computeListingContentIdentity(description: string): string | null {
@@ -340,14 +323,35 @@ export function hasEquivalentListingContentIdentity(
   right: JobIdentityInput,
 ): boolean {
   if (!hasCompatibleSeniority(left, right)) return false;
-  const leftContent =
-    readPreparedContent(left)?.read() ??
-    normalizeListingContentIdentity(left.description);
-  const rightContent =
-    readPreparedContent(right)?.read() ??
-    normalizeListingContentIdentity(right.description);
-  if (!leftContent || leftContent !== rightContent) {
-    return false;
+  if (
+    !left.exactContent &&
+    !right.exactContent &&
+    left.description &&
+    left.description === right.description
+  ) {
+    // Equal raw bodies have equal normalized bodies. Keep the same minimum
+    // evidence check without inflating two copies of text we already hold.
+    const leftPrepared = readPreparedContent(left);
+    const prepared =
+      leftPrepared === undefined ? readPreparedContent(right) : leftPrepared;
+    if (
+      !(prepared === undefined
+        ? normalizeListingContentIdentity(left.description)
+        : prepared)
+    )
+      return false;
+  } else {
+    const leftPrepared = readPreparedContent(left);
+    const rightPrepared = readPreparedContent(right);
+    const leftContent =
+      leftPrepared === undefined
+        ? normalizeListingContentIdentity(left.description)
+        : leftPrepared?.read();
+    const rightContent =
+      rightPrepared === undefined
+        ? normalizeListingContentIdentity(right.description)
+        : rightPrepared?.read();
+    if (!leftContent || leftContent !== rightContent) return false;
   }
   const leftCompany = normalizeText(left.company ?? "");
   const rightCompany = normalizeText(right.company ?? "");
@@ -455,9 +459,10 @@ export function buildJobIdentityAliases(
   }
 
   const prepared = readPreparedContent(input);
-  const exactContent = prepared
-    ? null
-    : normalizeListingContentIdentity(input.description);
+  const exactContent =
+    prepared === undefined
+      ? normalizeListingContentIdentity(input.description)
+      : null;
   const contentCompany = input.company ? normalizeText(input.company) : "";
   const contentLocation = input.location ? normalizeText(input.location) : "";
   if ((exactContent || prepared) && contentCompany && contentLocation) {
@@ -676,6 +681,82 @@ export function hasSameJobIdentity(
   );
 }
 
+type CompactIdentity = DiscoveryPreparedKeys & { basis: AliasBasis };
+// Only foreign frozen inputs cannot carry their own preparation.
+const frozenIdentities = new WeakMap<JobIdentityInput, CompactIdentity>();
+const aliasMetadata: Record<number, Omit<JobIdentityAlias, "key">> = {
+  10: { kind: "provider_posting_id", confidence: "strong", priority: 10 },
+  11: { kind: "provider_posting_id", confidence: "strong", priority: 11 },
+  20: { kind: "source_posting_id", confidence: "strong", priority: 20 },
+  21: { kind: "source_posting_id", confidence: "corroborating", priority: 21 },
+  30: { kind: "employer_application_url", confidence: "strong", priority: 30 },
+  40: { kind: "canonical_listing_url", confidence: "strong", priority: 40 },
+  41: { kind: "canonical_listing_url", confidence: "strong", priority: 41 },
+  50: { kind: "exact_listing_content", confidence: "strong", priority: 50 },
+  60: {
+    kind: "cross_source_listing_facts",
+    confidence: "strong",
+    priority: 60,
+  },
+  100: {
+    kind: "corroborated_listing_facts",
+    confidence: "possible",
+    priority: 100,
+  },
+};
+
+function identityBasis(input: JobIdentityInput): AliasBasis {
+  const basis = [...readAliasBasis(input)];
+  basis[14] = false; // Both source scopes are prepared together.
+  return basis;
+}
+
+export function rememberPreparedJobIdentity(
+  input: JobIdentityInput,
+  keys: DiscoveryPreparedKeys,
+): void {
+  const identity = { ...keys, basis: identityBasis(input) };
+  if (!writeDiscoveryPreparation(input, { identity }))
+    frozenIdentities.set(input, identity);
+}
+
+export function prepareJobIdentity(
+  input: JobIdentityInput,
+): DiscoveryPreparedKeys {
+  const cached =
+    readDiscoveryPreparation(input)?.identity ?? frozenIdentities.get(input);
+  const basis = identityBasis(input);
+  if (cached && sameAliasBasis(cached.basis, basis)) return cached;
+  if (readPreparedContent(input) === undefined && input.description) {
+    const normalized = normalizeListingContentIdentity(input.description);
+    rememberPreparedListingContent(
+      input,
+      normalized ? { digest: digestListingContent(normalized) } : null,
+    );
+  }
+  const aliases = buildJobIdentityAliases({
+    ...input,
+    matchAcrossSources: true,
+  });
+  const pack = (values: readonly JobIdentityAlias[]): DiscoveryCompactKeys => ({
+    keys: values.map((alias) => alias.key),
+    priorities: values.map((alias) => alias.priority),
+  });
+  const keys = {
+    local: pack(
+      aliases.filter((alias) => alias.kind !== "cross_source_listing_facts"),
+    ),
+    acrossSources: pack(aliases),
+  };
+  rememberPreparedJobIdentity(input, keys);
+  return keys;
+}
+
+function readCompactIdentity(input: JobIdentityInput): DiscoveryCompactKeys {
+  const keys = prepareJobIdentity(input);
+  return input.matchAcrossSources ? keys.acrossSources : keys.local;
+}
+
 export function createJobIdentityIndex<T extends object>(
   values: readonly T[],
   selectIdentity: (value: T) => JobIdentityInput,
@@ -704,9 +785,7 @@ export function createJobIdentityIndex<T extends object>(
   const add = (value: T): void => {
     const token = tokens.get(value) ?? ++nextToken;
     tokens.set(value, token);
-    const keys = buildJobIdentityAliases(selectIdentity(value)).map(
-      (alias) => alias.key,
-    );
+    const keys = readCompactIdentity(selectIdentity(value)).keys;
     valuesByToken.set(token, { value, keys });
     for (const key of keys) {
       const found = valuesByAlias.get(key);
@@ -736,7 +815,11 @@ export function createJobIdentityIndex<T extends object>(
   };
 
   const resolve = (identity: JobIdentityInput): JobIdentityResolution<T> => {
-    const aliases = buildJobIdentityAliases(identity);
+    const compact = readCompactIdentity(identity);
+    const aliases = compact.keys.map((key, position) => ({
+      key,
+      ...aliasMetadata[compact.priorities[position]!]!,
+    }));
     // A URL still matches when corrected card facts have no indexed alias.
     // Check every known alias before selecting it: an alias naming another
     // posting must not attach that posting's history or activity to this one.

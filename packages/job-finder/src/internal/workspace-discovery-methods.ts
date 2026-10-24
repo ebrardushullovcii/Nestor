@@ -6,6 +6,7 @@ import {
 import { isDeepStrictEqual } from "node:util";
 import { channel } from "node:diagnostics_channel";
 import { patchDiscoveryLedger } from "@nestor/db";
+import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
 import {
   createDiscoverySavedJobWriter,
   markSupersedingDiscoveryUpdate,
@@ -337,7 +338,9 @@ function applySavedJobDelta(
   }
 
   // The repository validates this returned row at its write boundary.
-  return { ...currentJob, ...changedFields };
+  const next = { ...currentJob, ...changedFields };
+  createDiscoveryListingFingerprints(next);
+  return next;
 }
 
 /** Inspection counts need identity facts, not complete retained provider postings. */
@@ -997,7 +1000,7 @@ export function resolvePostingProducingTarget(
 
 function normalizeCollectedCheckpointPosting(posting: JobPosting): JobPosting {
   const detailQuality = assessJobPostingDetailQuality(posting);
-  return {
+  return prepareDiscoveryPosting({
     ...posting,
     detailQuality,
     listingDetailCapture: deriveListingDetailCapture({
@@ -1005,7 +1008,7 @@ function normalizeCollectedCheckpointPosting(posting: JobPosting): JobPosting {
       detailQuality,
       listingDetailFetch: posting.listingDetailFetch,
     }),
-  };
+  });
 }
 
 function createPostingWithTriage(
@@ -2573,14 +2576,29 @@ export function createWorkspaceDiscoveryMethods(
           // duplicate-checkpoint heartbeat.
           persistedCheckpointRevision: null as number | null,
         };
+        const producingTargets = new Map<
+          string | null,
+          ReturnType<typeof resolvePostingProducingTarget>
+        >();
+        const producingTargetFor = (
+          posting: Pick<JobPosting, "producingPageUrl">,
+        ) => {
+          const key = posting.producingPageUrl ?? null;
+          let source = producingTargets.get(key);
+          if (!source) {
+            source = resolvePostingProducingTarget(
+              posting,
+              target,
+              enrichedPreferences.discovery.targets,
+            );
+            producingTargets.set(key, source);
+          }
+          return source;
+        };
         const sourceCountsFor = (
           posting: Pick<JobPosting, "producingPageUrl">,
         ): DiscoverySourceListingCounts => {
-          const source = resolvePostingProducingTarget(
-            posting,
-            target,
-            enrichedPreferences.discovery.targets,
-          );
+          const source = producingTargetFor(posting);
           let counts = checkpointState.sourceCounts.get(source.id);
           if (!counts) {
             counts = {
@@ -2879,11 +2897,7 @@ export function createWorkspaceDiscoveryMethods(
             mergeSeedJobs,
             budgetedPostings,
             (posting) => {
-              const producingTarget = resolvePostingProducingTarget(
-                posting,
-                target,
-                enrichedPreferences.discovery.targets,
-              );
+              const producingTarget = producingTargetFor(posting);
               return createDiscoveryProvenance({
                 targetId: producingTarget.id,
                 sourceLabel: producingTarget.label,
@@ -2934,19 +2948,19 @@ export function createWorkspaceDiscoveryMethods(
             ),
           );
 
-          const persistedSavedJobIds = new Set(
-            workingSavedJobs.map((job) => job.id),
-          );
+          const persistedSavedJobIds = settings.discoveryOnly
+            ? new Set(workingSavedJobs.map((job) => job.id))
+            : null;
           let jobsPersisted = 0;
           let jobsStaged = 0;
 
           if (settings.discoveryOnly) {
             const nextPendingJobs = mergeResult.mergedJobs.filter(
-              (job) => !persistedSavedJobIds.has(job.id),
+              (job) => !persistedSavedJobIds!.has(job.id),
             );
             workingSavedJobs = mergeResult.mergedJobs.filter(
               (job) =>
-                persistedSavedJobIds.has(job.id) &&
+                persistedSavedJobIds!.has(job.id) &&
                 !mergeResult.newJobs.some((newJob) => newJob.id === job.id),
             );
             workingPendingJobs = mergePendingJobs(
@@ -2959,7 +2973,7 @@ export function createWorkspaceDiscoveryMethods(
             jobsPersisted = mergeResult.newJobs.length;
           }
           for (const job of landedJobs.values()) {
-            if (settings.discoveryOnly && !persistedSavedJobIds.has(job.id)) {
+            if (settings.discoveryOnly && !persistedSavedJobIds!.has(job.id)) {
               touchedPendingJobIds.add(job.id);
             } else touchSavedJob(job);
           }
@@ -2972,11 +2986,7 @@ export function createWorkspaceDiscoveryMethods(
               // kept job read as "changed" when seen again, so each search
               // merged and rewrote every kept job of every board it read.
               posting: postingAsArrived.get(posting) ?? posting,
-              targetId: resolvePostingProducingTarget(
-                posting,
-                target,
-                enrichedPreferences.discovery.targets,
-              ).id,
+              targetId: producingTargetFor(posting).id,
               seenAt: new Date().toISOString(),
               status:
                 posting.detailQuality === "detail_enriched"

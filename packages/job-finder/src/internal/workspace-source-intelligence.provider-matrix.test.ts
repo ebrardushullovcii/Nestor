@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { JobDiscoveryTarget, JobSource } from "@nestor/contracts";
+import {
+  readDiscoveryPreparation,
+  readPreparedDiscoveryFingerprints,
+  type JobDiscoveryTarget,
+  type JobSource,
+} from "@nestor/contracts";
+import {
+  setDiscoveryFeedExecutor,
+  takePreparedDiscoveryPosting,
+} from "./discovery-feed-executor";
 
 import { runPublicProviderSourceCheck } from "./workspace-public-provider-source-check";
 import { toProviderAwarePosting } from "./discovery-posting-normalization";
@@ -143,10 +152,46 @@ const providerCases = [
 ] as const;
 
 afterEach(() => {
+  setDiscoveryFeedExecutor(null);
   vi.restoreAllMocks();
 });
 
 describe("public provider ATS acceptance matrix", () => {
+  test("reattaches explicit preparation after the real worker transport drops symbols", async () => {
+    const { target, payload } = providerCases[0];
+    const intelligence = inferSourceIntelligenceFromTarget({
+      target,
+      currentArtifact: null,
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(payload), {
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    setDiscoveryFeedExecutor(async (task) =>
+      structuredClone(await preparePublicProviderFeed(task)),
+    );
+    const result = await collectPublicProviderJobs({
+      target,
+      artifact: { intelligence },
+      source: "target_site",
+      prepareForDiscovery: true,
+    });
+    expect(result.jobs).toHaveLength(1);
+    const raw = result.jobs[0]!;
+    expect(readDiscoveryPreparation(raw)?.identity).toBeDefined();
+    expect(readPreparedDiscoveryFingerprints(raw)).toEqual(
+      createDiscoveryListingFingerprints(structuredClone(raw)),
+    );
+    const normalized = takePreparedDiscoveryPosting(raw)!;
+    expect(normalized).not.toBeNull();
+    expect(readDiscoveryPreparation(normalized)?.identity).toBeDefined();
+    expect(readPreparedDiscoveryFingerprints(normalized)).toEqual(
+      createDiscoveryListingFingerprints(structuredClone(normalized)),
+    );
+  });
   test.each(providerCases)(
     "$name prepares exactly the same posting, fingerprints and identity evidence off main",
     async ({ target, payload }) => {
@@ -164,10 +209,13 @@ describe("public provider ATS acceptance matrix", () => {
         ...base,
         prepareForDiscovery: false,
       });
-      const prepared = await preparePublicProviderFeed({
-        ...base,
-        prepareForDiscovery: true,
-      });
+      // Match a worker message: symbol metadata stays in the producer.
+      const prepared = structuredClone(
+        await preparePublicProviderFeed({
+          ...base,
+          prepareForDiscovery: true,
+        }),
+      );
       expect(prepared.skippedMalformedCount).toBe(raw.skippedMalformedCount);
       const expected = raw.jobs.map((posting) =>
         toProviderAwarePosting({
@@ -188,7 +236,9 @@ describe("public provider ATS acceptance matrix", () => {
           ...normalized,
           discoveredAt: "",
         })),
-      ).toEqual(expected.map((job) => ({ ...job, discoveredAt: "" })));
+      ).toEqual(
+        expected.map((job) => ({ ...structuredClone(job), discoveredAt: "" })),
+      );
       prepared.preparations.forEach((evidence, index) => {
         const job = { ...prepared.jobs[index]!, ...evidence.normalized };
         expect(evidence.fingerprints).toEqual(
@@ -198,7 +248,7 @@ describe("public provider ATS acceptance matrix", () => {
           prepareListingContent(job.description),
         );
         const aliases = buildJobIdentityAliases(job);
-        rememberPreparedListingContent(job.description, evidence.content);
+        rememberPreparedListingContent(job, evidence.content);
         expect(buildJobIdentityAliases(job)).toEqual(aliases);
       });
     },

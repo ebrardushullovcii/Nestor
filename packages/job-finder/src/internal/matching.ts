@@ -1,5 +1,7 @@
 import type { JobFinderAiClient } from "@nestor/ai-providers";
 import {
+  readDiscoveryPreparation,
+  writeDiscoveryPreparation,
   jobPostingDetailQualityValues,
   type ApplicationStatus,
   type CandidateProfile,
@@ -31,10 +33,12 @@ import { canonicalizeLocationAliases } from "./location-normalization";
 import {
   createJobIdentityDigest,
   createJobIdentityIndex,
+  prepareJobIdentity,
   type JobIdentityInput,
   hasEquivalentListingContentIdentity,
   type JobIdentityIndex,
 } from "./job-identity";
+import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
 import { assessJobPostingDetailQuality } from "./job-posting-detail-quality";
 import {
   attributeLegacySighting,
@@ -734,19 +738,21 @@ export function enrichDiscoveredPosting(
     isLikelyAccessGateListingUrl(posting.canonicalUrl) &&
     !isLikelyAccessGateListingUrl(existingJob.canonicalUrl)
   ) {
-    return {
+    return prepareDiscoveryPosting({
       ...preserveRicherExistingDetail(enrichedPosting, existingJob),
       title: existingJob.title,
       canonicalUrl: existingJob.canonicalUrl,
       applicationUrl: existingJob.applicationUrl,
-    };
+    });
   }
 
   if (existingJob && hasWeakerIncomingDetailEvidence(posting, existingJob)) {
-    return preserveRicherExistingDetail(enrichedPosting, existingJob);
+    return prepareDiscoveryPosting(
+      preserveRicherExistingDetail(enrichedPosting, existingJob),
+    );
   }
 
-  return enrichedPosting;
+  return prepareDiscoveryPosting(enrichedPosting);
 }
 
 function matchesLocationPhrase(
@@ -1278,14 +1284,16 @@ export function mergeDiscoveredPostings(
         : []),
       provenance,
     ]);
-    const enrichedPosting = existingJob
-      ? settleCanonicalRoute(
-          enrichDiscoveredPosting(posting, existingJob),
-          existingJob,
-          mergedProvenance,
-          posting,
-        )
-      : enrichDiscoveredPosting(posting, existingJob);
+    const enrichedPosting = prepareDiscoveryPosting(
+      existingJob
+        ? settleCanonicalRoute(
+            enrichDiscoveredPosting(posting, existingJob),
+            existingJob,
+            mergedProvenance,
+            posting,
+          )
+        : enrichDiscoveredPosting(posting, existingJob),
+    );
     const matchAssessment = assessPosting
       ? assessPosting(enrichedPosting)
       : createMatchAssessment(profile, searchPreferences, enrichedPosting);
@@ -1395,7 +1403,7 @@ export function mergeDiscoveredPostings(
 
   return {
     mergedJobs,
-    newJobs: mergedJobs.filter((job) => newJobIds.has(job.id)),
+    newJobs: [...newJobIds].map((id) => nextJobsById.get(id)!),
     validatedCount,
     duplicatesMerged,
     invalidSkipped,
@@ -1479,6 +1487,9 @@ export function toSightingIdentityInput(job: SavedJob): JobIdentityInput {
         : [],
     ),
   };
+  const preparation = readDiscoveryPreparation(job);
+  if (preparation) writeDiscoveryPreparation(identity, preparation);
+  prepareJobIdentity(identity);
   if (immutable) {
     if (identity.alternateListingUrls)
       Object.freeze(identity.alternateListingUrls);
@@ -1553,7 +1564,10 @@ export function applySightingRoute<T extends JobPosting>(
     providerBoardToken: sighting.providerBoardToken ?? null,
     providerIdentifier: sameProvider ? job.providerIdentifier : null,
   } as T;
-  return { ...routed, atsProvider: detectAtsProvider(routed) } as T;
+  return prepareDiscoveryPosting({
+    ...routed,
+    atsProvider: detectAtsProvider(routed),
+  } as T);
 }
 
 function settleCanonicalRoute(
