@@ -10,6 +10,57 @@ import {
 import { createSeed } from "./test-fixtures";
 import { createWorkspaceQueryRepository } from "./workspace-query-repository";
 
+test("full writes and targeted reads reuse statements without reusing row values", async () => {
+  const temp = await createTempRepository("nestor-saved-statements-");
+  const repo = await temp.createRepository();
+  const prepare = vi.spyOn(DatabaseSync.prototype, "prepare");
+  try {
+    const first = createSavedJob({ id: "first", title: "Original" });
+    const second = createSavedJob({ id: "second", title: "Other" });
+    for (const job of [first, second])
+      await repo.commitSavedJobDelta({
+        upserts: [{ ...job, planAssessments: { p: job.matchAssessment } }],
+      });
+    expect((await repo.listSavedJobsByIds([first.id]))[0]?.title).toBe(
+      "Original",
+    );
+    expect((await repo.listSavedJobsByIds([second.id]))[0]?.title).toBe(
+      "Other",
+    );
+    await repo.commitSavedJobDelta({
+      upserts: [
+        {
+          ...first,
+          title: "Updated",
+          planAssessments: { p: first.matchAssessment },
+        },
+      ],
+    });
+    expect((await repo.listSavedJobsByIds([first.id]))[0]?.title).toBe(
+      "Updated",
+    );
+    for (const prefix of [
+      "INSERT INTO job_plan_assessments(job_id,plan_id,value,score)",
+      "DELETE FROM job_plan_assessments WHERE job_id = ? AND plan_id = ?",
+      "UPDATE saved_jobs SET has_plan_assessments = 1",
+    ])
+      expect(
+        prepare.mock.calls.filter(([sql]) => sql.trim().startsWith(prefix)),
+      ).toHaveLength(1);
+    expect(
+      prepare.mock.calls.filter(
+        ([sql]) =>
+          sql.startsWith("SELECT id,") &&
+          sql.includes("WHERE id IN (SELECT value FROM json_each(?))"),
+      ),
+    ).toHaveLength(1);
+  } finally {
+    prepare.mockRestore();
+    await repo.close();
+    await temp.cleanup();
+  }
+});
+
 for (const storage of ["file", "memory"] as const)
   test(`${storage}: small writes retain workflow, other plans and exact job fields`, async () => {
     const temp =

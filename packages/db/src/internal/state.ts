@@ -79,6 +79,7 @@ import {
   restoreResumeDraftStorage,
 } from "./resume-draft-storage";
 import { notifyWorkspaceCommit } from "../workspace-commits";
+import { prepareStatement } from "./sqlite-statements";
 import {
   APPLICATION_ATTEMPT_INDEXED_COLLECTION_CONFIG,
   APPLY_COLLECTION_ORDER_BY_SQL,
@@ -342,7 +343,8 @@ export function listValues<TValue>(
   },
 ): TValue[] {
   const pagination = buildPaginationSql(options);
-  const statement = database.prepare(
+  const statement = prepareStatement(
+    database,
     `SELECT id, ${collectionValueSql(tableName)} AS value${tableName === "saved_jobs" ? savedJobFingerprintSelectSql + savedJobSalarySelectSql : ""} FROM ${stateTableNames[tableName]} ORDER BY id${pagination.sql}`,
   );
   const rows = statement.all(...pagination.params);
@@ -380,11 +382,10 @@ export async function listValuesInChunks<TValue>(
   tableName: StateCollectionTable,
   schema: SchemaParser<TValue>,
 ): Promise<TValue[]> {
-  const rows: (Record<string, SQLOutputValue> | null)[] = database
-    .prepare(
-      `SELECT id, ${collectionValueSql(tableName)} AS value${tableName === "saved_jobs" ? savedJobFingerprintSelectSql + savedJobSalarySelectSql : ""} FROM ${stateTableNames[tableName]} ORDER BY id`,
-    )
-    .all();
+  const rows: (Record<string, SQLOutputValue> | null)[] = prepareStatement(
+    database,
+    `SELECT id, ${collectionValueSql(tableName)} AS value${tableName === "saved_jobs" ? savedJobFingerprintSelectSql + savedJobSalarySelectSql : ""} FROM ${stateTableNames[tableName]} ORDER BY id`,
+  ).all();
   const values: TValue[] = [];
   for (let start = 0; start < rows.length; start += PARSE_CHUNK_ROWS) {
     if (start > 0) {
@@ -431,10 +432,10 @@ export function listCollectionValues<TValue>(
   const whereClause = options.whereSql ? ` WHERE ${options.whereSql}` : "";
   const pagination = buildPaginationSql(options);
   const baseParams = [...(options.params ?? [])] as SQLInputValue[];
-  return database
-    .prepare(
-      `SELECT id, ${collectionValueSql(tableName)} AS value${tableName === "saved_jobs" ? savedJobFingerprintSelectSql + savedJobSalarySelectSql : ""} FROM ${stateTableNames[tableName]}${whereClause} ORDER BY ${tableName === "resume_drafts" ? options.orderBySql.replace(/\bupdated_at\b/g, resumeDraftUpdatedAtSql) : options.orderBySql}${pagination.sql}`,
-    )
+  return prepareStatement(
+    database,
+    `SELECT id, ${collectionValueSql(tableName)} AS value${tableName === "saved_jobs" ? savedJobFingerprintSelectSql + savedJobSalarySelectSql : ""} FROM ${stateTableNames[tableName]}${whereClause} ORDER BY ${tableName === "resume_drafts" ? options.orderBySql.replace(/\bupdated_at\b/g, resumeDraftUpdatedAtSql) : options.orderBySql}${pagination.sql}`,
+  )
     .all(...baseParams, ...pagination.params)
     .map((row) =>
       parsePersistedRowValue({
