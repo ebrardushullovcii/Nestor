@@ -17,26 +17,43 @@ export function rememberPreparedDiscoveryPosting(
   raw: JobPosting,
   prepared: JobPosting,
 ): void {
-  writeDiscoveryPreparation(raw, { normalizedPosting: prepared });
+  writeDiscoveryPreparation(raw, {
+    normalizedPosting: prepared,
+    normalizedPostingSource: raw,
+  });
 }
 
 export function takePreparedDiscoveryPosting(
   raw: JobPosting,
 ): JobPosting | null {
-  return readDiscoveryPreparation(raw)?.normalizedPosting ?? null;
+  const preparation = readDiscoveryPreparation(raw);
+  return Object.isFrozen(raw) && preparation?.normalizedPostingSource === raw
+    ? (preparation.normalizedPosting ?? null)
+    : null;
 }
 
 export function carryPreparedDiscoveryPosting(
   before: JobPosting,
   after: JobPosting,
 ): JobPosting {
-  const prepared = readDiscoveryPreparation(before)?.normalizedPosting;
-  if (prepared)
+  const prepared = takePreparedDiscoveryPosting(before);
+  if (
+    prepared &&
+    [...new Set([...Object.keys(before), ...Object.keys(after)])].every(
+      (key) =>
+        key === "searchRejection" ||
+        Reflect.get(before, key) === Reflect.get(after, key),
+    )
+  ) {
+    rememberPreparedDiscoveryPosting(after, {
+      ...prepared,
+      searchRejection: after.searchRejection,
+    });
+    Object.freeze(after);
+  } else if (readDiscoveryPreparation(after)?.normalizedPosting)
     writeDiscoveryPreparation(after, {
-      normalizedPosting: {
-        ...prepared,
-        searchRejection: after.searchRejection,
-      },
+      normalizedPosting: undefined,
+      normalizedPostingSource: undefined,
     });
   return after;
 }

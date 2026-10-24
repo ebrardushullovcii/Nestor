@@ -37,7 +37,7 @@ export type JobIdentityInput = {
   location?: string | null;
   description?: string | null;
   /** Private indexed evidence, inflated only to confirm a content-hash match. */
-  exactContent?: { digest: string; read(): string };
+  exactContent?: { digest: string; packed?: Uint8Array; read(): string };
   postedAt?: string | null;
   postedAtText?: string | null;
   /**
@@ -203,6 +203,7 @@ function readPreparedContent(
   const description = packed ? null : content.description;
   return {
     digest,
+    ...(packed ? { packed } : {}),
     read: () =>
       packed
         ? inflateRawSync(packed).toString()
@@ -326,7 +327,19 @@ export function hasEquivalentListingContentIdentity(
   left: JobIdentityInput,
   right: JobIdentityInput,
 ): boolean {
-  if (!hasCompatibleSeniority(left, right)) return false;
+  if (!hasCompatibleSeniority(left, right) || !hasCompatibleTitles(left, right))
+    return false;
+  const leftCompany = normalizeText(left.company ?? "");
+  const rightCompany = normalizeText(right.company ?? "");
+  const leftLocation = normalizeText(left.location ?? "");
+  const rightLocation = normalizeText(right.location ?? "");
+  if (
+    !leftCompany ||
+    leftCompany !== rightCompany ||
+    !leftLocation ||
+    leftLocation !== rightLocation
+  )
+    return false;
   if (
     !left.exactContent &&
     !right.exactContent &&
@@ -347,6 +360,14 @@ export function hasEquivalentListingContentIdentity(
   } else {
     const leftPrepared = readPreparedContent(left);
     const rightPrepared = readPreparedContent(right);
+    // Equal compressed bytes decode to exactly equal text. This is the same
+    // collision proof without allocating/inflating two whole listing bodies.
+    if (
+      leftPrepared?.packed &&
+      rightPrepared?.packed &&
+      Buffer.compare(leftPrepared.packed, rightPrepared.packed) === 0
+    )
+      return true;
     const leftContent =
       leftPrepared === undefined
         ? normalizeListingContentIdentity(left.description)
@@ -357,19 +378,7 @@ export function hasEquivalentListingContentIdentity(
         : rightPrepared?.read();
     if (!leftContent || leftContent !== rightContent) return false;
   }
-  const leftCompany = normalizeText(left.company ?? "");
-  const rightCompany = normalizeText(right.company ?? "");
-  const leftLocation = normalizeText(left.location ?? "");
-  const rightLocation = normalizeText(right.location ?? "");
-  if (
-    !leftCompany ||
-    leftCompany !== rightCompany ||
-    !leftLocation ||
-    leftLocation !== rightLocation
-  ) {
-    return false;
-  }
-  return hasCompatibleTitles(left, right);
+  return true;
 }
 
 export function buildJobIdentityAliases(

@@ -1769,8 +1769,8 @@ export function createWorkspaceDiscoveryMethods(
       undefined,
     );
     for (const [position, job] of [
-      ...startingSavedJobs,
-      ...startingDiscovery.pendingDiscoveryJobs,
+      ...workingSavedJobs,
+      ...workingPendingJobs,
     ].entries()) {
       if (position > 0 && position % SETUP_JOBS_PER_TURN === 0)
         await yieldToEventLoop();

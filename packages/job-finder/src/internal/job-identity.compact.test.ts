@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import {
   readDiscoveryPreparation,
   writeDiscoveryPreparation,
@@ -70,6 +70,39 @@ test("compacting digest-only preparation releases its raw text too", () => {
   expect(readDiscoveryPreparation(compact)!.identity!.basis).not.toContain(
     posting.description,
   );
+});
+
+test("equal packed evidence proves content without inflating, while a hash collision still reads and rejects", () => {
+  const compact = compactJobIdentity(posting);
+  const other = compactJobIdentity({
+    ...posting,
+    description:
+      "Different responsibilities in a different engineering role. ".repeat(50),
+  });
+  const read = vi.fn(() => compact.exactContent!.read());
+  const readOther = vi.fn(() => other.exactContent!.read());
+  const left = { ...compact, exactContent: { ...compact.exactContent!, read } };
+  const equal = {
+    ...compact,
+    exactContent: {
+      ...compact.exactContent!,
+      packed: Uint8Array.from(compact.exactContent!.packed!),
+      read,
+    },
+  };
+  expect(hasEquivalentListingContentIdentity(left, equal)).toBe(true);
+  expect(read).not.toHaveBeenCalled();
+  const collision = {
+    ...other,
+    exactContent: {
+      ...other.exactContent!,
+      digest: compact.exactContent!.digest,
+      read: readOther,
+    },
+  };
+  expect(hasEquivalentListingContentIdentity(left, collision)).toBe(false);
+  expect(read).toHaveBeenCalledOnce();
+  expect(readOther).toHaveBeenCalledOnce();
 });
 
 test("compressed inspection evidence preserves aliases, ids and full content verification", () => {

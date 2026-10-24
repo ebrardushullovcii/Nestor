@@ -1,9 +1,10 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import {
   SavedJobSchema,
   JobDiscoveryTargetSchema,
   readDiscoveryPreparation,
   readPreparedDiscoveryFingerprints,
+  assessJobPostingDetailQuality,
   type SavedJob,
 } from "@nestor/contracts";
 import { createSavedJob, createSeed } from "../workspace-service.test-fixtures";
@@ -17,6 +18,11 @@ import {
 import { createJobIdentityIndex, prepareJobIdentity } from "./job-identity";
 import { toProviderAwarePosting } from "./discovery-posting-normalization";
 import { inferSourceIntelligenceFromTarget } from "./workspace-source-intelligence";
+import {
+  carryPreparedDiscoveryPosting,
+  rememberPreparedDiscoveryPosting,
+  takePreparedDiscoveryPosting,
+} from "./discovery-feed-executor";
 
 const body =
   "Build reliable software with a collaborative product and engineering team. ".repeat(
@@ -30,6 +36,23 @@ const preparedJob = () =>
       detailQuality: "partial_detail",
     }),
   );
+
+test("an equally titled full incoming listing does not need the saved body to choose richer evidence", () => {
+  const posting = { ...preparedJob(), description: body.repeat(10) };
+  expect(assessJobPostingDetailQuality(posting)).toBe("detail_enriched");
+  const saved = structuredClone(posting);
+  const expected = structuredClone(enrichDiscoveredPosting(posting, saved));
+  const read = vi.fn(() => {
+    throw new Error(
+      "Unchanged title and strongest incoming detail do not need the saved body",
+    );
+  });
+  Object.defineProperty(saved, "description", { enumerable: true, get: read });
+  expect(structuredClone(enrichDiscoveredPosting(posting, saved))).toEqual(
+    expected,
+  );
+  expect(read).not.toHaveBeenCalled();
+});
 const mutations = {
   title(job: SavedJob) {
     job.title = "Staff Software Engineer";
@@ -120,6 +143,50 @@ const paths = {
       })
     ).job,
 };
+
+test.each(Object.entries(mutations))(
+  "a changed %s cannot retain the worker's old normalized posting",
+  (_name, mutate) => {
+    const before = preparedJob();
+    rememberPreparedDiscoveryPosting(before, paths.normalization(before));
+    Object.freeze(before);
+    expect(takePreparedDiscoveryPosting(before)).not.toBeNull();
+    const changed = { ...before };
+    mutate(changed);
+    carryPreparedDiscoveryPosting(before, changed);
+    Object.freeze(changed);
+    expect(takePreparedDiscoveryPosting(changed)).toBeNull();
+    const expected = paths.normalization(structuredClone(changed));
+    expect(structuredClone(paths.normalization(changed))).toEqual(
+      structuredClone(expected),
+    );
+  },
+);
+
+test("only an explicit unchanged screen copy carries worker normalization; mutable and cloned inputs fall back", () => {
+  const before = preparedJob();
+  rememberPreparedDiscoveryPosting(before, paths.normalization(before));
+  expect(takePreparedDiscoveryPosting(before)).toBeNull();
+  Object.freeze(before);
+  const after = carryPreparedDiscoveryPosting(before, {
+    ...before,
+    searchRejection: { category: "role", reason: "Synthetic screen result" },
+  });
+  expect(takePreparedDiscoveryPosting(after)!.searchRejection).toEqual(
+    after.searchRejection,
+  );
+  expect(takePreparedDiscoveryPosting(Object.freeze({ ...before }))).toBeNull();
+  const normalized = paths.normalization(Object.freeze({ ...before }));
+  expect(
+    readDiscoveryPreparation(normalized)!.normalizedPosting,
+  ).toBeUndefined();
+  expect(
+    readDiscoveryPreparation(normalized)!.normalizedPostingSource,
+  ).toBeUndefined();
+  expect(
+    takePreparedDiscoveryPosting(Object.freeze(structuredClone(before))),
+  ).toBeNull();
+});
 
 for (const [path, apply] of Object.entries(paths))
   for (const [field, mutate] of Object.entries(mutations)) {

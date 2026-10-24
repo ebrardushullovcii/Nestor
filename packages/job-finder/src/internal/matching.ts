@@ -569,13 +569,17 @@ function hasWeakerIncomingDetailEvidence(
   posting: JobPosting,
   existingJob: SavedJob,
 ): boolean {
+  const incomingRank = jobPostingDetailQualityRank(
+    assessJobPostingDetailQuality(posting),
+  );
+  if (incomingRank === jobPostingDetailQualityValues.length - 1) return false;
   const existingQuality = strongestDetailQuality(
     existingJob.detailQuality,
     assessJobPostingDetailQuality(existingJob),
   );
 
   return (
-    jobPostingDetailQualityRank(assessJobPostingDetailQuality(posting)) <
+    incomingRank <
     jobPostingDetailQualityRank(existingQuality)
   );
 }
@@ -635,9 +639,9 @@ export function enrichDiscoveredPosting(
     ...posting,
     title:
       existingJob &&
-      hasEquivalentListingContentIdentity(posting, existingJob) &&
       normalizeText(existingJob.title).length >
-        normalizeText(posting.title).length
+        normalizeText(posting.title).length &&
+      hasEquivalentListingContentIdentity(posting, existingJob)
         ? existingJob.title
         : posting.title,
     providerUpdatedAt: selectLatestProviderUpdate(

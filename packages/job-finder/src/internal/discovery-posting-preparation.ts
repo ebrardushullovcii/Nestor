@@ -1,4 +1,8 @@
-import { readDiscoveryPreparation, type JobPosting } from "@nestor/contracts";
+import {
+  readDiscoveryPreparation,
+  writeDiscoveryPreparation,
+  type JobPosting,
+} from "@nestor/contracts";
 import {
   prepareJobIdentity,
   prepareListingContent,
@@ -8,6 +12,11 @@ import { createDiscoveryListingFingerprints } from "./workspace-discovery-ledger
 
 /** Call at creation; unchanged copies carry the same prepared facts. */
 export function prepareDiscoveryPosting<T extends JobPosting>(posting: T): T {
+  if (readDiscoveryPreparation(posting)?.normalizedPosting)
+    writeDiscoveryPreparation(posting, {
+      normalizedPosting: undefined,
+      normalizedPostingSource: undefined,
+    });
   const content = readDiscoveryPreparation(posting)?.content;
   if (!content || content.description !== posting.description)
     rememberPreparedListingContent(

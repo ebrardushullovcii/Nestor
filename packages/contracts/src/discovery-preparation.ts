@@ -25,7 +25,8 @@ export type DiscoveryPreparation = {
     owner?: object;
     value: DiscoveryListingFingerprints;
   };
-  normalizedPosting?: JobPosting;
+  normalizedPosting?: JobPosting | undefined;
+  normalizedPostingSource?: JobPosting | undefined;
 };
 
 export function readDiscoveryPreparation(
