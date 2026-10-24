@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
-import type {
-  JobSearchPreferences,
-  JobSearchCampaignCollection,
-  JobSearchCampaign,
+import {
+  JobSearchCampaignSchema,
+  type JobSearchPreferences,
+  type JobSearchCampaignCollection,
+  type JobSearchCampaign,
 } from "@nestor/contracts";
 import { backupBeforeStorageMigration } from "./storage-migration-backup";
 import { notifyWorkspaceCommit } from "../workspace-commits";
@@ -56,7 +57,11 @@ function readPreference(db: DatabaseSync, id: string): JobSearchPreferences {
     .prepare("SELECT value FROM search_preference_sets WHERE id = ?")
     .get(id);
   if (!stored) throw new Error("Search preferences are missing.");
-  const body = JSON.parse(String(stored.value)) as JobSearchPreferences;
+  // Stored without its sources (they are rows of their own).
+  const body = JSON.parse(String(stored.value)) as Omit<
+    JobSearchPreferences,
+    "discovery"
+  > & { discovery: Omit<JobSearchPreferences["discovery"], "targets"> };
   const targets = db
     .prepare(
       "SELECT s.value FROM search_preference_sources p JOIN job_sources s ON s.id = p.source_version_id WHERE p.preference_id = ? ORDER BY p.position",
@@ -68,7 +73,21 @@ function readPreference(db: DatabaseSync, id: string): JobSearchPreferences {
           String(row.value),
         ) as JobSearchPreferences["discovery"]["targets"][number],
     );
-  return { ...body, discovery: { ...body.discovery, targets } };
+  // Back in the written order (targets is the schema's first discovery key):
+  // callers compare preferences as JSON, and a moved key read as a change.
+  return { ...body, discovery: { targets, ...body.discovery } };
+}
+
+// Plans are written schema-parsed, so in the schema's key order. The parts kept
+// in their own tables go back to their places on read; with them appended,
+// plan reconciliation saw a changed plan and rewrote it on every launch.
+const PLAN_KEY_ORDER = Object.keys(JobSearchCampaignSchema.shape);
+function inPlanKeyOrder(plan: Record<string, unknown>): JobSearchCampaign {
+  const ordered: Record<string, unknown> = {};
+  for (const key of PLAN_KEY_ORDER) if (key in plan) ordered[key] = plan[key];
+  for (const key of Object.keys(plan))
+    if (!(key in ordered)) ordered[key] = plan[key];
+  return ordered as JobSearchCampaign;
 }
 function replaceLinks(
   db: DatabaseSync,
@@ -180,14 +199,15 @@ export function decodePreferenceSingleton(
           )
           .all(String(row.id))
           .map((item) => String(item.item_id));
-      return {
+      return inPlanKeyOrder({
         ...plan,
         searchPreferences: readPreference(db, String(row.preference_id)),
         jobIds: ids("plan_job_memberships"),
         sourceTargetIds: ids("plan_sources"),
-      };
+      });
     });
-  return { ...input, campaigns };
+  const { activeCampaignId, ...rest } = input as { activeCampaignId?: unknown };
+  return { activeCampaignId, campaigns, ...rest };
 }
 
 export function migratePreferenceStorage(db: DatabaseSync): void {
