@@ -1,9 +1,6 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import {
   workModeValues,
-  isLikelyUtilityShortlistJob,
-  resolveSavedJobCompany,
-  resolveSavedJobLocation,
   QueryJobListInputSchema,
   QueryCompaniesInputSchema,
   type WorkspaceStartupContext,
@@ -22,6 +19,7 @@ import {
   type JobFinderJobDetail,
 } from "@nestor/contracts";
 import { ensureWorkspaceReadIndex } from "./internal/workspace-read-index";
+import { createWorkspaceStartupReads } from "./internal/workspace-startup-reads";
 import {
   savedJobValueSql,
   ensureSavedJobRelations,
@@ -68,7 +66,17 @@ function prepareQuerySchema(database: DatabaseSync): void {
   ensurePreferenceStorageTables(database);
   database.exec(`CREATE TABLE IF NOT EXISTS workspace_changes (
     revision INTEGER PRIMARY KEY AUTOINCREMENT, table_name TEXT, item_id TEXT,
-    operation TEXT CHECK(operation IN ('upsert', 'delete')))`);
+    operation TEXT CHECK(operation IN ('upsert', 'delete')));
+    CREATE TABLE IF NOT EXISTS workspace_read_meta(key TEXT PRIMARY KEY,value TEXT);
+    CREATE INDEX IF NOT EXISTS plan_job_membership_job_idx ON plan_job_memberships(item_id,plan_id)`);
+  if (
+    !database.prepare("SELECT 1 FROM schema_migrations WHERE version=27").get()
+  )
+    database.exec(`INSERT OR IGNORE INTO plan_job_memberships(plan_id,item_id,position)
+      WITH campaigns AS MATERIALIZED (
+        SELECT json_extract(c.value, '$.id') AS id, jsonb_extract(jsonb(c.value), '$.jobIds') AS jobs
+        FROM singleton_state s, json_each(s.value, '$.campaigns') c WHERE s.key = 'campaign_state')
+      SELECT c.id, j.value, j.key FROM campaigns c, json_each(c.jobs) j`);
 }
 
 /** Header reads need only additive schema, never an inventory scan. */
@@ -96,84 +104,7 @@ export function prepareWorkspaceQueryDatabase(filePath: string): void {
       "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY; BEGIN IMMEDIATE",
     );
     prepareQuerySchema(database);
-    const legacy = !database
-      .prepare("SELECT 1 FROM schema_migrations WHERE version = 27")
-      .get();
-    if (legacy)
-      database.exec(`INSERT OR IGNORE INTO plan_job_memberships(plan_id,item_id,position)
-      WITH campaigns AS MATERIALIZED (
-        SELECT json_extract(c.value, '$.id') AS id, jsonb_extract(jsonb(c.value), '$.jobIds') AS jobs
-        FROM singleton_state s, json_each(s.value, '$.campaigns') c WHERE s.key = 'campaign_state')
-      SELECT c.id, j.value, j.key FROM campaigns c, json_each(c.jobs) j`);
     ensureWorkspaceReadIndex(database);
-    if (
-      !database
-        .prepare("SELECT 1 FROM schema_migrations WHERE version = 28")
-        .get()
-    ) {
-      const updates = [];
-      const readDescription = database.prepare(
-        "SELECT json_extract(value, '$.description') AS description FROM saved_jobs WHERE id = ?",
-      );
-      for (const row of database
-        .prepare(
-          `SELECT i.id, i.title, i.canonical_url AS canonicalUrl, i.company, i.location, i.status
-          FROM workspace_job_index i JOIN saved_jobs s ON s.id = i.id
-          WHERE i.origin = 'saved_jobs' AND i.plan_id = '' AND s.assessment_id IS NULL`,
-        )
-        .iterate()) {
-        // The existing intake/display policy, with no model decision changed.
-        if (
-          typeof row.title !== "string" ||
-          typeof row.company !== "string" ||
-          typeof row.canonicalUrl !== "string" ||
-          typeof row.location !== "string"
-        )
-          continue;
-        const job = {
-          title: row.title,
-          company: row.company,
-          canonicalUrl: row.canonicalUrl,
-          location: row.location,
-        };
-        // The shared intake policy reads a body only when employer facts are
-        // absent. Other startup rows never need listing or evidence reads.
-        let description: string | undefined;
-        let descriptionRead = false;
-        Object.defineProperty(job, "description", {
-          get() {
-            if (!descriptionRead) {
-              const value = readDescription.get(row.id!)?.description;
-              description = typeof value === "string" ? value : undefined;
-              descriptionRead = true;
-            }
-            return description;
-          },
-        });
-        updates.push({
-          id: row.id,
-          visible:
-            row.status !== "discovered" || !isLikelyUtilityShortlistJob(job)
-              ? 1
-              : 0,
-          company: resolveSavedJobCompany(job),
-          location: resolveSavedJobLocation(job),
-        });
-      }
-      const update =
-        database.prepare(`UPDATE workspace_job_index SET visible = ?, company = ?, location = ?
-        WHERE origin = 'saved_jobs' AND id = ? AND (visible IS NOT ? OR company IS NOT ? OR location IS NOT ?)`);
-      for (const row of updates)
-        update.run(
-          row.visible,
-          row.company,
-          row.location,
-          row.id!,
-          row.visible,
-          row.company,
-          row.location,
-        );
-    }
     database.exec("COMMIT");
   } catch (error) {
     if (database.isTransaction) database.exec("ROLLBACK");
@@ -254,6 +185,8 @@ export function createWorkspaceQueryRepository(
   database.exec(
     "PRAGMA busy_timeout = 100; PRAGMA cache_size = -8192; PRAGMA temp_store=MEMORY",
   );
+  const startupReads = createWorkspaceStartupReads(database);
+  let directReads = false;
   // The main file is opened readOnly. Only connection-local scalar TEMP tables
   // can be written by these helpers; no canonical row can be changed.
   const activity = createWorkspaceListActivityReader(database);
@@ -271,9 +204,10 @@ export function createWorkspaceQueryRepository(
     );
   // Every reply observes one committed SQLite snapshot: rows, totals, badges and
   // its revision cannot come from different concurrent writer transactions.
-  const read = <T>(fn: () => T): T => {
+  const read = <T>(fn: () => T, inventory = true): T => {
     database.exec("BEGIN");
     try {
+      directReads = startupReads.ensure(inventory);
       const result = fn();
       database.exec("COMMIT");
       return result;
@@ -281,6 +215,7 @@ export function createWorkspaceQueryRepository(
       database.exec("ROLLBACK");
       activity.invalidate();
       pageOrder.invalidate();
+      startupReads.invalidate();
       throw error;
     }
   };
@@ -429,32 +364,36 @@ export function createWorkspaceQueryRepository(
           sourceCount,
           activityControl: values.get("activity_control"),
         } as WorkspaceStartupContext;
-      });
+      }, false);
     },
     queryJobList(input) {
       const query = QueryJobListInputSchema.parse(input);
       return read(() => {
         const planId = plan(query.filters);
         const version = `${revision()}:${String(database.prepare("PRAGMA data_version").get()!.data_version)}`;
-        const activityVersion = String(
-          database
-            .prepare(
-              "SELECT value FROM workspace_read_meta WHERE key='activity_revision'",
-            )
-            .get()?.value ?? "0",
-        );
+        const activityVersion = directReads
+          ? `direct:${version}`
+          : String(
+              database
+                .prepare(
+                  "SELECT value FROM workspace_read_meta WHERE key='activity_revision'",
+                )
+                .get()?.value ?? "0",
+            );
         activity.ensure(planId, activityVersion);
         prepareOrder(activityVersion);
         prepareFilters(version);
         const from = `FROM workspace_job_index i JOIN workspace_listing_activity a
           ON a.plan_id=i.plan_id AND a.origin=i.origin AND a.id=i.id`;
-        const sortRevision = String(
-          database
-            .prepare(
-              "SELECT value FROM workspace_read_meta WHERE key='sort_revision'",
-            )
-            .get()?.value ?? "0",
-        );
+        const sortRevision = directReads
+          ? version
+          : String(
+              database
+                .prepare(
+                  "SELECT value FROM workspace_read_meta WHERE key='sort_revision'",
+                )
+                .get()?.value ?? "0",
+            );
         pageOrder.ensure(
           planId,
           query.sort,
@@ -653,13 +592,15 @@ export function createWorkspaceQueryRepository(
         if (planId && job.planAssessments?.[planId])
           job.matchAssessment = job.planAssessments[planId];
         return { job, planId };
-      });
+      }, false);
     },
     getCompanyDetail(companyId) {
-      const row = database
-        .prepare("SELECT value FROM workspace_company_index WHERE id = ?")
-        .get(companyId);
-      return row ? (raw(row.value) as CompanyEntity) : null;
+      return read(() => {
+        const row = database
+          .prepare("SELECT value FROM workspace_company_index WHERE id = ?")
+          .get(companyId);
+        return row ? (raw(row.value) as CompanyEntity) : null;
+      });
     },
     getListCounts(input) {
       return read(() => counts(plan(input)));
@@ -765,7 +706,7 @@ export function createWorkspaceQueryRepository(
             ),
           ],
         };
-      });
+      }, false);
     },
     close() {
       database.close();
