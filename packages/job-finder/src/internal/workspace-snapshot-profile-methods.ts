@@ -1901,6 +1901,8 @@ export function createWorkspaceSnapshotProfileMethods(
         null,
       now: generatedAt,
     });
+    // Progress is derived and carries its own time; the plan's updatedAt is
+    // when the person (or the Assistant) last edited it, and edits check it.
     const comparableProgress = (progress: JobSearchCampaign["progress"]) => ({
       ...progress,
       lastUpdatedAt: "",
@@ -1920,11 +1922,7 @@ export function createWorkspaceSnapshotProfileMethods(
               ...campaignState,
               campaigns: campaignState.campaigns.map((campaign) =>
                 campaign.id === activeCampaign.id
-                  ? {
-                      ...campaign,
-                      progress: nextProgress,
-                      updatedAt: generatedAt,
-                    }
+                  ? { ...campaign, progress: nextProgress }
                   : campaign,
               ),
             };
@@ -1981,11 +1979,7 @@ export function createWorkspaceSnapshotProfileMethods(
           ...latestState,
           campaigns: latestState.campaigns.map((campaign) =>
             campaign.id === activeCampaign.id
-              ? {
-                  ...campaign,
-                  progress: mergedProgress,
-                  updatedAt: generatedAt,
-                }
+              ? { ...campaign, progress: mergedProgress }
               : campaign,
           ),
         };
