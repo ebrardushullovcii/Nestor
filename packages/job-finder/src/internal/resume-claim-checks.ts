@@ -433,6 +433,8 @@ export function settleResumeClaimLines(input: {
   // A rejected summary falls back to the person's saved summary, as the
   // sanitizer does before checking. Keep that text on the saved draft too:
   // otherwise a later preview restores it while the editor stays empty.
+  // Without a saved summary, retain the text the model saw and its verdict;
+  // retaining a rejected line does not approve it or invent a replacement.
   const fixText = (
     text: string | null,
     origin: ResumeLine["origin"],
@@ -443,8 +445,9 @@ export function settleResumeClaimLines(input: {
     if (!text?.trim()) return text;
     const fix = fixFor({ text, origin, field, sectionId }, savedWording);
     if (fix === null) return text;
-    const replacement = fix || savedWording;
-    if (!replacement || repeatsAShownLine(replacement, text)) return null;
+    const replacement =
+      !fix || repeatsAShownLine(fix, text) ? savedWording : fix;
+    if (!replacement) return null;
     shown.push(replacement);
     return replacement;
   };
@@ -462,7 +465,7 @@ export function settleResumeClaimLines(input: {
               "section_text",
               section.id,
               section.kind === "summary"
-                ? input.profile?.summary?.trim() || null
+                ? input.profile?.summary?.trim() || section.text
                 : null,
             ),
             bullets: fixBullets(section.bullets, "section_bullet", section.id),

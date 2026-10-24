@@ -433,21 +433,36 @@ describe("resume claim checks before a draft is kept (ADR 0041)", () => {
   });
 
   describe("fixing what the check did not pass", () => {
-    test.each(["aggressive", "balanced", "conservative"])(
-      "%s keeps the saved summary in both the editor draft and later preview when the model removes its rewrite",
-      async (tailoringStrength) => {
+    test.each(
+      ["aggressive", "balanced", "conservative"].flatMap((strength) =>
+        ["empty", "duplicate"].map((fix) => [strength, fix]),
+      ),
+    )(
+      "%s keeps the saved summary in the draft and preview after an %s model fix",
+      async (tailoringStrength, fixKind) => {
         const { profile, job } = context();
-        profile.summary = `Builds reliable software (${tailoringStrength}-summary-fallback).`;
-        const draft = draftWith([]);
-        draft.sections[0]!.text = `Invented executive scope (${tailoringStrength}-summary-fallback).`;
+        const tag = `${tailoringStrength}-${fixKind}-summary-fallback`;
+        profile.summary = `Builds reliable software (${tag}).`;
+        const duplicate = `Maintained the synthetic project logs (${tag}).`;
+        const draft = draftWith([{ text: duplicate, origin: "ai_generated" }]);
+        const generated = `Invented executive scope (${tag}).`;
+        draft.sections[0]!.text = generated;
         const checkResumeClaims = vi.fn((input: ResumeClaimCheckInput) =>
           Promise.resolve(
             input.claims.map((claim) => ({
               id: claim.id,
-              verdict: "unsupported" as const,
+              verdict:
+                claim.text === generated
+                  ? ("unsupported" as const)
+                  : ("supported" as const),
               reason: "The evidence does not show executive scope.",
               evidenceIds: [],
-              fix: "",
+              fix:
+                claim.text === generated
+                  ? fixKind === "duplicate"
+                    ? duplicate
+                    : ""
+                  : null,
             })),
           ),
         );
@@ -472,8 +487,47 @@ describe("resume claim checks before a draft is kept (ADR 0041)", () => {
           buildResumeRenderDocument(profile, previewDraft),
         );
         expect(checkResumeClaims).toHaveBeenCalledOnce();
+        expect(checkResumeClaims.mock.calls[0]![0].evidence).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ text: profile.summary }),
+          ]),
+        );
       },
     );
+
+    test("without a profile summary, an empty fix preserves the text the model saw and its verdict", async () => {
+      const { profile, job } = context();
+      profile.summary = null;
+      const previous =
+        "Synthetic summary retained without inventing a fallback (no-profile-summary).";
+      const draft = draftWith([]);
+      draft.sections[0]!.text = previous;
+      const checkResumeClaims = vi.fn((input: ResumeClaimCheckInput) =>
+        Promise.resolve(
+          input.claims.map((claim) => ({
+            id: claim.id,
+            verdict: "unsupported" as const,
+            reason: "Synthetic model verdict stays authoritative.",
+            evidenceIds: [],
+            fix: "",
+          })),
+        ),
+      );
+      const base = { aiClient: { checkResumeClaims }, job, profile };
+      const fixed = await withResumeClaimFixes({
+        ...base,
+        draft: await withResumeClaimChecks({ ...base, draft }),
+        stretchesAreThePersons: true,
+      });
+      expect(fixed.sections[0]!.text).toBe(previous);
+      expect(checkResumeClaims.mock.calls[0]![0].claims[0]!.text).toBe(
+        previous,
+      );
+      expect(fixed.claimChecks).toEqual([
+        expect.objectContaining({ verdict: "unsupported", fix: "" }),
+      ]);
+      expect(checkResumeClaims).toHaveBeenCalledOnce();
+    });
 
     // Verdicts are remembered for the session, so each test words its own lines.
     function lines(tag: string) {
