@@ -4,6 +4,11 @@ import {
   ApplicationRecordSchema,
   FitJudgmentSchema,
   QueryJobListInputSchema,
+  DiscoveryLedgerEntrySchema,
+  JobDiscoveryTargetSchema,
+  SavedJobDiscoveryProvenanceSchema,
+  ResumeDraftSchema,
+  type SavedJob,
 } from "@nestor/contracts";
 import { afterEach, describe, expect, test } from "vitest";
 import {
@@ -15,8 +20,35 @@ import {
   prepareWorkspaceQueryDatabase,
 } from "./workspace-query-repository";
 import { subscribeWorkspaceCommits } from "./workspace-commits";
+import { compareDiscoveryJobs } from "@nestor/job-list-policy/ordering";
 
 const cleanups: Array<() => Promise<void> | void> = [];
+function assessedJob(overrides: Partial<SavedJob> = {}) {
+  const base = createSavedJob({
+    status: "discovered",
+    discoveryMethod: "browser_agent",
+    postedAt: null,
+    firstSeenAt: "2026-10-20T00:00:00.000Z",
+    lastSeenAt: "2026-10-20T00:00:00.000Z",
+    lastVerifiedActiveAt: null,
+  });
+  return createSavedJob({
+    ...base,
+    matchAssessment: {
+      ...base.matchAssessment,
+      score: 60,
+      contextFingerprint: "profile",
+      postingFingerprint: "posting",
+      judgment: FitJudgmentSchema.parse({
+        source: "batch",
+        judgedAt: "2026-10-24T00:00:00.000Z",
+        score: 60,
+        recommendation: "review_before_applying",
+      }),
+    },
+    ...overrides,
+  });
+}
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
@@ -30,6 +62,362 @@ async function fixture() {
   return { ...temp, writer, reader };
 }
 describe("independent workspace queries", () => {
+  test("triage reuses activity and an uncommitted sighting cannot escape its transaction", async () => {
+    const { writer, reader, filePath } = await fixture();
+    const job = assessedJob({ id: "triage-activity" });
+    await writer.commitSavedJobDelta({ upserts: [job] });
+    const before = reader.queryJobList({
+      list: "all",
+      filters: { planId: null },
+    }).rows[0]?.listingActivity;
+    const raw = new DatabaseSync(filePath);
+    try {
+      const epoch = () =>
+        raw
+          .prepare(
+            "SELECT value FROM workspace_read_meta WHERE key='activity_revision'",
+          )
+          .get()!.value;
+      const revision = epoch();
+      await writer.commitSavedJobDelta({
+        updateJobIds: [job.id],
+        update: (current) => ({ ...current, status: "ready_for_review" }),
+      });
+      expect(epoch()).toBe(revision);
+      expect(reader.getListCounts({ planId: null })).toMatchObject({
+        discovery: 0,
+        shortlisted: 1,
+      });
+      raw.exec("BEGIN IMMEDIATE");
+      raw
+        .prepare("UPDATE saved_jobs SET last_seen_at=? WHERE id=?")
+        .run("2026-10-25T00:00:00.000Z", job.id);
+      expect(epoch()).not.toBe(revision);
+      expect(
+        reader.queryJobList({ list: "all", filters: { planId: null } }).rows[0]
+          ?.listingActivity,
+      ).toEqual(before);
+      raw.exec("ROLLBACK");
+      expect(epoch()).toBe(revision);
+      expect(
+        reader.queryJobList({ list: "all", filters: { planId: null } }).rows[0]
+          ?.listingActivity,
+      ).toEqual(before);
+    } finally {
+      if (raw.isTransaction) raw.exec("ROLLBACK");
+      raw.close();
+    }
+  });
+  test("Home counts current approvals separately from stale approval overlays", async () => {
+    const { writer, reader, filePath } = await fixture();
+    await writer.commitSavedJobDelta({
+      upserts: [
+        assessedJob({ id: "approved-a" }),
+        assessedJob({ id: "approved-b" }),
+      ],
+    });
+    for (const id of ["approved-a", "approved-b"])
+      await writer.upsertResumeDraft(
+        ResumeDraftSchema.parse({
+          id,
+          jobId: id,
+          status: "approved",
+          templateId: "classic_ats",
+          createdAt: "2026-10-20T00:00:00.000Z",
+          updatedAt: "2026-10-20T00:00:00.000Z",
+          approvedAt: "2026-10-20T00:00:00.000Z",
+          sections: [],
+        }),
+      );
+    const raw = new DatabaseSync(filePath);
+    try {
+      raw
+        .prepare("INSERT INTO resume_draft_approval_state VALUES (?,?,?)")
+        .run("approved-a", "Profile changed.", "2026-10-24T00:00:00.000Z");
+    } finally {
+      raw.close();
+    }
+    expect(reader.getHomeSummary({ planId: null }).resumesApproved).toBe(1);
+  });
+  test("orders complete ties with the existing locale comparison and keeps unknown posting dates last", async () => {
+    const { writer, reader } = await fixture();
+    const first = assessedJob({
+      id: "hyphen",
+      title: "Senior Backend Engineer - Content Protection",
+    });
+    const second = assessedJob({
+      id: "paren",
+      title: "Senior Backend Engineer (Data serving)",
+    });
+    await writer.commitSavedJobDelta({ upserts: [first, second] });
+    expect(
+      reader
+        .queryJobList({ list: "discovery", filters: { planId: null } })
+        .rows.map((row) => row.id),
+    ).toEqual([first, second].sort(compareDiscoveryJobs).map((row) => row.id));
+    const jobs = [
+      assessedJob({
+        id: "posted",
+        company: "1Password",
+        postedAt: "2026-10-13T00:00:00.000Z",
+      }),
+      assessedJob({
+        id: "absolute",
+        company: "10Beauty",
+        postedAtText: "November 1, 2026",
+      }),
+      assessedJob({
+        id: "provider",
+        company: "Alpaca",
+        providerUpdatedAt: "2026-10-12T00:00:00.000Z",
+      }),
+      assessedJob({
+        id: "relative",
+        company: "Alpaca",
+        postedAtText: "Posted 3 months ago",
+        providerUpdatedAt: "2026-12-01T00:00:00.000Z",
+        firstSeenAt: "2026-12-01T00:00:00.000Z",
+      }),
+    ];
+    await writer.commitSavedJobDelta({ upserts: jobs });
+    expect(
+      reader
+        .queryJobList({
+          list: "discovery",
+          filters: { planId: null },
+          sort: "newest",
+        })
+        .rows.slice(0, 3)
+        .map((row) => row.id),
+    ).toEqual(["absolute", "posted", "provider"]);
+    expect(
+      reader
+        .queryJobList({
+          list: "discovery",
+          filters: { planId: null },
+          sort: "company",
+        })
+        .rows.slice(0, 2)
+        .map((row) => row.company),
+    ).toEqual(["1Password", "10Beauty"]);
+  });
+  test("exposes actual row facts, search labels, source filters and pool facet counts", async () => {
+    const { writer, reader } = await fixture();
+    const preferences = await writer.getSearchPreferences();
+    const target = JobDiscoveryTargetSchema.parse({
+      id: "query-source",
+      label: "Configured board",
+      startingUrl: "https://example.test/jobs",
+    });
+    await writer.saveSearchPreferences({
+      ...preferences,
+      discovery: { ...preferences.discovery, targets: [target] },
+    });
+    const job = assessedJob({
+      id: "labeled",
+      firstSeenAt: "2026-10-24T00:00:00.000Z",
+      providerUpdatedAt: "2026-10-23T00:00:00.000Z",
+      provenance: [
+        SavedJobDiscoveryProvenanceSchema.parse({
+          targetId: target.id,
+          adapterKind: "auto",
+          startingUrl: target.startingUrl,
+          discoveredAt: "2026-10-20T00:00:00.000Z",
+          sourceLabel: "Historical label",
+        }),
+      ],
+    });
+    job.matchAssessment = {
+      ...job.matchAssessment,
+      recommendation: "apply_with_original",
+      titleFamilyMatch: "same_family",
+    };
+    await writer.commitSavedJobDelta({
+      upserts: [job, assessedJob({ id: "unspecified", workMode: [] })],
+    });
+    const result = reader.queryJobList({
+      list: "discovery",
+      filters: {
+        planId: null,
+        sourceLabels: ["Configured board"],
+        recommendations: ["apply_with_original"],
+        activities: ["active"],
+        newSince: "2026-10-23T00:00:00.000Z",
+        newOnly: true,
+      },
+      search: "Original resume is credible",
+    });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({
+      id: "labeled",
+      providerUpdatedAt: job.providerUpdatedAt,
+      sourceLabels: ["Configured board"],
+      applyPath: "easy_apply",
+      listingActivity: { status: "active", observedAt: job.lastSeenAt },
+      tieBreakReason: "Job title matches one of your target roles.",
+    });
+    expect(result.facets.sources).toEqual([
+      { value: "Configured board", count: 1 },
+      { value: "Source unavailable", count: 1 },
+    ]);
+    expect(result.facets.workModes).toEqual([
+      { value: "remote", count: 1 },
+      { value: "Not specified", count: 1 },
+    ]);
+    expect(result.facets.newSince).toBe(1);
+    expect(
+      reader
+        .queryJobList({
+          list: "discovery",
+          filters: { planId: null, workModeUnspecified: true },
+        })
+        .rows.map((row) => row.id),
+    ).toEqual(["unspecified"]);
+    await writer.saveSearchPreferences({
+      ...preferences,
+      discovery: {
+        ...preferences.discovery,
+        targets: [{ ...target, label: "Renamed board" }],
+      },
+    });
+    expect(
+      reader
+        .queryJobList({
+          list: "discovery",
+          filters: { planId: null, sourceLabels: ["Renamed board"] },
+        })
+        .rows.map((row) => row.id),
+    ).toEqual(["labeled"]);
+  });
+  test("uses the existing identity ambiguity and newer activity rules for ledger and signal facts", async () => {
+    const { writer, reader } = await fixture();
+    const job = assessedJob({
+      id: "activity",
+      canonicalUrl: "https://example.test/jobs/activity",
+      applicationUrl: null,
+    });
+    await writer.commitSavedJobDelta({ upserts: [job] });
+    await writer.commitDiscoveryStateUpdate((current) => ({
+      ...current,
+      discoveryLedger: [
+        DiscoveryLedgerEntrySchema.parse({
+          id: "inactive",
+          canonicalUrl: job.canonicalUrl,
+          source: job.source,
+          sourceJobId: job.sourceJobId,
+          title: job.title,
+          company: job.company,
+          location: job.location,
+          targetId: "synthetic",
+          firstSeenAt: job.firstSeenAt,
+          lastSeenAt: job.lastSeenAt,
+          inactiveAt: "2026-10-22T00:00:00.000Z",
+          latestStatus: "inactive",
+        }),
+      ],
+    }));
+    const read = () =>
+      reader.queryJobList({ list: "discovery", filters: { planId: null } });
+    expect(read().rows[0]).toMatchObject({
+      id: "activity",
+      listingClosed: true,
+      listingActivity: { status: "inactive", ledgerEntryId: "inactive" },
+    });
+    await writer.commitSavedJobDelta({
+      upserts: [{ ...job, id: "ambiguous" }],
+    });
+    expect(
+      read().rows.every((row) => row.listingActivity.status === "active"),
+    ).toBe(true);
+    expect(read().rows.every((row) => row.indistinguishable)).toBe(true);
+    const intelligence = await writer.getIntelligenceState();
+    await writer.saveIntelligenceState({
+      ...intelligence,
+      safeguards: {
+        ...intelligence.safeguards,
+        listingSignals: [
+          {
+            id: "closed-signal",
+            jobId: job.id,
+            signal: "closed",
+            detail: null,
+            detectedAt: "2026-10-23T00:00:00.000Z",
+            confidence: 1,
+            provenance: "provider",
+            explanation: "The source reported this listing closed.",
+            recoveryGuidance: "Choose another listing.",
+          },
+        ],
+      },
+    });
+    const closed = reader.queryJobList({
+      list: "discovery",
+      filters: { planId: null, activities: ["closed"] },
+    });
+    expect(closed.rows.map((row) => row.id)).toEqual(["activity"]);
+    expect(closed.rows[0]?.listingActivity).toMatchObject({
+      status: "closed",
+      signalId: "closed-signal",
+    });
+    expect(closed.facets.activities).toEqual([
+      { value: "active", count: 1 },
+      { value: "closed", count: 1 },
+    ]);
+    await writer.commitSavedJobDelta({
+      upserts: [
+        assessedJob({
+          id: "unknown",
+          sourceJobId: "unknown",
+          canonicalUrl: "https://example.test/jobs/unknown",
+          lastSeenAt: null,
+          lastVerifiedActiveAt: null,
+        }),
+      ],
+    });
+    expect(
+      reader
+        .queryJobList({
+          list: "discovery",
+          filters: { planId: null, activities: ["unknown"] },
+        })
+        .rows.map((row) => row.id),
+    ).toEqual(["unknown"]);
+  });
+  test("pending intake reads real missing-employer body facts and retains curated rows", async () => {
+    const { writer, reader } = await fixture();
+    const empty = assessedJob({
+      id: "empty-pending",
+      title: "Opportunities",
+      company: "Unknown",
+      description: "Opportunities",
+      canonicalUrl: "https://example.test/catalog",
+    });
+    const real = assessedJob({
+      ...empty,
+      id: "real-pending",
+      description:
+        "An actual role with responsibilities and a complete application path.",
+    });
+    const curated = assessedJob({
+      ...empty,
+      id: "curated-pending",
+      status: "shortlisted",
+    });
+    await writer.commitDiscoveryStateUpdate((current) => ({
+      ...current,
+      pendingDiscoveryJobs: [empty, real, curated],
+    }));
+    expect(
+      reader
+        .queryJobList({ list: "discovery", filters: { planId: null } })
+        .rows.map((row) => row.id)
+        .sort(),
+    ).toEqual(["curated-pending", "real-pending"]);
+    expect(reader.getListCounts({ planId: null }).discovery).toBe(2);
+    expect(
+      reader.queryJobList({ list: "all", filters: { planId: null } }).total,
+    ).toBe(3);
+  });
   test("Find jobs bands keep unjudged work visible and exclude decided and weaker jobs by default", async () => {
     const { writer, reader } = await fixture();
     const base = createSavedJob({

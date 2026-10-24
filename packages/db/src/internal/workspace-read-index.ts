@@ -1,10 +1,10 @@
 import { ensureSavedJobFingerprintStorage } from "./saved-job-fingerprints";
 import type { DatabaseSync } from "node:sqlite";
 
-const VERSION = "11";
+const VERSION = "12";
 const jobTables = ["saved_jobs", "discovery_pending_jobs"] as const;
 const jobFields =
-  "status source work_mode title company search_text score hidden unjudged closed mismatch provisional outside title_family recency detail seen location source_job_id canonical_url application_url posted_at posted_text discovered_at first_seen_at salary_text detail_quality score_upper recommendation title_family_match location_reach resume_mode tailoring_mode visible rank_score feedback result_group".split(
+  "status source work_mode title company search_text score hidden unjudged closed mismatch provisional outside title_family recency detail seen location source_job_id canonical_url application_url posted_at posted_text discovered_at first_seen_at salary_text detail_quality score_upper recommendation title_family_match location_reach resume_mode tailoring_mode visible rank_score feedback result_group provider_updated_at discovery_method apply_path recommendation_rationale first_gap role_state seniority rescored source_provenance last_verified_active_at listing_closed_evidence identity_value tie_requirements first_reason last_seen_at".split(
     " ",
   );
 
@@ -36,7 +36,11 @@ function indexJobSql(table: string, where = ""): string {
       FROM ${table} ${where.replaceAll("j.id", "id")}),
     jobs AS MATERIALIZED (SELECT id, jsonb_remove(value, '$.description', '$.provenance', '$.summary',
       '$.responsibilities', '$.minimumQualifications', '$.preferredQualifications', '$.keywordSignals', '$.latestMatchAssessmentAudit') AS value,
-      ${metadata} FROM raw_jobs),
+      ${metadata},
+      CASE WHEN json_type(value,'$.provenance')='array' THEN
+        (SELECT json_group_array(json_remove(p.value,'$.listingFacts')) FROM json_each(raw_jobs.value,'$.provenance') p)
+        ${table === "saved_jobs" ? "ELSE (SELECT json_group_array(json_remove(p.value,'$.listingFacts')) FROM (SELECT value FROM job_provenance WHERE job_id=raw_jobs.id ORDER BY position) p)" : "ELSE '[]'"}
+      END AS source_provenance FROM raw_jobs),
     verdicts AS MATERIALIZED (SELECT j.id, p.value AS plan_id, jsonb(${assessment}) AS verdict
       FROM jobs j, json_each(jsonb_insert(${plans}, '$[#]', '')) p)
     SELECT '${table}', j.id, v.plan_id,
@@ -69,8 +73,8 @@ function indexJobSql(table: string, where = ""): string {
       json_extract(j.value, '$.discoveredAt'), j.first_seen_at,
       json_extract(j.value, '$.salaryText'), json_extract(j.value, '$.detailQuality'),
       COALESCE(json_extract(v.verdict, '$.scoreIsUpperBound'), 0),
-      COALESCE(json_extract(v.verdict, '$.recommendation'), 'review'),
-      json_extract(v.verdict, '$.titleFamilyMatch'), json_extract(v.verdict, '$.locationReach'),
+      COALESCE(json_extract(v.verdict, '$.recommendation'), 'review_before_applying'),
+      json_extract(v.verdict, '$.titleFamilyMatch'), COALESCE(json_extract(v.verdict, '$.locationReach'),'unknown'),
       json_extract(j.value, '$.resumeApplicationMode'), json_extract(j.value, '$.resumeTailoringMode'),
       COALESCE(j.list_visible, 1),
       CASE WHEN json_extract(j.value, '$.discoveryMethod') = 'catalog_seed' OR
@@ -86,7 +90,14 @@ function indexJobSql(table: string, where = ""): string {
           json_extract(v.verdict, '$.locationReach') IS 'in_area' AND COALESCE(json_extract(v.verdict, '$.titleFamilyMatch'),
             CASE json_extract(v.verdict, '$.dimensions.roleSuitability.state') WHEN 'exact' THEN 'same_family' WHEN 'adjacent' THEN 'adjacent' ELSE '' END) IN ('same_family', 'adjacent'))
           THEN 'mismatches'
-        WHEN json_extract(v.verdict, '$.score') < 50 THEN 'weaker' ELSE 'matches' END
+        WHEN json_extract(v.verdict, '$.score') < 50 THEN 'weaker' ELSE 'matches' END,
+      json_extract(j.value,'$.providerUpdatedAt'), json_extract(j.value,'$.discoveryMethod'),
+      json_extract(j.value,'$.applyPath'), COALESCE(json_extract(v.verdict,'$.recommendationRationale'),'Review the listing and resume evidence before applying.'),
+      json_extract(v.verdict,'$.gaps[0]'), COALESCE(json_extract(v.verdict,'$.dimensions.roleSuitability.state'),'unknown'),
+      json_extract(j.value,'$.seniority'), COALESCE(json_extract(j.value,'$.rescoredAfterListingRead'),0),
+      j.source_provenance, j.last_verified_active_at, json_extract(v.verdict,'$.judgment.listingClosedEvidence'),
+      json_object(${["source", "sourceJobId", "canonicalUrl", "applicationUrl", "providerKey", "providerBoardToken", "providerIdentifier", "title", "seniority", "company", "location", "postedAt", "postedAtText"].map((field) => `'${field}',json_extract(j.value,'$.${field}')`).join(",")}),
+      (SELECT json_group_array(json_object('category',json_extract(r.value,'$.category'),'status',json_extract(r.value,'$.status'))) FROM json_each(v.verdict,'$.requirements') r), json_extract(v.verdict,'$.reasons[0]'), j.last_seen_at
     FROM verdicts v JOIN jobs j ON j.id = v.id
     WHERE 1 ON CONFLICT(origin, id, plan_id) DO UPDATE SET ${jobFields.map((field) => `${field} = excluded.${field}`).join(", ")}
       WHERE ${jobFields.map((field) => `workspace_job_index.${field} IS NOT excluded.${field}`).join(" OR ")};`;
@@ -113,7 +124,7 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
     if (version && version !== VERSION) {
       for (const { name } of database
         .prepare(
-          "SELECT name FROM sqlite_master WHERE type = 'trigger' AND (name LIKE 'workspace_job_index_%' OR name LIKE 'workspace_entity_%' OR name LIKE 'workspace_companies_%' OR name LIKE 'workspace_feed_%' OR name LIKE 'workspace_membership_%' OR name LIKE 'workspace_plan_assessment_%' OR name = 'workspace_sighting_dates')",
+          "SELECT name FROM sqlite_master WHERE type = 'trigger' AND (name LIKE 'workspace_job_index_%' OR name LIKE 'workspace_entity_%' OR name LIKE 'workspace_companies_%' OR name LIKE 'workspace_feed_%' OR name LIKE 'workspace_membership_%' OR name LIKE 'workspace_plan_assessment_%' OR name LIKE 'workspace_activity_%' OR name = 'workspace_sighting_dates')",
         )
         .all())
         database.exec(`DROP TRIGGER ${String(name)}`);
@@ -140,6 +151,9 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
         salary_text TEXT, detail_quality TEXT, score_upper INTEGER,
         recommendation TEXT, title_family_match TEXT, location_reach TEXT,
         resume_mode TEXT, tailoring_mode TEXT, visible INTEGER, rank_score REAL, feedback INTEGER, result_group TEXT,
+        provider_updated_at TEXT, discovery_method TEXT, apply_path TEXT, recommendation_rationale TEXT,
+        first_gap TEXT, role_state TEXT, seniority TEXT, rescored INTEGER, source_provenance TEXT,
+        last_verified_active_at TEXT, listing_closed_evidence TEXT, identity_value TEXT, tie_requirements TEXT, first_reason TEXT, last_seen_at TEXT,
         PRIMARY KEY(origin, id, plan_id)
       );
       CREATE TABLE IF NOT EXISTS workspace_entity_index (
@@ -179,9 +193,14 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
           "INSERT OR REPLACE INTO workspace_read_meta VALUES ('version', ?)",
         )
         .run(VERSION);
+      database.exec(
+        "INSERT INTO workspace_read_meta(key,value) VALUES ('activity_revision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1",
+      );
     }
+    ensureActivityRevision(database);
     database.exec(`CREATE TRIGGER IF NOT EXISTS workspace_sighting_dates AFTER UPDATE OF first_seen_at, last_seen_at, last_verified_active_at ON saved_jobs BEGIN
       UPDATE workspace_job_index SET first_seen_at = NEW.first_seen_at,
+        last_seen_at = NEW.last_seen_at, last_verified_active_at = NEW.last_verified_active_at,
         seen = COALESCE(NEW.last_seen_at, json_extract(NEW.value, '$.discoveredAt'), ''),
         recency = COALESCE(json_extract(NEW.value, '$.postedAt'), NEW.first_seen_at, json_extract(NEW.value, '$.discoveredAt'), '')
       WHERE origin = 'saved_jobs' AND id = NEW.id;
@@ -213,8 +232,18 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
       CREATE INDEX IF NOT EXISTS workspace_job_date_idx ON workspace_job_index(plan_id, recency DESC, id);
       CREATE INDEX IF NOT EXISTS workspace_job_company_idx ON workspace_job_index(plan_id, company, id);
       CREATE INDEX IF NOT EXISTS workspace_job_identity_idx ON workspace_job_index(id, plan_id);
-      CREATE INDEX IF NOT EXISTS workspace_job_counts_idx ON workspace_job_index(plan_id, status, visible, hidden, origin, id);
+      CREATE INDEX IF NOT EXISTS workspace_ledger_activity_idx ON discovery_ledger(
+        json_extract(value,'$.latestStatus'),json_extract(value,'$.inactiveAt'));
     `);
+    if (
+      !database
+        .prepare("PRAGMA index_info(workspace_job_counts_idx)")
+        .all()
+        .some((row) => row.name === "feedback")
+    )
+      database.exec("DROP INDEX IF EXISTS workspace_job_counts_idx");
+    database.exec(`CREATE INDEX IF NOT EXISTS workspace_job_counts_idx ON workspace_job_index(
+      plan_id,status,visible,feedback,result_group,hidden,origin,id)`);
     for (const table of [
       "application_records",
       "resume_drafts",
@@ -298,5 +327,73 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
   } catch (error) {
     if (ownTransaction) database.exec("ROLLBACK");
     throw error;
+  }
+}
+
+/** Triage/status edits cannot invalidate activity for every listing. */
+function ensureActivityRevision(database: DatabaseSync): void {
+  const bump =
+    "INSERT INTO workspace_read_meta(key,value) VALUES ('activity_revision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1;";
+  const fields = [
+    "origin",
+    "id",
+    "plan_id",
+    "identity_value",
+    "title",
+    "company",
+    "first_seen_at",
+    "last_seen_at",
+    "last_verified_active_at",
+    "discovered_at",
+    "closed",
+    "listing_closed_evidence",
+  ];
+  const orderFields = [
+    ...fields,
+    "unjudged",
+    "mismatch",
+    "provisional",
+    "outside",
+    "rank_score",
+    "title_family",
+    "recency",
+    "detail",
+    "result_group",
+    "posted_at",
+    "posted_text",
+    "provider_updated_at",
+    "seen",
+  ];
+  const sortBump =
+    "INSERT INTO workspace_read_meta(key,value) VALUES ('sort_revision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1;";
+  for (const event of ["insert", "update", "delete"])
+    database.exec(`CREATE TRIGGER IF NOT EXISTS workspace_sort_jobs_${event}
+    AFTER ${event.toUpperCase()} ON workspace_job_index
+    ${event === "update" ? `WHEN ${orderFields.map((field) => `OLD.${field} IS NOT NEW.${field}`).join(" OR ")}` : ""}
+    BEGIN ${sortBump} END`);
+  for (const event of ["insert", "update", "delete"])
+    database.exec(`CREATE TRIGGER IF NOT EXISTS workspace_activity_jobs_${event}
+    AFTER ${event.toUpperCase()} ON workspace_job_index
+    ${event === "update" ? `WHEN ${fields.map((field) => `OLD.${field} IS NOT NEW.${field}`).join(" OR ")}` : ""}
+    BEGIN ${bump} END`);
+  for (const event of ["insert", "update", "delete"]) {
+    const ref = event === "delete" ? "OLD" : "NEW";
+    const inactive =
+      event === "update"
+        ? "(json_extract(OLD.value,'$.latestStatus')='inactive' OR json_extract(NEW.value,'$.latestStatus')='inactive') AND OLD.value IS NOT NEW.value"
+        : `json_extract(${ref}.value,'$.latestStatus')='inactive'`;
+    database.exec(
+      `CREATE TRIGGER IF NOT EXISTS workspace_activity_ledger_${event} AFTER ${event.toUpperCase()} ON discovery_ledger WHEN ${inactive} BEGIN ${bump} END`,
+    );
+    database.exec(`CREATE TRIGGER IF NOT EXISTS workspace_activity_signals_${event} AFTER ${event.toUpperCase()} ON singleton_state
+      WHEN ${ref}.key='intelligence_state' ${event === "update" ? "AND json_extract(OLD.value,'$.safeguards.listingSignals') IS NOT json_extract(NEW.value,'$.safeguards.listingSignals')" : ""}
+      BEGIN ${bump} END`);
+    const closed =
+      event === "update"
+        ? "(json_extract(OLD.value,'$.blocker.code')='application_closed' OR json_extract(NEW.value,'$.blocker.code')='application_closed') AND OLD.value IS NOT NEW.value"
+        : `json_extract(${ref}.value,'$.blocker.code')='application_closed'`;
+    database.exec(
+      `CREATE TRIGGER IF NOT EXISTS workspace_activity_attempts_${event} AFTER ${event.toUpperCase()} ON application_attempts WHEN ${closed} BEGIN ${bump} END`,
+    );
   }
 }

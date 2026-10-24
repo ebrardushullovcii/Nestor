@@ -11,6 +11,7 @@
 - `packages/browser-runtime`: browser lifecycle and generic automation primitives
 - `packages/browser-agent`: browser workflow policy, prompts, tool use, structured outputs
 - `packages/job-finder`: discovery, source-debug, resume, apply orchestration
+- `packages/job-list-policy`: shared listing identity, activity and ordering rules; no repository or workflow orchestration
 - `packages/live-assistant`: prep, live session, transcript, cues
 - `packages/ai-providers`: provider interfaces and adapters for chat, vision, STT, and embeddings
 - `packages/os-integration`: tray, hotkeys, windows, capture-policy adapters

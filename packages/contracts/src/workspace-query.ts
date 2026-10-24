@@ -4,11 +4,13 @@ import {
   NonEmptyStringSchema,
   WorkModeSchema,
 } from "./base";
+import { FitRecommendationSchema } from "./discovery";
 import type { ApplicationStatus } from "./base";
 import type {
   SavedJob,
   JobFinderJobDetail,
   JobSearchPreferences,
+  ListingActivity,
 } from "./discovery";
 import type { JobSearchCampaign } from "./job-search-campaigns";
 import type { CandidateProfile } from "./profile";
@@ -43,6 +45,15 @@ export const QueryJobListInputSchema = z
         workModes: z.array(WorkModeSchema).max(10).optional(),
         minimumScore: z.number().min(0).max(100).optional(),
         maximumScore: z.number().min(0).max(100).optional(),
+        recommendations: z.array(FitRecommendationSchema).max(4).optional(),
+        sourceLabels: z.array(NonEmptyStringSchema).max(100).optional(),
+        activities: z
+          .array(z.enum(["active", "inactive", "stale", "closed", "unknown"]))
+          .max(5)
+          .optional(),
+        newSince: z.string().datetime().optional(),
+        newOnly: z.boolean().optional(),
+        workModeUnspecified: z.boolean().optional(),
         discoveryBands: z
           .array(z.enum(["matches", "unchecked", "weaker", "mismatches"]))
           .min(1)
@@ -99,7 +110,21 @@ export type WorkspaceJobListRow = Pick<
   scoreIsUpperBound: boolean;
   titleFamilyMatch: SavedJob["matchAssessment"]["titleFamilyMatch"] | null;
   locationReach: SavedJob["matchAssessment"]["locationReach"];
+  /** Unavailable compatibility flag; inactive is distinct from proven closed. */
   listingClosed: boolean;
+  listingActivity: ListingActivity;
+  providerUpdatedAt: SavedJob["providerUpdatedAt"];
+  discoveryMethod: SavedJob["discoveryMethod"];
+  applyPath: SavedJob["applyPath"];
+  sourceLabels: string[];
+  recommendationRationale: string | null;
+  firstGap: string | null;
+  roleSuitabilityState: string | null;
+  seniority: SavedJob["seniority"];
+  rescoredAfterListingRead: boolean;
+  tieBreakReason: string | null;
+  indistinguishable: boolean;
+  scoreTied: boolean;
   resultGroup: "matches" | "unchecked" | "weaker" | "mismatches";
 };
 export interface WorkspaceListCounts {
@@ -132,6 +157,22 @@ export interface QueryJobListResult {
   resumeDrafts: WorkspaceEntitySummary[];
   applications: WorkspaceEntitySummary[];
   applyResults: WorkspaceEntitySummary[];
+  facets: WorkspaceJobListFacets;
+}
+export interface WorkspaceJobListFacets {
+  recommendations: Array<{
+    value: WorkspaceJobListRow["recommendation"];
+    count: number;
+  }>;
+  sources: Array<{ value: string; count: number }>;
+  workModes: Array<{ value: string; count: number }>;
+  activities: Array<{ value: ListingActivity["status"]; count: number }>;
+  locationReach: Array<{
+    value: WorkspaceJobListRow["locationReach"];
+    count: number;
+  }>;
+  assessed: number;
+  newSince: number | null;
 }
 export interface WorkspaceHomeSummary {
   counts: WorkspaceListCounts;

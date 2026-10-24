@@ -274,6 +274,9 @@ importers:
       '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@nestor/job-list-policy':
+        specifier: workspace:*
+        version: link:../job-list-policy
 
   packages/job-finder:
     dependencies:
@@ -298,6 +301,9 @@ importers:
       '@nestor/db':
         specifier: workspace:*
         version: link:../db
+      '@nestor/job-list-policy':
+        specifier: workspace:*
+        version: link:../job-list-policy
       '@nestor/knowledge-base':
         specifier: workspace:*
         version: link:../knowledge-base
@@ -307,6 +313,15 @@ importers:
       zod-to-json-schema:
         specifier: 3.24.6
         version: 3.24.6(zod@3.25.76)
+
+  packages/job-list-policy:
+    dependencies:
+      '@nestor/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@nestor/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/knowledge-base:
     dependencies:
