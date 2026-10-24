@@ -49,6 +49,25 @@ export function publishJobFinderWorkspaceUpdate(target?: WebContents): void {
   }
 }
 
+/**
+ * A search writes progress several times a second. Windows follow those
+ * writes through the change feed (ADR 0071), so only its first event asks
+ * them to sync; main listeners still hear every event.
+ */
+export function createSearchProgressPublisher(
+  target?: WebContents,
+): () => void {
+  let announced = false;
+  return () => {
+    if (announced) {
+      notifyJobFinderWorkspaceListeners();
+      return;
+    }
+    announced = true;
+    publishJobFinderWorkspaceUpdate(target);
+  };
+}
+
 const FIRST_UPDATE_DELAY_MS = 500;
 
 /** Keep active work visible while its IPC response waits for the browser. */

@@ -150,6 +150,7 @@ import { createJobFinderWorkspaceDeltaTracker } from "../services/job-finder/wor
 import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-workspace-view";
 import {
   notifyJobFinderWorkspaceListeners,
+  createSearchProgressPublisher,
   publishJobFinderWorkspaceUpdate,
   scheduleAnswerDraftWorkspaceUpdate,
   withJobFinderWorkspaceUpdates,
@@ -1512,9 +1513,10 @@ export function registerJobFinderRouteHandlers(
       // Home all kept an older run's success as the newest thing the app had
       // said about this plan.
       try {
-        const snapshot = await service.runCampaignNow(input, () => {
-          publishJobFinderWorkspaceUpdate(event.sender);
-        });
+        const snapshot = await service.runCampaignNow(
+          input,
+          createSearchProgressPublisher(event.sender),
+        );
         return workspaceMutationResponse(event.sender, snapshot);
       } finally {
         publishJobFinderWorkspaceUpdate(event.sender);
@@ -2089,6 +2091,7 @@ export function registerJobFinderRouteHandlers(
       const notices = getFinishedWorkNotifier();
       notices.progress("search", null);
       let finishedNotice: ReturnType<typeof searchFinishedNotice> | null = null;
+      const publishProgress = createSearchProgressPublisher(window);
 
       try {
         const snapshot = await jobFinderWorkspaceService.runAgentDiscovery(
@@ -2097,7 +2100,7 @@ export function registerJobFinderRouteHandlers(
               `job-finder:discovery-activity:${requestId}`,
               DiscoveryActivityEventSchema.parse(eventPayload),
             );
-            publishJobFinderWorkspaceUpdate(window);
+            publishProgress();
           },
           undefined,
           targetId ?? undefined,

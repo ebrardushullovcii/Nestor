@@ -76,6 +76,12 @@ import type {
 import type { JobFinderShellActions } from "../lib/job-finder-types";
 import { applyJobFinderWorkspaceDelta } from "../../../pages/job-finder-workspace-delta";
 import {
+  createSearchChangeFeedFollower,
+  isSearchRunning,
+  publishSearchLiveCounts,
+  type SearchChangeFeedFollower,
+} from "../lib/search-change-feed";
+import {
   isJobFinderStartupDatabaseRecoveryFact,
   type JobFinderStartupDatabaseRecoveryBlockedFact,
   type JobFinderStartupDatabaseRecoveryFact,
@@ -528,11 +534,54 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     };
   }, [syncWorkspaceFromUpdate]);
 
+  // During a search main announces only its start; the change feed says what
+  // the search wrote, and only screens that show the search sync for it.
+  const searchFeedRef = useRef<SearchChangeFeedFollower | null>(null);
+  useEffect(() => {
+    const queries = window.nestor.jobFinder.queries;
+    if (typeof queries?.onChanges !== "function") return undefined;
+    const follower = createSearchChangeFeedFollower({
+      isSearchRunning: () => isSearchRunning(workspaceRef.current),
+      currentRoute: () => window.location.hash.replace(/^#/, ""),
+      requestSync: () => requestBackgroundSyncRef.current?.(),
+      refreshCounts: () => {
+        const workspace = workspaceRef.current;
+        if (!workspace) return;
+        void queries
+          .getListCounts()
+          .then((counts) => {
+            if (workspaceRef.current === workspace)
+              publishSearchLiveCounts({ counts, workspace });
+          })
+          .catch(() => undefined);
+      },
+    });
+    searchFeedRef.current = follower;
+    const unsubscribe = queries.onChanges((changes) =>
+      follower.onChanges(changes),
+    );
+    const onRouteChange = () => follower.onRouteChange();
+    window.addEventListener("hashchange", onRouteChange);
+    return () => {
+      if (searchFeedRef.current === follower) searchFeedRef.current = null;
+      follower.dispose();
+      unsubscribe();
+      window.removeEventListener("hashchange", onRouteChange);
+    };
+  }, []);
+
   /**
    * Asks for a background refresh on the same paced path as main's update
    * notices, so progress refreshes during a search never stack on them.
+   * While a search runs it goes through the change-feed follower, so screens
+   * that do not show the search are not rebuilt for its progress.
    */
   const requestWorkspaceRefresh = useCallback(() => {
+    const follower = searchFeedRef.current;
+    if (follower && isSearchRunning(workspaceRef.current)) {
+      follower.onSearchProgress();
+      return;
+    }
     requestBackgroundSyncRef.current?.();
   }, []);
 

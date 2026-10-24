@@ -1,0 +1,191 @@
+import { useSyncExternalStore } from "react";
+import type {
+  JobFinderRendererWorkspaceSnapshot,
+  WorkspaceChanges,
+  WorkspaceListCounts,
+} from "@nestor/contracts";
+import { JOB_FINDER_ROUTE_PATHS } from "./job-finder-route-hrefs";
+
+/**
+ * While a search runs, the window follows the database's change feed instead
+ * of syncing the whole workspace for every progress event (ADR 0071). Screens
+ * that show the search (its jobs, fit scores or progress) sync at most once
+ * per `SEARCH_SYNC_INTERVAL_MS`; every other screen only refreshes the list
+ * counts behind the sidebar badges, and catches up when the person opens a
+ * search screen or the search ends.
+ */
+export const SEARCH_SYNC_INTERVAL_MS = 1_500;
+const SEARCH_COUNTS_INTERVAL_MS = 1_000;
+
+/** Tables a search writes its jobs, scores and plan membership to. */
+const SEARCH_JOB_TABLES = new Set([
+  "saved_jobs",
+  "discovery_pending_jobs",
+  "plan_job_memberships",
+  "job_plan_assessments",
+]);
+
+const SEARCH_VIEW_PATHS = [
+  "/job-finder/home",
+  JOB_FINDER_ROUTE_PATHS.discovery,
+  JOB_FINDER_ROUTE_PATHS.campaigns,
+  JOB_FINDER_ROUTE_PATHS.profile,
+];
+
+export function isSearchRunning(
+  workspace: JobFinderRendererWorkspaceSnapshot | null,
+): boolean {
+  return (
+    workspace?.discoveryRunState === "running" ||
+    workspace?.activeDiscoveryRun?.state === "running"
+  );
+}
+
+/** Find jobs, Home, Search plans and Profile (job sources) show the search. */
+export function isSearchViewRoute(route: string): boolean {
+  const path = route.split("?")[0] ?? "";
+  return SEARCH_VIEW_PATHS.some(
+    (view) => path === view || path.startsWith(`${view}/`),
+  );
+}
+
+export function classifySearchChanges(changes: WorkspaceChanges): {
+  jobs: boolean;
+  run: boolean;
+} {
+  let jobs = false;
+  let run = false;
+  for (const change of changes.changes) {
+    if (SEARCH_JOB_TABLES.has(change.table)) jobs = true;
+    else if (
+      change.table.startsWith("discovery_run") ||
+      (change.table === "singleton_state" &&
+        (change.id === "discovery_state" || change.id === "campaign_state"))
+    )
+      run = true;
+  }
+  return { jobs, run };
+}
+
+export interface SearchChangeFeedFollower {
+  /** A batch from the change feed. Ignored while no search runs. */
+  onChanges(changes: WorkspaceChanges): void;
+  /** The search's own callback saw jobs saved or a source finish. */
+  onSearchProgress(): void;
+  /** The person moved to another screen. */
+  onRouteChange(): void;
+  dispose(): void;
+}
+
+export function createSearchChangeFeedFollower(options: {
+  isSearchRunning: () => boolean;
+  currentRoute: () => string;
+  requestSync: () => void;
+  refreshCounts: () => void;
+  now?: () => number;
+  setTimer?: (callback: () => void, ms: number) => unknown;
+  clearTimer?: (handle: unknown) => void;
+}): SearchChangeFeedFollower {
+  const now = options.now ?? Date.now;
+  const setTimer =
+    options.setTimer ??
+    ((callback: () => void, ms: number) => window.setTimeout(callback, ms));
+  const clearTimer =
+    options.clearTimer ??
+    ((handle: unknown) => window.clearTimeout(handle as number));
+  let lastSyncAt = Number.NEGATIVE_INFINITY;
+  let lastCountsAt = Number.NEGATIVE_INFINITY;
+  let syncTimer: unknown = null;
+  let countsTimer: unknown = null;
+  // Jobs changed while the person was on a screen that does not show them.
+  let behind = false;
+  let disposed = false;
+
+  const sync = () => {
+    if (disposed || syncTimer !== null) return;
+    const wait = lastSyncAt + SEARCH_SYNC_INTERVAL_MS - now();
+    if (wait > 0) {
+      syncTimer = setTimer(() => {
+        syncTimer = null;
+        sync();
+      }, wait);
+      return;
+    }
+    lastSyncAt = now();
+    behind = false;
+    options.requestSync();
+  };
+  const counts = () => {
+    if (disposed || countsTimer !== null) return;
+    const wait = lastCountsAt + SEARCH_COUNTS_INTERVAL_MS - now();
+    if (wait > 0) {
+      countsTimer = setTimer(() => {
+        countsTimer = null;
+        counts();
+      }, wait);
+      return;
+    }
+    lastCountsAt = now();
+    options.refreshCounts();
+  };
+  const follow = (jobs: boolean, run: boolean) => {
+    if (!jobs && !run) return;
+    if (isSearchViewRoute(options.currentRoute())) sync();
+    else if (jobs) {
+      behind = true;
+      counts();
+    }
+  };
+
+  return {
+    onChanges(changes) {
+      if (disposed || !options.isSearchRunning()) return;
+      const { jobs, run } = classifySearchChanges(changes);
+      follow(jobs, run);
+    },
+    onSearchProgress() {
+      if (disposed) return;
+      follow(true, true);
+    },
+    onRouteChange() {
+      if (disposed || !behind) return;
+      if (isSearchViewRoute(options.currentRoute())) sync();
+    },
+    dispose() {
+      disposed = true;
+      if (syncTimer !== null) clearTimer(syncTimer);
+      if (countsTimer !== null) clearTimer(countsTimer);
+    },
+  };
+}
+
+/**
+ * List counts read during a search for screens that do not sync. They belong
+ * to the workspace snapshot that was current when they were read; any newer
+ * snapshot already counts the same jobs itself.
+ */
+interface SearchLiveCounts {
+  counts: WorkspaceListCounts;
+  workspace: JobFinderRendererWorkspaceSnapshot;
+}
+let liveCounts: SearchLiveCounts | null = null;
+const listeners = new Set<() => void>();
+
+export function publishSearchLiveCounts(next: SearchLiveCounts | null): void {
+  liveCounts = next;
+  for (const listener of listeners) listener();
+}
+
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
+const read = () => liveCounts;
+
+/** The counts to show beside `workspace`, or null when its own are current. */
+export function useSearchLiveCounts(
+  workspace: JobFinderRendererWorkspaceSnapshot,
+): WorkspaceListCounts | null {
+  const current = useSyncExternalStore(subscribe, read, read);
+  return current?.workspace === workspace ? current.counts : null;
+}
