@@ -11,14 +11,24 @@ import { isDeepStrictEqual } from "node:util";
 import { backupBeforeStorageMigration } from "./storage-migration-backup";
 import { ensureSavedJobRelations, savedJobValueSql } from "./saved-job-storage";
 import { notifyWorkspaceCommit } from "../workspace-commits";
-import { ensureWorkspaceReadIndex } from "./workspace-read-index";
 
 export function migrateSavedJobStorage(db: DatabaseSync): void {
+  for (const step of migrateSavedJobStorageSteps(db)) void step;
+}
+
+/** Each yield leaves complete old/new rows and releases the writer lock. */
+export function* migrateSavedJobStorageSteps(
+  db: DatabaseSync,
+): Generator<void> {
   ensureSavedJobRelations(db);
   if (db.prepare("SELECT 1 FROM schema_migrations WHERE version = 28").get())
     return;
-  const count = db.prepare("SELECT count(*) AS n FROM saved_jobs").get()!.n;
-  if (count) backupBeforeStorageMigration(db, 28);
+  const ids = db
+    .prepare(
+      "SELECT id FROM saved_jobs WHERE assessment_id IS NULL ORDER BY id",
+    )
+    .all();
+  if (ids.length) backupBeforeStorageMigration(db, 28);
   // Validate old files once. SQLite moves fields in sets without a canonical
   // reread, separately compiled statements or root-row cascades for each job.
   db.function("migration_job", (value) => {
@@ -60,31 +70,41 @@ export function migrateSavedJobStorage(db: DatabaseSync): void {
       ? 1
       : 0,
   );
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    const hadReadIndex = !!db
-      .prepare("SELECT 1 FROM sqlite_master WHERE name = 'workspace_job_index'")
-      .get();
-    if (hadReadIndex) {
-      for (const { name } of db
+  for (let offset = 0; offset < ids.length; offset += 50) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const count = db.prepare("SELECT count(*) AS n FROM saved_jobs").get()!.n;
+      // Conversion changes storage, never the already-correct screen facts.
+      // Keep the committed index and restore its writers in this transaction.
+      const indexTriggers = db
         .prepare(
-          "SELECT name FROM sqlite_master WHERE type = 'trigger' AND (name LIKE 'workspace_job_index_%' OR name LIKE 'workspace_plan_assessment_%')",
+          "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND (name LIKE 'workspace_job_index_%' OR name LIKE 'workspace_plan_assessment_%' OR name = 'workspace_sighting_dates')",
         )
-        .all())
+        .all();
+      for (const { name } of indexTriggers)
         db.exec(`DROP TRIGGER ${String(name)}`);
-    }
-    db.exec(`
+      db.exec("CREATE TEMP TABLE migration_ids(id TEXT PRIMARY KEY)");
+      db.prepare(
+        "INSERT INTO migration_ids SELECT value FROM json_each(?)",
+      ).run(
+        JSON.stringify(ids.slice(offset, offset + 50).map((row) => row.id)),
+      );
+      db.exec(`
       CREATE TEMP TABLE migration_jobs AS
-        SELECT id, jsonb(migration_job(${savedJobValueSql()})) AS value FROM saved_jobs;
+        SELECT id, jsonb(migration_job(value)) AS value FROM saved_jobs
+        WHERE assessment_id IS NULL AND id IN (SELECT id FROM migration_ids);
       DELETE FROM migration_jobs WHERE value IS NULL;
       CREATE UNIQUE INDEX migration_jobs_id ON migration_jobs(id);
-      CREATE TEMP TABLE migration_fingerprints AS SELECT * FROM saved_job_discovery_fingerprints;
+      CREATE TEMP TABLE migration_fingerprints AS SELECT * FROM saved_job_discovery_fingerprints WHERE job_id IN (SELECT id FROM migration_jobs);
       INSERT OR IGNORE INTO job_listing_texts(stable_key, text)
         SELECT migration_hash(json_extract(value, '$.description')), json_extract(value, '$.description') FROM migration_jobs;
       INSERT OR IGNORE INTO job_listing_texts(stable_key, text)
         SELECT migration_hash(json_extract(p.value, '$.listingFacts.description')), json_extract(p.value, '$.listingFacts.description')
         FROM migration_jobs j, json_each(j.value, '$.provenance') p WHERE json_type(p.value, '$.listingFacts') = 'object';
-      UPDATE job_listing_texts SET salary_evidence = migration_salary(text), salary_prepared = 1 WHERE salary_prepared = 0;
+      UPDATE job_listing_texts SET salary_evidence = migration_salary(text), salary_prepared = 1 WHERE salary_prepared = 0
+        AND stable_key IN (SELECT migration_hash(json_extract(value, '$.description')) FROM migration_jobs
+          UNION SELECT migration_hash(json_extract(p.value, '$.listingFacts.description')) FROM migration_jobs j,
+            json_each(j.value, '$.provenance') p WHERE json_type(p.value, '$.listingFacts') = 'object');
       DELETE FROM job_plan_assessments WHERE job_id IN (SELECT id FROM migration_jobs);
       INSERT INTO job_plan_assessments(job_id, plan_id, value, score)
         SELECT j.id, p.key, p.value, json_extract(p.value, '$.score') FROM migration_jobs j, json_each(j.value, '$.planAssessments') p;
@@ -111,28 +131,30 @@ export function migrateSavedJobStorage(db: DatabaseSync): void {
       INSERT OR REPLACE INTO saved_job_discovery_fingerprints SELECT * FROM migration_fingerprints;
       DROP TABLE migration_fingerprints;
     `);
-    if (
-      db
-        .prepare(
-          `SELECT 1 FROM saved_jobs JOIN migration_jobs j USING(id)
+      if (
+        db
+          .prepare(
+            `SELECT 1 FROM saved_jobs JOIN migration_jobs j USING(id)
       WHERE migration_equal(json(j.value), ${savedJobValueSql()}) = 0 LIMIT 1`,
-        )
-        .get()
-    )
-      throw new Error(
-        "Saved-job migration changed listing or assessment facts.",
-      );
-    if (db.prepare("SELECT count(*) AS n FROM saved_jobs").get()!.n !== count)
-      throw new Error("Saved-job migration changed record counts.");
-    db.exec("DROP TABLE migration_jobs");
-    db.prepare(
-      "INSERT INTO schema_migrations(version, name) VALUES (28, 'saved_job_evidence_and_assessment_references')",
-    ).run();
-    if (hadReadIndex) ensureWorkspaceReadIndex(db);
-    db.exec("COMMIT");
-    notifyWorkspaceCommit(db);
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
+          )
+          .get()
+      )
+        throw new Error(
+          "Saved-job migration changed listing or assessment facts.",
+        );
+      if (db.prepare("SELECT count(*) AS n FROM saved_jobs").get()!.n !== count)
+        throw new Error("Saved-job migration changed record counts.");
+      db.exec("DROP TABLE migration_jobs; DROP TABLE migration_ids");
+      for (const { sql } of indexTriggers) db.exec(String(sql));
+      db.exec("COMMIT");
+      notifyWorkspaceCommit(db);
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+    yield;
   }
+  db.prepare(
+    "INSERT INTO schema_migrations(version, name) VALUES (28, 'saved_job_evidence_and_assessment_references')",
+  ).run();
 }

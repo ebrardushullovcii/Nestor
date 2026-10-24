@@ -5,14 +5,20 @@ import {
   completeWorkspaceDatabaseMigrations,
 } from "@nestor/db";
 
-if (!parentPort) throw new Error("Workspace preparation requires a worker.");
-try {
-  prepareWorkspaceQuerySchema(String(workerData));
-  parentPort.postMessage("context-ready");
-  prepareWorkspaceQueryDatabase(String(workerData));
-  parentPort.postMessage("queries-ready");
-  completeWorkspaceDatabaseMigrations(String(workerData));
-  parentPort.postMessage("complete");
-} finally {
-  parentPort.close();
+async function prepare() {
+  const port = parentPort;
+  if (!port) throw new Error("Workspace preparation requires a worker.");
+  try {
+    prepareWorkspaceQuerySchema(String(workerData));
+    port.postMessage("context-ready");
+    prepareWorkspaceQueryDatabase(String(workerData));
+    port.postMessage("queries-ready");
+    await completeWorkspaceDatabaseMigrations(String(workerData));
+    port.postMessage("complete");
+  } finally {
+    port.close();
+  }
 }
+void prepare().catch((error: unknown) => {
+  throw error;
+});
