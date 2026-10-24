@@ -7,9 +7,39 @@ import {
   parseNormalizedCompensation,
   parseSalaryFloor,
   reconcileSalaryTextWithListingBody,
+  reconcileSalaryTextWithPreparedBody,
 } from "./matching-compensation";
 
 describe("compensation normalization and fit truth", () => {
+  test.each([
+    [null, "No pay range was provided."],
+    [null, "We offer EUR 96,000 per year for this role."],
+    ["EUR 96,000 per year", "We offer EUR 96,000 per year for this role."],
+    ["$200000 - 500000", "Salary: $100k-$500k USD yearly for this role."],
+  ] as const)(
+    "prepared body evidence preserves the same salary reconciliation (%s)",
+    (salary, description) => {
+      const stated = extractSalaryRangeFromListingBody(description);
+      expect(
+        reconcileSalaryTextWithPreparedBody(salary, stated, () => description),
+      ).toBe(reconcileSalaryTextWithListingBody(salary, description));
+    },
+  );
+  test("known empty or newly captured salary needs no body read", () => {
+    const read = () => {
+      throw new Error("Unused body was opened");
+    };
+    expect(
+      reconcileSalaryTextWithPreparedBody(
+        "Existing supplied range",
+        null,
+        read,
+      ),
+    ).toBe("Existing supplied range");
+    expect(
+      reconcileSalaryTextWithPreparedBody(null, "EUR 96,000 per year", read),
+    ).toBe("EUR 96,000 per year");
+  });
   test.each(["EUR 96,000 per year", "USD 99,000 per year"])(
     "reads an explicit amount and period without a salary label: %s",
     (salary) => {
@@ -84,9 +114,7 @@ describe("compensation normalization and fit truth", () => {
 
   test("extracts a salary range with explicit monetary evidence", () => {
     expect(
-      extractSalaryRangeFromListingBody(
-        "Salary: $85,000 - $95,000 per year",
-      ),
+      extractSalaryRangeFromListingBody("Salary: $85,000 - $95,000 per year"),
     ).toBe("$85,000 - $95,000 per year");
   });
 
@@ -267,14 +295,17 @@ describe("findSiteFurnitureSalaryTexts", () => {
 });
 
 test("R3-138 leaves OTE comparison to the model instead of treating base as total pay", () => {
-  const result = evaluateCompensationFit("$80,000 base; $160,000 OTE per year", {
-    minimum: 160000,
-    maximum: null,
-    interval: "year",
-    currency: "USD",
-    currencyStatus: "explicit",
-    basis: "total_ote",
-  });
+  const result = evaluateCompensationFit(
+    "$80,000 base; $160,000 OTE per year",
+    {
+      minimum: 160000,
+      maximum: null,
+      interval: "year",
+      currency: "USD",
+      currencyStatus: "explicit",
+      basis: "total_ote",
+    },
+  );
   expect(result.state).toBe("unknown");
   expect(result.explanation).toContain("total pay including commission");
   expect(result.listingMinimumAnnualUsd).toBeNull();

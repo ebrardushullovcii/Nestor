@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   readDiscoveryPreparation,
   readPreparedDiscoveryFingerprints,
+  readPreparedBodySalaryRange,
   type JobDiscoveryTarget,
   type JobSource,
 } from "@nestor/contracts";
@@ -15,6 +16,7 @@ import { runPublicProviderSourceCheck } from "./workspace-public-provider-source
 import { toProviderAwarePosting } from "./discovery-posting-normalization";
 import { preparePublicProviderFeed } from "./workspace-source-intelligence";
 import { createDiscoveryListingFingerprints } from "./workspace-discovery-ledger";
+import { extractSalaryRangeFromListingBody } from "./matching-compensation";
 import {
   buildJobIdentityAliases,
   rememberPreparedListingContent,
@@ -71,7 +73,8 @@ const providerCases = [
           title: "Frontend Engineer",
           absolute_url: "https://job-boards.greenhouse.io/acme/jobs/1001",
           location: { name: "Remote" },
-          content: "<p>Build accessible web applications.</p>",
+          content:
+            "<p>Build accessible web applications. We offer EUR 96,000 per year.</p>",
           updated_at: "2026-07-30T10:00:00.000Z",
         },
       ],
@@ -182,12 +185,16 @@ describe("public provider ATS acceptance matrix", () => {
     expect(result.jobs).toHaveLength(1);
     const raw = result.jobs[0]!;
     expect(readDiscoveryPreparation(raw)?.identity).toBeDefined();
+    expect(readPreparedBodySalaryRange(raw)).toBe("EUR 96,000 per year");
     expect(readPreparedDiscoveryFingerprints(raw)).toEqual(
       createDiscoveryListingFingerprints(structuredClone(raw)),
     );
     const normalized = takePreparedDiscoveryPosting(raw)!;
     expect(normalized).not.toBeNull();
     expect(readDiscoveryPreparation(normalized)?.identity).toBeDefined();
+    expect(readPreparedBodySalaryRange(normalized)).toBe(
+      extractSalaryRangeFromListingBody(normalized.description),
+    );
     expect(readPreparedDiscoveryFingerprints(normalized)).toEqual(
       createDiscoveryListingFingerprints(structuredClone(normalized)),
     );

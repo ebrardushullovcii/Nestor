@@ -4,11 +4,12 @@ import {
   JobDiscoveryTargetSchema,
   readDiscoveryPreparation,
   readPreparedDiscoveryFingerprints,
+  readPreparedBodySalaryRange,
   assessJobPostingDetailQuality,
   type SavedJob,
 } from "@nestor/contracts";
 import { createSavedJob, createSeed } from "../workspace-service.test-fixtures";
-import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
+import { prepareDiscoveryPosting, prepareBodySalaryRange } from "./discovery-posting-preparation";
 import { enrichDiscoveredPosting, mergeDiscoveredPostings } from "./matching";
 import { applyListingDetailToJob } from "./listing-detail-enrichment";
 import {
@@ -18,6 +19,8 @@ import {
 import { createJobIdentityIndex, prepareJobIdentity } from "./job-identity";
 import { toProviderAwarePosting } from "./discovery-posting-normalization";
 import { inferSourceIntelligenceFromTarget } from "./workspace-source-intelligence";
+import * as compensation from "./matching-compensation";
+import * as contracts from "@nestor/contracts";
 import {
   carryPreparedDiscoveryPosting,
   rememberPreparedDiscoveryPosting,
@@ -68,7 +71,7 @@ const mutations = {
   },
   description(job: SavedJob) {
     job.description =
-      body + "Own a new data platform and its operational reliability.";
+      body + "Own a new data platform. Salary: EUR 96,000 per year.";
   },
 };
 const paths = {
@@ -207,6 +210,9 @@ for (const [path, apply] of Object.entries(paths))
         createDiscoveryListingFingerprints(control),
       );
       expect(prepareJobIdentity(actual)).toEqual(prepareJobIdentity(control));
+      expect(readPreparedBodySalaryRange(actual)).toEqual(
+        compensation.extractSalaryRangeFromListingBody(control.description),
+      );
       expect(structuredClone(actual)).toEqual(structuredClone(control));
     });
   }
@@ -225,5 +231,38 @@ test("worker, JSON and schema-shaped rows with no carrier compute identity inste
     expect(createDiscoveryListingFingerprints(posting)).toEqual(
       createDiscoveryListingFingerprints(original),
     );
+  }
+});
+
+test("salary is parsed once per arriving text and carried without changing the listing's salary field", () => {
+  const parse = vi.spyOn(contracts, "extractSalaryRangeFromListingBody");
+  try {
+    const job = {
+      ...createSeed().savedJobs[0]!,
+      salaryText: null,
+      description: body + " We offer EUR 96,000 per year.",
+    };
+    prepareDiscoveryPosting(job);
+    prepareDiscoveryPosting({ ...job, title: "Changed title" });
+    expect(parse).toHaveBeenCalledTimes(1);
+    expect(readPreparedBodySalaryRange(job)).toBe("EUR 96,000 per year");
+    expect(job.salaryText).toBeNull();
+    const changed = {
+      ...job,
+      description: body + " We offer USD 99,000 per year.",
+    };
+    prepareDiscoveryPosting(changed);
+    expect(parse).toHaveBeenCalledTimes(2);
+    expect(readPreparedBodySalaryRange(changed)).toBe("USD 99,000 per year");
+    const copied = { ...job, description: changed.description };
+    prepareDiscoveryPosting(copied, changed);
+    expect(parse).toHaveBeenCalledTimes(2);
+    expect(readPreparedBodySalaryRange(copied)).toBe("USD 99,000 per year");
+    const decoded = structuredClone(job);
+    expect(prepareBodySalaryRange(decoded)).toBe("EUR 96,000 per year");
+    expect(prepareBodySalaryRange(decoded)).toBe("EUR 96,000 per year");
+    expect(parse).toHaveBeenCalledTimes(3);
+  } finally {
+    parse.mockRestore();
   }
 });

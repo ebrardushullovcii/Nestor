@@ -3,6 +3,7 @@ import { JobPostingSchema } from "./discovery";
 import {
   readDiscoveryPreparation,
   readPreparedDiscoveryFingerprints,
+  readPreparedBodySalaryRange,
   writeDiscoveryPreparation,
 } from "./discovery-preparation";
 
@@ -16,6 +17,54 @@ test("prepared values survive owned copies and stay outside JSON and worker mess
   );
   expect(JSON.stringify(posting)).toBe('{"description":"Synthetic body"}');
   expect(readDiscoveryPreparation(structuredClone(posting))).toBeUndefined();
+});
+
+test("salary preparation distinguishes missing evidence from no salary and rejects changed mutable inputs", () => {
+  const posting = { description: "Synthetic listing text" };
+  expect(readPreparedBodySalaryRange(posting)).toBeUndefined();
+  writeDiscoveryPreparation(posting, {
+    content: { description: posting.description, value: null },
+    bodySalaryRange: null,
+  });
+  expect(readPreparedBodySalaryRange(posting)).toBeNull();
+  expect(
+    readPreparedBodySalaryRange({ ...posting, description: "Changed text" }),
+  ).toBeUndefined();
+  posting.description = "Changed text";
+  writeDiscoveryPreparation(posting, {
+    content: { description: posting.description, value: null },
+  });
+  expect(readPreparedBodySalaryRange(posting)).toBeUndefined();
+  writeDiscoveryPreparation(posting, { bodySalaryRange: null });
+  posting.description = "Another changed text";
+  writeDiscoveryPreparation(posting, {
+    fingerprints: {
+      basis: { description: posting.description },
+      value: { version: 1, card: "card", detail: null, material: "material" },
+    },
+  });
+  expect(readPreparedBodySalaryRange(posting)).toBeUndefined();
+  const lazy = { description: "We offer EUR 96,000 per year." };
+  writeDiscoveryPreparation(lazy, {
+    fingerprints: {
+      owner: lazy,
+      value: { version: 1, card: "card", detail: null, material: "material" },
+    },
+    bodySalaryRange: "EUR 96,000 per year",
+  });
+  expect(readPreparedBodySalaryRange(lazy)).toBeUndefined();
+  Object.defineProperty(lazy, "description", {
+    get() {
+      throw new Error("Stored salary evidence opened the body");
+    },
+  });
+  Object.freeze(lazy);
+  expect(readPreparedBodySalaryRange(lazy)).toBe("EUR 96,000 per year");
+  expect(
+    readPreparedBodySalaryRange(
+      structuredClone({ description: "New decoded input" }),
+    ),
+  ).toBeUndefined();
 });
 
 test("stored fingerprints read no body and changed copies cannot reuse them", () => {

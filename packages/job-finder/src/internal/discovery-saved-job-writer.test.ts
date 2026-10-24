@@ -230,7 +230,7 @@ describe("discovery saved-job checkpoint writer", () => {
       merge: (current) => current,
       commit,
       persistDiscovery: () => Promise.resolve(),
-      coalesceMs: 5,
+      coalesce: true,
     });
     const step = (name: string) => (state: JobFinderDiscoveryState) => {
       applied.push(name);

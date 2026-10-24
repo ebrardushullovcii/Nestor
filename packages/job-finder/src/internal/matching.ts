@@ -578,10 +578,7 @@ function hasWeakerIncomingDetailEvidence(
     assessJobPostingDetailQuality(existingJob),
   );
 
-  return (
-    incomingRank <
-    jobPostingDetailQualityRank(existingQuality)
-  );
+  return incomingRank < jobPostingDetailQualityRank(existingQuality);
 }
 
 // Preserved groups cover every resume-affecting content field verbatim so a
@@ -742,17 +739,21 @@ export function enrichDiscoveredPosting(
     isLikelyAccessGateListingUrl(posting.canonicalUrl) &&
     !isLikelyAccessGateListingUrl(existingJob.canonicalUrl)
   ) {
-    return prepareDiscoveryPosting({
-      ...preserveRicherExistingDetail(enrichedPosting, existingJob),
-      title: existingJob.title,
-      canonicalUrl: existingJob.canonicalUrl,
-      applicationUrl: existingJob.applicationUrl,
-    });
+    return prepareDiscoveryPosting(
+      {
+        ...preserveRicherExistingDetail(enrichedPosting, existingJob),
+        title: existingJob.title,
+        canonicalUrl: existingJob.canonicalUrl,
+        applicationUrl: existingJob.applicationUrl,
+      },
+      existingJob,
+    );
   }
 
   if (existingJob && hasWeakerIncomingDetailEvidence(posting, existingJob)) {
     return prepareDiscoveryPosting(
       preserveRicherExistingDetail(enrichedPosting, existingJob),
+      existingJob,
     );
   }
 
@@ -1297,6 +1298,7 @@ export function mergeDiscoveredPostings(
             posting,
           )
         : enrichDiscoveredPosting(posting, existingJob),
+      existingJob,
     );
     const matchAssessment = assessPosting
       ? assessPosting(enrichedPosting)

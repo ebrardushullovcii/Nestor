@@ -77,14 +77,16 @@ export function createSyncedJobIdentityIndex<T extends object>(
     },
     async warm(values) {
       if (values === syncedWith) return;
-      for (let start = 0; start < values.length; start += 100) {
-        for (const value of values.slice(start, start + 100)) {
-          if (!members.has(value)) {
-            members.add(value);
-            inner.add(value);
-          }
+      let turnStarted = performance.now();
+      for (const value of values) {
+        if (!members.has(value)) {
+          members.add(value);
+          inner.add(value);
         }
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (performance.now() - turnStarted >= 8) {
+          await yieldToEventLoop();
+          turnStarted = performance.now();
+        }
       }
       invalidate();
       // sync also removes rows that departed while the index was warming.

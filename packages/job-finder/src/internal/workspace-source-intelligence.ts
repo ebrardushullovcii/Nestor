@@ -34,7 +34,11 @@ import {
   prepareJobIdentity,
   rememberPreparedJobIdentity,
 } from "./job-identity";
-import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
+import {
+  prepareDiscoveryPosting,
+  prepareBodySalaryRange,
+  rememberPreparedBodySalaryRange,
+} from "./discovery-posting-preparation";
 import {
   createDiscoveryListingFingerprints,
   rememberDiscoveryListingFingerprints,
@@ -1917,6 +1921,8 @@ export async function preparePublicProviderFeed(
         screeningFingerprints: createDiscoveryListingFingerprints(raw),
         content,
         screeningContent,
+        bodySalaryRange: prepareBodySalaryRange(posting),
+        screeningBodySalaryRange: prepareBodySalaryRange(raw),
       });
     }
   }
@@ -2054,6 +2060,11 @@ export async function collectPublicProviderJobs(input: {
         rememberPreparedListingContent(raw, preparation.screeningContent);
         rememberPreparedJobIdentity(job, preparation.keys);
         rememberPreparedJobIdentity(raw, preparation.screeningKeys);
+        rememberPreparedBodySalaryRange(job, preparation.bodySalaryRange);
+        rememberPreparedBodySalaryRange(
+          raw,
+          preparation.screeningBodySalaryRange,
+        );
         rememberDiscoveryListingFingerprints(job, preparation.fingerprints);
         rememberDiscoveryListingFingerprints(
           raw,

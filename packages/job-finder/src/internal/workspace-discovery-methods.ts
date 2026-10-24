@@ -6,7 +6,10 @@ import {
 import { isDeepStrictEqual } from "node:util";
 import { channel } from "node:diagnostics_channel";
 import { patchDiscoveryLedger } from "@nestor/db";
-import { prepareDiscoveryPosting } from "./discovery-posting-preparation";
+import {
+  prepareDiscoveryPosting,
+  prepareBodySalaryRange,
+} from "./discovery-posting-preparation";
 import {
   createDiscoverySavedJobWriter,
   markSupersedingDiscoveryUpdate,
@@ -24,6 +27,8 @@ import {
   DISCOVERY_NO_JOB_SITES_MESSAGE,
   DISCOVERY_RUN_ALREADY_ACTIVE_MESSAGE,
   DiscoveryAgentMetadataSchema,
+  readPreparedBodySalaryRange,
+  writeDiscoveryPreparation,
   type CandidateProfile,
   type DiscoveryActivityEvent,
   type DiscoveryRunRecord,
@@ -176,7 +181,7 @@ import {
   findSiteFurnitureSalaryTexts,
   isSalaryTextStatedInBody,
   isSiteFurnitureSalaryText,
-  reconcileSalaryTextWithListingBody,
+  reconcileSalaryTextWithPreparedBody,
 } from "./matching-compensation";
 import { normalizeListingText } from "./listing-detail-extraction";
 import { toProviderAwarePosting } from "./discovery-posting-normalization";
@@ -253,7 +258,6 @@ const DISCOVERY_SOURCE_CONCURRENCY = (() => {
 const MULTI_SOURCE_TARGET_TIME_BUDGET_MS = 20 * 60_000;
 const DISCOVERY_STALL_STEP_WINDOW = MAX_DISCOVERY_AGENT_NO_PROGRESS_STEPS;
 const RESUME_STALENESS_FLUSH_MS = 2 * 60_000;
-const DISCOVERY_SAVE_COALESCE_MS = 4;
 /** Saved jobs a search's setup prepares per event-loop turn. */
 const SETUP_JOBS_PER_TURN = 50;
 /** Postings a source's final pass triages and merges per event-loop turn. */
@@ -265,8 +269,12 @@ async function mapInTurns<T, R>(
   perTurn = FINAL_PASS_POSTINGS_PER_TURN,
 ): Promise<R[]> {
   const mapped: R[] = [];
+  let turnStarted = performance.now();
   for (const [position, item] of items.entries()) {
-    if (position % perTurn === 0) await yieldToEventLoop();
+    if (position % perTurn === 0 || performance.now() - turnStarted >= 8) {
+      await yieldToEventLoop();
+      turnStarted = performance.now();
+    }
     mapped.push(map(item));
   }
   return mapped;
@@ -337,9 +345,19 @@ function applySavedJobDelta(
     }
   }
 
-  // The repository validates this returned row at its write boundary.
   const next = { ...currentJob, ...changedFields };
+  let bodySalaryRange = readPreparedBodySalaryRange(next);
+  if (bodySalaryRange === undefined) {
+    const intendedRange = readPreparedBodySalaryRange(intendedJob);
+    if (
+      intendedRange !== undefined &&
+      next.description === intendedJob.description
+    )
+      bodySalaryRange = intendedRange;
+  }
   createDiscoveryListingFingerprints(next);
+  if (bodySalaryRange !== undefined)
+    writeDiscoveryPreparation(next, { bodySalaryRange });
   return next;
 }
 
@@ -1845,10 +1863,7 @@ export function createWorkspaceDiscoveryMethods(
       },
       // A search of many sources saves several times a second; those saves
       // share a transaction. A small search saves each one at once.
-      coalesceMs:
-        selectedTargets.length >= DISCOVERY_SAVE_COALESCE_MIN_SOURCES
-          ? DISCOVERY_SAVE_COALESCE_MS
-          : 0,
+      coalesce: selectedTargets.length >= DISCOVERY_SAVE_COALESCE_MIN_SOURCES,
     });
     const touchSavedJob = (job: SavedJob): SavedJob => {
       touchedSavedJobIds.add(job.id);
@@ -4476,9 +4491,10 @@ export function createWorkspaceDiscoveryMethods(
         touchedJobIds: Set<string>,
       ): SavedJob => {
         if (!runRetainedJobIds.has(job.id)) return job;
-        const salaryText = reconcileSalaryTextWithListingBody(
+        const salaryText = reconcileSalaryTextWithPreparedBody(
           job.salaryText,
-          job.description,
+          prepareBodySalaryRange(job),
+          () => job.description,
         );
         if (salaryText === job.salaryText) return job;
         correctedSalaryCount += 1;

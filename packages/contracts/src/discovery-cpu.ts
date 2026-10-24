@@ -6,6 +6,7 @@ import type {
 } from "./discovery";
 import type { SourceIntelligenceArtifact } from "./source-debug";
 import type { DiscoveryPreparedKeys } from "./discovery-preparation";
+import type { extractSalaryRangeFromListingBody } from "./listing-salary-evidence";
 
 /**
  * A feed reader that crashed or exited took its transferred bytes with it;
@@ -30,6 +31,8 @@ export type DiscoveryPostingPreparation = {
   keys: DiscoveryPreparedKeys;
   screeningKeys: DiscoveryPreparedKeys;
   screeningFingerprints: DiscoveryListingFingerprints;
+  bodySalaryRange: ReturnType<typeof extractSalaryRangeFromListingBody>;
+  screeningBodySalaryRange: ReturnType<typeof extractSalaryRangeFromListingBody>;
 };
 
 export type DiscoveryJobIdentityAlias = {
