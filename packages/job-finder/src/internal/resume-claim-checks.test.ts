@@ -440,14 +440,16 @@ describe("resume claim checks before a draft is kept (ADR 0041)", () => {
         profile.summary = `Builds reliable software (${tailoringStrength}-summary-fallback).`;
         const draft = draftWith([]);
         draft.sections[0]!.text = `Invented executive scope (${tailoringStrength}-summary-fallback).`;
-        const checkResumeClaims = vi.fn(async (input: ResumeClaimCheckInput) =>
-          input.claims.map((claim) => ({
-            id: claim.id,
-            verdict: "unsupported" as const,
-            reason: "The evidence does not show executive scope.",
-            evidenceIds: [],
-            fix: "",
-          })),
+        const checkResumeClaims = vi.fn((input: ResumeClaimCheckInput) =>
+          Promise.resolve(
+            input.claims.map((claim) => ({
+              id: claim.id,
+              verdict: "unsupported" as const,
+              reason: "The evidence does not show executive scope.",
+              evidenceIds: [],
+              fix: "",
+            })),
+          ),
         );
         const base = {
           aiClient: { checkResumeClaims },
