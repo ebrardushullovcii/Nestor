@@ -84,18 +84,21 @@ function compareNewestFirst(
   return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
 }
 
+// The same shape the rest of Job Finder uses. `toLocaleString()` printed
+// "9/10/2026, 1:19:52 AM" — a numeric month/day that reads as 9 October
+// outside the US, with seconds nobody needs. One formatter for every row:
+// building one per notification cost Home about 10 ms per render.
+const createdAtFormat = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  month: "short",
+});
+
 function formatCreatedAt(createdAt: string): string {
   const parsed = Date.parse(createdAt);
   if (Number.isNaN(parsed)) return createdAt;
-  // The same shape the rest of Job Finder uses. `toLocaleString()` printed
-  // "9/10/2026, 1:19:52 AM" — a numeric month/day that reads as 9 October
-  // outside the US, with seconds nobody needs.
-  return new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    month: "short",
-  }).format(new Date(parsed));
+  return createdAtFormat.format(new Date(parsed));
 }
 
 export function CampaignNotificationCenter(props: {
