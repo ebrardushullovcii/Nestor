@@ -16,8 +16,10 @@ import { ensureTailoredAssetJobIndex } from "./tailored-asset-storage";
 import { ensureResumeApprovalState } from "./resume-approval-state";
 import { ensureWorkspaceReadIndex } from "./workspace-read-index";
 import { migrateResumeStorage } from "./resume-storage-migration";
+import { ensureResumeSourceTables } from "./resume-draft-storage";
 import { migratePreferenceStorage } from "./preference-storage";
 import { migrateSavedJobStorage } from "./saved-job-storage-migration";
+import { ensureSavedJobRelations } from "./saved-job-storage";
 import { withStorageMigrationBackups } from "./storage-migration-backup";
 
 /**
@@ -245,7 +247,10 @@ function readLegacyDiscoveryRuns(
   );
 }
 
-export function runMigrations(database: DatabaseSync): void {
+export function runMigrations(
+  database: DatabaseSync,
+  options: { deferEvidenceConversion?: boolean } = {},
+): void {
   function ensurePreparedApplicationForms(): void {
     database.exec(`CREATE TABLE IF NOT EXISTS prepared_application_forms (
       id TEXT PRIMARY KEY, value TEXT NOT NULL
@@ -2357,17 +2362,25 @@ export function runMigrations(database: DatabaseSync): void {
     throw error;
   }
   ensurePreparedApplicationForms();
-  migrateEvidenceStorage(database);
+  migrateEvidenceStorage(database, options.deferEvidenceConversion);
 }
 
-function migrateEvidenceStorage(database: DatabaseSync): void {
+function migrateEvidenceStorage(
+  database: DatabaseSync,
+  deferEvidenceConversion = false,
+): void {
   withStorageMigrationBackups(database, () => {
     migrateDiscoveryStorage(database);
     ensureTailoredAssetJobIndex(database);
     ensureResumeApprovalState(database);
     migratePreferenceStorage(database);
-    migrateResumeStorage(database);
-    migrateSavedJobStorage(database);
+    if (deferEvidenceConversion) {
+      ensureResumeSourceTables(database);
+      ensureSavedJobRelations(database);
+    } else {
+      migrateResumeStorage(database);
+      migrateSavedJobStorage(database);
+    }
     ensureWorkspaceReadIndex(database);
   });
 }

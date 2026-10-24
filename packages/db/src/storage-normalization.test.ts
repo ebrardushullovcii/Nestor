@@ -21,9 +21,24 @@ import {
   serializeResumeRevision,
   rebaseRetainedResumeRevisions,
 } from "./internal/resume-revision-storage";
-import { migrateResumeStorage } from "./internal/resume-storage-migration";
+import {
+  migrateResumeStorage,
+  migrateResumeStorageSteps,
+} from "./internal/resume-storage-migration";
 import { migratePreferenceStorage } from "./internal/preference-storage";
-import { migrateSavedJobStorage } from "./internal/saved-job-storage-migration";
+import {
+  migrateSavedJobStorage,
+  migrateSavedJobStorageSteps,
+} from "./internal/saved-job-storage-migration";
+import {
+  savedJobValueSql,
+  writeSavedJobStorage,
+} from "./internal/saved-job-storage";
+import {
+  createWorkspaceQueryRepository,
+  prepareWorkspaceQueryDatabase,
+} from "./workspace-query-repository";
+import { completeWorkspaceDatabaseMigrations } from "./workspace-database-startup";
 import { readSavedJobFingerprintBatch } from "./internal/saved-job-fingerprints";
 import {
   restoreResumeDraftStorage,
@@ -89,6 +104,175 @@ test("source records preserve exact evidence once without changing the canonical
     ),
   ).toBe(1);
   expect(JSON.stringify(stored).length).toBeLessThan(20000);
+});
+
+test("interrupted job conversion keeps queries exact and resumes without overwriting a newer write", async () => {
+  const temp = await createTempRepository("nestor-sliced-job-migration-");
+  cleanups.push(temp.cleanup);
+  const repo = await temp.createRepository();
+  await repo.replaceSavedJobs([]);
+  await repo.close();
+  let db = new DatabaseSync(temp.filePath);
+  cleanups.push(() => db.close());
+  const jobs = Array.from({ length: 600 }, (_, index) =>
+    createSavedJob({
+      id: `job-${String(index).padStart(3, "0")}`,
+      description: `Synthetic listing evidence ${index}`,
+      campaignIds: ["plan"],
+    }),
+  );
+  const insert = db.prepare("INSERT INTO saved_jobs(id,value) VALUES (?,?)");
+  for (const job of jobs) insert.run(job.id, JSON.stringify(job));
+  db.exec(
+    "DELETE FROM schema_migrations WHERE version = 28; DELETE FROM workspace_read_meta WHERE key = 'version'",
+  );
+  prepareWorkspaceQueryDatabase(temp.filePath);
+  const reader = createWorkspaceQueryRepository(temp.filePath);
+  cleanups.push(() => reader.close());
+  const index = () =>
+    db
+      .prepare("SELECT * FROM workspace_job_index ORDER BY origin,id,plan_id")
+      .all();
+  const before = index();
+  const steps = migrateSavedJobStorageSteps(db);
+  expect(steps.next().done).toBe(false);
+  expect(db.isTransaction).toBe(false);
+  const converted = Number(
+    db
+      .prepare(
+        "SELECT count(*) AS n FROM saved_jobs WHERE assessment_id IS NOT NULL",
+      )
+      .get()?.n,
+  );
+  expect(converted).toBeGreaterThan(0);
+  expect(converted).toBeLessThan(jobs.length);
+  expect(index()).toEqual(before);
+  expect(reader.getJobDetail(jobs[0]!.id)?.job).toEqual(jobs[0]);
+  expect(reader.getJobDetail(jobs.at(-1)!.id)?.job).toEqual(jobs.at(-1));
+  steps.return(undefined);
+  db.close();
+  db = new DatabaseSync(temp.filePath);
+  const edited = {
+    ...jobs.at(-1)!,
+    title: "A newer title",
+    description: "Salary: USD 91,000 per year.",
+  };
+  writeSavedJobStorage(db, edited);
+  migrateSavedJobStorage(db);
+  expect(
+    JSON.parse(
+      String(
+        db
+          .prepare(
+            `SELECT ${savedJobValueSql()} AS value FROM saved_jobs WHERE id = ?`,
+          )
+          .get(edited.id)?.value,
+      ),
+    ),
+  ).toEqual(edited);
+  expect(
+    reader
+      .queryJobList({
+        list: "all",
+        filters: { planId: null },
+        search: "A newer title",
+      })
+      .rows.map((row) => row.id),
+  ).toEqual([edited.id]);
+  expect(db.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe(
+    "ok",
+  );
+});
+
+test("background conversion retires obsolete validation triggers before writing jobs", async () => {
+  const temp = await createTempRepository("nestor-migration-order-");
+  cleanups.push(temp.cleanup);
+  const repo = await temp.createRepository();
+  const job = createSavedJob({ id: "migration-order" });
+  await repo.commitSavedJobDelta({ upserts: [job] });
+  await repo.close();
+  const db = new DatabaseSync(temp.filePath);
+  cleanups.push(() => db.close());
+  db.prepare(
+    "UPDATE saved_jobs SET value=?,assessment_id=NULL,description_id=NULL WHERE id=?",
+  ).run(JSON.stringify(job), job.id);
+  db.exec(`DELETE FROM schema_migrations WHERE version IN (26,28);
+    CREATE TRIGGER row_validations_guard AFTER UPDATE ON saved_jobs BEGIN
+      SELECT RAISE(ABORT,'Retired validation trigger ran'); END;`);
+  await completeWorkspaceDatabaseMigrations(temp.filePath);
+  expect(
+    db
+      .prepare("SELECT 1 FROM sqlite_master WHERE name='row_validations_guard'")
+      .get(),
+  ).toBeUndefined();
+  expect(
+    JSON.parse(
+      String(
+        db
+          .prepare(
+            `SELECT ${savedJobValueSql()} AS value FROM saved_jobs WHERE id=?`,
+          )
+          .get(job.id)?.value,
+      ),
+    ),
+  ).toEqual(job);
+});
+
+test("sliced resume conversion preserves pending approval state and exact citations across restart", async () => {
+  const temp = await createTempRepository("nestor-sliced-resume-migration-");
+  cleanups.push(temp.cleanup);
+  const repo = await temp.createRepository();
+  await repo.close();
+  let db = new DatabaseSync(temp.filePath);
+  cleanups.push(() => db.close());
+  const drafts = Array.from({ length: 5 }, (_, index) => ({
+    ...draft(),
+    id: `draft-${index}`,
+  }));
+  const put = db.prepare(
+    "INSERT INTO resume_drafts(id,job_id,created_at,updated_at,value) VALUES (?,?,?,?,?)",
+  );
+  for (const row of drafts)
+    put.run(
+      row.id,
+      row.jobId,
+      row.createdAt,
+      row.updatedAt,
+      JSON.stringify(row),
+    );
+  db.prepare("INSERT INTO resume_draft_approval_state VALUES (?,?,?)").run(
+    drafts[0]!.id,
+    "Profile changed",
+    drafts[0]!.updatedAt,
+  );
+  db.exec("DELETE FROM schema_migrations WHERE version = 26");
+  const steps = migrateResumeStorageSteps(db);
+  expect(steps.next().done).toBe(false);
+  expect(db.isTransaction).toBe(false);
+  steps.return(undefined);
+  db.close();
+  db = new DatabaseSync(temp.filePath);
+  migrateResumeStorage(db);
+  expect(
+    db
+      .prepare(
+        "SELECT stale_reason FROM resume_draft_approval_state WHERE draft_id = ?",
+      )
+      .get(drafts[0]!.id)?.stale_reason,
+  ).toBe("Profile changed");
+  for (const row of drafts)
+    expect(
+      restoreResumeDraftStorage(
+        db,
+        JSON.parse(
+          String(
+            db
+              .prepare("SELECT value FROM resume_drafts WHERE id = ?")
+              .get(row.id)?.value,
+          ),
+        ),
+      ),
+    ).toEqual(row);
 });
 test("revision deltas reconstruct exact snapshots after retention and base replacement", () => {
   const db = new DatabaseSync(":memory:");
