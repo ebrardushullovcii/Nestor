@@ -39,7 +39,7 @@ function isSortField(value: unknown): value is DiscoveryResultsSortField {
   return value === "fit" || value === "recent" || value === "company";
 }
 
-function readPersistedSort(): DiscoveryResultsSort {
+export function readPersistedSort(): DiscoveryResultsSort {
   try {
     const raw = window.localStorage.getItem(SORT_STORAGE_KEY);
     if (!raw) return DISCOVERY_RESULTS_DEFAULT_SORT;
