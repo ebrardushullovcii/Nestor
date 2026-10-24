@@ -48,3 +48,4 @@ export * from "./workspace-query";
 export * from "./discovery-preparation";
 
 export * from "./listing-salary-evidence";
+export * from "./saved-job-sightings";

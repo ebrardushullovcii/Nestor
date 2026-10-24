@@ -18,6 +18,7 @@ import type {
   ApplicationReplayCheckpointInput,
   CandidateProfile,
   DiscoverySavedJobFingerprints,
+  SavedJobSightingPatch,
   JobFinderDiscoveryState,
   JobFinderActivityControl,
   ApplyQueue,
@@ -315,6 +316,7 @@ export interface JobFinderRepository
    * replacing rows that the caller did not intend to change.
    */
   commitSavedJobDelta(input: {
+    sightings?: readonly SavedJobSightingPatch[];
     upserts?: readonly SavedJob[];
     /**
      * Builds additional upserts from transaction-current canonical discovery
