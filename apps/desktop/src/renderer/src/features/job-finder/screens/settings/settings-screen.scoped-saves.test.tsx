@@ -238,7 +238,7 @@ describe("SettingsScreen scoped section saves", () => {
     view.unmount();
   });
 
-  it("keeps a staged AI behavior choice across an external settings refresh and sends only AI-owned fields", async () => {
+  it("keeps a picked AI behavior choice across an external settings refresh and sends only AI-owned fields", () => {
     const callbacks = createCallbacks();
     const initialSettings = parseSettings();
     const view = renderScreen(initialSettings, callbacks);
@@ -249,6 +249,8 @@ describe("SettingsScreen scoped section saves", () => {
     });
     fireEvent.click(originalChoice);
     expect(originalChoice.getAttribute("aria-checked")).toBe("true");
+    // The choice saves when picked.
+    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
 
     // External refresh: persisted workspace behavior changed elsewhere.
     view.rerender(parseSettings({ keepSessionAlive: true }));
@@ -276,16 +278,7 @@ describe("SettingsScreen scoped section saves", () => {
       }),
     ).toBeNull();
 
-    const aiSave = within(refreshedAiRegion).getByRole<HTMLButtonElement>(
-      "button",
-      { name: "Save AI behavior" },
-    );
-    expect(aiSave.disabled).toBe(false);
-    fireEvent.click(aiSave);
-
-    await waitFor(() =>
-      expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1),
-    );
+    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
     expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledWith({
       ...defaultAiBehaviorInput,
       resumeApproach: "original_resume",
@@ -321,11 +314,10 @@ describe("SettingsScreen scoped section saves", () => {
     const aiRegion = screen.getByRole("region", { name: AI_BEHAVIOR_LABEL });
     fireEvent.click(within(aiRegion).getByRole("radio", { name: /^Original/ }));
 
-    const pendingSave = within(aiRegion).getByRole<HTMLButtonElement>(
-      "button",
-      { name: "Save AI behavior" },
-    );
-    fireEvent.click(pendingSave);
+    // The click started the save; it shows as pending until it settles.
+    expect(
+      within(aiRegion).getByRole("button", { name: "Saving AI behavior" }),
+    ).toBeTruthy();
     expect(
       within(aiRegion).queryByRole("button", { name: "Retry AI behavior" }),
     ).toBeNull();
@@ -454,11 +446,6 @@ describe("SettingsScreen scoped section saves", () => {
 
     const aiRegion = screen.getByRole("region", { name: AI_BEHAVIOR_LABEL });
     fireEvent.click(within(aiRegion).getByRole("radio", { name: /^Original/ }));
-    fireEvent.click(
-      within(aiRegion).getByRole<HTMLButtonElement>("button", {
-        name: "Save AI behavior",
-      }),
-    );
 
     await waitFor(() =>
       expect(

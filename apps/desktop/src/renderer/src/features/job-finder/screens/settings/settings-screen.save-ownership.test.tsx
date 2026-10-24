@@ -221,8 +221,9 @@ describe("Settings save ownership", () => {
     }
   });
 
-  it("offers the section's save once something in it changes", () => {
-    renderScreen(parseSettings(), createCallbacks());
+  it("saves an AI behavior choice at once, with Undo and no reminder", async () => {
+    const callbacks = createCallbacks();
+    renderScreen(parseSettings(), callbacks);
 
     const region = screen.getByRole("region", { name: "AI behavior" });
     const replies = within(region).getByRole("radiogroup", {
@@ -233,19 +234,21 @@ describe("Settings save ownership", () => {
         .getAllByRole("radio")
         .find((radio) => radio.getAttribute("aria-checked") !== "true")!,
     );
-    const save = within(region).getByRole<HTMLButtonElement>("button", {
-      name: "Save AI behavior",
-    });
 
-    expect(save.disabled).toBe(false);
-    const reasonId = save.getAttribute("aria-describedby");
-    expect(document.getElementById(reasonId ?? "")?.textContent).toBe(
-      "Not saved yet.",
+    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(within(region).getByText(/AI behavior saved/)).toBeTruthy(),
     );
+    expect(within(region).getByRole("button", { name: "Undo" })).toBeTruthy();
+    expect(
+      within(region).queryByRole("button", { name: "Save AI behavior" }),
+    ).toBeNull();
+    expect(unsavedBar()).toBeNull();
   });
 
-  it("hides the save reminder until a section is dirty, then names that section and commits only it", async () => {
+  it("names a section in the save reminder only while it owes a save, and the bar commits only it", async () => {
     const callbacks = createCallbacks();
+    callbacks.onUpdateAiBehavior.mockResolvedValueOnce(false);
     renderScreen(parseSettings(), callbacks);
 
     expect(unsavedBar()).toBeNull();
@@ -260,8 +263,9 @@ describe("Settings save ownership", () => {
         .find((radio) => radio.getAttribute("aria-checked") !== "true")!,
     );
 
+    // The choice saved at once and failed: now it is outstanding.
+    await waitFor(() => expect(unsavedBar()).not.toBeNull());
     const bar = unsavedBar();
-    expect(bar).not.toBeNull();
     expect(bar?.getAttribute("data-settings-unsaved-count")).toBe("1");
     expect(bar?.textContent).toContain("Unsaved changes in AI behavior.");
 
@@ -277,7 +281,7 @@ describe("Settings save ownership", () => {
     );
 
     await waitFor(() =>
-      expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1),
+      expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(2),
     );
     expect(callbacks.onUpdateWorkspaceBehavior).not.toHaveBeenCalled();
     expect(callbacks.onUpdateApplicationDefaults).not.toHaveBeenCalled();
@@ -386,11 +390,12 @@ describe("Settings save ownership", () => {
     );
   });
 
-  it("names every dirty section and offers no save when more than one is outstanding", () => {
+  it("names every dirty section and offers no save when more than one is outstanding", async () => {
     const callbacks = createCallbacks();
+    callbacks.onUpdateAiBehavior.mockResolvedValueOnce(false);
     renderScreen(parseSettings(), callbacks);
 
-    // A theme saves on click, so AI behavior is the second dirty section.
+    // AI behavior saves on click; a failed save leaves it outstanding.
     const ai = screen.getByRole("region", { name: "AI behavior" });
     const replies = within(ai).getByRole("radiogroup", {
       name: "How the profile assistant replies",
@@ -399,6 +404,11 @@ describe("Settings save ownership", () => {
       .getAllByRole("radio")
       .find((radio) => radio.getAttribute("aria-checked") !== "true");
     fireEvent.click(unchecked!);
+    await waitFor(() =>
+      expect(
+        within(ai).getByRole("button", { name: "Retry AI behavior" }),
+      ).toBeTruthy(),
+    );
 
     const tracker = screen.getByRole("region", { name: "Tracker" });
     fireEvent.click(
@@ -421,7 +431,7 @@ describe("Settings save ownership", () => {
       "Go to Tracker",
     ]);
     fireEvent.click(barButtons[0]!);
-    expect(callbacks.onUpdateAiBehavior).not.toHaveBeenCalled();
+    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
     expect(callbacks.onUpdateTrackerCrm).not.toHaveBeenCalled();
   });
 
