@@ -95,6 +95,8 @@ import {
 } from "@renderer/features/job-finder/lib/resume-workspace-route-state";
 import { applicationSignInContinuesOnItsOwn } from "@renderer/features/job-finder/lib/application-sign-in-handoff";
 import { createIdentityMemo } from "@renderer/features/job-finder/lib/identity-memo";
+import { useLaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
+import { JobSearchHomeLaunch } from "@renderer/features/job-finder/screens/job-search-home/job-search-home-launch";
 
 // The canonical workflow surfaces (Profile, Find jobs, Shortlisted,
 // Applications) are part of the initial-route bundle so their real headings
@@ -557,6 +559,8 @@ export function JobFinderHydrationGate(props: {
   children: ReactNode;
   collections: readonly JobFinderDeferredCollection[];
   workspace: JobFinderRendererWorkspaceSnapshot;
+  /** What the screen can already show from the database while it loads. */
+  launchView?: ReactNode;
 }) {
   const isHydrating = isJobFinderHydratingCollections(
     props.workspace,
@@ -565,6 +569,10 @@ export function JobFinderHydrationGate(props: {
 
   if (!isHydrating) {
     return props.children;
+  }
+
+  if (props.launchView) {
+    return props.launchView;
   }
 
   return (
@@ -705,6 +713,7 @@ export function JobFinderCompanyDetailRoute() {
 
 export function JobFinderHomeRoute() {
   const context = useJobFinderPageContext();
+  const launchReads = useLaunchReads();
   const [activityPending, setActivityPending] = useState(false);
   // A workspace that has not started setup opens guided setup directly; Home
   // is one screen of hallway before it. The redirect is spent immediately so
@@ -751,6 +760,14 @@ export function JobFinderHomeRoute() {
   return (
     <JobFinderHydrationGate
       collections={HOME_REQUIRED_COLLECTIONS}
+      launchView={
+        launchReads.counts ? (
+          <JobSearchHomeLaunch
+            counts={launchReads.counts}
+            onNavigate={context.onNavigateSafely}
+          />
+        ) : undefined
+      }
       workspace={context.workspace}
     >
       <JobSearchHomeScreen
