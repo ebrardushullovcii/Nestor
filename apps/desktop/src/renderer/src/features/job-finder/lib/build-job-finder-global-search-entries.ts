@@ -4,7 +4,6 @@ import { buildJobFinderContextRoute } from "./job-finder-context-navigation";
 import { buildResumeWorkspaceRoute } from "./resume-workspace-route";
 import { JOB_FINDER_ROUTE_PATHS } from "./job-finder-route-hrefs";
 import {
-  formatJobEmployerLocationLine,
   isEmployerAbsenceLabel,
   isLocationAbsenceLabel,
   resolveJobEmployerDisplay,
@@ -168,11 +167,16 @@ export function buildJobFinderGlobalSearchEntries(
       canonicalUrl: job.canonicalUrl,
     });
     const location = resolveJobLocationDisplay(job.location);
+    const campaignId = campaignIdForJob(job.id);
     return {
-      campaignId: campaignIdForJob(job.id),
-      href: buildJobFinderContextRoute("/job-finder/discovery", {
-        jobId: job.id,
-      }),
+      campaignId,
+      // Built when a result is opened: building a link for each of thousands
+      // of jobs every time the palette opened cost about 45 ms.
+      get href() {
+        return buildJobFinderContextRoute("/job-finder/discovery", {
+          jobId: job.id,
+        });
+      },
       id: job.id,
       kind: "job" as const,
       metadata: [
@@ -188,13 +192,11 @@ export function buildJobFinderGlobalSearchEntries(
           !isEmployerAbsenceLabel(value) &&
           !isLocationAbsenceLabel(value),
       ),
+      // The employer and location line, from the two values resolved above.
       subtitle: [
-        formatJobEmployerLocationLine({
-          company: job.company,
-          location: job.location,
-          canonicalUrl: job.canonicalUrl,
-        }),
-        campaignLabelFor(campaignIdForJob(job.id)) ?? outOfPlanLabel(job.id),
+        employer,
+        location,
+        campaignLabelFor(campaignId) ?? outOfPlanLabel(job.id),
       ]
         .filter(Boolean)
         .join(" · "),

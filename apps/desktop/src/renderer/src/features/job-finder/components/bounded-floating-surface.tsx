@@ -53,18 +53,19 @@ export interface UseBoundedFloatingSurfaceOptions {
 }
 
 function readViewport(): { height: number; width: number } {
-  const documentRect = document.documentElement.getBoundingClientRect();
   // `visualViewport` first (it is the only source that reports a pinch-zoom or
   // an on-screen keyboard), then the document box, which excludes the
   // scrollbar gutter. A zero-sized document box is not a viewport, so
   // `innerWidth`/`innerHeight` are the last resort rather than a silent zero.
+  // The document box is read only when needed: reading it forces a layout.
+  const visual = window.visualViewport;
+  if (visual?.height && visual.width) {
+    return { height: visual.height, width: visual.width };
+  }
+  const documentRect = document.documentElement.getBoundingClientRect();
   return {
-    height:
-      window.visualViewport?.height ||
-      documentRect.height ||
-      window.innerHeight,
-    width:
-      window.visualViewport?.width || documentRect.width || window.innerWidth,
+    height: visual?.height || documentRect.height || window.innerHeight,
+    width: visual?.width || documentRect.width || window.innerWidth,
   };
 }
 
@@ -236,7 +237,11 @@ function computeBottomRightDockPlacement(): BottomRightDockPlacement {
       (highest, registration) => Math.max(highest, registration.minTopOffset),
       0,
     ),
-    noCoverRects: readBottomRightDockNoCoverRects(),
+    // An empty dock covers nothing, so it measures nothing: this pass runs
+    // after every commit and on every scroll, and reading those boxes forced
+    // a layout each time.
+    noCoverRects:
+      registrations.length === 0 ? [] : readBottomRightDockNoCoverRects(),
     occupants: registrations.map((registration) => registration.occupant),
     viewport,
   });

@@ -655,13 +655,20 @@ export function useProfileScreenForms(input: {
       summaryValues,
     ],
   );
+  // An untouched form saves the preferences it was given; building and
+  // validating the payload from ~900 job sources cost every Profile visit
+  // about 45 ms for nothing.
+  const preferencesFormDirty = preferencesForm.formState.isDirty;
   const draftSearchPreferencesResult = useMemo(
     () =>
-      buildSearchPreferencesPayload(
-        currentSearchPreferencesBaseline,
-        preferencesForm.getValues(),
-      ),
+      preferencesFormDirty
+        ? buildSearchPreferencesPayload(
+            currentSearchPreferencesBaseline,
+            preferencesForm.getValues(),
+          )
+        : { payload: currentSearchPreferencesBaseline },
     [
+      preferencesFormDirty,
       companyBlacklist,
       companyWhitelist,
       compensationInterval,
@@ -700,31 +707,28 @@ export function useProfileScreenForms(input: {
     // changed. Screens build their save payload against the newest canonical
     // they have seen, so the echo is matched against both the loaded baseline
     // and that pending canonical before anything else decides.
+    // Only an edited form can be echoing its own save, so an untouched one
+    // builds and validates no payloads here.
     const draftValues = profileForm.getValues();
-    const savedDraftPayload = buildProfilePayload(
-      latestProfileRef.current,
-      draftValues,
-    ).payload;
-    const pendingCanonicalPayload = buildProfilePayload(
-      pendingCanonicalProfileRef.current,
-      draftValues,
-    ).payload;
-    const savedDraftEchoFingerprints = new Set(
-      [savedDraftPayload, pendingCanonicalPayload]
-        .filter((payload) => payload !== undefined)
-        .map((payload) => buildOrderedContentFingerprint(payload)),
-    );
-    const incomingProfileEditorFingerprint = buildOrderedContentFingerprint(
-      createProfileEditorValues(
-        input.profile,
-        input.latestResumeImportReviewCandidates,
-      ),
-    );
-    const draftEditorFingerprint = buildOrderedContentFingerprint(draftValues);
+    const isEchoOfSavedDraft = () => {
+      const echoFingerprints = new Set(
+        [latestProfileRef.current, pendingCanonicalProfileRef.current]
+          .map((profile) => buildProfilePayload(profile, draftValues).payload)
+          .filter((payload) => payload !== undefined)
+          .map((payload) => buildOrderedContentFingerprint(payload)),
+      );
+      return (
+        echoFingerprints.has(incomingProfileFingerprint) ||
+        buildOrderedContentFingerprint(
+          createProfileEditorValues(
+            input.profile,
+            input.latestResumeImportReviewCandidates,
+          ),
+        ) === buildOrderedContentFingerprint(draftValues)
+      );
+    };
     const isSavedProfileDraftEcho =
-      profileForm.formState.isDirty &&
-      (savedDraftEchoFingerprints.has(incomingProfileFingerprint) ||
-        incomingProfileEditorFingerprint === draftEditorFingerprint);
+      profileForm.formState.isDirty && isEchoOfSavedDraft();
 
     // Seen/pending trackers advance on every path; loaded fingerprints and
     // the save baseline only advance when a form actually adopts content.
@@ -853,23 +857,22 @@ export function useProfileScreenForms(input: {
     const preferencesChangedSinceSeen =
       incomingPreferencesFingerprint !==
       seenSearchPreferencesContentFingerprintRef.current;
+    // Only an edited form can be echoing its own save.
     const draftPreferencesValues = preferencesForm.getValues();
-    const savedPreferencesPayload = buildSearchPreferencesPayload(
-      latestSearchPreferencesRef.current,
-      draftPreferencesValues,
-    ).payload;
-    const pendingCanonicalPreferencesPayload = buildSearchPreferencesPayload(
-      pendingCanonicalSearchPreferencesRef.current,
-      draftPreferencesValues,
-    ).payload;
-    const savedPreferencesEchoFingerprints = new Set(
-      [savedPreferencesPayload, pendingCanonicalPreferencesPayload]
-        .filter((payload) => payload !== undefined)
-        .map((payload) => buildOrderedContentFingerprint(payload)),
-    );
     const isSavedPreferencesDraftEcho =
       preferencesForm.formState.isDirty &&
-      savedPreferencesEchoFingerprints.has(incomingPreferencesFingerprint);
+      [latestSearchPreferencesRef.current, pendingCanonicalSearchPreferencesRef.current]
+        .map(
+          (preferences) =>
+            buildSearchPreferencesPayload(preferences, draftPreferencesValues)
+              .payload,
+        )
+        .some(
+          (payload) =>
+            payload !== undefined &&
+            buildOrderedContentFingerprint(payload) ===
+              incomingPreferencesFingerprint,
+        );
 
     seenSearchPreferencesContentFingerprintRef.current =
       incomingPreferencesFingerprint;
