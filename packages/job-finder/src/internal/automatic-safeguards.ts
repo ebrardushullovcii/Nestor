@@ -222,11 +222,9 @@ function runFailedOutright(run: DiscoveryRunRecord): boolean {
  * what made two failed source checks out of five look like a broken plan.
  */
 export function deriveDiscoveryRunFailureEvidence(
-  runs: readonly unknown[],
+  runs: readonly DiscoveryRunRecord[],
 ): FailureAttemptEvidence[] {
   const terminal = runs
-    .map((run) => parseDiscoveryRun(run))
-    .filter((run): run is DiscoveryRunRecord => run !== null)
     .filter(
       (run) =>
         run.state !== "idle" &&
@@ -382,7 +380,10 @@ export function deriveSourceDebugCampaignWork(rawRun: unknown): {
 }
 
 async function persistAutomaticFailurePause(input: {
-  ctx: WorkspaceServiceContext;
+  ctx: Pick<
+    WorkspaceServiceContext,
+    "repository" | "withIntelligenceTransition"
+  >;
   campaign: JobSearchCampaign;
   pauseId: string;
   evidence: readonly FailureAttemptEvidence[];
@@ -446,14 +447,18 @@ async function persistAutomaticFailurePause(input: {
 
 /** Re-derives a campaign's automatic discovery pause from durable run history. */
 export async function persistAutomaticDiscoverySafeguard(input: {
-  ctx: WorkspaceServiceContext;
+  ctx: Pick<
+    WorkspaceServiceContext,
+    "repository" | "withIntelligenceTransition"
+  >;
   campaign: JobSearchCampaign;
   now: string;
 }): Promise<void> {
-  // Read only: the display rows (no checkpoints, no copy) carry every run
-  // field the failure count reads. A full copy of the discovery history here
-  // cost about half a second at the end of each search.
-  const discovery = await input.ctx.repository.readDiscoveryDisplayProjection();
+  // The writer already published these canonical runs. This decision uses
+  // only their outcomes; refreshing display history also read every changed
+  // ledger body and cleared thousands of display markers.
+  const discovery = await (input.ctx.repository.readDiscoveryStateForRun?.() ??
+    input.ctx.repository.getDiscoveryState());
   const runs = discovery.recentRuns.filter(
     (run) => run.campaignId === input.campaign.id,
   );
