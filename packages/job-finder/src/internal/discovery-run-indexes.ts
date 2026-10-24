@@ -1,4 +1,7 @@
-import type { DiscoveryLedgerEntry } from "@nestor/contracts";
+import type {
+  DiscoveryLedgerEntry,
+  DiscoveryIdentityStore,
+} from "@nestor/contracts";
 import { yieldToEventLoop } from "@nestor/core";
 import {
   createJobIdentityIndex,
@@ -26,12 +29,18 @@ import {
  */
 export function createSyncedJobIdentityIndex<T extends object>(
   selectIdentity: (value: T) => JobIdentityInput,
+  storage?: DiscoveryIdentityStore,
 ): {
   sync(values: readonly T[]): JobIdentityIndex<T>;
   warm(values: readonly T[]): Promise<void>;
   accept(values: readonly T[]): JobIdentityIndex<T>;
 } {
-  const inner = createJobIdentityIndex<T>([], selectIdentity);
+  const inner = createJobIdentityIndex<T>(
+    [],
+    selectIdentity,
+    undefined,
+    storage,
+  );
   const members = new Set<T>();
   let syncedWith: readonly T[] | null = null;
   let resolutions = new WeakMap<object, JobIdentityResolution<T>>();
@@ -78,12 +87,16 @@ export function createSyncedJobIdentityIndex<T extends object>(
     async warm(values) {
       if (values === syncedWith) return;
       for (let start = 0; start < values.length; start += 100) {
-        for (const value of values.slice(start, start + 100)) {
-          if (!members.has(value)) {
-            members.add(value);
-            inner.add(value);
+        const add = () => {
+          for (const value of values.slice(start, start + 100)) {
+            if (!members.has(value)) {
+              members.add(value);
+              inner.add(value);
+            }
           }
-        }
+        };
+        if (storage) storage.batch(add);
+        else add();
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
       invalidate();
@@ -124,6 +137,7 @@ export function createSyncedJobIdentityIndex<T extends object>(
  */
 export function createRunDiscoveryLedger(
   initial: readonly DiscoveryLedgerEntry[],
+  storage?: DiscoveryIdentityStore,
 ) {
   let byId = new Map(initial.map((entry) => [entry.id, entry]));
   let byTarget = new Map<string, Set<string>>();
@@ -192,6 +206,7 @@ export function createRunDiscoveryLedger(
           ?.some(
             (range) => range.from <= lookupVersion && lookupVersion < range.to,
           ) === true,
+      storage,
     );
   const currentIndex = () => {
     if (!historyIndex) {
@@ -214,9 +229,9 @@ export function createRunDiscoveryLedger(
       historyIndex = createHistoryIndex();
       const rows = entries();
       for (let start = 0; start < rows.length; start += 100) {
-        for (const entry of rows.slice(start, start + 100)) {
-          observe(entry);
-        }
+        const add = () => rows.slice(start, start + 100).forEach(observe);
+        if (storage) storage.batch(add);
+        else add();
         await yieldToEventLoop();
       }
     },

@@ -1,7 +1,6 @@
 import type { JobFinderAiClient } from "@nestor/ai-providers";
 import {
   SavedJobDiscoveryProvenanceSchema,
-  SavedJobSchema,
   jobPostingDetailQualityValues,
   type ApplicationStatus,
   type CandidateProfile,
@@ -1092,7 +1091,7 @@ function assembleMergedDiscoveredJob(input: {
 }): SavedJob {
   const { matchAssessment, enrichedPosting, posting, existingJob } = input;
 
-  return SavedJobSchema.parse({
+  return {
     ...enrichedPosting,
     id: existingJob?.id ?? toSavedJobId(posting),
     // A discovery recrawl refreshes shared listing content, not the plans that
@@ -1111,7 +1110,10 @@ function assembleMergedDiscoveredJob(input: {
     discoveryFeedback: existingJob?.discoveryFeedback ?? null,
     resumeApplicationMode: existingJob?.resumeApplicationMode ?? null,
     latestMatchAssessmentAudit: existingJob?.latestMatchAssessmentAudit ?? null,
-  });
+    provenance: (enrichedPosting as Partial<SavedJob>).provenance ?? [],
+    resumeTailoringMode:
+      (enrichedPosting as Partial<SavedJob>).resumeTailoringMode ?? null,
+  };
 }
 
 // Ranks of a job list a merge already computed. A search merges source after

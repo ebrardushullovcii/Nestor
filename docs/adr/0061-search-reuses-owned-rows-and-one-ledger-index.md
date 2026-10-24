@@ -25,6 +25,14 @@ sources' captured baselines. Replacing an entry closes its old version; active
 baseline readers retain that version until they release it. Do not eagerly
 build a third ledger index after every checkpoint for a future feedback action.
 
+File repositories keep alias candidate rows in SQLite TEMP indexes. A persistent
+SHA-256 key of the exact identity inputs and alias-policy version reuses the
+existing alias builder's output when that identity is recorded again. Candidate
+queries fetch only matching keys and row tokens. The existing intersection,
+cross-source compatibility and exact-content collision checks still decide the
+match. Cache tables contain derived keys, never listing bodies; run indexes are
+dropped when the run ends. Other hosts retain the same in-memory implementation.
+
 Typed discovery updates and saved-job deltas trust their domain values. Decode
 stored JSON without another schema walk in these paths. Migrations, imports,
 external feed/model results and renderer IPC retain validation. ID-preservation

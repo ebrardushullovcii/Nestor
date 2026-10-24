@@ -3,6 +3,7 @@ import { deflateRawSync, inflateRawSync } from "node:zlib";
 import type {
   DiscoveryPostingPreparation,
   DiscoveryJobIdentityAlias,
+  DiscoveryIdentityStore,
 } from "@nestor/contracts";
 
 import { normalizeText } from "./shared";
@@ -761,16 +762,32 @@ export function createJobIdentityIndex<T extends object>(
   values: readonly T[],
   selectIdentity: (value: T) => JobIdentityInput,
   include?: (value: T) => boolean,
+  storage?: DiscoveryIdentityStore,
 ): JobIdentityIndex<T> {
   const valuesByAlias = new Map<string, Set<T>>();
   const aliasesByValue = new Map<T, readonly JobIdentityAlias[]>();
-  const matchesFor = (key: string) => {
-    const matches = valuesByAlias.get(key);
+  const tokens = new WeakMap<T, number>();
+  const valuesByToken = new Map<number, T>();
+  let nextToken = 0;
+  const matchesFor = (key: string, stored?: Map<string, Set<T>>) => {
+    const matches = (stored ?? valuesByAlias).get(key);
     return include && matches ? new Set([...matches].filter(include)) : matches;
   };
 
   const add = (value: T): void => {
-    const aliases = readIndexedAliases(value, selectIdentity(value));
+    const input = selectIdentity(value);
+    if (storage) {
+      const token = tokens.get(value) ?? ++nextToken;
+      tokens.set(value, token);
+      valuesByToken.set(token, value);
+      storage.put(
+        token,
+        `identity_aliases_v1:${JSON.stringify(readAliasBasis(input))}`,
+        () => readIndexedAliases(value, input),
+      );
+      return;
+    }
+    const aliases = readIndexedAliases(value, input);
     aliasesByValue.set(value, aliases);
     for (const alias of aliases) {
       const matches = valuesByAlias.get(alias.key);
@@ -783,6 +800,14 @@ export function createJobIdentityIndex<T extends object>(
   };
 
   const remove = (value: T): void => {
+    if (storage) {
+      const token = tokens.get(value);
+      if (token !== undefined) {
+        storage.remove(token);
+        valuesByToken.delete(token);
+      }
+      return;
+    }
     const aliases = aliasesByValue.get(value) ?? [];
     for (const alias of aliases) {
       const matches = valuesByAlias.get(alias.key);
@@ -799,6 +824,15 @@ export function createJobIdentityIndex<T extends object>(
     // identity field is checked against the cached basis, including mutable
     // queries: edits invalidate the hint before a match is considered.
     const aliases = readIndexedAliases(identity, identity);
+    const storedMatches = storage ? new Map<string, Set<T>>() : undefined;
+    if (storage && storedMatches)
+      for (const row of storage.find(aliases.map((alias) => alias.key))) {
+        const value = valuesByToken.get(row.id);
+        if (!value) continue;
+        const matches = storedMatches.get(row.key) ?? new Set<T>();
+        matches.add(value);
+        storedMatches.set(row.key, matches);
+      }
     // A URL still matches when corrected card facts have no indexed alias.
     // Check every known alias before selecting it: an alias naming another
     // posting must not attach that posting's history or activity to this one.
@@ -809,7 +843,7 @@ export function createJobIdentityIndex<T extends object>(
       if (alias.confidence !== "strong") {
         continue;
       }
-      const indexedMatches = matchesFor(alias.key);
+      const indexedMatches = matchesFor(alias.key, storedMatches);
       const matches =
         (alias.kind === "employer_application_url" ||
           alias.kind === "source_posting_id") &&
@@ -885,7 +919,7 @@ export function createJobIdentityIndex<T extends object>(
     const matchedCorroboratingAliases: JobIdentityAlias[] = [];
     let corroboratingCandidates: ReadonlySet<T> | null = null;
     for (const alias of corroboratingAliases) {
-      const matches = matchesFor(alias.key);
+      const matches = matchesFor(alias.key, storedMatches);
       if (!matches || matches.size === 0) {
         continue;
       }
@@ -930,7 +964,7 @@ export function createJobIdentityIndex<T extends object>(
     const matchedPossibleAliases: JobIdentityAlias[] = [];
     let possibleCandidates: ReadonlySet<T> | null = null;
     for (const alias of possibleAliases) {
-      const matches = matchesFor(alias.key);
+      const matches = matchesFor(alias.key, storedMatches);
       if (!matches || matches.size === 0) {
         continue;
       }

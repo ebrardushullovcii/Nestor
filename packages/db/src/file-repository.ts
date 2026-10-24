@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { createDiscoveryIdentityStore } from "./internal/discovery-identity-store";
 import { channel } from "node:diagnostics_channel";
 import {
   PreparedApplicationFormSchema,
@@ -1263,6 +1264,7 @@ export async function createFileJobFinderRepository(
       );
     },
     readSavedJobsProjection,
+    createDiscoveryIdentityStore: () => createDiscoveryIdentityStore(database),
     listSavedJobIds() {
       const current = readSavedJobsProjection.currentIds();
       if (current) return Promise.resolve([...current]);
