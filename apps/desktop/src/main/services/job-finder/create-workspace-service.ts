@@ -647,10 +647,12 @@ export async function createJobFinderWorkspaceServiceAsync(
     outputDirectory: getGeneratedResumeDocumentsDirectory(),
     // An ambiguous reset preserves its files for recovery. Do not classify
     // unreferenced exports as obsolete while the reset could not be reconciled.
-    retainedResumePaths:
-      getJobFinderStartupResetRecoveryFact().status === "degraded"
-        ? undefined
-        : () => jobFinderRepository.listRetainedResumeExportPaths(),
+    ...(getJobFinderStartupResetRecoveryFact().status === "degraded"
+      ? {}
+      : {
+          retainedResumePaths: () =>
+            jobFinderRepository.listRetainedResumeExportPaths(),
+        }),
     previewTestMode: desktopTestApiEnabled
       ? getResumePreviewTestMode(env)
       : "ok",
