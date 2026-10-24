@@ -277,7 +277,8 @@ async function mapInTurns<T, R>(
   let turnStarted = performance.now();
   for (const [position, item] of items.entries()) {
     if (position % perTurn === 0 || performance.now() - turnStarted >= 8) {
-      await yieldToEventLoop();
+      // Serve Electron messages between CPU slices so Stop and IPC get a turn.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       turnStarted = performance.now();
     }
     mapped.push(map(item));

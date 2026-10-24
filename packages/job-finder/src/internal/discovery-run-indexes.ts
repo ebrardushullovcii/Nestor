@@ -1,5 +1,4 @@
 import type { DiscoveryLedgerEntry } from "@nestor/contracts";
-import { yieldToEventLoop } from "@nestor/core";
 import {
   createJobIdentityIndex,
   type JobIdentityIndex,
@@ -84,7 +83,7 @@ export function createSyncedJobIdentityIndex<T extends object>(
           inner.add(value);
         }
         if (performance.now() - turnStarted >= 8) {
-          await yieldToEventLoop();
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
           turnStarted = performance.now();
         }
       }
@@ -215,9 +214,13 @@ export function createRunDiscoveryLedger(
       if (historyIndex) return;
       historyIndex = createHistoryIndex();
       const rows = entries();
-      for (let start = 0; start < rows.length; start += 100) {
-        rows.slice(start, start + 100).forEach(observe);
-        await yieldToEventLoop();
+      let turnStarted = performance.now();
+      for (const row of rows) {
+        observe(row);
+        if (performance.now() - turnStarted >= 8) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          turnStarted = performance.now();
+        }
       }
     },
     captureSnapshot() {
