@@ -13,6 +13,7 @@ export function createWorkspaceQueryBridge(): WorkspaceQueryApi {
   ): Promise<T> =>
     ipcRenderer.invoke("workspace-query:read", { method, input }) as Promise<T>;
   return {
+    setQueryUpdates: (active) => read("setQueryUpdates", { active }),
     getStartupContext: () => read("getStartupContext", {}),
     queryJobList: (input) => read("queryJobList", input),
     getJobDetail: (jobId, planId = null) =>

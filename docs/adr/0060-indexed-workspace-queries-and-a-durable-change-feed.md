@@ -20,6 +20,10 @@ transaction. Rollbacks also roll back changes. The feed contains no row bodies.
 Readers use one SQLite transaction for page, total, counts and revision. Windows
 receive committed identity batches and refetch mounted pages; the same cursor can
 later support synchronization without implementing remote sync now.
+Main's repository commit path schedules one coalesced `setImmediate` push and
+yields between bounded batches. There is no permanent poll: all production
+writers of visible workspace data run in main. Explicit catch-up reads cover
+reconnects; an external SQL writer needs an explicit catch-up.
 
 ## Why each piece exists
 
@@ -27,11 +31,15 @@ later support synchronization without implementing remote sync now.
 - The bounded query contract prevents a screen from requesting a whole inventory.
 - The transactional feed keeps all existing write paths visible to readers.
 - Plain IPC keeps transport and lifecycle code small.
+- Commit notification avoids a forever-running timer in every window.
 
 The old workspace API remains available during screen migration. The main-process
 `NESTOR_QUERY_LISTS=1` seam suppresses its three inventory arrays once those screens
 use queries. This is an integration seam, not a product setting. Remove remaining
 whole-projection caches and sync when their final consumers are moved.
+This switch is blocked until intake filtering, listing activity and returned
+application semantics match the existing screens. Removing the flag and legacy
+arrays is part of the screen migration, not an optional cleanup.
 
 ADRs 0046 and 0011 still govern canonical discovery and independent plan semantics.
 Older builds need not open a migrated database; forward migrations require backup

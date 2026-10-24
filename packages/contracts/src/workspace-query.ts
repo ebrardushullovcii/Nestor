@@ -1,7 +1,17 @@
 import { z } from "zod";
-import { ApplicationStatusSchema, NonEmptyStringSchema, WorkModeSchema } from "./base";
+import {
+  ApplicationStatusSchema,
+  NonEmptyStringSchema,
+  WorkModeSchema,
+} from "./base";
 import type { ApplicationStatus } from "./base";
-import type { SavedJob, JobFinderJobDetail } from "./discovery";
+import type {
+  SavedJob,
+  JobFinderJobDetail,
+  JobSearchPreferences,
+} from "./discovery";
+import type { JobSearchCampaign } from "./job-search-campaigns";
+import type { CandidateProfile } from "./profile";
 import type { CompanyEntity } from "./job-finder-intelligence";
 import type { JobFinderRendererWorkspaceSnapshot } from "./workspace";
 
@@ -30,7 +40,7 @@ export const QueryJobListInputSchema = z
         companyId: NonEmptyStringSchema.optional(),
         statuses: z.array(ApplicationStatusSchema).max(20).optional(),
         sources: z.array(NonEmptyStringSchema).max(100).optional(),
-      workModes: z.array(WorkModeSchema).max(10).optional(),
+        workModes: z.array(WorkModeSchema).max(10).optional(),
         minimumScore: z.number().min(0).max(100).optional(),
         maximumScore: z.number().min(0).max(100).optional(),
       })
@@ -150,18 +160,51 @@ export interface WorkspaceChanges {
   hasMore: boolean;
   lists: WorkspaceJobList[];
 }
-export type WorkspaceStartupContext = Pick<
-  JobFinderRendererWorkspaceSnapshot,
-  | "profile"
-  | "searchPreferences"
-  | "profileSetupState"
-  | "settings"
-  | "campaigns"
-  | "activeCampaignId"
-  | "activityControl"
->;
+export type WorkspaceStartupContext = Omit<
+  Pick<
+    JobFinderRendererWorkspaceSnapshot,
+    | "profile"
+    | "searchPreferences"
+    | "profileSetupState"
+    | "settings"
+    | "campaigns"
+    | "activeCampaignId"
+    | "activityControl"
+  >,
+  "searchPreferences" | "campaigns" | "profile"
+> & {
+  profile: Pick<
+    CandidateProfile,
+    | "id"
+    | "fullName"
+    | "firstName"
+    | "lastName"
+    | "headline"
+    | "currentLocation"
+  > & { hasResume: boolean };
+  searchPreferences: Omit<JobSearchPreferences, "discovery"> & {
+    discovery: Omit<JobSearchPreferences["discovery"], "targets">;
+  };
+  campaigns: Array<
+    Pick<
+      JobSearchCampaign,
+      | "id"
+      | "name"
+      | "description"
+      | "mode"
+      | "status"
+      | "minimumFitScore"
+      | "progress"
+    > & { jobCount: number; sourceCount: number }
+  >;
+  sourceCount: number;
+};
 
 export const WorkspaceReadRequestSchema = z.discriminatedUnion("method", [
+  z.object({
+    method: z.literal("setQueryUpdates"),
+    input: z.object({ active: z.boolean() }).strict(),
+  }),
   z.object({
     method: z.literal("getStartupContext"),
     input: z.object({}).strict(),
@@ -211,6 +254,7 @@ export const WorkspaceReadRequestSchema = z.discriminatedUnion("method", [
 ]);
 export type WorkspaceReadRequest = z.infer<typeof WorkspaceReadRequestSchema>;
 export interface WorkspaceQueryApi {
+  setQueryUpdates(active: boolean): Promise<void>;
   getStartupContext(): Promise<WorkspaceStartupContext>;
   queryJobList(input: QueryJobListInput): Promise<QueryJobListResult>;
   getJobDetail(

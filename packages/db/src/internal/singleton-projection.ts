@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { SchemaParser, StateTableKey } from "../repository-types";
 import { freezeProjection } from "./saved-job-projection";
 import { parsePersistedRowValue } from "./state";
+import { decodePreferenceSingleton } from "./preference-storage";
 
 /** Immutable values for readers that never write through a borrowed object. */
 export function createSingletonProjectionReader(database: DatabaseSync) {
@@ -52,12 +53,16 @@ export function createSingletonProjectionReader(database: DatabaseSync) {
     const stored = row.get(key);
     const value = freezeProjection(
       stored
-        ? parsePersistedRowValue({
-            tableName: "singleton_state",
-            rowId: key,
-            rawValue: String(stored.value),
-            schema,
-          })
+        ? (decodePreferenceSingleton(
+            database,
+            key,
+            parsePersistedRowValue({
+              tableName: "singleton_state",
+              rowId: key,
+              rawValue: String(stored.value),
+              schema,
+            }),
+          ) as T)
         : structuredClone(fallback),
     );
     // A rolled-back epoch can be reused. Never publish an uncommitted value.

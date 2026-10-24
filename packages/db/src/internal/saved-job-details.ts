@@ -2,13 +2,14 @@ import type { DatabaseSync, StatementSync } from "node:sqlite";
 import {
   SavedJobSchema,
   readPreparedDiscoveryFingerprints,
-  readPreparedSavedJobIdentity,
   writeDiscoveryPreparation,
-  JobPostingSchema,
+  readPreparedSavedJobIdentity,
+  readDiscoveryPreparation,
   type SavedJob,
   type SavedJobListFacts,
 } from "@nestor/contracts";
-import { parsePersistedRowValue, validatePersistedRowValue } from "./state";
+import { parsePersistedRowValue } from "./state";
+import { savedJobValueSql } from "./saved-job-storage";
 
 const DETAIL_LIMIT = 16;
 export const savedJobDetailFields = [
@@ -94,12 +95,7 @@ export function createSavedJobDetails(database: DatabaseSync) {
     }
     const row = getDescription.get(version);
     if (!row) throw new Error("The saved-job projection has been closed.");
-    const value = validatePersistedRowValue({
-      tableName: "saved_jobs",
-      rowId: String(row.id),
-      value: row.description,
-      schema: JobPostingSchema.shape.description,
-    });
+    const value = row.description as string;
     descriptions.set(version, value);
     if (descriptions.size > DETAIL_LIMIT)
       descriptions.delete(descriptions.keys().next().value!);
@@ -121,8 +117,14 @@ export function createSavedJobDetails(database: DatabaseSync) {
     const version = ++nextVersion;
     const anchor = { version };
     if (rawValue === undefined) {
-      copyStored ??= database.prepare(`INSERT INTO saved_job_details
-        SELECT ?, id, value FROM main.saved_jobs WHERE id = ?`);
+      if (!copyStored) {
+        const relational = database
+          .prepare("PRAGMA table_info(saved_jobs)")
+          .all()
+          .some((column) => column.name === "assessment_id");
+        copyStored = database.prepare(`INSERT INTO saved_job_details
+        SELECT ?, id, ${relational ? savedJobValueSql() : "value"} FROM main.saved_jobs WHERE id = ?`);
+      }
       copyStored.run(version, job.id);
     } else put.run(version, job.id, rawValue);
     // Every omitted field is a real validated, indexed SQLite read, never a
@@ -146,9 +148,11 @@ export function createSavedJobDetails(database: DatabaseSync) {
     });
     Object.freeze(row.provenance);
     const fingerprint = readPreparedDiscoveryFingerprints(job);
+    const bodySalaryRange = readDiscoveryPreparation(job)?.bodySalaryRange;
     if (fingerprint)
       writeDiscoveryPreparation(row, {
         fingerprints: { owner: row, value: fingerprint },
+        ...(bodySalaryRange !== undefined ? { bodySalaryRange } : {}),
       });
     const identity = readPreparedSavedJobIdentity(job);
     if (identity)

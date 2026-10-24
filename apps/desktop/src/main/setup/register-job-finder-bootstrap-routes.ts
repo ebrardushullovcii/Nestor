@@ -5,7 +5,6 @@ import {
   isDesktopTestApiEnabled,
 } from "../services/job-finder/test-api";
 import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-workspace-view";
-import { takeStartupBootstrap } from "../services/job-finder/startup-workspace-view";
 
 // The workspace services are a large module graph. Loading them only when a
 // handler needs them lets a saved startup view answer the window at once.
@@ -61,8 +60,6 @@ export function registerJobFinderBootstrapDesktopRoutes(ipcMain: IpcMain) {
 
   ipcMain.handle("job-finder:get-workspace-bootstrap", async () => {
     await waitForOpeningHold();
-    const startupBootstrap = takeStartupBootstrap();
-    if (startupBootstrap) return startupBootstrap;
     const workspaceService = await getJobFinderWorkspaceService();
     return toRendererWorkspaceSnapshot(
       JobFinderWorkspaceSnapshotSchema.parse(

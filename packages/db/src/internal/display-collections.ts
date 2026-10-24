@@ -21,11 +21,6 @@ import type {
   SchemaParser,
 } from "../repository-types";
 import { APPLY_COLLECTION_ORDER_BY_SQL } from "../apply-collection-support";
-import {
-  createRowValidationMarks,
-  type ParseMarkedRow,
-  type RowValidationStamp,
-} from "./row-validation-marks";
 import { freezeProjection } from "./saved-job-projection";
 import {
   createResumeApprovalProjection,
@@ -39,13 +34,7 @@ import type { ResumeStateFold } from "./resume-approval-fold";
  * cover every local writer (including reset/import), roll back with writes,
  * and data_version covers commits made by other SQLite connections.
  */
-export function createDisplayCollectionsReader(
-  database: DatabaseSync,
-  options: {
-    /** Who validates rows; marked tables skip the schema for rows it marked. */
-    validationStamp?: RowValidationStamp;
-  } = {},
-) {
+export function createDisplayCollectionsReader(database: DatabaseSync) {
   const readVersion = database.prepare("PRAGMA data_version");
   const foldPreparers = new Map<
     string,
@@ -59,16 +48,10 @@ export function createDisplayCollectionsReader(
     schema: SchemaParser<T>,
     orderBy: string,
     where = "1",
-    {
-      marked = false,
-      hasApproval,
-    }: { marked?: boolean; hasApproval?: (row: T) => boolean } = {},
+    { hasApproval }: { hasApproval?: (row: T) => boolean } = {},
   ): () => readonly T[] {
     const prefix = `display_${table}`;
-    const marks = marked
-      ? createRowValidationMarks(database, table, options.validationStamp)
-      : null;
-    const rowsSql = marks?.selectSql ?? `id, value FROM ${table}`;
+    const rowsSql = `id, value FROM ${table}`;
     database.exec(`
       CREATE TEMP TABLE ${prefix}_epoch (revision INTEGER NOT NULL);
       INSERT INTO ${prefix}_epoch VALUES (0);
@@ -145,20 +128,17 @@ export function createDisplayCollectionsReader(
       statement: StatementSync,
       ...params: SQLInputValue[]
     ): T[] => {
-      const run = (parse: ParseMarkedRow | null) =>
-        statement.all(...params).map((row) =>
-          freezeProjection(
-            parse
-              ? parse(row, schema)
-              : parsePersistedRowValue({
-                  tableName: table,
-                  rowId: String(row.id),
-                  rawValue: String(row.value),
-                  schema,
-                }),
-          ),
-        );
-      return marks ? marks.read(run) : run(null);
+      return statement.all(...params).map((row) =>
+        freezeProjection(
+          parsePersistedRowValue<T>({
+            database,
+            tableName: table,
+            rowId: String(row.id),
+            rawValue: String(row.value),
+            schema,
+          }),
+        ),
+      );
     };
 
     return () => {
@@ -217,7 +197,6 @@ export function createDisplayCollectionsReader(
       "updated_at DESC, id ASC",
       "1",
       {
-        marked: true,
         hasApproval: (draft) =>
           draft.status === "approved" ||
           draft.approvedAt !== null ||

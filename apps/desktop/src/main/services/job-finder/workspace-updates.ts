@@ -1,4 +1,5 @@
 import { BrowserWindow, type WebContents } from "electron";
+import { usesWorkspaceQueryUpdates } from "./query-update-mode";
 
 export const JOB_FINDER_WORKSPACE_UPDATED_CHANNEL =
   "job-finder:workspace-updated";
@@ -27,14 +28,17 @@ export function publishJobFinderWorkspaceUpdate(target?: WebContents): void {
     const canSend = typeof target.send === "function";
     const isDestroyed =
       typeof target.isDestroyed === "function" && target.isDestroyed();
-    if (canSend && !isDestroyed) {
+    if (canSend && !isDestroyed && !usesWorkspaceQueryUpdates(target.id)) {
       target.send(JOB_FINDER_WORKSPACE_UPDATED_CHANNEL);
     }
     return;
   }
 
   for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.webContents.isDestroyed()) {
+    if (
+      !window.webContents.isDestroyed() &&
+      !usesWorkspaceQueryUpdates(window.webContents.id)
+    ) {
       window.webContents.send(JOB_FINDER_WORKSPACE_UPDATED_CHANNEL);
     }
   }

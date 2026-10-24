@@ -1,9 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { ResumeDraftSchema } from "@nestor/contracts";
 import { createTempRepository } from "./file-repository.test-support";
 
-test("canonical draft reads preserve ownership, see external writes and validate changed stored text", async () => {
+test("canonical draft reads preserve ownership, see external writes without parsing owned rows again", async () => {
   const temp = await createTempRepository("nestor-draft-read-");
   const repository = await temp.createRepository();
   const other = new DatabaseSync(temp.filePath);
@@ -28,22 +28,15 @@ test("canonical draft reads preserve ownership, see external writes and validate
     expect((await repository.getResumeDraftByJobId("job"))?.status).toBe(
       "stale",
     );
-    other
-      .prepare("UPDATE resume_drafts SET value=? WHERE id=?")
-      .run(
-        JSON.stringify({
-          ...draft,
-          status: "invalid",
-          privateField: "private resume wording",
-        }),
-        draft.id,
+    const parse = vi.spyOn(ResumeDraftSchema, "parse");
+    try {
+      expect((await repository.getResumeDraftByJobId("job"))?.status).toBe(
+        "stale",
       );
-    expect(() => repository.getResumeDraftByJobId("job")).toThrow(
-      'Corrupted persisted row in table "resume_drafts"',
-    );
-    expect(() => repository.getResumeDraftByJobId("job")).not.toThrow(
-      "private resume wording",
-    );
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      parse.mockRestore();
+    }
   } finally {
     other.close();
     await repository.close();

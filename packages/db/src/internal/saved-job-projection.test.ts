@@ -4,7 +4,11 @@ import {
   createSavedJob,
   createTempRepository,
 } from "../file-repository.test-support";
-import { createSavedJobProjectionReader, readSavedJobProjectionChanges } from "./saved-job-projection";
+import {
+  createSavedJobProjectionReader,
+  readSavedJobProjectionChanges,
+} from "./saved-job-projection";
+import { ensureSavedJobRelations } from "./saved-job-storage";
 
 const databases: DatabaseSync[] = [];
 afterEach(() => {
@@ -17,10 +21,11 @@ function fixture() {
   db.exec(
     "CREATE TABLE saved_jobs (id TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE progress (value INTEGER)",
   );
+  ensureSavedJobRelations(db);
   const put = (id: string, title = id) =>
     db
       .prepare(
-        "INSERT INTO saved_jobs VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
+        "INSERT INTO saved_jobs(id, value) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
       )
       .run(id, JSON.stringify(createSavedJob({ id, title })));
   return { db, put, read: createSavedJobProjectionReader(db) };
@@ -37,7 +42,9 @@ test("progress-only writes reuse rows; a job change replaces only its immutable 
   expect(() => first[0]!.keySkills.push("accidental edit")).toThrow();
   put("a", "Changed");
   const changed = await read();
-  expect(readSavedJobProjectionChanges(first, changed)?.rows.map((row) => row.id)).toEqual(["a"]);
+  expect(
+    readSavedJobProjectionChanges(first, changed)?.rows.map((row) => row.id),
+  ).toEqual(["a"]);
   expect(changed[0]).toBe(first[0]);
   expect(changed[1]?.title).toBe("Changed");
   expect(changed[1]?.provenance).toBe(first[1]?.provenance);
@@ -47,7 +54,9 @@ test("progress-only writes reuse rows; a job change replaces only its immutable 
   db.prepare("DELETE FROM saved_jobs WHERE id=?").run("B");
   const removed = await read();
   expect(removed.map((job) => job.id)).toEqual(["a"]);
-  expect(readSavedJobProjectionChanges(changed, removed)?.removedIds).toEqual(["B"]);
+  expect(readSavedJobProjectionChanges(changed, removed)?.removedIds).toEqual([
+    "B",
+  ]);
   expect(readSavedJobProjectionChanges(first, changed)).toBeNull();
 });
 
@@ -78,14 +87,12 @@ test("a sighting's copy of the listing and an equal plan verdict share the job's
       other: { ...base.matchAssessment, score: base.matchAssessment.score - 1 },
     },
   });
-  db.prepare("INSERT INTO saved_jobs VALUES (?, ?)").run(
+  db.prepare("INSERT INTO saved_jobs(id, value) VALUES (?, ?)").run(
     "a",
     JSON.stringify(job),
   );
   const [row] = await read();
-  expect(row?.provenance[0]?.listingFacts?.description).toBe(
-    base.description,
-  );
+  expect(row?.provenance[0]?.listingFacts?.description).toBe(base.description);
   expect(row?.planAssessments?.same).toBe(row?.matchAssessment);
   expect(row?.planAssessments?.other).not.toBe(row?.matchAssessment);
   expect(row?.planAssessments?.other?.score).toBe(
@@ -145,7 +152,10 @@ test("corrupt changed rows fail instead of serving stale data", async () => {
   const { db, put, read } = fixture();
   put("a");
   await read();
-  db.prepare("UPDATE saved_jobs SET value=? WHERE id=?").run("{}", "a");
+  db.prepare("UPDATE saved_jobs SET value=? WHERE id=?").run(
+    "invalid JSON",
+    "a",
+  );
   await expect(read()).rejects.toThrow("Corrupted persisted row");
   put("a", "Repaired");
   expect((await read())[0]?.title).toBe("Repaired");

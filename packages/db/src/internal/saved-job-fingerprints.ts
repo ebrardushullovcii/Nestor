@@ -6,6 +6,7 @@ import {
   readPreparedSavedJobIdentity,
   captureDiscoverySavedIdentityBasis,
   writeDiscoveryPreparation,
+  readDiscoveryPreparation,
   type DiscoveryListingFingerprints,
   type DiscoverySavedJobFingerprints,
   type SavedJob,
@@ -144,9 +145,11 @@ function capturedFingerprintBasis(
   );
 }
 
-/** Transitional legacy write validation preserves the new carried metadata. */
-export function parseSavedJobWithPreparation(job: SavedJob): SavedJob {
-  const row = SavedJobSchema.parse(job);
+/** A codec may normalize fields; retain only preparation still valid afterward. */
+export function copySavedJobPreparation<T extends object>(
+  job: object,
+  row: T,
+): T {
   const value = readPreparedDiscoveryFingerprints(job);
   if (value) {
     writeDiscoveryPreparation(row, {
@@ -156,7 +159,7 @@ export function parseSavedJobWithPreparation(job: SavedJob): SavedJob {
       },
     });
     if (!readPreparedDiscoveryFingerprints(row))
-      writeDiscoveryPreparation(row, { fingerprints: undefined });
+      delete readDiscoveryPreparation(row)!.fingerprints;
   }
   const identity = readPreparedSavedJobIdentity(job);
   if (identity) {
@@ -167,9 +170,25 @@ export function parseSavedJobWithPreparation(job: SavedJob): SavedJob {
       },
     });
     if (!readPreparedSavedJobIdentity(row))
-      writeDiscoveryPreparation(row, { savedIdentity: undefined });
+      delete readDiscoveryPreparation(row)!.savedIdentity;
+  }
+  const source = readDiscoveryPreparation(job);
+  const salary: unknown = source && Reflect.get(source, "bodySalaryRange");
+  if (
+    (typeof salary === "string" || salary === null) &&
+    Reflect.get(job, "description") === Reflect.get(row, "description")
+  ) {
+    const preparation = {
+      ...readDiscoveryPreparation(row),
+      bodySalaryRange: salary,
+    };
+    writeDiscoveryPreparation(row, preparation);
   }
   return row;
+}
+/** Transitional legacy write validation preserves the new carried metadata. */
+export function parseSavedJobWithPreparation(job: SavedJob): SavedJob {
+  return copySavedJobPreparation(job, SavedJobSchema.parse(job));
 }
 export function parseSavedJobsWithPreparation(
   jobs: readonly SavedJob[],
@@ -177,24 +196,7 @@ export function parseSavedJobsWithPreparation(
   return jobs.map(parseSavedJobWithPreparation);
 }
 export function cloneSavedJobWithPreparation(job: SavedJob): SavedJob {
-  const row = structuredClone(job);
-  const value = readPreparedDiscoveryFingerprints(job);
-  if (value)
-    writeDiscoveryPreparation(row, {
-      fingerprints: {
-        basis: capturedFingerprintBasis(row),
-        value: { ...value },
-      },
-    });
-  const identity = readPreparedSavedJobIdentity(job);
-  if (identity)
-    writeDiscoveryPreparation(row, {
-      savedIdentity: {
-        basis: captureDiscoverySavedIdentityBasis(row),
-        value: structuredClone(identity),
-      },
-    });
-  return row;
+  return copySavedJobPreparation(job, structuredClone(job));
 }
 
 /** Joined with each canonical/list page, never fetched once per job. */

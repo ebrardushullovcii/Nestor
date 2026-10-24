@@ -4,6 +4,8 @@ import {
   cloneSavedJobWithPreparation,
   readSavedJobPreparedValue,
 } from "./internal/saved-job-fingerprints";
+import { applySavedJobSightings } from "./internal/saved-job-sightings";
+import { applySavedJobPlanAssessments } from "./internal/saved-job-plan-assessments";
 import {
   PreparedApplicationFormSchema,
   ApplyJobResultSchema,
@@ -304,7 +306,7 @@ export function createInMemoryJobFinderRepository(
       applyQueue = null;
 
       // The reset replaces the whole workspace, but the compare-and-swap epoch
-      // only ever moves forward ï¿½ mirroring `initSingletonValue` in the SQLite
+      // only ever moves forward — mirroring `initSingletonValue` in the SQLite
       // backend. Rewinding it to 1 would let a token captured before the reset
       // still satisfy the equality check afterwards and overwrite the freshly
       // seeded profile, search preferences and profile setup state.
@@ -611,7 +613,19 @@ export function createInMemoryJobFinderRepository(
         ),
       );
     },
+    updateSavedJobSightings(updates) {
+      const next = applySavedJobSightings(state.savedJobs, updates);
+      state.savedJobs = next.jobs;
+      return Promise.resolve(next.changed);
+    },
+    updateSavedJobPlanAssessments(updates) {
+      const next = applySavedJobPlanAssessments(state.savedJobs, updates);
+      state.savedJobs = next.jobs;
+      return Promise.resolve(next.changed);
+    },
     commitSavedJobDelta({
+      planAssessments = [],
+      sightings = [],
       upserts = [],
       upsertsFromDiscovery,
       upsertsFromBorrowedDiscovery,
@@ -694,6 +708,11 @@ export function createInMemoryJobFinderRepository(
           nextSavedJobs = upsertById(nextSavedJobs, job);
         }
 
+        nextSavedJobs = applySavedJobSightings(nextSavedJobs, sightings).jobs;
+        nextSavedJobs = applySavedJobPlanAssessments(
+          nextSavedJobs,
+          planAssessments,
+        ).jobs;
         let nextResumeDrafts = state.resumeDrafts;
         let nextResumeExportArtifacts = state.resumeExportArtifacts;
         let nextTailoredAssets = state.tailoredAssets;

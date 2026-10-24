@@ -19,6 +19,11 @@ import {
   type JobFinderJobDetail,
 } from "@nestor/contracts";
 import { ensureWorkspaceReadIndex } from "./internal/workspace-read-index";
+import { savedJobValueSql } from "./internal/saved-job-storage";
+import { migrateSavedJobStorage } from "./internal/saved-job-storage-migration";
+import { ensureResumeApprovalState } from "./internal/resume-approval-state";
+import { migratePreferenceStorage } from "./internal/preference-storage";
+import { validateWorkspaceSettingsFile } from "./internal/state";
 
 export interface WorkspaceQueryRepository {
   getStartupContext(): WorkspaceStartupContext;
@@ -43,18 +48,23 @@ export interface WorkspaceQueryRepository {
 export function prepareWorkspaceQueryDatabase(filePath: string): void {
   const database = new DatabaseSync(filePath);
   try {
+    validateWorkspaceSettingsFile(database);
+    ensureResumeApprovalState(database);
+    migratePreferenceStorage(database);
+    migrateSavedJobStorage(database);
     ensureWorkspaceReadIndex(database);
   } finally {
     database.close();
   }
 }
 
+const activeApplication = `(e.returned_to_shortlist_at IS NULL OR julianday(e.returned_to_shortlist_at) < julianday(e.updated_at))`;
 const applicationMember = `EXISTS (SELECT 1 FROM workspace_entity_index e
-  WHERE e.origin = 'application_records' AND e.job_id = i.id
-    AND (e.returned_to_shortlist_at IS NULL OR e.returned_to_shortlist_at < e.updated_at))`;
-const shortlistMember = `i.status IN ('shortlisted','drafting','ready_for_review','approved')
-  AND NOT ${applicationMember}`;
-const discoveryMember = `i.status IN ('discovered','shortlisted','drafting','ready_for_review','approved')`;
+  WHERE e.origin = 'application_records' AND e.job_id = i.id AND ${activeApplication})`;
+// The canonical review queue includes prepared applications and excludes the
+// plain shortlisted status used when a job is moved back to Find jobs.
+const shortlistMember = `i.status IN ('drafting','ready_for_review','approved')`;
+const discoveryMember = `i.visible = 1 AND i.status IN ('discovered','shortlisted','drafting','ready_for_review','approved')`;
 function membership(list: WorkspaceJobList): string {
   switch (list) {
     case "discovery":
@@ -81,6 +91,24 @@ const allLists: WorkspaceJobList[] = [
   "company",
   "all",
 ];
+function affectedLists(table: string, id: string): WorkspaceJobList[] {
+  if (
+    table === "saved_jobs" ||
+    table === "discovery_pending_jobs" ||
+    table === "plan_job_memberships" ||
+    (table === "singleton_state" && id === "campaign_state")
+  )
+    return allLists;
+  if (table.startsWith("resume_") || table === "tailored_assets")
+    return ["shortlisted", "applications"];
+  if (
+    table === "application_records" ||
+    table === "apply_job_results" ||
+    table === "prepared_application_forms"
+  )
+    return ["applications", "shortlisted", "company", "all"];
+  return [];
+}
 
 export function createWorkspaceQueryRepository(
   filePath: string,
@@ -121,32 +149,40 @@ export function createWorkspaceQueryRepository(
   const plan = (input?: { planId?: string | null | undefined }) =>
     input?.planId === undefined ? (activePlan() ?? "") : (input.planId ?? "");
   function counts(planId: string): WorkspaceListCounts {
-    const row = database
-      .prepare(
-        `SELECT count(*) AS total,
-      COALESCE(sum(${discoveryMember}),0) AS discovery,
-      COALESCE(sum(i.hidden = 1),0) AS dismissed,
-      COALESCE(sum(${shortlistMember}),0) AS shortlisted,
-      COALESCE(sum(${applicationMember}),0) AS applications
-      FROM workspace_job_index i WHERE i.plan_id = ? AND ${deduplicated}`,
-      )
-      .get(planId)!;
+    const count = (condition: string) =>
+      Number(
+        database
+          .prepare(
+            `SELECT count(*) AS n FROM workspace_job_index i
+      WHERE i.plan_id = ? AND ${deduplicated} AND (${condition})`,
+          )
+          .get(planId)!.n,
+      );
+    const applications = Number(
+      database
+        .prepare(
+          `SELECT count(DISTINCT e.job_id) AS n FROM workspace_entity_index e
+      WHERE e.origin = 'application_records' AND ${activeApplication}
+      AND EXISTS (SELECT 1 FROM workspace_job_index i WHERE i.id = e.job_id AND i.plan_id = ?)`,
+        )
+        .get(planId)!.n,
+    );
     return {
-      discovery: Number(row.discovery),
-      dismissed: Number(row.dismissed),
-      shortlisted: Number(row.shortlisted),
-      applications: Number(row.applications),
+      discovery: count(discoveryMember),
+      dismissed: count("i.hidden = 1"),
+      shortlisted: count(shortlistMember),
+      applications,
       companies: Number(
         database
           .prepare("SELECT count(*) AS total FROM workspace_company_index")
           .get()!.total,
       ),
-      all: Number(row.total),
+      all: count("1"),
     };
   }
   const order = {
     best_match:
-      "i.unjudged, i.closed, i.mismatch, i.provisional, i.outside, CASE WHEN i.provisional = 0 THEN i.score ELSE 0 END DESC, i.title_family, i.recency DESC, i.detail, i.title, i.company, i.id",
+      "i.unjudged, i.closed, i.mismatch, i.provisional, i.outside, i.rank_score DESC, i.title_family, i.recency DESC, i.detail, i.title, i.company, i.id",
     newest: "i.recency DESC, i.id",
     title: "i.title COLLATE NOCASE, i.company, i.id",
     company: "i.company COLLATE NOCASE, i.title, i.id",
@@ -177,21 +213,81 @@ export function createWorkspaceQueryRepository(
         const values = new Map(
           database
             .prepare(
-              "SELECT key, value FROM singleton_state WHERE key IN ('profile', 'search_preferences', 'profile_setup_state', 'settings', 'campaign_state', 'activity_control')",
+              "SELECT key, value FROM singleton_state WHERE key IN ('profile_setup_state', 'settings', 'activity_control')",
             )
             .all()
             .map((row) => [String(row.key), raw(row.value)]),
         );
-        const campaign = values.get("campaign_state") as
-          | { campaigns?: unknown; activeCampaignId?: unknown }
-          | undefined;
+        const normalized = !!database
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE name = 'job_search_plans'",
+          )
+          .get();
+        const preferenceRow = normalized
+          ? database
+              .prepare(
+                "SELECT p.id, p.value FROM singleton_state s JOIN search_preference_sets p ON p.id = json_extract(s.value, '$.preferenceId') WHERE s.key = 'search_preferences'",
+              )
+              .get()
+          : database
+              .prepare(
+                "SELECT json_remove(value, '$.discovery.targets') AS value FROM singleton_state WHERE key = 'search_preferences'",
+              )
+              .get();
+        const sourceCount = normalized
+          ? Number(
+              database
+                .prepare(
+                  "SELECT count(*) AS n FROM search_preference_sources WHERE preference_id = ?",
+                )
+                .get(String(preferenceRow?.id))!.n,
+            )
+          : Number(
+              database
+                .prepare(
+                  "SELECT COALESCE(json_array_length(value, '$.discovery.targets'),0) AS n FROM singleton_state WHERE key = 'search_preferences'",
+                )
+                .get()?.n ?? 0,
+            );
+        const planValue = (
+          value: string,
+        ) => `json_object('id', json_extract(${value}, '$.id'), 'name', json_extract(${value}, '$.name'),
+          'description', json_extract(${value}, '$.description'), 'mode', json_extract(${value}, '$.mode'), 'status', json_extract(${value}, '$.status'),
+          'minimumFitScore', json_extract(${value}, '$.minimumFitScore'), 'progress', json_extract(${value}, '$.progress'))`;
+        const planRows = normalized
+          ? database
+              .prepare(
+                `SELECT ${planValue("p.value")} AS value, (SELECT count(*) FROM plan_job_memberships j WHERE j.plan_id = p.id) AS job_count,
+            (SELECT count(*) FROM plan_sources s WHERE s.plan_id = p.id) AS source_count FROM job_search_plans p ORDER BY position, id`,
+              )
+              .all()
+          : database
+              .prepare(
+                `SELECT ${planValue("c.value")} AS value,
+            json_array_length(c.value, '$.jobIds') AS job_count, json_array_length(c.value, '$.sourceTargetIds') AS source_count
+            FROM singleton_state s, json_each(s.value, '$.campaigns') c WHERE s.key = 'campaign_state'`,
+              )
+              .all();
+        const profile = database
+          .prepare(
+            `SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.fullName') AS fullName,
+          json_extract(value, '$.firstName') AS firstName, json_extract(value, '$.lastName') AS lastName,
+          json_extract(value, '$.headline') AS headline, json_extract(value, '$.currentLocation') AS currentLocation,
+          json_extract(value, '$.baseResume.id') IS NOT NULL AS hasResume FROM singleton_state WHERE key = 'profile'`,
+          )
+          .get();
         return {
-          profile: values.get("profile"),
-          searchPreferences: values.get("search_preferences"),
+          profile: { ...profile, hasResume: profile?.hasResume === 1 },
+          searchPreferences: preferenceRow ? raw(preferenceRow.value) : null,
           profileSetupState: values.get("profile_setup_state"),
           settings: values.get("settings"),
-          campaigns: campaign?.campaigns,
-          activeCampaignId: campaign?.activeCampaignId,
+          campaigns: planRows.map((row) => ({
+            ...(raw(row.value) as object),
+            jobCount: Number(row.job_count),
+            sourceCount: Number(row.source_count),
+          })),
+          activeCampaignId: activePlan(),
+          sourceCount,
           activityControl: values.get("activity_control"),
         } as WorkspaceStartupContext;
       });
@@ -213,12 +309,7 @@ export function createWorkspaceQueryRepository(
         }
         if (query.filters.workModes?.length) {
           const mask = query.filters.workModes.reduce(
-            (value, mode) =>
-              value |
-              (1 <<
-                workModeValues.indexOf(
-                  mode as (typeof workModeValues)[number],
-                )),
+            (value, mode) => value | (1 << workModeValues.indexOf(mode)),
             0,
           );
           where.push("(i.work_mode & ?) != 0");
@@ -258,10 +349,12 @@ export function createWorkspaceQueryRepository(
           i.discovered_at AS discoveredAt, i.first_seen_at AS firstSeenAt, i.seen AS lastSeenAt,
           i.salary_text AS salaryText, i.detail_quality AS detailQuality,
           i.resume_mode AS resumeApplicationMode, i.tailoring_mode AS resumeTailoringMode,
-          nullif(i.plan_id, '') AS planId, i.score, i.recommendation, i.unjudged,
+          nullif(i.plan_id, '') AS planId, COALESCE(plan_verdict.score, i.score) AS score, i.recommendation, i.unjudged,
           i.score_upper AS scoreUpper, i.title_family_match AS titleFamilyMatch,
           i.location_reach AS locationReach, i.closed
-          FROM workspace_job_index i WHERE ${condition} ORDER BY ${order[query.sort]} LIMIT ? OFFSET ?`,
+          FROM workspace_job_index i LEFT JOIN job_plan_assessments plan_verdict ON i.origin = 'saved_jobs'
+            AND plan_verdict.job_id = i.id AND plan_verdict.plan_id = i.plan_id
+          WHERE ${condition} ORDER BY ${order[query.sort]} LIMIT ? OFFSET ?`,
           )
           .all(...args, query.page.limit, query.page.offset);
         const rows = columns.map(
@@ -291,7 +384,7 @@ export function createWorkspaceQueryRepository(
       return read(() => {
         const row = database
           .prepare(
-            "SELECT value FROM saved_jobs WHERE id = ? UNION ALL SELECT value FROM discovery_pending_jobs WHERE id = ? LIMIT 1",
+            `SELECT ${savedJobValueSql()} AS value FROM saved_jobs WHERE id = ? UNION ALL SELECT value FROM discovery_pending_jobs WHERE id = ? LIMIT 1`,
           )
           .get(jobId, jobId);
         if (!row) return null;
@@ -316,15 +409,15 @@ export function createWorkspaceQueryRepository(
         const statuses = database
           .prepare(
             `SELECT e.status, count(*) AS total FROM workspace_entity_index e
-          WHERE e.origin = 'application_records' AND EXISTS (SELECT 1 FROM workspace_job_index i
-            WHERE i.id = e.job_id AND i.plan_id = ? AND ${deduplicated}) GROUP BY e.status`,
+          WHERE e.origin = 'application_records' AND ${activeApplication} AND EXISTS (SELECT 1 FROM workspace_job_index i
+            WHERE i.id = e.job_id AND i.plan_id = ?) GROUP BY e.status`,
           )
           .all(planId);
         const drafts = database
           .prepare(
             `SELECT CASE WHEN a.draft_id IS NOT NULL THEN 'stale' ELSE e.status END AS status, count(*) AS total
           FROM workspace_entity_index e LEFT JOIN resume_draft_approval_state a ON a.draft_id = e.id
-          WHERE e.origin = 'resume_drafts' AND e.job_id IN (SELECT i.id FROM workspace_job_index i WHERE i.plan_id = ? AND ${deduplicated}) GROUP BY status`,
+          WHERE e.origin = 'resume_drafts' AND EXISTS (SELECT 1 FROM workspace_job_index i WHERE i.id = e.job_id AND i.plan_id = ?) GROUP BY status`,
           )
           .all(planId);
         return {
@@ -389,22 +482,26 @@ export function createWorkspaceQueryRepository(
           )
           .all(after, limit + 1);
         const hasMore = rows.length > limit;
-        const changes = rows
-          .slice(0, limit)
-          .map((row) => ({
-            revision: Number(row.revision),
-            table: String(row.table_name),
-            id: String(row.item_id),
-            operation:
-              row.operation === "delete"
-                ? ("delete" as const)
-                : ("upsert" as const),
-          }));
+        const changes = rows.slice(0, limit).map((row) => ({
+          revision: Number(row.revision),
+          table: String(row.table_name),
+          id: String(row.item_id),
+          operation:
+            row.operation === "delete"
+              ? ("delete" as const)
+              : ("upsert" as const),
+        }));
         return {
           changes,
           revision: changes.at(-1)?.revision ?? Math.min(after, revision()),
           hasMore,
-          lists: changes.length ? allLists : [],
+          lists: [
+            ...new Set(
+              changes.flatMap((change) =>
+                affectedLists(change.table, change.id),
+              ),
+            ),
+          ],
         };
       });
     },

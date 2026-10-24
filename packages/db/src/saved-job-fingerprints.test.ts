@@ -2,6 +2,7 @@ import { DatabaseSync, StatementSync } from "node:sqlite";
 import { expect, test, vi } from "vitest";
 import {
   readPreparedDiscoveryFingerprints,
+  readPreparedBodySalaryRange,
   readPreparedSavedJobIdentity,
   captureDiscoverySavedIdentityBasis,
   DISCOVERY_FINGERPRINT_FIELDS,
@@ -74,6 +75,8 @@ for (const storage of ["file", "memory"] as const)
         expect(readPreparedDiscoveryFingerprints(borrowed!)).toEqual(
           fingerprint,
         );
+        if (storage === "file")
+          expect(readPreparedBodySalaryRange(borrowed!)).toBeNull();
         expect(readPreparedSavedJobIdentity(borrowed!)).toEqual(identity);
         expect(get).not.toHaveBeenCalled();
       } finally {
@@ -121,7 +124,10 @@ for (const storage of ["file", "memory"] as const)
       );
       // A caller must not smuggle an unchecked saved identity through the
       // structurally compatible batch value used as listing fingerprints.
-      const rerouted = createSavedJob({ id: job.id, sourceJobId: "another-source-job" });
+      const rerouted = createSavedJob({
+        id: job.id,
+        sourceJobId: "another-source-job",
+      });
       const unverified = { ...fingerprint, identity };
       writeDiscoveryPreparation(rerouted, {
         fingerprints: {

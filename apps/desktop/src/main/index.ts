@@ -19,10 +19,6 @@ import { registerFinishedWorkWindow } from "./setup/finished-work-notifier-insta
 import { runShutdownWithTimeout } from "./setup/shutdown-with-timeout";
 import { createDeferredBackgroundInitController } from "./setup/deferred-background-init";
 import { getMainWindowCloseGuard } from "./setup/main-window-close-guard";
-import {
-  captureStartupWorkspaceView,
-  hasStartupWorkspaceView,
-} from "./services/job-finder/startup-workspace-view";
 import type * as InterviewOverlayApi from "./setup/interview-overlay-windows";
 import type * as InterviewSessionControlsApi from "./setup/interview-session-controls";
 import type * as CandidateAssetLibraryApi from "./services/job-finder/candidate-asset-library-instance";
@@ -44,10 +40,6 @@ try {
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
-if (hasSingleInstanceLock) {
-  // Before anything opens the workspace database (see the module).
-  captureStartupWorkspaceView();
-}
 const startupDiagnosticsPath = getDesktopStartupDiagnosticsPath();
 
 function recordStartupDiagnostic(message: string, error?: unknown) {
@@ -126,7 +118,8 @@ function loadInterviewSessionControlsModule() {
 }
 
 let closeInterviewOverlayWindows = () => {};
-let workspaceQueryHost: ReturnType<typeof createWorkspaceQueryHost> | null = null;
+let workspaceQueryHost: ReturnType<typeof createWorkspaceQueryHost> | null =
+  null;
 let disposeInterviewSessionControls = () => {};
 
 // The 500ms deferred service initialization owns the background eager loads.
@@ -139,7 +132,7 @@ let disposeInterviewSessionControls = () => {};
 // their own services on demand.
 const deferredBackgroundInit = createDeferredBackgroundInitController({
   // Counted from the window's page load, not its creation; see below.
-  scheduleDelayMs: process.env.NESTOR_QUERY_LISTS === "1" ? 2_000 : 150,
+  scheduleDelayMs: 150,
   advancedInterviewSurfacesEnabled,
   loadJobFinderServices,
   loadCampaignSchedulerModule,
@@ -296,26 +289,11 @@ void app
       return;
     }
     recordStartupDiagnostic("main window created");
-    // Electron's browser thread is this JavaScript thread, so loading the
-    // feature services holds the window's own page load (about 0.7 s). With
-    // a saved startup view the window needs nothing from them to show the
-    // workspace: start them once the page has loaded. Without one, the
-    // window waits for them anyway, so they start early and overlap the
-    // page's script compile.
-    let backgroundInitScheduled = false;
-    const scheduleBackgroundInit = () => {
-      if (backgroundInitScheduled) return;
-      backgroundInitScheduled = true;
-      clearTimeout(backgroundInitFallback);
-      deferredBackgroundInit.schedule();
-    };
-    const backgroundInitFallback = setTimeout(
-      scheduleBackgroundInit,
-      process.env.NESTOR_QUERY_LISTS === "1" || hasStartupWorkspaceView() ? 3_000 : 350,
+    // Service initialization shares main's thread with the window's load.
+    mainWindow.webContents.once("did-finish-load", () =>
+      deferredBackgroundInit.schedule(),
     );
-    mainWindow.webContents.once("did-finish-load", scheduleBackgroundInit);
     mainWindow.on("closed", () => {
-      clearTimeout(backgroundInitFallback);
       deferredBackgroundInit.cancelScheduled();
       closeInterviewOverlayWindows();
     });
@@ -384,7 +362,7 @@ async function shutdownJobFinderServicesIfLoaded(): Promise<void> {
   const { shutdownAssistantHost } =
     await import("./services/assistant/assistant-service");
   await shutdownAssistantHost();
-  await shutdownJobFinderWorkspaceService({ saveStartupView: true });
+  await shutdownJobFinderWorkspaceService();
 }
 
 async function shutdownLiveAssistantIfLoaded(): Promise<void> {

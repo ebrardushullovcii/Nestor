@@ -3,15 +3,19 @@ import { existsSync } from "node:fs";
 import {
   createWorkspaceQueryRepository,
   prepareWorkspaceQueryDatabase,
+  subscribeWorkspaceCommits,
   type WorkspaceQueryRepository,
 } from "@nestor/db";
 import { WorkspaceReadRequestSchema } from "@nestor/contracts";
 import { getJobFinderWorkspaceFilePath } from "../services/job-finder/paths";
+import { setWorkspaceQueryUpdateMode } from "../services/job-finder/query-update-mode";
 
 /** Small SQLite reads are ordinary typed IPC; no workspace hydration is needed. */
 export function createWorkspaceQueryHost() {
   let repository: WorkspaceQueryRepository | null = null;
   let cursor = 0;
+  let unsubscribe: (() => void) | undefined;
+  let pendingPush: ReturnType<typeof setImmediate> | undefined;
   const windows = new Set<BrowserWindow>();
   function reader(): WorkspaceQueryRepository {
     if (repository) return repository;
@@ -21,6 +25,7 @@ export function createWorkspaceQueryHost() {
     prepareWorkspaceQueryDatabase(filePath);
     repository = createWorkspaceQueryRepository(filePath);
     cursor = repository.getChanges(Number.MAX_SAFE_INTEGER).revision;
+    unsubscribe = subscribeWorkspaceCommits(filePath, schedulePush);
     return repository;
   }
   ipcMain.handle("workspace-query:read", (event, payload: unknown) => {
@@ -30,6 +35,10 @@ export function createWorkspaceQueryHost() {
     )
       throw new Error("Workspace read is unavailable.");
     const request = WorkspaceReadRequestSchema.parse(payload);
+    if (request.method === "setQueryUpdates") {
+      setWorkspaceQueryUpdateMode(event.sender.id, request.input.active);
+      return;
+    }
     const db = reader();
     switch (request.method) {
       case "getStartupContext":
@@ -50,7 +59,8 @@ export function createWorkspaceQueryHost() {
         return db.getChanges(request.input.after, request.input.limit);
     }
   });
-  const timer = setInterval(() => {
+  function pushChanges() {
+    pendingPush = undefined;
     if (!repository || !windows.size) return;
     try {
       const changes = repository.getChanges(cursor);
@@ -59,19 +69,27 @@ export function createWorkspaceQueryHost() {
         if (!window.isDestroyed())
           window.webContents.send("workspace-query:changes", changes);
       cursor = changes.revision;
+      if (changes.hasMore) schedulePush();
     } catch {
-      // Leave the durable cursor unchanged so the next tick retries.
+      // A later commit or explicit reconnect can retry the durable cursor.
     }
-  }, 100);
-  timer.unref();
+  }
+  function schedulePush() {
+    pendingPush ??= setImmediate(pushChanges);
+  }
   app.once("will-quit", () => {
-    clearInterval(timer);
+    unsubscribe?.();
+    if (pendingPush) clearImmediate(pendingPush);
     repository?.close();
   });
   return {
     attach(window: BrowserWindow) {
+      const id = window.webContents.id;
       windows.add(window);
-      window.once("closed", () => windows.delete(window));
+      window.once("closed", () => {
+        windows.delete(window);
+        setWorkspaceQueryUpdateMode(id, false);
+      });
     },
   };
 }

@@ -4,6 +4,8 @@ import {
   cloneSavedJobWithPreparation,
   readSavedJobFingerprintBatch,
 } from "./internal/saved-job-fingerprints";
+import { writeSavedJobSightings } from "./internal/saved-job-sightings";
+import { writeSavedJobPlanAssessments } from "./internal/saved-job-plan-assessments";
 import { isDeepStrictEqual } from "node:util";
 import {
   PreparedApplicationFormSchema,
@@ -119,6 +121,7 @@ import {
   stateTableNames,
   upsertIndexedCollectionValue,
   writeState,
+  validateWorkspaceSettingsFile,
 } from "./internal/state";
 import {
   applyProfileCopilotMessagePatchFlags,
@@ -418,7 +421,8 @@ export async function createFileJobFinderRepository(
       await secureDatabaseFile(options.filePath);
     }
 
-    // Complete interrupted folds before publishing any startup view.
+    validateWorkspaceSettingsFile(database);
+    // Complete interrupted approval folds before serving the workspace.
     await createResumeApprovalFolder(database).flush();
     context = createFileRepositoryContext({
       database,
@@ -430,16 +434,10 @@ export async function createFileJobFinderRepository(
       normalizedSeed.discovery,
     );
     readSavedJobsProjection = createSavedJobProjectionReader(database, {
-      validationStamp: options.rowValidationStamp ?? null,
       sqliteDetails: true,
-      ...(options.backgroundValidationReady
-        ? { backgroundValidationReady: options.backgroundValidationReady }
-        : {}),
     });
     readIntelligenceProjection = createIntelligenceProjectionReader(database);
-    readDisplayCollections = createDisplayCollectionsReader(database, {
-      validationStamp: options.rowValidationStamp ?? null,
-    });
+    readDisplayCollections = createDisplayCollectionsReader(database);
     approvalFolder = createResumeApprovalFolder(
       database,
       readDisplayCollections.prepareResumeStateFold,
@@ -1290,7 +1288,35 @@ export async function createFileJobFinderRepository(
     readSavedJobDiscoveryFingerprints(jobIds) {
       return Promise.resolve(readSavedJobFingerprintBatch(database, jobIds));
     },
+    updateSavedJobSightings(updates) {
+      try {
+        return Promise.resolve(
+          updates.length
+            ? runImmediateTransaction(database, () =>
+                writeSavedJobSightings(database, updates),
+              )
+            : 0,
+        );
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
+    updateSavedJobPlanAssessments(updates) {
+      try {
+        return Promise.resolve(
+          updates.length
+            ? runImmediateTransaction(database, () =>
+                writeSavedJobPlanAssessments(database, updates),
+              )
+            : 0,
+        );
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
     commitSavedJobDelta({
+      planAssessments = [],
+      sightings = [],
       upserts = [],
       upsertsFromDiscovery,
       upsertsFromBorrowedDiscovery,
@@ -1462,6 +1488,8 @@ export async function createFileJobFinderRepository(
             }
           }
 
+          writeSavedJobSightings(database, sightings);
+          writeSavedJobPlanAssessments(database, planAssessments);
           if (updateDiscoveryState && currentDiscoveryState) {
             committedDiscovery = discoveryStorage.update(
               updateDiscoveryState(currentDiscoveryState),
@@ -2534,10 +2562,7 @@ export async function createFileJobFinderRepository(
           // as stale instead of reverting this campaign preference change.
           // A campaign-only edit leaves preferences untouched and must not
           // invalidate unrelated in-flight profile work.
-          if (
-            JSON.stringify(nextSearchPreferences) !==
-            JSON.stringify(searchPreferences)
-          ) {
+          if (!isDeepStrictEqual(nextSearchPreferences, searchPreferences)) {
             incrementSingletonRevision(database, "profile");
           }
           return next.result;

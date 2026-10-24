@@ -1,4 +1,5 @@
 import type { DiscoveryListingFingerprints, JobPosting } from "./discovery";
+import type { extractSalaryRangeFromListingBody } from "./listing-salary-evidence";
 
 /** Internal prepared facts travel with owned postings; JSON and IPC omit symbols. */
 export const DISCOVERY_PREPARATION = Symbol.for("nestor.discoveryPreparation");
@@ -40,6 +41,7 @@ export type DiscoveryPreparation = {
   };
   normalizedPosting?: JobPosting | undefined;
   normalizedPostingSource?: JobPosting | undefined;
+  bodySalaryRange?: ReturnType<typeof extractSalaryRangeFromListingBody>;
 };
 
 export function readDiscoveryPreparation(
@@ -52,9 +54,7 @@ export function readDiscoveryPreparation(
 
 export function writeDiscoveryPreparation(
   value: object,
-  preparation: {
-    [K in keyof DiscoveryPreparation]?: DiscoveryPreparation[K] | undefined;
-  },
+  preparation: Partial<DiscoveryPreparation>,
 ): boolean {
   if (
     !Object.isExtensible(value) ||
@@ -62,8 +62,22 @@ export function writeDiscoveryPreparation(
       ?.configurable === false
   )
     return false;
+  const previous = readDiscoveryPreparation(value);
+  const next = { ...previous, ...preparation };
+  const beforeBody =
+    previous?.content?.description ??
+    previous?.fingerprints?.basis?.description;
+  if (
+    !Object.hasOwn(preparation, "bodySalaryRange") &&
+    ((preparation.content && preparation.content.description !== beforeBody) ||
+      (preparation.fingerprints?.basis &&
+        preparation.fingerprints.basis.description !== beforeBody) ||
+      (preparation.fingerprints?.owner &&
+        preparation.fingerprints.owner !== previous?.fingerprints?.owner))
+  )
+    delete next.bodySalaryRange;
   Object.defineProperty(value, DISCOVERY_PREPARATION, {
-    value: { ...readDiscoveryPreparation(value), ...preparation },
+    value: next,
     enumerable: true,
     configurable: true,
     writable: true,
@@ -190,4 +204,25 @@ export function readPreparedDiscoveryFingerprints(
     )
     ? prepared.value
     : null;
+}
+
+/** The existing body salary parser's result, including a known absent range. */
+export function readPreparedBodySalaryRange(
+  posting: object,
+): DiscoveryPreparation["bodySalaryRange"] {
+  const prepared = readDiscoveryPreparation(posting);
+  if (!prepared || !Object.hasOwn(prepared, "bodySalaryRange"))
+    return undefined;
+  const owner = prepared.fingerprints?.owner;
+  if (owner === posting && Object.isFrozen(posting))
+    return prepared.bodySalaryRange;
+  const description: unknown = Reflect.get(posting, "description");
+  return typeof description === "string" &&
+    (prepared.content?.description === description ||
+      prepared.fingerprints?.basis?.description === description ||
+      (owner &&
+        Object.isFrozen(owner) &&
+        Reflect.get(owner, "description") === description))
+    ? prepared.bodySalaryRange
+    : undefined;
 }

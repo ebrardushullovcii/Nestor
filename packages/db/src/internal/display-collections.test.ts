@@ -97,7 +97,9 @@ test("transaction reads, rollback epoch reuse, reset, and corrupt changed rows c
     expect((await read()).tailoredAssets.map((row) => row.contentText)).toEqual(
       ["Full synthetic resume body", "Full synthetic resume body"],
     );
-    db.prepare("UPDATE tailored_assets SET value='{}' WHERE id='a'").run();
+    db.prepare(
+      "UPDATE tailored_assets SET value='invalid JSON' WHERE id='a'",
+    ).run();
     await expect(read()).rejects.toThrow(
       'Corrupted persisted row in table "tailored_assets"',
     );

@@ -1,3 +1,4 @@
+import { notifyWorkspaceCommit } from "./workspace-commits";
 import {
   ApplicationAuthorityEnvelopeSchema,
   ApprovedApplicationAnswerSnapshotSchema,
@@ -41,6 +42,7 @@ export function runImmediateTransaction<TValue>(
   try {
     const result = operation();
     database.exec("COMMIT");
+    notifyWorkspaceCommit(database);
     walCheckpointSchedulers.get(database)?.();
     return result;
   } catch (error) {
@@ -77,7 +79,10 @@ export function scheduleWalCheckpoints(
     try {
       database.exec("PRAGMA wal_checkpoint(PASSIVE)");
     } catch (error) {
-      console.warn("[JobFinderRepository] Write-ahead log checkpoint failed.", error);
+      console.warn(
+        "[JobFinderRepository] Write-ahead log checkpoint failed.",
+        error,
+      );
     }
   };
   const background =
