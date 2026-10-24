@@ -5,6 +5,7 @@ import type {
   WorkspaceChanges,
 } from "@nestor/contracts";
 import { KeptRouteVisibilityContext } from "../../lib/kept-route-visibility";
+import { describeFailure } from "../../lib/describe-failure";
 
 /**
  * Find jobs reads what it shows from the database (ADR 0071): one page of
@@ -128,8 +129,7 @@ export function useFindJobsList(
       setState((previous) => ({
         ...previous,
         pending: false,
-        error:
-          error instanceof Error ? error.message : "Jobs could not be read.",
+        error: describeFailure(error, { action: "read your jobs" }).userMessage,
       }));
     }
   }, []);
@@ -178,7 +178,8 @@ export function useFindJobsList(
       if (changedJobs.length > 0)
         setRevisions((current) => {
           const next = new Map(current);
-          for (const change of changedJobs) next.set(change.id, change.revision);
+          for (const change of changedJobs)
+            next.set(change.id, change.revision);
           return next;
         });
       if (!changes.lists.includes("discovery") || timer !== undefined) return;
