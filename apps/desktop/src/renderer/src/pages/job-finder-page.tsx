@@ -922,7 +922,7 @@ function JobFinderOpeningShell() {
                 Applications, which is why it is the component and not another
                 copied class string. */}
             {findJobsLaunchPage ? (
-              <FindJobsLaunch page={findJobsLaunchPage} />
+              <FindJobsLaunch {...findJobsLaunchPage} />
             ) : isLockedOpeningRoute ? (
               <LockedScreenLayout
                 topContent={
