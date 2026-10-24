@@ -3,26 +3,14 @@ import type { DatabaseSync } from "node:sqlite";
 import { registerWorkspaceStartupListFacts } from "./workspace-startup-list-facts";
 
 const VERSION = "12";
-export const workspaceReadIndexVersion = VERSION;
-export const workspaceJobTables = [
-  "saved_jobs",
-  "discovery_pending_jobs",
-] as const;
-const jobTables = workspaceJobTables;
+const jobTables = ["saved_jobs", "discovery_pending_jobs"] as const;
 const jobFields =
   "status source work_mode title company search_text score hidden unjudged closed mismatch provisional outside title_family recency detail seen location source_job_id canonical_url application_url posted_at posted_text discovered_at first_seen_at salary_text detail_quality score_upper recommendation title_family_match location_reach resume_mode tailoring_mode visible rank_score feedback result_group provider_updated_at discovery_method apply_path recommendation_rationale first_gap role_state seniority rescored source_provenance last_verified_active_at listing_closed_evidence identity_value tie_requirements first_reason last_seen_at".split(
     " ",
   );
 
-export const workspaceJobIndexColumns = [
-  "origin",
-  "id",
-  "plan_id",
-  ...jobFields,
-];
-
-/** Startup and stored indexes derive every scalar from this one expression. */
-export function workspaceJobIndexSelectSql(
+/** Bulk preparation and row writers use the same scalar expressions. */
+function workspaceJobIndexSelectSql(
   table: string,
   where = "",
   startup = false,
@@ -54,16 +42,18 @@ export function workspaceJobIndexSelectSql(
       ? `COALESCE((SELECT verdict_plan.value FROM job_plan_assessments verdict_plan
         WHERE verdict_plan.job_id = j.id AND verdict_plan.plan_id = p.value),
       (SELECT verdict.value FROM json_each(j.value, '$.planAssessments') verdict WHERE verdict.key = p.value),
-      (SELECT value FROM job_fit_assessments WHERE id = j.assessment_id), json_extract(j.value, '$.matchAssessment'))`
+      (SELECT value FROM job_fit_assessments WHERE id = j.assessment_id), jsonb_extract(j.value, '$.matchAssessment'))`
       : `COALESCE((SELECT verdict.value FROM json_each(j.value, '$.planAssessments') verdict WHERE verdict.key = p.value),
-      json_extract(j.value, '$.matchAssessment'))`;
-  return `WITH raw_jobs AS MATERIALIZED (SELECT id, jsonb(value) AS value ${storedColumns}
+      jsonb_extract(j.value, '$.matchAssessment'))`;
+  return `WITH raw_jobs AS MATERIALIZED (SELECT id, jsonb_remove(jsonb(value),
+      '$.description', '$.summary', '$.responsibilities', '$.minimumQualifications',
+      '$.preferredQualifications', '$.keywordSignals', '$.latestMatchAssessmentAudit') AS value ${storedColumns}
       FROM ${table} ${where.replaceAll("j.id", "id")}),
     jobs AS MATERIALIZED (SELECT id, jsonb_remove(value, '$.description', '$.provenance', '$.summary',
       '$.responsibilities', '$.minimumQualifications', '$.preferredQualifications', '$.keywordSignals', '$.latestMatchAssessmentAudit') AS value,
       ${metadata},
       CASE WHEN json_type(value,'$.provenance')='array' THEN
-        (SELECT json_group_array(json_remove(p.value,'$.listingFacts')) FROM json_each(raw_jobs.value,'$.provenance') p)
+        (SELECT json_group_array(json_remove(jsonb_extract(raw_jobs.value,'$.provenance['||p.key||']'),'$.listingFacts')) FROM json_each(raw_jobs.value,'$.provenance') p)
         ${table === "saved_jobs" ? "ELSE (SELECT json_group_array(json_remove(p.value,'$.listingFacts')) FROM (SELECT value FROM job_provenance WHERE job_id=raw_jobs.id ORDER BY position) p)" : "ELSE '[]'"}
       END AS source_provenance FROM raw_jobs),
     verdicts AS MATERIALIZED (SELECT j.id, p.value AS plan_id, jsonb(${assessment}) AS verdict
@@ -122,7 +112,7 @@ export function workspaceJobIndexSelectSql(
       json_extract(j.value,'$.seniority'), COALESCE(json_extract(j.value,'$.rescoredAfterListingRead'),0),
       j.source_provenance, j.last_verified_active_at, json_extract(v.verdict,'$.judgment.listingClosedEvidence'),
       json_object(${["source", "sourceJobId", "canonicalUrl", "applicationUrl", "providerKey", "providerBoardToken", "providerIdentifier", "title", "seniority", "company", "location", "postedAt", "postedAtText"].map((field) => `'${field}',json_extract(j.value,'$.${field}')`).join(",")}),
-      (SELECT json_group_array(json_object('category',json_extract(r.value,'$.category'),'status',json_extract(r.value,'$.status'))) FROM json_each(v.verdict,'$.requirements') r), json_extract(v.verdict,'$.reasons[0]'), j.last_seen_at
+      (SELECT json_group_array(json_object('category',json_extract(v.verdict,'$.requirements['||r.key||'].category'),'status',json_extract(v.verdict,'$.requirements['||r.key||'].status'))) FROM json_each(v.verdict,'$.requirements') r), json_extract(v.verdict,'$.reasons[0]'), j.last_seen_at
     FROM verdicts v JOIN jobs j ON j.id = v.id`;
 }
 
@@ -132,18 +122,13 @@ function indexJobSql(table: string, where = "", startup = false): string {
       WHERE ${jobFields.map((field) => `workspace_job_index.${field} IS NOT excluded.${field}`).join(" OR ")};`;
 }
 
-export const workspaceEntityIndexColumns =
-  "origin,id,job_id,status,updated_at,approved_at,approved_export_id,stale_reason,stage,returned_to_shortlist_at,run_id,last_action_label,next_action_label";
-export const workspaceEntityTables = [
+const workspaceEntityTables = [
   "application_records",
   "resume_drafts",
   "apply_job_results",
 ] as const;
 
-export function workspaceEntityIndexSelectSql(
-  table: string,
-  condition = "",
-): string {
+function workspaceEntityIndexSelectSql(table: string, condition = ""): string {
   return `WITH rows AS MATERIALIZED (SELECT id, jsonb_remove(jsonb(value), '$.sections', '$.visualObservationSets', '$.visualCheckpoints') AS value FROM ${table} ${condition})
     SELECT '${table}', id, json_extract(value, '$.jobId'),
       COALESCE(json_extract(value, '$.status'), json_extract(value, '$.state'), ''),
@@ -153,9 +138,7 @@ export function workspaceEntityIndexSelectSql(
       json_extract(value, '$.lastActionLabel'), json_extract(value, '$.nextActionLabel') FROM rows`;
 }
 
-export const workspaceCompanyIndexColumns =
-  "id,name,canonical_name,preference,job_count,application_count,updated_at,value";
-export const workspaceCompanyIndexSelectSql = `SELECT json_extract(c.value, '$.id'),
+const workspaceCompanyIndexSelectSql = `SELECT json_extract(c.value, '$.id'),
   lower(json_extract(c.value, '$.canonicalName')), json_extract(c.value, '$.canonicalName'),
   COALESCE(json_extract(c.value, '$.preference'), 'neutral'), COALESCE(json_array_length(c.value, '$.jobIds'), 0),
   COALESCE(json_array_length(c.value, '$.applicationRecordIds'), 0), json_extract(c.value, '$.updatedAt'), c.value

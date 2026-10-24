@@ -68,6 +68,7 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0063](0063-command-scoped-browser-focus.md) | accepted | Hidden reads wake without rendering; only pending frame-dependent commands and requested screenshots receive temporary focus |
 | [0068](0068-discovery-commands-return-run-facts.md) | accepted | Search and Stop return run facts; query screens follow commits while legacy refreshes wait for search completion |
 | [0070](0070-read-original-rows-during-startup-conversion.md) | accepted | Original rows answer startup queries before index preparation, and typed writers open before evidence conversion completes |
+| [0071](0071-one-index-before-inventory-reads.md) | accepted | One stored index owns inventory reads; measured duplicate startup facts did not deliver earlier counts or pages |
 
 ## Policy
 

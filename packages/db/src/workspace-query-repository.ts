@@ -19,7 +19,6 @@ import {
   type JobFinderJobDetail,
 } from "@nestor/contracts";
 import { ensureWorkspaceReadIndex } from "./internal/workspace-read-index";
-import { createWorkspaceStartupReads } from "./internal/workspace-startup-reads";
 import {
   savedJobValueSql,
   ensureSavedJobRelations,
@@ -185,8 +184,6 @@ export function createWorkspaceQueryRepository(
   database.exec(
     "PRAGMA busy_timeout = 100; PRAGMA cache_size = -8192; PRAGMA temp_store=MEMORY",
   );
-  const startupReads = createWorkspaceStartupReads(database);
-  let directReads = false;
   // The main file is opened readOnly. Only connection-local scalar TEMP tables
   // can be written by these helpers; no canonical row can be changed.
   const activity = createWorkspaceListActivityReader(database);
@@ -204,10 +201,9 @@ export function createWorkspaceQueryRepository(
     );
   // Every reply observes one committed SQLite snapshot: rows, totals, badges and
   // its revision cannot come from different concurrent writer transactions.
-  const read = <T>(fn: () => T, inventory = true): T => {
+  const read = <T>(fn: () => T): T => {
     database.exec("BEGIN");
     try {
-      directReads = startupReads.ensure(inventory);
       const result = fn();
       database.exec("COMMIT");
       return result;
@@ -215,7 +211,6 @@ export function createWorkspaceQueryRepository(
       database.exec("ROLLBACK");
       activity.invalidate();
       pageOrder.invalidate();
-      startupReads.invalidate();
       throw error;
     }
   };
@@ -364,36 +359,32 @@ export function createWorkspaceQueryRepository(
           sourceCount,
           activityControl: values.get("activity_control"),
         } as WorkspaceStartupContext;
-      }, false);
+      });
     },
     queryJobList(input) {
       const query = QueryJobListInputSchema.parse(input);
       return read(() => {
         const planId = plan(query.filters);
         const version = `${revision()}:${String(database.prepare("PRAGMA data_version").get()!.data_version)}`;
-        const activityVersion = directReads
-          ? `direct:${version}`
-          : String(
-              database
-                .prepare(
-                  "SELECT value FROM workspace_read_meta WHERE key='activity_revision'",
-                )
-                .get()?.value ?? "0",
-            );
+        const activityVersion = String(
+          database
+            .prepare(
+              "SELECT value FROM workspace_read_meta WHERE key='activity_revision'",
+            )
+            .get()?.value ?? "0",
+        );
         activity.ensure(planId, activityVersion);
         prepareOrder(activityVersion);
         prepareFilters(version);
         const from = `FROM workspace_job_index i JOIN workspace_listing_activity a
           ON a.plan_id=i.plan_id AND a.origin=i.origin AND a.id=i.id`;
-        const sortRevision = directReads
-          ? version
-          : String(
-              database
-                .prepare(
-                  "SELECT value FROM workspace_read_meta WHERE key='sort_revision'",
-                )
-                .get()?.value ?? "0",
-            );
+        const sortRevision = String(
+          database
+            .prepare(
+              "SELECT value FROM workspace_read_meta WHERE key='sort_revision'",
+            )
+            .get()?.value ?? "0",
+        );
         pageOrder.ensure(
           planId,
           query.sort,
@@ -592,7 +583,7 @@ export function createWorkspaceQueryRepository(
         if (planId && job.planAssessments?.[planId])
           job.matchAssessment = job.planAssessments[planId];
         return { job, planId };
-      }, false);
+      });
     },
     getCompanyDetail(companyId) {
       return read(() => {
@@ -706,7 +697,7 @@ export function createWorkspaceQueryRepository(
             ),
           ],
         };
-      }, false);
+      });
     },
     close() {
       database.close();

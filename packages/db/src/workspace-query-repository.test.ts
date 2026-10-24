@@ -11,6 +11,7 @@ import {
   type SavedJob,
   type QueryJobListInput,
   type QueryJobListResult,
+  type WorkspaceListCounts,
 } from "@nestor/contracts";
 import { afterEach, describe, expect, test } from "vitest";
 import {
@@ -66,8 +67,8 @@ async function fixture() {
   return { ...temp, writer, reader };
 }
 describe("independent workspace queries", () => {
-  test("original-table startup pages match the stored index for every sort and switch after its commit", async () => {
-    const temp = await createTempRepository("nestor-direct-startup-");
+  test("a legacy rebuild preserves the typed first fifty rows, order and counts for every sort", async () => {
+    const temp = await createTempRepository("nestor-index-startup-");
     cleanups.push(temp.cleanup);
     const writer = await temp.createRepository();
     let writerClosed = false;
@@ -100,6 +101,42 @@ describe("independent workspace queries", () => {
       }),
     );
     await writer.commitSavedJobDelta({ upserts: jobs });
+    const beforeReader = createWorkspaceQueryRepository(temp.filePath);
+    const before = new Map<
+      string,
+      { query: QueryJobListInput; page: QueryJobListResult }
+    >();
+    let counts: WorkspaceListCounts | undefined;
+    try {
+      for (const list of [
+        "discovery",
+        "shortlisted",
+        "applications",
+        "all",
+      ] as const)
+        for (const sort of [
+          "best_match",
+          "newest",
+          "company",
+          "title",
+          "recently_seen",
+        ] as const) {
+          const query = {
+            list,
+            sort,
+            filters: { planId: null },
+            page: { offset: 0, limit: 50 },
+          };
+          before.set(`${list}:${sort}`, {
+            query,
+            page: beforeReader.queryJobList(query),
+          });
+        }
+      counts = beforeReader.getListCounts({ planId: null });
+    } finally {
+      beforeReader.close();
+    }
+    expect(counts).toMatchObject({ all: jobs.length, shortlisted: 2 });
     const preferences = await writer.getSearchPreferences();
     const campaigns = await writer.getCampaignState();
     await writer.close();
@@ -128,61 +165,18 @@ describe("independent workspace queries", () => {
       DROP TABLE workspace_company_index; DROP TABLE workspace_company_jobs;
       DELETE FROM schema_migrations WHERE version IN (26,27,28,29); DELETE FROM workspace_read_meta`);
     prepareWorkspaceQuerySchema(temp.filePath);
+    prepareWorkspaceQueryDatabase(temp.filePath);
     const reader = createWorkspaceQueryRepository(temp.filePath);
     cleanups.push(() => reader.close());
-    expect(reader.getListCounts({ planId: null }).all).toBe(jobs.length);
-    const changedTitle = "Updated before the stored index exists";
-    raw
-      .prepare(
-        "UPDATE saved_jobs SET value=json_set(value,'$.title',?) WHERE id=?",
-      )
-      .run(changedTitle, jobs[0]!.id);
-    expect(
-      reader.queryJobList({
-        list: "all",
-        filters: { planId: null },
-        search: changedTitle,
-      }).rows[0]?.id,
-    ).toBe(jobs[0]!.id);
-    const before = new Map<
-      string,
-      { query: QueryJobListInput; page: QueryJobListResult }
-    >();
-    for (const list of [
-      "discovery",
-      "shortlisted",
-      "applications",
-      "all",
-    ] as const)
-      for (const sort of [
-        "best_match",
-        "newest",
-        "company",
-        "title",
-        "recently_seen",
-      ] as const) {
-        const query = {
-          list,
-          sort,
-          filters: { planId: null },
-          page: { offset: 0, limit: 50 },
-        };
-        before.set(`${list}:${sort}`, {
-          query,
-          page: reader.queryJobList(query),
-        });
-      }
-    const counts = reader.getListCounts({ planId: null });
-    expect(counts.all).toBe(jobs.length);
-    expect(counts.shortlisted).toBe(2);
-    expect(
-      raw
-        .prepare("SELECT 1 FROM sqlite_master WHERE name='workspace_job_index'")
-        .get(),
-    ).toBeUndefined();
-    prepareWorkspaceQueryDatabase(temp.filePath);
-    for (const { query, page } of before.values())
-      expect(reader.queryJobList(query)).toEqual(page);
+    for (const { query, page } of before.values()) {
+      const { revision: ignoredBeforeRevision, ...expected } = page;
+      const { revision: ignoredAfterRevision, ...actual } =
+        reader.queryJobList(query);
+      expect(actual).toEqual(expected);
+      expect(ignoredAfterRevision).toBeGreaterThanOrEqual(
+        ignoredBeforeRevision,
+      );
+    }
     expect(reader.getListCounts({ planId: null })).toEqual(counts);
     raw
       .prepare(
