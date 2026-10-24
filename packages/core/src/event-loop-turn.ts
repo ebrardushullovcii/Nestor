@@ -1,17 +1,16 @@
-// Resolve one CPU continuation per event-loop turn. Resolving every waiting
-// worker in the same check phase joins their individually bounded slices into
-// one long stall before Electron can handle its next message.
+// Resolve one CPU continuation per timer turn, so Electron can handle input
+// between slices. setImmediate can keep chaining work in the check phase.
 const waiting: Array<() => void> = [];
 let scheduled = false;
 
 function scheduleNext(): void {
   scheduled = true;
-  setImmediate(() => {
+  setTimeout(() => {
     const next = waiting.shift();
     scheduled = false;
     if (waiting.length > 0) scheduleNext();
     next?.();
-  });
+  }, 0);
 }
 
 export function yieldToEventLoop(): Promise<void> {

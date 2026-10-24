@@ -1,4 +1,11 @@
-import type { SavedJob, MatchAssessment } from "@nestor/contracts";
+import {
+  readPreparedDiscoveryFingerprints,
+  readPreparedSavedJobIdentity,
+  readPreparedBodySalaryRange,
+  writeDiscoveryPreparation,
+  type SavedJob,
+  type MatchAssessment,
+} from "@nestor/contracts";
 import { copyView } from "@nestor/core";
 const planViews = new WeakMap<
   SavedJob,
@@ -17,8 +24,7 @@ export function withPlanAssessment<T extends SavedJob>(
   const planChanged = planId
     ? job.planAssessments?.[planId] !== assessment
     : false;
-  if (job.matchAssessment === matchAssessment && !planChanged)
-    return job;
+  if (job.matchAssessment === matchAssessment && !planChanged) return job;
   return copyView(job, {
     matchAssessment,
     ...(planChanged && planId
@@ -29,8 +35,10 @@ export function withPlanAssessment<T extends SavedJob>(
 export function readPlanAssessment<T extends SavedJob>(
   job: T,
   planId: string | null,
+  assessmentOverride?: MatchAssessment,
 ): T {
-  const assessment = planId ? job.planAssessments?.[planId] : null;
+  const assessment =
+    assessmentOverride ?? (planId ? job.planAssessments?.[planId] : null);
   // A plan without its own verdict shows the shared one, which plan-scoped
   // writes no longer change. Jobs judged before plans kept their own
   // verdicts keep showing that judgment instead of losing their fit.
@@ -41,6 +49,20 @@ export function readPlanAssessment<T extends SavedJob>(
     // retains the caller's additional fields as well as the SavedJob fields.
     if (previous?.assessment === assessment) return previous.view as T;
     const view: T = copyView(job, { matchAssessment: assessment });
+    // Only the verdict changed. Rebind existing proofs to this immutable view
+    // so later salary/identity reads do not open unchanged listing bodies.
+    const fingerprints = readPreparedDiscoveryFingerprints(job);
+    const identity = readPreparedSavedJobIdentity(job);
+    const bodySalaryRange = fingerprints
+      ? readPreparedBodySalaryRange(job)
+      : undefined;
+    writeDiscoveryPreparation(view, {
+      ...(fingerprints
+        ? { fingerprints: { owner: view, value: fingerprints } }
+        : {}),
+      ...(identity ? { savedIdentity: { owner: view, value: identity } } : {}),
+      ...(bodySalaryRange !== undefined ? { bodySalaryRange } : {}),
+    });
     Object.freeze(view);
     planViews.set(job, { assessment, view });
     return view;

@@ -1756,9 +1756,7 @@ export function createWorkspaceDiscoveryMethods(
           job,
           readPlanAssessment(job, assessmentPlanId).matchAssessment,
         );
-        return matchAssessment === job.matchAssessment
-          ? job
-          : Object.freeze(copyView(job, { matchAssessment }));
+        return readPlanAssessment(job, assessmentPlanId, matchAssessment);
       },
       SETUP_JOBS_PER_TURN,
     );
@@ -1916,12 +1914,22 @@ export function createWorkspaceDiscoveryMethods(
     const storedJob = (job: SavedJob): SavedJob => {
       const cached = storedJobs.get(job);
       if (cached) return cached;
-      const stored = withPlanAssessment(
+      let stored = withPlanAssessment(
         job,
         assessmentPlanId,
         job.matchAssessment,
         originalJobsById.get(job.id)?.matchAssessment ?? job.matchAssessment,
       );
+      // A new kept job joins its plan in the write that creates it. Waiting
+      // until the terminal commit rewrote every new root a second time.
+      if (assessmentPlanId && !originalJobsById.has(job.id)) {
+        stored = copyView(stored, {
+          campaignIds: uniqueStrings([
+            ...(stored.campaignIds ?? []),
+            assessmentPlanId,
+          ]).sort(),
+        });
+      }
       storedJobs.set(job, stored);
       return stored;
     };
@@ -4788,12 +4796,9 @@ export function createWorkspaceDiscoveryMethods(
         // none of the listing bodies state is the page's furniture; it is
         // dropped so the row says the pay was not stated rather than stating
         // someone else's.
-        const furnitureSalaries = findSiteFurnitureSalaryTexts(
-          retainedRunJobs.map((job) => ({
-            description: job.description,
-            salaryText: job.salaryText,
-          })),
-        );
+        // Pass lazy rows through; only salary-bearing candidates need a body.
+        const furnitureSalaries =
+          await findSiteFurnitureSalaryTexts(retainedRunJobs);
         if (furnitureSalaries.size > 0) {
           let droppedSalaryCount = 0;
           const sanitizeFurnitureSalary = (
@@ -4819,11 +4824,11 @@ export function createWorkspaceDiscoveryMethods(
               matchAssessment: assessDiscoveryPosting(sanitizedJob),
             };
           };
-          workingSavedJobs = workingSavedJobs.map((job) => {
+          workingSavedJobs = await mapInTurns(workingSavedJobs, (job) => {
             const next = sanitizeFurnitureSalary(job, touchedSavedJobIds);
             return next !== job ? touchSavedJob(next) : job;
           });
-          workingPendingJobs = workingPendingJobs.map((job) =>
+          workingPendingJobs = await mapInTurns(workingPendingJobs, (job) =>
             sanitizeFurnitureSalary(job, touchedPendingJobIds),
           );
           if (droppedSalaryCount > 0) {
