@@ -24,6 +24,7 @@ import {
   createResumeImportArtifactsFixture,
   createSavedJob,
   createTempRepository,
+  savedJobData,
 } from "./file-repository.test-support";
 import { createSeed } from "./test-fixtures";
 
@@ -891,7 +892,7 @@ async function expectPostResetState(
     },
     {
       label: "saved jobs",
-      read: () => repository.listSavedJobs(),
+      read: async () => (await repository.listSavedJobs()).map(savedJobData),
       expected: resetSeed.savedJobs,
     },
     {
@@ -1063,9 +1064,7 @@ const repositoryRuntimes: readonly RepositoryRuntime[] = [
   {
     name: "file-backed sqlite",
     open: async () => {
-      const temp = await createTempRepository(
-        "nestor-db-reset-conformance-",
-      );
+      const temp = await createTempRepository("nestor-db-reset-conformance-");
       const repository = await temp.createRepository();
       return {
         repository,

@@ -2,6 +2,8 @@
 
 Status: accepted (2026-10-21).
 
+Amended by [ADR 0061](0061-store-evidence-once-and-query-startup-facts.md): startup views and validation marks are removed; typed app-owned rows are trusted on read. Canonical storage is normalized without changing repository contracts.
+
 Amended by [ADR 0057](0057-saved-job-details-stay-in-sqlite.md) on 2026-10-23: compatible clean views also survive a main-process update. The original decision below records the initial build restriction.
 
 ## Context

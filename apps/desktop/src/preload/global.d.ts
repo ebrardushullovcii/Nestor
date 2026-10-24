@@ -258,6 +258,7 @@ declare global {
         ) => Promise<JobFinderRendererWorkspaceSnapshot>;
       };
       jobFinder: {
+        queries: import("@nestor/contracts").WorkspaceQueryApi;
         getApplicationAuthorityReadiness: (
           input?: GetApplicationAuthorityReadinessInput,
         ) => Promise<ApplicationAuthorityReadiness>;

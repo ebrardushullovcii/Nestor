@@ -1,5 +1,6 @@
 import type { ResumeDraftRevision } from "@nestor/contracts";
 import type { DatabaseSync } from "node:sqlite";
+import { rebaseRetainedResumeRevisions } from "./internal/resume-revision-storage";
 
 import { sortNewestFirst } from "./in-memory-repository-utils";
 
@@ -54,6 +55,11 @@ export function prunePersistedResumeDraftRevisions(
   database: DatabaseSync,
   draftId: string,
 ): void {
+  rebaseRetainedResumeRevisions(
+    database,
+    draftId,
+    MAX_RESUME_DRAFT_REVISIONS_PER_DRAFT,
+  );
   database
     .prepare(
       `DELETE FROM resume_draft_revisions

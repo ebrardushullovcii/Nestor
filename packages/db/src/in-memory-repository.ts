@@ -1,4 +1,12 @@
 import {
+  parseSavedJobWithPreparation,
+  parseSavedJobsWithPreparation,
+  cloneSavedJobWithPreparation,
+  readSavedJobPreparedValue,
+} from "./internal/saved-job-fingerprints";
+import { applySavedJobSightings } from "./internal/saved-job-sightings";
+import { applySavedJobPlanAssessments } from "./internal/saved-job-plan-assessments";
+import {
   PreparedApplicationFormSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
@@ -552,7 +560,7 @@ export function createInMemoryJobFinderRepository(
         limit < 0
           ? orderedJobs.slice(offset)
           : orderedJobs.slice(offset, offset + limit);
-      return Promise.resolve(cloneValue(sliced));
+      return Promise.resolve(sliced.map(cloneSavedJobWithPreparation));
     },
     readSavedJobsProjection() {
       if (savedProjectionSource !== state.savedJobs) {
@@ -561,7 +569,7 @@ export function createInMemoryJobFinderRepository(
           .map((job) => {
             let row = savedProjectionRows.get(job);
             if (!row) {
-              row = freezeProjection(cloneValue(job));
+              row = freezeProjection(cloneSavedJobWithPreparation(job));
               savedProjectionRows.set(job, row);
             }
             return row;
@@ -586,14 +594,38 @@ export function createInMemoryJobFinderRepository(
     listSavedJobsByIds(jobIds) {
       const wanted = new Set(jobIds);
       return Promise.resolve(
-        cloneValue(
+        state.savedJobs
+          .filter((job) => wanted.has(job.id))
+          .sort((left, right) => left.id.localeCompare(right.id))
+          .map(cloneSavedJobWithPreparation),
+      );
+    },
+    readSavedJobDiscoveryFingerprints(jobIds) {
+      const wanted = new Set(jobIds);
+      return Promise.resolve(
+        new Map(
           state.savedJobs
             .filter((job) => wanted.has(job.id))
-            .sort((left, right) => left.id.localeCompare(right.id)),
+            .flatMap((job) => {
+              const value = readSavedJobPreparedValue(job);
+              return value ? [[job.id, value] as const] : [];
+            }),
         ),
       );
     },
+    updateSavedJobSightings(updates) {
+      const next = applySavedJobSightings(state.savedJobs, updates);
+      state.savedJobs = next.jobs;
+      return Promise.resolve(next.changed);
+    },
+    updateSavedJobPlanAssessments(updates) {
+      const next = applySavedJobPlanAssessments(state.savedJobs, updates);
+      state.savedJobs = next.jobs;
+      return Promise.resolve(next.changed);
+    },
     commitSavedJobDelta({
+      planAssessments = [],
+      sightings = [],
       upserts = [],
       upsertsFromDiscovery,
       upsertsFromBorrowedDiscovery,
@@ -611,17 +643,15 @@ export function createInMemoryJobFinderRepository(
           updateDiscoveryState
             ? freezeProjection(state.discovery)
             : null;
-        const normalizedUpserts = SavedJobSchema.array().parse(
-          cloneValue([
-            ...upserts,
-            ...(upsertsFromDiscovery && currentDiscoveryState
-              ? upsertsFromDiscovery(cloneValue(currentDiscoveryState))
-              : []),
-            ...(upsertsFromBorrowedDiscovery && currentDiscoveryState
-              ? upsertsFromBorrowedDiscovery(currentDiscoveryState)
-              : []),
-          ]),
-        );
+        const normalizedUpserts = parseSavedJobsWithPreparation([
+          ...upserts,
+          ...(upsertsFromDiscovery && currentDiscoveryState
+            ? upsertsFromDiscovery(cloneValue(currentDiscoveryState))
+            : []),
+          ...(upsertsFromBorrowedDiscovery && currentDiscoveryState
+            ? upsertsFromBorrowedDiscovery(currentDiscoveryState)
+            : []),
+        ]);
         const existingJobIds = new Set(state.savedJobs.map((job) => job.id));
         let previousJobForResumeApproval: ReturnType<
           typeof SavedJobSchema.parse
@@ -649,11 +679,11 @@ export function createInMemoryJobFinderRepository(
             if (updatedJobIds && !updatedJobIds.has(currentJob.id)) {
               return currentJob;
             }
-            const nextJob = SavedJobSchema.parse(
+            const nextJob = parseSavedJobWithPreparation(
               update(
                 borrowCurrentJobs
                   ? freezeProjection(currentJob)
-                  : cloneValue(currentJob),
+                  : cloneSavedJobWithPreparation(currentJob),
               ),
             );
             if (nextJob.id !== currentJob.id) {
@@ -678,6 +708,11 @@ export function createInMemoryJobFinderRepository(
           nextSavedJobs = upsertById(nextSavedJobs, job);
         }
 
+        nextSavedJobs = applySavedJobSightings(nextSavedJobs, sightings).jobs;
+        nextSavedJobs = applySavedJobPlanAssessments(
+          nextSavedJobs,
+          planAssessments,
+        ).jobs;
         let nextResumeDrafts = state.resumeDrafts;
         let nextResumeExportArtifacts = state.resumeExportArtifacts;
         let nextTailoredAssets = state.tailoredAssets;
@@ -839,15 +874,11 @@ export function createInMemoryJobFinderRepository(
       }
     },
     replaceSavedJobs(savedJobs) {
-      state.savedJobs = SavedJobSchema.array().parse(
-        cloneValue([...savedJobs]),
-      );
+      state.savedJobs = parseSavedJobsWithPreparation(savedJobs);
       return Promise.resolve();
     },
     replaceSavedJobsAndDiscoveryState({ savedJobs, discoveryState }) {
-      state.savedJobs = SavedJobSchema.array().parse(
-        cloneValue([...savedJobs]),
-      );
+      state.savedJobs = parseSavedJobsWithPreparation(savedJobs);
       state.discovery = JobFinderDiscoveryStateSchema.parse(
         cloneValue(discoveryState),
       );
@@ -859,9 +890,7 @@ export function createInMemoryJobFinderRepository(
       staleReason,
       tailoredAsset,
     }) {
-      const normalizedJobs = SavedJobSchema.array().parse(
-        cloneValue([...savedJobs]),
-      );
+      const normalizedJobs = parseSavedJobsWithPreparation(savedJobs);
       const normalizedDraft = ResumeDraftSchema.parse(
         cloneValue({
           ...draft,
@@ -1298,14 +1327,25 @@ export function createInMemoryJobFinderRepository(
       return Promise.resolve(sortApplyJobResults(cloneValue(values)));
     },
     getPreparedApplicationForm(resultId) {
-      return Promise.resolve(cloneValue(state.preparedApplicationForms?.find(form => form.id === resultId) ?? null));
+      return Promise.resolve(
+        cloneValue(
+          state.preparedApplicationForms?.find(
+            (form) => form.id === resultId,
+          ) ?? null,
+        ),
+      );
     },
     upsertPreparedApplicationForm(form) {
-      state.preparedApplicationForms = upsertById(state.preparedApplicationForms ?? [], PreparedApplicationFormSchema.parse(cloneValue(form)));
+      state.preparedApplicationForms = upsertById(
+        state.preparedApplicationForms ?? [],
+        PreparedApplicationFormSchema.parse(cloneValue(form)),
+      );
       return Promise.resolve();
     },
     deletePreparedApplicationForm(resultId) {
-      state.preparedApplicationForms = (state.preparedApplicationForms ?? []).filter(form => form.id !== resultId);
+      state.preparedApplicationForms = (
+        state.preparedApplicationForms ?? []
+      ).filter((form) => form.id !== resultId);
       return Promise.resolve();
     },
     upsertApplyJobResult(result) {

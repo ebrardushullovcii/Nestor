@@ -2,8 +2,11 @@ import { buildWorkspaceFileExport } from "../services/job-finder/workspace-file-
 import { readJobFinderJobDetail } from "../services/job-finder/read-job-detail";
 import { JOB_FINDER_ACTIONS, executeJobFinderAction, type JobFinderActionId } from "@nestor/job-finder";
 import {
-  ApplicationPageStatesInputSchema, ApplicationPageStatesSchema,
-  ReopenApplicationPageInputSchema, ApplicationPageStateSchema, ApplicationPageReopenProgressSchema,
+  ApplicationPageStatesInputSchema,
+  ApplicationPageStatesSchema,
+  ReopenApplicationPageInputSchema,
+  ApplicationPageStateSchema,
+  ApplicationPageReopenProgressSchema,
 } from "@nestor/contracts";
 import { getApplicationPageAccessForWorkspaceService } from "../services/job-finder/create-workspace-service";
 import {
@@ -145,11 +148,6 @@ import {
 import { collectJobFinderPerformanceSnapshot } from "../services/job-finder/collect-performance-snapshot";
 import { createJobFinderWorkspaceDeltaTracker } from "../services/job-finder/workspace-delta";
 import { toRendererWorkspaceSnapshot } from "../services/job-finder/renderer-workspace-view";
-import {
-  takeStartupSnapshot,
-  noteStartupWorkspaceSnapshotSent,
-  noteStartupWorkspaceRevisionHeld,
-} from "../services/job-finder/startup-workspace-view";
 import {
   notifyJobFinderWorkspaceListeners,
   publishJobFinderWorkspaceUpdate,
@@ -638,9 +636,11 @@ export async function approveApplicationResumes(
     await approveOneApplicationResume(job, {});
   }
   if (options?.personApproved) {
-    await Promise.all(uniqueJobIds.map((jobId) =>
-      resumeApprovals.run(() => approveSelected(jobId)),
-    ));
+    await Promise.all(
+      uniqueJobIds.map((jobId) =>
+        resumeApprovals.run(() => approveSelected(jobId)),
+      ),
+    );
   } else {
     for (const jobId of uniqueJobIds) await approveSelected(jobId);
   }
@@ -661,8 +661,13 @@ export async function approveApplicationResumes(
       try {
         await workspaceService.approveCurrentResume(jobId);
       } catch (error: unknown) {
-        if (error instanceof Error && /still need your decision/iu.test(error.message)) {
-          throw new Error(`The resume for '${job.title}' has a line waiting for your decision.`);
+        if (
+          error instanceof Error &&
+          /still need your decision/iu.test(error.message)
+        ) {
+          throw new Error(
+            `The resume for '${job.title}' has a line waiting for your decision.`,
+          );
         }
         throw error;
       }
@@ -690,10 +695,7 @@ export async function approveApplicationResumes(
 
     const tailoringMode =
       job.resumeTailoringMode ?? searchPreferences.tailoringMode;
-    if (
-      tailoringMode === "aggressive" &&
-      !alreadyApproved
-    ) {
+    if (tailoringMode === "aggressive" && !alreadyApproved) {
       holdBack(
         job,
         `Read and approve the Aggressive resume for '${job.title}' before applying.`,
@@ -813,7 +815,10 @@ async function startApplyQueueRun(
       } catch (error: unknown) {
         skipped.push({
           jobId,
-          reason: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+          reason: (error instanceof Error
+            ? error.message
+            : String(error)
+          ).slice(0, 500),
         });
       }
     }
@@ -827,7 +832,12 @@ async function startApplyQueueRun(
   const notGoing = new Set(skipped.map((entry) => entry.jobId));
   const ids = pendingIds.filter((jobId) => !notGoing.has(jobId));
   if (ids.length === 0) {
-    return { runId: null, startedJobIds: [], skipped, settled: Promise.resolve() };
+    return {
+      runId: null,
+      startedJobIds: [],
+      skipped,
+      settled: Promise.resolve(),
+    };
   }
   await syncApplicationAuthorityForSavedMode(service, ids, mode);
   let markSettled!: () => void;
@@ -922,9 +932,9 @@ export function getApplyQueueRunner(): ApplyQueueRunner {
     loadQueue: async () =>
       (await requireApplyQueueRepository()).repository.getApplyQueue(),
     saveQueue: async (queue) => {
-      await (await requireApplyQueueRepository()).repository.saveApplyQueue(
-        queue,
-      );
+      await (
+        await requireApplyQueueRepository()
+      ).repository.saveApplyQueue(queue);
       noteApplyQueueOnTaskbar(queue);
     },
     readDailyCapacity: async () => {
@@ -950,8 +960,11 @@ export function getApplyQueueRunner(): ApplyQueueRunner {
       (await (await requireApplyQueueRepository()).repository.getSettings())
         .applicationAutomationMode ?? "prepare_only",
     isActivityPaused: async () =>
-      (await (await requireApplyQueueRepository()).repository.getActivityControl())
-        .paused,
+      (
+        await (
+          await requireApplyQueueRepository()
+        ).repository.getActivityControl()
+      ).paused,
     startRun: startApplyQueueRun,
     cancelRun: async (runId) => {
       const { service } = await requireApplyQueueRepository();
@@ -1243,7 +1256,6 @@ export function registerJobFinderRouteHandlers(
     (event, payload: unknown) => {
       const { revision } = JobFinderWorkspaceHeldRevisionSchema.parse(payload);
       workspaceDeltaTracker.noteHeldRevision(event.sender, revision);
-      noteStartupWorkspaceRevisionHeld();
     },
   );
   const activeResumePreviewRequests = new WeakMap<
@@ -1340,28 +1352,8 @@ export function registerJobFinderRouteHandlers(
     "job-finder:sync-workspace",
     async (event, payload: unknown) => {
       const input = JobFinderWorkspaceSyncInputSchema.parse(payload);
-      const startupSnapshot =
-        input.baseRevision === null ? takeStartupSnapshot() : null;
-      if (startupSnapshot) {
-        noteStartupWorkspaceSnapshotSent();
-        // The view saved at the last clean close stands in until the real
-        // workspace has loaded; then the window converges by delta. If the
-        // workspace cannot load, the window reloads into the ordinary path,
-        // which reports the failure.
-        void getJobFinderWorkspaceService().then(
-          // A later turn, so the notice never overtakes this reply.
-          () => setTimeout(() => publishJobFinderWorkspaceUpdate(event.sender)),
-          () => {
-            if (!event.sender.isDestroyed()) event.sender.reload();
-          },
-        );
-        return workspaceDeltaTracker.synchronize(null, startupSnapshot, {
-          earlierProcess: true,
-        });
-      }
       const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
       const snapshot = await readWorkspaceProjection(jobFinderWorkspaceService);
-      noteStartupWorkspaceSnapshotSent();
 
       return workspaceDeltaTracker.synchronize(
         input.baseRevision,
@@ -1703,7 +1695,8 @@ export function registerJobFinderRouteHandlers(
         ) {
           const jobFinderWorkspaceService =
             await getJobFinderWorkspaceService();
-          return workspaceMutationResponse(event.sender, 
+          return workspaceMutationResponse(
+            event.sender,
             await readWorkspaceProjection(jobFinderWorkspaceService),
           );
         }
@@ -1713,7 +1706,8 @@ export function registerJobFinderRouteHandlers(
         if (!sourcePath) {
           const jobFinderWorkspaceService =
             await getJobFinderWorkspaceService();
-          return workspaceMutationResponse(event.sender, 
+          return workspaceMutationResponse(
+            event.sender,
             await readWorkspaceProjection(jobFinderWorkspaceService),
           );
         }
@@ -2094,8 +2088,7 @@ export function registerJobFinderRouteHandlers(
         parseAgentDiscoveryRequest(payload);
       const notices = getFinishedWorkNotifier();
       notices.progress("search", null);
-      let finishedNotice: ReturnType<typeof searchFinishedNotice> | null =
-        null;
+      let finishedNotice: ReturnType<typeof searchFinishedNotice> | null = null;
 
       try {
         const snapshot = await jobFinderWorkspaceService.runAgentDiscovery(
@@ -2130,7 +2123,9 @@ export function registerJobFinderRouteHandlers(
           sync: workspaceMutationResponse(window, snapshot),
         };
         if (reply.outcome === "completed") {
-          finishedNotice = searchFinishedNotice(countNewJobsOfLatestRun(snapshot));
+          finishedNotice = searchFinishedNotice(
+            countNewJobsOfLatestRun(snapshot),
+          );
         }
         return reply;
       } catch (error) {
@@ -2787,7 +2782,8 @@ export function registerJobFinderRouteHandlers(
         ? await listJobsNotInProgress(repository, requestedJobIds)
         : requestedJobIds;
       if (pendingJobIds.length === 0) {
-        return workspaceMutationResponse(event.sender, 
+        return workspaceMutationResponse(
+          event.sender,
           await readWorkspaceProjection(jobFinderWorkspaceService),
         );
       }
@@ -2834,7 +2830,8 @@ export function registerJobFinderRouteHandlers(
         );
       }
 
-      return workspaceMutationResponse(event.sender, 
+      return workspaceMutationResponse(
+        event.sender,
         await readWorkspaceProjection(jobFinderWorkspaceService),
       );
     },
@@ -2978,7 +2975,8 @@ export function registerJobFinderRouteHandlers(
         request.status === "pending" &&
         details.run.mode === "copilot"
       ) {
-        return workspaceMutationResponse(event.sender, 
+        return workspaceMutationResponse(
+          event.sender,
           await jobFinderWorkspaceService.startApplyCopilotRun(
             jobId,
             undefined,
@@ -3009,22 +3007,43 @@ export function registerJobFinderRouteHandlers(
     },
   );
 
-  ipcMain.handle("job-finder:get-application-page-states", async (_event, payload: unknown) => {
-    const input = ApplicationPageStatesInputSchema.parse(payload);
-    const service = await getJobFinderWorkspaceService();
-    return ApplicationPageStatesSchema.parse(await getApplicationPageAccessForWorkspaceService(service).getStates(input.resultIds));
-  });
-  ipcMain.handle("job-finder:reopen-application-page", async (event, payload: unknown) => {
-    const requestId = parseOptionalRequestId(payload);
-    // requestId is transport metadata, not part of the product command.
-    const input = ReopenApplicationPageInputSchema.parse(
-      payload && typeof payload === "object" && "resultId" in payload ? {resultId: payload.resultId} : payload);
-    const service = await getJobFinderWorkspaceService();
-    return ApplicationPageStateSchema.parse(await getApplicationPageAccessForWorkspaceService(service).reopen(input.resultId, progress => {
-      if (requestId && !event.sender.isDestroyed()) event.sender.send(
-        `job-finder:application-page-reopen-progress:${requestId}`, ApplicationPageReopenProgressSchema.parse(progress));
-    }));
-  });
+  ipcMain.handle(
+    "job-finder:get-application-page-states",
+    async (_event, payload: unknown) => {
+      const input = ApplicationPageStatesInputSchema.parse(payload);
+      const service = await getJobFinderWorkspaceService();
+      return ApplicationPageStatesSchema.parse(
+        await getApplicationPageAccessForWorkspaceService(service).getStates(
+          input.resultIds,
+        ),
+      );
+    },
+  );
+  ipcMain.handle(
+    "job-finder:reopen-application-page",
+    async (event, payload: unknown) => {
+      const requestId = parseOptionalRequestId(payload);
+      // requestId is transport metadata, not part of the product command.
+      const input = ReopenApplicationPageInputSchema.parse(
+        payload && typeof payload === "object" && "resultId" in payload
+          ? { resultId: payload.resultId }
+          : payload,
+      );
+      const service = await getJobFinderWorkspaceService();
+      return ApplicationPageStateSchema.parse(
+        await getApplicationPageAccessForWorkspaceService(service).reopen(
+          input.resultId,
+          (progress) => {
+            if (requestId && !event.sender.isDestroyed())
+              event.sender.send(
+                `job-finder:application-page-reopen-progress:${requestId}`,
+                ApplicationPageReopenProgressSchema.parse(progress),
+              );
+          },
+        ),
+      );
+    },
+  );
 
   ipcMain.handle(
     "job-finder:focus-prepared-application-page",
@@ -3119,7 +3138,10 @@ export function registerJobFinderRouteHandlers(
     workspaceMutationResponse(event.sender, await resetJobFinderBrowser()),
   );
   ipcMain.handle("job-finder:reset-workspace", async (event) => {
-    return workspaceMutationResponse(event.sender, await resetJobFinderWorkspace());
+    return workspaceMutationResponse(
+      event.sender,
+      await resetJobFinderWorkspace(),
+    );
   });
 
   ipcMain.handle("job-finder:get-startup-reset-recovery", () =>

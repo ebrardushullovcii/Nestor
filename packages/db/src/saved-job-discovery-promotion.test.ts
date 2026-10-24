@@ -8,6 +8,7 @@ import {
 import {
   createSavedJob,
   createTempRepository,
+  savedJobData,
 } from "./file-repository.test-support";
 import { createSeed } from "./test-fixtures";
 
@@ -57,7 +58,10 @@ for (const storage of ["memory", "file"] as const) {
       const { repo, close } = await fixture(storage);
       try {
         const pending = createSavedJob({ id: "borrowed_pending" });
-        await repo.commitDiscoveryStateUpdate((current) => ({ ...current, pendingDiscoveryJobs: [pending] }));
+        await repo.commitDiscoveryStateUpdate((current) => ({
+          ...current,
+          pendingDiscoveryJobs: [pending],
+        }));
         let borrowed: unknown;
         await repo.commitSavedJobDelta({
           upsertsFromDiscovery: (current) => {
@@ -67,24 +71,41 @@ for (const storage of ["memory", "file"] as const) {
           upsertsFromBorrowedDiscovery: (current) => {
             borrowed = current;
             expect(current.pendingDiscoveryJobs[0]!.title).toBe(pending.title);
-            expect(() => { current.pendingDiscoveryJobs[0]!.title = "Illegal write"; }).toThrow();
+            expect(() => {
+              current.pendingDiscoveryJobs[0]!.title = "Illegal write";
+            }).toThrow();
             expect(() => current.pendingDiscoveryJobs.push(pending)).toThrow();
-            return [{ ...current.pendingDiscoveryJobs[0]!, title: "Borrowed factory value" }];
+            return [
+              {
+                ...current.pendingDiscoveryJobs[0]!,
+                title: "Borrowed factory value",
+              },
+            ];
           },
           updateDiscoveryState: (current) => {
             expect(current).toBe(borrowed);
             return { ...current, pendingDiscoveryJobs: [] };
           },
         });
-        expect((await repo.listSavedJobsByIds([pending.id]))[0]?.title).toBe("Borrowed factory value");
+        expect((await repo.listSavedJobsByIds([pending.id]))[0]?.title).toBe(
+          "Borrowed factory value",
+        );
         const before = await repo.readDiscoveryDisplayProjection();
-        await expect(repo.commitSavedJobDelta({
-          upserts: [createSavedJob({ id: "failed_borrowed_job" })],
-          upsertsFromBorrowedDiscovery: () => { throw new Error("borrowed rollback"); },
-        })).rejects.toThrow("borrowed rollback");
-        expect(await repo.listSavedJobsByIds(["failed_borrowed_job"])).toEqual([]);
+        await expect(
+          repo.commitSavedJobDelta({
+            upserts: [createSavedJob({ id: "failed_borrowed_job" })],
+            upsertsFromBorrowedDiscovery: () => {
+              throw new Error("borrowed rollback");
+            },
+          }),
+        ).rejects.toThrow("borrowed rollback");
+        expect(await repo.listSavedJobsByIds(["failed_borrowed_job"])).toEqual(
+          [],
+        );
         expect(await repo.readDiscoveryDisplayProjection()).toBe(before);
-      } finally { await close(); }
+      } finally {
+        await close();
+      }
     });
 
     test("a newer pending enrichment survives promotion while existing saved rows keep precedence", async () => {
@@ -136,10 +157,12 @@ for (const storage of ["memory", "file"] as const) {
           promote(repo, [pending.id, stored.id]),
         ]);
         expect(captured.description).toBe("Captured old listing");
-        expect(await repo.listSavedJobsByIds([pending.id])).toEqual([
-          { ...enriched, status: "shortlisted" },
-        ]);
-        expect((await repo.listSavedJobsByIds([stored.id]))[0]).toEqual({
+        expect(
+          (await repo.listSavedJobsByIds([pending.id])).map(savedJobData),
+        ).toEqual([{ ...enriched, status: "shortlisted" }]);
+        expect(
+          savedJobData((await repo.listSavedJobsByIds([stored.id]))[0]!),
+        ).toEqual({
           ...stored,
           status: "shortlisted",
         });
@@ -288,11 +311,14 @@ test("targeted SQLite promotion never parses unrelated saved rows, and a saved-o
       ...current,
       pendingDiscoveryJobs: [pending],
     }));
-    other
-      .prepare(
-        "UPDATE saved_jobs SET value='unreadable unrelated row' WHERE id=?",
-      )
-      .run("unrelated_saved");
+    // Query-column triggers reject malformed JSON before it can poison a list.
+    expect(() =>
+      other
+        .prepare(
+          "UPDATE saved_jobs SET value='unreadable unrelated row' WHERE id=?",
+        )
+        .run("unrelated_saved"),
+    ).toThrow("malformed JSON");
     await promote(repo, [pending.id, target.id]);
     expect(
       (await repo.listSavedJobsByIds([pending.id, target.id])).map(
@@ -320,31 +346,75 @@ test("borrowed pending promotion does not clone or parse 25 MiB of canonical che
   try {
     const pending = createSavedJob({ id: "small_promotion" });
     const historical = DiscoveryRunRecordSchema.parse({
-      id: "large_history", state: "completed", scope: "run_all",
-      startedAt: "2026-10-13T10:00:00.000Z", targetIds: ["synthetic_target"],
-      targetExecutions: [{
-        targetId: "synthetic_target", adapterKind: "auto", state: "completed",
-        agentCheckpoint: {
-          revision: 1, savedAt: "2026-10-13T10:00:00.000Z", stepCount: 1,
-          currentUrl: "https://example.test/history", lastStableUrl: "https://example.test/history",
-          visitedUrls: [], phaseEvidence: {},
-          collectedJobs: [createSavedJob({ id: "large_checkpoint_job", description: "h".repeat(25 * 1024 * 1024) })],
+      id: "large_history",
+      state: "completed",
+      scope: "run_all",
+      startedAt: "2026-10-13T10:00:00.000Z",
+      targetIds: ["synthetic_target"],
+      targetExecutions: [
+        {
+          targetId: "synthetic_target",
+          adapterKind: "auto",
+          state: "completed",
+          agentCheckpoint: {
+            revision: 1,
+            savedAt: "2026-10-13T10:00:00.000Z",
+            stepCount: 1,
+            currentUrl: "https://example.test/history",
+            lastStableUrl: "https://example.test/history",
+            visitedUrls: [],
+            phaseEvidence: {},
+            collectedJobs: [
+              createSavedJob({
+                id: "large_checkpoint_job",
+                description: "h".repeat(25 * 1024 * 1024),
+              }),
+            ],
+          },
         },
-      }], activity: [], summary: { targetsPlanned: 1, outcome: "completed" },
+      ],
+      activity: [],
+      summary: { targetsPlanned: 1, outcome: "completed" },
     });
-    await repo.commitDiscoveryStateUpdate((current) => ({ ...current, recentRuns: [historical], pendingDiscoveryJobs: [pending] }));
+    await repo.commitDiscoveryStateUpdate((current) => ({
+      ...current,
+      recentRuns: [historical],
+      pendingDiscoveryJobs: [pending],
+    }));
     const clone = vi.spyOn(globalThis, "structuredClone");
     const parse = vi.spyOn(JSON, "parse");
     await repo.commitSavedJobDelta({
       upsertsFromBorrowedDiscovery: (current) => current.pendingDiscoveryJobs,
-      updateDiscoveryState: (current) => ({ ...current, pendingDiscoveryJobs: [] }),
+      updateDiscoveryState: (current) => ({
+        ...current,
+        pendingDiscoveryJobs: [],
+      }),
     });
-    expect(clone.mock.calls.some(([value]) => value !== null && typeof value === "object" && "recentRuns" in value)).toBe(false);
-    expect(parse.mock.calls.some(([value]) => String(value).length >= 25 * 1024 * 1024)).toBe(false);
-    console.info("25 MiB history pending promotion: 0 whole-discovery clones, 0 checkpoint-body parses");
+    expect(
+      clone.mock.calls.some(
+        ([value]) =>
+          value !== null && typeof value === "object" && "recentRuns" in value,
+      ),
+    ).toBe(false);
+    expect(
+      parse.mock.calls.some(
+        ([value]) => String(value).length >= 25 * 1024 * 1024,
+      ),
+    ).toBe(false);
+    console.info(
+      "25 MiB history pending promotion: 0 whole-discovery clones, 0 checkpoint-body parses",
+    );
     clone.mockRestore();
     parse.mockRestore();
-    expect((await repo.listSavedJobsByIds([pending.id]))[0]).toEqual(pending);
-    expect((await repo.getDiscoveryState()).recentRuns[0]?.targetExecutions[0]?.agentCheckpoint?.collectedJobs[0]?.description.length).toBe(25 * 1024 * 1024);
-  } finally { vi.restoreAllMocks(); await close(); }
+    expect(
+      savedJobData((await repo.listSavedJobsByIds([pending.id]))[0]!),
+    ).toEqual(pending);
+    expect(
+      (await repo.getDiscoveryState()).recentRuns[0]?.targetExecutions[0]
+        ?.agentCheckpoint?.collectedJobs[0]?.description.length,
+    ).toBe(25 * 1024 * 1024);
+  } finally {
+    vi.restoreAllMocks();
+    await close();
+  }
 }, 30000);

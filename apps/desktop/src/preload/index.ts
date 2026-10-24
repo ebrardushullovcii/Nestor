@@ -20,6 +20,7 @@ import {
 } from "electron";
 import { browserBridge } from "./browser";
 import { createAssistantBridge } from "./assistant";
+import { createWorkspaceQueryBridge } from "./workspace-query";
 import type {
   PersonalWorkspaceRestorePreview,
   PersonalWorkspaceRestoreResult,
@@ -560,6 +561,7 @@ const desktopApi = {
       ) as Promise<JobFinderRendererWorkspaceSnapshot>,
   },
   jobFinder: {
+    queries: createWorkspaceQueryBridge(),
     getTailoredAsset: (assetId: string): Promise<TailoredAsset | null> =>
       ipcRenderer
         .invoke(

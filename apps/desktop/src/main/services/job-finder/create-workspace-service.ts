@@ -7,10 +7,6 @@ import { installDiscoveryFeedWorkers } from "./discovery-cpu";
 import type { Page } from "playwright";
 import { publishJobFinderWorkspaceUpdate } from "./workspace-updates";
 import {
-  mainBuildDigest,
-  waitForStartupWorkspaceHydration,
-} from "./startup-workspace-view";
-import {
   publishOnApplyStandingChanges,
   publishOnUserActionChanges,
 } from "./user-action-update-push";
@@ -601,8 +597,6 @@ export async function createJobFinderWorkspaceServiceAsync(
       recoveryTelemetry: {
         onRestored: recordRestoredStartupDatabaseRecoveryEvent,
       },
-      rowValidationStamp: mainBuildDigest(),
-      backgroundValidationReady: waitForStartupWorkspaceHydration(),
     });
   } catch (error) {
     if (error instanceof WorkspaceDatabaseRecoveryRequiredError) {
@@ -665,7 +659,6 @@ export async function createJobFinderWorkspaceServiceAsync(
   );
   installDiscoveryFeedWorkers();
   const workspaceService = createJobFinderWorkspaceService({
-    backgroundWorkReady: waitForStartupWorkspaceHydration(),
     resumeDraftProcessor,
     aiClient,
     visionProvider,

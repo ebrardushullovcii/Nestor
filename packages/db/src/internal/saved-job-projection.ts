@@ -1,21 +1,21 @@
+import {
+  savedJobFingerprintSelectSql,
+  attachStoredSavedJobFingerprints,
+  ensureSavedJobFingerprintStorage,
+} from "./saved-job-fingerprints";
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
 import {
+  savedJobSalarySelectSql,
+  attachStoredSavedJobSalary,
+  savedJobValueSql,
+} from "./saved-job-storage";
+import {
   SavedJobSchema,
-  SavedJobListFactsSchema,
   type SavedJobListFacts,
   type SavedJob,
 } from "@nestor/contracts";
-import {
-  createRowValidationMarks,
-  type ParseMarkedRow,
-  type RowValidationStamp,
-} from "./row-validation-marks";
-import {
-  listCollectionValues,
-  parsePersistedRowJson,
-  parsePersistedRowValue,
-} from "./state";
+import { listCollectionValues, parsePersistedRowJson } from "./state";
 import {
   createSavedJobDetails,
   savedJobDetailFields,
@@ -152,24 +152,14 @@ function shareUnchangedFields<T extends object>(next: T, previous: T): void {
 export function createSavedJobProjectionReader(
   database: DatabaseSync,
   options: {
-    /** Who validates rows; rows it already marked skip the schema. */
-    validationStamp?: RowValidationStamp;
     sqliteDetails?: boolean;
-    backgroundValidationReady?: PromiseLike<void>;
   } = {},
 ) {
+  ensureSavedJobFingerprintStorage(database);
   const details = options.sqliteDetails
     ? createSavedJobDetails(database)
     : null;
   const pageRows = details ? 50 : PROJECTION_PAGE_ROWS;
-  let validationError: Error | null = null;
-  let validationStarted = false;
-  let validation: Promise<void> = Promise.resolve();
-  const marks = createRowValidationMarks(
-    database,
-    "saved_jobs",
-    options.validationStamp,
-  );
   database.exec(`
     CREATE TEMP TABLE saved_job_projection_epoch (revision INTEGER NOT NULL);
     INSERT INTO saved_job_projection_epoch VALUES (0);
@@ -210,8 +200,29 @@ export function createSavedJobProjectionReader(
     "SELECT id FROM saved_job_projection_changes",
   );
 
+  const relational = database
+    .prepare("PRAGMA table_info(saved_jobs)")
+    .all()
+    .some((column) => column.name === "assessment_id");
+  if (relational)
+    for (const operation of ["insert", "update", "delete"] as const) {
+      const ref = operation === "delete" ? "OLD" : "NEW";
+      database.exec(`CREATE TEMP TRIGGER saved_job_projection_plan_${operation}
+      AFTER ${operation.toUpperCase()} ON main.job_plan_assessments BEGIN
+        UPDATE saved_job_projection_epoch SET revision = revision + 1;
+        INSERT INTO saved_job_projection_changes(id,revision) SELECT ${ref}.job_id,revision FROM saved_job_projection_epoch
+          WHERE 1 ON CONFLICT(id) DO UPDATE SET revision = excluded.revision;
+      END`);
+    }
+  const preparationSql =
+    savedJobFingerprintSelectSql +
+    (relational
+      ? savedJobSalarySelectSql
+      : ", NULL AS body_salary_prepared, NULL AS body_salary_range");
   const readPage = database.prepare(
-    `SELECT ${marks?.selectSql ?? "id, value FROM saved_jobs"}
+    `SELECT id, ${
+      relational ? savedJobValueSql() : "value"
+    } AS value${preparationSql} FROM saved_jobs
       WHERE id > ? ORDER BY id LIMIT ?`,
   );
   // SQLite strips evidence before it crosses into the JS heap. In addition
@@ -224,15 +235,11 @@ export function createSavedJobProjectionReader(
   // still never enters JS.
   const factsQuery = (selection: string) => `
     WITH saved_job_list_source AS MATERIALIZED (
-      SELECT id, CASE WHEN json_valid(value) THEN jsonb(value) ELSE value END AS value,
-        ${
-          marks
-            ? `(SELECT validated_stamp FROM row_validations
-          WHERE validated_table = 'saved_jobs' AND validated_row_id = saved_jobs.id)`
-            : "NULL"
-        } AS validated_stamp
+      SELECT id, CASE WHEN json_valid(value) THEN jsonb(${
+        relational ? savedJobValueSql("saved_jobs", false, false) : "value"
+      }) ELSE value END AS value${preparationSql}
       FROM saved_jobs ${selection}
-    ) SELECT id, validated_stamp,
+    ) SELECT id, discovery_fingerprints, body_salary_prepared, body_salary_range,
     CASE WHEN typeof(saved_jobs.value) = 'blob' THEN json(
       CASE WHEN json_type(saved_jobs.value, '$.provenance') = 'array'
         AND NOT EXISTS (SELECT 1 FROM json_each(saved_jobs.value, '$.provenance') WHERE type != 'object')
@@ -254,14 +261,16 @@ export function createSavedJobProjectionReader(
       rowId: String(row.id),
       rawValue: String(row.list_value),
     };
-    const stamp = marks?.current();
-    // The full schema returned exactly this stored JSON. Removing only detail
-    // fields cannot invalidate its remaining facts; do not clone their large
-    // verdict evidence through another schema on every saved-view relaunch.
-    const facts =
-      stamp && row.validated_stamp === stamp
-        ? (parsePersistedRowJson(input) as SavedJobListFacts)
-        : parsePersistedRowValue({ ...input, schema: SavedJobListFactsSchema });
+    const facts = attachStoredSavedJobFingerprints(
+      parsePersistedRowJson(input) as SavedJobListFacts,
+      row.discovery_fingerprints,
+      true,
+    );
+    attachStoredSavedJobSalary(
+      facts,
+      row.body_salary_prepared,
+      row.body_salary_range,
+    );
     return freezeProjection(shareListValues(facts, share));
   }
   const readChangedFacts = details
@@ -278,41 +287,33 @@ export function createSavedJobProjectionReader(
    * change markers, which this read leaves for the next one.
    */
   async function readAllRowsInPages(): Promise<Map<string, SavedJob>> {
-    // Starts reading in this turn when the stamp is known (or absent).
-    if (marks && marks.current() === null) await marks.settled();
     const jobs = new Map<string, SavedJob>();
     let after = "";
-    const readPageOfJobs = (parse: ParseMarkedRow | null) => {
-      const thin = readFactsPage && marks?.current();
-      const rows = (thin ? readFactsPage : readPage).all(after, pageRows);
-      for (const row of rows) {
-        if (details && marks?.current()) {
-          const facts = readListFacts(row);
-          jobs.set(facts.id, details.project(facts));
-          continue;
-        }
-        const job = toProjectionRow(
-          parse
-            ? parse(row, SavedJobSchema)
-            : parsePersistedRowValue({
-                tableName: "saved_jobs",
-                rowId: String(row.id),
-                rawValue: String(row.value),
-                schema: SavedJobSchema,
-              }),
-          share,
-        );
-        jobs.set(
-          job.id,
-          details ? details.project(job, String(row.value)) : job,
-        );
-      }
-      return rows;
-    };
     for (;;) {
-      const rows = marks ? marks.read(readPageOfJobs) : readPageOfJobs(null);
+      const rows = (readFactsPage ?? readPage).all(after, pageRows);
+      for (const row of rows) {
+        const job = details
+          ? details.project(readListFacts(row))
+          : toProjectionRow(
+              attachStoredSavedJobSalary(
+                attachStoredSavedJobFingerprints(
+                  parsePersistedRowJson({
+                    tableName: "saved_jobs",
+                    rowId: String(row.id),
+                    rawValue: String(row.value),
+                  }) as SavedJob,
+                  row.discovery_fingerprints,
+                  true,
+                ),
+                row.body_salary_prepared,
+                row.body_salary_range,
+              ),
+              share,
+            );
+        jobs.set(job.id, job);
+      }
       if (rows.length < pageRows) return jobs;
-      after = String(rows[rows.length - 1]!.id);
+      after = String(rows.at(-1)!.id);
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
   }
@@ -331,7 +332,6 @@ export function createSavedJobProjectionReader(
       return snapshot;
 
     if (snapshot === null || version !== externalVersion) {
-      if (snapshot && version !== externalVersion) validationStarted = false;
       jobsById = await readAllRowsInPages();
     } else {
       // Changed rows a page at a time, like a full read: a search that just
@@ -344,15 +344,13 @@ export function createSavedJobProjectionReader(
         if (start > 0)
           await new Promise<void>((resolve) => setImmediate(resolve));
         const pageIds = ids.slice(start, start + pageRows);
-        if (details && readChangedFacts && marks?.current()) {
+        if (details && readChangedFacts) {
           const found = new Set<string>();
-          marks.read(() => {
-            for (const row of readChangedFacts.all(JSON.stringify(pageIds))) {
-              const facts = readListFacts(row);
-              found.add(facts.id);
-              next.set(facts.id, details.project(facts));
-            }
-          });
+          for (const row of readChangedFacts.all(JSON.stringify(pageIds))) {
+            const facts = readListFacts(row);
+            found.add(facts.id);
+            next.set(facts.id, details.project(facts));
+          }
           for (const id of pageIds) if (!found.has(id)) next.delete(id);
           continue;
         }
@@ -409,32 +407,7 @@ export function createSavedJobProjectionReader(
     return snapshot;
   }
 
-  async function validateInBackground(): Promise<void> {
-    if (!marks) return;
-    await options.backgroundValidationReady;
-    if (!database.isOpen) return;
-    const stamp = await marks.settled();
-    if (!stamp) return;
-    // Cold rows can carry large evidence bodies; this runs beside foreground saves.
-    const page = database.prepare(`SELECT ${marks.selectSql}
-      WHERE ${"saved_jobs"}.id > ? AND (validated_stamp IS NULL OR validated_stamp != ?)
-      ORDER BY saved_jobs.id LIMIT 1`);
-    let after = "";
-    while (database.isOpen) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      if (!database.isOpen) return;
-      const ids = marks.read((parse) => {
-        const rows = page.all(after, stamp);
-        for (const row of rows) parse(row, SavedJobSchema);
-        return rows.map((row) => String(row.id));
-      });
-      if (!ids.length) return;
-      after = ids.at(-1)!;
-    }
-  }
-
   function readProjection(): Promise<readonly SavedJob[]> {
-    if (validationError) return Promise.reject(validationError);
     // Transaction reads see their own writes, but neither the cached map nor
     // its change markers may consume them: a rollback can reuse the epoch.
     // Capture this rare read synchronously so it cannot outlive the transaction.
@@ -458,22 +431,9 @@ export function createSavedJobProjectionReader(
     }
     pendingVersion = version;
     pendingRevision = revision;
-    pending = read()
-      .then((rows) => {
-        if (details && !validationStarted) {
-          validationStarted = true;
-          validation = validateInBackground();
-          void validation.catch((error: unknown) => {
-            validationError =
-              error instanceof Error ? error : new Error(String(error));
-            console.warn("[Job Finder] Saved-job validation failed.", error);
-          });
-        }
-        return rows;
-      })
-      .finally(() => {
-        pending = null;
-      });
+    pending = read().finally(() => {
+      pending = null;
+    });
     return pending;
   }
 
@@ -500,6 +460,5 @@ export function createSavedJobProjectionReader(
   }
   return Object.assign(readProjection, {
     currentIds,
-    validation: () => validation,
   });
 }

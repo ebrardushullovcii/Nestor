@@ -1,3 +1,4 @@
+import { readResumeRevision } from "./internal/resume-revision-storage";
 import {
   CandidateProfileSchema,
   JobSearchPreferencesSchema,
@@ -153,6 +154,7 @@ export function createFileRepositoryResumeMethods(
       if (cached?.json === json)
         return Promise.resolve(cloneValue(cached.draft));
       const draft = parsePersistedRowValue({
+        database,
         tableName: "resume_drafts",
         rowId: String(row.id),
         rawValue: json,
@@ -776,10 +778,7 @@ export function createFileRepositoryResumeMethods(
 
       // Schemas already return independent values. Prepare their JSON and
       // index columns before the transaction, with turns between large rows.
-      const draftJson = JSON.stringify(normalizedDraft);
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      const revisionJson = JSON.stringify(normalizedRevision);
-      await new Promise<void>((resolve) => setImmediate(resolve));
+
       const validationJson = JSON.stringify(normalizedValidation);
       await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -812,7 +811,11 @@ export function createFileRepositoryResumeMethods(
       const coalescedRow = coalesceRevision ? latestRevisionRow() : undefined;
       if (coalesceRevision) {
         const previous = coalescedRow
-          ? ResumeDraftRevisionSchema.parse(JSON.parse(coalescedRow.value))
+          ? readResumeRevision(
+              database,
+              String(coalescedRow.id),
+              String(coalescedRow.value),
+            )
           : undefined;
         assertResumeRevisionCoalescing(
           previous,
@@ -882,10 +885,6 @@ export function createFileRepositoryResumeMethods(
               persistedDraft.createdAt,
               persistedDraft.updatedAt,
             ],
-            serializedValue:
-              persistedDraft === normalizedDraft
-                ? draftJson
-                : JSON.stringify(persistedDraft),
           },
         );
         upsertIndexedCollectionValue(
@@ -898,7 +897,6 @@ export function createFileRepositoryResumeMethods(
               normalizedRevision.draftId,
               normalizedRevision.createdAt,
             ],
-            serializedValue: revisionJson,
           },
         );
         prunePersistedResumeDraftRevisions(

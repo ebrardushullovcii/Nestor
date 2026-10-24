@@ -17,6 +17,9 @@ import type {
   ApplicationReplayCheckpoint,
   ApplicationReplayCheckpointInput,
   CandidateProfile,
+  DiscoverySavedJobFingerprints,
+  SavedJobSightingPatch,
+  SavedJobPlanAssessmentPatch,
   JobFinderDiscoveryState,
   JobFinderActivityControl,
   ApplyQueue,
@@ -305,11 +308,25 @@ export interface JobFinderRepository
   listSavedJobIds(): Promise<readonly string[]>;
   /** The saved jobs with these ids, in `listSavedJobs` order. */
   listSavedJobsByIds(jobIds: readonly string[]): Promise<readonly SavedJob[]>;
+  /** Stored prepared fingerprints in one indexed batch; listing bodies are not read. */
+  readSavedJobDiscoveryFingerprints(
+    jobIds: readonly string[],
+  ): Promise<ReadonlyMap<string, DiscoverySavedJobFingerprints>>;
+  /** Timestamp-only batch; absent fields stay unchanged, null clears, unknown ids are ignored. */
+  updateSavedJobSightings(
+    updates: readonly SavedJobSightingPatch[],
+  ): Promise<number>;
+  updateSavedJobPlanAssessments(
+    updates: readonly SavedJobPlanAssessmentPatch[],
+  ): Promise<number>;
   /**
    * Atomically applies row-local saved-job updates and/or inserts without
    * replacing rows that the caller did not intend to change.
    */
   commitSavedJobDelta(input: {
+    planAssessments?: readonly SavedJobPlanAssessmentPatch[];
+    /** Applied after full upserts, in this same job/discovery transaction. */
+    sightings?: readonly SavedJobSightingPatch[];
     upserts?: readonly SavedJob[];
     /**
      * Builds additional upserts from transaction-current canonical discovery
@@ -479,7 +496,9 @@ export interface JobFinderRepository
     applicationRecordId?: string;
   }): Promise<readonly ApplyJobResult[]>;
   upsertApplyJobResult(result: ApplyJobResultInput): Promise<void>;
-  getPreparedApplicationForm(resultId: string): Promise<PreparedApplicationForm | null>;
+  getPreparedApplicationForm(
+    resultId: string,
+  ): Promise<PreparedApplicationForm | null>;
   upsertPreparedApplicationForm(form: PreparedApplicationForm): Promise<void>;
   deletePreparedApplicationForm(resultId: string): Promise<void>;
   markApplicationPreparationStarted(input: {
@@ -852,15 +871,6 @@ export interface FileJobFinderRepositoryOptions {
    * restored-snapshot revalidation regardless.
    */
   recoveryValidationOverrides?: WorkspaceRecoveryValidationOverrides;
-  /**
-   * Identity of the code that validates rows, normally a digest of the
-   * main-process build. Saved job and resume draft rows this identity already
-   * validated, and not written since, are not validated again by the display
-   * reads. Omitted or null validates every row.
-   */
-  rowValidationStamp?: PromiseLike<string | null> | string | null;
-  /** Let the initial display finish before validating unopened full job rows. */
-  backgroundValidationReady?: PromiseLike<void>;
 }
 
 export type StateTableKey =

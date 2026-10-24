@@ -1,4 +1,8 @@
 import {
+  savedJobFingerprintSelectSql,
+  attachStoredSavedJobFingerprints,
+} from "./saved-job-fingerprints";
+import {
   resumeDraftValueSql,
   resumeDraftUpdatedAtSql,
   tailoredAssetValueSql,
@@ -51,6 +55,30 @@ import {
   type JobFinderRepositoryState,
 } from "@nestor/contracts";
 import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
+import {
+  type ResumeDraft,
+  type ResumeDraftRevision,
+  type SavedJob,
+} from "@nestor/contracts";
+import {
+  readResumeRevision,
+  serializeResumeRevision,
+} from "./resume-revision-storage";
+import {
+  encodePreferenceSingleton,
+  decodePreferenceSingleton,
+} from "./preference-storage";
+import {
+  savedJobValueSql,
+  writeSavedJobStorage,
+  savedJobSalarySelectSql,
+  attachStoredSavedJobSalary,
+} from "./saved-job-storage";
+import {
+  compactResumeDraftStorage,
+  restoreResumeDraftStorage,
+} from "./resume-draft-storage";
+import { notifyWorkspaceCommit } from "../workspace-commits";
 import {
   APPLICATION_ATTEMPT_INDEXED_COLLECTION_CONFIG,
   APPLY_COLLECTION_ORDER_BY_SQL,
@@ -261,11 +289,47 @@ export function parsePersistedRowValue<TValue>(input: {
   rowId: string;
   rawValue: string;
   schema: SchemaParser<TValue>;
+  database?: DatabaseSync;
+  rawFingerprints?: unknown;
+  rawBodySalaryPrepared?: unknown;
+  rawBodySalaryRange?: unknown;
 }): TValue {
-  return validatePersistedRowValue({
-    ...input,
-    value: parsePersistedRowJson(input),
-  });
+  if (input.tableName === "resume_draft_revisions" && input.database)
+    return readResumeRevision(
+      input.database,
+      input.rowId,
+      input.rawValue,
+    ) as TValue;
+  const value = parsePersistedRowJson(input) as TValue;
+  if (input.tableName === "saved_jobs") {
+    attachStoredSavedJobFingerprints(value, input.rawFingerprints);
+    attachStoredSavedJobSalary(
+      value,
+      input.rawBodySalaryPrepared,
+      input.rawBodySalaryRange,
+    );
+  }
+  if (input.tableName === "resume_drafts")
+    return restoreResumeDraftStorage(input.database!, value) as TValue;
+  // Explicit legacy normalizers are file/migration boundaries. Ordinary Zod
+  // schemas describe trusted app-owned rows and are not run on every read.
+  if (!("safeParse" in input.schema))
+    return validatePersistedRowValue({ ...input, value });
+  return value;
+}
+
+export function serializeCollectionValue(
+  database: DatabaseSync,
+  tableName: StateCollectionTable,
+  value: { id: string },
+): string {
+  if (tableName === "resume_drafts")
+    return JSON.stringify(
+      compactResumeDraftStorage(database, value as ResumeDraft),
+    );
+  if (tableName === "resume_draft_revisions")
+    return serializeResumeRevision(database, value as ResumeDraftRevision);
+  return JSON.stringify(value);
 }
 
 export function listValues<TValue>(
@@ -279,14 +343,18 @@ export function listValues<TValue>(
 ): TValue[] {
   const pagination = buildPaginationSql(options);
   const statement = database.prepare(
-    `SELECT id, ${collectionValueSql(tableName)} AS value FROM ${stateTableNames[tableName]} ORDER BY id${pagination.sql}`,
+    `SELECT id, ${collectionValueSql(tableName)} AS value${tableName === "saved_jobs" ? savedJobFingerprintSelectSql + savedJobSalarySelectSql : ""} FROM ${stateTableNames[tableName]} ORDER BY id${pagination.sql}`,
   );
   const rows = statement.all(...pagination.params);
   return rows.map((row) =>
     parsePersistedRowValue({
+      database,
       tableName,
       rowId: String(row.id),
       rawValue: String(row.value),
+      rawFingerprints: row.discovery_fingerprints,
+      rawBodySalaryPrepared: row.body_salary_prepared,
+      rawBodySalaryRange: row.body_salary_range,
       schema,
     }),
   );
@@ -295,6 +363,7 @@ export function listValues<TValue>(
 const PARSE_CHUNK_ROWS = 100;
 
 function collectionValueSql(tableName: StateCollectionTable): string {
+  if (tableName === "saved_jobs") return savedJobValueSql();
   if (tableName === "resume_drafts") return resumeDraftValueSql;
   if (tableName === "tailored_assets") return tailoredAssetValueSql;
   return "value";
@@ -313,7 +382,7 @@ export async function listValuesInChunks<TValue>(
 ): Promise<TValue[]> {
   const rows: (Record<string, SQLOutputValue> | null)[] = database
     .prepare(
-      `SELECT id, ${collectionValueSql(tableName)} AS value FROM ${stateTableNames[tableName]} ORDER BY id`,
+      `SELECT id, ${collectionValueSql(tableName)} AS value${tableName === "saved_jobs" ? savedJobFingerprintSelectSql + savedJobSalarySelectSql : ""} FROM ${stateTableNames[tableName]} ORDER BY id`,
     )
     .all();
   const values: TValue[] = [];
@@ -332,9 +401,13 @@ export async function listValuesInChunks<TValue>(
       // cloning again was a second full copy of every job per read.
       values.push(
         parsePersistedRowValue({
+          database,
           tableName,
           rowId: String(row.id),
           rawValue: String(row.value),
+          rawFingerprints: row.discovery_fingerprints,
+          rawBodySalaryPrepared: row.body_salary_prepared,
+          rawBodySalaryRange: row.body_salary_range,
           schema,
         }),
       );
@@ -360,30 +433,22 @@ export function listCollectionValues<TValue>(
   const baseParams = [...(options.params ?? [])] as SQLInputValue[];
   return database
     .prepare(
-      `SELECT id, ${collectionValueSql(tableName)} AS value FROM ${stateTableNames[tableName]}${whereClause} ORDER BY ${tableName === "resume_drafts" ? options.orderBySql.replace(/\bupdated_at\b/g, resumeDraftUpdatedAtSql) : options.orderBySql}${pagination.sql}`,
+      `SELECT id, ${collectionValueSql(tableName)} AS value${tableName === "saved_jobs" ? savedJobFingerprintSelectSql + savedJobSalarySelectSql : ""} FROM ${stateTableNames[tableName]}${whereClause} ORDER BY ${tableName === "resume_drafts" ? options.orderBySql.replace(/\bupdated_at\b/g, resumeDraftUpdatedAtSql) : options.orderBySql}${pagination.sql}`,
     )
     .all(...baseParams, ...pagination.params)
     .map((row) =>
       parsePersistedRowValue({
+        database,
         tableName,
         rowId: String(row.id),
         rawValue: String(row.value),
+        rawFingerprints: row.discovery_fingerprints,
+        rawBodySalaryPrepared: row.body_salary_prepared,
+        rawBodySalaryRange: row.body_salary_range,
         schema,
       }),
     );
 }
-
-/**
- * Parsed singletons by their stored text. A workspace refresh reads the plan
- * state, search settings and discovery state every time, and validating them
- * (about 1 MB with a large search) dominated an unchanged refresh. When the
- * stored text is the same, a copy of the earlier validated value is returned;
- * callers own and may edit what they get, so the cached value is never shared.
- */
-const parsedSingletons = new WeakMap<
-  DatabaseSync,
-  Map<string, { raw: string; schema: unknown; value: unknown }>
->();
 
 function parseSingletonRow<TValue>(
   database: DatabaseSync,
@@ -391,25 +456,35 @@ function parseSingletonRow<TValue>(
   rawValue: string,
   schema: SchemaParser<TValue>,
 ): TValue {
-  let byKey = parsedSingletons.get(database);
-  if (!byKey) {
-    byKey = new Map();
-    parsedSingletons.set(database, byKey);
-  }
-  const cached = byKey.get(key);
-  if (cached && cached.schema === schema && cached.raw === rawValue) {
-    return structuredClone(cached.value) as TValue;
-  }
-  const value = parsePersistedRowValue({
-    tableName: stateTableNames.singleton_state,
-    rowId: key,
-    rawValue,
-    schema,
-  });
-  byKey.set(key, { raw: rawValue, schema, value: structuredClone(value) });
-  return value;
+  return decodePreferenceSingleton(
+    database,
+    key,
+    parsePersistedRowValue({
+      tableName: "singleton_state",
+      rowId: key,
+      rawValue,
+      schema,
+    }),
+  ) as TValue;
 }
 
+/** Settings authorize external actions, so validate their file once on open. */
+export function validateWorkspaceSettingsFile(database: DatabaseSync): void {
+  const row = database
+    .prepare("SELECT value FROM singleton_state WHERE key = 'settings'")
+    .get();
+  if (row)
+    validatePersistedRowValue({
+      tableName: "singleton_state",
+      rowId: "settings",
+      value: parsePersistedRowJson({
+        tableName: "singleton_state",
+        rowId: "settings",
+        rawValue: String(row.value),
+      }),
+      schema: JobFinderSettingsSchema,
+    });
+}
 export function getSingletonValue<TValue>(
   database: DatabaseSync,
   key: StateTableKey,
@@ -437,12 +512,7 @@ export function getSingletonValue<TValue>(
 
   if (options?.onInvalid === "fallback") {
     try {
-      return parsePersistedRowValue({
-        tableName: stateTableNames.singleton_state,
-        rowId: key,
-        rawValue: String(row.value),
-        schema,
-      });
+      return parseSingletonRow(database, key, String(row.value), schema);
     } catch (error) {
       console.warn(
         `[JobFinderRepository] Falling back to the default value for singleton "${key}": ${
@@ -494,15 +564,27 @@ export function saveSingletonValue(
   key: StateTableKey,
   value: unknown,
 ): void {
-  database
-    .prepare(
-      `INSERT INTO ${stateTableNames.singleton_state} (key, value, revision)
+  const ownTransaction = !database.isTransaction;
+  if (ownTransaction) database.exec("BEGIN IMMEDIATE");
+  try {
+    const storedValue = encodePreferenceSingleton(database, key, value);
+    database
+      .prepare(
+        `INSERT INTO ${stateTableNames.singleton_state} (key, value, revision)
        VALUES (?, ?, 1)
        ON CONFLICT(key) DO UPDATE SET
          value = excluded.value,
          revision = ${stateTableNames.singleton_state}.revision + 1`,
-    )
-    .run(key, JSON.stringify(value));
+      )
+      .run(key, JSON.stringify(storedValue));
+    if (ownTransaction) {
+      database.exec("COMMIT");
+      notifyWorkspaceCommit(database);
+    }
+  } catch (error) {
+    if (ownTransaction) database.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 /**
@@ -549,12 +631,31 @@ export function replaceCollection(
   values: readonly { id: string }[],
 ): void {
   database.exec(`DELETE FROM ${stateTableNames[tableName]}`);
+  if (tableName === "saved_jobs") {
+    for (const value of values)
+      writeSavedJobStorage(database, value as SavedJob);
+    return;
+  }
   const statement = database.prepare(
     `INSERT OR REPLACE INTO ${stateTableNames[tableName]} (id, value) VALUES (?, ?)`,
   );
 
-  for (const value of values) {
-    statement.run(value.id, JSON.stringify(value));
+  const orderedValues =
+    tableName === "resume_draft_revisions"
+      ? [...values].sort((a, b) => {
+          const left = a as ResumeDraftRevision;
+          const right = b as ResumeDraftRevision;
+          return (
+            left.createdAt.localeCompare(right.createdAt) ||
+            left.id.localeCompare(right.id)
+          );
+        })
+      : values;
+  for (const value of orderedValues) {
+    statement.run(
+      value.id,
+      serializeCollectionValue(database, tableName, value),
+    );
   }
 }
 
@@ -590,11 +691,22 @@ function insertIndexedCollection(
     `INSERT OR REPLACE INTO ${stateTableNames[tableName]} (${columnSql}) VALUES (${placeholders})`,
   );
 
-  for (const value of values) {
+  const ordered =
+    tableName === "resume_draft_revisions"
+      ? [...values].sort((a, b) => {
+          const left = a as ResumeDraftRevision;
+          const right = b as ResumeDraftRevision;
+          return (
+            left.createdAt.localeCompare(right.createdAt) ||
+            left.id.localeCompare(right.id)
+          );
+        })
+      : values;
+  for (const value of ordered) {
     statement.run(
       value.id,
       ...options.getColumns(value),
-      JSON.stringify(value),
+      serializeCollectionValue(database, tableName, value),
     );
   }
 }
@@ -622,7 +734,9 @@ export function upsertIndexedCollectionValue(
     .run(
       value.id,
       ...options.getColumns(value),
-      options.serializedValue ?? JSON.stringify(value),
+      tableName === "resume_drafts" || tableName === "resume_draft_revisions"
+        ? serializeCollectionValue(database, tableName, value)
+        : (options.serializedValue ?? JSON.stringify(value)),
     );
 }
 
@@ -631,11 +745,15 @@ export function upsertCollectionValue(
   tableName: StateCollectionTable,
   value: { id: string },
 ): void {
+  if (tableName === "saved_jobs") {
+    writeSavedJobStorage(database, value as SavedJob);
+    return;
+  }
   database
     .prepare(
       `INSERT OR REPLACE INTO ${stateTableNames[tableName]} (id, value) VALUES (?, ?)`,
     )
-    .run(value.id, JSON.stringify(value));
+    .run(value.id, serializeCollectionValue(database, tableName, value));
 }
 
 /**
@@ -701,13 +819,31 @@ export function writeState(
         notifications: state.campaignNotifications,
       });
     } else {
+      for (const table of [
+        "plan_sources",
+        "plan_job_memberships",
+        "job_search_plans",
+      ]) {
+        if (
+          database
+            .prepare(
+              "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            )
+            .get(table)
+        )
+          database.exec(`DELETE FROM ${table}`);
+      }
       database
         .prepare(`DELETE FROM ${stateTableNames.singleton_state} WHERE key = ?`)
         .run("campaign_state");
     }
     initSingletonValue(database, "activity_control", state.activityControl);
     initSingletonValue(database, "intelligence_state", state.intelligence);
-    replaceCollection(database, "prepared_application_forms", state.preparedApplicationForms ?? []);
+    replaceCollection(
+      database,
+      "prepared_application_forms",
+      state.preparedApplicationForms ?? [],
+    );
     replaceCollection(database, "saved_jobs", state.savedJobs);
     replaceCollection(database, "tailored_assets", state.tailoredAssets);
     replaceIndexedCollection(
@@ -1087,6 +1223,7 @@ export function writeState(
       state.sourceDebugEvidenceRefs,
     );
     database.exec("COMMIT");
+    notifyWorkspaceCommit(database);
   } catch (error) {
     database.exec("ROLLBACK");
     throw error;
@@ -1296,7 +1433,11 @@ export function readState(
         orderBySql: APPLY_COLLECTION_ORDER_BY_SQL.application_artifact_refs,
       },
     ),
-    preparedApplicationForms: listValues(database, "prepared_application_forms", PreparedApplicationFormSchema),
+    preparedApplicationForms: listValues(
+      database,
+      "prepared_application_forms",
+      PreparedApplicationFormSchema,
+    ),
     applicationReplayCheckpoints: listCollectionValues(
       database,
       "application_replay_checkpoints",

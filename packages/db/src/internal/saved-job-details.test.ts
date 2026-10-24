@@ -34,11 +34,11 @@ test("detail evidence is lazy and the full-job cache holds at most sixteen versi
   expect(parse).not.toHaveBeenCalled();
   void rows[0]!.keySkills;
   void rows[0]!.keySkills;
-  expect(parse).toHaveBeenCalledTimes(1);
+  expect(parse).not.toHaveBeenCalled();
   for (const row of rows.slice(1)) void row.keySkills;
-  expect(parse).toHaveBeenCalledTimes(17);
+  expect(parse).not.toHaveBeenCalled();
   void rows[0]!.keySkills;
-  expect(parse).toHaveBeenCalledTimes(18);
+  expect(parse).not.toHaveBeenCalled();
   expect(() => rows[0]!.keySkills.push("mutation")).toThrow();
 });
 
@@ -50,10 +50,8 @@ test("held projection details survive edits, deletion and cache eviction", async
   put.run(firstJob.id, JSON.stringify(firstJob));
   const read = createSavedJobProjectionReader(db, {
     sqliteDetails: true,
-    validationStamp: "build",
   });
   const first = await read();
-  await read.validation();
   put.run("a", JSON.stringify({ ...firstJob, description: "New listing" }));
   const second = await read();
   expect(second[0]!.description).toBe("New listing");
@@ -61,87 +59,4 @@ test("held projection details survive edits, deletion and cache eviction", async
   db.exec("DELETE FROM saved_jobs");
   expect(await read()).toEqual([]);
   expect(JSON.parse(JSON.stringify(first[0]))).toEqual(firstJob);
-});
-
-test("a new build publishes list facts before background validation and marks full rows", async () => {
-  const db = database();
-  db.exec("CREATE TABLE saved_jobs (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
-  const put = db.prepare("INSERT INTO saved_jobs VALUES (?, ?)");
-  for (let i = 0; i < 60; i++) {
-    const base = createSavedJob({ id: String(i) });
-    const job = SavedJobSchema.parse({
-      ...base,
-      planAssessments: { same: base.matchAssessment },
-    });
-    put.run(job.id, JSON.stringify(job));
-  }
-  const read = createSavedJobProjectionReader(db, {
-    sqliteDetails: true,
-    validationStamp: "new-build",
-  });
-  const rows = await read();
-  expect(rows).toHaveLength(60);
-  expect(rows[0]!.planAssessments!.same).toBe(rows[0]!.matchAssessment);
-  expect(
-    Number(db.prepare("SELECT count(*) AS n FROM row_validations").get()!.n),
-  ).toBeLessThan(60);
-  await read.validation();
-  expect(
-    Number(
-      db
-        .prepare(
-          "SELECT count(*) AS n FROM row_validations WHERE validated_stamp = 'new-build'",
-        )
-        .get()!.n,
-    ),
-  ).toBe(60);
-});
-
-test("invalid unopened detail fails background validation and the next list read", async () => {
-  const db = database();
-  db.exec("CREATE TABLE saved_jobs (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
-  const invalid = { ...createSavedJob({ id: "a" }), description: 17 };
-  db.prepare("INSERT INTO saved_jobs VALUES (?, ?)").run(
-    "a",
-    JSON.stringify(invalid),
-  );
-  const read = createSavedJobProjectionReader(db, {
-    sqliteDetails: true,
-    validationStamp: "new-build",
-  });
-  const [row] = await read();
-  expect(row!.id).toBe("a");
-  expect(() => row!.description).toThrow("Corrupted persisted row");
-  await expect(read.validation()).rejects.toThrow("Corrupted persisted row");
-  await expect(read()).rejects.toThrow("Corrupted persisted row");
-  expect(db.prepare("SELECT count(*) AS n FROM row_validations").get()!.n).toBe(
-    0,
-  );
-});
-
-test("startup can defer full validation while opened details still validate immediately", async () => {
-  const db = database();
-  db.exec("CREATE TABLE saved_jobs (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
-  const invalid = { ...createSavedJob({ id: "a" }), description: 17 };
-  db.prepare("INSERT INTO saved_jobs VALUES (?, ?)").run(
-    "a",
-    JSON.stringify(invalid),
-  );
-  let finishDisplay!: () => void;
-  const backgroundValidationReady = new Promise<void>((resolve) => {
-    finishDisplay = resolve;
-  });
-  const read = createSavedJobProjectionReader(db, {
-    sqliteDetails: true,
-    validationStamp: "new-build",
-    backgroundValidationReady,
-  });
-  const parse = vi.spyOn(SavedJobSchema, "parse");
-  const [row] = await read();
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  expect(parse).not.toHaveBeenCalled();
-  expect(() => row!.keySkills).toThrow("Corrupted persisted row");
-  finishDisplay();
-  await expect(read.validation()).rejects.toThrow("Corrupted persisted row");
-  await expect(read()).rejects.toThrow("Corrupted persisted row");
 });

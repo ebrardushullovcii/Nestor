@@ -65,6 +65,12 @@ export {
   WorkspaceDatabaseRecoveryRequiredError,
 } from "./file-repository";
 export { readCleanCloseFingerprint } from "./internal/clean-close-marker";
+export { subscribeWorkspaceCommits } from "./workspace-commits";
+export {
+  createWorkspaceQueryRepository,
+  prepareWorkspaceQueryDatabase,
+  type WorkspaceQueryRepository,
+} from "./workspace-query-repository";
 export { readSavedJobProjectionChanges } from "./internal/saved-job-projection";
 export {
   createFileLiveAssistantRepository,

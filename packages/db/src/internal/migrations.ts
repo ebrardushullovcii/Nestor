@@ -14,6 +14,10 @@ import { quarantineAgentAnswers } from "../agent-answer-migration";
 import { migrateDiscoveryStorage } from "./discovery-storage";
 import { ensureTailoredAssetJobIndex } from "./tailored-asset-storage";
 import { ensureResumeApprovalState } from "./resume-approval-state";
+import { ensureWorkspaceReadIndex } from "./workspace-read-index";
+import { migrateResumeStorage } from "./resume-storage-migration";
+import { migratePreferenceStorage } from "./preference-storage";
+import { migrateSavedJobStorage } from "./saved-job-storage-migration";
 
 /**
  * Exact column shape every application-authority table must have. The assert
@@ -245,7 +249,10 @@ export function runMigrations(database: DatabaseSync): void {
     database.exec(`CREATE TABLE IF NOT EXISTS prepared_application_forms (
       id TEXT PRIMARY KEY, value TEXT NOT NULL
     )`);
-    database.prepare("INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)")
+    database
+      .prepare(
+        "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)",
+      )
       .run(21, "durable_prepared_application_forms");
   }
   function hasTable(tableName: string): boolean {
@@ -2083,6 +2090,10 @@ export function runMigrations(database: DatabaseSync): void {
     migrateDiscoveryStorage(database);
     ensureTailoredAssetJobIndex(database);
     ensureResumeApprovalState(database);
+    migratePreferenceStorage(database);
+    migrateResumeStorage(database);
+    migrateSavedJobStorage(database);
+    ensureWorkspaceReadIndex(database);
     return;
   }
 
@@ -2354,4 +2365,8 @@ export function runMigrations(database: DatabaseSync): void {
   migrateDiscoveryStorage(database);
   ensureTailoredAssetJobIndex(database);
   ensureResumeApprovalState(database);
+  migratePreferenceStorage(database);
+  migrateResumeStorage(database);
+  migrateSavedJobStorage(database);
+  ensureWorkspaceReadIndex(database);
 }

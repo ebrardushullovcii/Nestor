@@ -6,11 +6,17 @@ import type {
 import { normalizeLegacyDiscoveryState } from "./legacy";
 import { cloneValue, parsePersistedRowValue } from "./state";
 import { freezeProjection } from "./saved-job-projection";
-import { discoveryRowScope, readDiscoveryStorage, type DiscoveryDisplayRowCache } from "./discovery-storage";
+import {
+  discoveryRowScope,
+  readDiscoveryStorage,
+  type DiscoveryDisplayRowCache,
+} from "./discovery-storage";
 import type { DiscoveryDisplayProjection } from "../repository-types";
 
 /** Checkpoints belong to resume/write paths, never to the display projection. */
-export function toDiscoveryDisplayProjection(state: JobFinderDiscoveryState): DiscoveryDisplayProjection {
+export function toDiscoveryDisplayProjection(
+  state: JobFinderDiscoveryState,
+): DiscoveryDisplayProjection {
   const displayRun = (run: DiscoveryRunRecord): DiscoveryRunRecord => ({
     ...run,
     targetExecutions: run.targetExecutions.map((execution) => ({
@@ -30,7 +36,7 @@ export function toDiscoveryDisplayProjection(state: JobFinderDiscoveryState): Di
 /** Remove checkpoint payloads inside SQLite, before JSON crosses into JS. */
 function displayRunSql(run: string): string {
   return `json_set(${run}, '$.targetExecutions', json((
-    SELECT json_group_array(json_remove(execution.value, '$.agentCheckpoint'))
+    SELECT json_group_array(json_set(execution.value, '$.agentCheckpoint', json('null')))
     FROM json_each(${run}, '$.targetExecutions') AS execution
   )))`;
 }
@@ -39,7 +45,13 @@ export function createDiscoveryDisplayProjectionReader(
   database: DatabaseSync,
   fallback: JobFinderDiscoveryState,
 ) {
-  const normalized = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'discovery_runs'").get());
+  const normalized = Boolean(
+    database
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'discovery_runs'",
+      )
+      .get(),
+  );
   // All local write paths (reset/import included) pass through this table.
   // SQLite rolls these markers back together with a failed transaction.
   database.exec(`
@@ -50,9 +62,11 @@ export function createDiscoveryDisplayProjectionReader(
         (event) => `
       CREATE TEMP TRIGGER discovery_display_${event.toLowerCase()}
       AFTER ${event} ON main.singleton_state
-      WHEN ${event === "UPDATE"
-        ? "(OLD.key = 'discovery_state' OR NEW.key = 'discovery_state') AND (OLD.value IS NOT NEW.value OR OLD.key IS NOT NEW.key)"
-        : `${event === "DELETE" ? "OLD" : "NEW"}.key = 'discovery_state'`}
+      WHEN ${
+        event === "UPDATE"
+          ? "(OLD.key = 'discovery_state' OR NEW.key = 'discovery_state') AND (OLD.value IS NOT NEW.value OR OLD.key IS NOT NEW.key)"
+          : `${event === "DELETE" ? "OLD" : "NEW"}.key = 'discovery_state'`
+      }
       BEGIN UPDATE discovery_display_epoch SET revision = revision + 1; END;
     `,
       )
@@ -65,11 +79,20 @@ export function createDiscoveryDisplayProjectionReader(
     )`);
     // Checkpoint bodies are absent from this projection. A checkpoint-only
     // commit must keep the same display object and avoid rebuilding history.
-    for (const table of ["discovery_runs", "discovery_run_targets", "discovery_run_activity", "discovery_ledger", "discovery_pending_jobs"]) {
+    for (const table of [
+      "discovery_runs",
+      "discovery_run_targets",
+      "discovery_run_activity",
+      "discovery_ledger",
+      "discovery_pending_jobs",
+    ]) {
       for (const event of ["INSERT", "UPDATE", "DELETE"]) {
         const row = event === "DELETE" ? "OLD" : "NEW";
-        const runId = table === "discovery_run_targets" || table === "discovery_run_activity"
-          ? `${row}.run_id` : "''";
+        const runId =
+          table === "discovery_run_targets" ||
+          table === "discovery_run_activity"
+            ? `${row}.run_id`
+            : "''";
         const retiredChild = event === "DELETE" && runId !== "''";
         database.exec(`CREATE TEMP TRIGGER discovery_display_${table}_${event.toLowerCase()}
           AFTER ${event} ON main.${table}
@@ -119,10 +142,17 @@ export function createDiscoveryDisplayProjectionReader(
         rowCache = { scopes: new Map(), dirty: new Map() };
       }
       rowCache.dirty.clear();
-      for (const row of database.prepare("SELECT table_name, run_id, id FROM discovery_display_changes WHERE revision > ?").all(cachedRevision ?? -1)) {
-        const scope = discoveryRowScope(String(row.table_name), String(row.run_id));
+      for (const row of database
+        .prepare(
+          "SELECT table_name, run_id, id FROM discovery_display_changes WHERE revision > ?",
+        )
+        .all(cachedRevision ?? -1)) {
+        const scope = discoveryRowScope(
+          String(row.table_name),
+          String(row.run_id),
+        );
         let dirty = rowCache.dirty.get(scope);
-        if (!dirty) rowCache.dirty.set(scope, dirty = new Set());
+        if (!dirty) rowCache.dirty.set(scope, (dirty = new Set()));
         dirty.add(String(row.id));
       }
     }
@@ -132,7 +162,12 @@ export function createDiscoveryDisplayProjectionReader(
       if (normalized) {
         // Checkpoint rows are never selected, so their payloads cannot cross
         // into JavaScript just to render discovery state.
-        projection = readDiscoveryStorage(database, fallback, false, database.isTransaction ? undefined : rowCache ?? undefined);
+        projection = readDiscoveryStorage(
+          database,
+          fallback,
+          false,
+          database.isTransaction ? undefined : (rowCache ?? undefined),
+        );
       } else {
         const row = readDisplay.get();
         projection = row
@@ -162,7 +197,10 @@ export function createDiscoveryDisplayProjectionReader(
       cachedRevision = revision;
       cachedVersion = version;
       rowCache?.dirty.clear();
-      if (normalized) database.prepare("DELETE FROM discovery_display_changes WHERE revision <= ?").run(revision);
+      if (normalized)
+        database
+          .prepare("DELETE FROM discovery_display_changes WHERE revision <= ?")
+          .run(revision);
     }
     return projection;
   }

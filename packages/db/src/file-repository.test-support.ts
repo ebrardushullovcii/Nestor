@@ -10,7 +10,14 @@ import type {
   ResumeImportRun,
   SavedJob,
 } from "@nestor/contracts";
-import { SavedJobSchema } from "@nestor/contracts";
+import { SavedJobSchema, DISCOVERY_PREPARATION } from "@nestor/contracts";
+
+/** Compare every domain field separately from internal carried preparation. */
+export function savedJobData(job: SavedJob): SavedJob {
+  const data = { ...job };
+  Reflect.deleteProperty(data, DISCOVERY_PREPARATION);
+  return data;
+}
 
 export type FileRepository = Awaited<
   ReturnType<typeof createFileJobFinderRepository>
