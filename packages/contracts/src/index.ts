@@ -46,3 +46,5 @@ export * from "./resume-computation";
 export * from "./workspace-query";
 
 export * from "./discovery-preparation";
+
+export * from "./listing-salary-evidence";
