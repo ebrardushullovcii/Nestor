@@ -1,4 +1,4 @@
-# ADR 0071: Find jobs reads its page from queries; searches follow the change feed
+# ADR 0075: Find jobs reads its page from queries; searches follow the change feed
 
 Status: accepted (2026-10-24). Builds on [ADR 0060](0060-indexed-workspace-queries-and-a-durable-change-feed.md) and [ADR 0068](0068-discovery-commands-return-run-facts.md).
 

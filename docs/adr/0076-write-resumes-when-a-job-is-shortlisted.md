@@ -1,4 +1,4 @@
-# ADR 0072: Write a resume when a job is shortlisted
+# ADR 0076: Write a resume when a job is shortlisted
 
 Status: accepted (2026-10-24). Amends [ADR 0045](0045-resume-batches-continue-after-restart.md) for these resumes; keeps [ADR 0048](0048-shortlisted-resume-pipeline.md)'s limits.
 

@@ -455,7 +455,7 @@ type WorkspaceApplicationMethods = Omit<
     control: JobFinderActivityControl,
     onFinished?: () => void,
   ): Promise<void>;
-  /** Holds or continues the resumes shortlisting asked for (ADR 0072). */
+  /** Holds or continues the resumes shortlisting asked for (ADR 0076). */
   resumeOnShortlistPauseChanged(paused: boolean): void;
   continueResumesOnShortlist(): Promise<void>;
   resolveApplyConsentRequest(
@@ -952,7 +952,7 @@ export function createWorkspaceApplicationMethods(
       pendingListingReads.set(id, generation);
     }
     drainListingReads();
-    // A resume starts writing the moment its job is shortlisted (ADR 0072).
+    // A resume starts writing the moment its job is shortlisted (ADR 0076).
     void resumeOnShortlist.request(ids).catch((error: unknown) => {
       if (listingReadCurrent(generation))
         console.warn("[shortlist] Resume could not be queued", error);
@@ -5665,7 +5665,7 @@ export function createWorkspaceApplicationMethods(
     await clearStaleMissingResumeBlockerForJob(jobId);
   }
 
-  // Resumes written because a job was shortlisted (ADR 0072): the person's
+  // Resumes written because a job was shortlisted (ADR 0076): the person's
   // request is kept in the intelligence state; the writing is the batch path.
   const resumeOnShortlist = createResumeOnShortlist({
     isEnabled: async () =>

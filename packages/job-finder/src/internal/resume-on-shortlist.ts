@@ -1,7 +1,7 @@
 import type { ResumeBatchGenerationResult } from "@nestor/contracts";
 
 /**
- * Resumes start writing the moment a job is shortlisted (ADR 0072), so one is
+ * Resumes start writing the moment a job is shortlisted (ADR 0076), so one is
  * ready by the time the person opens it.
  *
  * This owns no writer of its own: every job goes through the same generation

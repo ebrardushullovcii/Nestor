@@ -8,7 +8,7 @@ import { JOB_FINDER_ROUTE_PATHS } from "./job-finder-route-hrefs";
 
 /**
  * While a search runs, the window follows the database's change feed instead
- * of syncing the whole workspace for every progress event (ADR 0071). Find
+ * of syncing the whole workspace for every progress event (ADR 0075). Find
  * jobs reads its list from the database and refetches it from the feed, so
  * the workspace snapshot only needs a sync where a screen shows what is not
  * queried yet: Home for the search's jobs and progress, and Find jobs, Search

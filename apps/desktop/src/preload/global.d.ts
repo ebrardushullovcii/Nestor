@@ -324,7 +324,7 @@ declare global {
         ) => Promise<JobFinderJobDetail>;
         getWorkspaceBootstrap: () => Promise<JobFinderRendererWorkspaceSnapshot>;
         /**
-         * Home's first view (ADR 0073): everything but the Find jobs lists,
+         * Home's first view (ADR 0077): everything but the Find jobs lists,
          * which stay deferred. Null when the workspace cannot give one.
          */
         getWorkspaceHome?: () => Promise<JobFinderRendererWorkspaceSnapshot | null>;

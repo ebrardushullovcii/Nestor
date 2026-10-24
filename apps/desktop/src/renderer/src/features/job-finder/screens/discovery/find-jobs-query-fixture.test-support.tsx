@@ -32,7 +32,7 @@ import type { FixtureWindow } from "./find-jobs-list-report.test-support";
 /**
  * Test support: a `window.nestor.jobFinder.queries` that answers Find jobs'
  * list queries from plain job rows, using the renderer's earlier in-memory
- * list rules as the oracle (ADR 0071). A screen test then passes only when
+ * list rules as the oracle (ADR 0075). A screen test then passes only when
  * the query-backed screen shows what those rules would have shown.
  */
 export interface FindJobsQueryFixture {

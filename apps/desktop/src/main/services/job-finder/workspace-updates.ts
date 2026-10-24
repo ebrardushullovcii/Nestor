@@ -65,7 +65,7 @@ export function publishJobFinderWorkspaceUpdate(target?: WebContents): void {
 
 /**
  * A search writes progress several times a second. Windows follow those
- * writes through the change feed (ADR 0071), so only its first event asks
+ * writes through the change feed (ADR 0075), so only its first event asks
  * them to sync; main listeners still hear every event.
  */
 export function createSearchProgressPublisher(

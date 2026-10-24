@@ -8,7 +8,7 @@ import { KeptRouteVisibilityContext } from "../../lib/kept-route-visibility";
 import { describeFailure } from "../../lib/describe-failure";
 
 /**
- * Find jobs reads what it shows from the database (ADR 0071): one page of
+ * Find jobs reads what it shows from the database (ADR 0075): one page of
  * rows with the pool's facets, badge counts, band outline and ordered ids,
  * refetched when the change feed says a job list changed. Nothing here holds
  * a saved job beyond the rows on screen.

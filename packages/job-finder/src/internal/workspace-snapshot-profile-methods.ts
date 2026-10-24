@@ -1467,7 +1467,7 @@ export function createWorkspaceSnapshotProfileMethods(
   async function getWorkspaceSnapshot(
     borrowValidatedJobs = false,
     /**
-     * Home's first view (ADR 0073): only the jobs the person took past Find
+     * Home's first view (ADR 0077): only the jobs the person took past Find
      * jobs, no Find jobs lists, and nothing written back. The full snapshot
      * follows and replaces it.
      */
@@ -2185,7 +2185,7 @@ export function createWorkspaceSnapshotProfileMethods(
   }
 
   /**
-   * Home's first view, before the full snapshot (ADR 0073). Null when this
+   * Home's first view, before the full snapshot (ADR 0077). Null when this
    * workspace cannot give one; the full snapshot is the answer then.
    */
   async function getWorkspaceHomeSnapshot(): Promise<JobFinderWorkspaceSnapshot | null> {

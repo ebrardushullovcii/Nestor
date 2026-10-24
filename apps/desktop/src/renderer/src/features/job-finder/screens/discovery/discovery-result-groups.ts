@@ -244,7 +244,7 @@ export function buildDiscoveryResultGroupHeadings(
 
 /**
  * The same headings from the list's ids and bands in order, which Find jobs
- * reads from the database instead of holding every row (ADR 0071).
+ * reads from the database instead of holding every row (ADR 0075).
  */
 export function buildRunHeadings(
   ids: readonly string[],

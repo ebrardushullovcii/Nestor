@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import { createWorkspaceServiceHarness } from "./workspace-service.test-harness";
 import { createSeed } from "./workspace-service.test-fixtures";
 
-describe("Home's first view (ADR 0073)", () => {
+describe("Home's first view (ADR 0077)", () => {
   test("holds what Home reads, as the full snapshot has it, without the Find jobs lists", async () => {
     const harness = createWorkspaceServiceHarness({ seed: createSeed() });
     // A workspace's first full snapshot creates its plan; until then the

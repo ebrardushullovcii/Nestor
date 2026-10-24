@@ -764,7 +764,7 @@ export function JobFinderHomeRoute() {
   // Home reads every collection: on the bootstrap snapshot (no saved search
   // runs or jobs yet) it told a person with thousands of jobs to "Run your
   // first search" for several seconds after launch. Its first view (ADR
-  // 0073) has all of them but the Find jobs lists, whose two numbers Home
+  // 0077) has all of them but the Find jobs lists, whose two numbers Home
   // takes from the database until the lists land.
   const findJobsCounts =
     launchReads.findJobs &&
@@ -1717,7 +1717,7 @@ function JobFinderReviewQueueRouteContent() {
     requestedItem,
   ]);
 
-  // A resume shortlisting asked for is being written too (ADR 0072): the
+  // A resume shortlisting asked for is being written too (ADR 0076): the
   // row says so and nothing offers to write it a second time.
   const shortlistResumeJobIds =
     context.workspace.intelligence.resumeOnShortlistJobIds;

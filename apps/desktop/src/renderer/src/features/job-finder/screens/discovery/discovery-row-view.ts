@@ -9,7 +9,7 @@ import { joinUniqueSentences } from "../../lib/sentence-copy";
 
 /**
  * What one Find jobs row prints, from the list columns the query returns
- * (ADR 0071). The inspector still reads the complete job by id.
+ * (ADR 0075). The inspector still reads the complete job by id.
  */
 export interface DiscoveryRowView {
   fit: MatchAssessmentPresentation;

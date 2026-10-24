@@ -1,7 +1,7 @@
 import type { WorkspaceJobListRow } from "@nestor/contracts";
 
 /**
- * Keeps the page still while the person reads it (ADR 0071).
+ * Keeps the page still while the person reads it (ADR 0075).
  *
  * - While a search runs, rows stay where they were first shown and newly
  *   found jobs join the end of the page, instead of every refresh re-ranking

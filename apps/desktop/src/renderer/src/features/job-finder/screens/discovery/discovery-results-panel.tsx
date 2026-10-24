@@ -149,7 +149,7 @@ interface DiscoveryResultsPanelProps {
   // filters instead of leaking them across plans.
   facetScopeId?: string | null;
   hasCompletedSearch?: boolean;
-  /** The open job the person just decided, kept in its place (ADR 0071). */
+  /** The open job the person just decided, kept in its place (ADR 0075). */
   heldJobId?: string | null;
   isSearchInProgress?: boolean;
   /** The plan whose jobs are listed; omitted means the active plan. */
@@ -1188,7 +1188,7 @@ export function DiscoveryResultsPanel({
     selectedJobId: string | null | undefined;
   }>(() => ({ page: 0, selectedJobId: undefined }));
   const [isPagePending, startPageTransition] = useTransition();
-  // What the list shows, asked of the database (ADR 0071): the filters,
+  // What the list shows, asked of the database (ADR 0075): the filters,
   // search, order and page are the request; facets, counts and the rows on
   // this page come back with it.
   const listRequest = useMemo<FindJobsListRequest>(() => {

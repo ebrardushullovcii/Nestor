@@ -926,7 +926,7 @@ export const JobFinderSettingsSchema = z.object({
    */
   collapseSideMenuWithAssistant: z.boolean().optional(),
   /**
-   * Start writing a job's resume as soon as it is shortlisted (ADR 0072).
+   * Start writing a job's resume as soon as it is shortlisted (ADR 0076).
    * Absent means on: read it through `writesResumesOnShortlist`.
    */
   writeResumesOnShortlist: z.boolean().optional(),

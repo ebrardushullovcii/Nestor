@@ -1909,7 +1909,7 @@ export const JobFinderIntelligenceStateSchema = z
     resumeBatchCheckpoints: z.array(ResumeBatchCheckpointSchema).optional(),
     /**
      * Shortlisted jobs whose resume is waiting to be written or being
-     * written because they were shortlisted (ADR 0072).
+     * written because they were shortlisted (ADR 0076).
      */
     resumeOnShortlistJobIds: z
       .array(NonEmptyStringSchema)

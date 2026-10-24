@@ -218,7 +218,7 @@ export interface BuildJobSearchHomeModelInput {
   discoveryRunPending: boolean;
   /**
    * Find jobs' counts read from the database, for Home's first view while
-   * the workspace has no Find jobs lists yet (ADR 0073). The same numbers
+   * the workspace has no Find jobs lists yet (ADR 0077). The same numbers
    * the lists give, so nothing changes when they land.
    */
   findJobsCounts?: HomeFindJobsCounts | null;

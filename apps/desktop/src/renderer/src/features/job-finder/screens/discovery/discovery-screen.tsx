@@ -404,7 +404,7 @@ export function DiscoveryScreen(props: {
   // What the results panel actually displays on its current filtered and
   // paginated page. Null state means "not reported yet"; an explicit null
   // jobId means the panel is showing no results at all.
-  // The results panel's page and the list's order (ADR 0071).
+  // The results panel's page and the list's order (ADR 0075).
   const [list, setList] = useState<DiscoveryListSnapshot | null>(null);
   const planJobCount = list?.ready ? list.planJobCount : props.planJobCount;
   const [displayedSelection, setDisplayedSelection] = useState<{
@@ -759,7 +759,7 @@ export function DiscoveryScreen(props: {
       ? selectedJob.id
       : null;
   // The page the results panel shows and the list's order, read from the
-  // database (ADR 0071); the open job's full record comes by id.
+  // database (ADR 0075); the open job's full record comes by id.
   const listRows = list?.rows ?? NO_LIST_ROWS;
   const listOrderedJobIds = list?.orderedJobIds ?? NO_LIST_IDS;
   const listDetailRevision = list?.detailRevision;

@@ -6,7 +6,7 @@ import {
   createWorkspaceServiceHarness,
 } from "./workspace-service.test-support";
 
-// Resumes start writing the moment a job is shortlisted (ADR 0072).
+// Resumes start writing the moment a job is shortlisted (ADR 0076).
 
 function seedWith(count: number) {
   const seed = createSeed();

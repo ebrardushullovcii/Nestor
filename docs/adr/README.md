@@ -67,9 +67,9 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0058](0058-one-apply-press-queues-the-whole-choice.md) | accepted | One Apply press over selected, page or all ready jobs is a saved queue of ten-job runs inside the daily limit; it waits for midnight and carries on after a restart |
 | [0063](0063-command-scoped-browser-focus.md) | accepted | Hidden reads wake without rendering; only pending frame-dependent commands and requested screenshots receive temporary focus |
 | [0068](0068-discovery-commands-return-run-facts.md) | accepted | Search and Stop return run facts; query screens follow commits while legacy refreshes wait for search completion |
-| [0071](0071-find-jobs-reads-its-page-from-queries.md) | accepted | Find jobs reads its page, facets and order from queries and follows the change feed; during a search the snapshot syncs only where a screen still needs it |
-| [0072](0072-write-resumes-when-a-job-is-shortlisted.md) | accepted | A shortlisted job's resume starts writing at once through the batch path (switch in Settings, default on); move back, Undo or hide withdraw it; pause holds it; it carries on after a restart |
-| [0073](0073-home-opens-on-a-first-view-before-the-full-snapshot.md) | accepted | Home opens on a first view (everything but the Find jobs lists, nothing written) before the full snapshot; early presses wait for the full one |
+| [0075](0075-find-jobs-reads-its-page-from-queries.md) | accepted | Find jobs reads its page, facets and order from queries and follows the change feed; during a search the snapshot syncs only where a screen still needs it |
+| [0076](0076-write-resumes-when-a-job-is-shortlisted.md) | accepted | A shortlisted job's resume starts writing at once through the batch path (switch in Settings, default on); move back, Undo or hide withdraw it; pause holds it; it carries on after a restart |
+| [0077](0077-home-opens-on-a-first-view-before-the-full-snapshot.md) | accepted | Home opens on a first view (everything but the Find jobs lists, nothing written) before the full snapshot; early presses wait for the full one |
 
 ## Policy
 

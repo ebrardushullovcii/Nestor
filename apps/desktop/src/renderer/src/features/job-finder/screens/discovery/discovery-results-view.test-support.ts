@@ -29,7 +29,7 @@ import {
 } from "./discovery-source-attribution";
 
 /**
- * Test support (ADR 0071): the in-memory list rules Find jobs used before it
+ * Test support (ADR 0075): the in-memory list rules Find jobs used before it
  * read its page from the database. The query fixture answers with them, so
  * screen tests compare the query-backed screen against these rules.
  *

@@ -208,7 +208,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     return workspaceRequestSequenceRef.current === sequence;
   }, []);
 
-  // Home can show its buttons before the full snapshot lands (ADR 0073). A
+  // Home can show its buttons before the full snapshot lands (ADR 0077). A
   // press then waits for it quietly instead of failing; only a load that
   // never finishes answers with the error.
   const hydrationWaitersRef = useRef(new Set<() => void>());
@@ -1313,7 +1313,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         // hydration request is fenced like every other workspace request so a
         // later user action can never be overwritten by a stale full snapshot.
         if (bootstrap.hydration?.phase === "bootstrap") {
-          // Home's first view (ADR 0073): every collection but the Find jobs
+          // Home's first view (ADR 0077): every collection but the Find jobs
           // lists, read before the full snapshot so Home does not wait for
           // it. It is still a bootstrap snapshot, so actions wait as before.
           let shownBootstrap = bootstrap;
