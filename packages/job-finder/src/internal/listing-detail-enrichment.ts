@@ -723,6 +723,7 @@ export async function readSightingApplyRoutes(input: {
         break;
       }
       let pageApplyUrl: string | null = null;
+      let listingFacts: SavedJob["provenance"][number]["listingFacts"];
       try {
         if (response.status >= 400) continue;
         const detail = await readListingDetail({
@@ -734,6 +735,19 @@ export async function readSightingApplyRoutes(input: {
         });
         if (!detail) continue;
         pageApplyUrl = detail.directApplyUrl;
+        // A canonical switch uses this sighting's own facts. Keeping only
+        // its apply link discarded the body we just read, so the later
+        // switch replaced a complete saved listing with the card's title.
+        listingFacts = {
+          ...sighting.listingFacts,
+          title: detail.title ?? sighting.listingFacts?.title ?? job.title,
+          company: detail.company ?? sighting.listingFacts?.company ?? job.company,
+          location: detail.location ?? sighting.listingFacts?.location ?? job.location,
+          salaryText: detail.salaryText ?? sighting.listingFacts?.salaryText ?? null,
+          seniority: detail.seniority ?? sighting.listingFacts?.seniority ?? null,
+          description: detail.description || sighting.listingFacts?.description || "",
+          summary: sighting.listingFacts?.summary ?? null,
+        };
       } catch {
         // A failed model read stays unread so a later search can retry.
         continue;
@@ -746,6 +760,7 @@ export async function readSightingApplyRoutes(input: {
           listingUrl,
           pageApplyUrl,
           now(),
+          listingFacts,
         ),
       });
       changed.add(job.id);
