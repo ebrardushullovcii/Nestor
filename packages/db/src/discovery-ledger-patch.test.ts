@@ -18,11 +18,13 @@ const entry = (id: string) =>
     lastSeenAt: "2026-10-23T00:00:00.000Z",
   });
 
-test("ledger patches validate only changed rows, retain order, roll back and preserve external edits", async () => {
+test("ledger patches trust typed rows, retain order, roll back and preserve external edits", async () => {
   const temp = await createTempRepository("nestor-ledger-patch-");
   let repo = await temp.createRepository();
   const raw = new DatabaseSync(temp.filePath);
   try {
+    raw.exec(`CREATE TRIGGER fail_ledger_patch BEFORE INSERT ON discovery_ledger
+      WHEN NEW.id = 'rolled_back' BEGIN SELECT RAISE(ABORT, 'patch failed'); END;`);
     await repo.commitDiscoveryStateUpdate((current) => ({
       ...current,
       discoveryLedger: Array.from({ length: 3000 }, (_, i) =>
@@ -41,7 +43,7 @@ test("ledger patches validate only changed rows, retain order, roll back and pre
         { id: "appended", update: () => entry("appended") },
       ]),
     }));
-    expect(parse).toHaveBeenCalledTimes(3); // two writes plus the new test row
+    expect(parse).toHaveBeenCalledTimes(1); // the new test row; owned writes are trusted
     parse.mockRestore();
     const committed = await repo.readDiscoveryStateForRun!();
     expect(committed.discoveryLedger[19]).toBe(before.discoveryLedger[19]);
@@ -62,7 +64,6 @@ test("ledger patches validate only changed rows, retain order, roll back and pre
         discoveryLedger: patchDiscoveryLedger(current.discoveryLedger, [
           { id: "rolled_back", update: () => entry("rolled_back") },
         ]),
-        pendingDiscoveryJobs: [{ id: "invalid" }] as never,
       })),
     ).rejects.toThrow();
     expect(await repo.readDiscoveryStateForRun!()).toBe(moved);

@@ -514,6 +514,14 @@ export function ReviewQueueMissionPanel({
             This job is already in Applications. Open it to see its latest
             status.
           </p>
+        ) : onTakeOutOfApplyQueue ? (
+          <p
+            className="text-(length:--text-small) leading-6 text-foreground-soft"
+            data-testid="shortlisted-state-line"
+          >
+            Waiting in the apply queue. It starts by itself within your daily
+            limit.
+          </p>
         ) : aiUnavailableLine || readinessDescription ? (
           <p
             className="text-(length:--text-small) leading-6 text-foreground-soft"

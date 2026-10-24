@@ -19,6 +19,7 @@ import { z } from "zod";
 import { AssistantToolError, defineTool, json } from "../tool-kit";
 import {
   allJobs,
+  assistantJobStatus,
   compactJob,
   createJobCaveats,
   describeApplicationStanding,
@@ -375,7 +376,7 @@ export const shortlistJobsTool = defineTool({
         };
       }
       if (!["discovered", "shortlisted"].includes(job.status)) {
-        return { jobId, outcome: `already ${job.status}` };
+        return { jobId, outcome: `already ${assistantJobStatus(job.status)}` };
       }
       if (job.listingActivity.status === "closed") {
         return {

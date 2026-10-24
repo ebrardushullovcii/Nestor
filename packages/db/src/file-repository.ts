@@ -1,8 +1,8 @@
 import {
-  parseSavedJobWithPreparation,
   parseSavedJobsWithPreparation,
-  cloneSavedJobWithPreparation,
   readSavedJobFingerprintBatch,
+  writeSavedJobFingerprints,
+  samePreparedSavedJobInputs,
 } from "./internal/saved-job-fingerprints";
 import { writeSavedJobSightings } from "./internal/saved-job-sightings";
 import { writeSavedJobPlanAssessments } from "./internal/saved-job-plan-assessments";
@@ -50,8 +50,9 @@ import {
   type SavedJob,
   type JobFinderDiscoveryState,
   type JobFinderRepositoryState,
+  readPreparedDiscoveryFingerprints,
 } from "@nestor/contracts";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -136,10 +137,12 @@ import type {
   WorkspaceDatabaseRecoveryRequiredDetails,
   WorkspaceDatabaseRecoveryRequiredOutcome,
 } from "./repository-types";
+import { createSavedJobProjectionReader } from "./internal/saved-job-projection";
 import {
-  createSavedJobProjectionReader,
-  freezeProjection,
-} from "./internal/saved-job-projection";
+  createSavedJobWriteReader,
+  freezeSavedJobForWrite,
+  sameSavedJobWrite,
+} from "./internal/saved-job-write-reader";
 import { createDiscoveryDisplayProjectionReader } from "./internal/discovery-display-projection";
 import {
   createDiscoveryStorage,
@@ -364,6 +367,9 @@ export async function createFileJobFinderRepository(
   }
 
   const database = await openWorkspaceDatabaseWithRecovery();
+  let writeReader: ReturnType<typeof createSavedJobWriteReader> | null = null;
+  const readJobsForWrite = (ids: readonly string[]) =>
+    (writeReader ??= createSavedJobWriteReader(database))(ids);
   // Detail versions are disk-backed, with a bounded SQLite page cache.
   // Set this before any connection-local projection tables are created.
   database.exec("PRAGMA temp_store = FILE; PRAGMA temp.cache_size = -2048");
@@ -1290,6 +1296,40 @@ export async function createFileJobFinderRepository(
     readSavedJobDiscoveryFingerprints(jobIds) {
       return Promise.resolve(readSavedJobFingerprintBatch(database, jobIds));
     },
+    writeSavedJobDiscoveryFingerprints(jobs) {
+      try {
+        if (jobs.length)
+          runImmediateTransaction(database, () => {
+            const byId = new Map(jobs.map((job) => [job.id, job]));
+            for (const { job: current, bodyKey } of readJobsForWrite([
+              ...byId.keys(),
+            ])) {
+              const job = byId.get(current.id)!;
+              if (!readPreparedDiscoveryFingerprints(job)) continue;
+              const description = job.description;
+              if (bodyKey) {
+                if (
+                  createHash("sha256").update(description).digest("hex") !==
+                  bodyKey
+                )
+                  continue;
+                // The interned key proves these exact bytes without loading the stored body.
+                Object.defineProperty(current, "description", {
+                  value: description,
+                  enumerable: true,
+                });
+              }
+              if (samePreparedSavedJobInputs(job, current))
+                writeSavedJobFingerprints(database, job);
+            }
+          });
+        return Promise.resolve();
+      } catch (error) {
+        return Promise.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    },
     updateSavedJobSightings(updates) {
       try {
         return Promise.resolve(
@@ -1354,6 +1394,8 @@ export async function createFileJobFinderRepository(
               ? upsertsFromBorrowedDiscovery(currentDiscoveryState)
               : []),
           ];
+          if (normalizedUpserts.some((job) => !job.id))
+            throw new Error("Saved job upserts must have an id.");
           if (updateSettings) {
             const currentSettings =
               getSingletonValue(
@@ -1376,34 +1418,43 @@ export async function createFileJobFinderRepository(
           > | null = null;
 
           if (update) {
-            const currentJobs = updateJobIds
-              ? listCollectionValues(
-                  database,
-                  "saved_jobs",
-                  { parse: (value) => value as SavedJob },
-                  {
-                    whereSql: "id IN (SELECT value FROM json_each(?))",
-                    params: [
-                      JSON.stringify([
-                        ...new Set([
-                          ...updateJobIds,
-                          ...normalizedUpserts.map((job) => job.id),
-                          ...(clearResumeApproval
-                            ? [clearResumeApproval.jobId]
-                            : []),
-                        ]),
-                      ]),
-                    ],
-                    orderBySql: "id",
-                  },
-                )
-              : listValues(database, "saved_jobs", {
-                  parse: (value) => value as SavedJob,
-                });
+            const currentJobs =
+              updateJobIds && borrowCurrentJobs
+                ? readJobsForWrite([
+                    ...updateJobIds,
+                    ...normalizedUpserts.map((job) => job.id),
+                    ...(clearResumeApproval ? [clearResumeApproval.jobId] : []),
+                  ]).map(({ job }) => job)
+                : updateJobIds
+                  ? listCollectionValues(
+                      database,
+                      "saved_jobs",
+                      { parse: (value) => value as SavedJob },
+                      {
+                        whereSql: "id IN (SELECT value FROM json_each(?))",
+                        params: [
+                          JSON.stringify([
+                            ...new Set([
+                              ...updateJobIds,
+                              ...normalizedUpserts.map((job) => job.id),
+                              ...(clearResumeApproval
+                                ? [clearResumeApproval.jobId]
+                                : []),
+                            ]),
+                          ]),
+                        ],
+                        orderBySql: "id",
+                      },
+                    )
+                  : listValues(database, "saved_jobs", {
+                      parse: (value) => value as SavedJob,
+                    });
             for (const currentJob of currentJobs) {
               existingJobIds.add(currentJob.id);
               const nextJob = update(
-                borrowCurrentJobs ? freezeProjection(currentJob) : currentJob,
+                borrowCurrentJobs
+                  ? freezeSavedJobForWrite(currentJob)
+                  : currentJob,
               );
               if (nextJob.id !== currentJob.id) {
                 throw new Error(
@@ -1414,7 +1465,7 @@ export async function createFileJobFinderRepository(
                 previousJobForResumeApproval = currentJob;
                 nextJobForResumeApproval = nextJob;
               }
-              if (!isDeepStrictEqual(nextJob, currentJob)) {
+              if (!sameSavedJobWrite(nextJob, currentJob)) {
                 context.writePersistedValue("saved_jobs", nextJob);
               }
             }

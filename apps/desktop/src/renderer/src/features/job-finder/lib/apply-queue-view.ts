@@ -192,7 +192,7 @@ export function describeApplyQueue(
       const limit = options.dailyLimit ?? null;
       return {
         title: `${verb.doing} ${jobs}`,
-        detail: `${limit ? `Today's limit of ${limit} is reached` : "Today's limit is reached"} · ${toGo} continue ${formatResumeTime(queue.resumesAt)}${leftOutPart}`,
+        detail: `${limit ? `Today's limit of ${limit} is reached` : "Today's limit is reached"} · ${toGo} ${toGo === 1 ? "continues" : "continue"} ${formatResumeTime(queue.resumesAt)}${leftOutPart}`,
         active: false,
         primary: { label: "Raise the limit", action: "raise_limit" },
         secondary: { label: "Stop", action: "stop" },

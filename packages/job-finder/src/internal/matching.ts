@@ -471,6 +471,23 @@ function buildKeywordSignals(posting: JobPosting): JobKeywordSignal[] {
 }
 
 function buildScreeningHints(posting: JobPosting): SavedJob["screeningHints"] {
+  const carried = readDiscoveryPreparation(posting)?.screeningHints;
+  if (
+    carried &&
+    carried.basis.location === posting.location &&
+    carried.basis.summary === posting.summary &&
+    carried.basis.description === posting.description &&
+    (
+      ["minimumQualifications", "preferredQualifications", "workMode"] as const
+    ).every(
+      (field) =>
+        carried.basis[field].length === posting[field].length &&
+        carried.basis[field].every(
+          (value, index) => value === posting[field][index],
+        ),
+    )
+  )
+    return carried.value;
   const remoteHintSource = [
     posting.location,
     posting.summary,
@@ -494,7 +511,7 @@ function buildScreeningHints(posting: JobPosting): SavedJob["screeningHints"] {
     posting.workMode.includes("flexible") ||
     /\bremote\b/i.test(remoteHintSource);
 
-  return {
+  const value: SavedJob["screeningHints"] = {
     sponsorshipText:
       normalizedText.includes("visa sponsorship") ||
       normalizedText.includes("work authorization")
@@ -526,6 +543,20 @@ function buildScreeningHints(posting: JobPosting): SavedJob["screeningHints"] {
     requiresConsentInterrupt: null,
     requiresConsentInterruptKind: null,
   };
+  writeDiscoveryPreparation(posting, {
+    screeningHints: {
+      basis: {
+        location: posting.location,
+        summary: posting.summary,
+        description: posting.description,
+        minimumQualifications: [...posting.minimumQualifications],
+        preferredQualifications: [...posting.preferredQualifications],
+        workMode: [...posting.workMode],
+      },
+      value,
+    },
+  });
+  return value;
 }
 
 function mergeKeywordSignals(

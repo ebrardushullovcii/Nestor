@@ -1,4 +1,5 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import {
   SavedJobSchema,
   DISCOVERY_FINGERPRINT_FIELDS,
@@ -34,6 +35,22 @@ type StoredFingerprints = DiscoveryListingFingerprints & {
     content: { digest: string; packed: string } | null;
   };
 };
+
+/** Both callers are transaction-current; description can be verified by its interned hash. */
+export function samePreparedSavedJobInputs(
+  left: SavedJob,
+  right: SavedJob,
+): boolean {
+  return (
+    DISCOVERY_FINGERPRINT_FIELDS.every((field) =>
+      isDeepStrictEqual(left[field], right[field]),
+    ) &&
+    isDeepStrictEqual(
+      captureDiscoverySavedIdentityBasis(left),
+      captureDiscoverySavedIdentityBasis(right),
+    )
+  );
+}
 
 function decodeFingerprints(raw: string): DiscoverySavedJobFingerprints {
   const { identity, ...stored } = JSON.parse(raw) as StoredFingerprints;
@@ -94,17 +111,30 @@ export function readSavedJobFingerprintBatch(
 }
 
 /** The caller's job transaction owns this write and any rollback. */
+const writes = new WeakMap<
+  DatabaseSync,
+  { put: StatementSync; remove: StatementSync }
+>();
 export function writeSavedJobFingerprints(
   db: DatabaseSync,
   job: SavedJob,
 ): void {
   if (!db.isTransaction)
     throw new Error("Saved-job fingerprints require the job transaction.");
+  let prepared = writes.get(db);
+  if (!prepared) {
+    prepared = {
+      put: db.prepare(`INSERT INTO saved_job_discovery_fingerprints(job_id, value) VALUES (?, ?)
+        ON CONFLICT(job_id) DO UPDATE SET value = excluded.value WHERE value IS NOT excluded.value`),
+      remove: db.prepare(
+        "DELETE FROM saved_job_discovery_fingerprints WHERE job_id = ?",
+      ),
+    };
+    writes.set(db, prepared);
+  }
   const value = readSavedJobPreparedValue(job);
   if (!value) {
-    db.prepare(
-      "DELETE FROM saved_job_discovery_fingerprints WHERE job_id = ?",
-    ).run(job.id);
+    prepared.remove.run(job.id);
     return;
   }
   const { identity, ...fingerprints } = value;
@@ -126,10 +156,7 @@ export function writeSavedJobFingerprints(
         }
       : {}),
   };
-  db.prepare(
-    `INSERT INTO saved_job_discovery_fingerprints(job_id, value) VALUES (?, ?)
-    ON CONFLICT(job_id) DO UPDATE SET value = excluded.value WHERE value IS NOT excluded.value`,
-  ).run(job.id, JSON.stringify(stored));
+  prepared.put.run(job.id, JSON.stringify(stored));
 }
 
 function capturedFingerprintBasis(

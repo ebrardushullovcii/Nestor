@@ -39,6 +39,15 @@ transfer explicit typed preparation and main attaches it to the created rows.
 Exact input fields, including mutable arrays, invalidate preparation after a
 material change. Only foreign frozen inputs need a weak fallback. There is no
 text cache or URL peer cache. Read-path owns durable saved-job fingerprints.
+Search stores preparation computed from legacy rows through one bounded batch
+writer into that same fingerprint table. It checks transaction-current inputs;
+the existing interned body hash proves unchanged text without loading it.
+Normal later job writes recompute or delete preparation. No startup backfill
+is required. Preparation changes invalidate the existing borrowed projection
+so the next search receives those persisted facts even in the same app session.
+Scoped borrowed updates read root fields and relations separately, loading all
+required bodies in one indexed batch only when the updater or write uses them.
+Prepared SQL statements belong to the connection, rather than to each job.
 
 Typed discovery updates and saved-job deltas trust their domain values. Decode
 stored JSON without another schema walk in these paths. Migrations, imports,

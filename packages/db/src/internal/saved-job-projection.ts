@@ -205,15 +205,19 @@ export function createSavedJobProjectionReader(
     .all()
     .some((column) => column.name === "assessment_id");
   if (relational)
-    for (const operation of ["insert", "update", "delete"] as const) {
-      const ref = operation === "delete" ? "OLD" : "NEW";
-      database.exec(`CREATE TEMP TRIGGER saved_job_projection_plan_${operation}
-      AFTER ${operation.toUpperCase()} ON main.job_plan_assessments BEGIN
+    for (const table of [
+      "job_plan_assessments",
+      "saved_job_discovery_fingerprints",
+    ])
+      for (const operation of ["insert", "update", "delete"] as const) {
+        const ref = operation === "delete" ? "OLD" : "NEW";
+        database.exec(`CREATE TEMP TRIGGER saved_job_projection_${table}_${operation}
+      AFTER ${operation.toUpperCase()} ON main.${table} BEGIN
         UPDATE saved_job_projection_epoch SET revision = revision + 1;
         INSERT INTO saved_job_projection_changes(id,revision) SELECT ${ref}.job_id,revision FROM saved_job_projection_epoch
           WHERE 1 ON CONFLICT(id) DO UPDATE SET revision = excluded.revision;
       END`);
-    }
+      }
   const preparationSql =
     savedJobFingerprintSelectSql +
     (relational
