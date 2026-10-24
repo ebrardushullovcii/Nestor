@@ -33,6 +33,7 @@
     "@nestor/core": "workspace:*",
     "@nestor/db": "workspace:*",
     "@nestor/knowledge-base": "workspace:*",
-    "zod": "^3.24.2"
+    "zod": "^3.24.2",
+    "zod-to-json-schema": "3.24.6"
   }
 }

@@ -80,6 +80,8 @@ export interface AgentLoopModel {
 /** What the model said when it finished, in its own words plus typed extras. */
 export interface AgentLoopFinish {
   reason: string;
+  /** Optional verified tool output retained in the conversation transcript. */
+  output?: string;
   stuck: boolean;
   needsPerson: boolean;
   data: Record<string, unknown>;

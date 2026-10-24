@@ -1604,6 +1604,7 @@ export type SavedJob = JobPosting & {
   personSupplied?: boolean | undefined;
   planAssessments?: Record<string, MatchAssessment> | undefined;
   status: z.infer<typeof ApplicationStatusSchema>;
+  shortlistedAt?: string | null | undefined;
   matchAssessment: MatchAssessment;
   provenance: SavedJobDiscoveryProvenance[];
   discoveryFeedback: DiscoveryFeedback | null;
@@ -1623,6 +1624,7 @@ type SavedJobInput = z.input<typeof JobPostingSchema> & {
     | Record<string, z.input<typeof MatchAssessmentSchema>>
     | undefined;
   status: z.input<typeof ApplicationStatusSchema>;
+  shortlistedAt?: string | null | undefined;
   matchAssessment: z.input<typeof MatchAssessmentSchema>;
   provenance?: z.input<typeof SavedJobDiscoveryProvenanceSchema>[] | undefined;
   discoveryFeedback?:
@@ -1646,6 +1648,7 @@ const SavedJobObjectSchema = JobPostingSchema.extend({
   personSupplied: z.boolean().optional(),
   planAssessments: z.record(MatchAssessmentSchema).optional(),
   status: ApplicationStatusSchema,
+  shortlistedAt: IsoDateTimeSchema.nullable().optional(),
   matchAssessment: MatchAssessmentSchema,
   provenance: z.array(SavedJobDiscoveryProvenanceSchema).default([]),
   discoveryFeedback: DiscoveryFeedbackSchema.nullable().default(null),

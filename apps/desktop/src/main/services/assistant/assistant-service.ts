@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@nestor/contracts";
+import type { ApplicationAutomationMode, ApplyQueue, AssistantMessage } from "@nestor/contracts";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -13,6 +13,7 @@ import {
   AssistantSessionHost,
   createAssistantModelHandle,
   createScriptedAssistantModelHandle,
+  decideUnderGrants,
   type AssistantModelResolution,
 } from "@nestor/job-finder";
 
@@ -32,6 +33,28 @@ export const ASSISTANT_EVENT_CHANNEL = "job-finder:assistant:event";
 let hostPromise: Promise<AssistantSessionHost> | null = null;
 let repository: AssistantRepository | null = null;
 let unsubscribeWorkspaceUpdates: (() => void) | null = null;
+
+/** A queue rechecks its frozen bindings and current grants before each run. */
+export async function assistantQueuePolicy(
+  queue: Pick<ApplyQueue, "assistantScopes">, jobIds: readonly string[], mode: ApplicationAutomationMode,
+) {
+  const bindings = queue.assistantScopes ?? [];
+  if (!bindings.length) return { mode, refused: [], boundJobIds: [] };
+  repository ??= createAssistantRepository({ filePath: path.join(getJobFinderUserDataDirectory(), "assistant.sqlite") });
+  const bound = new Set<string>();
+  const refused: { jobId: string; reason: string }[] = [];
+  const modes = { prepare_only: 0, confirm_before_submit: 1, autonomous_submit: 2 } as const;
+  for (const conversationId of new Set(bindings.map((set) => set.conversationId))) {
+    const ids = jobIds.filter((id) => bindings.some((set) => set.conversationId === conversationId && set.jobIds.includes(id)));
+    if (!ids.length) continue;
+    for (const id of ids) bound.add(id);
+    for (const decision of decideUnderGrants({ grants: await repository.listGrants(conversationId), jobIds: ids, action: "prepare", savedMode: mode })) {
+      if (!decision.allowed) refused.push({ jobId: decision.jobId, reason: decision.reason ?? "The instruction no longer covers this job." });
+      else if (decision.mode && modes[decision.mode] < modes[mode]) mode = decision.mode;
+    }
+  }
+  return { mode, refused, boundJobIds: [...bound] };
+}
 
 function isEnabled(value: string | undefined): boolean {
   return value === "1" || value === "true";

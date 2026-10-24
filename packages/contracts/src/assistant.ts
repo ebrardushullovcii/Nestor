@@ -250,6 +250,7 @@ export const assistantChangeTargetValues = [
   "settings",
   "resume_draft",
   "search_plan",
+  "job_triage",
 ] as const;
 export const AssistantChangeTargetSchema = z.enum(assistantChangeTargetValues);
 export type AssistantChangeTarget = z.infer<typeof AssistantChangeTargetSchema>;
@@ -286,7 +287,7 @@ export const AssistantMessagePartSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("proposal"),
       proposalId: IdSchema,
-      kind: z.enum(["profile_operations", "resume_patches"]),
+      kind: z.enum(["profile_operations", "resume_patches", "job_finder_action"]),
       summary: NonEmptyStringSchema.max(400),
       status: z.enum(["pending", "applied", "rejected"]).default("pending"),
       targetId: IdSchema.nullable().default(null),
@@ -513,6 +514,7 @@ export const AssistantOperationSchema = z
         kind: z.enum([
           "discovery",
           "apply_batch",
+          "apply_queue",
           "apply_run",
           "resume_generation",
           "source_check",
@@ -580,7 +582,7 @@ export const AssistantProposalSchema = z
     id: IdSchema,
     conversationId: IdSchema,
     messageId: IdSchema.nullable().default(null),
-    kind: z.enum(["profile_operations", "resume_patches"]),
+    kind: z.enum(["profile_operations", "resume_patches", "job_finder_action"]),
     targetId: IdSchema.nullable().default(null),
     summary: NonEmptyStringSchema.max(400),
     items: z
@@ -630,7 +632,7 @@ export const AssistantInstructionGrantSchema = z
     sourceMessageId: IdSchema,
     action: AssistantGrantActionSchema,
     /** Resolved and frozen when the grant was recorded. */
-    jobIds: z.array(IdSchema).min(1).max(100),
+    jobIds: z.array(IdSchema).min(1).max(2000),
     resumePolicy: z.string().max(400).nullable().default(null),
     answerPolicy: z.string().max(1000).nullable().default(null),
     constraints: z.array(NonEmptyStringSchema.max(400)).max(12).default([]),
@@ -680,13 +682,14 @@ export const AssistantRunRefSchema = z
     kind: z.enum([
       "discovery",
       "apply_batch",
+          "apply_queue",
       "apply_run",
       "resume_generation",
       "source_check",
     ]),
     id: IdSchema,
     /** Jobs the run covers, when known (apply batches, resume batches). */
-    jobIds: z.array(IdSchema).max(100).default([]),
+    jobIds: z.array(IdSchema).max(2000).default([]),
   })
   .strict();
 export type AssistantRunRef = z.infer<typeof AssistantRunRefSchema>;

@@ -28,6 +28,15 @@ export function readRunStatus(
   snapshot: JobFinderWorkspaceSnapshot,
   run: AssistantRunRef,
 ): RunStatus {
+  if (run.kind === "apply_queue") {
+    const queue = snapshot.applyQueue;
+    if (!queue || queue.id !== run.id) return { done: true, summary: "The Apply queue is no longer active.", details: null };
+    return {
+      done: queue.state === "done" || queue.state === "stopped",
+      summary: `Apply queue ${queue.state.replaceAll("_", " ")}: ${queue.startedJobIds.length} started, ${queue.skipped.length} held back, ${queue.jobIds.length} chosen.${queue.pausedReason ? ` ${queue.pausedReason}` : ""}`,
+      details: { state: queue.state, startedJobIds: queue.startedJobIds, skipped: queue.skipped, resumesAt: queue.resumesAt },
+    };
+  }
   if (run.kind === "discovery") {
     const record =
       snapshot.activeDiscoveryRun?.id === run.id

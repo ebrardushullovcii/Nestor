@@ -55,9 +55,9 @@ export const recordInstructionTool = defineTool({
   ),
   input: z.object({
     action: AssistantGrantActionSchema,
-    jobIds: z.array(Id).max(100).default([]),
+    jobIds: z.array(Id).max(2000).default([]),
     resultSetId: Id.optional(),
-    positions: z.array(z.number().int().min(1)).max(100).optional(),
+    positions: z.array(z.number().int().min(1)).max(2000).optional(),
     quote: z.string().trim().min(1).max(1_000),
     constraints: z.array(z.string().trim().min(1).max(400)).max(12).default([]),
     resumePolicy: z.string().max(400).optional(),
@@ -121,7 +121,7 @@ export const recordInstructionTool = defineTool({
       conversationId: session.conversationId,
       sourceMessageId: authorizing.id,
       action: input.action,
-      jobIds: check.accepted.slice(0, 100),
+      jobIds: check.accepted.slice(0, 2000),
       resumePolicy: input.resumePolicy ?? null,
       answerPolicy: input.answerPolicy ?? null,
       constraints: input.constraints,
@@ -165,7 +165,7 @@ export const updateInstructionTool = defineTool({
   ),
   input: z.object({
     grantId: Id,
-    removeJobIds: z.array(Id).max(100).default([]),
+    removeJobIds: z.array(Id).max(2000).default([]),
     action: z.enum(["prepare", "apply_saved_mode"]).optional(),
     revoke: z.boolean().default(false),
     quote: z.string().trim().min(1).max(1_000),
@@ -241,7 +241,7 @@ export const applyToJobsTool = defineTool({
     ["jobIds"],
   ),
   input: z.object({
-    jobIds: z.array(Id).min(1).max(50),
+    jobIds: z.array(Id).min(1).max(2000),
     evenIfExcludedOrApplied: z.boolean().default(false),
   }),
   label: (input) =>
@@ -329,16 +329,22 @@ export const applyToJobsTool = defineTool({
       );
     }
     const started: string[] = [];
+    const queued: string[] = [];
     const heldBack: { jobId: string; reason: string }[] = [...cautioned];
     const runIds: string[] = [];
     for (const [mode, jobIds] of byMode) {
       session.assertCurrent();
-      const result = await ports.startApplications({ jobIds, mode });
+      const result = await ports.startApplications({ jobIds, mode, conversationId: session.conversationId, onQueued: async (queueId) => {
+        session.assertCurrent();
+        await session.watchRun({ kind: "apply_queue", id: queueId, jobIds }, "Applying to the chosen jobs");
+        session.assertCurrent();
+      } });
+      queued.push(...(result.queuedJobIds ?? []));
       started.push(...result.startedJobIds);
       heldBack.push(
         ...result.heldBack.map(({ jobId, reason }) => ({ jobId, reason })),
       );
-      if (result.runId) {
+      if (result.runId && !result.queueId) {
         runIds.push(result.runId);
         await session.watchRun(
           {
@@ -352,9 +358,10 @@ export const applyToJobsTool = defineTool({
     }
     ports.publishWorkspaceUpdate();
     return {
-      summary: `Started ${plural(started.length, "application")}${heldBack.length ? `; held back ${heldBack.length}` : ""}${refused.length ? `; refused ${refused.length}` : ""}. The conversation continues when the batch ends.`,
+      summary: `${queued.length ? `Queued ${plural(queued.length, "application")}; ` : ""}started ${plural(started.length, "application")}${heldBack.length ? `; held back ${heldBack.length}` : ""}${refused.length ? `; refused ${refused.length}` : ""}. The conversation continues when the batch ends.`,
       data: {
         runIds,
+        queued,
         started,
         heldBack,
         refused: refused.map(({ jobId, reason }) => ({ jobId, reason })),

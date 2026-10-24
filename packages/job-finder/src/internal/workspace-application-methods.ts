@@ -904,6 +904,7 @@ export function createWorkspaceApplicationMethods(
         return job;
       return {
         ...job,
+        shortlistedAt: new Date().toISOString(),
         status:
           assetByJob.get(job.id)?.status === "ready"
             ? "ready_for_review"
