@@ -65,6 +65,7 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0056](0056-resume-autosave-history-groups.md) | accepted | Consecutive Resume Studio autosaves share a history step |
 | [0057](0057-saved-job-details-stay-in-sqlite.md) | accepted | Saved listing details stay in SQLite behind bounded caches; compatible clean views survive updates while unopened saved jobs validate in background slices |
 | [0058](0058-one-apply-press-queues-the-whole-choice.md) | accepted | One Apply press over selected, page or all ready jobs is a saved queue of ten-job runs inside the daily limit; it waits for midnight and carries on after a restart |
+| [0063](0063-command-scoped-browser-focus.md) | accepted | Hidden reads wake without rendering; only pending frame-dependent commands and requested screenshots receive temporary focus |
 
 ## Policy
 
