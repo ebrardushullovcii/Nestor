@@ -970,6 +970,19 @@ export type JobFinderDiscoveryState = z.infer<
   typeof JobFinderDiscoveryStateSchema
 >;
 
+/** Shell fields only; history, pending jobs and ledger are deferred. */
+export const DiscoveryBootstrapStateSchema = JobFinderDiscoveryStateSchema.pick(
+  {
+    sessions: true,
+    runState: true,
+    activeRun: true,
+    activeSourceDebugRun: true,
+  },
+);
+export type DiscoveryBootstrapState = z.infer<
+  typeof DiscoveryBootstrapStateSchema
+>;
+
 // Keep repository schema declarations small as application receipt fields grow.
 const PersistedApplicationRecordSchema: z.ZodType<
   z.output<typeof ApplicationRecordSchema>,

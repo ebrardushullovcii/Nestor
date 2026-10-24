@@ -82,7 +82,7 @@ describe("normalized discovery storage", () => {
             const all = stmt.all.bind(stmt);
             vi.spyOn(stmt, "all").mockImplementation((...args) => { calls.rankReads++; return all(...args); });
           }
-          if (sql.startsWith("INSERT OR REPLACE INTO discovery_ledger")) {
+          if (sql.startsWith("INSERT INTO discovery_ledger_observations")) {
             const run = stmt.run.bind(stmt);
             vi.spyOn(stmt, "run").mockImplementation((...args) => { calls.rowWrites++; return run(...args); });
           }

@@ -584,7 +584,10 @@ export function deriveDashboardSummary(input: {
    * omitting it means "no grouping applies".
    */
   groupedDecisions?: readonly GroupedManualAnswerDecision[];
-  discovery: JobFinderDiscoveryState;
+  discovery: Pick<
+    JobFinderDiscoveryState,
+    "activeRun" | "recentRuns" | "runState" | "activeSourceDebugRun"
+  >;
   searchPreferences: JobSearchPreferences;
   sourceAccessPrompts?: readonly Pick<
     SourceAccessPrompt,

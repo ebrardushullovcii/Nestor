@@ -79,6 +79,8 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0070](0070-read-original-rows-during-startup-conversion.md) | accepted | Original rows answer startup queries before index preparation, and typed writers open before evidence conversion completes |
 | [0071](0071-store-evidence-once-and-query-startup-facts.md) | accepted | Store evidence once and query startup facts |
 | [0072](0072-background-database-backups-and-export-retention.md) | accepted | Background database backups and generated export retention |
+| [0074](0074-one-index-before-inventory-reads.md) | accepted | One stored index owns inventory reads; measured duplicate startup facts did not deliver earlier counts or pages |
+| [0078](0078-ledger-observations-and-wal-growth.md) | accepted | Ledger observations use small columns; checkpoints follow WAL growth rather than retained file size |
 
 ## Policy
 

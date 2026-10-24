@@ -1337,11 +1337,10 @@ export function createWorkspaceSnapshotProfileMethods(
     }
 
     const recoveryPromise = (async () => {
-      // Every refresh runs this check. The discovery projection is cached and
-      // answers "was anything running?"; the plan state and search settings
-      // (hundreds of KB with a large search) are read only when it was.
+      // Recovery needs only current run ownership, not the ledger, pending
+      // listings or history. Read full canonical state only inside its commit.
       const discoveryState =
-        await ctx.repository.readDiscoveryDisplayProjection();
+        await ctx.repository.readDiscoveryBootstrapProjection();
       if (
         ctx.activeDiscoveryAbortControllerRef.current ||
         ctx.activeDiscoveryPromiseRef.current
@@ -2153,7 +2152,7 @@ export function createWorkspaceSnapshotProfileMethods(
     ] = await Promise.all([
       getCurrentSetupStateContext(),
       ctx.repository.getSettings(),
-      ctx.repository.readDiscoveryDisplayProjection(),
+      ctx.repository.readDiscoveryBootstrapProjection(),
       ctx.repository.getCampaignState(),
       ctx.repository.listUserActionRequests(),
       ctx.repository.getActivityControl(),
@@ -2223,12 +2222,10 @@ export function createWorkspaceSnapshotProfileMethods(
       applyRuns: [],
       userActionRequests: bootstrapUserActionRequests,
       discovery: {
-        ...discovery,
+        runState: discovery.runState,
         activeRun: discovery.activeRun,
         recentRuns: [],
         activeSourceDebugRun: discovery.activeSourceDebugRun,
-        recentSourceDebugRuns: [],
-        sessions: discovery.sessions,
       },
       searchPreferences: bootstrapSearchPreferences,
     });

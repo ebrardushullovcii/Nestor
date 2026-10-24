@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { discoveryLedgerValueSql } from "./discovery-ledger-storage";
 import type {
   ApplicationAttempt,
   DiscoveryLedgerEntry,
@@ -80,10 +81,15 @@ export function createWorkspaceListActivityReader(db: DatabaseSync) {
         },
       });
     }
+    const normalizedLedger = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='discovery_ledger_observations'").get());
     const ledger = db
       .prepare(
-        `SELECT value FROM discovery_ledger
-      WHERE json_extract(value,'$.latestStatus')='inactive' AND json_extract(value,'$.inactiveAt') IS NOT NULL ORDER BY position`,
+        normalizedLedger ? `SELECT ${discoveryLedgerValueSql()} AS value FROM discovery_ledger
+      WHERE json_extract(value,'$.latestStatus')='inactive' AND EXISTS (
+        SELECT 1 FROM discovery_ledger_observations observation
+        WHERE observation.id=discovery_ledger.id AND observation.inactive_at IS NOT NULL) ORDER BY position`
+        : `SELECT value FROM discovery_ledger WHERE json_extract(value,'$.latestStatus')='inactive'
+          AND json_extract(value,'$.inactiveAt') IS NOT NULL ORDER BY position`,
       )
       .all()
       .map((row) => JSON.parse(String(row.value)) as DiscoveryLedgerEntry);

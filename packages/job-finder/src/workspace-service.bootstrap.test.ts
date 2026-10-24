@@ -7,7 +7,7 @@ import {
   JobFinderIntelligenceStateSchema,
   SourceDebugRunRecordSchema,
 } from "@nestor/contracts";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
   createBrowserRuntime,
@@ -109,6 +109,28 @@ function createHydrationFixture() {
 }
 
 describe("workspace service bootstrap hydration", () => {
+  test("bootstrap never reads the deferred discovery display projection", async () => {
+    const { repository, workspaceService } = createWorkspaceServiceHarness({
+      seed: createHydrationFixture().seed,
+    });
+    const fullDiscoveryRead = vi.spyOn(
+      repository,
+      "readDiscoveryDisplayProjection",
+    );
+    const bootstrapRead = vi.spyOn(
+      repository,
+      "readDiscoveryBootstrapProjection",
+    );
+    try {
+      const bootstrap = await workspaceService.getWorkspaceBootstrap();
+      expect(bootstrap.hydration.phase).toBe("bootstrap");
+      expect(bootstrapRead).toHaveBeenCalledOnce();
+      expect(fullDiscoveryRead).not.toHaveBeenCalled();
+    } finally {
+      fullDiscoveryRead.mockRestore();
+      bootstrapRead.mockRestore();
+    }
+  });
   test("keeps the shell state in bootstrap and restores deferred collections in the full snapshot", async () => {
     const fixture = createHydrationFixture();
     const harness = createWorkspaceServiceHarness({ seed: fixture.seed });
