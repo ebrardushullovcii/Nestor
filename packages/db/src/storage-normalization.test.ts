@@ -38,6 +38,7 @@ import {
   createWorkspaceQueryRepository,
   prepareWorkspaceQueryDatabase,
 } from "./workspace-query-repository";
+import { completeWorkspaceDatabaseMigrations } from "./workspace-database-startup";
 import { readSavedJobFingerprintBatch } from "./internal/saved-job-fingerprints";
 import {
   restoreResumeDraftStorage,
@@ -181,6 +182,40 @@ test("interrupted job conversion keeps queries exact and resumes without overwri
   expect(db.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe(
     "ok",
   );
+});
+
+test("background conversion retires obsolete validation triggers before writing jobs", async () => {
+  const temp = await createTempRepository("nestor-migration-order-");
+  cleanups.push(temp.cleanup);
+  const repo = await temp.createRepository();
+  const job = createSavedJob({ id: "migration-order" });
+  await repo.commitSavedJobDelta({ upserts: [job] });
+  await repo.close();
+  const db = new DatabaseSync(temp.filePath);
+  cleanups.push(() => db.close());
+  db.prepare(
+    "UPDATE saved_jobs SET value=?,assessment_id=NULL,description_id=NULL WHERE id=?",
+  ).run(JSON.stringify(job), job.id);
+  db.exec(`DELETE FROM schema_migrations WHERE version IN (26,28);
+    CREATE TRIGGER row_validations_guard AFTER UPDATE ON saved_jobs BEGIN
+      SELECT RAISE(ABORT,'Retired validation trigger ran'); END;`);
+  await completeWorkspaceDatabaseMigrations(temp.filePath);
+  expect(
+    db
+      .prepare("SELECT 1 FROM sqlite_master WHERE name='row_validations_guard'")
+      .get(),
+  ).toBeUndefined();
+  expect(
+    JSON.parse(
+      String(
+        db
+          .prepare(
+            `SELECT ${savedJobValueSql()} AS value FROM saved_jobs WHERE id=?`,
+          )
+          .get(job.id)?.value,
+      ),
+    ),
+  ).toEqual(job);
 });
 
 test("sliced resume conversion preserves pending approval state and exact citations across restart", async () => {

@@ -15,11 +15,12 @@ export async function completeWorkspaceDatabaseMigrations(
     database.exec("PRAGMA busy_timeout = 5000; PRAGMA temp_store = MEMORY");
     await withStorageMigrationBackups(database, async () => {
       runMigrations(database, { deferEvidenceConversion: true });
-      for (const step of migrateSavedJobStorageSteps(database)) {
+      // Resume conversion retires old validation triggers before job writes.
+      for (const step of migrateResumeStorageSteps(database)) {
         void step;
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
-      for (const step of migrateResumeStorageSteps(database)) {
+      for (const step of migrateSavedJobStorageSteps(database)) {
         void step;
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
