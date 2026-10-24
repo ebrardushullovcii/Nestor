@@ -194,3 +194,45 @@ it("recounts open jobs when the list or the shortlist changes", () => {
   });
   expect(result.current).toMatchObject({ total: 2 });
 });
+
+it("lets a job moved back from Shortlisted be decided again (STAB-009)", async () => {
+  vi.stubGlobal("nestor", {
+    jobFinder: { getJobDetail: vi.fn(() => new Promise(() => undefined)) },
+  });
+  const jobs = [row("a"), row("b")];
+  const queued = (jobId: string) =>
+    ({ jobId }) as unknown as Parameters<
+      typeof useDiscoveryTriage
+    >[0]["reviewQueue"][number];
+  const onQueueJob = vi.fn(() =>
+    Promise.resolve({ status: "success" as const, message: "Added" }),
+  );
+  const { result, rerender } = renderHook(
+    ({ reviewQueue }: { reviewQueue: ReturnType<typeof queued>[] }) =>
+      useDiscoveryTriage({
+        enabled: true,
+        rows: jobs,
+        groupOf,
+        orderedJobIds: jobs.map((job) => job.id),
+        inspectedJob: jobs[0]!,
+        reviewQueue,
+        campaignId: "plan",
+        onSelectJob: vi.fn(),
+        onQueueJob,
+        onDismissJob: vi.fn(),
+        onRestoreDismissedJob: vi.fn(),
+      }),
+    { initialProps: { reviewQueue: [] as ReturnType<typeof queued>[] } },
+  );
+  act(() => result.current!.onShortlist!());
+  await act(() => vi.waitFor(() => expect(onQueueJob).toHaveBeenCalled()));
+  // Decided here: its buttons are off while the shortlist lands.
+  expect(result.current!.onShortlist).toBeNull();
+  rerender({ reviewQueue: [queued("a")] });
+  expect(result.current!.onShortlist).toBeNull();
+  // Moved back to Find jobs from Shortlisted.
+  rerender({ reviewQueue: [] });
+  expect(result.current!.onShortlist).not.toBeNull();
+  expect(result.current!.onNotInterested).not.toBeNull();
+  expect(result.current).toMatchObject({ goneThrough: 0 });
+});

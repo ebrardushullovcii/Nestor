@@ -78,6 +78,12 @@ export function findNextTriageJobId(
   return null;
 }
 
+interface TriageDecision {
+  weaker: boolean;
+  kind: "shortlist" | "hide";
+  landed: boolean;
+}
+
 export function useDiscoveryTriage(input: {
   enabled: boolean;
   /** The page on screen: titles and statuses of the rows it shows. */
@@ -104,8 +110,11 @@ export function useDiscoveryTriage(input: {
   onRestoreDismissedJob: (jobId: string) => void;
   onRemoveFromShortlist?: (jobIds: readonly string[]) => Promise<void>;
 }): DiscoveryTriage | null {
-  // Each decided job, and whether it was a weaker match.
-  const [decided, setDecided] = useState<ReadonlyMap<string, boolean>>(
+  // Each decided job: whether it was a weaker match, how it was decided,
+  // and whether the decision has landed (the job is in Shortlisted, or has
+  // left the list). A landed decision undone somewhere else (Move back,
+  // Show again) is forgotten, so the job can be decided again (STAB-009).
+  const [decided, setDecided] = useState<ReadonlyMap<string, TriageDecision>>(
     new Map(),
   );
   const [last, setLast] = useState<LastDecision | null>(null);
@@ -152,8 +161,28 @@ export function useDiscoveryTriage(input: {
   }, [decided, groupOf, jobsById, orderedJobIds, shortlistedIds]);
   const openCount = currentWeaker ? openCounts.weaker : openCounts.stronger;
   const decidedCount = [...decided.values()].filter(
-    (weaker) => weaker === currentWeaker,
+    (decision) => decision.weaker === currentWeaker,
   ).length;
+  useEffect(() => {
+    const listed = new Set(orderedJobIds);
+    setDecided((previous) => {
+      let next: Map<string, TriageDecision> | null = null;
+      for (const [jobId, decision] of previous) {
+        const landed =
+          decision.kind === "shortlist"
+            ? shortlistedIds.has(jobId)
+            : !listed.has(jobId);
+        if (!decision.landed && landed) {
+          next ??= new Map(previous);
+          next.set(jobId, { ...decision, landed: true });
+        } else if (decision.landed && !landed) {
+          next ??= new Map(previous);
+          next.delete(jobId);
+        }
+      }
+      return next ?? previous;
+    });
+  }, [orderedJobIds, shortlistedIds]);
   const nextId = findNextTriageJobId(input.orderedJobIds, currentId, isOpen);
   const previousId = findNextTriageJobId(
     input.orderedJobIds,
@@ -163,10 +192,15 @@ export function useDiscoveryTriage(input: {
   );
   const currentIsOpen = currentId !== null && isOpen(currentId);
 
-  const markDecided = (jobId: string, value: boolean) =>
+  const markDecided = (
+    jobId: string,
+    value: boolean,
+    kind: TriageDecision["kind"] = "shortlist",
+  ) =>
     setDecided((previous) => {
       const next = new Map(previous);
-      if (value) next.set(jobId, isWeaker(jobId));
+      if (value)
+        next.set(jobId, { weaker: isWeaker(jobId), kind, landed: false });
       else next.delete(jobId);
       return next;
     });
@@ -196,7 +230,7 @@ export function useDiscoveryTriage(input: {
   const notInterested = () => {
     if (!current || !currentIsOpen) return;
     const { id: jobId, title } = current;
-    markDecided(jobId, true);
+    markDecided(jobId, true, "hide");
     setLast({ kind: "hide", jobId, title });
     setFailure(null);
     if (nextId) input.onSelectJob(nextId);
