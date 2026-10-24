@@ -1905,9 +1905,14 @@ function JobFinderReviewQueueRouteContent() {
         onOpenBrowserSession={() => {
           void context.onOpenBrowserSession();
         }}
+        // A link to the job: Find jobs lists only jobs still waiting on a
+        // decision, so a shortlisted job opened by selection alone left an
+        // empty page (STAB-004). The link holds it open there.
         onOpenJobDetails={(jobId) => {
           context.onSelectDiscoveryJob(jobId);
-          context.onNavigateSafely("/job-finder/discovery");
+          context.onNavigateSafely(
+            buildJobFinderContextRoute("/job-finder/discovery", { jobId }),
+          );
         }}
         onOpenApplication={(recordId) => {
           context.onSelectApplicationRecord(recordId);
