@@ -864,7 +864,37 @@ export function createWorkspaceSnapshotProfileMethods(
     return views;
   }
 
-  async function runNoResponseAutomationIfDue(options?: {
+  function startStoredResumeDraftSettlement(): Promise<unknown> {
+    storedResumeDraftSettlement ??= settleStoredResumeDrafts(ctx).catch(
+      (error: unknown) => {
+        console.warn(
+          "[Job Finder] Settling stored resume drafts failed",
+          error,
+        );
+      },
+    );
+    return storedResumeDraftSettlement;
+  }
+
+  let noResponseAutomationRun: Promise<void> | null = null;
+  /**
+   * A call while a run is going joins it rather than starting another; one
+   * with just-saved settings runs after it, with those settings.
+   */
+  function runNoResponseAutomationIfDue(options?: {
+    settings?: ApplicationCrmSettings;
+  }): Promise<void> {
+    if (options?.settings)
+      return (noResponseAutomationRun ?? Promise.resolve()).then(() =>
+        runNoResponseAutomationOnce(options),
+      );
+    noResponseAutomationRun ??= runNoResponseAutomationOnce().finally(() => {
+      noResponseAutomationRun = null;
+    });
+    return noResponseAutomationRun;
+  }
+
+  async function runNoResponseAutomationOnce(options?: {
     settings?: ApplicationCrmSettings;
   }): Promise<void> {
     const now = Date.now();
@@ -1476,20 +1506,14 @@ export function createWorkspaceSnapshotProfileMethods(
     // Display reads show the scores as they stand and refresh when the
     // rescoring lands; a canonical read waits for it.
     if (!borrowValidatedJobs) await settleSavedJobRescoring();
-    await runNoResponseAutomationIfDue();
-
-    storedResumeDraftSettlement ??= settleStoredResumeDrafts(ctx).catch(
-      (error: unknown) => {
-        console.warn(
-          "[Job Finder] Settling stored resume drafts failed",
-          error,
-        );
-      },
-    );
+    // Home's first view answers without the automation and the draft
+    // settlement and starts them once it is sent; the full snapshot that
+    // follows waits for them as before.
+    if (!homeTier) await runNoResponseAutomationIfDue();
     await Promise.all([
       recoverInterruptedDiscoveryStateOnLoad(),
       recoverInterruptedApplyRunsOnLoad(),
-      storedResumeDraftSettlement,
+      homeTier ? undefined : startStoredResumeDraftSettlement(),
     ]);
     if (borrowValidatedJobs) await nextTurn();
     await reconcileAutomaticBatchSampleReviews(ctx);
@@ -2191,7 +2215,18 @@ export function createWorkspaceSnapshotProfileMethods(
   async function getWorkspaceHomeSnapshot(): Promise<JobFinderWorkspaceSnapshot | null> {
     if (!ctx.repository.listCuratedSavedJobIds) return null;
     try {
-      return await getWorkspaceSnapshot(true, true);
+      const home = await getWorkspaceSnapshot(true, true);
+      // What the first view skipped starts once it is on its way.
+      realSetImmediate(() => {
+        void runNoResponseAutomationIfDue().catch((error: unknown) => {
+          console.warn(
+            "[JobFinderWorkspace] No-response automation skipped.",
+            error,
+          );
+        });
+        void startStoredResumeDraftSettlement();
+      });
+      return home;
     } catch (error) {
       if (error instanceof HomeTierUnavailableError) return null;
       throw error;
