@@ -347,7 +347,7 @@ test("resume writing reuses the complete listing without forcing another full fi
   expect(fetchListingHtml).not.toHaveBeenCalled();
   expect(write).toHaveBeenCalledOnce();
   expect(write.mock.calls[0]?.[0].job.description).toBe(
-    seed.savedJobs[0]!.description,
+    seed.savedJobs[0].description,
   );
   await workspaceService.shutdown();
 });
