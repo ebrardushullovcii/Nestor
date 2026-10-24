@@ -221,11 +221,13 @@ export function PageStatusLine(props: {
     computeFit();
   }, [computeFit, fitCount, signature]);
 
+  // Measured when what the button says can change, not after every render:
+  // reading it forces a layout.
   useLayoutEffect(() => {
     if (moreRef.current && moreRef.current.offsetWidth > 0) {
       moreWidthRef.current = moreRef.current.offsetWidth;
     }
-  });
+  }, [fitCount, signature]);
 
   useEffect(() => {
     const line = lineRef.current;
