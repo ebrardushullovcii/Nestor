@@ -104,3 +104,61 @@ test("standalone sanitizing supplies no writing deadline or signal", async () =>
     await workspaceService.shutdown();
   }
 });
+
+test("a summary the fixes left empty is saved the way export re-derives it", async () => {
+  const seed = createSeed();
+  const { repository, workspaceService } = createWorkspaceServiceHarness({
+    seed,
+  });
+  const job = seed.savedJobs.find((entry) => entry.id === "job_ready")!;
+  const at = "2026-10-13T10:00:00.000Z";
+  const draft = ResumeDraftSchema.parse({
+    id: "settled_summary_draft",
+    jobId: job.id,
+    status: "draft",
+    templateId: "classic_ats",
+    createdAt: at,
+    updatedAt: at,
+    sections: [
+      {
+        id: "summary",
+        kind: "summary",
+        label: "Summary",
+        text: "Invented pitch the checker rejected.",
+        origin: "ai_generated",
+        locked: false,
+        included: true,
+        sortOrder: 0,
+        updatedAt: at,
+      },
+    ],
+  });
+  // The checker rejected the generated summary and offered nothing to keep.
+  mocks.fixes.mockImplementation(({ draft: checked }) =>
+    Promise.resolve({
+      ...checked,
+      sections: checked.sections.map((section) => ({ ...section, text: null })),
+    }),
+  );
+  const ctx = {
+    repository,
+    aiClient: createAiClient(),
+  } as unknown as WorkspaceServiceContext;
+  try {
+    const saved = await sanitizeAndCheckResumeDraft(
+      ctx,
+      { draft, job, profile: seed.profile },
+      { fixGeneratedLines: true },
+    );
+    const exported = await sanitizeAndCheckResumeDraft(ctx, {
+      draft: saved,
+      job,
+      profile: seed.profile,
+    });
+    expect(seed.profile.summary?.trim()).toBeTruthy();
+    expect(saved.sections[0]?.text).toBe(seed.profile.summary?.trim());
+    expect(exported.sections).toEqual(saved.sections);
+  } finally {
+    await workspaceService.shutdown();
+  }
+});
