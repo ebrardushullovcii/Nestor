@@ -14,12 +14,17 @@ import {
   type FinishInBrowserHandler,
   type FinishInBrowserInput,
 } from "./applications-detail-panel-recovery-actions-section";
+import type { ApplicationQueueHold } from "./application-queue-hold";
 
 /**
  * Recovery keeps only the action group here; the per-run history now lives in
  * the collapsed Technical details block rendered by the activity sections.
  */
 export function ApplicationsDetailPanelRecoverySections(props: {
+  /** The Apply queue set this job aside before it started. */
+  queueHold?: ApplicationQueueHold | null;
+  /** The employer, for a held job's sentence. */
+  company?: string;
   progressNow?: number | undefined;
   /** The mode saved in Settings; a retry runs in it. */
   applyMode?: ApplyMode;
@@ -104,6 +109,8 @@ export function ApplicationsDetailPanelRecoverySections(props: {
   return (
     <ApplicationsDetailPanelRecoveryActionsSection
       progressNow={props.progressNow}
+      queueHold={props.queueHold ?? null}
+      {...(props.company ? { company: props.company } : {})}
       {...(props.applyMode ? { applyMode: props.applyMode } : {})}
       canRestageAutoRun={canRestageAutoRun}
       canRestageQueueRun={canRestageQueueRun}

@@ -86,6 +86,7 @@ import {
 } from "../../lib/apply-queue-view";
 import { useAssistantContextSource } from "../../assistant/assistant-provider";
 import { buildListContext } from "../../assistant/assistant-context-capture";
+import { buildApplicationQueueHolds } from "./application-queue-hold";
 
 /** Statuses an application reaches once it was sent and can have an outcome. */
 const OUTCOME_STATUSES = new Set<string>([
@@ -158,6 +159,8 @@ export function ApplicationsScreen(props: {
   ) => void;
   /** The Apply queue (ADR 0058), shown above the list with its controls. */
   applyQueue?: JobFinderRendererWorkspaceSnapshot["applyQueue"];
+  /** Same-company conflicts, to tell a held job's open choice from a made one. */
+  sameCompanyConflicts?: JobFinderRendererWorkspaceSnapshot["intelligence"]["safeguards"]["simultaneousApplicationConflicts"];
   onControlApplyQueue?: (action: ApplyQueueControlAction) => void;
   onRaiseDailyLimit?: () => void;
   onStartApplyCopilot: (input: JobFinderExactApplicationTarget) => void;
@@ -439,6 +442,14 @@ export function ApplicationsScreen(props: {
   // Bulk retry: every application whose last run ended where a fresh run
   // could differ. One control, so a batch that failed on a bad network night
   // is not ten separate "Try again" presses.
+  const queueHolds = useMemo(
+    () =>
+      buildApplicationQueueHolds({
+        applyQueue: props.applyQueue,
+        conflicts: props.sameCompanyConflicts ?? [],
+      }),
+    [props.applyQueue, props.sameCompanyConflicts],
+  );
   const retryableJobIds = useMemo(() => {
     const running = new Set(
       applyRuns
@@ -1166,6 +1177,7 @@ export function ApplicationsScreen(props: {
         ) : (
           <ApplicationsRecordsPanel
             progressNow={progressNow}
+            queueHolds={queueHolds}
             {...(props.crmSettings
               ? { customStages: props.crmSettings.customStages }
               : {})}
@@ -1273,6 +1285,7 @@ export function ApplicationsScreen(props: {
           </section>
         ) : (
           <ApplicationsDetailPanel
+            queueHolds={queueHolds}
             progressNow={progressNow}
             {...(props.onReturnApplicationToShortlist
               ? { onReturnToShortlist: props.onReturnApplicationToShortlist }

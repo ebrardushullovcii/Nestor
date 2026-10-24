@@ -2853,6 +2853,10 @@ export function JobFinderApplicationsRoute() {
           void context.onStartAutoApplyQueue(jobIds, applicationAutomationMode);
         }}
         applyQueue={context.workspace.applyQueue}
+        sameCompanyConflicts={
+          context.workspace.intelligence.safeguards
+            .simultaneousApplicationConflicts
+        }
         onControlApplyQueue={context.onControlApplyQueue}
         onRaiseDailyLimit={() =>
           context.onNavigateSafely(

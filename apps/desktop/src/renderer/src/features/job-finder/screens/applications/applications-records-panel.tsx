@@ -111,9 +111,15 @@ import {
   getApplicationReadableNextStepLabel,
   getApplicationStagePresentation,
 } from "./applications-status";
+import {
+  describeApplicationQueueHold,
+  type ApplicationQueueHold,
+} from "./application-queue-hold";
 
 interface ApplicationsRecordsPanelProps {
   progressNow?: number | undefined;
+  /** Jobs the Apply queue set aside before they started, by job id. */
+  queueHolds?: ReadonlyMap<string, ApplicationQueueHold>;
   activeFilter: ApplicationsViewFilter;
   applicationRecords: readonly ApplicationRecord[];
   /** Stages the person named in the tracker, shown by those names. */
@@ -171,6 +177,7 @@ interface ApplicationsRecordsPanelProps {
 }
 
 export function ApplicationsRecordsPanel({
+  queueHolds,
   activeFilter,
   applicationRecords: sourceRecords,
   customStages,
@@ -554,9 +561,20 @@ export function ApplicationsRecordsPanel({
                 })
               : null;
             const hiringStage = trackedHiringStageBadge(record, customStages);
+            const queueHold = latestResult
+              ? undefined
+              : queueHolds?.get(record.jobId);
             const stage = hiringStage
               ? hiringStage
-              : applyState
+              : queueHold
+                ? {
+                    label: describeApplicationQueueHold(
+                      queueHold,
+                      record.company,
+                    ),
+                    tone: "warning" as const,
+                  }
+                : applyState
                 ? {
                     label: applyState.title,
                     tone:

@@ -67,6 +67,7 @@ import {
   listPendingApplicationQuestions,
 } from "./applications-status";
 import { formatApplicationEmployerLine } from "../../lib/job-employer-location-display";
+import type { ApplicationQueueHold } from "./application-queue-hold";
 
 function buildLiveAssistantApplicationHref(input: {
   record: ApplicationRecord;
@@ -109,6 +110,8 @@ function buildLiveAssistantApplicationHref(input: {
 
 interface ApplicationsDetailPanelProps {
   progressNow?: number | undefined;
+  /** Jobs the Apply queue set aside before they started, by job id. */
+  queueHolds?: ReadonlyMap<string, ApplicationQueueHold>;
   /** Applications -> Shortlisted, shown only for an unsent application. */
   onReturnToShortlist?: (record: ApplicationRecord) => void;
   answerDraft?: QuestionAnswerDraft | undefined;
@@ -208,6 +211,7 @@ interface ApplicationsDetailPanelProps {
 
 export function ApplicationsDetailPanel({
   progressNow,
+  queueHolds,
   onReturnToShortlist,
   applyMode,
   activeFilter,
@@ -481,6 +485,8 @@ export function ApplicationsDetailPanel({
   const recoverySection = selectedRecord ? (
     <ApplicationsDetailPanelRecoverySections
       progressNow={progressNow}
+      queueHold={queueHolds?.get(selectedRecord.jobId) ?? null}
+      company={selectedRecord.company}
       {...(applyMode ? { applyMode } : {})}
       canRestageAutoRun={canRestageAutoRun}
       canRestageQueueRun={canRestageQueueRun}
