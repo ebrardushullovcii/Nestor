@@ -79,7 +79,7 @@ export function createDiscoveryDisplayProjectionReader(
     )`);
     // Checkpoint bodies are absent from this projection. A checkpoint-only
     // commit must keep the same display object and avoid rebuilding history.
-    for (const table of ["discovery_runs", "discovery_run_targets", "discovery_run_activity", "discovery_run_source_health", "discovery_ledger", "discovery_pending_jobs"]) {
+    for (const table of ["discovery_runs", "discovery_run_targets", "discovery_run_activity", "discovery_run_source_health", "discovery_ledger", "discovery_ledger_observations", "discovery_pending_jobs"]) {
       for (const event of ["INSERT", "UPDATE", "DELETE"]) {
         const row = event === "DELETE" ? "OLD" : "NEW";
         const runId = table === "discovery_run_targets" || table === "discovery_run_activity" || table === "discovery_run_source_health"
@@ -91,7 +91,7 @@ export function createDiscoveryDisplayProjectionReader(
           BEGIN
             UPDATE discovery_display_epoch SET revision = revision + 1;
             INSERT INTO discovery_display_changes (table_name, run_id, id)
-              VALUES ('${table}', ${runId}, ${row}.id)
+              VALUES ('${table === "discovery_ledger_observations" ? "discovery_ledger" : table}', ${runId}, ${row}.id)
               ON CONFLICT(table_name, run_id, id) DO NOTHING;
           END`);
       }

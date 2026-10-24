@@ -222,6 +222,7 @@ const allLists: WorkspaceJobList[] = [
 function affectedLists(table: string, id: string): WorkspaceJobList[] {
   if (
     table === "discovery_ledger" ||
+    table === "discovery_ledger_observations" ||
     table === "application_attempts" ||
     table === "job_sources" ||
     table === "search_preference_sources" ||
