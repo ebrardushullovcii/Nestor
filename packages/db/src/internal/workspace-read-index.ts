@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const VERSION = "2";
+const VERSION = "3";
 const jobTables = ["saved_jobs", "discovery_pending_jobs"] as const;
 
 function indexJobSql(table: string, where = ""): string {
@@ -92,7 +92,7 @@ export function ensureWorkspaceReadIndex(database: DatabaseSync): void {
         closed INTEGER NOT NULL, mismatch INTEGER NOT NULL, provisional INTEGER NOT NULL,
         outside INTEGER NOT NULL, title_family INTEGER NOT NULL, recency TEXT NOT NULL,
         detail INTEGER NOT NULL, seen TEXT NOT NULL,
-        location TEXT, source_job_id TEXT, canonical_url TEXT NOT NULL, application_url TEXT NOT NULL,
+        location TEXT, source_job_id TEXT, canonical_url TEXT NOT NULL, application_url TEXT,
         posted_at TEXT, posted_text TEXT, discovered_at TEXT NOT NULL, first_seen_at TEXT,
         salary_text TEXT, detail_quality TEXT NOT NULL, score_upper INTEGER NOT NULL,
         recommendation TEXT NOT NULL, title_family_match TEXT, location_reach TEXT,
