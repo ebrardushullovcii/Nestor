@@ -173,6 +173,31 @@ if (
   void loadJobSearchHomeScreen().catch(() => undefined);
 }
 
+// Every other screen's code is fetched once the window is idle, so the first
+// click on any of them renders at once instead of waiting on its chunk.
+if (import.meta.env.MODE !== "test" && typeof window !== "undefined") {
+  const preloadScreens = () => {
+    for (const load of [
+      loadJobSearchHomeScreen,
+      loadSettingsScreen,
+      loadCompaniesScreen,
+      loadCompanyDetailScreen,
+      loadResumeWorkspaceScreen,
+      loadCampaignsScreen,
+      loadActionsScreen,
+      loadOutcomeAnalyticsScreen,
+      loadResumeStrategiesScreen,
+      loadSafeguardsScreen,
+      loadRapidReviewScreen,
+      loadProfileSetupScreen,
+    ])
+      void load().catch(() => undefined);
+  };
+  if (typeof window.requestIdleCallback === "function")
+    window.requestIdleCallback(preloadScreens, { timeout: 4000 });
+  else window.setTimeout(preloadScreens, 2000);
+}
+
 const ProfileSetupScreen = lazy(loadProfileSetupScreen);
 const CampaignsScreen = lazy(loadCampaignsScreen);
 const CompaniesScreen = lazy(loadCompaniesScreen);

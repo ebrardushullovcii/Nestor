@@ -298,7 +298,6 @@ describe("JobFinderShell section navigation", () => {
       await screen.findByRole("heading", { name: "Loaded Home" }),
     ).toBeTruthy();
     expect(screen.queryByText("Opening Home…")).toBeNull();
-    expect(screen.getByRole("main").getAttribute("aria-busy")).toBe("false");
   });
 
   it("moves complete navigation labels into More at a 200% viewport", async () => {

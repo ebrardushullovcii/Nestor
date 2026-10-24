@@ -12,7 +12,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useTransition,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -26,7 +25,6 @@ import {
   House,
   Keyboard,
   Layers3,
-  LoaderCircle,
   Minus,
   Search,
   Settings,
@@ -580,9 +578,9 @@ export function JobFinderShell({
       isMaximized: false,
       isMinimizable: true,
     });
-  const [routeAnnouncement, setRouteAnnouncement] = useState("");
-  const [isNavigationPending, startNavigationTransition] = useTransition();
-  const [openingScreenLabel, setOpeningScreenLabel] = useState("");
+  // The live region is written directly: as state, the announcement re-rendered
+  // the whole shell twice on every navigation.
+  const routeAnnouncementRef = useRef<HTMLSpanElement | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(
     getInitialSidebarCollapsedState,
   );
@@ -1002,7 +1000,8 @@ export function JobFinderShell({
     const usesNarrowShellReflow =
       window.matchMedia?.("(max-width: 639px)").matches ?? false;
     document.title = `${activeScreenLabel} | Job Finder | Nestor`;
-    setRouteAnnouncement("");
+    const announcement = routeAnnouncementRef.current;
+    if (announcement) announcement.textContent = "";
     if (!hasDestinationAnchor) {
       main?.scrollTo({ top: 0 });
       main?.focus({ preventScroll: true });
@@ -1022,7 +1021,8 @@ export function JobFinderShell({
       } catch {
         // Navigation timing is diagnostic only and must never block routing.
       }
-      setRouteAnnouncement(`${activeScreenLabel} opened.`);
+      if (announcement)
+        announcement.textContent = `${activeScreenLabel} opened.`;
     });
 
     return () => {
@@ -1108,14 +1108,14 @@ export function JobFinderShell({
       // Navigation timing is diagnostic only and must never block routing.
     }
 
-    setOpeningScreenLabel(screenLabelMap[nextScreen as JobFinderScreen]);
-    startNavigationTransition(() => {
-      if (onNavigate) {
-        onNavigate(nextPath);
-      } else {
-        void navigate(nextPath);
-      }
-    });
+    // Straight to the screen in one commit. Every screen's code is fetched
+    // ahead of time, and a cold one shows its own opening surface, so a
+    // transition only made each click wait while React rendered in slices.
+    if (onNavigate) {
+      onNavigate(nextPath);
+    } else {
+      void navigate(nextPath);
+    }
   }
 
   // The switch's only destination: the other module. Selecting the module the
@@ -2076,10 +2076,9 @@ export function JobFinderShell({
         aria-atomic="true"
         aria-live="polite"
         className="sr-only"
+        ref={routeAnnouncementRef}
         role="status"
-      >
-        {routeAnnouncement}
-      </span>
+      />
 
       {/* Content passes under the fixed header with no seam, so a title or a
           card sitting at the boundary paints sliced through its glyphs. The
@@ -2106,7 +2105,6 @@ export function JobFinderShell({
         }}
       >
         <main
-          aria-busy={isNavigationPending}
           aria-label={activeScreenLabel}
           className={
             usesLockedScreenLayout
@@ -2116,18 +2114,6 @@ export function JobFinderShell({
           ref={mainRef}
           tabIndex={-1}
         >
-          {isNavigationPending ? (
-            <div
-              className="pointer-events-none absolute right-5 top-3 z-20 flex items-center gap-2 rounded-(--radius-field) border border-(--surface-panel-border) bg-(--surface-panel) px-3 py-2 text-xs text-foreground-soft"
-              role="status"
-            >
-              <LoaderCircle
-                aria-hidden="true"
-                className="size-3 motion-safe:animate-spin"
-              />
-              Opening {openingScreenLabel}…
-            </div>
-          ) : null}
           <div
             className={cn(
               SHELL_ROUTE_CONTAINER_BASE_CLASS,

@@ -1178,8 +1178,10 @@ export function DiscoveryScreen(props: {
     inspectedJob && (companies ?? []).length > 0
       ? ((companies ?? []).find(
           (company) =>
-            isListableCompanyName(company.canonicalName) &&
-            company.jobIds.includes(inspectedJob.id),
+            // The cheap id check first: normalizing every company's name on
+            // each render cost a shortlist or hide about 20 ms.
+            company.jobIds.includes(inspectedJob.id) &&
+            isListableCompanyName(company.canonicalName),
         )?.id ?? null)
       : null;
   const hiddenJobCount = resultVisibility.hiddenAlsoFoundCount;
