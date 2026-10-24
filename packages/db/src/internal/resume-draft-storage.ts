@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import type { ResumeDraft, ResumeDraftSourceRef } from "@nestor/contracts";
 
 export function ensureResumeSourceTables(db: DatabaseSync): void {
@@ -9,6 +9,14 @@ export function ensureResumeSourceTables(db: DatabaseSync): void {
 }
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
+const statements = new WeakMap<DatabaseSync, Map<string, StatementSync>>();
+function statement(db: DatabaseSync, sql: string): StatementSync {
+  let cache = statements.get(db);
+  if (!cache) statements.set(db, (cache = new Map<string, StatementSync>()));
+  let prepared = cache.get(sql);
+  if (!prepared) cache.set(sql, (prepared = db.prepare(sql)));
+  return prepared;
+}
 
 /** Sections store citation row IDs; source records and source text live once. */
 export function compactResumeDraftStorage(
@@ -30,22 +38,26 @@ export function compactResumeDraftStorage(
     let textId: number | null = null;
     if (ref.snippet !== null) {
       const key = hash(ref.snippet);
-      db.prepare(
+      statement(
+        db,
         "INSERT OR IGNORE INTO resume_source_texts(stable_key, text) VALUES (?, ?)",
       ).run(key, ref.snippet);
       textId = Number(
-        db
-          .prepare("SELECT id FROM resume_source_texts WHERE stable_key = ?")
-          .get(key)!.id,
+        statement(
+          db,
+          "SELECT id FROM resume_source_texts WHERE stable_key = ?",
+        ).get(key)!.id,
       );
     }
     const key = hash(json);
-    db.prepare(
+    statement(
+      db,
       "INSERT OR IGNORE INTO resume_sources(stable_key, ref_id, source_kind, source_id, text_id) VALUES (?, ?, ?, ?, ?)",
     ).run(key, ref.id, ref.sourceKind, ref.sourceId, textId);
     const id = Number(
-      db.prepare("SELECT id FROM resume_sources WHERE stable_key = ?").get(key)!
-        .id,
+      statement(db, "SELECT id FROM resume_sources WHERE stable_key = ?").get(
+        key,
+      )!.id,
     );
     byObject.set(ref, id);
     byValue.set(json, id);
