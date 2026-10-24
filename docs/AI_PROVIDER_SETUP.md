@@ -31,8 +31,9 @@ NESTOR_AI_REASONING_EFFORT=xhigh
 NESTOR_AI_SEARCH_REASONING_EFFORT=low
 # Reading the jobs on a page:
 NESTOR_AI_PAGE_READ_REASONING_EFFORT=low
-# Fit judged in batches during and after a search:
-NESTOR_AI_FIT_REASONING_EFFORT=medium
+# Fit judged in batches during and after a search (bundled Muse route;
+# other model routes retain medium unless explicitly overridden):
+NESTOR_AI_FIT_REASONING_EFFORT=low
 # Fact checks of resume lines and of written application answers:
 NESTOR_AI_CLAIM_CHECK_REASONING_EFFORT=medium
 # Application form turns, reading a form's questions, and checking short

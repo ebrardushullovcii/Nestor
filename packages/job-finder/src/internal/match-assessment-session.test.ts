@@ -157,8 +157,8 @@ describe("match assessment session", () => {
       scorerVersion: MATCH_ASSESSMENT_SCORER_VERSION,
       contextFingerprint: session.contextFingerprint,
     });
-    expect(first.postingFingerprint).toMatch(/^match_posting_v4_logic15_/u);
-    expect(session.contextFingerprint).toMatch(/^match_context_v4_logic15_/u);
+    expect(first.postingFingerprint).toMatch(/^match_posting_v4_logic16_/u);
+    expect(session.contextFingerprint).toMatch(/^match_context_v4_logic16_/u);
   });
 
   test("does not reuse an assessment persisted under the previous scoring logic", () => {

@@ -12,7 +12,11 @@ import type {
 } from "@nestor/contracts";
 
 import { createMatchAssessmentPostingInput } from "./match-assessment-posting-input";
-import { createMatchAssessmentPostingFingerprint } from "./match-assessment-session";
+import {
+  createMatchAssessmentPostingFingerprint,
+  MATCH_ASSESSMENT_SCORER_VERSION,
+  sameFitEvidenceFingerprint,
+} from "./match-assessment-session";
 
 export { applyFitJudgment, readCarriedJudgment } from "./fit-judgment-apply";
 
@@ -56,21 +60,35 @@ export function toFitJudgment(
  * before the profile facts, the goals or the listing it was given changed.
  * A verdict an earlier build stamped with the whole-input fingerprint of the
  * same inputs (`legacyVerdictFingerprint`) is current too.
+ * Rubric changes alone are refreshed only by the search's capped older-job
+ * pass (`refreshRubric`), never by automatic judging when Find jobs opens.
  */
 export function jobNeedsFitJudgment(
   job: JobPosting & { matchAssessment: MatchAssessment },
   verdictFingerprint: string,
   legacyVerdictFingerprint?: string,
+  options: { refreshRubric?: boolean } = {},
 ): boolean {
   const judgment = job.matchAssessment.judgment;
   if (!judgment) {
     return true;
   }
   return (
-    (judgment.contextFingerprint !== verdictFingerprint &&
+    (options.refreshRubric === true &&
+      job.matchAssessment.scorerVersion < MATCH_ASSESSMENT_SCORER_VERSION) ||
+    (!sameFitEvidenceFingerprint(
+      judgment.contextFingerprint,
+      verdictFingerprint,
+    ) &&
       (legacyVerdictFingerprint === undefined ||
-        judgment.contextFingerprint !== legacyVerdictFingerprint)) ||
-    judgment.postingFingerprint !== fitPostingFingerprint(job)
+        !sameFitEvidenceFingerprint(
+          judgment.contextFingerprint,
+          legacyVerdictFingerprint,
+        ))) ||
+    !sameFitEvidenceFingerprint(
+      judgment.postingFingerprint,
+      fitPostingFingerprint(job),
+    )
   );
 }
 

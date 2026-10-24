@@ -10,6 +10,7 @@ import {
 
 import {
   createAiClient,
+  createAgentBrowserRuntime,
   createSeed,
   createWorkspaceServiceHarness,
 } from "../workspace-service.test-support";
@@ -25,6 +26,7 @@ import {
   createMatchAssessmentSession,
 } from "./match-assessment-session";
 import { createMatchAssessment } from "./matching";
+import { readPlanAssessment } from "./plan-assessment";
 import { enrichSearchPreferencesFromProfile } from "./workspace-helpers";
 
 type Seed = ReturnType<typeof createSeed>;
@@ -166,7 +168,10 @@ test("a stored verdict stays current through the fingerprint change and a later 
   ).toBe(true);
 
   // A change the model does read still asks again.
-  const relevant = { ...seed.profile, skills: [...seed.profile.skills, "Rust"] };
+  const relevant = {
+    ...seed.profile,
+    skills: [...seed.profile.skills, "Rust"],
+  };
   const afterRelevantEdit = createMatchAssessmentSession({
     profile: relevant,
     searchPreferences: judgingGoals(seed, relevant),
@@ -180,17 +185,105 @@ test("a stored verdict stays current through the fingerprint change and a later 
     ),
   ).toBe(true);
   expect(createFitVerdictFingerprint(seed.profile, goals)).toMatch(
-    /^fit_verdict_v1_logic15_/u,
+    /^fit_verdict_v1_logic16_/u,
   );
 });
+
+test.each([15, 16])(
+  "rubric revision %s stays current automatically and can be selected for a search refresh",
+  (revision) => {
+    const seed = createSeed();
+    const goals = judgingGoals(seed, seed.profile);
+    const stored = legacyJudgedJob(
+      seed,
+      seed.savedJobs[0]!,
+      "older_rubric",
+      goals,
+    );
+    const session = createMatchAssessmentSession({
+      profile: seed.profile,
+      searchPreferences: goals,
+      calculate: createMatchAssessment,
+    });
+    const judgment = stored.matchAssessment.judgment!;
+    stored.matchAssessment.judgment = {
+      ...judgment,
+      contextFingerprint: session.verdictFingerprint.replace(
+        "_logic16_",
+        `_logic${revision}_`,
+      ),
+      postingFingerprint: judgment.postingFingerprint!.replace(
+        "_logic16_",
+        `_logic${revision}_`,
+      ),
+    };
+    stored.matchAssessment.scorerVersion = 17;
+    expect(
+      jobNeedsFitJudgment(
+        stored,
+        session.verdictFingerprint,
+        session.contextFingerprint,
+      ),
+    ).toBe(false);
+    expect(
+      jobNeedsFitJudgment(
+        stored,
+        session.verdictFingerprint,
+        session.contextFingerprint,
+        { refreshRubric: true },
+      ),
+    ).toBe(true);
+    expect(
+      jobNeedsFitJudgment(
+        { ...stored, description: "Changed listing" },
+        session.verdictFingerprint,
+        session.contextFingerprint,
+      ),
+    ).toBe(true);
+    const changedProfile = {
+      ...seed.profile,
+      skills: [...seed.profile.skills, "Rust"],
+    };
+    expect(
+      jobNeedsFitJudgment(
+        stored,
+        createFitVerdictFingerprint(changedProfile, goals),
+        createMatchAssessmentContextFingerprint(changedProfile, goals),
+      ),
+    ).toBe(true);
+    const changedGoals = { ...goals, targetRoles: ["Different work"] };
+    expect(
+      jobNeedsFitJudgment(
+        stored,
+        createFitVerdictFingerprint(seed.profile, changedGoals),
+        createMatchAssessmentContextFingerprint(seed.profile, changedGoals),
+      ),
+    ).toBe(true);
+    expect(
+      session.assessPersisted(stored, stored.matchAssessment).judgment,
+    ).toEqual(stored.matchAssessment.judgment);
+  },
+);
 
 test("opening the workspace re-stamps stored verdicts, so Judge all asks nothing after an unrelated edit", async () => {
   const seed = createSeed();
   const goals = judgingGoals(seed, seed.profile);
   const base = seed.savedJobs[0]!;
-  seed.savedJobs = Array.from({ length: 30 }, (_, index) =>
-    legacyJudgedJob(seed, base, `legacy_${index}`, goals),
-  );
+  seed.savedJobs = Array.from({ length: 30 }, (_, index) => {
+    const job = legacyJudgedJob(seed, base, `legacy_${index}`, goals);
+    job.matchAssessment.scorerVersion = 16;
+    job.matchAssessment.judgment!.contextFingerprint =
+      job.matchAssessment.judgment!.contextFingerprint!.replace(
+        "_logic16_",
+        "_logic15_",
+      );
+    job.matchAssessment.judgment!.postingFingerprint =
+      job.matchAssessment.judgment!.postingFingerprint!.replace(
+        "_logic16_",
+        "_logic15_",
+      );
+    return job;
+  });
   const judgeJobFits = vi.fn((input: JudgeJobFitsInput) =>
     Promise.resolve(
       input.jobs.map(({ jobId }) => ({
@@ -233,3 +326,119 @@ test("opening the workspace re-stamps stored verdicts, so Judge all asks nothing
       .map((job) => job.matchAssessment.judgment?.score),
   ).toEqual(Array.from({ length: 30 }, () => 77));
 }, 30_000);
+
+test.each(["rubric", "missing verdict", "profile", "posting"] as const)(
+  "a full assessment refresh after a %s change preserves only still-current evidence",
+  async (change) => {
+    const seed = createSeed();
+    const goals = judgingGoals(seed, seed.profile);
+    const job = legacyJudgedJob(seed, seed.savedJobs[0]!, "full_rubric", goals);
+    job.matchAssessment.scorerVersion = 17;
+    job.matchAssessment.judgment!.source = "full";
+    job.matchAssessment.requirements = [
+      {
+        id: "design-evidence",
+        label: "Design systems",
+        status: "supported",
+        category: "skill",
+        importance: "required",
+        jobEvidence: "Own the design system",
+        resumeEvidence: [],
+        explanation: "Previously checked against unchanged synthetic evidence",
+      },
+    ];
+    if (change === "profile")
+      job.matchAssessment.judgment!.contextFingerprint = "changed-profile";
+    if (change === "posting")
+      job.matchAssessment.judgment!.postingFingerprint = "changed-posting";
+    const evidence = structuredClone(job.matchAssessment.requirements);
+    seed.savedJobs = [job];
+    const client = createAiClient();
+    const assessJobFit = vi.fn(client.assessJobFit.bind(client));
+    const judgeJobFits = vi.fn((input: JudgeJobFitsInput) =>
+      Promise.resolve(
+        (change === "missing verdict" ? [] : input.jobs).map(({ jobId }) => ({
+          jobId,
+          score: 70,
+          recommendation: "apply_with_original" as const,
+          role: "exact" as const,
+          roleExplanation: "Synthetic role match",
+          preferences: "aligned" as const,
+          preferencesExplanation: null,
+          locationReach: "in_area" as const,
+          reasons: ["Synthetic refreshed verdict"],
+          gaps: [],
+          listingClosed: false,
+          listingClosedEvidence: null,
+        })),
+      ),
+    );
+    const { workspaceService, repository } = createWorkspaceServiceHarness({
+      seed,
+      aiClient: { ...client, assessJobFit, judgeJobFits },
+      browserRuntime: createAgentBrowserRuntime([]),
+    });
+    const initial = await workspaceService.getWorkspaceSnapshot();
+    const plan = initial.campaigns[0]!;
+    await repository.saveCampaignState({
+      activeCampaignId: plan.id,
+      notifications: [],
+      campaigns: initial.campaigns.map((row) =>
+        row.id === plan.id ? { ...row, jobIds: [job.id] } : row,
+      ),
+    });
+    await repository.commitSavedJobDelta({
+      update: (row) =>
+        row.id === job.id
+          ? {
+              ...row,
+              campaignIds: [plan.id],
+              planAssessments: { [plan.id]: row.matchAssessment },
+            }
+          : row,
+    });
+    await workspaceService.runAgentDiscovery();
+    const fullCalls = assessJobFit.mock.calls.filter(
+      ([input]) => input.job.canonicalUrl === job.canonicalUrl,
+    );
+    expect(fullCalls).toHaveLength(
+      change === "profile" || change === "posting" ? 1 : 0,
+    );
+    if (change === "missing verdict") {
+      const unchanged = readPlanAssessment(
+        (await repository.listSavedJobs()).find((row) => row.id === job.id)!,
+        plan.id,
+      );
+      expect(unchanged.matchAssessment.requirements).toEqual(evidence);
+      expect(unchanged.matchAssessment.judgment).toMatchObject({
+        source: "full",
+        score: 77,
+      });
+      expect(unchanged.matchAssessment.scorerVersion).toBe(17);
+    }
+    if (change === "rubric") {
+      const updated = readPlanAssessment(
+        (await repository.listSavedJobs()).find((row) => row.id === job.id)!,
+        plan.id,
+      );
+      expect(updated.matchAssessment.requirements).toEqual(evidence);
+      expect(updated.matchAssessment.judgment).toMatchObject({
+        source: "full",
+        score: 70,
+      });
+      expect(updated.matchAssessment.scorerVersion).toBe(18);
+      await workspaceService.runAgentDiscovery();
+      expect(
+        assessJobFit.mock.calls.filter(
+          ([input]) => input.job.canonicalUrl === job.canonicalUrl,
+        ),
+      ).toHaveLength(0);
+      expect(
+        judgeJobFits.mock.calls.flatMap(([input]) =>
+          input.jobs.filter((row) => row.jobId === job.id),
+        ),
+      ).toHaveLength(1);
+    }
+  },
+  30_000,
+);

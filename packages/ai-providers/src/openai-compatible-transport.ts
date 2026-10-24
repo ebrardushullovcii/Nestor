@@ -396,8 +396,12 @@ export function buildModelRequestBody(input: {
   apiMode: ModelApiMode;
   model: string;
   reasoningEffort?: ModelReasoningEffort | undefined;
+  /** Set only by callers whose model route supports sampling controls. */
+  temperature?: number | undefined;
   messages: readonly CompatibleMessage[];
   jsonOutput?: boolean;
+  /** Responses only; callers must verify strict schema support on the route. */
+  jsonSchema?: { name: string; schema: Record<string, unknown> } | undefined;
   tools?: readonly CompatibleTool[];
   maxOutputTokens?: number | undefined;
   parallelToolCalls?: boolean | undefined;
@@ -417,7 +421,11 @@ export function buildModelRequestBody(input: {
         ? { stream_options: { include_usage: true } }
         : {}),
       model: input.model,
-      ...(!input.reasoningEffort ? { temperature: 0.2 } : {}),
+      ...(input.temperature !== undefined
+        ? { temperature: input.temperature }
+        : !input.reasoningEffort
+          ? { temperature: 0.2 }
+          : {}),
       ...(input.reasoningEffort
         ? {
             reasoning_effort: input.reasoningEffort,
@@ -443,12 +451,23 @@ export function buildModelRequestBody(input: {
   return {
     model: input.model,
     store: false,
+    ...(input.temperature !== undefined
+      ? { temperature: input.temperature }
+      : {}),
     reasoning: {
       effort: input.reasoningEffort ?? DEFAULT_VISION_MODEL_REASONING_EFFORT,
       ...(input.reasoningSummary ? { summary: "auto" } : {}),
     },
     input: toResponsesInput(input.messages),
-    ...(input.jsonOutput ? { text: { format: { type: "json_object" } } } : {}),
+    ...(input.jsonSchema
+      ? {
+          text: {
+            format: { type: "json_schema", strict: true, ...input.jsonSchema },
+          },
+        }
+      : input.jsonOutput
+        ? { text: { format: { type: "json_object" } } }
+        : {}),
     ...(input.tools && input.tools.length > 0
       ? {
           tools: input.tools.map((tool) => ({

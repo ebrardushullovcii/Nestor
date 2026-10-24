@@ -18,12 +18,10 @@ import {
 } from "./match-assessment-posting-input";
 
 /**
- * Bump both values together whenever scoring OUTPUT changes, not only when the
- * scorer's shape changes. The fingerprints below are computed over the profile
- * and preferences alone, so an assessment persisted by an earlier build hashes
- * identically under a later one and is reused verbatim: a returning workspace
- * would keep stale scores forever. The revision inside each fingerprint prefix
- * is the only thing that forces a recalculation.
+ * Bump the scorer version when scoring output changes. Change the fingerprint
+ * revision only when its evidence inputs change: a rubric update must not
+ * invalidate every stored verdict when Find jobs automatically judges jobs.
+ * Search refreshes older rubrics within its existing older-job allowance.
  *
  * Revision 8 (scorer version 9): a saved location that is only an absence
  * placeholder ("Location not stated", "N/A") stopped counting as a geographic
@@ -55,8 +53,26 @@ import {
 // scores written before are retired; a stored model verdict is kept.
 // Revision 15 (version 16): country eligibility, availability and full
 // listing evidence are explicit inputs; prior verdicts stay until replacement.
-export const MATCH_ASSESSMENT_SCORER_VERSION = 16;
-const MATCH_ASSESSMENT_LOGIC_REVISION = 15;
+// Revision 16 (version 17): both model judges use the same absolute fit anchors
+// and the supported Muse route samples at zero. Replace old verdicts on demand.
+// Version 18: evidence points within the absolute bands. Revision 15 and 16
+// hashed identical evidence; their model verdicts remain current automatically.
+export const MATCH_ASSESSMENT_SCORER_VERSION = 18;
+const MATCH_ASSESSMENT_LOGIC_REVISION = 16;
+
+/** Only the rubric changed between these two stamps, not their hashed inputs. */
+export function sameFitEvidenceFingerprint(
+  stored: string | null | undefined,
+  current: string,
+): boolean {
+  return (
+    stored === current ||
+    stored?.replace(
+      /^(fit_verdict_v1|match_context_v4|match_posting_v4)_logic15_/u,
+      "$1_logic16_",
+    ) === current
+  );
+}
 
 function stableSerialize(value: unknown): string {
   if (value === null || typeof value !== "object") {
@@ -134,7 +150,13 @@ export function rebindLegacyVerdict<
   },
 ): T {
   const judgment = assessment.judgment;
-  if (judgment?.contextFingerprint !== fingerprints.legacyVerdictFingerprint)
+  if (
+    !judgment ||
+    !sameFitEvidenceFingerprint(
+      judgment.contextFingerprint,
+      fingerprints.legacyVerdictFingerprint,
+    )
+  )
     return assessment;
   return {
     ...assessment,
@@ -222,7 +244,11 @@ export function createMatchAssessmentSession(input: {
     knownPostingFingerprint?: string,
   ): MatchAssessment => {
     const carried =
-      carriedInput?.contextFingerprint === fingerprints.legacyVerdictFingerprint
+      carriedInput &&
+      sameFitEvidenceFingerprint(
+        carriedInput.contextFingerprint,
+        fingerprints.legacyVerdictFingerprint,
+      )
         ? { ...carriedInput, contextFingerprint: verdictFingerprint }
         : carriedInput;
     const previous = rebind(

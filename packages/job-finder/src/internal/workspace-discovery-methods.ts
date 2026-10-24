@@ -75,6 +75,7 @@ import {
   selectCanonicalSighting,
 } from "./listing-sightings";
 import { createMatchAssessmentSession } from "./match-assessment-session";
+import { applyFitJudgment } from "./fit-judgment-apply";
 import { withSavedJobSearchBehavior } from "./job-search-behavior";
 import {
   compareMatchRecommendationPriority,
@@ -151,6 +152,7 @@ import { createJobIdentityIndex } from "./job-identity";
 import { assessJobPostingDetailQuality } from "./job-posting-detail-quality";
 import { JOB_FIT_JUDGING_BATCH_SIZE } from "@nestor/ai-providers";
 import { createSearchFitBatcher } from "./search-fit-batcher";
+import { createSearchListingReadAhead } from "./search-listing-read-ahead";
 import { selectSourcesFinishedBeforeRestart } from "./discovery-restart";
 import {
   fitPostingFingerprint,
@@ -161,6 +163,7 @@ import {
 import {
   describeListingDetailEnrichment,
   createModelListingPageReader,
+  createListingReadRateLimitState,
   enrichSavedJobListingDetails,
   jobNeedsListingDetail,
   LISTING_DETAIL_READS_PER_RUN,
@@ -2187,6 +2190,103 @@ export function createWorkspaceDiscoveryMethods(
       searchFitBatcher.stop();
     };
 
+    // Read page facts ahead, but leave the card jobs and their fit scheduling
+    // untouched. The usual final pass alone selects and applies these facts.
+    const listingAbortController = new AbortController();
+    const listingSignal = AbortSignal.any([
+      executionSignal,
+      listingAbortController.signal,
+    ]);
+    const canReadListingUrlNow = (url: string): boolean => {
+      try {
+        const host = new URL(url).host;
+        return !activeRun.targetExecutions.some((execution) => {
+          if (execution.accessBlockerReason !== "site_protection") return false;
+          const target = targets.find(
+            (target) => target.id === execution.targetId,
+          );
+          return [execution.parkedTab?.url, target?.startingUrl].some(
+            (blocked) => {
+              try {
+                return blocked ? new URL(blocked).host === host : false;
+              } catch {
+                return false;
+              }
+            },
+          );
+        });
+      } catch {
+        return false;
+      }
+    };
+    // Picked jobs already have priority over new results. Prepare those while
+    // sources collect; ordinary older jobs wait so they cannot spend every
+    // read before new listings arrive. All reads share one run-wide allowance.
+    const runSourceCount = Math.max(1, activeRun.targetIds.length);
+    let olderReadAheadLeft = Math.min(
+      LISTING_DETAIL_READS_PER_RUN,
+      OLDER_LISTING_READS_PER_SOURCE * runSourceCount,
+    );
+    const olderReadCandidates = allJobs()
+      .filter(
+        (job) =>
+          belongsToSearchPlan(job) &&
+          jobNeedsListingDetail(job) &&
+          canReadListingUrlNow(job.canonicalUrl),
+      )
+      .sort(
+        (left, right) =>
+          Number(personPickedJob(right)) - Number(personPickedJob(left)) ||
+          compareMatchRecommendationPriority(
+            left.matchAssessment,
+            right.matchAssessment,
+          ) ||
+          compareMatchRoleSuitabilityPriority(
+            left.matchAssessment,
+            right.matchAssessment,
+          ) ||
+          compareMatchScores(left.matchAssessment, right.matchAssessment),
+      )
+      .filter((job) => personSuppliedJob(job) || olderReadAheadLeft-- > 0)
+      .filter(personPickedJob);
+    const listingReadAhead = createSearchListingReadAhead({
+      maxJobs: LISTING_DETAIL_READS_PER_RUN,
+      getJob: (id) => allJobsById().get(id),
+      canRead: (job) =>
+        belongsToSearchPlan(job) &&
+        jobNeedsListingDetail(job) &&
+        canReadListingUrlNow(job.canonicalUrl),
+    });
+    const renderedListingSlots = createConcurrencyLimiter(2);
+    const listingRateLimitState = createListingReadRateLimitState();
+    const startListingReadAhead = (): Promise<void> => {
+      if (!ctx.fetchListingHtml) return Promise.resolve();
+      listingReadAhead.enqueue(olderReadCandidates.map((job) => job.id));
+      const readRenderedPage = ctx.browserRuntime.readRenderedPage?.bind(
+        ctx.browserRuntime,
+      );
+      return enrichSavedJobListingDetails({
+        jobs: [],
+        nextJob: () => listingReadAhead.next(),
+        onReadPrepared: (job, read) => listingReadAhead.record(job, read),
+        rateLimitState: listingRateLimitState,
+        fetchHtml: ctx.fetchListingHtml,
+        readPage: createModelListingPageReader(ctx.aiClient),
+        ...(readRenderedPage
+          ? {
+              readRenderedPage: (
+                url: string,
+                options: { signal?: AbortSignal },
+              ) =>
+                renderedListingSlots.run(() => readRenderedPage(url, options)),
+            }
+          : {}),
+        assess: assessDiscoveryPosting,
+        signal: listingSignal,
+      }).then(() => undefined);
+    };
+    let listingReadAheadPass: Promise<void> | undefined;
+
     const planningEvent = createDiscoveryEvent({
       runId,
       timestamp: new Date().toISOString(),
@@ -2409,6 +2509,7 @@ export function createWorkspaceDiscoveryMethods(
     };
 
     try {
+      listingReadAheadPass = startListingReadAhead();
       let executionIndex = 0;
       const readyApiTargets = iteratePublicApiTargetsByReadiness({
         targets: apiTargets,
@@ -3955,6 +4056,7 @@ export function createWorkspaceDiscoveryMethods(
         }
         publishActivity(targetCompletedEvent);
         queueKeptJobsForFit();
+        listingReadAhead.enqueue(runRetainedJobIds);
 
         // Persistence and matching above can resolve entirely through
         // microtasks for fast API sources. Give Electron a real event-loop turn
@@ -4003,6 +4105,9 @@ export function createWorkspaceDiscoveryMethods(
       // so the reads go to the best fits first.
       queueKeptJobsForFit();
       await finishSearchFitJudging();
+      listingReadAhead.close();
+      await listingReadAheadPass;
+      executionSignal.throwIfAborted();
 
       // A browser handoff also ends this run's later HTTP reads on that host.
       const blockedSourceHosts = new Set(
@@ -4049,10 +4154,13 @@ export function createWorkspaceDiscoveryMethods(
       // and judged whatever the size of the search. Exempting every picked
       // job made a one-source search re-read dozens of listings and re-judge
       // two hundred shortlisted jobs, about a million tokens.
-      const runSourceCount = Math.max(1, activeRun.targetIds.length);
       let olderListingReadsLeft = Math.min(
         LISTING_DETAIL_READS_PER_RUN,
         OLDER_LISTING_READS_PER_SOURCE * runSourceCount,
+      );
+      let unreadListingReadsLeft = Math.max(
+        0,
+        LISTING_DETAIL_READS_PER_RUN - listingReadAhead.readsStarted,
       );
       const enrichmentCandidates = mergeSavedJobs(
         workingSavedJobs,
@@ -4084,6 +4192,9 @@ export function createWorkspaceDiscoveryMethods(
             personSuppliedJob(job) ||
             runRetainedJobIds.has(job.id) ||
             olderListingReadsLeft-- > 0,
+        )
+        .filter(
+          (job) => listingReadAhead.read(job) || unreadListingReadsLeft-- > 0,
         );
       const readEvent = (
         message: string,
@@ -4111,7 +4222,7 @@ export function createWorkspaceDiscoveryMethods(
       // No reader configured means no reads: the desktop composes the
       // plain-HTTP reader in; tests and other hosts opt in explicitly so a
       // fixture URL is never fetched for real.
-      let listingReadsReserved = 0;
+      let listingReadsReserved = listingReadAhead.readsStarted;
       if (
         ctx.fetchListingHtml &&
         enrichmentCandidates.length > 0 &&
@@ -4124,7 +4235,9 @@ export function createWorkspaceDiscoveryMethods(
           enrichmentCandidates.length,
           LISTING_DETAIL_READS_PER_RUN,
         );
-        listingReadsReserved = readsThisRun;
+        listingReadsReserved += enrichmentCandidates.filter(
+          (job) => !listingReadAhead.read(job),
+        ).length;
         const readingProgress = (completed: number, total: number) =>
           emitActivity(
             readEvent(`Reading listings ${completed} of ${total}.`, {
@@ -4137,6 +4250,8 @@ export function createWorkspaceDiscoveryMethods(
         try {
           const enrichment = await enrichSavedJobListingDetails({
             jobs: enrichmentCandidates,
+            readAhead: (job) => listingReadAhead.read(job),
+            rateLimitState: listingRateLimitState,
             maxJobs: readsThisRun,
             onProgress: readingProgress,
             fetchHtml: fetchListingHtml,
@@ -4335,6 +4450,7 @@ export function createWorkspaceDiscoveryMethods(
                 job,
                 assessmentSession.verdictFingerprint,
                 assessmentSession.contextFingerprint,
+                { refreshRubric: true },
               ) &&
               fitAskedFingerprints.get(job.id) !== fitPostingFingerprint(job),
           )
@@ -4368,12 +4484,30 @@ export function createWorkspaceDiscoveryMethods(
             );
           fitProgress(0);
           try {
+            // A new rubric needs a fresh verdict, not another extraction of
+            // unchanged requirement evidence. Changed facts still take the
+            // full comparison below.
+            const rubricRefreshIds = new Set(
+              toJudge
+                .filter(
+                  (job) =>
+                    job.matchAssessment.judgment?.source === "full" &&
+                    !jobNeedsFitJudgment(
+                      job,
+                      assessmentSession.verdictFingerprint,
+                      assessmentSession.contextFingerprint,
+                    ),
+                )
+                .map((job) => job.id),
+            );
             const judgments = await judgeJobFitsInBatches({
               aiClient: ctx.aiClient,
               profile,
               searchPreferences: enrichedPreferences,
               jobs: toJudge.filter(
-                (job) => job.matchAssessment.judgment?.source !== "full",
+                (job) =>
+                  job.matchAssessment.judgment?.source !== "full" ||
+                  rubricRefreshIds.has(job.id),
               ),
               contextFingerprint: assessmentSession.verdictFingerprint,
               signal: executionSignal,
@@ -4386,8 +4520,26 @@ export function createWorkspaceDiscoveryMethods(
             // a job previously read in full. A batch verdict cannot replace
             // that read or erase its requirement evidence.
             const fullAssessments = new Map<string, MatchAssessment>();
+            for (const job of toJudge) {
+              if (!rubricRefreshIds.has(job.id)) continue;
+              const judgment = judgments.get(job.id);
+              if (!judgment) continue;
+              fullAssessments.set(
+                job.id,
+                assessmentSession.remember(
+                  job,
+                  applyFitJudgment(job.matchAssessment, {
+                    ...judgment,
+                    source: "full",
+                  }),
+                ),
+              );
+              judgments.delete(job.id);
+            }
             const fullJobs = toJudge.filter(
-              (job) => job.matchAssessment.judgment?.source === "full",
+              (job) =>
+                job.matchAssessment.judgment?.source === "full" &&
+                !rubricRefreshIds.has(job.id),
             );
             let fullCursor = 0;
             await Promise.all(
@@ -4585,6 +4737,9 @@ export function createWorkspaceDiscoveryMethods(
     } finally {
       // Verdicts still on their way when a run stops are not saved after it.
       stopSearchFitJudging();
+      listingAbortController.abort();
+      listingReadAhead.stop();
+      await listingReadAheadPass;
       screenBatcher?.stop();
       if (!keepSessionAlive) {
         for (const source of openedSessionSources) {
