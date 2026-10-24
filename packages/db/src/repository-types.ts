@@ -312,6 +312,8 @@ export interface JobFinderRepository
   readSavedJobDiscoveryFingerprints(
     jobIds: readonly string[],
   ): Promise<ReadonlyMap<string, DiscoverySavedJobFingerprints>>;
+  /** Store carried preparation only if its inputs still match; never rewrite a job body. */
+  writeSavedJobDiscoveryFingerprints(jobs: readonly SavedJob[]): Promise<void>;
   /** Timestamp-only batch; absent fields stay unchanged, null clears, unknown ids are ignored. */
   updateSavedJobSightings(
     updates: readonly SavedJobSightingPatch[],

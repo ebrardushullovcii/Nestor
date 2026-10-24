@@ -3,6 +3,8 @@ import {
   parseSavedJobsWithPreparation,
   cloneSavedJobWithPreparation,
   readSavedJobPreparedValue,
+  samePreparedSavedJobInputs,
+  copySavedJobPreparation,
 } from "./internal/saved-job-fingerprints";
 import { applySavedJobSightings } from "./internal/saved-job-sightings";
 import { applySavedJobPlanAssessments } from "./internal/saved-job-plan-assessments";
@@ -612,6 +614,18 @@ export function createInMemoryJobFinderRepository(
             }),
         ),
       );
+    },
+    writeSavedJobDiscoveryFingerprints(jobs) {
+      const byId = new Map(jobs.map((job) => [job.id, job]));
+      state.savedJobs = state.savedJobs.map((current) => {
+        const job = byId.get(current.id);
+        return job &&
+          readSavedJobPreparedValue(job) &&
+          samePreparedSavedJobInputs(job, current)
+          ? copySavedJobPreparation(job, { ...current })
+          : current;
+      });
+      return Promise.resolve();
     },
     updateSavedJobSightings(updates) {
       const next = applySavedJobSightings(state.savedJobs, updates);

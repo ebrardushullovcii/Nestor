@@ -29,6 +29,7 @@ import {
   DiscoveryAgentMetadataSchema,
   readPreparedBodySalaryRange,
   readPreparedDiscoveryFingerprints,
+  readPreparedSavedJobIdentity,
   DISCOVERY_FINGERPRINT_FIELDS,
   writeDiscoveryPreparation,
   type CandidateProfile,
@@ -352,7 +353,9 @@ export function applySavedJobDelta(
   }
 
   const next = copyView(currentJob, changedFields);
-  const fingerprints = DISCOVERY_FINGERPRINT_FIELDS.some((field) => field in changedFields)
+  const fingerprints = DISCOVERY_FINGERPRINT_FIELDS.some(
+    (field) => field in changedFields,
+  )
     ? null
     : readPreparedDiscoveryFingerprints(currentJob);
   if (fingerprints) {
@@ -361,6 +364,18 @@ export function applySavedJobDelta(
       fingerprints: { owner: next, value: fingerprints },
       ...(bodySalaryRange !== undefined ? { bodySalaryRange } : {}),
     });
+    if (
+      [
+        "source",
+        "sourceJobId",
+        "canonicalUrl",
+        "providerKey",
+        "providerBoardToken",
+        "providerIdentifier",
+        "provenance",
+      ].some((field) => field in changedFields)
+    )
+      toSightingIdentityInput(next);
     return Object.freeze(next);
   }
   let bodySalaryRange = readPreparedBodySalaryRange(next);
@@ -375,6 +390,7 @@ export function applySavedJobDelta(
   createDiscoveryListingFingerprints(next);
   if (bodySalaryRange !== undefined)
     writeDiscoveryPreparation(next, { bodySalaryRange });
+  toSightingIdentityInput(next);
   return next;
 }
 
@@ -1718,6 +1734,40 @@ export function createWorkspaceDiscoveryMethods(
       },
       SETUP_JOBS_PER_TURN,
     );
+    // Upgrade old rows as they are prepared, without rewriting their bodies.
+    // Subsequent runs read the persisted compact facts instead of normalizing again.
+    for (
+      let start = 0;
+      start < workingSavedJobs.length;
+      start += SETUP_JOBS_PER_TURN
+    ) {
+      if (executionController.signal.aborted) break;
+      const prepared: SavedJob[] = [];
+      const rows = await mapInTurns(
+        workingSavedJobs.slice(start, start + SETUP_JOBS_PER_TURN),
+        (job) => {
+          if (
+            readPreparedDiscoveryFingerprints(job) &&
+            readPreparedSavedJobIdentity(job)
+          )
+            return job;
+          const next = copyView(
+            job,
+            Object.fromEntries(
+              DISCOVERY_FINGERPRINT_FIELDS.map((field) => [field, job[field]]),
+            ),
+          );
+          prepareDiscoveryPosting(next);
+          toSightingIdentityInput(next);
+          prepared.push(next);
+          return Object.freeze(next);
+        },
+        SETUP_JOBS_PER_TURN,
+      );
+      if (prepared.length)
+        await ctx.repository.writeSavedJobDiscoveryFingerprints(prepared);
+      workingSavedJobs.splice(start, rows.length, ...rows);
+    }
     let workingPendingJobs = startingDiscovery.pendingDiscoveryJobs.map(
       (job) => ({
         ...job,

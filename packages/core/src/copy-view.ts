@@ -9,6 +9,14 @@ export function copyView<T extends object, U extends object>(
     descriptor.configurable = true;
     if ("value" in descriptor) descriptor.writable = true;
   }
-  return Object.assign(Object.defineProperties({}, descriptors), patch) as T &
-    U;
+  for (const key of Reflect.ownKeys(patch)) {
+    if (Object.getOwnPropertyDescriptor(patch, key)?.enumerable)
+      Reflect.set(descriptors, key, {
+        value: Reflect.get(patch, key),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+  }
+  return Object.defineProperties({}, descriptors) as T & U;
 }

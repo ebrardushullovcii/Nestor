@@ -7,9 +7,13 @@ import {
   readPreparedBodySalaryRange,
   assessJobPostingDetailQuality,
   type SavedJob,
+  type JobPosting,
 } from "@nestor/contracts";
 import { createSavedJob, createSeed } from "../workspace-service.test-fixtures";
-import { prepareDiscoveryPosting, prepareBodySalaryRange } from "./discovery-posting-preparation";
+import {
+  prepareDiscoveryPosting,
+  prepareBodySalaryRange,
+} from "./discovery-posting-preparation";
 import { enrichDiscoveredPosting, mergeDiscoveredPostings } from "./matching";
 import { applyListingDetailToJob } from "./listing-detail-enrichment";
 import {
@@ -41,6 +45,48 @@ const preparedJob = () =>
       detailQuality: "partial_detail",
     }),
   );
+
+test("triage and merge carry the same computed screening hints", () => {
+  const first = enrichDiscoveredPosting(preparedJob(), undefined);
+  const carried = readDiscoveryPreparation(first)!.screeningHints!.value;
+  const second = enrichDiscoveredPosting(first, undefined);
+  expect(readDiscoveryPreparation(second)!.screeningHints!.value).toBe(carried);
+  expect(second.screeningHints).toEqual(first.screeningHints);
+});
+
+test.each([
+  (job: JobPosting) => {
+    job.location = "Remote Europe";
+  },
+  (job: JobPosting) => {
+    job.summary = "Work authorization is required.";
+  },
+  (job: JobPosting) => {
+    job.description = "Visa sponsorship and relocation available.";
+  },
+  (job: JobPosting) => {
+    job.minimumQualifications.push("Active security clearance");
+  },
+  (job: JobPosting) => {
+    job.preferredQualifications.push("Must travel regularly");
+  },
+  (job: JobPosting) => {
+    job.workMode.push("remote");
+  },
+])(
+  "changed screening inputs recompute rather than reuse carried hints (%#)",
+  (mutate) => {
+    const job = enrichDiscoveredPosting(preparedJob(), undefined);
+    const carried = readDiscoveryPreparation(job)!.screeningHints!.value;
+    mutate(job);
+    const expected = enrichDiscoveredPosting(structuredClone(job), undefined);
+    const result = enrichDiscoveredPosting(job, undefined);
+    expect(readDiscoveryPreparation(result)!.screeningHints!.value).not.toBe(
+      carried,
+    );
+    expect(result.screeningHints).toEqual(expected.screeningHints);
+  },
+);
 
 test("an equally titled full incoming listing does not need the saved body to choose richer evidence", () => {
   const posting = { ...preparedJob(), description: body.repeat(10) };
@@ -272,19 +318,36 @@ test("salary is parsed once per arriving text and carried without changing the l
 test("a plan-only delta preserves concurrent status and proven lazy listing fields without opening them", () => {
   const baseline = preparedJob();
   const fingerprints = createDiscoveryListingFingerprints(baseline);
-  contracts.writeDiscoveryPreparation(baseline, { fingerprints: { owner: baseline, value: fingerprints } });
-  const read = vi.fn(() => { throw new Error("A plan update opened listing text"); });
-  Object.defineProperty(baseline, "description", { enumerable: true, configurable: true, get: read });
+  contracts.writeDiscoveryPreparation(baseline, {
+    fingerprints: { owner: baseline, value: fingerprints },
+  });
+  const read = vi.fn(() => {
+    throw new Error("A plan update opened listing text");
+  });
+  Object.defineProperty(baseline, "description", {
+    enumerable: true,
+    configurable: true,
+    get: read,
+  });
   Object.freeze(baseline);
   const current = copyView(baseline, { status: "shortlisted" as const });
   const salary = readPreparedBodySalaryRange(baseline)!;
-  contracts.writeDiscoveryPreparation(current, { fingerprints: { owner: current, value: fingerprints }, bodySalaryRange: salary });
+  contracts.writeDiscoveryPreparation(current, {
+    fingerprints: { owner: current, value: fingerprints },
+    bodySalaryRange: salary,
+  });
   Object.freeze(current);
-  const intended = copyView(baseline, { planAssessments: { synthetic_plan: baseline.matchAssessment } });
+  const intended = copyView(baseline, {
+    planAssessments: { synthetic_plan: baseline.matchAssessment },
+  });
   const next = applySavedJobDelta(current, baseline, intended);
   expect(next.status).toBe("shortlisted");
-  expect(next.planAssessments?.synthetic_plan).toEqual(baseline.matchAssessment);
-  expect(Object.getOwnPropertyDescriptor(next, "description")).toMatchObject({ get: read });
+  expect(next.planAssessments?.synthetic_plan).toEqual(
+    baseline.matchAssessment,
+  );
+  expect(Object.getOwnPropertyDescriptor(next, "description")).toMatchObject({
+    get: read,
+  });
   expect(readPreparedDiscoveryFingerprints(next)).toEqual(fingerprints);
   expect(readPreparedBodySalaryRange(next)).toBe(salary);
   expect(read).not.toHaveBeenCalled();
@@ -293,10 +356,15 @@ test("a plan-only delta preserves concurrent status and proven lazy listing fiel
 test("a delta changing the listing body recomputes its fingerprints and salary evidence", () => {
   const baseline = preparedJob();
   const before = createDiscoveryListingFingerprints(baseline);
-  const intended = prepareDiscoveryPosting({ ...baseline, description: body + " Pay: EUR 96,000 per year." });
+  const intended = prepareDiscoveryPosting({
+    ...baseline,
+    description: body + " Pay: EUR 96,000 per year.",
+  });
   const next = applySavedJobDelta(baseline, baseline, intended);
   expect(next.description).toBe(intended.description);
-  expect(createDiscoveryListingFingerprints(next)).toEqual(createDiscoveryListingFingerprints(intended));
+  expect(createDiscoveryListingFingerprints(next)).toEqual(
+    createDiscoveryListingFingerprints(intended),
+  );
   expect(createDiscoveryListingFingerprints(next)).not.toEqual(before);
   expect(readPreparedBodySalaryRange(next)).toBe("EUR 96,000 per year");
 });

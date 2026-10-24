@@ -42,6 +42,18 @@ export type DiscoveryPreparation = {
   normalizedPosting?: JobPosting | undefined;
   normalizedPostingSource?: JobPosting | undefined;
   bodySalaryRange?: ReturnType<typeof extractSalaryRangeFromListingBody>;
+  screeningHints?: {
+    basis: Pick<
+      JobPosting,
+      | "location"
+      | "summary"
+      | "description"
+      | "minimumQualifications"
+      | "preferredQualifications"
+      | "workMode"
+    >;
+    value: JobPosting["screeningHints"];
+  };
 };
 
 export function readDiscoveryPreparation(
@@ -64,6 +76,11 @@ export function writeDiscoveryPreparation(
     return false;
   const previous = readDiscoveryPreparation(value);
   const next = { ...previous, ...preparation };
+  if (
+    preparation.content &&
+    next.screeningHints?.basis.description !== preparation.content.description
+  )
+    delete next.screeningHints;
   const beforeBody =
     previous?.content?.description ??
     previous?.fingerprints?.basis?.description;
