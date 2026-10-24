@@ -12,6 +12,7 @@ import { cleanupTempDirectoryWithRetry, createSavedJob, createTempRepository } f
 import { createDiscoveryStorage } from "./internal/discovery-storage";
 import { createDiscoveryDisplayProjectionReader } from "./internal/discovery-display-projection";
 import { createSeed } from "./test-fixtures";
+import { patchDiscoveryLedger } from "./index";
 
 function ledger(id: string) {
   return DiscoveryLedgerEntrySchema.parse({
@@ -63,6 +64,45 @@ function activity(runId: string, index: number) {
 }
 
 describe("normalized discovery storage", () => {
+  test("a ledger batch reads only its changed ranks once and inserts all changed rows once", async () => {
+    const temp = await createTempRepository("nestor-ledger-batch-");
+    try {
+      const repo = await temp.createRepository();
+      await repo.commitDiscoveryStateUpdate((current) => ({ ...current, discoveryLedger: Array.from({ length: 3000 }, (_, index) => ledger(`batch_${index}`)) }));
+      await repo.close();
+      const raw = new DatabaseSync(temp.filePath);
+      try {
+        const storage = createDiscoveryStorage(raw, createSeed().discovery);
+        const before = storage.read();
+        const calls = { rankReads: 0, rowWrites: 0 };
+        const prepare = raw.prepare.bind(raw);
+        const spy = vi.spyOn(raw, "prepare").mockImplementation((sql) => {
+          const stmt = prepare(sql);
+          if (sql.startsWith("SELECT id, position FROM discovery_ledger WHERE")) {
+            const all = stmt.all.bind(stmt);
+            vi.spyOn(stmt, "all").mockImplementation((...args) => { calls.rankReads++; return all(...args); });
+          }
+          if (sql.startsWith("INSERT OR REPLACE INTO discovery_ledger")) {
+            const run = stmt.run.bind(stmt);
+            vi.spyOn(stmt, "run").mockImplementation((...args) => { calls.rowWrites++; return run(...args); });
+          }
+          return stmt;
+        });
+        const next = patchDiscoveryLedger(before.discoveryLedger, Array.from({ length: 500 }, (_, index) => ({ id: `batch_${index}`, update: (row) => ({ ...row!, lastSeenAt: "2026-10-24T00:00:00.000Z" }) })));
+        raw.exec("BEGIN IMMEDIATE");
+        const stored = storage.update({ ...before, discoveryLedger: next }, before);
+        raw.exec("COMMIT");
+        storage.publish(stored);
+        expect(calls).toEqual({ rankReads: 1, rowWrites: 1 });
+        expect(storage.read().discoveryLedger).toEqual(next);
+        spy.mockRestore();
+        const reopened = new DatabaseSync(temp.filePath);
+        try { expect(createDiscoveryStorage(reopened, createSeed().discovery).read().discoveryLedger).toEqual(next); }
+        finally { reopened.close(); }
+      } finally { raw.close(); }
+    } finally { await cleanupTempDirectoryWithRetry(temp.tempDirectory); }
+  });
+
   test("migration 29 backs up and preserves complete legacy run metadata once", async () => {
     const temp = await createTempRepository("nestor-run-progress-migration-");
     try {

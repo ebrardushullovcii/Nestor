@@ -21,6 +21,8 @@ import { toProviderAwarePosting } from "./discovery-posting-normalization";
 import { inferSourceIntelligenceFromTarget } from "./workspace-source-intelligence";
 import * as compensation from "./matching-compensation";
 import * as contracts from "@nestor/contracts";
+import { copyView } from "@nestor/core";
+import { applySavedJobDelta } from "./workspace-discovery-methods";
 import {
   carryPreparedDiscoveryPosting,
   rememberPreparedDiscoveryPosting,
@@ -265,4 +267,36 @@ test("salary is parsed once per arriving text and carried without changing the l
   } finally {
     parse.mockRestore();
   }
+});
+
+test("a plan-only delta preserves concurrent status and proven lazy listing fields without opening them", () => {
+  const baseline = preparedJob();
+  const fingerprints = createDiscoveryListingFingerprints(baseline);
+  contracts.writeDiscoveryPreparation(baseline, { fingerprints: { owner: baseline, value: fingerprints } });
+  const read = vi.fn(() => { throw new Error("A plan update opened listing text"); });
+  Object.defineProperty(baseline, "description", { enumerable: true, configurable: true, get: read });
+  Object.freeze(baseline);
+  const current = copyView(baseline, { status: "shortlisted" as const });
+  const salary = readPreparedBodySalaryRange(baseline)!;
+  contracts.writeDiscoveryPreparation(current, { fingerprints: { owner: current, value: fingerprints }, bodySalaryRange: salary });
+  Object.freeze(current);
+  const intended = copyView(baseline, { planAssessments: { synthetic_plan: baseline.matchAssessment } });
+  const next = applySavedJobDelta(current, baseline, intended);
+  expect(next.status).toBe("shortlisted");
+  expect(next.planAssessments?.synthetic_plan).toEqual(baseline.matchAssessment);
+  expect(Object.getOwnPropertyDescriptor(next, "description")).toMatchObject({ get: read });
+  expect(readPreparedDiscoveryFingerprints(next)).toEqual(fingerprints);
+  expect(readPreparedBodySalaryRange(next)).toBe(salary);
+  expect(read).not.toHaveBeenCalled();
+});
+
+test("a delta changing the listing body recomputes its fingerprints and salary evidence", () => {
+  const baseline = preparedJob();
+  const before = createDiscoveryListingFingerprints(baseline);
+  const intended = prepareDiscoveryPosting({ ...baseline, description: body + " Pay: EUR 96,000 per year." });
+  const next = applySavedJobDelta(baseline, baseline, intended);
+  expect(next.description).toBe(intended.description);
+  expect(createDiscoveryListingFingerprints(next)).toEqual(createDiscoveryListingFingerprints(intended));
+  expect(createDiscoveryListingFingerprints(next)).not.toEqual(before);
+  expect(readPreparedBodySalaryRange(next)).toBe("EUR 96,000 per year");
 });

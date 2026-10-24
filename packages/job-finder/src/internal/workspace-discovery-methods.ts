@@ -28,6 +28,8 @@ import {
   DISCOVERY_RUN_ALREADY_ACTIVE_MESSAGE,
   DiscoveryAgentMetadataSchema,
   readPreparedBodySalaryRange,
+  readPreparedDiscoveryFingerprints,
+  DISCOVERY_FINGERPRINT_FIELDS,
   writeDiscoveryPreparation,
   type CandidateProfile,
   type DiscoveryActivityEvent,
@@ -306,7 +308,7 @@ const CHECKPOINT_RESUME_HEARTBEAT_REVISIONS = 8;
 const AGENT_RUNTIME_UNAVAILABLE_WARNING =
   "The bounded browser agent runtime is unavailable for this source; live collection fell back to direct discovery.";
 
-function applySavedJobDelta(
+export function applySavedJobDelta(
   currentJob: SavedJob,
   baselineJob: SavedJob,
   intendedJob: SavedJob,
@@ -345,7 +347,18 @@ function applySavedJobDelta(
     }
   }
 
-  const next = { ...currentJob, ...changedFields };
+  const next = copyView(currentJob, changedFields);
+  const fingerprints = DISCOVERY_FINGERPRINT_FIELDS.some((field) => field in changedFields)
+    ? null
+    : readPreparedDiscoveryFingerprints(currentJob);
+  if (fingerprints) {
+    const bodySalaryRange = readPreparedBodySalaryRange(currentJob);
+    writeDiscoveryPreparation(next, {
+      fingerprints: { owner: next, value: fingerprints },
+      ...(bodySalaryRange !== undefined ? { bodySalaryRange } : {}),
+    });
+    return Object.freeze(next);
+  }
   let bodySalaryRange = readPreparedBodySalaryRange(next);
   if (bodySalaryRange === undefined) {
     const intendedRange = readPreparedBodySalaryRange(intendedJob);

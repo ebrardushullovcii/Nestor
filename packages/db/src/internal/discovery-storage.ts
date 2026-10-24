@@ -1,5 +1,6 @@
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { existsSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 import {
   BrowserAgentRunCheckpointSchema,
   DiscoveryActivityEventSchema,
@@ -579,6 +580,12 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
       : undefined;
   if (patch?.before === before) {
     const result = after.slice();
+    const rankedIds = patch.rows.flatMap(({ index, previousIndex, moveToEnd }) =>
+      previousIndex !== undefined && !moveToEnd ? [after[index]!.id] : []);
+    const ranks = new Map(rankedIds.length ? statement(database,
+      "SELECT id, position FROM discovery_ledger WHERE id IN (SELECT value FROM json_each(?))")
+      .all(JSON.stringify(rankedIds)).map((row) => [String(row.id), Number(row.position)]) : []);
+    const writes: Array<readonly [string, number, T]> = [];
     let maximum: number | null = null;
     for (const { index, previousIndex, moveToEnd } of patch.rows) {
       const row = after[index]!;
@@ -587,17 +594,13 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
         old === row || (old && aliases.get(row) === old)
           ? old
           : frozen(row);
-      if (old && !moveToEnd && JSON.stringify(old) === JSON.stringify(parsed)) {
+      if (old && !moveToEnd && Object.keys(old).length === Object.keys(parsed).length &&
+        Object.keys(old).every((key) => isDeepStrictEqual(Reflect.get(old, key), Reflect.get(parsed, key)))) {
         result[index] = old;
       } else {
         let position: number;
         if (old && !moveToEnd)
-          position = Number(
-            statement(
-              database,
-              "SELECT position FROM discovery_ledger WHERE id = ?",
-            ).get(row.id)?.position,
-          );
+          position = ranks.get(row.id)!;
         else {
           maximum ??= Number(
             statement(
@@ -607,12 +610,16 @@ function writeChangedRows<T extends { id: string }>(database: DatabaseSync, tabl
           );
           position = ++maximum;
         }
-        replaceRow(database, table, [row.id, position], parsed);
+        writes.push([row.id, position, parsed]);
         result[index] = parsed;
       }
       frozen(row);
       aliases.set(row, result[index]);
     }
+    if (writes.length)
+      statement(database, `INSERT OR REPLACE INTO discovery_ledger (id, position, value)
+        SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')
+        FROM json_each(?)`).run(JSON.stringify(writes));
     // Existing ranks did not move. Appends invalidate the generic writer's
     // position cache; it can rebuild that cache if a later write reorders rows.
     positionCache?.delete(`${table}\u0000`);
