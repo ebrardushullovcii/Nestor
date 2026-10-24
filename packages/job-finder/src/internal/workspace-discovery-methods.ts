@@ -1914,12 +1914,22 @@ export function createWorkspaceDiscoveryMethods(
     const storedJob = (job: SavedJob): SavedJob => {
       const cached = storedJobs.get(job);
       if (cached) return cached;
-      const stored = withPlanAssessment(
+      let stored = withPlanAssessment(
         job,
         assessmentPlanId,
         job.matchAssessment,
         originalJobsById.get(job.id)?.matchAssessment ?? job.matchAssessment,
       );
+      // A new kept job joins its plan in the write that creates it. Waiting
+      // until the terminal commit rewrote every new root a second time.
+      if (assessmentPlanId && !originalJobsById.has(job.id)) {
+        stored = copyView(stored, {
+          campaignIds: uniqueStrings([
+            ...(stored.campaignIds ?? []),
+            assessmentPlanId,
+          ]).sort(),
+        });
+      }
       storedJobs.set(job, stored);
       return stored;
     };

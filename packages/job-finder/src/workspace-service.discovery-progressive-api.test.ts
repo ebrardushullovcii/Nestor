@@ -459,9 +459,11 @@ describe("progressive public API discovery", () => {
       expect(completedTargetIds(events)).toEqual(["target_fast_api"]);
     });
     expect(runSettled).toBe(false);
-    expect(
-      (await repository.listSavedJobs()).map((job) => job.sourceJobId),
-    ).toContain("2002");
+    const liveJobs = await repository.listSavedJobs();
+    expect(liveJobs.map((job) => job.sourceJobId)).toContain("2002");
+    const livePlan = await repository.getCampaignState();
+    expect(liveJobs.find((job) => job.sourceJobId === "2002")?.campaignIds)
+      .toContain(livePlan?.activeCampaignId);
 
     slowResponse.resolve(
       createGreenhouseResponse({
@@ -484,6 +486,9 @@ describe("progressive public API discovery", () => {
       jobsPersisted: 2,
       outcome: "completed",
     });
+    expect((await repository.listSavedJobs()).every((job) =>
+      job.campaignIds?.includes(livePlan.activeCampaignId ?? ""),
+    )).toBe(true);
   });
 
   test("keeps a completed fast batch durable when a slower provider later fails", async () => {
