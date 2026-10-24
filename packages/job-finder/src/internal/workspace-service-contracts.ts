@@ -170,6 +170,12 @@ export interface JobFinderWorkspaceService {
    * by design and are marked in the snapshot hydration metadata.
    */
   getWorkspaceBootstrap(): Promise<JobFinderWorkspaceSnapshot>;
+  /**
+   * Home's first view (ADR 0077): every collection Home reads except the
+   * Find jobs lists, which stay deferred. Null when the workspace cannot give
+   * one; the full snapshot follows either way.
+   */
+  getWorkspaceHomeSnapshot?(): Promise<JobFinderWorkspaceSnapshot | null>;
   getResumeImportState(): Promise<{
     activeVisionRunIds: readonly string[];
     resumeImportRuns: readonly ResumeImportRun[];
@@ -433,6 +439,8 @@ export interface JobFinderWorkspaceService {
   queueJobForReview(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
   /** One row-local shortlist commit, without constructing a workspace per job. */
   queueJobsForReview?(jobIds: readonly string[]): Promise<void>;
+  /** Starts resumes that shortlisting asked for and a restart left waiting. */
+  continueResumesOnShortlist?(): Promise<void>;
   saveResumeBatchCheckpoint(checkpoint: ResumeBatchCheckpoint): Promise<void>;
   setJobResumeApplicationMode(
     jobId: string,
@@ -976,6 +984,8 @@ export interface CreateJobFinderWorkspaceServiceOptions {
   /** Publishes the terminal snapshot of a queue resumed after restart. */
   onDetachedApplyRunFinished?: () => void;
   onResumeEvidenceFinished?: () => void;
+  /** A resume started by shortlisting was queued, written or withdrawn. */
+  onShortlistResumeChanged?: () => void;
   onListingAssessmentFinished?: () => void;
   /** Saved jobs were rescored in the background after a profile or goal save. */
   onSavedJobsRescored?: () => void;

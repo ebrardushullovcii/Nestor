@@ -6,8 +6,11 @@ import { DiscoveryRunRecordSchema } from "@nestor/contracts";
 import type { BrowserSessionState } from "@nestor/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DiscoveryResultsPanel } from "./discovery-results-panel";
 import type { DiscoveryLatestRunVerdict } from "./discovery-run-feedback";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession: BrowserSessionState = {
   source: "target_site",
@@ -18,7 +21,7 @@ const browserSession: BrowserSessionState = {
   lastCheckedAt: "2026-08-23T10:00:00.000Z",
 };
 
-function renderEmptyResults(options?: {
+async function renderEmptyResults(options?: {
   browserSession?: BrowserSessionState;
   hasCompletedSearch?: boolean;
   isSearchInProgress?: boolean;
@@ -26,9 +29,9 @@ function renderEmptyResults(options?: {
   editPlanHref?: string;
   failureCalloutShown?: boolean;
 }) {
-  return render(
+  const rendered = render(
     <MemoryRouter>
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={options?.browserSession ?? browserSession}
         jobs={[]}
         onSelectJob={vi.fn()}
@@ -45,6 +48,8 @@ function renderEmptyResults(options?: {
       />
     </MemoryRouter>,
   );
+  await flushFindJobsQueries();
+  return rendered;
 }
 
 afterEach(() => {
@@ -52,8 +57,8 @@ afterEach(() => {
 });
 
 describe("DiscoveryResultsPanel newest-run empty-state verdicts", () => {
-  it("offers source setup when the offline catalog has no results", () => {
-    renderEmptyResults({
+  it("offers source setup when the offline catalog has no results", async () => {
+    await renderEmptyResults({
       browserSession: {
         ...browserSession,
         driver: "catalog_seed",
@@ -79,8 +84,8 @@ describe("DiscoveryResultsPanel newest-run empty-state verdicts", () => {
     ).toBeTruthy();
   });
 
-  it("shows an explicit failed state instead of first-search or no-match copy", () => {
-    renderEmptyResults({
+  it("shows an explicit failed state instead of first-search or no-match copy", async () => {
+    await renderEmptyResults({
       latestRunVerdict: {
         hasEarlierCompleted: false,
         interruptState: "failed",
@@ -98,8 +103,8 @@ describe("DiscoveryResultsPanel newest-run empty-state verdicts", () => {
     expect(screen.queryByText("Ready for your first search")).toBeNull();
   });
 
-  it("names cancellation as its own outcome", () => {
-    renderEmptyResults({
+  it("names cancellation as its own outcome", async () => {
+    await renderEmptyResults({
       latestRunVerdict: {
         hasEarlierCompleted: false,
         interruptState: "cancelled",
@@ -115,8 +120,8 @@ describe("DiscoveryResultsPanel newest-run empty-state verdicts", () => {
     expect(screen.queryByText("Ready for your first search")).toBeNull();
   });
 
-  it("shows the stopped verdict without a second box about an earlier search", () => {
-    renderEmptyResults({
+  it("shows the stopped verdict without a second box about an earlier search", async () => {
+    await renderEmptyResults({
       latestRunVerdict: {
         hasEarlierCompleted: true,
         interruptState: "cancelled",
@@ -128,8 +133,8 @@ describe("DiscoveryResultsPanel newest-run empty-state verdicts", () => {
     expect(screen.getByText("The last search was cancelled")).toBeTruthy();
   });
 
-  it("reports a zero-result completed run with failed sources as source failures", () => {
-    renderEmptyResults({
+  it("reports a zero-result completed run with failed sources as source failures", async () => {
+    await renderEmptyResults({
       latestRunVerdict: {
         hasEarlierCompleted: false,
         interruptState: "sources_failed",
@@ -146,17 +151,17 @@ describe("DiscoveryResultsPanel newest-run empty-state verdicts", () => {
     expect(screen.queryByText("No matches from this search")).toBeNull();
   });
 
-  it("defers to the failure callout instead of offering Search now beside it", () => {
+  it("defers to the failure callout instead of offering Search now beside it", async () => {
     const verdict: DiscoveryLatestRunVerdict = {
       hasEarlierCompleted: false,
       interruptState: "sources_failed",
       kind: "interrupted",
     };
-    renderEmptyResults({ latestRunVerdict: verdict });
+    await renderEmptyResults({ latestRunVerdict: verdict });
     expect(screen.getByText(/Select Search now to try again\./)).toBeTruthy();
     cleanup();
 
-    renderEmptyResults({
+    await renderEmptyResults({
       latestRunVerdict: verdict,
       failureCalloutShown: true,
     });
@@ -166,8 +171,8 @@ describe("DiscoveryResultsPanel newest-run empty-state verdicts", () => {
     ).toBeTruthy();
   });
 
-  it("keeps the degraded verdict without a second box about an earlier search", () => {
-    renderEmptyResults({
+  it("keeps the degraded verdict without a second box about an earlier search", async () => {
+    await renderEmptyResults({
       latestRunVerdict: {
         hasEarlierCompleted: true,
         interruptState: "sources_failed",
@@ -182,8 +187,8 @@ describe("DiscoveryResultsPanel newest-run empty-state verdicts", () => {
     expect(screen.queryByText("No matches from this search")).toBeNull();
   });
 
-  it("keeps the no-match verdict only for a completed newest run", () => {
-    renderEmptyResults({
+  it("keeps the no-match verdict only for a completed newest run", async () => {
+    await renderEmptyResults({
       editPlanHref: "/job-finder/campaigns?campaignId=plan_chicago",
       latestRunVerdict: { kind: "completed" },
     });
@@ -199,25 +204,25 @@ describe("DiscoveryResultsPanel newest-run empty-state verdicts", () => {
     ).toBeNull();
   });
 
-  it("keeps the ready verdict only when no settled run exists", () => {
-    renderEmptyResults({ latestRunVerdict: { kind: "none" } });
+  it("keeps the ready verdict only when no settled run exists", async () => {
+    await renderEmptyResults({ latestRunVerdict: { kind: "none" } });
 
     expect(screen.getByText("Ready for your first search")).toBeTruthy();
     expect(screen.queryByText("No matches from this search")).toBeNull();
   });
 
-  it("falls back to the legacy completed flag when no verdict is provided", () => {
-    renderEmptyResults({ hasCompletedSearch: true });
+  it("falls back to the legacy completed flag when no verdict is provided", async () => {
+    await renderEmptyResults({ hasCompletedSearch: true });
     expect(screen.getByText("No matches from this search")).toBeTruthy();
 
     cleanup();
 
-    renderEmptyResults();
+    await renderEmptyResults();
     expect(screen.getByText("Ready for your first search")).toBeTruthy();
   });
 
-  it("keeps live progress above any terminal verdict while a run is active", () => {
-    renderEmptyResults({
+  it("keeps live progress above any terminal verdict while a run is active", async () => {
+    await renderEmptyResults({
       isSearchInProgress: true,
       latestRunVerdict: {
         hasEarlierCompleted: false,
@@ -232,8 +237,8 @@ describe("DiscoveryResultsPanel newest-run empty-state verdicts", () => {
     ).toBeNull();
   });
 
-  it("treats a running newest run as live progress rather than a final verdict", () => {
-    renderEmptyResults({ latestRunVerdict: { kind: "running" } });
+  it("treats a running newest run as live progress rather than a final verdict", async () => {
+    await renderEmptyResults({ latestRunVerdict: { kind: "running" } });
 
     expect(screen.getByText("Searching your sources")).toBeTruthy();
     expect(screen.queryByText("Ready for your first search")).toBeNull();
@@ -241,7 +246,7 @@ describe("DiscoveryResultsPanel newest-run empty-state verdicts", () => {
   });
 });
 
-it("keeps recorded source explanations and coverage after a no-match search", () => {
+it("keeps recorded source explanations and coverage after a no-match search", async () => {
   const run = DiscoveryRunRecordSchema.parse({
     id: "empty",
     state: "completed",
@@ -284,7 +289,7 @@ it("keeps recorded source explanations and coverage after a no-match search", ()
   });
   render(
     <MemoryRouter>
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         jobs={[]}
         onSelectJob={vi.fn()}
@@ -294,6 +299,7 @@ it("keeps recorded source explanations and coverage after a no-match search", ()
       />
     </MemoryRouter>,
   );
+  await flushFindJobsQueries();
   expect(
     screen.getByTestId("discovery-source-summaries").hasAttribute("open"),
   ).toBe(false);
@@ -307,7 +313,7 @@ it("keeps recorded source explanations and coverage after a no-match search", ()
   expect(screen.getAllByText(/inspected not recorded/)).toHaveLength(2);
 });
 
-it("says no source could be searched when every source failed, and retries it directly", () => {
+it("says no source could be searched when every source failed, and retries it directly", async () => {
   const run = DiscoveryRunRecordSchema.parse({
     id: "partial",
     state: "completed",
@@ -323,7 +329,7 @@ it("says no source could be searched when every source failed, and retries it di
   const onRetrySource = vi.fn();
   render(
     <MemoryRouter>
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         jobs={[]}
         onSelectJob={vi.fn()}
@@ -333,6 +339,7 @@ it("says no source could be searched when every source failed, and retries it di
       />
     </MemoryRouter>,
   );
+  await flushFindJobsQueries();
   // Nothing was found, so it is not "Partial results".
   expect(screen.queryByText(/Partial results/)).toBeNull();
   expect(screen.getByText(/No source could be searched/)).toBeTruthy();
@@ -346,7 +353,7 @@ it("says no source could be searched when every source failed, and retries it di
 
 it.each(["running", "cancelled"] as const)(
   "uses accurate source status for a %s run, with plain errors and singular counts",
-  (state) => {
+  async (state) => {
     const run = DiscoveryRunRecordSchema.parse({
       id: "source-copy",
       state,
@@ -374,7 +381,7 @@ it.each(["running", "cancelled"] as const)(
     });
     render(
       <MemoryRouter>
-        <DiscoveryResultsPanel
+        <DiscoveryResultsPanelWithJobs
           browserSession={browserSession}
           jobs={[]}
           selectedJob={null}
@@ -384,6 +391,7 @@ it.each(["running", "cancelled"] as const)(
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
     const summary = screen.getByTestId("discovery-source-summaries");
     expect(summary.hasAttribute("open")).toBe(false);
     fireEvent.click(summary.querySelector("summary")!);
@@ -403,7 +411,7 @@ it.each(["running", "cancelled"] as const)(
   },
 );
 
-it("searches again from an interrupted run without passing the click along", () => {
+it("searches again from an interrupted run without passing the click along", async () => {
   const run = DiscoveryRunRecordSchema.parse({
     id: "interrupted",
     state: "failed",
@@ -420,7 +428,7 @@ it("searches again from an interrupted run without passing the click along", () 
   const onSearchAgain = vi.fn();
   render(
     <MemoryRouter>
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         jobs={[]}
         onSelectJob={vi.fn()}
@@ -430,6 +438,7 @@ it("searches again from an interrupted run without passing the click along", () 
       />
     </MemoryRouter>,
   );
+  await flushFindJobsQueries();
 
   fireEvent.click(
     screen.getByRole("button", { name: "Search again from here" }),
@@ -439,10 +448,10 @@ it("searches again from an interrupted run without passing the click along", () 
   expect(onSearchAgain).toHaveBeenCalledWith();
 });
 
-it("names a background plan even while the current plan has no results", () => {
+it("names a background plan even while the current plan has no results", async () => {
   render(
     <MemoryRouter>
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         jobs={[]}
         selectedJob={null}
@@ -451,6 +460,7 @@ it("names a background plan even while the current plan has no results", () => {
       />
     </MemoryRouter>,
   );
+  await flushFindJobsQueries();
   expect(
     screen.getByTestId("discovery-results-status-line").textContent,
   ).toContain("Local B is searching in the background");

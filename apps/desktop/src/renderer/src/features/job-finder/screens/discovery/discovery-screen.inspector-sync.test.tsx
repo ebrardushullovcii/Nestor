@@ -20,16 +20,22 @@ import { ToastProvider } from "@renderer/components/ui/toast";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// Job details load over IPC in the app; here the listed row is the detail.
-vi.mock("../../hooks/use-job-detail", () => ({
-  useJobDetail: (row: unknown) => ({
-    job: row,
+// Job details load over IPC in the app; here the fixture's row is the detail.
+vi.mock("../../hooks/use-job-detail", async () => {
+  const { readFixtureJob } = await import(
+    "./find-jobs-list-report.test-support"
+  );
+  return {
+  useJobDetail: (row: { id: string } | null) => ({
+    job: row ? readFixtureJob(row.id) : null,
     error: null,
     loading: false,
     retry: () => undefined,
   }),
   clearJobDetailCache: () => undefined,
-}));
+  prefetchJobDetail: () => undefined,
+  };
+});
 
 const detailProbe = vi.hoisted(() => ({
   latest: null as { selectedJob: SavedJob | null } | null,
@@ -91,7 +97,11 @@ vi.mock("./discovery-filters-panel", () => ({
   ),
 }));
 
-import { DiscoveryScreen } from "./discovery-screen";
+import type { DiscoveryScreen } from "./discovery-screen";
+import {
+  DiscoveryScreenWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site" as const,
@@ -163,7 +173,7 @@ function createJobs(count = JOB_COUNT): SavedJob[] {
   });
 }
 
-function renderScreen(options?: {
+async function renderScreen(options?: {
   jobs?: readonly SavedJob[];
   campaigns?: Parameters<typeof DiscoveryScreen>[0]["campaigns"];
   activeCampaignId?: string;
@@ -172,9 +182,9 @@ function renderScreen(options?: {
   selectedJob?: SavedJob | null;
 }) {
   const jobs = options?.jobs ?? createJobs();
-  return render(
+  const rendered = render(
     <MemoryRouter>
-      <DiscoveryScreen
+      <DiscoveryScreenWithJobs
         actionState={{ message: null }}
         activeRun={null}
         {...(options?.campaigns ? { campaigns: options.campaigns } : {})}
@@ -207,6 +217,8 @@ function renderScreen(options?: {
       />
     </MemoryRouter>,
   );
+  await flushFindJobsQueries();
+  return rendered;
 }
 
 function getResultButton(jobId: string): HTMLButtonElement {
@@ -226,7 +238,7 @@ afterEach(() => {
 });
 
 describe("DiscoveryScreen inspector sync across pagination and search", () => {
-  it("passes configured discovery targets into result attribution and falls back after removal", () => {
+  it("passes configured discovery targets into result attribution and falls back after removal", async () => {
     const target = JobDiscoveryTargetSchema.parse({
       id: "target_private_board",
       label: "Private Product Roles",
@@ -252,7 +264,7 @@ describe("DiscoveryScreen inspector sync across pagination and search", () => {
       },
     };
 
-    renderScreen({
+    await renderScreen({
       jobs: [job],
       searchPreferences: configuredPreferences,
       selectedJob: job,
@@ -265,7 +277,7 @@ describe("DiscoveryScreen inspector sync across pagination and search", () => {
     ).toBe("Found on Private Product Roles");
 
     cleanup();
-    renderScreen({
+    await renderScreen({
       jobs: [job],
       searchPreferences: {
         ...configuredPreferences,
@@ -281,10 +293,10 @@ describe("DiscoveryScreen inspector sync across pagination and search", () => {
     ).toBe("Found on fallback.example.test");
   });
 
-  it("keeps the selected job while moving to another results page", () => {
+  it("keeps the selected job while moving to another results page", async () => {
     const jobs = createJobs();
     const onSelectJob = vi.fn();
-    renderScreen({ onSelectJob, selectedJob: jobs[0] ?? null });
+    await renderScreen({ onSelectJob, selectedJob: jobs[0] ?? null });
 
     expect(detailProbe.latest?.selectedJob?.id).toBe("sync_job_000");
     expect(getResultButton("sync_job_000").getAttribute("aria-current")).toBe(
@@ -292,6 +304,7 @@ describe("DiscoveryScreen inspector sync across pagination and search", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await flushFindJobsQueries();
 
     expect(screen.getByText("51–60 of 60")).toBeTruthy();
     // The inspector must now display a job that is actually on this page.
@@ -308,13 +321,14 @@ describe("DiscoveryScreen inspector sync across pagination and search", () => {
   });
 
   it("clears the stale inspector when a search filters every result out", async () => {
-    renderScreen();
+    await renderScreen();
 
     expect(detailProbe.latest?.selectedJob?.id).toBe("sync_job_000");
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Find a job" }), {
       target: { value: "zzz-no-such-role" },
     });
+    await flushFindJobsQueries();
 
     await waitFor(() => {
       expect(detailProbe.latest?.selectedJob).toBeNull();
@@ -323,11 +337,12 @@ describe("DiscoveryScreen inspector sync across pagination and search", () => {
   });
 
   it("inspects the strongest remaining job when a search narrows the pool", async () => {
-    renderScreen();
+    await renderScreen();
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Find a job" }), {
       target: { value: "Northstar" },
     });
+    await flushFindJobsQueries();
 
     await waitFor(() => {
       expect(detailProbe.latest?.selectedJob?.id).toBe("sync_job_055");
@@ -338,9 +353,9 @@ describe("DiscoveryScreen inspector sync across pagination and search", () => {
     );
   });
 
-  it("keeps a deep-linked off-page selection inspected and opens its page", () => {
+  it("keeps a deep-linked off-page selection inspected and opens its page", async () => {
     const jobs = createJobs();
-    renderScreen({ selectedJob: jobs[59] ?? null });
+    await renderScreen({ selectedJob: jobs[59] ?? null });
 
     expect(screen.getByText("51–60 of 60")).toBeTruthy();
     expect(detailProbe.latest?.selectedJob?.id).toBe("sync_job_059");
@@ -349,21 +364,23 @@ describe("DiscoveryScreen inspector sync across pagination and search", () => {
     );
   });
 
-  it("still inspects the exact job after an explicit click on another page", () => {
+  it("still inspects the exact job after an explicit click on another page", async () => {
     const jobs = createJobs();
     const onSelectJob = vi.fn();
-    const { rerender } = renderScreen({
+    const { rerender } = await renderScreen({
       onSelectJob,
       selectedJob: jobs[0] ?? null,
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await flushFindJobsQueries();
     fireEvent.click(getResultButton("sync_job_052"));
+    await flushFindJobsQueries();
     expect(onSelectJob).toHaveBeenCalledWith("sync_job_052");
 
     rerender(
       <MemoryRouter>
-        <DiscoveryScreen
+        <DiscoveryScreenWithJobs
           actionState={{ message: null }}
           activeRun={null}
           browserSession={browserSession}
@@ -390,6 +407,7 @@ describe("DiscoveryScreen inspector sync across pagination and search", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
 
     expect(detailProbe.latest?.selectedJob?.id).toBe("sync_job_052");
     expect(getResultButton("sync_job_052").getAttribute("aria-current")).toBe(
@@ -401,7 +419,7 @@ describe("DiscoveryScreen inspector sync across pagination and search", () => {
 it("keeps the initial filtered row and inspector together", async () => {
   const jobs = createJobs(2);
   jobs[1]!.workMode = ["hybrid"];
-  const view = renderScreen({
+  const view = await renderScreen({
     jobs,
     selectedJob: jobs[0]!,
     activeCampaignId: "sync-plan",
@@ -416,7 +434,7 @@ it("keeps the initial filtered row and inspector together", async () => {
   );
   // A parent remount must not reset the inspector to the hidden requested job.
   view.unmount();
-  renderScreen({ jobs, selectedJob: jobs[0]!, activeCampaignId: "sync-plan" });
+  await renderScreen({ jobs, selectedJob: jobs[0]!, activeCampaignId: "sync-plan" });
   expect(detailProbe.latest?.selectedJob?.id).toBe(jobs[1]!.id);
   expect(getResultButton(jobs[1]!.id).getAttribute("aria-current")).toBe(
     "true",
@@ -429,7 +447,7 @@ it("announces the assessed fit when the job moves to weaker matches", async () =
     return (
       <ToastProvider>
         <MemoryRouter>
-          <DiscoveryScreen
+          <DiscoveryScreenWithJobs
             actionState={{ message: null }}
             activeRun={null}
             browserSession={browserSession}
@@ -480,6 +498,7 @@ it("announces the assessed fit when the job moves to weaker matches", async () =
     );
   }
   render(<World />);
+  await flushFindJobsQueries();
   fireEvent.click(
     screen.getByRole("button", { name: "Assess selected listing" }),
   );

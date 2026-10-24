@@ -7,7 +7,10 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApplicationsRecordsPanel } from "../screens/applications/applications-records-panel";
-import { DiscoveryResultsPanel } from "../screens/discovery/discovery-results-panel";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "../screens/discovery/find-jobs-query-fixture.test-support";
 import { ReviewQueueListPanel } from "../screens/review-queue/review-queue-list-panel";
 import {
   jobFinderListRowBadgeSlotClassName,
@@ -163,10 +166,10 @@ function firstRow(container: HTMLElement): Element {
   return row;
 }
 
-function renderDiscoveryRow(): Element {
+async function renderDiscoveryRow(): Promise<Element> {
   const job = createSavedJob();
   const { container } = render(
-    <DiscoveryResultsPanel
+    <DiscoveryResultsPanelWithJobs
       browserSession={{
         source: "target_site",
         status: "ready",
@@ -181,6 +184,7 @@ function renderDiscoveryRow(): Element {
       selectedJob={null}
     />,
   );
+  await flushFindJobsQueries();
   return firstRow(container);
 }
 
@@ -222,8 +226,8 @@ function renderApplicationsRow(): Element {
 }
 
 describe("one Job Finder list treatment", () => {
-  it("renders Find jobs, Shortlisted and Applications rows with identical structural classes", () => {
-    const discovery = structuralClasses(renderDiscoveryRow());
+  it("renders Find jobs, Shortlisted and Applications rows with identical structural classes", async () => {
+    const discovery = structuralClasses(await renderDiscoveryRow());
     cleanup();
     const reviewQueue = structuralClasses(renderReviewQueueRow());
     cleanup();
@@ -245,13 +249,13 @@ describe("one Job Finder list treatment", () => {
     }
   });
 
-  it("puts every row's status badge in the one trailing title-line slot", () => {
+  it("puts every row's status badge in the one trailing title-line slot", async () => {
     for (const [list, renderRow] of [
       ["Find jobs", renderDiscoveryRow],
       ["Shortlisted", renderReviewQueueRow],
       ["Applications", renderApplicationsRow],
     ] as const) {
-      const row = renderRow();
+      const row = await renderRow();
 
       const badgeSlots = row.querySelectorAll(
         `[class="${jobFinderListRowBadgeSlotClassName}"]`,
@@ -272,13 +276,13 @@ describe("one Job Finder list treatment", () => {
     }
   });
 
-  it("uses one title -> meta -> status line rhythm in all three lists", () => {
+  it("uses one title -> meta -> status line rhythm in all three lists", async () => {
     for (const [list, renderRow] of [
       ["Find jobs", renderDiscoveryRow],
       ["Shortlisted", renderReviewQueueRow],
       ["Applications", renderApplicationsRow],
     ] as const) {
-      const row = renderRow();
+      const row = await renderRow();
       const lines = elementsCarrying(row, jobFinderListRowLinesClassName);
       // Exactly one lines stack per row: one inner rhythm, not three.
       expect(`${list}: ${lines.length}`).toBe(`${list}: 1`);
@@ -292,10 +296,10 @@ describe("one Job Finder list treatment", () => {
     }
   });
 
-  it("keeps a badge-heavy row to one verdict and says the rest on the meta line", () => {
+  it("keeps a badge-heavy row to one verdict and says the rest on the meta line", async () => {
     const job = createBadgeHeavyJob();
     const { container } = render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={{
           source: "target_site",
           status: "ready",
@@ -310,6 +314,7 @@ describe("one Job Finder list treatment", () => {
         selectedJob={null}
       />,
     );
+    await flushFindJobsQueries();
 
     const badgeSlot = firstRow(container).querySelector(
       `[class="${jobFinderListRowBadgeSlotClassName}"]`,

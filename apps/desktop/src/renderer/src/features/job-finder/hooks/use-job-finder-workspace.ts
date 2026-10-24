@@ -75,6 +75,13 @@ import type {
 } from "@nestor/contracts";
 import type { JobFinderShellActions } from "../lib/job-finder-types";
 import { applyJobFinderWorkspaceDelta } from "../../../pages/job-finder-workspace-delta";
+import { whenLaunchReadsSettled } from "../lib/launch-reads";
+import {
+  createSearchChangeFeedFollower,
+  isSearchRunning,
+  publishSearchLiveCounts,
+  type SearchChangeFeedFollower,
+} from "../lib/search-change-feed";
 import {
   isJobFinderStartupDatabaseRecoveryFact,
   type JobFinderStartupDatabaseRecoveryBlockedFact,
@@ -108,6 +115,9 @@ type JobFinderWorkspaceState =
       retry: () => void;
       startupDatabaseRecovery: JobFinderStartupDatabaseRecoveryBlockedFact | null;
     };
+
+/** How long a press made before the full workspace landed waits for it. */
+const HYDRATION_ACTION_WAIT_MS = 120_000;
 
 function markJobFinderTiming(markName: string, startMarkName?: string) {
   const performanceApi = globalThis.performance;
@@ -198,12 +208,30 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     return workspaceRequestSequenceRef.current === sequence;
   }, []);
 
-  const assertWorkspaceHydrated = useCallback(() => {
-    if (workspaceRef.current?.hydration?.phase === "bootstrap") {
-      throw new Error(
-        "Job Finder is still finishing its initial load. Please wait a moment and try again.",
-      );
-    }
+  // Home can show its buttons before the full snapshot lands (ADR 0077). A
+  // press then waits for it quietly instead of failing; only a load that
+  // never finishes answers with the error.
+  const hydrationWaitersRef = useRef(new Set<() => void>());
+  // Null when nothing is pending, so a press on a loaded workspace still
+  // reaches main in the same turn.
+  const waitForWorkspaceHydrated = useCallback((): Promise<void> | null => {
+    if (workspaceRef.current?.hydration?.phase !== "bootstrap") return null;
+    const waiters = hydrationWaitersRef.current;
+    return new Promise<void>((resolve, reject) => {
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        waiters.delete(done);
+        reject(
+          new Error(
+            "Job Finder is still finishing its initial load. Please wait a moment and try again.",
+          ),
+        );
+      }, HYDRATION_ACTION_WAIT_MS);
+      waiters.add(done);
+    });
   }, []);
 
   const commitWorkspace = useCallback(
@@ -228,6 +256,11 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       }
       workspaceCommitVersionRef.current += 1;
       workspaceRef.current = workspace;
+      if (workspace.hydration?.phase !== "bootstrap") {
+        const waiters = [...hydrationWaitersRef.current];
+        hydrationWaitersRef.current.clear();
+        for (const done of waiters) done();
+      }
       // Main answers this window's next change relative to what it shows.
       // Test hosts and an older preload may not offer the notice.
       const noteRevision = window.nestor.jobFinder.noteWorkspaceRevision;
@@ -338,7 +371,8 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       options?: { allowDuringBootstrap?: boolean },
     ): Promise<JobFinderRendererWorkspaceSnapshot> => {
       if (!options?.allowDuringBootstrap) {
-        assertWorkspaceHydrated();
+        const hydrating = waitForWorkspaceHydrated();
+        if (hydrating) await hydrating;
       }
       const sequence = beginWorkspaceRequest();
       let response:
@@ -388,7 +422,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       return workspace;
     },
     [
-      assertWorkspaceHydrated,
+      waitForWorkspaceHydrated,
       beginWorkspaceRequest,
       commitWorkspace,
       commitWorkspaceSyncResult,
@@ -528,17 +562,61 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     };
   }, [syncWorkspaceFromUpdate]);
 
+  // During a search main announces only its start; the change feed says what
+  // the search wrote, and only screens that show the search sync for it.
+  const searchFeedRef = useRef<SearchChangeFeedFollower | null>(null);
+  useEffect(() => {
+    const queries = window.nestor.jobFinder.queries;
+    if (typeof queries?.onChanges !== "function") return undefined;
+    const follower = createSearchChangeFeedFollower({
+      isSearchRunning: () => isSearchRunning(workspaceRef.current),
+      currentRoute: () => window.location.hash.replace(/^#/, ""),
+      requestSync: () => requestBackgroundSyncRef.current?.(),
+      refreshCounts: () => {
+        const workspace = workspaceRef.current;
+        if (!workspace) return;
+        void queries
+          .getListCounts()
+          .then((counts) => {
+            if (workspaceRef.current === workspace)
+              publishSearchLiveCounts({ counts, workspace });
+          })
+          .catch(() => undefined);
+      },
+    });
+    searchFeedRef.current = follower;
+    const unsubscribe = queries.onChanges((changes) =>
+      follower.onChanges(changes),
+    );
+    const onRouteChange = () => follower.onRouteChange();
+    window.addEventListener("hashchange", onRouteChange);
+    return () => {
+      if (searchFeedRef.current === follower) searchFeedRef.current = null;
+      follower.dispose();
+      unsubscribe();
+      window.removeEventListener("hashchange", onRouteChange);
+    };
+  }, []);
+
   /**
    * Asks for a background refresh on the same paced path as main's update
    * notices, so progress refreshes during a search never stack on them.
+   * While a search runs it goes through the change-feed follower, so screens
+   * that do not show the search are not rebuilt for its progress.
    */
   const requestWorkspaceRefresh = useCallback(() => {
+    const follower = searchFeedRef.current;
+    if (follower && isSearchRunning(workspaceRef.current)) {
+      follower.onSearchProgress();
+      return;
+    }
     requestBackgroundSyncRef.current?.();
   }, []);
 
   const runWorkspaceEntityMutation = useCallback(
     async (mutation: JobFinderWorkspaceEntityMutation) => {
-      assertWorkspaceHydrated();
+      const hydrating = waitForWorkspaceHydrated();
+      if (hydrating) await hydrating;
       const sequence = beginWorkspaceRequest();
       const baseRevision = workspaceRevisionRef.current || null;
       const result = await window.nestor.jobFinder.mutateWorkspaceEntities({
@@ -563,7 +641,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
       beginWorkspaceRequest,
       commitWorkspaceSyncResult,
       recoverFullWorkspaceOnce,
-      assertWorkspaceHydrated,
+      waitForWorkspaceHydrated,
       isCurrentWorkspaceRequest,
       scheduleConvergenceFetch,
     ],
@@ -663,7 +741,8 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         jobId: string,
         intent: ResumePdfExportIntent = "download",
       ) => {
-        assertWorkspaceHydrated();
+        const hydrating = waitForWorkspaceHydrated();
+        if (hydrating) await hydrating;
         const sequence = beginWorkspaceRequest();
         const { workspace, ...outcome } =
           await window.nestor.jobFinder.exportResumePdf(jobId, intent);
@@ -1234,6 +1313,30 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         // hydration request is fenced like every other workspace request so a
         // later user action can never be overwritten by a stale full snapshot.
         if (bootstrap.hydration?.phase === "bootstrap") {
+          // Home's first view (ADR 0077): every collection but the Find jobs
+          // lists, read before the full snapshot so Home does not wait for
+          // it. It is still a bootstrap snapshot, so actions wait as before.
+          let shownBootstrap = bootstrap;
+          const readHome = window.nestor.jobFinder.getWorkspaceHome;
+          if (typeof readHome === "function") {
+            const homeSequence = beginWorkspaceRequest();
+            const home = await readHome().catch(() => null);
+            if (
+              home &&
+              !cancelled &&
+              isCurrentWorkspaceRequest(homeSequence) &&
+              workspaceRef.current === bootstrap
+            ) {
+              commitWorkspace(home);
+              shownBootstrap = home;
+              markJobFinderTiming("job-finder:workspace:home:ready");
+            }
+          }
+          // The full load reads every saved job in main. It starts once the
+          // screens drawn from the launch queries are usable, not ahead of
+          // them.
+          await whenLaunchReadsSettled();
+          if (cancelled) return;
           const hydrationSequence = beginWorkspaceRequest();
           markJobFinderTiming(`${performancePrefix}:hydration:start`);
           markJobFinderTiming("job-finder:workspace:hydration:start");
@@ -1302,7 +1405,7 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
               if (
                 cancelled ||
                 !isCurrentWorkspaceRequest(hydrationSequence) ||
-                workspaceRef.current !== bootstrap
+                workspaceRef.current !== shownBootstrap
               ) {
                 // This failure was superseded: an action owns the surface or
                 // a newer request already replaced the bootstrap snapshot.

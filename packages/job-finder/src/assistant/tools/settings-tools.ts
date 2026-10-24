@@ -13,6 +13,7 @@ import {
   UpdateWorkspaceBehaviorInputSchema,
   WrittenAnswerLengthSchema,
   collapsesSideMenuWithAssistant,
+  writesResumesOnShortlist,
   type AssistantMessagePart,
   type JobFinderWorkspaceSnapshot,
 } from "@nestor/contracts";
@@ -39,6 +40,7 @@ const SETTINGS_LABELS: Record<string, string> = {
   discoveryOnly: "Search only",
   collapseSideMenuWithAssistant:
     "Collapse the side menu while the assistant is open",
+  writeResumesOnShortlist: "Write resumes when I shortlist",
   tailoringMode: "Resume level",
   discovery: "Search selectivity",
 };
@@ -123,6 +125,7 @@ export const readSettingsTool = defineTool({
         collapseSideMenuWithAssistant: collapsesSideMenuWithAssistant(
           snapshot.settings,
         ),
+        writeResumesOnShortlist: writesResumesOnShortlist(snapshot.settings),
         activityPaused: snapshot.activityControl.paused ?? false,
         searchPlans: snapshot.campaigns.map((campaign) => ({
           id: campaign.id,
@@ -248,12 +251,15 @@ export const updateWorkspaceBehaviorTool = defineTool({
   name: "update_workspace_behavior",
   group: "settings",
   description:
-    "Changes whether browser tabs stay open after runs, whether Job Finder only searches (never prepares applications), and whether the left side menu folds to icons while this assistant sidebar is open (Settings > App & device). Send only the fields to change.",
+    "Changes whether browser tabs stay open after runs, whether Job Finder only searches (never prepares applications), whether the left side menu folds to icons while this assistant sidebar is open (Settings > App & device), and whether a resume starts writing as soon as a job is shortlisted (Settings > AI behavior > Resumes). Send only the fields to change.",
   parameters: json.object({
     keepSessionAlive: json.boolean(),
     discoveryOnly: json.boolean(),
     collapseSideMenuWithAssistant: json.boolean(
       "On (the default) folds the side menu while the assistant is open.",
+    ),
+    writeResumesOnShortlist: json.boolean(
+      "On (the default) starts writing a job's resume at its level as soon as it is shortlisted. Off leaves resumes for the person to create.",
     ),
   }),
   input: UpdateWorkspaceBehaviorInputSchema,

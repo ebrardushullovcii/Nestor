@@ -272,7 +272,8 @@ function ensureFeatureRoutesReady(channel: string): Promise<void> {
   if (channel.startsWith("job-finder:")) {
     if (
       channel === "job-finder:get-workspace" ||
-      channel === "job-finder:get-workspace-bootstrap"
+      channel === "job-finder:get-workspace-bootstrap" ||
+      channel === "job-finder:get-workspace-home"
     ) {
       jobFinderBootstrapRoutesReadyPromise ??= nativeIpcRenderer
         .invoke("system:job-finder-bootstrap-routes-ready")
@@ -748,6 +749,10 @@ const desktopApi = {
       ipcRenderer.invoke(
         "job-finder:get-workspace-bootstrap",
       ) as Promise<JobFinderRendererWorkspaceSnapshot>,
+    getWorkspaceHome: () =>
+      ipcRenderer.invoke(
+        "job-finder:get-workspace-home",
+      ) as Promise<JobFinderRendererWorkspaceSnapshot | null>,
     syncWorkspace: (baseRevision: WorkspaceRevision | null) =>
       ipcRenderer.invoke("job-finder:sync-workspace", {
         baseRevision,

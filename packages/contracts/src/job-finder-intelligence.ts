@@ -1907,6 +1907,14 @@ export const JobFinderIntelligenceStateSchema = z
     resumeStrategies: z.array(ResumeStrategySchema).max(200).default([]),
     resumeBatchCheckpoint: ResumeBatchCheckpointSchema.nullable().optional(),
     resumeBatchCheckpoints: z.array(ResumeBatchCheckpointSchema).optional(),
+    /**
+     * Shortlisted jobs whose resume is waiting to be written or being
+     * written because they were shortlisted (ADR 0076).
+     */
+    resumeOnShortlistJobIds: z
+      .array(NonEmptyStringSchema)
+      .max(10_000)
+      .optional(),
     resumeStrategySelections: z
       .array(ResumeStrategySelectionSchema)
       .max(10_000)

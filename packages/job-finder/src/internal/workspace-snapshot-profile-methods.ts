@@ -263,6 +263,33 @@ function buildJobViews(
   };
 }
 
+/**
+ * Home's first view (ADR 0077) holds only the jobs past Find jobs. Their rows
+ * are projected as the full list projects them, so Shortlisted and
+ * Applications can open from it; nothing is ranked, so the full list's
+ * ordering caches stay its own.
+ */
+function buildHomeTierJobViews(
+  input: Omit<JobViewInput, "pendingDiscoveryJobs" | "companies">,
+) {
+  const savedJobs = input.rawSavedJobs.map((job) =>
+    readPlanAssessment(job, input.planId),
+  );
+  const discoveryJobs = projectDiscoveryJobViews({
+    jobs: selectVisibleDiscoveryJobs(savedJobs),
+    identityJobs: input.rawSavedJobs,
+    discoveryLedger: input.discoveryLedger,
+    listingSignals: input.listingSignals,
+    applicationAttempts: input.applicationAttempts,
+  });
+  return {
+    savedJobs,
+    discoveryJobs,
+    projectedDismissedDiscoveryJobs: [],
+    companyJobs: [],
+  };
+}
+
 // What a display read still validates once the collections it borrows are
 // left out. Search preferences and plans were validated when they were
 // normalized and reconciled above. Built once: a fresh schema per refresh
@@ -301,6 +328,9 @@ const BOOTSTRAP_DEFERRED_COLLECTIONS = [
   "documents",
   "intelligence",
 ] as const;
+
+/** The workspace has nothing for a Home tier to show yet (no plans). */
+class HomeTierUnavailableError extends Error {}
 
 const NO_RESPONSE_AUTOMATION_MIN_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -542,6 +572,7 @@ export function createWorkspaceSnapshotProfileMethods(
   | "getWorkspaceSnapshot"
   | "getWorkspaceProjection"
   | "getWorkspaceBootstrap"
+  | "getWorkspaceHomeSnapshot"
   | "getResumeImportState"
   | "resetWorkspace"
   | "openBrowserSession"
@@ -860,7 +891,37 @@ export function createWorkspaceSnapshotProfileMethods(
     return views;
   }
 
-  async function runNoResponseAutomationIfDue(options?: {
+  function startStoredResumeDraftSettlement(): Promise<unknown> {
+    storedResumeDraftSettlement ??= settleStoredResumeDrafts(ctx).catch(
+      (error: unknown) => {
+        console.warn(
+          "[Job Finder] Settling stored resume drafts failed",
+          error,
+        );
+      },
+    );
+    return storedResumeDraftSettlement;
+  }
+
+  let noResponseAutomationRun: Promise<void> | null = null;
+  /**
+   * A call while a run is going joins it rather than starting another; one
+   * with just-saved settings runs after it, with those settings.
+   */
+  function runNoResponseAutomationIfDue(options?: {
+    settings?: ApplicationCrmSettings;
+  }): Promise<void> {
+    if (options?.settings)
+      return (noResponseAutomationRun ?? Promise.resolve()).then(() =>
+        runNoResponseAutomationOnce(options),
+      );
+    noResponseAutomationRun ??= runNoResponseAutomationOnce().finally(() => {
+      noResponseAutomationRun = null;
+    });
+    return noResponseAutomationRun;
+  }
+
+  async function runNoResponseAutomationOnce(options?: {
     settings?: ApplicationCrmSettings;
   }): Promise<void> {
     const now = Date.now();
@@ -1461,24 +1522,24 @@ export function createWorkspaceSnapshotProfileMethods(
 
   async function getWorkspaceSnapshot(
     borrowValidatedJobs = false,
+    /**
+     * Home's first view (ADR 0077): only the jobs the person took past Find
+     * jobs, no Find jobs lists, and nothing written back. The full snapshot
+     * follows and replaces it.
+     */
+    homeTier = false,
   ): Promise<JobFinderWorkspaceSnapshot> {
     // Display reads show the scores as they stand and refresh when the
     // rescoring lands; a canonical read waits for it.
     if (!borrowValidatedJobs) await settleSavedJobRescoring();
-    await runNoResponseAutomationIfDue();
-
-    storedResumeDraftSettlement ??= settleStoredResumeDrafts(ctx).catch(
-      (error: unknown) => {
-        console.warn(
-          "[Job Finder] Settling stored resume drafts failed",
-          error,
-        );
-      },
-    );
+    // Home's first view answers without the automation and the draft
+    // settlement and starts them once it is sent; the full snapshot that
+    // follows waits for them as before.
+    if (!homeTier) await runNoResponseAutomationIfDue();
     await Promise.all([
       recoverInterruptedDiscoveryStateOnLoad(),
       recoverInterruptedApplyRunsOnLoad(),
-      storedResumeDraftSettlement,
+      homeTier ? undefined : startStoredResumeDraftSettlement(),
     ]);
     if (borrowValidatedJobs) await nextTurn();
     await reconcileAutomaticBatchSampleReviews(ctx);
@@ -1555,9 +1616,11 @@ export function createWorkspaceSnapshotProfileMethods(
       applyQueue,
     ] = await Promise.all([
       getCurrentSetupStateContext(borrowValidatedJobs),
-      borrowValidatedJobs
-        ? ctx.repository.readSavedJobsProjection()
-        : ctx.repository.listSavedJobs(),
+      homeTier
+        ? readHomeTierSavedJobs()
+        : borrowValidatedJobs
+          ? ctx.repository.readSavedJobsProjection()
+          : ctx.repository.listSavedJobs(),
       display?.tailoredAssets ?? ctx.repository.listTailoredAssets(),
       display?.resumeDrafts ?? ctx.repository.listResumeDrafts(),
       display?.resumeExportArtifacts ??
@@ -1589,18 +1652,25 @@ export function createWorkspaceSnapshotProfileMethods(
     ]);
     // From the jobs this read already loaded, so it costs no second read.
     if (borrowValidatedJobs) await nextTurn();
-    legacyFitFingerprintRebinding ??= rebindLegacyFitVerdicts(ctx, {
-      savedJobs: rawSavedJobs,
-      pendingDiscoveryJobs: discovery.pendingDiscoveryJobs,
-    }).catch((error: unknown) => {
-      console.warn("[Job Finder] Re-binding stored fit verdicts failed", error);
-    });
+    if (!homeTier)
+      legacyFitFingerprintRebinding ??= rebindLegacyFitVerdicts(ctx, {
+        savedJobs: rawSavedJobs,
+        pendingDiscoveryJobs: discovery.pendingDiscoveryJobs,
+      }).catch((error: unknown) => {
+        console.warn(
+          "[Job Finder] Re-binding stored fit verdicts failed",
+          error,
+        );
+      });
 
-    let intelligence = groupCompanyConflicts(
-      rawIntelligence,
-      applicationRecords,
-      rawSavedJobs,
-    );
+    // Grouping needs every job; the full snapshot does it.
+    let intelligence = homeTier
+      ? rawIntelligence
+      : groupCompanyConflicts(
+          rawIntelligence,
+          applicationRecords,
+          rawSavedJobs,
+        );
     if (
       intelligence !== rawIntelligence &&
       JSON.stringify(intelligence) !== JSON.stringify(rawIntelligence)
@@ -1666,10 +1736,13 @@ export function createWorkspaceSnapshotProfileMethods(
       normalizedDraftCollection = normalizedResumeDrafts;
     }
 
-    const discoverySessions = await ctx.refreshDiscoverySessions(
-      setupContext.searchPreferences,
-      discovery.sessions,
-    );
+    // Refreshing saves the sessions; the first view shows them as stored.
+    const discoverySessions = homeTier
+      ? discovery.sessions
+      : await ctx.refreshDiscoverySessions(
+          setupContext.searchPreferences,
+          discovery.sessions,
+        );
     const preferredSessionAdapter = getPreferredSessionAdapter(
       setupContext.searchPreferences,
     );
@@ -1718,18 +1791,21 @@ export function createWorkspaceSnapshotProfileMethods(
         prompts: sourceAccessPrompts,
       };
 
-    let campaignState = await ctx.withCampaignTransition(() =>
-      ensureCampaignState({
-        repository: ctx.repository,
-        searchPreferences: setupContext.searchPreferences,
-        now: generatedAt,
-        borrowValidated: borrowValidatedJobs,
-      }),
-    );
+    let campaignState = homeTier
+      ? await readHomeTierCampaignState()
+      : await ctx.withCampaignTransition(() =>
+          ensureCampaignState({
+            repository: ctx.repository,
+            searchPreferences: setupContext.searchPreferences,
+            now: generatedAt,
+            borrowValidated: borrowValidatedJobs,
+          }),
+        );
     const snapshotPlanId = campaignState.activeCampaignId;
     if (
-      lastJobViews?.input.rawSavedJobs !== rawSavedJobs ||
-      lastJobViews.input.planId !== snapshotPlanId
+      !homeTier &&
+      (lastJobViews?.input.rawSavedJobs !== rawSavedJobs ||
+        lastJobViews.input.planId !== snapshotPlanId)
     )
       await warmDiscoveryJobChecks(
         lastJobViews && lastJobViews.input.planId === snapshotPlanId
@@ -1744,6 +1820,7 @@ export function createWorkspaceSnapshotProfileMethods(
         },
       );
     if (
+      !homeTier &&
       !lastJobViews &&
       inactiveListingLedger(discovery.discoveryLedger).length > 0
     )
@@ -1753,15 +1830,23 @@ export function createWorkspaceSnapshotProfileMethods(
       discoveryJobs,
       projectedDismissedDiscoveryJobs,
       companyJobs,
-    } = deriveJobViews({
-      rawSavedJobs,
-      planId: snapshotPlanId,
-      pendingDiscoveryJobs: discovery.pendingDiscoveryJobs,
-      discoveryLedger: discovery.discoveryLedger,
-      listingSignals: intelligence.safeguards.listingSignals,
-      applicationAttempts,
-      companies: intelligence.companies,
-    });
+    } = homeTier
+      ? buildHomeTierJobViews({
+          rawSavedJobs,
+          planId: snapshotPlanId,
+          discoveryLedger: discovery.discoveryLedger,
+          listingSignals: intelligence.safeguards.listingSignals,
+          applicationAttempts,
+        })
+      : deriveJobViews({
+          rawSavedJobs,
+          planId: snapshotPlanId,
+          pendingDiscoveryJobs: discovery.pendingDiscoveryJobs,
+          discoveryLedger: discovery.discoveryLedger,
+          listingSignals: intelligence.safeguards.listingSignals,
+          applicationAttempts,
+          companies: intelligence.companies,
+        });
     // A draft not yet approved can hold lines the export gate refuses until
     // the person decides them (a stretched line, or an Assistant edit kept
     // with "Accept anyway"). The queue has to know, or it calls the resume
@@ -1799,14 +1884,15 @@ export function createWorkspaceSnapshotProfileMethods(
       listingAssessmentPending:
         ctx.listingAssessmentJobIds?.has(item.jobId) ?? false,
     }));
-    const reconciledApplicationRecords =
-      await reconcileStaleMissingResumeBlockers(ctx.repository, {
-        applicationRecords,
-        resumeDrafts: normalizedResumeDrafts,
-        resumeExportArtifacts,
-        tailoredAssets,
-        detectedAt: generatedAt,
-      });
+    const reconciledApplicationRecords = homeTier
+      ? applicationRecords
+      : await reconcileStaleMissingResumeBlockers(ctx.repository, {
+          applicationRecords,
+          resumeDrafts: normalizedResumeDrafts,
+          resumeExportArtifacts,
+          tailoredAssets,
+          detectedAt: generatedAt,
+        });
     const recordSource =
       display &&
       reconciledApplicationRecords.length === applicationRecords.length &&
@@ -1900,14 +1986,18 @@ export function createWorkspaceSnapshotProfileMethods(
         null,
       now: generatedAt,
     });
+    // Progress is derived and carries its own time; the plan's updatedAt is
+    // when the person (or the Assistant) last edited it, and edits check it.
     const comparableProgress = (progress: JobSearchCampaign["progress"]) => ({
       ...progress,
       lastUpdatedAt: "",
     });
+    // Progress counts every job; the Home tier shows the stored one.
     const campaignProgressChanged =
+      !homeTier &&
       JSON.stringify(comparableProgress(activeCampaign.progress)) !==
-      JSON.stringify(comparableProgress(nextProgress));
-    if (!campaignProgressChanged && borrowValidatedJobs)
+        JSON.stringify(comparableProgress(nextProgress));
+    if (!campaignProgressChanged && borrowValidatedJobs && !homeTier)
       displayCampaignProgress = null;
     if (campaignProgressChanged && borrowValidatedJobs) {
       const key = JSON.stringify(comparableProgress(nextProgress));
@@ -1919,11 +2009,7 @@ export function createWorkspaceSnapshotProfileMethods(
               ...campaignState,
               campaigns: campaignState.campaigns.map((campaign) =>
                 campaign.id === activeCampaign.id
-                  ? {
-                      ...campaign,
-                      progress: nextProgress,
-                      updatedAt: generatedAt,
-                    }
+                  ? { ...campaign, progress: nextProgress }
                   : campaign,
               ),
             };
@@ -1980,11 +2066,7 @@ export function createWorkspaceSnapshotProfileMethods(
           ...latestState,
           campaigns: latestState.campaigns.map((campaign) =>
             campaign.id === activeCampaign.id
-              ? {
-                  ...campaign,
-                  progress: mergedProgress,
-                  updatedAt: generatedAt,
-                }
+              ? { ...campaign, progress: mergedProgress }
               : campaign,
           ),
         };
@@ -2028,10 +2110,9 @@ export function createWorkspaceSnapshotProfileMethods(
     const snapshot = {
       module: "job-finder",
       generatedAt,
-      hydration: {
-        phase: "complete",
-        deferredCollections: [],
-      },
+      hydration: homeTier
+        ? { phase: "bootstrap", deferredCollections: ["discovery_jobs"] }
+        : { phase: "complete", deferredCollections: [] },
       agentProvider: ctx.aiClient.getStatus(),
       visionProvider: ctx.visionProvider?.getStatus() ?? null,
       availableResumeTemplates,
@@ -2087,17 +2168,18 @@ export function createWorkspaceSnapshotProfileMethods(
       return JobFinderWorkspaceSnapshotSchema.parse(snapshot);
     // The window only needs display evidence. Keep the canonical feedback
     // cache warm for triage after the first full view has reached the window.
-    ledgerWarmup ??= (async () => {
-      await ctx.backgroundWorkReady;
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      if (ctx.isWorkspaceClosing?.()) return;
-      const canonical = await ctx.repository.readDiscoveryStateForRun?.();
-      await warmDiscoveryLedgerIndex(
-        canonical?.discoveryLedger ?? discovery.discoveryLedger,
-      );
-    })().catch((error: unknown) => {
-      console.warn("[Job Finder] Warming triage history failed", error);
-    });
+    if (!homeTier)
+      ledgerWarmup ??= (async () => {
+        await ctx.backgroundWorkReady;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (ctx.isWorkspaceClosing?.()) return;
+        const canonical = await ctx.repository.readDiscoveryStateForRun?.();
+        await warmDiscoveryLedgerIndex(
+          canonical?.discoveryLedger ?? discovery.discoveryLedger,
+        );
+      })().catch((error: unknown) => {
+        console.warn("[Job Finder] Warming triage history failed", error);
+      });
     // Rows were validated on entering the immutable repository projection.
     // Re-parsing the same jobs in three lists deep-copied every listing again
     // on each progress update. Only display callers borrow these values; IPC
@@ -2133,6 +2215,50 @@ export function createWorkspaceSnapshotProfileMethods(
       userActionRequests: campaignUserActionRequests,
       userActionEvents: campaignUserActionEvents,
     };
+  }
+
+  /** The jobs past Find jobs, and every job an application points at. */
+  async function readHomeTierSavedJobs(): Promise<readonly SavedJob[]> {
+    const [curated, records] = await Promise.all([
+      ctx.repository.listCuratedSavedJobIds!(),
+      ctx.repository.listApplicationRecords(),
+    ]);
+    return ctx.repository.listSavedJobsByIds([
+      ...new Set([...curated, ...records.map((record) => record.jobId)]),
+    ]);
+  }
+
+  async function readHomeTierCampaignState(): Promise<JobSearchCampaignCollection> {
+    const state = await (ctx.repository.readCampaignProjection?.() ??
+      ctx.repository.getCampaignState());
+    // A workspace without plans is created by the full snapshot.
+    if (!state) throw new HomeTierUnavailableError();
+    return state;
+  }
+
+  /**
+   * Home's first view, before the full snapshot (ADR 0077). Null when this
+   * workspace cannot give one; the full snapshot is the answer then.
+   */
+  async function getWorkspaceHomeSnapshot(): Promise<JobFinderWorkspaceSnapshot | null> {
+    if (!ctx.repository.listCuratedSavedJobIds) return null;
+    try {
+      const home = await getWorkspaceSnapshot(true, true);
+      // What the first view skipped starts once it is on its way.
+      realSetImmediate(() => {
+        void runNoResponseAutomationIfDue().catch((error: unknown) => {
+          console.warn(
+            "[JobFinderWorkspace] No-response automation skipped.",
+            error,
+          );
+        });
+        void startStoredResumeDraftSettlement();
+      });
+      return home;
+    } catch (error) {
+      if (error instanceof HomeTierUnavailableError) return null;
+      throw error;
+    }
   }
 
   async function getWorkspaceBootstrap(): Promise<JobFinderWorkspaceSnapshot> {
@@ -2452,6 +2578,7 @@ export function createWorkspaceSnapshotProfileMethods(
     getWorkspaceSnapshot,
     getWorkspaceProjection: () => getWorkspaceSnapshot(true),
     getWorkspaceBootstrap,
+    getWorkspaceHomeSnapshot,
     async getResumeImportState() {
       const [
         resumeImportRuns,
@@ -2988,6 +3115,7 @@ export function createWorkspaceSnapshotProfileMethods(
         discoveryOnly: parsedInput.discoveryOnly,
         collapseSideMenuWithAssistant:
           parsedInput.collapseSideMenuWithAssistant,
+        writeResumesOnShortlist: parsedInput.writeResumesOnShortlist,
       });
       await ctx.repository.commitSettingsUpdate((current) =>
         JobFinderSettingsSchema.parse({ ...current, ...behaviorFields }),

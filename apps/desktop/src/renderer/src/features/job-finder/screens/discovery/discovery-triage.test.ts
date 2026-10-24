@@ -2,18 +2,17 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { JobListRow } from "@nestor/contracts";
+import type { WorkspaceJobListRow } from "@nestor/contracts";
 import { findNextTriageJobId, useDiscoveryTriage } from "./discovery-triage";
 
 // Rows whose id starts with "w" stand in for weaker matches.
-vi.mock("./discovery-result-groups", () => ({
-  isDiscoveryAlsoFoundResult: (job: JobListRow) => job.id.startsWith("w"),
-}));
+const groupOf = (jobId: string) =>
+  jobId.startsWith("w") ? ("weaker" as const) : ("matches" as const);
 
 afterEach(() => vi.restoreAllMocks());
 
-function row(id: string, status = "discovered"): JobListRow {
-  return { id, title: `Role ${id}`, status, detailRevision: "1" } as unknown as JobListRow;
+function row(id: string, status = "discovered"): WorkspaceJobListRow {
+  return { id, title: `Role ${id}`, status } as unknown as WorkspaceJobListRow;
 }
 
 it("finds the next open job after this one, wrapping to the top", () => {
@@ -35,10 +34,11 @@ it("shortlists, moves on at once, counts it, and undoes it", async () => {
   );
   const onRemoveFromShortlist = vi.fn(() => Promise.resolve());
   const { result, rerender } = renderHook(
-    ({ inspected }: { inspected: JobListRow }) =>
+    ({ inspected }: { inspected: WorkspaceJobListRow }) =>
       useDiscoveryTriage({
         enabled: true,
-        jobs,
+        rows: jobs,
+        groupOf,
         orderedJobIds: jobs.map((job) => job.id),
         inspectedJob: inspected,
         reviewQueue: [],
@@ -83,7 +83,8 @@ it("acts on S, X, J and U outside text fields only", async () => {
   renderHook(() =>
     useDiscoveryTriage({
       enabled: true,
-      jobs,
+      rows: jobs,
+      groupOf,
       orderedJobIds: ["a", "b"],
       inspectedJob: jobs[0]!,
       reviewQueue: [],
@@ -125,10 +126,11 @@ it("counts progress within the open job's group, so weaker matches do not bury i
   });
   const jobs = [row("a"), row("b"), row("w1"), row("w2"), row("w3")];
   const { result, rerender } = renderHook(
-    ({ inspected }: { inspected: JobListRow }) =>
+    ({ inspected }: { inspected: WorkspaceJobListRow }) =>
       useDiscoveryTriage({
         enabled: true,
-        jobs,
+        rows: jobs,
+        groupOf,
         orderedJobIds: jobs.map((job) => job.id),
         inspectedJob: inspected,
         reviewQueue: [],
@@ -158,12 +160,13 @@ it("recounts open jobs when the list or the shortlist changes", () => {
       jobs,
       reviewQueue,
     }: {
-      jobs: JobListRow[];
+      jobs: WorkspaceJobListRow[];
       reviewQueue: { jobId: string }[];
     }) =>
       useDiscoveryTriage({
         enabled: true,
-        jobs,
+        rows: jobs,
+        groupOf,
         orderedJobIds: jobs.map((job) => job.id),
         inspectedJob: jobs[0]!,
         reviewQueue: reviewQueue as never,

@@ -15,7 +15,10 @@ import {
   AssistantProvider,
   useAssistant,
 } from "../../assistant/assistant-provider";
-import { DiscoveryResultsPanel } from "./discovery-results-panel";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 function createJob(index: number): SavedJob {
   return SavedJobSchema.parse({
@@ -57,7 +60,7 @@ describe("Find jobs publishes ticked rows to the assistant", () => {
       <MemoryRouter initialEntries={["/job-finder/discovery"]}>
         <AssistantProvider>
           <Probe />
-          <DiscoveryResultsPanel
+          <DiscoveryResultsPanelWithJobs
             browserSession={{
               source: "target_site",
               status: "ready",
@@ -75,6 +78,7 @@ describe("Find jobs publishes ticked rows to the assistant", () => {
         </AssistantProvider>
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Role 2" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Role 3" }));
     let reference: Awaited<

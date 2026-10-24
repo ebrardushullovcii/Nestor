@@ -27,6 +27,7 @@ import type { ActionState } from "../../lib/job-finder-types";
 import type { TailoredDraftPreparationViewState } from "../review-queue/review-queue-status";
 import {
   buildJobSearchHomeModel,
+  type HomeFindJobsCounts,
   type HomeAction,
   type HomeButton,
 } from "./job-search-home-model";
@@ -36,6 +37,8 @@ export { buildInterruptedSearchRetryRequest } from "./job-search-home-model";
 
 export interface JobSearchHomeScreenProps {
   workspace: JobFinderRendererWorkspaceSnapshot;
+  /** Find jobs' counts from the database while its lists still load. */
+  findJobsCounts?: HomeFindJobsCounts | null;
   /**
    * What the last press on this page came to, in a sentence. A refusal
    * (Apply held back by a resume, a send that could not start) is shown here
@@ -278,6 +281,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
     tasks,
     tailoredDraftPreparation: props.tailoredDraftPreparation,
     discoveryRunPending: props.discoveryRunPending ?? false,
+    findJobsCounts: props.findJobsCounts ?? null,
     canRunDiscovery: Boolean(props.onRunDiscovery),
     applicationAutomationMode:
       props.applicationAutomationMode ?? "prepare_only",

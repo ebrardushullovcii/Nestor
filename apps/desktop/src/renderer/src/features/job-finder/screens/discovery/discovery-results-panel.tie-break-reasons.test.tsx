@@ -4,7 +4,10 @@ import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DiscoveryResultsPanel } from "./discovery-results-panel";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 /**
  * Three rows printed "26% fit" one under the other and two of them said
@@ -130,10 +133,10 @@ function threeTiedJobs(): readonly SavedJob[] {
 afterEach(cleanup);
 
 describe("rows that share a percentage", () => {
-  it("gives every tied row its own secondary reason", () => {
+  it("gives every tied row its own secondary reason", async () => {
     const jobs = threeTiedJobs();
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={jobs}
@@ -141,6 +144,7 @@ describe("rows that share a percentage", () => {
         selectedJob={jobs[0] ?? null}
       />,
     );
+    await flushFindJobsQueries();
 
     const reasons = jobs.map(
       (job) =>
@@ -161,7 +165,7 @@ describe("rows that share a percentage", () => {
     }
   });
 
-  it("leaves a row with no shared percentage quiet", () => {
+  it("leaves a row with no shared percentage quiet", async () => {
     const jobs = [
       tiedJob("solo_high", "Marketing Manager", "Envisionit", {
         score: 74,
@@ -177,7 +181,7 @@ describe("rows that share a percentage", () => {
       }),
     ];
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={jobs}
@@ -185,6 +189,7 @@ describe("rows that share a percentage", () => {
         selectedJob={jobs[0] ?? null}
       />,
     );
+    await flushFindJobsQueries();
 
     expect(
       screen.queryByTestId("discovery-result-fit-reason-solo_high"),

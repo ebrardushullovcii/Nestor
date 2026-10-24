@@ -558,6 +558,22 @@ export function isJobFinderHydratingCollections(
 }
 
 /**
+ * "discovery_jobs" for a screen that reads the rows of jobs past Find jobs
+ * only. Home's first view (ADR 0077) already holds those rows, so Shortlisted
+ * and Applications open from it instead of waiting for every job.
+ */
+function jobRowsFor(
+  workspace: JobFinderRendererWorkspaceSnapshot,
+): readonly JobFinderDeferredCollection[] {
+  const { phase, deferredCollections } = workspace.hydration;
+  return phase === "bootstrap" &&
+    deferredCollections.length === 1 &&
+    deferredCollections[0] === "discovery_jobs"
+    ? []
+    : ["discovery_jobs"];
+}
+
+/**
  * Bootstrap snapshots intentionally leave large collections empty. Routes
  * that depend on those collections must not render an empty result state or
  * offer actions that the workspace hook will reject while hydration runs.
@@ -763,10 +779,26 @@ export function JobFinderHomeRoute() {
 
   // Home reads every collection: on the bootstrap snapshot (no saved search
   // runs or jobs yet) it told a person with thousands of jobs to "Run your
-  // first search" for several seconds after launch.
+  // first search" for several seconds after launch. Its first view (ADR
+  // 0077) has all of them but the Find jobs lists, whose two numbers Home
+  // takes from the database until the lists land.
+  const findJobsCounts =
+    launchReads.findJobs &&
+    isJobFinderHydratingCollections(context.workspace, ["discovery_jobs"])
+      ? {
+          visible: launchReads.findJobs.focused.total,
+          weaker: Math.max(
+            0,
+            launchReads.findJobs.wide.total -
+              launchReads.findJobs.focused.total,
+          ),
+        }
+      : null;
   return (
     <JobFinderHydrationGate
-      collections={HOME_REQUIRED_COLLECTIONS}
+      collections={
+        findJobsCounts ? HOME_FIRST_VIEW_COLLECTIONS : HOME_REQUIRED_COLLECTIONS
+      }
       launchView={
         launchReads.counts ? (
           <JobSearchHomeLaunch
@@ -778,6 +810,7 @@ export function JobFinderHomeRoute() {
       workspace={context.workspace}
     >
       <JobSearchHomeScreen
+        findJobsCounts={findJobsCounts}
         actionState={context.actionState}
         activityPending={activityPending}
         applicationAutomationMode={
@@ -862,6 +895,15 @@ const HOME_REQUIRED_COLLECTIONS = [
   "review_queue",
   "applications",
   "source_history",
+] as const;
+
+/** Everything Home reads apart from the Find jobs lists. */
+const HOME_FIRST_VIEW_COLLECTIONS = [
+  "review_queue",
+  "applications",
+  "source_history",
+  "documents",
+  "intelligence",
 ] as const;
 
 export function JobFinderCampaignsRoute() {
@@ -1409,9 +1451,7 @@ export function JobFinderDiscoveryRoute() {
     return (
       <JobFinderHydrationGate
         collections={["discovery_jobs"]}
-        launchView={
-          launchPage ? <FindJobsLaunch {...launchPage} /> : undefined
-        }
+        launchView={launchPage ? <FindJobsLaunch {...launchPage} /> : undefined}
         workspace={context.workspace}
       >
         {null}
@@ -1531,7 +1571,7 @@ export function JobFinderDiscoveryRoute() {
         )}
         isActivityPausePending={activityPausePending}
         discoverySessions={context.workspace.discoverySessions}
-        jobs={jobs}
+        planJobCount={jobs.length}
         dismissedJobs={dismissedJobs}
         liveEvents={context.liveDiscoveryEvents}
         isJobPending={(jobId) =>
@@ -1675,7 +1715,7 @@ function JobFinderReviewQueueRouteContent() {
     ? (queue.find((item) => item.jobId === navigationContext.jobId) ?? null)
     : null;
   const isHydrating = isJobFinderHydratingCollections(context.workspace, [
-    "discovery_jobs",
+    ...jobRowsFor(context.workspace),
     "review_queue",
     "documents",
   ]);
@@ -1693,12 +1733,21 @@ function JobFinderReviewQueueRouteContent() {
     requestedItem,
   ]);
 
+  // A resume shortlisting asked for is being written too (ADR 0076): the
+  // row says so and nothing offers to write it a second time.
+  const shortlistResumeJobIds =
+    context.workspace.intelligence.resumeOnShortlistJobIds;
+  const writingOnShortlist = useMemo(
+    () => new Set(shortlistResumeJobIds ?? []),
+    [shortlistResumeJobIds],
+  );
   // One identity while nothing starts or finishes, so the list's per-job
   // statuses are not worked out again on every render.
   const isReviewJobPending = useCallback(
     (jobId: string) =>
+      writingOnShortlist.has(jobId) ||
       context.isPending(jobFinderPendingActions.resumeJob(jobId)),
-    [context.isPending],
+    [context.isPending, writingOnShortlist],
   );
   const handleSelectItem = useCallback(
     (jobId: string) => {
@@ -1720,7 +1769,11 @@ function JobFinderReviewQueueRouteContent() {
   if (isHydrating) {
     return (
       <JobFinderHydrationGate
-        collections={["discovery_jobs", "review_queue", "documents"]}
+        collections={[
+          ...jobRowsFor(context.workspace),
+          "review_queue",
+          "documents",
+        ]}
         workspace={context.workspace}
       >
         {null}
@@ -1761,7 +1814,11 @@ function JobFinderReviewQueueRouteContent() {
 
   return (
     <JobFinderHydrationGate
-      collections={["discovery_jobs", "review_queue", "documents"]}
+      collections={[
+        ...jobRowsFor(context.workspace),
+        "review_queue",
+        "documents",
+      ]}
       workspace={context.workspace}
     >
       <ReviewQueueScreen
@@ -2357,7 +2414,7 @@ export function JobFinderApplicationsRoute() {
     navigationContext.applicationRecordId || navigationContext.jobId,
   );
   const isHydrating = isJobFinderHydratingCollections(context.workspace, [
-    "discovery_jobs",
+    ...jobRowsFor(context.workspace),
     "applications",
     "intelligence",
   ]);
@@ -2456,7 +2513,11 @@ export function JobFinderApplicationsRoute() {
   if (isHydrating) {
     return (
       <JobFinderHydrationGate
-        collections={["discovery_jobs", "applications", "intelligence"]}
+        collections={[
+          ...jobRowsFor(context.workspace),
+          "applications",
+          "intelligence",
+        ]}
         workspace={context.workspace}
       >
         {null}
@@ -2620,7 +2681,11 @@ export function JobFinderApplicationsRoute() {
 
   return (
     <JobFinderHydrationGate
-      collections={["discovery_jobs", "applications", "intelligence"]}
+      collections={[
+        ...jobRowsFor(context.workspace),
+        "applications",
+        "intelligence",
+      ]}
       workspace={context.workspace}
     >
       <ApplicationsScreen

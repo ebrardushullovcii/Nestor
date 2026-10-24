@@ -14,11 +14,14 @@ import {
   getDiscoveryOtherActiveCriteria,
 } from "./discovery-filters-panel";
 import { DiscoverySearchSections } from "./discovery-filters-panel-sections";
-import { DiscoveryResultsPanel } from "./discovery-results-panel";
 import {
   DISCOVERY_OFFLINE_CATALOG_NOTICE,
   DISCOVERY_OFFLINE_SETUP_NOTICE,
 } from "./discovery-search-readiness";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 function CurrentPath() {
   const location = useLocation();
@@ -36,7 +39,7 @@ describe("DiscoveryFiltersPanel", () => {
     vi.clearAllMocks();
   });
 
-  it("makes the current-search details an independent wheel and keyboard scroll region", () => {
+  it("makes the current-search details an independent wheel and keyboard scroll region", async () => {
     const searchPreferences: JobSearchPreferences = {
       targetRoles: ["Software Engineer"],
       jobFamilies: [],
@@ -151,6 +154,7 @@ describe("DiscoveryFiltersPanel", () => {
     expect(queryByText(/^Other active criteria/)).toBeNull();
 
     fireEvent.click(getByRole("button", { name: "Edit your places" }));
+    await flushFindJobsQueries();
     expect(getByText("/job-finder/campaigns?campaignId=plan-a")).toBeTruthy();
   });
 
@@ -234,7 +238,7 @@ describe("DiscoveryFiltersPanel", () => {
     expect(queryByText(/Search setup is ready/iu)).toBeNull();
   });
 
-  it("discloses configured omitted preferences and hard exclusions in a collapsed native control", () => {
+  it("discloses configured omitted preferences and hard exclusions in a collapsed native control", async () => {
     const searchPreferences: JobSearchPreferences = {
       targetRoles: ["Software Engineer"],
       jobFamilies: ["Engineering"],
@@ -322,6 +326,7 @@ describe("DiscoveryFiltersPanel", () => {
     expect(summary.tagName).toBe("SUMMARY");
 
     fireEvent.click(summary);
+    await flushFindJobsQueries();
 
     expect(disclosure?.open).toBe(true);
     expect(
@@ -398,7 +403,7 @@ describe("DiscoveryFiltersPanel", () => {
     expect(editAction.getAttribute("type")).toBe("button");
   });
 
-  it("opens the role editor from the keyboard-activatable Add roles control", () => {
+  it("opens the role editor from the keyboard-activatable Add roles control", async () => {
     function LocationProbe() {
       const location = useLocation();
       return (
@@ -437,6 +442,7 @@ describe("DiscoveryFiltersPanel", () => {
     );
 
     fireEvent.click(getByRole("button", { name: "Add roles" }));
+    await flushFindJobsQueries();
 
     expect(container.querySelector("[data-test-location]")?.textContent).toBe(
       "/job-finder/profile?section=preferences&focus=target-roles",
@@ -722,7 +728,7 @@ describe("DiscoveryFiltersPanel", () => {
     ).toBe(true);
   });
 
-  it("shows a source-aware sign-in prompt near the search controls", () => {
+  it("shows a source-aware sign-in prompt near the search controls", async () => {
     const onOpenBrowserSessionForTarget = vi.fn();
     const onRunDiscoveryForTarget = vi.fn();
     const searchPreferences: JobSearchPreferences = {
@@ -841,6 +847,7 @@ describe("DiscoveryFiltersPanel", () => {
     });
 
     fireEvent.click(signInButton);
+    await flushFindJobsQueries();
 
     expect(onOpenBrowserSessionForTarget).toHaveBeenCalledWith(
       "target_linkedin_default",
@@ -851,6 +858,7 @@ describe("DiscoveryFiltersPanel", () => {
         name: /i'm signed in — retry linkedin/i,
       }),
     );
+    await flushFindJobsQueries();
 
     expect(onRunDiscoveryForTarget).toHaveBeenCalledWith(
       "target_linkedin_default",
@@ -869,7 +877,7 @@ describe("DiscoveryFiltersPanel", () => {
     expect(runOneSource.className).toContain("shrink-0");
   });
 
-  it("ignores disabled-target prompts for the primary sign-in CTA", () => {
+  it("ignores disabled-target prompts for the primary sign-in CTA", async () => {
     const onOpenBrowserSession = vi.fn();
     const onOpenBrowserSessionForTarget = vi.fn();
     const searchPreferences: JobSearchPreferences = {
@@ -1000,6 +1008,7 @@ describe("DiscoveryFiltersPanel", () => {
     });
 
     fireEvent.click(enabledSourceButton);
+    await flushFindJobsQueries();
 
     expect(onOpenBrowserSessionForTarget).toHaveBeenCalledWith(
       "target_enabled",
@@ -1007,7 +1016,7 @@ describe("DiscoveryFiltersPanel", () => {
     expect(onOpenBrowserSession).not.toHaveBeenCalled();
   });
 
-  it("keeps the main browser CTA generic when sign-in is only recommended", () => {
+  it("keeps the main browser CTA generic when sign-in is only recommended", async () => {
     const onOpenBrowserSession = vi.fn();
     const onOpenBrowserSessionForTarget = vi.fn();
     const searchPreferences: JobSearchPreferences = {
@@ -1118,16 +1127,17 @@ describe("DiscoveryFiltersPanel", () => {
     fireEvent.click(
       getByRole("button", { name: "Open the Job Finder browser" }),
     );
+    await flushFindJobsQueries();
 
     expect(onOpenBrowserSession).toHaveBeenCalledTimes(1);
     expect(onOpenBrowserSessionForTarget).not.toHaveBeenCalled();
   });
 
-  it("shows a primary recovery action inside blocked results", () => {
+  it("shows a primary recovery action inside blocked results", async () => {
     const onRecoveryAction = vi.fn();
     const { container, getByText } = render(
       <MemoryRouter>
-        <DiscoveryResultsPanel
+        <DiscoveryResultsPanelWithJobs
           browserSession={{
             source: "target_site",
             status: "login_required",
@@ -1146,19 +1156,21 @@ describe("DiscoveryFiltersPanel", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
 
     expect(getByText("Next step")).toBeTruthy();
     fireEvent.click(
       within(container).getByRole("button", { name: "Sign in to LinkedIn" }),
     );
+    await flushFindJobsQueries();
     expect(onRecoveryAction).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a primary recovery action visible when blocked state still shows stale results", () => {
+  it("keeps a primary recovery action visible when blocked state still shows stale results", async () => {
     const onRecoveryAction = vi.fn();
     const { container, getByText } = render(
       <MemoryRouter>
-        <DiscoveryResultsPanel
+        <DiscoveryResultsPanelWithJobs
           browserSession={{
             source: "target_site",
             status: "login_required",
@@ -1297,6 +1309,7 @@ describe("DiscoveryFiltersPanel", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
 
     expect(getByText(/sign in before the next search/i)).toBeTruthy();
     fireEvent.click(
@@ -1304,13 +1317,14 @@ describe("DiscoveryFiltersPanel", () => {
         name: "Sign in to LinkedIn",
       })[0]!,
     );
+    await flushFindJobsQueries();
     expect(onRecoveryAction).toHaveBeenCalledTimes(1);
   });
 
-  it("prioritizes missing search setup over browser startup copy", () => {
+  it("prioritizes missing search setup over browser startup copy", async () => {
     const { getByText, getByRole, queryByText } = render(
       <MemoryRouter>
-        <DiscoveryResultsPanel
+        <DiscoveryResultsPanelWithJobs
           browserSession={{
             source: "target_site",
             status: "unknown",
@@ -1333,6 +1347,7 @@ describe("DiscoveryFiltersPanel", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
 
     expect(getByText("Add a target role before searching")).toBeTruthy();
     expect(
@@ -1350,10 +1365,10 @@ describe("DiscoveryFiltersPanel", () => {
     ).toBe("/job-finder/profile?section=sources&focus=job-sources");
   });
 
-  it("shows a ready first-search state before any completed run", () => {
+  it("shows a ready first-search state before any completed run", async () => {
     const { getByText, queryByText } = render(
       <MemoryRouter>
-        <DiscoveryResultsPanel
+        <DiscoveryResultsPanelWithJobs
           browserSession={{
             source: "target_site",
             status: "ready",
@@ -1368,15 +1383,16 @@ describe("DiscoveryFiltersPanel", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
 
     expect(getByText("Ready for your first search")).toBeTruthy();
     expect(queryByText("No matches from this search")).toBeNull();
   });
 
-  it("shows no matches only after a completed search", () => {
+  it("shows no matches only after a completed search", async () => {
     const { getByRole, getByText, queryByText } = render(
       <MemoryRouter>
-        <DiscoveryResultsPanel
+        <DiscoveryResultsPanelWithJobs
           browserSession={{
             source: "target_site",
             status: "ready",
@@ -1392,13 +1408,14 @@ describe("DiscoveryFiltersPanel", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
 
     expect(getByText("No matches from this search")).toBeTruthy();
     expect(getByRole("link", { name: "Edit your places" })).toBeTruthy();
     expect(queryByText("Ready for your first search")).toBeNull();
   });
 
-  it("keeps completed-source matches visible while the remaining sources run", () => {
+  it("keeps completed-source matches visible while the remaining sources run", async () => {
     const progressiveJob = {
       id: "job_progressive",
       title: "Senior Product Designer",
@@ -1415,7 +1432,7 @@ describe("DiscoveryFiltersPanel", () => {
     } as unknown as SavedJob;
     const { getByRole, getByText, queryByRole } = render(
       <MemoryRouter>
-        <DiscoveryResultsPanel
+        <DiscoveryResultsPanelWithJobs
           browserSession={{
             source: "target_site",
             status: "ready",
@@ -1431,6 +1448,7 @@ describe("DiscoveryFiltersPanel", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
 
     // One plain status line under the Results header (ADR 0042).
     expect(getByText(/^1 result shown\./)).toBeTruthy();
@@ -1449,10 +1467,10 @@ describe("DiscoveryFiltersPanel", () => {
     ).toBe("job_progressive");
   });
 
-  it("does not treat the catalog runtime as browser startup or a live-search-ready state", () => {
+  it("does not treat the catalog runtime as browser startup or a live-search-ready state", async () => {
     const { getByText, queryByText } = render(
       <MemoryRouter>
-        <DiscoveryResultsPanel
+        <DiscoveryResultsPanelWithJobs
           browserSession={{
             source: "target_site",
             status: "unknown",
@@ -1467,6 +1485,7 @@ describe("DiscoveryFiltersPanel", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
 
     expect(getByText("Job Finder cannot search right now")).toBeTruthy();
     expect(getByText(DISCOVERY_OFFLINE_SETUP_NOTICE)).toBeTruthy();
@@ -1475,7 +1494,7 @@ describe("DiscoveryFiltersPanel", () => {
     expect(queryByText("Ready for your first search")).toBeNull();
   });
 
-  it("keeps saved-earlier rows honest without inventing source, activity, or fit evidence", () => {
+  it("keeps saved-earlier rows honest without inventing source, activity, or fit evidence", async () => {
     const catalogJob = {
       id: "catalog-job",
       title: "Catalog role",
@@ -1500,7 +1519,7 @@ describe("DiscoveryFiltersPanel", () => {
 
     const { getAllByRole, getAllByText, queryByText } = render(
       <MemoryRouter>
-        <DiscoveryResultsPanel
+        <DiscoveryResultsPanelWithJobs
           browserSession={{
             source: "target_site",
             status: "unknown",
@@ -1515,6 +1534,7 @@ describe("DiscoveryFiltersPanel", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
 
     const offlineCatalogStatus = getAllByRole("status").find((status) =>
       status.textContent?.includes(DISCOVERY_OFFLINE_CATALOG_NOTICE),
@@ -1536,10 +1556,10 @@ describe("DiscoveryFiltersPanel", () => {
     expect(queryByText("92% fit")).toBeNull();
   });
 
-  it("shows live search progress instead of an empty result verdict", () => {
+  it("shows live search progress instead of an empty result verdict", async () => {
     const { getByText, queryByText } = render(
       <MemoryRouter>
-        <DiscoveryResultsPanel
+        <DiscoveryResultsPanelWithJobs
           browserSession={{
             source: "target_site",
             status: "ready",
@@ -1556,6 +1576,7 @@ describe("DiscoveryFiltersPanel", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
 
     expect(getByText("Searching your sources")).toBeTruthy();
     expect(queryByText("No matches from this search")).toBeNull();

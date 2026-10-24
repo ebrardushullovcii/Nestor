@@ -71,7 +71,14 @@ export function clearJobDetailCache() {
  * (the next job in a triage pass) shows at once. A failed read is dropped;
  * opening the job reads it again.
  */
-export function prefetchJobDetail(row: JobListRow, planId: string | null) {
+/**
+ * What the detail reads are keyed by: the job, the revision of its stored
+ * facts, and any list facts newer than the detail (Shortlisted's rows).
+ */
+export type JobDetailRow = { id: string; detailRevision?: string | undefined } &
+  Partial<Omit<JobListRow, "id" | "detailRevision">>;
+
+export function prefetchJobDetail(row: JobDetailRow, planId: string | null) {
   const key = JSON.stringify([
     detailCache.generation(),
     planId,
@@ -92,7 +99,7 @@ export function prefetchJobDetail(row: JobListRow, planId: string | null) {
 }
 
 /** Selection, plan, detail revision and reset all fence asynchronous reads. */
-export function useJobDetail(row: JobListRow | null, planId: string | null) {
+export function useJobDetail(row: JobDetailRow | null, planId: string | null) {
   const generation = useSyncExternalStore(
     detailCache.subscribe,
     detailCache.generation,

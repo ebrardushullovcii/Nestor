@@ -26,6 +26,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useJobFinderWorkspace } from "./use-job-finder-workspace";
+import { startLaunchReads } from "../lib/launch-reads";
 import { createJobFinderWorkspaceDeltaTracker } from "../../../../../main/services/job-finder/workspace-delta";
 import { applyJobFinderWorkspaceDelta } from "../../../pages/job-finder-workspace-delta";
 
@@ -1451,6 +1452,156 @@ describe("useJobFinderWorkspace entity mutations", () => {
         );
       }
     });
+  });
+
+  it("shows Home's first view before the full snapshot, then asks for it", async () => {
+    enableBootstrapApi();
+    const bootstrap: JobFinderRendererWorkspaceSnapshot = {
+      ...createWorkspace("job-bootstrap"),
+      discoveryJobs: [],
+      selectedDiscoveryJobId: null,
+      hydration: {
+        phase: "bootstrap" as const,
+        deferredCollections: ["discovery_jobs", "review_queue"] as const,
+      },
+    };
+    const home: JobFinderRendererWorkspaceSnapshot = {
+      ...createWorkspace("job-home"),
+      discoveryJobs: [],
+      hydration: {
+        phase: "bootstrap" as const,
+        deferredCollections: ["discovery_jobs"] as const,
+      },
+    };
+    const homeRead = deferred<JobFinderRendererWorkspaceSnapshot | null>();
+    const getWorkspaceHome = vi.fn(() => homeRead.promise);
+    Object.assign(window.nestor.jobFinder as object, { getWorkspaceHome });
+    const hydration = deferred<JobFinderWorkspaceSyncResult>();
+    getWorkspaceBootstrap.mockResolvedValueOnce(bootstrap);
+    syncWorkspace.mockReturnValueOnce(hydration.promise);
+
+    const { result } = renderHook(() => useJobFinderWorkspace());
+    await waitFor(() => expect(getWorkspaceHome).toHaveBeenCalledTimes(1));
+    // The full snapshot is asked for only after the first view answered.
+    expect(syncWorkspace).not.toHaveBeenCalled();
+    await act(async () => {
+      homeRead.resolve(home);
+      await homeRead.promise;
+    });
+    await waitFor(() =>
+      expect(requireReadyWorkspace(result.current).workspace).toBe(home),
+    );
+    expect(syncWorkspace).toHaveBeenCalledWith(null);
+
+    await act(async () => {
+      hydration.resolve({
+        kind: "snapshot",
+        currentRevision: 8,
+        reason: "initial",
+        snapshot: createWorkspace("job-hydrated"),
+      });
+      await hydration.promise;
+    });
+    await waitFor(() =>
+      expect(
+        requireReadyWorkspace(result.current).workspace.hydration.phase,
+      ).toBe("complete"),
+    );
+  });
+
+  it("starts the full load only after the launch queries answered", async () => {
+    enableBootstrapApi();
+    const counts = deferred<unknown>();
+    Object.assign(window.nestor.jobFinder as object, {
+      queries: {
+        getHomeSummary: () => Promise.resolve({ counts: null }),
+        getListCounts: () => counts.promise,
+        getStartupContext: () => Promise.resolve(null),
+        queryJobList: () => Promise.resolve({ rows: [], total: 0 }),
+      },
+    });
+    startLaunchReads();
+    getWorkspaceBootstrap.mockResolvedValueOnce({
+      ...createWorkspace("job-bootstrap"),
+      discoveryJobs: [],
+      hydration: {
+        phase: "bootstrap" as const,
+        deferredCollections: ["discovery_jobs"] as const,
+      },
+    });
+    syncWorkspace.mockResolvedValueOnce({
+      kind: "snapshot",
+      currentRevision: 8,
+      reason: "initial",
+      snapshot: createWorkspace("job-hydrated"),
+    });
+
+    const { result } = renderHook(() => useJobFinderWorkspace());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(syncWorkspace).not.toHaveBeenCalled();
+
+    await act(async () => {
+      counts.resolve({ discovery: 0 });
+      await counts.promise;
+    });
+    await waitFor(() => expect(syncWorkspace).toHaveBeenCalledWith(null));
+  });
+
+  it("holds a press made before the full snapshot and runs it when it lands", async () => {
+    enableBootstrapApi();
+    const bootstrap: JobFinderRendererWorkspaceSnapshot = {
+      ...createWorkspace("job-bootstrap"),
+      discoveryJobs: [],
+      selectedDiscoveryJobId: null,
+      hydration: {
+        phase: "bootstrap" as const,
+        deferredCollections: ["discovery_jobs"] as const,
+      },
+    };
+    const paused = createWorkspace("job-paused");
+    const setActivityControl = vi.fn(() => Promise.resolve(paused));
+    Object.assign(window.nestor.jobFinder as object, { setActivityControl });
+    const hydration = deferred<JobFinderWorkspaceSyncResult>();
+    getWorkspaceBootstrap.mockResolvedValueOnce(bootstrap);
+    syncWorkspace.mockReturnValueOnce(hydration.promise);
+
+    const { result } = renderHook(() => useJobFinderWorkspace());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    let settled = false;
+    let failure: unknown = null;
+    act(() => {
+      void requireReadyWorkspace(result.current)
+        .actions.setActivityControl({ paused: true })
+        .then(
+          () => {
+            settled = true;
+          },
+          (error: unknown) => {
+            failure = error;
+          },
+        );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(setActivityControl).not.toHaveBeenCalled();
+    expect(failure).toBeNull();
+
+    await act(async () => {
+      hydration.resolve({
+        kind: "snapshot",
+        currentRevision: 8,
+        reason: "initial",
+        snapshot: createWorkspace("job-hydrated"),
+      });
+      await hydration.promise;
+    });
+    await waitFor(() => expect(settled).toBe(true));
+    expect(setActivityControl).toHaveBeenCalledTimes(1);
+    expect(failure).toBeNull();
   });
 
   it("does not let late hydration overwrite a newer user action", async () => {

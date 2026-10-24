@@ -67,6 +67,15 @@ export const QueryJobListInputSchema = z
       .default("best_match"),
     search: z.string().max(500).default(""),
     page: WorkspacePageSchema,
+    /**
+     * Whole-pool facts a single page cannot carry, read with the same
+     * filters: the result bands as runs in list order (for band dividers)
+     * and the ordered ids (for select all and finding a job's page).
+     */
+    include: z
+      .object({ outline: z.boolean().optional(), ids: z.boolean().optional() })
+      .strict()
+      .optional(),
   })
   .strict();
 export type QueryJobListInput = z.input<typeof QueryJobListInputSchema>;
@@ -106,6 +115,8 @@ export type WorkspaceJobListRow = Pick<
   score: number;
   recommendation: SavedJob["matchAssessment"]["recommendation"];
   judged: boolean;
+  /** No bound, current verdict: "Fit not assessed", whatever else is known. */
+  provisional: boolean;
   scoreWithheld: boolean;
   scoreIsUpperBound: boolean;
   titleFamilyMatch: SavedJob["matchAssessment"]["titleFamilyMatch"] | null;
@@ -158,6 +169,13 @@ export interface QueryJobListResult {
   applications: WorkspaceEntitySummary[];
   applyResults: WorkspaceEntitySummary[];
   facets: WorkspaceJobListFacets;
+  /** Present when `include.outline` was asked: consecutive result bands. */
+  outline?: Array<{
+    group: WorkspaceJobListRow["resultGroup"];
+    count: number;
+  }>;
+  /** Present when `include.ids` was asked: the whole pool in list order. */
+  ids?: string[];
 }
 export interface WorkspaceJobListFacets {
   recommendations: Array<{

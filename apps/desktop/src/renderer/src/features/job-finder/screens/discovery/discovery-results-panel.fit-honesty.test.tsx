@@ -4,7 +4,10 @@ import { SavedJobSchema, type SavedJob } from "@nestor/contracts";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DiscoveryResultsPanel } from "./discovery-results-panel";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 /**
  * Rendered-string guards for the withheld fit score.
@@ -148,9 +151,9 @@ function unboundJob(): SavedJob {
   });
 }
 
-function renderResults(jobs: readonly SavedJob[], selected: SavedJob | null) {
-  return render(
-    <DiscoveryResultsPanel
+async function renderResults(jobs: readonly SavedJob[], selected: SavedJob | null) {
+  const rendered = render(
+    <DiscoveryResultsPanelWithJobs
       browserSession={browserSession}
       hasCompletedSearch
       jobs={jobs}
@@ -158,6 +161,8 @@ function renderResults(jobs: readonly SavedJob[], selected: SavedJob | null) {
       selectedJob={selected}
     />,
   );
+  await flushFindJobsQueries();
+  return rendered;
 }
 
 afterEach(() => {
@@ -165,9 +170,9 @@ afterEach(() => {
 });
 
 describe("Find jobs fit honesty", () => {
-  it("never prints the unearned percentage, and states the title-only fact once per band", () => {
+  it("never prints the unearned percentage, and states the title-only fact once per band", async () => {
     const job = titleOnlyJob();
-    renderResults([job], job);
+    await renderResults([job], job);
 
     // The number that was not earned must not appear anywhere on the row.
     expect(screen.queryByText(/54% fit/)).toBeNull();
@@ -197,18 +202,18 @@ describe("Find jobs fit honesty", () => {
     ).toEqual([srOnly]);
   });
 
-  it("prints 'Fit not assessed' with no number for an unbound assessment", () => {
+  it("prints 'Fit not assessed' with no number for an unbound assessment", async () => {
     const job = unboundJob();
-    renderResults([job], job);
+    await renderResults([job], job);
 
     const fit = screen.getByTestId(`discovery-result-fit-${job.id}`);
     expect(fit.textContent).toBe("Fit not assessed");
     expect(fit.textContent).not.toContain("70");
   });
 
-  it("still prints the percentage once its evidence was checked", () => {
+  it("still prints the percentage once its evidence was checked", async () => {
     const job = checkedJob();
-    renderResults([job], job);
+    await renderResults([job], job);
 
     expect(
       screen.getByTestId(`discovery-result-fit-${job.id}`).textContent,
@@ -216,10 +221,10 @@ describe("Find jobs fit honesty", () => {
   });
 });
 
-it("does not show a strong recommendation beside an unjudged fit", () => {
+it("does not show a strong recommendation beside an unjudged fit", async () => {
   const job = unboundJob();
   job.matchAssessment.recommendation = "strong_fit";
-  renderResults([job], job);
+  await renderResults([job], job);
   expect(screen.getAllByText("Fit not assessed").length).toBeGreaterThan(0);
   expect(screen.queryByText("Strong fit")).toBeNull();
 });

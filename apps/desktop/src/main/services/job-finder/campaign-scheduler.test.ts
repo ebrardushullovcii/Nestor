@@ -12,9 +12,20 @@ import {
 vi.mock("./workspace-service", () => ({
   getJobFinderWorkspaceService: vi.fn(),
 }));
-vi.mock("./workspace-updates", () => ({
-  publishJobFinderWorkspaceUpdate: vi.fn(),
-}));
+vi.mock("./workspace-updates", async () => {
+  const publishJobFinderWorkspaceUpdate = vi.fn();
+  // A search announces its first event to windows; later events go to the
+  // change feed (ADR 0075).
+  const createSearchProgressPublisher = () => {
+    let announced = false;
+    return () => {
+      if (announced) return;
+      announced = true;
+      publishJobFinderWorkspaceUpdate();
+    };
+  };
+  return { publishJobFinderWorkspaceUpdate, createSearchProgressPublisher };
+});
 
 interface FakeTimerHandle {
   callback: () => void;

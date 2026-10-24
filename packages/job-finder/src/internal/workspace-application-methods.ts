@@ -6,11 +6,13 @@ import {
   RESUME_AI_CONCURRENCY,
   RESUME_LOCAL_CONCURRENCY,
   RESUME_PIPELINE_CAPACITY,
+  writesResumesOnShortlist,
   type ResumeBatchGenerationResult,
   type ResumeBatchGenerationProgress,
   type ResumeBatchProviderBlock,
 } from "@nestor/contracts";
 import { refreshApprovedApplicationLetter } from "./approved-application-letter";
+import { createResumeOnShortlist } from "./resume-on-shortlist";
 import { createReturnToShortlistMethods } from "./application-return-to-shortlist";
 import type {
   DiscoveryFeedbackBatchOutcome,
@@ -454,6 +456,9 @@ type WorkspaceApplicationMethods = Omit<
     control: JobFinderActivityControl,
     onFinished?: () => void,
   ): Promise<void>;
+  /** Holds or continues the resumes shortlisting asked for (ADR 0076). */
+  resumeOnShortlistPauseChanged(paused: boolean): void;
+  continueResumesOnShortlist(): Promise<void>;
   resolveApplyConsentRequest(
     requestId: string,
     action: "approve" | "decline",
@@ -948,6 +953,11 @@ export function createWorkspaceApplicationMethods(
       pendingListingReads.set(id, generation);
     }
     drainListingReads();
+    // A resume starts writing the moment its job is shortlisted (ADR 0076).
+    void resumeOnShortlist.request(ids).catch((error: unknown) => {
+      if (listingReadCurrent(generation))
+        console.warn("[shortlist] Resume could not be queued", error);
+    });
   }
 
   /**
@@ -4816,7 +4826,12 @@ export function createWorkspaceApplicationMethods(
         const latestJob = (
           await ctx.repository.listSavedJobsByIds([jobId])
         ).find((entry) => entry.id === jobId);
-        if (!latestJob || removedResumeJobIds.has(jobId))
+        // Hidden while it was being written: saving would bring it back.
+        if (
+          !latestJob ||
+          removedResumeJobIds.has(jobId) ||
+          latestJob.status === "archived"
+        )
           return { jobId, outcome: "cancelled" };
 
         if (
@@ -5652,6 +5667,61 @@ export function createWorkspaceApplicationMethods(
     await clearStaleMissingResumeBlockerForJob(jobId);
   }
 
+  // Resumes written because a job was shortlisted (ADR 0076): the person's
+  // request is kept in the intelligence state; the writing is the batch path.
+  const resumeOnShortlist = createResumeOnShortlist({
+    isEnabled: async () =>
+      ctx.aiClient.getStatus().kind === "openai_compatible" &&
+      writesResumesOnShortlist(await ctx.repository.getSettings()),
+    isPaused: async () => (await ctx.repository.getActivityControl()).paused,
+    isClosing: () => ctx.isWorkspaceClosing?.() === true,
+    needingResume: async (jobIds) =>
+      (await ctx.repository.listSavedJobsByIds(jobIds))
+        .filter(
+          (job) =>
+            job.status === "drafting" &&
+            job.resumeApplicationMode !== "original_resume",
+        )
+        .map((job) => job.id),
+    readQueue: async () =>
+      (
+        await (ctx.repository.readIntelligenceProjection?.() ??
+          ctx.repository.getIntelligenceState())
+      ).resumeOnShortlistJobIds ?? [],
+    updateQueue: (change) =>
+      ctx.withIntelligenceTransition(async () => {
+        const current = await ctx.repository.getIntelligenceState();
+        const before = current.resumeOnShortlistJobIds ?? [];
+        const after = change(before);
+        if (
+          after.length === before.length &&
+          after.every((id, index) => before[index] === id)
+        )
+          return;
+        await ctx.repository.saveIntelligenceState({
+          ...current,
+          resumeOnShortlistJobIds: [...after],
+        });
+      }),
+    generate: async (jobId, shouldStop) => {
+      try {
+        return await startResumeGeneration(jobId, {
+          shouldStop,
+          deferWhenAiBusy: true,
+        });
+      } catch (error) {
+        if (isAiServiceBusy(error)) return { jobId, outcome: "not_started" };
+        throw error;
+      }
+    },
+    cancelInFlight: (jobId) => removedResumeJobIds.add(jobId),
+    onChange: () => ctx.onShortlistResumeChanged?.(),
+    retryLater: (run) => {
+      const timer = setTimeout(run, 30_000);
+      (timer as { unref?: () => void }).unref?.();
+    },
+  });
+
   return {
     resumeApplicationUserAction,
     ...createReturnToShortlistMethods({
@@ -5806,6 +5876,9 @@ export function createWorkspaceApplicationMethods(
       return ctx.getWorkspaceSnapshot();
     },
     queueJobsForReview,
+    resumeOnShortlistPauseChanged: (paused) =>
+      resumeOnShortlist.pauseChanged(paused),
+    continueResumesOnShortlist: () => resumeOnShortlist.continue(),
     async queueJobForReview(jobId) {
       await queueJobsForReview([jobId]);
       return ctx.getWorkspaceSnapshot();
@@ -5856,6 +5929,7 @@ export function createWorkspaceApplicationMethods(
     },
     async removeJobFromReview(jobId) {
       removedResumeJobIds.add(jobId);
+      await resumeOnShortlist.withdraw([jobId]);
       await ctx.updateJob(jobId, (job) =>
         SavedJobSchema.parse({
           ...job,
@@ -5866,6 +5940,7 @@ export function createWorkspaceApplicationMethods(
       return ctx.getWorkspaceSnapshot();
     },
     async removeJobsFromReview(jobIds) {
+      await resumeOnShortlist.withdraw(jobIds);
       for (const jobId of new Set(jobIds)) {
         removedResumeJobIds.add(jobId);
         await ctx.updateJob(jobId, (job) =>
@@ -5877,11 +5952,13 @@ export function createWorkspaceApplicationMethods(
       }
     },
     async dismissDiscoveryJob(input) {
+      await resumeOnShortlist.withdraw([input.jobId]);
       await dismissDiscoveryJobWithoutSnapshot(input, feedbackFence());
       return ctx.getWorkspaceSnapshot();
     },
     async dismissDiscoveryJobs(inputs, options) {
       const byId = new Map(inputs.map((input) => [input.jobId, input]));
+      await resumeOnShortlist.withdraw([...byId.keys()]);
       return runFeedbackBatch(
         [...byId.keys()],
         "hidden",

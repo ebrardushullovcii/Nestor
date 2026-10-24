@@ -37,6 +37,7 @@ let reads: LaunchReads = {
   findJobs: null,
 };
 let started = false;
+let settled: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
 function publish(next: Partial<LaunchReads>): void {
@@ -53,20 +54,20 @@ export function startLaunchReads(): void {
       ? undefined
       : window.nestor?.jobFinder?.queries;
   if (!queries) return;
-  void queries
+  const home = queries
     .getHomeSummary()
     .then((home) => publish({ home, counts: reads.counts ?? home.counts }))
     .catch(() => undefined);
-  void queries
+  const counts = queries
     .getListCounts()
     .then((counts) => publish({ counts }))
     .catch(() => undefined);
-  void queries
+  const context = queries
     .getStartupContext()
     .then((context) => publish({ context }))
     .catch(() => undefined);
   const page = { offset: 0, limit: LAUNCH_FIND_JOBS_PAGE_SIZE };
-  void Promise.all([
+  const findJobs = Promise.all([
     queries.queryJobList({ list: "discovery", sort: "best_match", page }),
     queries.queryJobList({
       list: "discovery",
@@ -79,6 +80,25 @@ export function startLaunchReads(): void {
   ])
     .then(([focused, wide]) => publish({ findJobs: { focused, wide } }))
     .catch(() => undefined);
+  settled = Promise.all([home, counts, context, findJobs]).then(() => {
+    settled = null;
+  });
+}
+
+/** The longest the full workspace load waits on the launch reads. */
+const LAUNCH_READS_WAIT_MS = 3_000;
+
+/**
+ * Resolves once every launch read has answered (or failed), so the window's
+ * full workspace load starts after the screens drawn from them are usable,
+ * not ahead of them. Never waits longer than a few seconds.
+ */
+export function whenLaunchReadsSettled(): Promise<void> {
+  if (!settled) return Promise.resolve();
+  return Promise.race([
+    settled,
+    new Promise<void>((resolve) => setTimeout(resolve, LAUNCH_READS_WAIT_MS)),
+  ]);
 }
 
 function subscribe(listener: () => void): () => void {

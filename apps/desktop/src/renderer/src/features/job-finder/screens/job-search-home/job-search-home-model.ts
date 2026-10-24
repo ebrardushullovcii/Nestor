@@ -200,6 +200,13 @@ interface JobSearchHomeModel {
   showPlanSelector: boolean;
 }
 
+export interface HomeFindJobsCounts {
+  /** The jobs Find jobs lists by default. */
+  visible: number;
+  /** The weaker matches behind "Show weaker matches". */
+  weaker: number;
+}
+
 export interface BuildJobSearchHomeModelInput {
   workspace: JobFinderRendererWorkspaceSnapshot;
   tasks: JobFinderTaskCenterModel;
@@ -209,6 +216,12 @@ export interface BuildJobSearchHomeModelInput {
     | undefined;
   /** A search request is in flight but the run has not been recorded yet. */
   discoveryRunPending: boolean;
+  /**
+   * Find jobs' counts read from the database, for Home's first view while
+   * the workspace has no Find jobs lists yet (ADR 0077). The same numbers
+   * the lists give, so nothing changes when they land.
+   */
+  findJobsCounts?: HomeFindJobsCounts | null;
   /** Whether Home may start a search itself. */
   canRunDiscovery: boolean;
   applicationAutomationMode: ApplicationAutomationMode;
@@ -1072,8 +1085,11 @@ export function buildJobSearchHomeModel(
     });
   }
 
-  const visibleJobs = countDiscoveryVisibleJobs(workspace, jobIds);
-  const hiddenWeaker = countDiscoveryWeakerJobs(workspace, jobIds);
+  const visibleJobs =
+    input.findJobsCounts?.visible ??
+    countDiscoveryVisibleJobs(workspace, jobIds);
+  const hiddenWeaker =
+    input.findJobsCounts?.weaker ?? countDiscoveryWeakerJobs(workspace, jobIds);
   const shortlisted = countShortlistedJobs(workspace, jobIds);
   const shortlist = countShortlist(queue, workspace);
   const resumeBatch =

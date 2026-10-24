@@ -15,7 +15,10 @@ import {
   DISCOVERY_DETAIL_REGION_ID,
   DISCOVERY_STACKED_LAYOUT_MEDIA_QUERY,
 } from "./discovery-accessibility";
-import { DiscoveryResultsPanel } from "./discovery-results-panel";
+import {
+  DiscoveryResultsPanelWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const browserSession = {
   source: "target_site" as const,
@@ -52,12 +55,12 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderResultsWithDetailRegion(input: {
+async function renderResultsWithDetailRegion(input: {
   onSelectJob: (jobId: string) => void;
 }) {
-  return render(
+  const rendered = render(
     <>
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={[resultJob]}
@@ -71,6 +74,8 @@ function renderResultsWithDetailRegion(input: {
       </section>
     </>,
   );
+  await flushFindJobsQueries();
+  return rendered;
 }
 
 function getDetailRegion(): HTMLElement {
@@ -82,11 +87,11 @@ function getDetailRegion(): HTMLElement {
 }
 
 describe("DiscoveryResultsPanel narrow search access", () => {
-  it("keeps the also-found control inside the aligned results panel", () => {
+  it("keeps the also-found control inside the aligned results panel", async () => {
     const onToggleAlsoFound = vi.fn();
 
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hiddenAlsoFoundCount={6}
         jobs={[resultJob]}
@@ -96,6 +101,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
         selectedJob={resultJob}
       />,
     );
+    await flushFindJobsQueries();
 
     const resultsPanel = screen.getByRole("region", { name: "Results" });
     expect(
@@ -106,12 +112,13 @@ describe("DiscoveryResultsPanel narrow search access", () => {
     fireEvent.click(
       within(resultsPanel).getByRole("button", { name: /Show weaker matches/u }),
     );
+    await flushFindJobsQueries();
     expect(onToggleAlsoFound).toHaveBeenCalledOnce();
   });
 
-  it("leaves the route-level search action to the page header", () => {
+  it("leaves the route-level search action to the page header", async () => {
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={[resultJob]}
@@ -119,6 +126,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
         selectedJob={resultJob}
       />,
     );
+    await flushFindJobsQueries();
 
     expect(screen.queryByRole("button", { name: "Search again" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Search now" })).toBeNull();
@@ -129,7 +137,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
 
     render(
       <>
-        <DiscoveryResultsPanel
+        <DiscoveryResultsPanelWithJobs
           browserSession={browserSession}
           hasCompletedSearch
           jobs={[resultJob]}
@@ -143,6 +151,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
         </section>
       </>,
     );
+    await flushFindJobsQueries();
 
     expect(screen.getByRole("region", { name: "Results" })).toBeTruthy();
     const resultButton = screen.getByRole("button", {
@@ -157,9 +166,11 @@ describe("DiscoveryResultsPanel narrow search access", () => {
     );
     resultButton.focus();
     fireEvent.click(resultButton, { detail: 1 });
+    await flushFindJobsQueries();
     expect(document.activeElement).toBe(resultButton);
 
     fireEvent.click(resultButton, { detail: 0 });
+    await flushFindJobsQueries();
     await vi.waitFor(() => {
       expect(document.activeElement).toBe(detailHeading);
     });
@@ -174,7 +185,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
       value: matchMediaMock,
     });
 
-    renderResultsWithDetailRegion({ onSelectJob });
+    await renderResultsWithDetailRegion({ onSelectJob });
 
     const detailHeading = screen.getByRole("heading", {
       name: "Senior Product Designer",
@@ -189,6 +200,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
     });
     resultButton.focus();
     fireEvent.click(resultButton, { detail: 0 });
+    await flushFindJobsQueries();
 
     await vi.waitFor(() => {
       expect(document.activeElement).toBe(detailHeading);
@@ -211,7 +223,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
       value: matchMediaMock,
     });
 
-    renderResultsWithDetailRegion({ onSelectJob });
+    await renderResultsWithDetailRegion({ onSelectJob });
 
     const scrollIntoViewMock = vi.fn();
     getDetailRegion().scrollIntoView = scrollIntoViewMock;
@@ -221,6 +233,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
     resultButton.focus();
 
     fireEvent.click(resultButton, { detail: 1 });
+    await flushFindJobsQueries();
 
     await vi.waitFor(() => {
       expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: "start" });
@@ -238,7 +251,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
       value: vi.fn(() => ({ matches: false })),
     });
 
-    renderResultsWithDetailRegion({ onSelectJob: vi.fn() });
+    await renderResultsWithDetailRegion({ onSelectJob: vi.fn() });
 
     const scrollIntoViewMock = vi.fn();
     getDetailRegion().scrollIntoView = scrollIntoViewMock;
@@ -248,6 +261,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
     resultButton.focus();
 
     fireEvent.click(resultButton, { detail: 1 });
+    await flushFindJobsQueries();
     await new Promise<void>((resolve) => {
       queueMicrotask(resolve);
     });
@@ -256,7 +270,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
     expect(document.activeElement).toBe(resultButton);
   });
 
-  it("searches the current result pool without changing the selected job", () => {
+  it("searches the current result pool without changing the selected job", async () => {
     const secondJob = {
       ...resultJob,
       id: "job_backend",
@@ -265,7 +279,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
     } as SavedJob;
 
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={[resultJob, secondJob]}
@@ -273,10 +287,12 @@ describe("DiscoveryResultsPanel narrow search access", () => {
         selectedJob={resultJob}
       />,
     );
+    await flushFindJobsQueries();
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Find a job" }), {
       target: { value: "Northstar" },
     });
+    await flushFindJobsQueries();
 
     expect(screen.getByText("1 of 2 jobs")).toBeTruthy();
     expect(
@@ -287,7 +303,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
     ).toBeNull();
   });
 
-  it("offers no list-management chrome beside the two controls that matter", () => {
+  it("offers no list-management chrome beside the two controls that matter", async () => {
     const secondJob = {
       ...resultJob,
       id: "job_backend_compare",
@@ -300,7 +316,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
     } as SavedJob;
 
     render(
-      <DiscoveryResultsPanel
+      <DiscoveryResultsPanelWithJobs
         browserSession={browserSession}
         hasCompletedSearch
         jobs={[resultJob, secondJob]}
@@ -308,6 +324,7 @@ describe("DiscoveryResultsPanel narrow search access", () => {
         selectedJob={resultJob}
       />,
     );
+    await flushFindJobsQueries();
 
     // Compare and Saved views were list-management chrome for a workspace
     // holding a handful of rows; both are deleted rather than restyled.
@@ -319,10 +336,10 @@ describe("DiscoveryResultsPanel narrow search access", () => {
   });
 });
 
-it("offers hidden weaker matches that fit the text instead of saying they were found elsewhere", () => {
+it("offers hidden weaker matches that fit the text instead of saying they were found elsewhere", async () => {
   const onToggleAlsoFound = vi.fn();
   render(
-    <DiscoveryResultsPanel
+    <DiscoveryResultsPanelWithJobs
       browserSession={browserSession}
       jobs={[resultJob]}
       hiddenAlsoFoundJobs={[
@@ -335,9 +352,11 @@ it("offers hidden weaker matches that fit the text instead of saying they were f
       selectedJob={null}
     />,
   );
+  await flushFindJobsQueries();
   fireEvent.change(screen.getByRole("searchbox", { name: "Find a job" }), {
     target: { value: "Backend" },
   });
+  await flushFindJobsQueries();
   expect(
     screen.getByText("1 hidden weaker match fits this text."),
   ).toBeTruthy();

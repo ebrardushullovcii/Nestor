@@ -1,5 +1,8 @@
 import { getJobFinderWorkspaceService } from "./workspace-service";
-import { publishJobFinderWorkspaceUpdate } from "./workspace-updates";
+import {
+  createSearchProgressPublisher,
+  publishJobFinderWorkspaceUpdate,
+} from "./workspace-updates";
 
 /**
  * Local campaign scheduler.
@@ -64,7 +67,7 @@ function createDefaultTimer(
 
 async function defaultTick(): Promise<void> {
   const service = await getJobFinderWorkspaceService();
-  const onActivity = () => publishJobFinderWorkspaceUpdate();
+  const onActivity = createSearchProgressPublisher();
   if (service.processDueScheduledCampaigns) {
     const changed = await service.processDueScheduledCampaigns(
       undefined,

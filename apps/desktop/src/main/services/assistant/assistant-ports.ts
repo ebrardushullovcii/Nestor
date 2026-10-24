@@ -36,7 +36,10 @@ import {
   listJobsNotInProgress,
 } from "../job-finder/start-apply-batch";
 import { isDesktopTestApiEnabled } from "../job-finder/test-api";
-import { publishJobFinderWorkspaceUpdate } from "../job-finder/workspace-updates";
+import {
+  createSearchProgressPublisher,
+  publishJobFinderWorkspaceUpdate,
+} from "../job-finder/workspace-updates";
 import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
 import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { waitForAssistantResumeImport } from "./resume-import-completion";
@@ -262,9 +265,10 @@ export function createAssistantHostPorts(input: {
       let complete!: (runId: string | null) => void;
       const started = new Promise<string | null>((resolve) => { complete = resolve; });
       let failure: unknown;
+      const publishProgress = createSearchProgressPublisher();
       const activity = (event: DiscoveryActivityEvent) => {
         complete(event.runId);
-        publishJobFinderWorkspaceUpdate();
+        publishProgress();
       };
       const work = campaignId ? service.runCampaignNow({ campaignId }, activity)
         : service.runAgentDiscovery(activity, undefined, targetId ?? undefined, searchRequest);

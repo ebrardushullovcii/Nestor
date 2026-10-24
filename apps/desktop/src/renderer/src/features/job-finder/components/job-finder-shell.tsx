@@ -78,6 +78,7 @@ import {
   selectCampaignJobIds,
   toDestinationBadgeCount,
 } from "../lib/destination-counts";
+import { useSearchLiveCounts } from "../lib/search-change-feed";
 import { useLaunchReads } from "../lib/launch-reads";
 import {
   SHELL_HEADER_MASK_HEIGHT_CLASS,
@@ -673,11 +674,13 @@ export function JobFinderShell({
   // of them used to count something other than what their destination page
   // prints, and nothing could hold the two together.
   const launchCounts = useLaunchReads().counts;
+  const searchCounts = useSearchLiveCounts(workspace);
   const screenDefinitions = useMemo<readonly ShellScreenDefinition[]>(() => {
     const campaignJobIds = selectCampaignJobIds(workspace);
-    // Until the jobs load, the three list badges come from the database.
+    // Until the jobs load, the three list badges come from the database, and
+    // so do they during a search on screens that do not sync for it.
     const openingCounts =
-      workspace.hydration?.phase === "bootstrap" ? launchCounts : null;
+      workspace.hydration?.phase === "bootstrap" ? launchCounts : searchCounts;
 
     return [
       {
@@ -783,7 +786,7 @@ export function JobFinderShell({
         icon: Settings,
       },
     ];
-  }, [launchCounts, workspace]);
+  }, [launchCounts, searchCounts, workspace]);
 
   const actionScreen = screenDefinitions.find(
     (screen) => screen.id === "actions",

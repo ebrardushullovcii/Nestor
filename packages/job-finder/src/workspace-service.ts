@@ -281,6 +281,7 @@ export function createJobFinderWorkspaceService(
     onActivityControlChanged,
     onDetachedApplyRunFinished,
     onResumeEvidenceFinished,
+    onShortlistResumeChanged,
     onListingAssessmentFinished,
     onSavedJobsRescored,
     onExplicitUserStart,
@@ -490,6 +491,7 @@ export function createJobFinderWorkspaceService(
     activeResumeVisionRunIds,
     activeResumeEvidenceRunIds,
     ...(onResumeEvidenceFinished ? { onResumeEvidenceFinished } : {}),
+    ...(onShortlistResumeChanged ? { onShortlistResumeChanged } : {}),
     getWorkspaceSnapshot: () =>
       Promise.reject(new Error("Workspace snapshot method not initialized.")),
     readWorkspaceSnapshot: () =>
@@ -934,6 +936,13 @@ export function createJobFinderWorkspaceService(
         activeDiscoveryAbortControllerRef.current)
     )
       return lastDisplayProjection;
+    await waitForUserActionRecovery();
+    return borrowValidatedJobs
+      ? readDisplayProjection()
+      : snapshotProfileMethods.getWorkspaceSnapshot();
+  }
+
+  async function waitForUserActionRecovery() {
     // Recovery starts or joins the continuation of every verifying step, and
     // a continuation drives the browser for minutes. Quick verifications
     // still land in this snapshot; a long continuation carries on in the
@@ -959,13 +968,15 @@ export function createJobFinderWorkspaceService(
       ]).finally(() => {
         if (timer) clearTimeout(timer);
       });
-    return borrowValidatedJobs
-      ? readDisplayProjection()
-      : snapshotProfileMethods.getWorkspaceSnapshot();
   }
 
   async function getWorkspaceBootstrap() {
     return snapshotProfileMethods.getWorkspaceBootstrap();
+  }
+
+  async function getWorkspaceHomeSnapshot() {
+    await waitForUserActionRecovery();
+    return (await snapshotProfileMethods.getWorkspaceHomeSnapshot?.()) ?? null;
   }
 
   // Mutation results are display reads. Canonical snapshots stay available
@@ -1534,6 +1545,7 @@ export function createJobFinderWorkspaceService(
     });
     await repository.saveActivityControl(control);
     await onActivityControlChanged?.(control);
+    applicationMethods.resumeOnShortlistPauseChanged(control.paused);
     // Home's Pause new work lets the current application reach a safe
     // boundary. The queue waits between jobs and Resume continues that same
     // run. Browser takeover and shutdown still abort immediately.
@@ -1836,6 +1848,7 @@ export function createJobFinderWorkspaceService(
       };
     },
     getWorkspaceBootstrap,
+    getWorkspaceHomeSnapshot,
     mutateSafeguards: safeguardMethods.mutateSafeguards,
     getSafeguardsOverview: safeguardMethods.getSafeguardsOverview,
     evaluateApplicationSafeguardBlockers:
@@ -1957,6 +1970,8 @@ export function createJobFinderWorkspaceService(
       trackWorkspaceOperation("shortlisting jobs", () =>
         applicationMethods.queueJobsForReview!(jobIds),
       ),
+    continueResumesOnShortlist: () =>
+      applicationMethods.continueResumesOnShortlist(),
     recordApplicationsSentByPerson: () =>
       recordApplicationsSentByPerson(context),
     judgeUnjudgedJobs: () => {

@@ -234,9 +234,27 @@ export function buildDiscoveryResultGroupHeadings(
   ranked: boolean,
   options: DiscoveryResultGroupHeadingOptions = {},
 ): ReadonlyMap<string, DiscoveryResultGroupHeading> {
+  return buildRunHeadings(
+    jobs.map((job) => job.id),
+    jobs.map(getRowResultGroup),
+    ranked,
+    options,
+  );
+}
+
+/**
+ * The same headings from the list's ids and bands in order, which Find jobs
+ * reads from the database instead of holding every row (ADR 0075).
+ */
+export function buildRunHeadings(
+  ids: readonly string[],
+  groups: readonly DiscoveryResultGroupId[],
+  ranked: boolean,
+  options: DiscoveryResultGroupHeadingOptions = {},
+): ReadonlyMap<string, DiscoveryResultGroupHeading> {
   const headings = new Map<string, DiscoveryResultGroupHeading>();
-  forEachHeadedDiscoveryResultRun(jobs, ranked, options, (run) => {
-    headings.set(jobs[run.headingIndex]!.id, {
+  forEachHeadedDiscoveryResultRun(groups, ranked, options, (run) => {
+    headings.set(ids[run.headingIndex]!, {
       count: run.end - run.start,
       description: groupCopy[run.group].description,
       id: run.group,
@@ -261,10 +279,25 @@ export function buildDiscoveryHeadedGroupByJobId(
   ranked: boolean,
   options: DiscoveryResultGroupHeadingOptions = {},
 ): ReadonlyMap<string, DiscoveryResultGroupId> {
+  return buildRunHeadedGroups(
+    jobs.map((job) => job.id),
+    jobs.map(getRowResultGroup),
+    ranked,
+    options,
+  );
+}
+
+/** {@link buildDiscoveryHeadedGroupByJobId} from ids and bands in order. */
+export function buildRunHeadedGroups(
+  ids: readonly string[],
+  groups: readonly DiscoveryResultGroupId[],
+  ranked: boolean,
+  options: DiscoveryResultGroupHeadingOptions = {},
+): ReadonlyMap<string, DiscoveryResultGroupId> {
   const headed = new Map<string, DiscoveryResultGroupId>();
-  forEachHeadedDiscoveryResultRun(jobs, ranked, options, (run) => {
+  forEachHeadedDiscoveryResultRun(groups, ranked, options, (run) => {
     for (let index = run.headingIndex; index < run.visibleEnd; index += 1) {
-      headed.set(jobs[index]!.id, run.group);
+      headed.set(ids[index]!, run.group);
     }
   });
   return headed;
@@ -294,7 +327,7 @@ interface DiscoveryResultRun {
  * filed under the previous band's label.
  */
 function forEachHeadedDiscoveryResultRun(
-  jobs: readonly JobListRow[],
+  groups: readonly DiscoveryResultGroupId[],
   ranked: boolean,
   options: DiscoveryResultGroupHeadingOptions,
   visit: (run: DiscoveryResultRun) => void,
@@ -304,13 +337,15 @@ function forEachHeadedDiscoveryResultRun(
   }
 
   const windowStart = Math.max(0, options.window?.start ?? 0);
-  const windowEnd = Math.min(jobs.length, options.window?.end ?? jobs.length);
-  const groups = jobs.map(getRowResultGroup);
+  const windowEnd = Math.min(
+    groups.length,
+    options.window?.end ?? groups.length,
+  );
   let start = 0;
-  while (start < jobs.length) {
+  while (start < groups.length) {
     const group = groups[start]!;
     let end = start + 1;
-    while (end < jobs.length && groups[end] === group) {
+    while (end < groups.length && groups[end] === group) {
       end += 1;
     }
 

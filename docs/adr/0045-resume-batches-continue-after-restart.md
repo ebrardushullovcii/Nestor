@@ -1,6 +1,6 @@
 # ADR 0045: Resume batches can be continued after a restart
 
-Status: accepted (2026-10-05). Shortlisted concurrency is superseded by [ADR 0048](0048-shortlisted-resume-pipeline.md).
+Status: accepted (2026-10-05). Shortlisted concurrency is superseded by [ADR 0048](0048-shortlisted-resume-pipeline.md). Resumes started by shortlisting carry on after a restart by themselves ([ADR 0076](0076-write-resumes-when-a-job-is-shortlisted.md)).
 
 ## Context
 

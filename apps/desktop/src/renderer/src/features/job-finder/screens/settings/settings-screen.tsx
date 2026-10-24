@@ -552,6 +552,7 @@ export function SettingsScreen(props: {
           <SettingsAiBehaviorSection
             onSettingsDraftEdited={onSettingsDraftEdited}
             onUpdateAiBehavior={onUpdateAiBehavior}
+            onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
             searchPreferences={searchPreferences}
             settings={settings}
           />

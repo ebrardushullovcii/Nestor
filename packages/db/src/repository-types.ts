@@ -310,6 +310,11 @@ export interface JobFinderRepository
   listSavedJobIds(): Promise<readonly string[]>;
   /** The saved jobs with these ids, in `listSavedJobs` order. */
   listSavedJobsByIds(jobIds: readonly string[]): Promise<readonly SavedJob[]>;
+  /**
+   * Ids of the saved jobs the person took past Find jobs: every status but
+   * "discovered" and "archived". Home's first view reads only these.
+   */
+  listCuratedSavedJobIds?(): Promise<readonly string[]>;
   /** Stored prepared fingerprints in one indexed batch; listing bodies are not read. */
   readSavedJobDiscoveryFingerprints(
     jobIds: readonly string[],

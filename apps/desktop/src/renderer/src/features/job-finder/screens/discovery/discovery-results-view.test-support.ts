@@ -29,6 +29,10 @@ import {
 } from "./discovery-source-attribution";
 
 /**
+ * Test support (ADR 0075): the in-memory list rules Find jobs used before it
+ * read its page from the database. The query fixture answers with them, so
+ * screen tests compare the query-backed screen against these rules.
+ *
  * The derived views behind the Find jobs results list, computed once per job
  * collection rather than once per render.
  *
@@ -42,8 +46,11 @@ import {
  * sort-after-filter produced.
  */
 
-export const SOURCE_UNAVAILABLE_FILTER = "Source unavailable";
-export const WORK_MODE_UNSPECIFIED_FILTER = "Not specified";
+import {
+  SOURCE_UNAVAILABLE_FILTER,
+  WORK_MODE_UNSPECIFIED_FILTER,
+} from "./discovery-filter-values";
+export { SOURCE_UNAVAILABLE_FILTER, WORK_MODE_UNSPECIFIED_FILTER };
 
 function getListingActivity(job: JobListRow): ListingActivity {
   return job.listingActivity ?? { status: "unknown" };

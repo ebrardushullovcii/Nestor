@@ -43,23 +43,37 @@ vi.mock("./discovery-filters-panel", () => ({
     </section>
   ),
 }));
-vi.mock("./discovery-results-panel", () => ({
-  DISCOVERY_OFFLINE_CATALOG_NOTICE_ID: "discovery-offline-catalog-notice",
-  DISCOVERY_SEARCH_SETUP_BLOCKER_ID: "discovery-search-setup-blocker",
-  DiscoveryResultsPanel: ({
-    editPlanHref,
-  }: {
-    editPlanHref?: string | null;
-  }) => (
-    <section aria-label="Job results">
-      <a data-testid="results-plan-editor-link" href={editPlanHref ?? ""}>
-        Edit your places
-      </a>
-    </section>
-  ),
-}));
+vi.mock("./discovery-results-panel", async () => {
+  const { useFixtureListReport } = await import(
+    "./find-jobs-list-report.test-support"
+  );
+  return {
+    DISCOVERY_OFFLINE_CATALOG_NOTICE_ID: "discovery-offline-catalog-notice",
+    DISCOVERY_SEARCH_SETUP_BLOCKER_ID: "discovery-search-setup-blocker",
+    DiscoveryResultsPanel: (
+      props: Parameters<typeof useFixtureListReport>[0] & {
+        editPlanHref?: string | null;
+      },
+    ) => {
+      useFixtureListReport(props);
+      return (
+        <section aria-label="Job results">
+          <a
+            data-testid="results-plan-editor-link"
+            href={props.editPlanHref ?? ""}
+          >
+            Edit your places
+          </a>
+        </section>
+      );
+    },
+  };
+});
 
-import { DiscoveryScreen } from "./discovery-screen";
+import {
+  DiscoveryScreenWithJobs,
+  flushFindJobsQueries,
+} from "./find-jobs-query-fixture.test-support";
 
 const searchPreferences: JobSearchPreferences = {
   targetRoles: ["Marketing Manager"],
@@ -100,10 +114,10 @@ const job = {
 afterEach(cleanup);
 
 describe("Find jobs links to the selected plan's editor", () => {
-  function renderScreen(jobs: readonly SavedJob[]) {
-    return render(
+  async function renderScreen(jobs: readonly SavedJob[]) {
+    const rendered = render(
       <MemoryRouter>
-        <DiscoveryScreen
+        <DiscoveryScreenWithJobs
           actionState={{ message: null }}
           activeCampaignId="plan_chicago"
           activeRun={null}
@@ -138,11 +152,13 @@ describe("Find jobs links to the selected plan's editor", () => {
         />
       </MemoryRouter>,
     );
+    await flushFindJobsQueries();
+    return rendered;
   }
 
   // General setup lives on Profile; result recovery edits this plan's places.
-  it("points the search-setup panel's places link at Profile preferences", () => {
-    renderScreen([]);
+  it("points the search-setup panel's places link at Profile preferences", async () => {
+    await renderScreen([]);
     fireEvent.click(screen.getByRole("button", { name: "Roles, places & sources" }));
 
     expect(
@@ -150,8 +166,8 @@ describe("Find jobs links to the selected plan's editor", () => {
     ).toBe(JOB_FINDER_ROUTE_PATHS.profileWorkModes);
   });
 
-  it("points the results panel's places link at this plan's editor", () => {
-    renderScreen([job]);
+  it("points the results panel's places link at this plan's editor", async () => {
+    await renderScreen([job]);
 
     expect(
       screen.getByTestId("results-plan-editor-link").getAttribute("href"),
