@@ -24,10 +24,9 @@ const queriesReady = new Promise<void>((resolve) => {
   resolveQueries = resolve;
 });
 
-async function read(request: WorkspaceReadRequest) {
+function read(request: WorkspaceReadRequest) {
   if (request.method === "setQueryUpdates")
     throw new Error("Query update mode belongs to the main window.");
-  await (request.method === "getStartupContext" ? contextReady : queriesReady);
   if (!repository) {
     repository = createWorkspaceQueryRepository(filePath);
     cursor = repository.getChanges(Number.MAX_SAFE_INTEGER).revision;
@@ -109,12 +108,17 @@ parent.on("message", (event) => {
           return;
         }
         const { id, request } = parsed.data;
-        void read(request).then(
-          (value) => {
+        // Post the result in the gate's continuation. An extra async read/then
+        // hop let a later page build delay an already-computed Home reply.
+        void (
+          request.method === "getStartupContext" ? contextReady : queriesReady
+        )
+          .then(() => {
+            const value = read(request);
             send(port, { type: "reply", id, ok: true, value });
             pushChanges();
-          },
-          (error: unknown) =>
+          })
+          .catch((error: unknown) =>
             send(port, {
               type: "reply",
               id,
@@ -124,7 +128,7 @@ parent.on("message", (event) => {
                   ? error.message
                   : "Workspace read failed.",
             }),
-        );
+          );
       });
       port.start();
       break;
