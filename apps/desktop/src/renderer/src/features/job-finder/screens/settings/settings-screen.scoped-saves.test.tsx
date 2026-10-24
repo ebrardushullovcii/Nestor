@@ -69,7 +69,10 @@ function createCallbacks() {
     onSettingsDraftEdited: vi.fn(),
     // Production scoped saves resolve false when a save did not commit.
     onUpdateAiBehavior: vi.fn<
-      (input: UpdateAiBehaviorInput) => Promise<boolean>
+      (
+        input: UpdateAiBehaviorInput,
+        options?: { undo?: () => void },
+      ) => Promise<boolean>
     >(() => Promise.resolve(true)),
     onUpdateAppearanceTheme: vi.fn<
       (theme: AppearanceTheme) => Promise<boolean>
@@ -97,7 +100,9 @@ function renderScreen(settings: JobFinderSettings, callbacks: Callbacks) {
         isWorkspaceResetPending={false}
         onResetWorkspace={callbacks.onResetWorkspace}
         onSettingsDraftEdited={callbacks.onSettingsDraftEdited}
-        onUpdateAiBehavior={(input) => callbacks.onUpdateAiBehavior(input)}
+        onUpdateAiBehavior={(input, options) =>
+          callbacks.onUpdateAiBehavior(input, options)
+        }
         onUpdateAppearanceTheme={(theme) =>
           callbacks.onUpdateAppearanceTheme(theme)
         }
@@ -279,10 +284,13 @@ describe("SettingsScreen scoped section saves", () => {
     ).toBeNull();
 
     expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
-    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledWith({
-      ...defaultAiBehaviorInput,
-      resumeApproach: "original_resume",
-    } satisfies UpdateAiBehaviorInput);
+    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledWith(
+      {
+        ...defaultAiBehaviorInput,
+        resumeApproach: "original_resume",
+      } satisfies UpdateAiBehaviorInput,
+      { undo: expect.any(Function) as unknown },
+    );
     // No whole JobFinderSettings payload and no workspace fields leaked.
     const payload = callbacks.onUpdateAiBehavior.mock
       .calls[0]?.[0] as UpdateAiBehaviorInput;

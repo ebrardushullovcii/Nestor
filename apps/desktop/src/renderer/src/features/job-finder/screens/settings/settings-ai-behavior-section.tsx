@@ -49,7 +49,7 @@ import {
  * and every stretched resume line still needs their confirmation (ADR 0018).
  *
  * A choice saves the moment it is picked, like every other Settings switch,
- * and the saved line offers Undo. Typed text saves when the person pauses or
+ * and the saved toast offers Undo. Typed text saves when the person pauses or
  * leaves the field. A Save button appears only to retry a failed save.
  */
 
@@ -299,6 +299,7 @@ interface SettingsAiBehaviorSectionProps {
   onSettingsDraftEdited?: () => void;
   onUpdateAiBehavior: (
     input: UpdateAiBehaviorInput,
+    options?: { undo?: () => void },
   ) => Promise<boolean | void> | void;
   searchPreferences: Pick<JobSearchPreferences, "tailoringMode">;
   settings: JobFinderSettings;
@@ -318,8 +319,6 @@ export function SettingsAiBehaviorSection({
   const savedKey = JSON.stringify(toSavedInput(saved));
   const [draft, setDraft] = useState<AiBehaviorDraft>(saved);
   const [seededKey, setSeededKey] = useState(savedKey);
-  // What the last save replaced, offered as Undo beside "saved".
-  const [undoDraft, setUndoDraft] = useState<AiBehaviorDraft | null>(null);
   const { resetSectionSave, runSectionSave, saveState } =
     useSettingsSectionSave();
 
@@ -343,7 +342,6 @@ export function SettingsAiBehaviorSection({
       sentRef.current = { draft: saved, key: savedKey };
       latestDraftRef.current = saved;
       setDraft(saved);
-      setUndoDraft(null);
     }
   }
 
@@ -371,9 +369,18 @@ export function SettingsAiBehaviorSection({
     sentRef.current = { draft: next, key };
     inFlightRef.current = true;
     let committed = false;
+    // Undo puts back what this save replaced, and saves that at once too.
+    const undo = () => {
+      latestDraftRef.current = previous.draft;
+      setDraft(previous.draft);
+      sendLatest({ offerUndo: false });
+    };
     void runSectionSave({
       execute: async () => {
-        const result = await onUpdateRef.current(input);
+        const result = await onUpdateRef.current(
+          input,
+          options.offerUndo ? { undo } : undefined,
+        );
         committed = result !== false;
         return result;
       },
@@ -389,7 +396,6 @@ export function SettingsAiBehaviorSection({
         sentRef.current = previous;
         return;
       }
-      setUndoDraft(options.offerUndo ? previous.draft : null);
       // A choice made while this save ran goes out now.
       sendLatest({ offerUndo: true });
     });
@@ -443,14 +449,6 @@ export function SettingsAiBehaviorSection({
     );
   const sendTypedText = () => sendLatest({ offerUndo: true });
 
-  const undoLastSave = () => {
-    if (!undoDraft) return;
-    latestDraftRef.current = undoDraft;
-    setDraft(undoDraft);
-    setUndoDraft(null);
-    sendLatest({ offerUndo: false });
-  };
-
   // Typed text still waiting for its pause goes out when Settings closes.
   useEffect(
     () => () => {
@@ -494,7 +492,6 @@ export function SettingsAiBehaviorSection({
         <SettingsSectionSaveControl
           hasUnsavedChanges={hasUnsavedChanges}
           onSave={sendTypedText}
-          onUndo={undoDraft ? undoLastSave : undefined}
           saveState={saveState}
           subject="AI behavior"
           effect="Applies from your next chat, search, resume, or application."

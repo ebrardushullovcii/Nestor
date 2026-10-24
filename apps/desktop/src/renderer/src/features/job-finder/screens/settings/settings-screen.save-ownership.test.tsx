@@ -84,7 +84,10 @@ function createCallbacks() {
       (input: UpdateWorkspaceBehaviorInput) => Promise<boolean>
     >(() => Promise.resolve(true)),
     onUpdateAiBehavior: vi.fn<
-      (input: UpdateAiBehaviorInput) => Promise<boolean>
+      (
+        input: UpdateAiBehaviorInput,
+        options?: { undo?: () => void },
+      ) => Promise<boolean>
     >(() => Promise.resolve(true)),
   };
 }
@@ -100,7 +103,9 @@ function renderScreen(settings: JobFinderSettings, callbacks: Callbacks) {
         isWorkspaceResetPending={false}
         onResetWorkspace={callbacks.onResetWorkspace}
         onSettingsDraftEdited={callbacks.onSettingsDraftEdited}
-        onUpdateAiBehavior={(input) => callbacks.onUpdateAiBehavior(input)}
+        onUpdateAiBehavior={(input, options) =>
+          callbacks.onUpdateAiBehavior(input, options)
+        }
         onUpdateAppearanceTheme={(theme) =>
           callbacks.onUpdateAppearanceTheme(theme)
         }
@@ -221,7 +226,7 @@ describe("Settings save ownership", () => {
     }
   });
 
-  it("saves an AI behavior choice at once, with Undo and no reminder", async () => {
+  it("saves an AI behavior choice at once, with an Undo for the toast and no reminder", async () => {
     const callbacks = createCallbacks();
     renderScreen(parseSettings(), callbacks);
 
@@ -236,10 +241,13 @@ describe("Settings save ownership", () => {
     );
 
     expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
+    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledWith(
+      expect.objectContaining({ aiBehavior: expect.any(Object) as unknown }),
+      { undo: expect.any(Function) as unknown },
+    );
     await waitFor(() =>
       expect(within(region).getByText(/AI behavior saved/)).toBeTruthy(),
     );
-    expect(within(region).getByRole("button", { name: "Undo" })).toBeTruthy();
     expect(
       within(region).queryByRole("button", { name: "Save AI behavior" }),
     ).toBeNull();

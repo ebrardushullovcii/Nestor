@@ -21,7 +21,8 @@ import { SettingsAiBehaviorSection } from "./settings-ai-behavior-section";
  * The AI behavior section, as a person meets it.
  *
  * What matters: every group is there, the defaults are the product's
- * original manner, each choice saves the whole section at once with Undo,
+ * original manner, each choice saves the whole section at once (Undo rides
+ * on the save toast),
  * and the aggressive resume choice carries its own warning.
  */
 
@@ -94,7 +95,9 @@ describe("SettingsAiBehaviorSection", () => {
         .getAttribute("aria-checked"),
     ).toBe("true");
     // Nothing to save: no button.
-    expect(screen.queryByRole("button", { name: "Save AI behavior" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Save AI behavior" }),
+    ).toBeNull();
   });
 
   it("sends the whole section with each choice, coalescing choices made while a save runs", async () => {
@@ -113,13 +116,11 @@ describe("SettingsAiBehaviorSection", () => {
     // The click itself saves; no Save button is needed.
     fireEvent.click(screen.getByRole("radio", { name: /^Proactive/ }));
     expect(onUpdateAiBehavior).toHaveBeenCalledTimes(1);
-    expect(onUpdateAiBehavior).toHaveBeenCalledWith(
-      expect.objectContaining({
-        aiBehavior: expect.objectContaining({
-          profileAssistant: { initiative: "proactive", replyStyle: "brief" },
-        }),
-      }),
-    );
+    expect(onUpdateAiBehavior.mock.calls[0]?.[0]).toMatchObject({
+      aiBehavior: {
+        profileAssistant: { initiative: "proactive", replyStyle: "brief" },
+      },
+    });
 
     // Choices made while that save runs stay on screen and go out together.
     fireEvent.click(screen.getByRole("radio", { name: /Cast a wide net/ }));
@@ -146,7 +147,7 @@ describe("SettingsAiBehaviorSection", () => {
     });
 
     await waitFor(() => expect(onUpdateAiBehavior).toHaveBeenCalledTimes(2));
-    expect(onUpdateAiBehavior).toHaveBeenLastCalledWith({
+    expect(onUpdateAiBehavior.mock.calls[1]?.[0]).toEqual({
       aiBehavior: {
         profileAssistant: { initiative: "proactive", replyStyle: "brief" },
         jobSearch: {
@@ -175,11 +176,15 @@ describe("SettingsAiBehaviorSection", () => {
     await waitFor(() =>
       expect(screen.getByText(/AI behavior saved/)).toBeTruthy(),
     );
-    expect(screen.queryByRole("button", { name: "Save AI behavior" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Save AI behavior" }),
+    ).toBeNull();
   });
 
   it("saves typed text when the person leaves the field, trimmed", async () => {
-    const onUpdateAiBehavior = vi.fn(() => Promise.resolve(true));
+    const onUpdateAiBehavior = vi
+      .fn<(input: UpdateAiBehaviorInput) => Promise<boolean>>()
+      .mockResolvedValue(true);
     renderSection(onUpdateAiBehavior);
 
     const language = screen.getByPlaceholderText(
@@ -195,23 +200,28 @@ describe("SettingsAiBehaviorSection", () => {
     fireEvent.blur(language);
 
     expect(onUpdateAiBehavior).toHaveBeenCalledTimes(1);
-    expect(onUpdateAiBehavior).toHaveBeenCalledWith(
-      expect.objectContaining({
-        coverLetter: {
-          tone: "plain_professional",
-          length: "standard",
-          language: "German",
-          sample: null,
-        },
-      }),
-    );
+    expect(onUpdateAiBehavior.mock.calls[0]?.[0]).toMatchObject({
+      coverLetter: {
+        tone: "plain_professional",
+        length: "standard",
+        language: "German",
+        sample: null,
+      },
+    });
     await waitFor(() =>
       expect(screen.getByText(/AI behavior saved/)).toBeTruthy(),
     );
   });
 
-  it("offers Undo after a save, and Undo saves the earlier choice back", async () => {
-    const onUpdateAiBehavior = vi.fn(() => Promise.resolve(true));
+  it("hands the save toast an Undo that saves the earlier choice back", async () => {
+    const onUpdateAiBehavior = vi
+      .fn<
+        (
+          input: UpdateAiBehaviorInput,
+          options?: { undo?: () => void },
+        ) => Promise<boolean>
+      >()
+      .mockResolvedValue(true);
     renderSection(onUpdateAiBehavior);
 
     fireEvent.click(screen.getByRole("radio", { name: /^Aggressive/ }));
@@ -220,21 +230,26 @@ describe("SettingsAiBehaviorSection", () => {
     );
     expect(onUpdateAiBehavior).toHaveBeenLastCalledWith(
       expect.objectContaining({ resumeApproach: "aggressive" }),
+      { undo: expect.any(Function) as unknown },
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    const undo = onUpdateAiBehavior.mock.calls[0]?.[1]?.undo;
+    act(() => undo?.());
 
     await waitFor(() => expect(onUpdateAiBehavior).toHaveBeenCalledTimes(2));
+    // Undoing offers no Undo of its own.
     expect(onUpdateAiBehavior).toHaveBeenLastCalledWith(
       expect.objectContaining({ resumeApproach: "balanced" }),
+      undefined,
     );
     expect(
-      screen.getByRole("radio", { name: /^Tailored/ }).getAttribute("aria-checked"),
+      screen
+        .getByRole("radio", { name: /^Tailored/ })
+        .getAttribute("aria-checked"),
     ).toBe("true");
     await waitFor(() =>
       expect(screen.getByText("AI behavior change undone.")).toBeTruthy(),
     );
-    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
   });
 
   it("keeps a failed choice on screen and retries it", async () => {
@@ -249,18 +264,20 @@ describe("SettingsAiBehaviorSection", () => {
       name: "Retry AI behavior",
     });
     expect(
-      screen.getByText("AI behavior was not saved. Retry before leaving this page."),
+      screen.getByText(
+        "AI behavior was not saved. Retry before leaving this page.",
+      ),
     ).toBeTruthy();
     expect(
-      screen.getByRole("radio", { name: /^Original/ }).getAttribute("aria-checked"),
+      screen
+        .getByRole("radio", { name: /^Original/ })
+        .getAttribute("aria-checked"),
     ).toBe("true");
-    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
-
     fireEvent.click(retry);
     await waitFor(() => expect(onUpdateAiBehavior).toHaveBeenCalledTimes(2));
-    expect(onUpdateAiBehavior).toHaveBeenLastCalledWith(
-      expect.objectContaining({ resumeApproach: "original_resume" }),
-    );
+    expect(onUpdateAiBehavior.mock.calls[1]?.[0]).toMatchObject({
+      resumeApproach: "original_resume",
+    });
     await waitFor(() =>
       expect(screen.getByText(/AI behavior saved/)).toBeTruthy(),
     );

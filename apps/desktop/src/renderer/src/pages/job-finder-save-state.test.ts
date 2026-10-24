@@ -27,6 +27,26 @@ function assertFailedBlockedState(
 }
 
 describe('Job Finder save coordinator', () => {
+  it('carries a request undo onto its saved state only', async () => {
+    const states: JobFinderSaveState[] = []
+    const undo = vi.fn()
+    const coordinator = createJobFinderSaveCoordinator({ onStateChange: (state) => states.push(state) })
+    await coordinator.run({
+      dedupeKey: 'settings:a',
+      execute: () => Promise.resolve(true),
+      failedMessage: () => 'Not saved.',
+      label: 'AI behavior',
+      savedMessage: 'AI behavior saved.',
+      surface: 'settings',
+      undo
+    })
+
+    expect(states.map((state) => state.state)).toEqual(['saving', 'saved'])
+    expect(states[0] && 'undo' in states[0]).toBe(false)
+    const saved = states[1]
+    expect(saved?.state === 'saved' ? saved.undo : null).toBe(undo)
+  })
+
   it('deduplicates rapid identical saves and versions meaningful changes', async () => {
     const states: JobFinderSaveState[] = []
     let resolveFirst: (value: string) => void = () => undefined

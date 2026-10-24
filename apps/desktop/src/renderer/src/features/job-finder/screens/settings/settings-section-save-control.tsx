@@ -33,7 +33,6 @@ export function SettingsSectionSaveControl({
   hasUnsavedChanges,
   isSaveDisabled = false,
   onSave,
-  onUndo,
   saveState,
   subject,
   effect,
@@ -41,8 +40,6 @@ export function SettingsSectionSaveControl({
   hasUnsavedChanges: boolean;
   isSaveDisabled?: boolean;
   onSave: () => void;
-  /** Offered beside the saved confirmation of a section that saves at once. */
-  onUndo?: (() => void) | undefined;
   saveState: SettingsSectionSaveState;
   /** Lowercase noun phrase naming what commits, for example "appearance". */
   subject: string;
@@ -102,21 +99,14 @@ export function SettingsSectionSaveControl({
           {saveState.message}
         </p>
       ) : hasSaved ? (
-        <div className="flex min-w-0 max-w-96 items-center justify-end gap-2">
-          <p
-            className="min-w-0 max-w-80 break-words text-right text-xs leading-4 text-(--success-text)"
-            data-settings-save-state="saved"
-            id={feedbackId}
-            role="status"
-          >
-            {saveState.message}
-          </p>
-          {onUndo ? (
-            <Button onClick={onUndo} size="xs" type="button" variant="outline">
-              Undo
-            </Button>
-          ) : null}
-        </div>
+        <p
+          className="min-w-0 max-w-80 break-words text-right text-xs leading-4 text-(--success-text)"
+          data-settings-save-state="saved"
+          id={feedbackId}
+          role="status"
+        >
+          {saveState.message}
+        </p>
       ) : (
         <p
           className={

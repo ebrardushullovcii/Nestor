@@ -436,7 +436,10 @@ export interface JobFinderPageContext {
   onUpdateWorkspaceBehavior: (
     input: UpdateWorkspaceBehaviorInput,
   ) => Promise<boolean>;
-  onUpdateAiBehavior: (input: UpdateAiBehaviorInput) => Promise<boolean>;
+  onUpdateAiBehavior: (
+    input: UpdateAiBehaviorInput,
+    options?: { undo?: () => void },
+  ) => Promise<boolean>;
   onUpdateAppearanceTheme: (
     appearanceTheme: AppearanceTheme,
   ) => Promise<boolean>;
