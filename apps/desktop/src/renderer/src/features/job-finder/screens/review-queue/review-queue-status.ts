@@ -982,6 +982,10 @@ const CAPTIONS_REPEATING_STATUS: Readonly<Record<string, readonly string[]>> = {
   "Resume failed": ["Resume failed — try again"],
   [TO_REVIEW_LABEL]: ["Resume ready — review it before applying"],
   "Ready to apply": ["Resume approved", "Resume ready — Apply approves it"],
+  [IN_APPLY_QUEUE_LABEL]: [
+    "Resume approved",
+    "Resume ready — Apply approves it",
+  ],
   "Out of date": ["Resume is out of date — refresh it"],
 };
 

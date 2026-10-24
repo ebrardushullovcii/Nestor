@@ -647,6 +647,13 @@ export function describeApplyQueueStart(
   if (queue.state === "waiting_for_tomorrow") {
     return `Today's limit is reached, so ${going === 1 ? "this one starts" : `these ${going} start`} after midnight by themselves.${heldBackSentence}`;
   }
+  // A run of ten takes only what today's limit allows; the rest wait for
+  // midnight. The toast said "2 applications started" over 1 started.
+  const startedNow = queue.startedJobIds.filter((id) => chosen.has(id)).length;
+  const waiting = going - startedNow;
+  if (going <= 10 && startedNow > 0 && waiting > 0) {
+    return `${startedNow === 1 ? "1 application started" : `${startedNow} applications started`}. Today's limit is reached, so ${waiting === 1 ? "1 more starts" : `${waiting} more start`} after midnight by themselves.${heldBackSentence}`;
+  }
   const started =
     going <= 10
       ? going === 1

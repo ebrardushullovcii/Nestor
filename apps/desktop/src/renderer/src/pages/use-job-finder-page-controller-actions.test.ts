@@ -19,6 +19,7 @@ import {
   createDiscoveryWorkspaceRefreshCoordinator,
   consumeFirstSearchRequest,
   createPrimaryPageActions,
+  describeApplyQueueStart,
   describePreparedApplicationSubmitResult,
   preparedApplicationsToastTone,
   clearJobFinderNavigationHint,
@@ -3323,4 +3324,36 @@ it("names only Job sources when that Profile section is saved", () => {
         "Job sources were not saved. Retry before leaving this page.",
     }),
   );
+});
+
+describe("describeApplyQueueStart", () => {
+  const queue = (startedJobIds: string[]) =>
+    ({
+      reviewQueue: [],
+      applyQueue: {
+        id: "queue_1",
+        mode: "prepare_only",
+        state: "running",
+        jobIds: ["a", "b", "c"],
+        startedJobIds,
+        skipped: [],
+        activeRunId: "run_1",
+        pausedReason: null,
+        resumesAt: null,
+        createdAt: "2026-10-23T10:00:00.000Z",
+        updatedAt: "2026-10-23T10:00:00.000Z",
+      },
+    }) as unknown as JobFinderRendererWorkspaceSnapshot;
+
+  it("counts only the jobs today's limit let start", () => {
+    expect(describeApplyQueueStart(queue(["a"]), ["a", "b", "c"])).toBe(
+      "1 application started. Today's limit is reached, so 2 more start after midnight by themselves.",
+    );
+  });
+
+  it("keeps the plain line when every chosen job started", () => {
+    expect(
+      describeApplyQueueStart(queue(["a", "b", "c"]), ["a", "b", "c"]),
+    ).toBe("3 applications started. Watch them in Applications.");
+  });
 });
