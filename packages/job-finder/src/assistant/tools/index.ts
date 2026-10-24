@@ -50,6 +50,8 @@ for (const tool of registeredActionTools) {
 export type AssistantCatalogMode = "flat" | "grouped";
 
 const COMMON_TOOLS = [
+  ...workspaceTools.map(tool => tool.name),
+  "get_application", "list_applications", "answer_application_question",
   "read_profile", "edit_profile", "get_job", "query_jobs", "shortlist_jobs",
   "remove_from_shortlist", "list_sources", "update_sources", "undo_change",
   "action_read_action_state",
