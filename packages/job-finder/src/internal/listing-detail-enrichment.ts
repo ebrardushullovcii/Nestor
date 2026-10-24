@@ -318,12 +318,32 @@ function isHttpUrl(value: string | null | undefined): boolean {
   }
 }
 
-/**
- * Whether a job is worth a read right now: it has a fetchable page, its body
- * is not already known, and it has not been tried too recently.
- */
+/** A past successful fetch cannot prove that a later merge kept its body. */
+export function hasCompleteListingDetail(job: SavedJob): boolean {
+  if (
+    job.detailQuality !== "detail_enriched" ||
+    job.listingDetailFetch?.outcome !== "enriched"
+  )
+    return false;
+  // A successful older read can belong to a different sighting. Structured
+  // facts left on that row must not make title/card text look like a body.
+  return (
+    assessJobPostingDetailQuality({
+      title: job.title,
+      company: job.company,
+      description: job.description,
+      keySkills: [],
+      responsibilities: [],
+      minimumQualifications: [],
+      preferredQualifications: [],
+      benefits: [],
+    }) !== "card_only"
+  );
+}
+
+/** A missing body is due unless a failed page read is still in back-off. */
 export function jobNeedsListingDetail(
-  job: Pick<SavedJob, "detailQuality" | "canonicalUrl" | "listingDetailFetch">,
+  job: SavedJob,
   nowIso: string = new Date().toISOString(),
 ): boolean {
   // Browser-agent collection intentionally keeps its structured result small.
@@ -335,7 +355,7 @@ export function jobNeedsListingDetail(
     job.detailQuality === "detail_enriched" &&
     job.listingDetailFetch?.outcome === "enriched"
   ) {
-    return false;
+    return isHttpUrl(job.canonicalUrl) && !hasCompleteListingDetail(job);
   }
   if (!isHttpUrl(job.canonicalUrl)) {
     return false;
@@ -741,11 +761,16 @@ export async function readSightingApplyRoutes(input: {
         listingFacts = {
           ...sighting.listingFacts,
           title: detail.title ?? sighting.listingFacts?.title ?? job.title,
-          company: detail.company ?? sighting.listingFacts?.company ?? job.company,
-          location: detail.location ?? sighting.listingFacts?.location ?? job.location,
-          salaryText: detail.salaryText ?? sighting.listingFacts?.salaryText ?? null,
-          seniority: detail.seniority ?? sighting.listingFacts?.seniority ?? null,
-          description: detail.description || sighting.listingFacts?.description || "",
+          company:
+            detail.company ?? sighting.listingFacts?.company ?? job.company,
+          location:
+            detail.location ?? sighting.listingFacts?.location ?? job.location,
+          salaryText:
+            detail.salaryText ?? sighting.listingFacts?.salaryText ?? null,
+          seniority:
+            detail.seniority ?? sighting.listingFacts?.seniority ?? null,
+          description:
+            detail.description || sighting.listingFacts?.description || "",
           summary: sighting.listingFacts?.summary ?? null,
         };
       } catch {
@@ -883,10 +908,8 @@ export async function enrichSavedJobListingDetails(
     const needs = input.rereadComplete
       ? isHttpUrl(job.canonicalUrl)
       : input.ignoreRetryBackoff
-        ? !(
-            job.detailQuality === "detail_enriched" &&
-            job.listingDetailFetch?.outcome === "enriched"
-          ) && job.listingDetailFetch?.outcome !== "unsupported_url"
+        ? !hasCompleteListingDetail(job) &&
+          job.listingDetailFetch?.outcome !== "unsupported_url"
         : jobNeedsListingDetail(job, now());
     if (!needs) {
       summary.skipped += 1;

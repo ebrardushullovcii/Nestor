@@ -274,6 +274,7 @@ import {
   createModelListingPageReader,
   enrichSavedJobListingDetails,
   jobNeedsListingDetail,
+  hasCompleteListingDetail,
 } from "./listing-detail-enrichment";
 import { jobNeedsFitJudgment } from "./fit-judgment";
 import { createMatchAssessmentSession } from "./match-assessment-session";
@@ -992,9 +993,7 @@ export function createWorkspaceApplicationMethods(
       }
       if (!listingReadCurrent(generation)) return;
       const isPending = savedJobs.length === 0;
-      const alreadyRead =
-        job.detailQuality === "detail_enriched" &&
-        job.listingDetailFetch?.outcome === "enriched";
+      const alreadyRead = hasCompleteListingDetail(job);
       // Resume writing needs the captured posting body, not another fit
       // verdict. Explicit assessment controls still request a fresh judgment.
       if (options.resumeWriterOwnsSlot && alreadyRead) return;
