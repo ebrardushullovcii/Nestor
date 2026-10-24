@@ -205,6 +205,9 @@ const dockRegistrations = new Map<string, BottomRightDockRegistration>();
 const dockListeners = new Set<() => void>();
 let dockPlacement: BottomRightDockPlacement = EMPTY_DOCK_PLACEMENT;
 let dockFrame: number | undefined;
+// Reading the viewport forces a layout, and the pass runs after commits; the
+// size only changes with a resize, so it is read once per resize.
+let dockViewport: { height: number; width: number } | null = null;
 
 function readBottomRightDockNoCoverRects() {
   if (typeof document === "undefined") {
@@ -225,7 +228,8 @@ function computeBottomRightDockPlacement(): BottomRightDockPlacement {
   }
 
   const registrations = [...dockRegistrations.values()];
-  const viewport = readViewport();
+  dockViewport ??= readViewport();
+  const viewport = dockViewport;
   // The narrowest requested inset wins, so every occupant lines up on one
   // edge (the launcher asks for 12px below the mobile breakpoint).
   const insets = registrations.flatMap((registration) =>
@@ -292,6 +296,11 @@ function scheduleBottomRightDockUpdate(): void {
   });
 }
 
+function handleBottomRightDockResize(): void {
+  dockViewport = null;
+  scheduleBottomRightDockUpdate();
+}
+
 function subscribeToBottomRightDock(listener: () => void): () => void {
   const isFirst = dockListeners.size === 0;
   dockListeners.add(listener);
@@ -300,19 +309,22 @@ function subscribeToBottomRightDock(listener: () => void): () => void {
     // All three sources, always: a window resize, a scroll anywhere in the app
     // (captured, passive — it only measures), and the visual viewport, which
     // is the only one that reports a pinch-zoom or an on-screen keyboard.
-    window.addEventListener("resize", scheduleBottomRightDockUpdate);
+    window.addEventListener("resize", handleBottomRightDockResize);
     window.addEventListener("scroll", scheduleBottomRightDockUpdate, {
       capture: true,
       passive: true,
     });
     window.visualViewport?.addEventListener(
       "resize",
-      scheduleBottomRightDockUpdate,
+      handleBottomRightDockResize,
     );
     window.visualViewport?.addEventListener(
       "scroll",
       scheduleBottomRightDockUpdate,
     );
+    // The first reader gets the empty dock's real edge once; after that only
+    // a resize, a scroll or an occupant moves it.
+    scheduleBottomRightDockUpdate();
   }
 
   return () => {
@@ -328,11 +340,12 @@ function subscribeToBottomRightDock(listener: () => void): () => void {
       dockFrame = undefined;
     }
     dockPlacement = EMPTY_DOCK_PLACEMENT;
-    window.removeEventListener("resize", scheduleBottomRightDockUpdate);
+    dockViewport = null;
+    window.removeEventListener("resize", handleBottomRightDockResize);
     window.removeEventListener("scroll", scheduleBottomRightDockUpdate, true);
     window.visualViewport?.removeEventListener(
       "resize",
-      scheduleBottomRightDockUpdate,
+      handleBottomRightDockResize,
     );
     window.visualViewport?.removeEventListener(
       "scroll",
@@ -405,9 +418,10 @@ export function useBottomRightDock(
   }, [active, height, id, inset, minTopOffset, order, width]);
 
   // Rows appear, move and disappear from renders this hook cannot see, so the
-  // pass is also re-run after every commit that changes what the dock holds.
+  // pass is also re-run after every commit while something sits in the dock.
+  // An empty dock depends on the viewport alone and has nothing to re-check.
   useLayoutEffect(() => {
-    scheduleBottomRightDockUpdate();
+    if (dockRegistrations.size > 0) scheduleBottomRightDockUpdate();
   });
 
   return useMemo(() => {

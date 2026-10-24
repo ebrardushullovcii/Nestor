@@ -203,6 +203,7 @@ export function SettingsScreen(props: {
   ) => Promise<boolean | void> | void;
   onUpdateAiBehavior: (
     input: UpdateAiBehaviorInput,
+    options?: { undo?: () => void },
   ) => Promise<boolean | void> | void;
   onUpdateApplicationDefaults: (
     input: UpdateApplicationDefaultsInput,

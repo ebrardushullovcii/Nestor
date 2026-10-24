@@ -387,6 +387,61 @@ describe("JobFinderSaveStatus", () => {
     expect(onRetry).not.toHaveBeenCalled();
   });
 
+  it("offers Undo on a saved confirmation that carries one, and closes when it is pressed", () => {
+    const undo = vi.fn();
+    const onDismissSaved = vi.fn();
+    render(
+      <JobFinderSaveStatus
+        onDismissSaved={onDismissSaved}
+        onRetry={vi.fn()}
+        saveState={{
+          state: "saved",
+          version: 2,
+          attempt: 1,
+          surface: "settings",
+          label: "AI behavior",
+          message: "AI behavior saved.",
+          canRetry: false,
+          undo,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Undo AI behavior change" }),
+    );
+    expect(undo).toHaveBeenCalledOnce();
+    expect(onDismissSaved).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("holds a saved confirmation while the pointer is on it", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-10T10:00:00.000Z"));
+    render(
+      <JobFinderSaveStatus
+        onRetry={vi.fn()}
+        saveState={{
+          state: "saved",
+          version: 2,
+          attempt: 1,
+          surface: "settings",
+          label: "AI behavior",
+          message: "AI behavior saved.",
+          canRetry: false,
+          savedAt: "2026-08-10T10:00:00.000Z",
+          undo: vi.fn(),
+        }}
+      />,
+    );
+
+    fireEvent.pointerEnter(screen.getByRole("status"));
+    act(() => {
+      vi.advanceTimersByTime(SAVE_SUCCESS_VISIBLE_MS * 2);
+    });
+    expect(screen.getByRole("button", { name: "Undo AI behavior change" })).toBeTruthy();
+  });
+
   it("dismisses a saved confirmation after its readable interval without hiding failures", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-10T10:00:00.000Z"));

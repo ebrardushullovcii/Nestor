@@ -17,6 +17,8 @@ export type JobFinderSaveState =
        * the Retry action is gone and points at the surface Save action.
        */
       retryBlockedReason?: string
+      /** Offered beside a saved confirmation; puts the earlier values back. */
+      undo?: () => void
     }
 
 export const initialJobFinderSaveState: JobFinderSaveState = {
@@ -114,6 +116,8 @@ export type JobFinderSaveRequest<TResult> = {
   label: string
   savedMessage: string
   surface: JobFinderSaveSurface
+  /** Shown as Undo on the saved confirmation. */
+  undo?: () => void
 }
 
 export type JobFinderSaveResult<TResult> =
@@ -229,7 +233,8 @@ export function createJobFinderSaveCoordinator(input: {
             label: request.label,
             message: request.savedMessage,
             canRetry: false,
-            savedAt
+            savedAt,
+            ...(request.undo ? { undo: request.undo } : {})
           })
           input.onReceiptChange?.({
             schemaVersion: 1,

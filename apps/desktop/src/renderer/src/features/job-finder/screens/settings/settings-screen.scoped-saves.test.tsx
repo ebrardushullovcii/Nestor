@@ -69,7 +69,10 @@ function createCallbacks() {
     onSettingsDraftEdited: vi.fn(),
     // Production scoped saves resolve false when a save did not commit.
     onUpdateAiBehavior: vi.fn<
-      (input: UpdateAiBehaviorInput) => Promise<boolean>
+      (
+        input: UpdateAiBehaviorInput,
+        options?: { undo?: () => void },
+      ) => Promise<boolean>
     >(() => Promise.resolve(true)),
     onUpdateAppearanceTheme: vi.fn<
       (theme: AppearanceTheme) => Promise<boolean>
@@ -97,7 +100,9 @@ function renderScreen(settings: JobFinderSettings, callbacks: Callbacks) {
         isWorkspaceResetPending={false}
         onResetWorkspace={callbacks.onResetWorkspace}
         onSettingsDraftEdited={callbacks.onSettingsDraftEdited}
-        onUpdateAiBehavior={(input) => callbacks.onUpdateAiBehavior(input)}
+        onUpdateAiBehavior={(input, options) =>
+          callbacks.onUpdateAiBehavior(input, options)
+        }
         onUpdateAppearanceTheme={(theme) =>
           callbacks.onUpdateAppearanceTheme(theme)
         }
@@ -238,7 +243,7 @@ describe("SettingsScreen scoped section saves", () => {
     view.unmount();
   });
 
-  it("keeps a staged AI behavior choice across an external settings refresh and sends only AI-owned fields", async () => {
+  it("keeps a picked AI behavior choice across an external settings refresh and sends only AI-owned fields", () => {
     const callbacks = createCallbacks();
     const initialSettings = parseSettings();
     const view = renderScreen(initialSettings, callbacks);
@@ -249,6 +254,8 @@ describe("SettingsScreen scoped section saves", () => {
     });
     fireEvent.click(originalChoice);
     expect(originalChoice.getAttribute("aria-checked")).toBe("true");
+    // The choice saves when picked.
+    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
 
     // External refresh: persisted workspace behavior changed elsewhere.
     view.rerender(parseSettings({ keepSessionAlive: true }));
@@ -276,20 +283,14 @@ describe("SettingsScreen scoped section saves", () => {
       }),
     ).toBeNull();
 
-    const aiSave = within(refreshedAiRegion).getByRole<HTMLButtonElement>(
-      "button",
-      { name: "Save AI behavior" },
+    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
+    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledWith(
+      {
+        ...defaultAiBehaviorInput,
+        resumeApproach: "original_resume",
+      } satisfies UpdateAiBehaviorInput,
+      { undo: expect.any(Function) as unknown },
     );
-    expect(aiSave.disabled).toBe(false);
-    fireEvent.click(aiSave);
-
-    await waitFor(() =>
-      expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1),
-    );
-    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledWith({
-      ...defaultAiBehaviorInput,
-      resumeApproach: "original_resume",
-    } satisfies UpdateAiBehaviorInput);
     // No whole JobFinderSettings payload and no workspace fields leaked.
     const payload = callbacks.onUpdateAiBehavior.mock
       .calls[0]?.[0] as UpdateAiBehaviorInput;
@@ -321,11 +322,10 @@ describe("SettingsScreen scoped section saves", () => {
     const aiRegion = screen.getByRole("region", { name: AI_BEHAVIOR_LABEL });
     fireEvent.click(within(aiRegion).getByRole("radio", { name: /^Original/ }));
 
-    const pendingSave = within(aiRegion).getByRole<HTMLButtonElement>(
-      "button",
-      { name: "Save AI behavior" },
-    );
-    fireEvent.click(pendingSave);
+    // The click started the save; it shows as pending until it settles.
+    expect(
+      within(aiRegion).getByRole("button", { name: "Saving AI behavior" }),
+    ).toBeTruthy();
     expect(
       within(aiRegion).queryByRole("button", { name: "Retry AI behavior" }),
     ).toBeNull();
@@ -454,11 +454,6 @@ describe("SettingsScreen scoped section saves", () => {
 
     const aiRegion = screen.getByRole("region", { name: AI_BEHAVIOR_LABEL });
     fireEvent.click(within(aiRegion).getByRole("radio", { name: /^Original/ }));
-    fireEvent.click(
-      within(aiRegion).getByRole<HTMLButtonElement>("button", {
-        name: "Save AI behavior",
-      }),
-    );
 
     await waitFor(() =>
       expect(

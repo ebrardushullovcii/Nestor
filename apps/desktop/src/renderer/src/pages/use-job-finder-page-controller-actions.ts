@@ -912,6 +912,8 @@ export function createActionRunners(args: {
      * still land in the route message.
      */
     routeSuccessMessage?: "toast_only";
+    /** Offered as Undo on the saved confirmation. */
+    undo?: () => void;
   }) => {
     const suppressRouteSuccess = input.routeSuccessMessage === "toast_only";
     const ownerStartRoute = jobFinderStatusRoute;
@@ -932,6 +934,7 @@ export function createActionRunners(args: {
       return runAction(input.action, input.onSuccess, input.savedMessage, {
         scope: input.scope,
         startMessage: `Saving ${input.label.toLowerCase()}…`,
+        ...(input.undo ? { undo: input.undo } : {}),
       });
     }
 
@@ -963,6 +966,7 @@ export function createActionRunners(args: {
       label: input.label,
       savedMessage: input.savedMessage,
       surface: input.surface,
+      ...(input.undo ? { undo: input.undo } : {}),
     });
 
     // The coordinator marks a settled operation `superseded` when a newer
@@ -1014,6 +1018,7 @@ export function createPrimaryPageActions(
       savedMessage: string;
       scope: PendingActionScope;
       surface: JobFinderSaveSurface;
+      undo?: () => void;
     }) => Promise<boolean>;
     withPendingScope: <TResult>(
       scope: PendingActionScope | null,
@@ -3901,7 +3906,10 @@ export function createPrimaryPageActions(
         scope: jobFinderPendingActions.settingsSave(),
         surface: "settings",
       }),
-    onUpdateAiBehavior: (input: UpdateAiBehaviorInput) =>
+    onUpdateAiBehavior: (
+      input: UpdateAiBehaviorInput,
+      options?: { undo?: () => void },
+    ) =>
       runSaveAction({
         action: () => actions.updateAiBehavior(input),
         dedupeKey: createSaveDedupeKey("settings", input),
@@ -3913,6 +3921,7 @@ export function createPrimaryPageActions(
           "AI behavior saved. Your next search, resume, chat, and application use it.",
         scope: jobFinderPendingActions.settingsSave(),
         surface: "settings",
+        ...(options?.undo ? { undo: options.undo } : {}),
       }),
     onUpdateAppearanceTheme: (appearanceTheme: AppearanceTheme) =>
       runSaveAction({

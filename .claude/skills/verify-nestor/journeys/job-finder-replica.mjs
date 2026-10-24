@@ -119,7 +119,9 @@ const STAGES = {
     ).trim();
     await shot("jf-job-detail-fit");
     await click("Shortlist job");
-    await waitFor("Job added to Shortlisted.", 15);
+    // Find jobs reports a decision on its triage bar ("N of M gone through"
+    // with Undo), not in a toast; the stored status below is the proof.
+    await waitFor("Undo", 15, { role: "button" });
     await click("Shortlisted", {
       role: "button",
       within: "Job Finder sidebar destinations",

@@ -6,6 +6,7 @@ import type {
 } from "@nestor/contracts";
 import { JobFinderSettingsSchema } from "@nestor/contracts";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -20,7 +21,8 @@ import { SettingsAiBehaviorSection } from "./settings-ai-behavior-section";
  * The AI behavior section, as a person meets it.
  *
  * What matters: every group is there, the defaults are the product's
- * original manner, one Save commits the whole section with the full input,
+ * original manner, each choice saves the whole section at once (Undo rides
+ * on the save toast),
  * and the aggressive resume choice carries its own warning.
  */
 
@@ -93,14 +95,34 @@ describe("SettingsAiBehaviorSection", () => {
         .getAttribute("aria-checked"),
     ).toBe("true");
     // Nothing to save: no button.
-    expect(screen.queryByRole("button", { name: "Save AI behavior" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Save AI behavior" }),
+    ).toBeNull();
   });
 
-  it("commits the whole section in one save with the full input", async () => {
-    const onUpdateAiBehavior = vi.fn(() => Promise.resolve(true));
+  it("sends the whole section with each choice, coalescing choices made while a save runs", async () => {
+    let finishFirst: (saved: boolean) => void = () => undefined;
+    const onUpdateAiBehavior = vi
+      .fn<(input: UpdateAiBehaviorInput) => Promise<boolean>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finishFirst = resolve;
+          }),
+      )
+      .mockResolvedValue(true);
     renderSection(onUpdateAiBehavior);
 
+    // The click itself saves; no Save button is needed.
     fireEvent.click(screen.getByRole("radio", { name: /^Proactive/ }));
+    expect(onUpdateAiBehavior).toHaveBeenCalledTimes(1);
+    expect(onUpdateAiBehavior.mock.calls[0]?.[0]).toMatchObject({
+      aiBehavior: {
+        profileAssistant: { initiative: "proactive", replyStyle: "brief" },
+      },
+    });
+
+    // Choices made while that save runs stay on screen and go out together.
     fireEvent.click(screen.getByRole("radio", { name: /Cast a wide net/ }));
     fireEvent.click(
       screen.getByRole("switch", { name: "Count remote jobs as any location" }),
@@ -110,45 +132,152 @@ describe("SettingsAiBehaviorSection", () => {
       screen.getByRole("radio", { name: /Whenever there is room/ }),
     );
     fireEvent.click(screen.getByRole("radio", { name: /^Full/ }));
-    fireEvent.change(
-      screen.getByPlaceholderText(/Leave empty to match the job posting/i),
-      { target: { value: "  German  " } },
+    fireEvent.click(screen.getByRole("switch", { name: "Marketing contact" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Site terms" }));
+    expect(onUpdateAiBehavior).toHaveBeenCalledTimes(1);
+    expect(
+      screen
+        .getByRole("radio", { name: /Cast a wide net/ })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+
+    await act(() => {
+      finishFirst(true);
+      return Promise.resolve();
+    });
+
+    await waitFor(() => expect(onUpdateAiBehavior).toHaveBeenCalledTimes(2));
+    expect(onUpdateAiBehavior.mock.calls[1]?.[0]).toEqual({
+      aiBehavior: {
+        profileAssistant: { initiative: "proactive", replyStyle: "brief" },
+        jobSearch: {
+          selectivity: "wide_net",
+          remoteCountsAsAnyLocation: false,
+        },
+        applying: {
+          coverLetterPolicy: "when_possible",
+          writtenAnswerLength: "full",
+          preApprovedDeclarations: [
+            "truthfulness_certification",
+            "privacy_notice_acknowledgement",
+            "background_check_consent",
+            "marketing_contact_consent",
+          ],
+        },
+      },
+      coverLetter: {
+        tone: "plain_professional",
+        length: "standard",
+        language: null,
+        sample: null,
+      },
+      resumeApproach: "conservative",
+    });
+    await waitFor(() =>
+      expect(screen.getByText(/AI behavior saved/)).toBeTruthy(),
     );
+    expect(
+      screen.queryByRole("button", { name: "Save AI behavior" }),
+    ).toBeNull();
+  });
+
+  it("saves typed text when the person leaves the field, trimmed", async () => {
+    const onUpdateAiBehavior = vi
+      .fn<(input: UpdateAiBehaviorInput) => Promise<boolean>>()
+      .mockResolvedValue(true);
+    renderSection(onUpdateAiBehavior);
+
+    const language = screen.getByPlaceholderText(
+      /Leave empty to match the job posting/i,
+    );
+    fireEvent.change(language, { target: { value: "  German  " } });
     fireEvent.change(
       screen.getByPlaceholderText(/Paste a letter you wrote yourself/i),
       { target: { value: "   " } },
     );
-    expect(screen.getByText("Not saved yet.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Save AI behavior" }));
+    // Not on every keystroke.
+    expect(onUpdateAiBehavior).not.toHaveBeenCalled();
+    fireEvent.blur(language);
 
+    expect(onUpdateAiBehavior).toHaveBeenCalledTimes(1);
+    expect(onUpdateAiBehavior.mock.calls[0]?.[0]).toMatchObject({
+      coverLetter: {
+        tone: "plain_professional",
+        length: "standard",
+        language: "German",
+        sample: null,
+      },
+    });
     await waitFor(() =>
-      expect(onUpdateAiBehavior).toHaveBeenCalledWith({
-        aiBehavior: {
-          profileAssistant: { initiative: "proactive", replyStyle: "brief" },
-          jobSearch: {
-            selectivity: "wide_net",
-            remoteCountsAsAnyLocation: false,
-          },
-          applying: {
-            coverLetterPolicy: "when_possible",
-            writtenAnswerLength: "full",
-            preApprovedDeclarations: [
-              "truthfulness_certification",
-              "privacy_notice_acknowledgement",
-              "terms_acceptance",
-              "background_check_consent",
-            ],
-          },
-        },
-        coverLetter: {
-          tone: "plain_professional",
-          length: "standard",
-          language: "German",
-          sample: null,
-        },
-        resumeApproach: "conservative",
-      }),
+      expect(screen.getByText(/AI behavior saved/)).toBeTruthy(),
     );
+  });
+
+  it("hands the save toast an Undo that saves the earlier choice back", async () => {
+    const onUpdateAiBehavior = vi
+      .fn<
+        (
+          input: UpdateAiBehaviorInput,
+          options?: { undo?: () => void },
+        ) => Promise<boolean>
+      >()
+      .mockResolvedValue(true);
+    renderSection(onUpdateAiBehavior);
+
+    fireEvent.click(screen.getByRole("radio", { name: /^Aggressive/ }));
+    await waitFor(() =>
+      expect(screen.getByText(/AI behavior saved/)).toBeTruthy(),
+    );
+    expect(onUpdateAiBehavior).toHaveBeenLastCalledWith(
+      expect.objectContaining({ resumeApproach: "aggressive" }),
+      { undo: expect.any(Function) as unknown },
+    );
+
+    const undo = onUpdateAiBehavior.mock.calls[0]?.[1]?.undo;
+    act(() => undo?.());
+
+    await waitFor(() => expect(onUpdateAiBehavior).toHaveBeenCalledTimes(2));
+    // Undoing offers no Undo of its own.
+    expect(onUpdateAiBehavior).toHaveBeenLastCalledWith(
+      expect.objectContaining({ resumeApproach: "balanced" }),
+      undefined,
+    );
+    expect(
+      screen
+        .getByRole("radio", { name: /^Tailored/ })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    await waitFor(() =>
+      expect(screen.getByText("AI behavior change undone.")).toBeTruthy(),
+    );
+  });
+
+  it("keeps a failed choice on screen and retries it", async () => {
+    const onUpdateAiBehavior = vi
+      .fn<(input: UpdateAiBehaviorInput) => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    renderSection(onUpdateAiBehavior);
+
+    fireEvent.click(screen.getByRole("radio", { name: /^Original/ }));
+    const retry = await screen.findByRole("button", {
+      name: "Retry AI behavior",
+    });
+    expect(
+      screen.getByText(
+        "AI behavior was not saved. Retry before leaving this page.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen
+        .getByRole("radio", { name: /^Original/ })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    fireEvent.click(retry);
+    await waitFor(() => expect(onUpdateAiBehavior).toHaveBeenCalledTimes(2));
+    expect(onUpdateAiBehavior.mock.calls[1]?.[0]).toMatchObject({
+      resumeApproach: "original_resume",
+    });
     await waitFor(() =>
       expect(screen.getByText(/AI behavior saved/)).toBeTruthy(),
     );
