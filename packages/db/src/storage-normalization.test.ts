@@ -517,13 +517,14 @@ test("saved-job conversion retains exact prepared identity across the codec", as
   cleanups.push(temp.cleanup);
   const repo = await temp.createRepository();
   const job = createSavedJob();
+  const matchAssessmentPostingFingerprint =
+    contracts.computeMatchAssessmentPostingFingerprint(job);
   const value: DiscoverySavedJobFingerprints = {
     version: 1,
     card: "card",
     detail: "detail",
     material: "material",
-    matchAssessmentPostingFingerprint:
-      contracts.computeMatchAssessmentPostingFingerprint(job),
+    matchAssessmentPostingFingerprint,
     identity: {
       version: 1,
       local: { keys: ["opaque"], priorities: [40] },
@@ -535,7 +536,7 @@ test("saved-job conversion retains exact prepared identity across the codec", as
   writeDiscoveryPreparation(job, {
     fingerprints: { owner: job, value: fingerprints },
     savedIdentity: { owner: job, value: identity! },
-    matchAssessmentPostingFingerprint: value.matchAssessmentPostingFingerprint,
+    matchAssessmentPostingFingerprint,
   });
   Object.freeze(job);
   await repo.commitSavedJobDelta({ upserts: [job] });
