@@ -43,6 +43,11 @@ export const ApplyQueueSchema = z
     mode: ApplicationAutomationModeSchema,
     state: ApplyQueueStateSchema,
     jobIds: z.array(NonEmptyStringSchema).max(APPLY_QUEUE_MAX_JOBS),
+    /** Chat-owned choices retain their identity even if the chat is deleted. */
+    assistantScopes: z.array(z.object({
+      conversationId: NonEmptyStringSchema,
+      jobIds: z.array(NonEmptyStringSchema).max(APPLY_QUEUE_MAX_JOBS),
+    }).strict()).optional(),
     /** Jobs handed to a run. A job is never handed to a second run. */
     startedJobIds: z.array(NonEmptyStringSchema).max(APPLY_QUEUE_MAX_JOBS),
     skipped: z.array(ApplyQueueSkippedJobSchema).max(APPLY_QUEUE_MAX_JOBS),
@@ -68,6 +73,7 @@ export type JobFinderStartApplyQueueInput = z.infer<
 export const JobFinderApplyQueueControlInputSchema = z
   .object({
     action: z.enum(["pause", "continue", "stop", "dismiss"]),
+    queueId: NonEmptyStringSchema.optional(),
   })
   .strict();
 export type JobFinderApplyQueueControlInput = z.infer<

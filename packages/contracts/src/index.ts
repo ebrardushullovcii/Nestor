@@ -12,6 +12,7 @@ export * from "./application-documents";
 export * from "./apply";
 export * from "./profile";
 export * from "./product-action-tools";
+export * from "./job-finder-actions";
 export * from "./assistant";
 export * from "./profile-copilot";
 export * from "./profile-setup";

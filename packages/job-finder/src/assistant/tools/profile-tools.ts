@@ -1030,6 +1030,7 @@ export const editProfileTool = defineTool({
       };
     }
     return {
+      canFinish: result.invalidatedApprovedResumeJobIds.length === 0,
       summary: `Saved: ${input.summary}. Changed ${recorded.fields.join(", ")}.${
         result.invalidatedApprovedResumeJobIds.length > 0
           ? ` This cleared approval on ${plural(result.invalidatedApprovedResumeJobIds.length, "resume")}; those resumes are now stale and need refreshing and fresh review before they can be sent.`
@@ -1101,7 +1102,12 @@ export async function undoReceipt(
       .map((entry) => ({ ...entry, path: entry.path.slice(1) }));
   let undone: string[] = [];
   let conflicts: string[] = [];
-  if (receipt.target === "search_plan") {
+  if (receipt.target === "job_triage") {
+    const { undoTriageChange } = await import("../triage-changes");
+    const result = await undoTriageChange(context, receipt);
+    undone = result.undoneLabels;
+    conflicts = result.conflictLabels;
+  } else if (receipt.target === "search_plan") {
     const { undoSearchPlanChange } = await import("./search-plan-tools");
     const result = await undoSearchPlanChange(context, receipt);
     undone = result.undoneLabels;

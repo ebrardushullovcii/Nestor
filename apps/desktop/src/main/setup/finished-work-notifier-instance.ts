@@ -14,6 +14,10 @@ const WINDOWS_APP_USER_MODEL_ID = "com.nestor.desktop";
 let mainWindow: BrowserWindow | null = null;
 let notifier: FinishedWorkNotifier | null = null;
 
+export function getRegisteredMainWindow(): BrowserWindow | null {
+  return mainWindow;
+}
+
 /** Called once the main window exists; notices and the taskbar use it. */
 export function registerFinishedWorkWindow(window: BrowserWindow): void {
   mainWindow = window;

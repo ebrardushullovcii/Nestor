@@ -1,3 +1,4 @@
+import { executeRegisteredAssistantAction } from "./tools/registered-action-tools";
 import { estimateResumeBatchMinutesLeft } from "@nestor/contracts";
 import { verifyPersonAnswerAuthority } from "./person-answer-authority";
 import { readAssistantWorkState } from "./work-state";
@@ -67,6 +68,7 @@ import { closeStoppedTurn } from "./turn-closure";
 import { allJobs, createJobCaveats } from "./tools/format";
 import {
   AssistantToolError,
+  assistantModelToolDefinition,
   toConversationTool,
   type AssistantHandleStore,
   type AssistantToolOutputs,
@@ -230,6 +232,7 @@ function titleFrom(text: string): string {
 }
 
 export class AssistantSessionHost {
+  private readonly resolvingProposals = new Map<string, Promise<AssistantMessage>>();
   private readonly navigationRequests = new Map<
     string,
     {
@@ -652,6 +655,10 @@ export class AssistantSessionHost {
       if (run.kind === "discovery") await this.ports.cancelSearch(run.id);
       else if (run.kind === "apply_batch" || run.kind === "apply_run") {
         await this.service.cancelApplyRun(run.id);
+      } else if (run.kind === "apply_queue") {
+        await this.ports.executeAction?.("control-apply-queue", { action: "stop", queueId: run.id });
+      } else if (run.kind === "source_check") {
+        await this.service.cancelSourceDebug(run.id);
       } else if (run.kind === "resume_generation")
         cancelBackgroundBatch(run.id);
     } catch (error) {
@@ -734,10 +741,12 @@ export class AssistantSessionHost {
     const session = this.createTurnSession(live, handle);
     const catalogMode = this.options.catalogMode ?? "grouped";
     const loadedGroups = new Set<AssistantToolGroup>();
+    const loadedToolNames = new Set<string>();
     const catalogOptions = {
       mode: catalogMode,
       browserAvailable: Boolean(this.ports.browser),
       screen: live.sourceMessage?.context?.screen ?? null,
+      onLoadToolNames: (names: readonly string[]) => { for (const name of names) loadedToolNames.add(name); },
       onLoadGroups: (groups: readonly AssistantToolGroup[]) => {
         for (const group of groups) loadedGroups.add(group);
       },
@@ -764,14 +773,8 @@ export class AssistantSessionHost {
       buildAssistantToolCatalog({
         ...catalogOptions,
         loadedGroups: [...loadedGroups],
-      }).map((definition) => ({
-        type: "function" as const,
-        function: {
-          name: definition.name,
-          description: definition.description,
-          parameters: definition.parameters,
-        },
-      }));
+        loadedToolNames: [...loadedToolNames],
+      }).map(assistantModelToolDefinition);
     let lastEstimate = 0;
 
     this.startStallWatch(live);
@@ -1366,7 +1369,7 @@ export class AssistantSessionHost {
             resultSummary:
               outcome.kind === "ok"
                 ? outcome.content.split("\n")[0]!.slice(0, 2_000)
-                : null,
+                : outcome.kind === "finish" ? outcome.finish.reason : null,
             endedAt: this.now(),
           });
           return outcome;
@@ -2332,9 +2335,18 @@ export class AssistantSessionHost {
   // Proposals and undo
   // ---------------------------------------------------------------------------
 
-  async resolveProposal(
-    input: AssistantResolveProposalInput,
-  ): Promise<AssistantMessage> {
+  resolveProposal(input: AssistantResolveProposalInput): Promise<AssistantMessage> {
+    const key = `${input.conversationId}:${input.proposalId}`;
+    const existing = this.resolvingProposals.get(key);
+    if (existing) return existing;
+    const work = this.resolveProposalOnce(input);
+    this.resolvingProposals.set(key, work);
+    void work.finally(() => this.resolvingProposals.delete(key)).catch(() => undefined);
+    return work;
+  }
+
+  private async resolveProposalOnce(input: AssistantResolveProposalInput): Promise<AssistantMessage> {
+    let afterConfirmation: (() => Promise<unknown>) | null = null;
     const message = await this.repository.getMessage(input.messageId);
     if (!message || message.conversationId !== input.conversationId) {
       throw new Error("That message is gone.");
@@ -2396,7 +2408,21 @@ export class AssistantSessionHost {
         (item) => !input.itemIds?.length || input.itemIds.includes(item.id),
       );
       const session = this.detachedSession(input.conversationId, message.id);
-      if (proposal.kind === "profile_operations") {
+      if (proposal.kind === "job_finder_action") {
+        if (proposal.status !== "pending") return message;
+        for (const item of chosen) {
+          const work = () => executeRegisteredAssistantAction(item.payload, {
+            service: this.service, ports: this.ports, session,
+          }, true);
+          const payload = item.payload as { actionId?: string };
+          if (payload.actionId === "reset-workspace" || payload.actionId === "confirm-personal-workspace-restore") {
+            afterConfirmation = work;
+          } else {
+            const result = await work();
+            if (result.status === "refused") throw new Error(result.summary);
+          }
+        }
+      } else if (proposal.kind === "profile_operations") {
         const result = await this.service.applyAssistantProfileOperations({
           operations: chosen.map(
             (item) => item.payload as ProfileCopilotPatchOperation,
@@ -2474,6 +2500,22 @@ export class AssistantSessionHost {
       message: updated,
     });
     this.ports.publishWorkspaceUpdate();
+    // Reset and restore replace this conversation; finish its confirmation first.
+    if (afterConfirmation) {
+      try {
+        const result = await afterConfirmation() as { status?: string; summary?: string };
+        if (result.status === "refused") throw new Error(result.summary);
+      } catch (error) {
+        // A failed replacement keeps the original conversation and its retry card.
+        if (await this.repository.getMessage(message.id)) {
+          const proposal = await this.repository.getProposal(part.proposalId);
+          if (proposal) await this.repository.upsertProposal({ ...proposal, status: "pending", resolvedAt: null });
+          await this.repository.upsertMessage(message);
+          await this.emit(input.conversationId, null, { type: "message_updated", message });
+        }
+        throw error;
+      }
+    }
     return updated;
   }
 

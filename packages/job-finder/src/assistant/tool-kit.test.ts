@@ -104,6 +104,21 @@ function harness() {
 }
 
 describe("collected page-job references", () => {
+  it.each([true, false])("ends a simple action only when its verified receipt allows it (%s)", async (canFinish) => {
+    const { run } = harness();
+    const execute = vi.fn(() => Promise.resolve({ summary: "Saved the exact headline.", data: { headline: "Engineer" }, canFinish }));
+    const tool: AssistantToolDefinition = { ...getJobTool, name: "edit_profile", execute };
+    const result = await run(tool, { jobId: "job", complete: true });
+    expect(execute).toHaveBeenCalledWith({ jobId: "job" }, expect.anything());
+    expect(result.kind).toBe(canFinish ? "finish" : "ok");
+    if (result.kind === "finish") expect(result.finish.output).toContain('"headline":"Engineer"');
+  });
+
+  it("keeps the model's next step when it did not request completion", async () => {
+    const { run } = harness();
+    const tool: AssistantToolDefinition = { ...getJobTool, name: "edit_profile", execute: () => Promise.resolve({ summary: "Saved.", canFinish: true }) };
+    expect((await run(tool, { jobId: "job" })).kind).toBe("ok");
+  });
   it.each([
     ["get_job", getJobTool],
     ["shortlist_jobs", shortlistJobsTool],

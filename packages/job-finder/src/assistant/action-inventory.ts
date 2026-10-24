@@ -1,5 +1,3 @@
-import type { JobFinderWorkspaceService } from "../internal/workspace-service-contracts";
-
 /**
  * Every visible Job Finder action and how the assistant reaches it (plan
  * §6.4). An entry maps to tools, or is excluded with a reason. The eval lane
@@ -24,11 +22,6 @@ const tools = (...names: string[]): ActionCoverage => ({
   kind: "tools",
   tools: names,
 });
-const excluded = (reason: string): ActionCoverage => ({
-  kind: "excluded",
-  reason,
-});
-
 export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
   // Home
   {
@@ -64,9 +57,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:mark-campaign-notification-read",
       "job-finder:mark-all-campaign-notifications-read",
     ],
-    coverage: excluded(
-      "Reading notifications is presentation state of the bell, not work.",
-    ),
+    coverage: tools("action_mark_campaign_notification_read", "action_mark_all_campaign_notifications_read"),
   },
 
   // Profile
@@ -145,21 +136,21 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:candidate-assets:restore",
       "job-finder:candidate-assets:delete",
     ],
-    coverage: tools("list_documents", "read_document"),
+    coverage: tools("list_documents", "read_document", "action_candidate_assets_import", "action_candidate_assets_open", "action_candidate_assets_restore", "action_candidate_assets_list"),
   },
   {
     id: "profile.files_delete",
     screen: "Profile › Files",
     action: "Delete a file",
     channels: ["job-finder:candidate-assets:delete"],
-    coverage: excluded("Deleting the person's files stays with the person."),
+    coverage: tools("action_candidate_assets_delete"),
   },
   {
     id: "profile.sources",
     screen: "Profile › Sources",
     action: "Add sources, turn them on or off",
     channels: ["job-finder:save-search-preferences"],
-    coverage: tools("list_sources", "update_sources"),
+    coverage: tools("list_sources", "update_sources", "action_edit_source", "action_remove_source"),
   },
   {
     id: "profile.source_check",
@@ -175,7 +166,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:accept-source-instruction-draft",
       "job-finder:verify-source-instructions",
     ],
-    coverage: tools("check_source", "list_sources"),
+    coverage: tools("check_source", "list_sources", "action_cancel_source_debug", "action_get_source_debug_run_details", "action_list_source_debug_runs", "action_save_source_instruction_artifact", "action_accept_source_instruction_draft", "action_verify_source_instructions"),
   },
   {
     id: "profile.legacy_copilot",
@@ -217,9 +208,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     screen: "Find jobs",
     action: "Judge fit for every job not judged yet",
     channels: ["job-finder:judge-unjudged-jobs"],
-    coverage: excluded(
-      "A long background pass over the whole list; the person starts it from Find jobs, and the assistant judges one listing with assess_job_listing.",
-    ),
+    coverage: tools("action_judge_unjudged_jobs", "assess_job_listing"),
   },
   {
     id: "discovery.shortlist",
@@ -293,9 +282,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:toggle-campaign-rule",
       "job-finder:project-campaign-rule-funnel",
     ],
-    coverage: excluded(
-      "Plan deletion, rules and funnel editing still use Search plans; Undo can remove a plan just created in chat.",
-    ),
+    coverage: tools("action_save_campaign_rule", "action_delete_campaign_rule", "action_toggle_campaign_rule", "action_project_campaign_rule_funnel", "action_delete_campaign"),
   },
   {
     id: "campaigns.run_now",
@@ -385,7 +372,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:clear-resume-approval",
       "job-finder:reveal-saved-file",
     ],
-    coverage: tools("export_resume"),
+    coverage: tools("export_resume", "action_approve_resume", "action_clear_resume_approval", "action_reveal_saved_file"),
   },
   {
     id: "resume.lines_to_confirm",
@@ -399,9 +386,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     screen: "Resume studio",
     action: "Acknowledge a work-history suggestion",
     channels: ["job-finder:set-work-history-review-acknowledgment"],
-    coverage: excluded(
-      "Acknowledging an intentional omission is a statement only the person makes.",
-    ),
+    coverage: tools("action_set_work_history_review_acknowledgment"),
   },
   {
     id: "resume.template",
@@ -438,9 +423,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:recommend-resume-strategy",
       "job-finder:set-campaign-resume-strategy-default",
     ],
-    coverage: excluded(
-      "Named resume approaches are an advanced surface without a tool yet; logged as a gap.",
-    ),
+    coverage: tools("action_read_action_state", "action_save_resume_strategy", "action_select_resume_strategy", "action_disable_resume_strategy", "action_recommend_resume_strategy", "action_set_campaign_resume_strategy_default"),
   },
 
   // Applications
@@ -454,7 +437,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:remove-from-apply-queue",
       "job-finder:approve-resumes",
     ],
-    coverage: excluded("Durable queue controls and bulk approval are missing from the assistant."),
+    coverage: tools("apply_to_jobs", "action_control_apply_queue", "action_remove_from_apply_queue", "action_approve_resumes"),
   },
   {
     id: "apply.move_back",
@@ -464,7 +447,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:return-application-to-shortlist",
       "job-finder:undo-return-application-to-shortlist",
     ],
-    coverage: excluded("The assistant cannot yet move an application back."),
+    coverage: tools("action_return_application_to_shortlist", "action_undo_return_application_to_shortlist"),
   },
   {
     id: "apply.reopen",
@@ -474,7 +457,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:get-application-page-states",
       "job-finder:reopen-application-page",
     ],
-    coverage: excluded("Page recovery is missing from the assistant."),
+    coverage: tools("action_get_application_page_states", "action_reopen_application_page"),
   },
   {
     id: "apply.start",
@@ -520,7 +503,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:approve-apply-run",
       "job-finder:resolve-apply-consent-request",
     ],
-    coverage: tools("apply_to_jobs"),
+    coverage: tools("action_approve_apply_run", "action_resolve_apply_consent_request"),
   },
   {
     id: "apply.details",
@@ -551,9 +534,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     screen: "Applications",
     action: "Export the application packet",
     channels: ["job-finder:export-application-packet"],
-    coverage: excluded(
-      "Writing files to a chosen folder stays a person's action for now.",
-    ),
+    coverage: tools("action_export_application_packet"),
   },
   {
     id: "apply.documents",
@@ -566,9 +547,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:edit-application-document",
       "job-finder:export-application-document",
     ],
-    coverage: excluded(
-      "Application letters are written by the apply agent; editing them from the sidebar is a logged gap.",
-    ),
+    coverage: tools("action_list_application_documents", "action_propose_application_document", "action_edit_application_document", "action_approve_application_document", "action_export_application_document"),
   },
   {
     id: "apply.authority",
@@ -583,20 +562,14 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:update-application-authority-envelope",
       "job-finder:revoke-application-authority-envelope",
     ],
-    coverage: tools(
-      "record_instruction",
-      "update_instruction",
-      "update_apply_settings",
-    ),
+    coverage: tools("action_get_application_authority_readiness", "action_approve_current_application_answers", "action_list_application_authority_envelopes", "action_get_application_authority_envelope", "action_create_application_authority_envelope", "action_update_application_authority_envelope", "action_revoke_application_authority_envelope", "record_instruction", "update_instruction", "update_apply_settings"),
   },
   {
     id: "apply.uncertain",
     screen: "Applications",
     action: "Resolve an uncertain send after checking the employer site",
     channels: ["job-finder:resolve-submission-outcome"],
-    coverage: excluded(
-      "Only the person can check the employer's site; the two-step confirmation stays theirs (ADR 0012).",
-    ),
+    coverage: tools("action_resolve_submission_outcome"),
   },
 
   // Needs you
@@ -666,9 +639,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:run-application-no-response-automation",
       "job-finder:update-tracker-crm",
     ],
-    coverage: excluded(
-      "Runs by itself on Settings changes; tracker settings are a logged gap.",
-    ),
+    coverage: tools("action_update_tracker_crm", "action_run_application_no_response_automation"),
   },
 
   // Companies
@@ -688,7 +659,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:review-company-merge",
       "job-finder:refresh-company-intelligence",
     ],
-    coverage: excluded("Company notes and merges are a logged gap."),
+    coverage: tools("action_read_action_state", "action_mutate_company_intelligence", "action_review_company_merge", "action_refresh_company_intelligence"),
   },
 
   // Settings
@@ -736,9 +707,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     screen: "Safeguards",
     action: "Review and change safeguards",
     channels: ["job-finder:mutate-safeguards"],
-    coverage: excluded(
-      "Safeguards limit the assistant itself; the person changes them.",
-    ),
+    coverage: tools("action_get_safeguards", "action_mutate_safeguards"),
   },
   {
     id: "settings.diagnostics",
@@ -752,16 +721,14 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "job-finder:get-startup-database-recovery",
       "job-finder:dismiss-startup-database-recovery-notice",
     ],
-    coverage: excluded(
-      "Maintenance and destructive reset stay with the person.",
-    ),
+    coverage: tools("action_export_diagnostics", "action_get_performance_snapshot", "action_reset_workspace", "action_reset_browser", "action_get_startup_reset_recovery", "action_get_startup_database_recovery", "action_dismiss_startup_database_recovery_notice", "action_export_personal_workspace", "action_preview_personal_workspace_restore", "action_confirm_personal_workspace_restore"),
   },
   {
     id: "settings.clipboard",
     screen: "Anywhere",
     action: "Copy text",
     channels: ["job-finder:write-clipboard-text"],
-    coverage: excluded("Copying is a presentation convenience."),
+    coverage: tools("action_write_clipboard_text"),
   },
 
   // Browser
@@ -807,164 +774,3 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     coverage: tools("apply_here", "record_instruction", "apply_to_jobs"),
   },
 ];
-
-/**
- * Secondary lint (plan §6.4): every workspace-service method is mapped to a
- * tool or marked internal. Typed as an exhaustive record, so a new service
- * method fails to compile until someone decides.
- */
-export const SERVICE_METHOD_COVERAGE: Record<
-  keyof JobFinderWorkspaceService,
-  string
-> = {
-  refreshApprovedApplicationLetter: "internal",
-  assessJobListing: "assess_job_listing",
-  judgeUnjudgedJobs: "internal",
-  saveUserActionAnswerDraft: "internal",
-  withWorkspaceRestore: "internal",
-  shutdown: "internal",
-  saveResumeBatchCheckpoint: "internal",
-  getWorkspaceSnapshot: "get_workspace_summary",
-  getWorkspaceProjection: "internal",
-  getApplicationDocumentContext: "internal",
-  removeJobsFromReview: "internal",
-  getWorkspaceBootstrap: "internal",
-  getResumeImportState: "internal",
-  openBrowserSession: "browser_open",
-  checkBrowserSession: "internal",
-  performUserAction: "resolve_needs_you",
-  projectGroupedManualAnswer: "internal",
-  applyGroupedManualAnswer: "resolve_needs_you",
-  snoozeGroupedDecision: "internal",
-  saveApplicationAnswer: "answer_application_question",
-  clearApplicationAnswer: "internal",
-  continueApplicationsWaitingForFiles: "internal",
-  resetWorkspace: "internal",
-  saveProfile: "edit_profile",
-  saveProfileAndSearchPreferences: "edit_profile",
-  runResumeImport: "import_resume",
-  analyzeProfileFromResume: "import_resume",
-  saveSearchPreferences: "update_sources",
-  saveProfileSetupState: "finish_profile_setup",
-  applyProfileSetupReviewAction: "resolve_import_suggestion",
-  applyResumeTimelineRepairAction: "edit_profile",
-  sendProfileCopilotMessage: "internal (retired chat)",
-  proposeProfileCopilotChange: "internal (retired chat)",
-  applyProfileCopilotPatchGroup:
-    "internal (retired chat proposals, via resolve proposal)",
-  rejectProfileCopilotPatchGroup:
-    "internal (retired chat proposals, via resolve proposal)",
-  undoProfileRevision: "undo_change",
-  saveSettings: "update_apply_settings",
-  updateApplicationDefaults: "update_apply_settings",
-  updateWorkspaceBehavior: "update_workspace_behavior",
-  updateAiBehavior: "update_ai_behavior",
-  updateTrackerCrm: "internal",
-  updateAppearanceTheme: "internal",
-  saveCampaign: "internal",
-  selectCampaign: "select_search_plan",
-  deleteCampaign: "internal",
-  setActivityControl: "pause_activity",
-  runDiscovery: "search_for_jobs",
-  runAgentDiscovery: "search_for_jobs",
-  runDiscoveryForTarget: "search_for_jobs",
-  cancelDiscoveryRun: "cancel_search",
-  runCampaignNow: "search_for_jobs",
-  runDueScheduledCampaigns: "internal",
-  processDueScheduledCampaigns: "internal",
-  markCampaignNotificationRead: "internal",
-  markAllCampaignNotificationsRead: "internal",
-  saveCampaignRule: "internal",
-  deleteCampaignRule: "internal",
-  toggleCampaignRule: "internal",
-  projectCampaignRuleFunnel: "internal",
-  runSourceDebug: "check_source",
-  cancelSourceDebug: "internal",
-  getSourceDebugRun: "internal",
-  getSourceDebugRunDetails: "internal",
-  listSourceDebugRuns: "list_sources",
-  saveSourceInstructionArtifact: "internal",
-  acceptSourceInstructionDraft: "internal",
-  verifySourceInstructions: "internal",
-  queueJobForReview: "shortlist_jobs",
-  queueJobsForReview: "shortlist_jobs",
-  setJobResumeApplicationMode: "set_resume_level",
-  removeJobFromReview: "remove_from_shortlist",
-  dismissDiscoveryJob: "dismiss_jobs",
-  dismissDiscoveryJobs: "dismiss_jobs",
-  excludeEmployerDiscoveryJobs: "exclude_employer",
-  previewEmployerExclusion: "exclude_employer",
-  removeEmployerExclusion: "include_employer",
-  restoreDismissedDiscoveryJob: "restore_jobs",
-  restoreDismissedDiscoveryJobs: "restore_jobs",
-  mutateRapidReview: "shortlist_jobs",
-  recordOutcome: "record_outcome",
-  refreshCompanyIntelligence: "internal",
-  setCompanyPreference: "set_company_preference",
-  reviewCompanyMerge: "internal",
-  mutateCompanyIntelligence: "internal",
-  setOutcomeSuggestionEnabled: "internal",
-  mutateSafeguards: "internal",
-  getSafeguardsOverview: "internal",
-  evaluateApplicationSafeguardBlockers: "internal",
-  evaluateDiscoverySafeguardBlockers: "internal",
-  saveResumeStrategy: "internal",
-  disableResumeStrategy: "internal",
-  selectResumeStrategy: "internal",
-  recommendResumeStrategy: "internal",
-  setCampaignResumeStrategyDefault: "internal",
-  generateResume: "generate_resumes",
-  generateResumeForBatch: "internal (Shortlisted bounded generation pipeline)",
-  getResumeWorkspace: "read_resume",
-  previewResumeDraft: "preview_resume",
-  saveResumeDraft: "set_resume_template",
-  restoreResumeDraftRevision: "restore_resume_version",
-  undoResumeAssistantEdit: "undo_change",
-  regenerateResumeDraft: "generate_resumes",
-  regenerateResumeSection: "generate_resumes",
-  exportResumePdf: "export_resume",
-  approveResume: "export_resume",
-  approveCurrentResume: "internal (bulk resume approval)",
-  clearResumeApproval: "internal",
-  setWorkHistoryReviewAcknowledgment: "internal",
-  setResumeClaimConfirmation: "confirm_resume_line",
-  applyResumePatch: "edit_resume",
-  getResumeAssistantMessages: "internal (retired chat, archived)",
-  getResumeAssistantHistory: "internal (read-only retired chat migration)",
-  sendResumeAssistantMessage: "internal (retired chat)",
-  resolveResumeAssistantProposal:
-    "internal (retired chat proposals, via resolve proposal)",
-  getApplyRunDetails: "get_application",
-  writeApplicationDocumentText:
-    "internal (drafts for Applications › Documents; the apply agent writes the letter it sends)",
-  buildApplicationPacket: "internal",
-  startApplyCopilotRun: "apply_to_jobs",
-  startAutoApplyRun: "apply_to_jobs",
-  startAutoApplyQueueRun: "apply_to_jobs",
-  approveApplyRun: "apply_to_jobs",
-  cancelApplyRun: "cancel_applications",
-  resolveApplyConsentRequest: "internal",
-  returnApplicationToShortlist: "internal",
-  undoReturnApplicationToShortlist: "internal",
-  revokeApplyRunApproval: "cancel_applications",
-  inspectPreparedApplicationPage: "browser_use_application",
-  focusPreparedApplicationPage: "continue_application",
-  recordApplicationsSentByPerson: "internal",
-  submitPreparedApplication: "send_applications",
-  approveApply: "apply_to_jobs",
-  recordLiveAssistantApplicationAction: "internal",
-  mutateApplicationCrm: "update_tracking",
-  mutateApplicationCrmBulkStage: "set_stage_for_applications",
-  runApplicationNoResponseAutomation: "internal",
-  exportApplicationCrm: "export_tracker",
-  applyAssistantProfileOperations: "edit_profile",
-  undoAssistantProfileChange: "undo_change",
-  undoAssistantSettingsChange: "undo_change",
-  applyAssistantResumePatches: "edit_resume",
-  applyAssistantResumeRevision: "revise_resume",
-  undoAssistantResumeChange: "undo_change",
-  extractJobsFromPageText: "collect_page_jobs",
-  addJobFromBrowserPage: "save_page_jobs",
-  saveJobsFromPage: "save_page_jobs",
-  runResumeRevisionSpecialist: "revise_resume",
-};

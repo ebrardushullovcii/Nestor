@@ -1,4 +1,4 @@
-import type { IpcMain } from "electron";
+import type { IpcMain, IpcMainInvokeEvent } from "electron";
 
 import {
   ApplicationAuthorityEnvelopeMutationResultSchema,
@@ -31,13 +31,14 @@ export interface JobFinderAuthorityRouteDependencies {
  * prepare-only create/update, and revocation; no preflight, arm, or submit
  * operation is registered here.
  */
-export function registerJobFinderAuthorityRouteHandlers(
-  ipcMain: IpcMain,
+export function createJobFinderAuthorityOperations(
   dependencies: JobFinderAuthorityRouteDependencies = {
     service: getJobFinderApplicationAuthorityService(),
   },
-): void {
-  ipcMain.handle(
+) {
+  const operations = new Map<string, (event: IpcMainInvokeEvent | null, input: unknown) => Promise<unknown>>();
+  const add = (name: string, operation: (event: IpcMainInvokeEvent | null, input: unknown) => Promise<unknown>) => operations.set(name, operation);
+  add(
     "job-finder:get-application-authority-readiness",
     async (_event, payload: unknown) => {
       GetApplicationAuthorityReadinessInputSchema.parse(
@@ -49,7 +50,7 @@ export function registerJobFinderAuthorityRouteHandlers(
     },
   );
 
-  ipcMain.handle(
+  add(
     "job-finder:approve-current-application-answers",
     async (_event, payload: unknown) => {
       const input = ApproveCurrentApplicationAnswersInputSchema.parse(payload);
@@ -59,7 +60,7 @@ export function registerJobFinderAuthorityRouteHandlers(
     },
   );
 
-  ipcMain.handle(
+  add(
     "job-finder:list-application-authority-envelopes",
     async (_event, payload: unknown) => {
       const input = ListApplicationAuthorityEnvelopesInputSchema.parse(
@@ -70,7 +71,7 @@ export function registerJobFinderAuthorityRouteHandlers(
     },
   );
 
-  ipcMain.handle(
+  add(
     "job-finder:get-application-authority-envelope",
     async (_event, payload: unknown) => {
       const input = GetApplicationAuthorityEnvelopeInputSchema.parse(payload);
@@ -79,7 +80,7 @@ export function registerJobFinderAuthorityRouteHandlers(
     },
   );
 
-  ipcMain.handle(
+  add(
     "job-finder:create-application-authority-envelope",
     async (_event, payload: unknown) => {
       const input =
@@ -89,7 +90,7 @@ export function registerJobFinderAuthorityRouteHandlers(
     },
   );
 
-  ipcMain.handle(
+  add(
     "job-finder:update-application-authority-envelope",
     async (_event, payload: unknown) => {
       const input =
@@ -99,7 +100,7 @@ export function registerJobFinderAuthorityRouteHandlers(
     },
   );
 
-  ipcMain.handle(
+  add(
     "job-finder:revoke-application-authority-envelope",
     async (_event, payload: unknown) => {
       const input =
@@ -109,7 +110,7 @@ export function registerJobFinderAuthorityRouteHandlers(
     },
   );
 
-  ipcMain.handle(
+  add(
     "job-finder:resolve-submission-outcome",
     async (_event, payload: unknown) => {
       const input = ResolveSubmissionOutcomeInputSchema.parse(payload);
@@ -117,4 +118,16 @@ export function registerJobFinderAuthorityRouteHandlers(
       return ResolveSubmissionOutcomeResultSchema.parse(result);
     },
   );
+  return operations;
+}
+
+export function registerJobFinderAuthorityRouteHandlers(ipcMain: IpcMain, dependencies?: JobFinderAuthorityRouteDependencies): void {
+  for (const [name, operation] of createJobFinderAuthorityOperations(dependencies)) {
+    ipcMain.handle(name, (event, input: unknown) => operation(event, input));
+  }
+}
+export async function executeAuthorityAction(id: string, input: unknown) {
+  const operation = createJobFinderAuthorityOperations().get(`job-finder:${id}`);
+  if (!operation) throw new Error("Unknown application authority action.");
+  return operation(null, input);
 }

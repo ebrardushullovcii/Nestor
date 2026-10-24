@@ -1,9 +1,11 @@
 import { withJobFinderWorkspaceUpdates } from "../services/job-finder/workspace-updates";
 import { ApplicationLetterGroundingError } from "@nestor/job-finder";
 import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
+import { isDesktopTestApiEnabled } from "../services/job-finder/test-api";
+import { getJobFinderUserDataDirectory } from "../services/job-finder/paths";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import {
   ApplicationDocumentExportResultSchema,
@@ -44,7 +46,7 @@ interface ApplicationDocumentRouteDependencies {
     document: ApplicationDocumentRevision,
   ) => Promise<void>;
   selectExportPath: (
-    event: IpcMainInvokeEvent,
+    event: IpcMainInvokeEvent | null,
     defaultFileName: string,
   ) => Promise<string | null>;
   /** Model-written, fact-checked draft text. Null reports a failed draft. */
@@ -66,9 +68,15 @@ interface ApplicationDocumentContext {
 }
 
 async function selectExportPath(
-  event: IpcMainInvokeEvent,
+  event: IpcMainInvokeEvent | null,
   defaultFileName: string,
 ) {
+  if (!event) {
+    const directory = isDesktopTestApiEnabled()
+      ? path.join(getJobFinderUserDataDirectory(), "exports") : app.getPath("downloads");
+    await mkdir(directory, { recursive: true });
+    return path.join(directory, `${Date.now()}_${path.basename(defaultFileName)}`);
+  }
   const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   const options = {
     title: "Export application document",
@@ -88,8 +96,7 @@ function wrapStorageError(error: unknown): never {
   );
 }
 
-export function registerApplicationDocumentRouteHandlers(
-  ipcMain: IpcMain,
+export function createApplicationDocumentOperations(
   dependencies: ApplicationDocumentRouteDependencies = {
     library: getApplicationDocumentLibrary(),
     getWorkspaceProjection: async () => {
@@ -123,6 +130,8 @@ export function registerApplicationDocumentRouteHandlers(
     },
   },
 ) {
+  const operations = new Map<string, (event: IpcMainInvokeEvent | null, payload: unknown) => Promise<unknown>>();
+  const add = (name: string, operation: (event: IpcMainInvokeEvent | null, payload: unknown) => Promise<unknown>) => operations.set(name, operation);
   // A listing needs one job, its record and its newest result. Reading them
   // by id kept opening Applications from rebuilding all saved jobs.
   const readApplicationDocumentContext = async (
@@ -156,7 +165,7 @@ export function registerApplicationDocumentRouteHandlers(
     };
   };
 
-  ipcMain.handle(
+  add(
     "job-finder:list-application-documents",
     async (_event, payload) => {
       try {
@@ -215,7 +224,7 @@ export function registerApplicationDocumentRouteHandlers(
     },
   );
 
-  ipcMain.handle(
+  add(
     "job-finder:propose-application-document",
     async (_event, payload) => {
       try {
@@ -319,7 +328,7 @@ export function registerApplicationDocumentRouteHandlers(
     },
   );
 
-  ipcMain.handle(
+  add(
     "job-finder:approve-application-document",
     async (event, payload) => {
       try {
@@ -329,9 +338,11 @@ export function registerApplicationDocumentRouteHandlers(
           input.expectedRevision,
         );
         if (dependencies.refreshApprovedLetter) {
-          await withJobFinderWorkspaceUpdates(event.sender, () =>
-            dependencies.refreshApprovedLetter!(approved),
-          );
+          if (event) {
+            await withJobFinderWorkspaceUpdates(event.sender, () => dependencies.refreshApprovedLetter!(approved));
+          } else {
+            await dependencies.refreshApprovedLetter(approved);
+          }
         }
         return ApplicationDocumentRevisionSchema.parse(approved);
       } catch (error) {
@@ -340,7 +351,7 @@ export function registerApplicationDocumentRouteHandlers(
     },
   );
 
-  ipcMain.handle(
+  add(
     "job-finder:edit-application-document",
     async (_event, payload) => {
       try {
@@ -358,7 +369,7 @@ export function registerApplicationDocumentRouteHandlers(
     },
   );
 
-  ipcMain.handle(
+  add(
     "job-finder:export-application-document",
     async (event, payload) => {
       try {
@@ -394,4 +405,19 @@ export function registerApplicationDocumentRouteHandlers(
       }
     },
   );
+  return operations;
+}
+
+export function registerApplicationDocumentRouteHandlers(
+  ipcMain: IpcMain, dependencies?: ApplicationDocumentRouteDependencies,
+) {
+  for (const [name, operation] of createApplicationDocumentOperations(dependencies)) {
+    ipcMain.handle(name, (event, payload: unknown) => operation(event, payload));
+  }
+}
+
+export async function executeApplicationDocumentAction(actionId: string, input: unknown): Promise<unknown> {
+  const operation = createApplicationDocumentOperations().get(`job-finder:${actionId}`);
+  if (!operation) throw new Error("Unknown application document action.");
+  return operation(null, input);
 }

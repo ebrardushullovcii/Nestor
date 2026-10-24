@@ -1060,25 +1060,7 @@ export const setResumeTemplateTool = defineTool({
   },
 });
 
-export const restoreResumeVersionTool = defineTool({
-  name: "restore_resume_version",
-  group: "resume",
-  description:
-    "Restores an earlier version of one job's resume from its history (read_resume lists no history; use the revision ids the person points at in Version history).",
-  parameters: json.object({ jobId: json.string(), revisionId: json.string() }, [
-    "jobId",
-    "revisionId",
-  ]),
-  input: z.object({ jobId: Id, revisionId: Id }),
-  label: () => "Restoring an earlier resume version",
-  effect: "local_write",
-  async execute(input, { service, session, ports }) {
-    session.assertCurrent();
-    await service.restoreResumeDraftRevision(input.jobId, input.revisionId);
-    ports.publishWorkspaceUpdate();
-    return { summary: "Restored that version." };
-  },
-});
+
 
 export const resumeTools = [
   readResumeTool,
@@ -1091,5 +1073,4 @@ export const resumeTools = [
   exportResumeTool,
   confirmResumeLineTool,
   setResumeTemplateTool,
-  restoreResumeVersionTool,
 ];

@@ -132,6 +132,29 @@ async function settle(): Promise<void> {
 }
 
 describe("apply queue runner", () => {
+  it("persists the assistant's exact grant binding before dispatch and stops if binding fails", async () => {
+    const harness = createHarness();
+    const runner = createApplyQueueRunner(harness.deps);
+    let boundId: string | null = null;
+    await runner.start(ids(12), "prepare_only", (queue) => {
+      expect(harness.runs).toHaveLength(0);
+      expect(harness.queue()).toBeNull();
+      expect(queue.jobIds).toEqual(ids(12));
+      queue.assistantScopes = [{ conversationId: "chat", jobIds: ids(12) }];
+      boundId = queue.id;
+      return Promise.resolve();
+    });
+    expect(harness.queue()?.id).toBe(boundId);
+    expect(harness.queue()?.assistantScopes).toEqual([{ conversationId: "chat", jobIds: ids(12) }]);
+    expect(harness.runs[0]?.mode).toBe("prepare_only");
+    const failed = createHarness();
+    const second = createApplyQueueRunner(failed.deps);
+    await expect(second.start(ids(2), "autonomous_submit", () => Promise.reject(new Error("Stopped before binding")))).rejects.toThrow("Stopped before binding");
+    expect(failed.runs).toHaveLength(0);
+    expect(failed.queue()).toBeNull();
+    runner.dispose();
+    second.dispose();
+  });
   it("sets aside only named company conflicts and fills later runs with the rest", async () => {
     const harness = createHarness();
     const startRun = harness.deps.startRun.bind(harness.deps);

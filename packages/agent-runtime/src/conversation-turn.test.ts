@@ -82,6 +82,31 @@ function tool(
 }
 
 describe("runConversationTurn", () => {
+  it("can reply from a verified tool receipt without another model call and retains its facts", async () => {
+    const model = scripted([{ toolCalls: [call("one", "edit")] }]);
+    const events: ConversationTurnEvent[] = [];
+    const result = await runConversationTurn({ model, assembleMessages: async (turn) => [{ role: "user", content: "Change my headline" }, ...turn], tools: [tool("edit", async () => ({ kind: "finish", finish: { reason: "Headline saved.", output: "Headline saved. receipt=r1", stuck: false, needsPerson: false, data: {} } }))], onEvent: (event) => { events.push(event); } });
+    expect(result.modelCalls).toBe(1);
+    expect(result.reply).toBe("Headline saved.");
+    expect(result.turnMessages).toContainEqual({ role: "tool", toolCallId: "one", content: "Headline saved. receipt=r1" });
+    expect(result.turnMessages.at(-1)).toEqual({ role: "assistant", content: "Headline saved." });
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool_finished", outcome: "done" }));
+  });
+
+  it.each([false, true])("never completes early or hides an earlier failed call (failed=%s)", async (failed) => {
+    let secondRan = false;
+    const model = scripted([{ toolCalls: [call("one", "first"), call("two", "second")] }, { content: "Both results checked." }]);
+    const receipt = { kind: "finish" as const, finish: { reason: "Saved.", stuck: false, needsPerson: false, data: {} } };
+    const result = await runConversationTurn({ model, assembleMessages: async (turn) => [{ role: "user", content: "Do both" }, ...turn], tools: [
+      tool("first", async () => failed ? { kind: "ok", status: "failed", content: "Could not save" } : receipt),
+      tool("second", async () => { secondRan = true; return failed ? receipt : { kind: "ok", content: "Second saved" }; }),
+    ] });
+    expect(secondRan).toBe(true);
+    expect(result.modelCalls).toBe(2);
+    expect(result.reply).toBe("Both results checked.");
+    expect(result.turnMessages.filter((message) => message.role === "tool")).toHaveLength(2);
+  });
+
   it("refreshes the offered catalog after a tool loads more capabilities", async () => {
     let loaded = false;
     const load = tool("load", async () => {

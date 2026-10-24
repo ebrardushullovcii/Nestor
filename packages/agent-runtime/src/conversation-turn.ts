@@ -427,6 +427,7 @@ export async function runConversationTurn(
     }
 
     let redirected = false;
+    let batchSucceeded = true;
     for (const [index, toolCall] of toolCalls.entries()) {
       const tool = toolsByName.get(toolCall.function.name);
       if (redirected) {
@@ -475,6 +476,7 @@ export async function runConversationTurn(
         break;
       }
       if (!tool) {
+        batchSucceeded = false;
         turnMessages.push({
           role: "tool",
           toolCallId: toolCall.id,
@@ -502,6 +504,7 @@ export async function runConversationTurn(
           options.signal,
         );
       } catch (error) {
+        batchSucceeded = false;
         if (options.signal?.aborted || isAbortError(error)) {
           turnMessages.push({
             role: "tool",
@@ -562,14 +565,20 @@ export async function runConversationTurn(
         });
       }
       if (outcome.kind === "finish") {
-        // A conversation has no finish tool; treat one as the reply.
         turnMessages.push({
           role: "tool",
           toolCallId: toolCall.id,
-          content: "Finished.",
+          content: outcome.finish.output ?? outcome.finish.reason,
         });
-        return result("replied", { reply: outcome.finish.reason });
+        await emit({ type: "tool_finished", toolCallId: toolCall.id, toolName: toolCall.function.name, label, outcome: "done", summary: outcome.finish.reason.slice(0, 300) });
+        // A completion request never drops other calls or hides an earlier failure.
+        if (batchSucceeded && index === toolCalls.length - 1) {
+          turnMessages.push({ role: "assistant", content: outcome.finish.reason });
+          return result("replied", { reply: outcome.finish.reason });
+        }
+        continue;
       }
+      if (outcome.status === "failed" || outcome.status === "refused") batchSucceeded = false;
       let content = outcome.content;
       if (content.length > resultLimit) {
         const note = options.storeOverflow

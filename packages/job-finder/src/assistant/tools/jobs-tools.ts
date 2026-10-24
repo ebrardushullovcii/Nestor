@@ -1,7 +1,13 @@
+import { recordTriageChange } from "../triage-changes";
+import { diffValues } from "../change-diff";
+import { readAssistantWorkspace } from "../tool-kit";
+import { executeJobFinderAction } from "../action-registry";
 import { runningSearchState } from "../work-state";
 import {
   DiscoveryFeedbackReasonSchema,
   JobDiscoveryTargetSchema,
+  JobFinderAssistantSearchInputSchema,
+  JobFinderSourceQueryInputSchema,
   NonEmptyStringSchema,
   discoveryFeedbackReasonValues,
   normalizeCompanyName,
@@ -24,11 +30,7 @@ import {
   plural,
 } from "./format";
 
-import type { JobFinderWorkspaceService } from "../../internal/workspace-service-contracts";
 
-function readAssistantWorkspace(service: JobFinderWorkspaceService) {
-  return service.getWorkspaceProjection?.() ?? service.getWorkspaceSnapshot();
-}
 
 function feedbackOutcome(entry: DiscoveryFeedbackBatchOutcome) {
   return {
@@ -55,7 +57,7 @@ const QueryInput = z.object({
   onlyIds: z.array(Id).max(3000).optional(),
   sourceIds: z.array(Id).min(1).max(1_000).optional(),
   listingOrigins: z.array(z.string().url()).min(1).max(200).optional(),
-  sort: z.enum(["score", "recent"]).default("score"),
+  sort: z.enum(["score", "recent", "shortlisted"]).default("score"),
   limit: z.number().int().min(1).max(25).default(10),
   includeExcludedEmployers: z.boolean().default(false),
   show: z.boolean().default(true),
@@ -110,7 +112,7 @@ function filterJobs(
     return true;
   });
   return filtered.sort((left, right) =>
-    input.sort === "recent"
+    input.sort === "shortlisted" ? (right.shortlistedAt ?? "").localeCompare(left.shortlistedAt ?? "") : input.sort === "recent"
       ? (right.postedAt ?? right.discoveredAt).localeCompare(
           left.postedAt ?? left.discoveredAt,
         )
@@ -136,7 +138,7 @@ export const queryJobsTool = defineTool({
     listingOrigins: json.ids(
       "Only listing URLs on these exact origins, including port, such as http://127.0.0.1:47950. For local-only picks use the requested local origin.",
     ),
-    sort: json.enumOf(["score", "recent"]),
+    sort: json.enumOf(["score", "recent", "shortlisted"], "shortlisted orders by the recorded shortlist time; undated older rows are last."),
     limit: json.number("Rows to show, at most 25."),
     includeExcludedEmployers: json.boolean(
       "Only when the person names an excluded employer.",
@@ -198,6 +200,7 @@ export const queryJobsTool = defineTool({
           return {
             position: index + 1,
             ...jobEvidence(job),
+            shortlistedAt: job.shortlistedAt ?? null,
             application: describeApplicationStanding(snapshot, job.id),
             ...(caveats.excludedEmployer ? { excludedEmployer: true } : {}),
             ...(caveats.alreadyAppliedAs
@@ -285,7 +288,11 @@ export const getJobTool = defineTool({
   input: z.object({ jobId: Id }),
   label: () => "Reading the job",
   effect: "read",
-  async execute(input, { service }) {
+  async execute(input, { service, ports, session }) {
+    if (ports.readJobDetail) {
+      const result = await ports.readJobDetail(input.jobId, session.context?.list?.campaignId ?? null);
+      return { summary: `${result.job.title} at ${result.job.company}.`, data: jobDetail(result.job) };
+    }
     const snapshot = await readAssistantWorkspace(service);
     const job = findJob(snapshot, input.jobId);
     if (!job)
@@ -447,10 +454,12 @@ export const shortlistJobsTool = defineTool({
       .filter((entry) => entry.outcome === "shortlisted")
       .map((entry) => findJob(after, entry.jobId))
       .filter((job): job is DiscoveryJobView => job !== null);
+    const undoParts = await recordTriageChange(session, snapshot, after, uniqueIds, "Shortlisted jobs");
     return {
+      canFinish: done === uniqueIds.length,
       summary: `Shortlisted ${plural(done, "job")} of ${uniqueIds.length}; ${outcomes.filter((entry) => entry.outcome === "not started: stopped").length} not started.`,
       data: outcomes,
-      parts: shortlisted.length
+      parts: [...(shortlisted.length
         ? [
             jobRowsPart({
               jobs: shortlisted,
@@ -458,7 +467,7 @@ export const shortlistJobsTool = defineTool({
               resultSetId: null,
             }),
           ]
-        : [],
+        : []), ...undoParts],
     };
   },
 });
@@ -573,11 +582,12 @@ export const removeFromShortlistTool = defineTool({
   label: () => "Removing jobs from Shortlisted",
   effect: "local_write",
   async execute(input, { service, session, ports }) {
+    const before = await readAssistantWorkspace(service);
     const outcomes: { jobId: string; outcome: string }[] = [];
     for (const jobId of input.jobIds) {
       session.assertCurrent();
       try {
-        await service.removeJobFromReview(jobId);
+        await executeJobFinderAction("remove-job-from-review", { jobId: jobId }, { service });
         outcomes.push({ jobId, outcome: "removed" });
       } catch (error) {
         outcomes.push({
@@ -588,8 +598,10 @@ export const removeFromShortlistTool = defineTool({
     }
     ports.publishWorkspaceUpdate();
     return {
+      canFinish: outcomes.every((entry) => entry.outcome === "removed"),
       summary: `Removed ${plural(outcomes.filter((entry) => entry.outcome === "removed").length, "job")} from Shortlisted.`,
       data: outcomes,
+      parts: await recordTriageChange(session, before, await readAssistantWorkspace(service), input.jobIds, "Moved jobs back to Find jobs"),
     };
   },
 });
@@ -655,7 +667,9 @@ export const dismissJobsTool = defineTool({
       (jobId) => shortlistedBefore.has(jobId) && !shortlistedAfter.has(jobId),
     );
     return {
+      canFinish: leftShortlist.length === 0 && outcomes.every((entry) => entry.outcome === "hidden"),
       summary: `Hid ${plural(outcomes.filter((entry) => entry.outcome === "hidden").length, "job")}.${leftShortlist.length > 0 ? ` These were on the shortlist and are no longer: ${leftShortlist.join(", ")}.` : ""}`,
+      parts: await recordTriageChange(session, before, after, input.jobIds, "Hid jobs"),
       data: outcomes.map((entry) => ({
         ...entry,
         leftShortlist: leftShortlist.includes(entry.jobId),
@@ -673,6 +687,7 @@ export const restoreJobsTool = defineTool({
   label: () => "Restoring hidden jobs",
   effect: "local_write",
   async execute(input, { service, session, ports }) {
+    const before = await readAssistantWorkspace(service);
     const jobIds = [...new Set(input.jobIds)];
     const batch = service.restoreDismissedDiscoveryJobs
       ? await service.restoreDismissedDiscoveryJobs(jobIds, {
@@ -698,8 +713,10 @@ export const restoreJobsTool = defineTool({
       ports.publishWorkspaceUpdate();
     }
     return {
+      canFinish: outcomes.every((entry) => entry.outcome === "restored"),
       summary: `Restored ${plural(outcomes.filter((entry) => entry.outcome === "restored").length, "job")}.`,
       data: outcomes,
+      parts: await recordTriageChange(session, before, batch?.workspace ?? await readAssistantWorkspace(service), jobIds, "Showed jobs again"),
     };
   },
 });
@@ -861,15 +878,11 @@ export const searchForJobsTool = defineTool({
       breadth: json.enumOf(["best_only", "wide"]),
       freshness: json.enumOf(["any", "recent"]),
       sourceIds: json.ids("Only these sources; omit for all."),
+      campaignId: json.string("Run this saved search plan without switching the active plan."),
     },
     ["goal"],
   ),
-  input: z.object({
-    goal: z.string().trim().min(1).max(1_000),
-    breadth: z.enum(["best_only", "wide"]).optional(),
-    freshness: z.enum(["any", "recent"]).default("any"),
-    sourceIds: z.array(Id).min(1).max(1_000).optional(),
-  }),
+  input: JobFinderAssistantSearchInputSchema,
   label: () => "Starting a job search",
   effect: "external",
   async execute(input, { ports, session, service }) {
@@ -899,6 +912,7 @@ export const searchForJobsTool = defineTool({
         sourceIds: input.sourceIds ?? "all",
       },
       targetId: null,
+      ...(input.campaignId ? { campaignId: input.campaignId } : {}),
     });
     if (!started.runId) {
       throw new AssistantToolError("refused", started.message);
@@ -908,7 +922,7 @@ export const searchForJobsTool = defineTool({
       "Searching for jobs",
     );
     return {
-      summary: `The search started. Results go to ${before.campaigns.find((plan) => plan.id === before.activeCampaignId)?.name ?? "your current plan"} in Find jobs and Shortlisted. This conversation continues when it ends.`,
+      summary: `The search started. Results go to ${before.campaigns.find((plan) => plan.id === (input.campaignId ?? before.activeCampaignId))?.name ?? "your current plan"} in Find jobs and Shortlisted. This conversation continues when it ends.`,
       data: {
         runId: started.runId,
         running: runningSearchState(await readAssistantWorkspace(service)),
@@ -918,46 +932,37 @@ export const searchForJobsTool = defineTool({
   },
 });
 
-export const cancelSearchTool = defineTool({
-  name: "cancel_search",
-  group: "jobs",
-  description: "Stops a running search; jobs already found are kept.",
-  parameters: json.object({ runId: json.string() }, ["runId"]),
-  input: z.object({ runId: Id }),
-  label: () => "Stopping the search",
-  effect: "local_write",
-  async execute(input, { ports }) {
-    await ports.cancelSearch(input.runId);
-    return { summary: "The search is stopping; what it found is kept." };
-  },
-});
+
 
 export const listSourcesTool = defineTool({
   name: "list_sources",
   group: "jobs",
   description:
-    "Lists the job sources searches read, with ids, addresses, whether each is on, and its last check.",
-  parameters: json.object({}),
-  input: z.object({}).passthrough(),
+    "Lists job sources with ids, addresses, enabled state and last check. Use query to match words in a source's name or address; cursor and limit page the matches. For a simple switch by name, update_sources enableMatching/disableMatching does the lookup and change in one action.",
+  parameters: json.object({ query: json.string(), cursor: json.number(), limit: json.number() }),
+  input: JobFinderSourceQueryInputSchema,
   label: () => "Reading your job sources",
   effect: "read",
-  async execute(_input, { service }) {
+  async execute(input, { service }) {
     const snapshot = await readAssistantWorkspace(service);
-    const targets = snapshot.searchPreferences.discovery.targets;
+    const targets = snapshot.searchPreferences.discovery.targets.filter((target) => !input.query || sourceMatches(target, input.query));
+    const shown = targets.slice(input.cursor ?? 0, (input.cursor ?? 0) + (input.limit ?? 200)).map((target) => ({
+      id: target.id, label: target.label, url: target.startingUrl, enabled: target.enabled,
+      instructions: target.instructionStatus, lastVerifiedAt: target.lastVerifiedAt, staleReason: target.staleReason,
+    }));
     return {
       summary: `${plural(targets.length, "source")}, ${targets.filter((target) => target.enabled).length} on.`,
-      data: targets.slice(0, 200).map((target) => ({
-        id: target.id,
-        label: target.label,
-        url: target.startingUrl,
-        enabled: target.enabled,
-        instructions: target.instructionStatus,
-        lastVerifiedAt: target.lastVerifiedAt,
-        staleReason: target.staleReason,
-      })),
+      data: input.query || input.cursor !== undefined || input.limit !== undefined
+        ? { sources: shown, total: targets.length, next: (input.cursor ?? 0) + shown.length < targets.length ? (input.cursor ?? 0) + shown.length : null }
+        : shown,
     };
   },
 });
+
+function sourceMatches(source: { label: string; startingUrl: string }, query: string): boolean {
+  const text = `${source.label} ${source.startingUrl}`.toLowerCase();
+  return query.toLowerCase().split(/\s+/u).filter(Boolean).every((word) => text.includes(word));
+}
 
 function sourceLabel(url: string): string {
   try {
@@ -996,6 +1001,8 @@ export const updateSourcesTool = defineTool({
     ),
     enableIds: json.ids(),
     disableIds: json.ids(),
+    enableMatching: json.string("Turn on sources whose names or addresses match these words."),
+    disableMatching: json.string("Turn off sources whose names or addresses match these words."),
   }),
   input: z.object({
     addUrls: z.array(z.string().trim().url()).max(200).default([]),
@@ -1016,6 +1023,8 @@ export const updateSourcesTool = defineTool({
       .optional(),
     enableIds: z.array(Id).max(500).default([]),
     disableIds: z.array(Id).max(500).default([]),
+    enableMatching: z.string().trim().min(1).max(200).optional(),
+    disableMatching: z.string().trim().min(1).max(200).optional(),
   }),
   label: () => "Updating your job sources",
   effect: "local_write",
@@ -1070,9 +1079,9 @@ export const updateSourcesTool = defineTool({
           renames.get(target.id) ??
           named.get(target.startingUrl.replace(/\/+$/u, "")) ??
           target.label,
-        enabled: input.enableIds.includes(target.id)
+        enabled: input.enableIds.includes(target.id) || (input.enableMatching && sourceMatches(target, input.enableMatching))
           ? true
-          : input.disableIds.includes(target.id)
+          : input.disableIds.includes(target.id) || (input.disableMatching && sourceMatches(target, input.disableMatching))
             ? false
             : target.enabled,
       })),
@@ -1098,11 +1107,20 @@ export const updateSourcesTool = defineTool({
           (before) => before.id === target.id && before.enabled,
         ),
     ).length;
+    const changes = diffValues(preferences.discovery.targets, savedTargets).map((entry) => ({ ...entry, path: ["search_preferences", "discovery", "targets", ...entry.path] }));
+    const sourceParts = [];
+    if (changes.length && session.recordChange) {
+      for (let cursor = 0; cursor < changes.length; cursor += 600) {
+        sourceParts.push((await session.recordChange({ target: "search_preferences", targetId: null, summary: "Updated job sources", entries: changes.slice(cursor, cursor + 600) })).part);
+      }
+    }
     ports.publishWorkspaceUpdate();
     return {
+      parts: sourceParts,
+      canFinish: additions.length + enabledCount + disabledCount > 0 && [...input.enableIds, ...input.disableIds].every((id) => preferences.discovery.targets.some((target) => target.id === id)),
       summary: `Added ${plural(additions.length, "source")}; ${enabledCount} turned on, ${disabledCount} turned off.${targets.some((target) => preferences.discovery.targets.some((before) => before.id === target.id && before.label !== target.label)) ? " Updated source names." : ""}`,
       data: {
-        sources: savedTargets.map((target) => ({
+        sources: savedTargets.filter((target) => !input.enableMatching && !input.disableMatching || Boolean(input.enableMatching && sourceMatches(target, input.enableMatching)) || Boolean(input.disableMatching && sourceMatches(target, input.disableMatching))).slice(0, input.enableMatching || input.disableMatching ? 25 : savedTargets.length).map((target) => ({
           id: target.id,
           label: target.label,
           enabled: target.enabled,
@@ -1144,7 +1162,7 @@ export const checkSourceTool = defineTool({
   effect: "external",
   async execute(input, { ports, session }) {
     session.assertCurrent();
-    await ports.checkSource(input.sourceId);
+    await ports.checkSource(input.sourceId, { signal: session.signal });
     return {
       summary: "The source check finished; list_sources shows its result.",
     };
@@ -1165,7 +1183,6 @@ export const jobsTools = [
   excludeEmployerTool,
   includeEmployerTool,
   searchForJobsTool,
-  cancelSearchTool,
   listSourcesTool,
   updateSourcesTool,
   checkSourceTool,

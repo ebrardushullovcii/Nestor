@@ -47,6 +47,7 @@ export interface ApplyQueueRunner {
   start(
     jobIds: readonly string[],
     mode: ApplicationAutomationMode,
+    beforeDispatch?: (queue: ApplyQueue) => Promise<void>,
   ): Promise<ApplyQueue>;
   control(
     action: "pause" | "continue" | "stop" | "dismiss",
@@ -342,7 +343,7 @@ export function createApplyQueueRunner(
   }
 
   return {
-    async start(jobIds, mode) {
+    async start(jobIds, mode, beforeDispatch) {
       const unique = [...new Set(jobIds)];
       // Pressed again after it was taken out: it goes back in.
       for (const id of unique) removedJobIds.delete(id);
@@ -385,6 +386,7 @@ export function createApplyQueueRunner(
           updatedAt: createdAt,
         };
       }
+      await beforeDispatch?.(queue);
       await save(queue);
       pump();
       // The press returns once the first run is going or refused, as one

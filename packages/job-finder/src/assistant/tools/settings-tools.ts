@@ -4,10 +4,8 @@ import {
   AiBehaviorPreferenceSchema,
   ApplicationAttestationKindSchema,
   ApplicationAutomationModeSchema,
-  CompanyPreferenceSchema,
   CoverLetterPolicySchema,
   JobSearchSelectivitySchema,
-  NonEmptyStringSchema,
   ProfileAssistantInitiativeSchema,
   ProfileAssistantReplyStyleSchema,
   UpdateAiBehaviorInputSchema,
@@ -28,8 +26,6 @@ import {
   json,
   type AssistantToolContext,
 } from "../tool-kit";
-
-const Id = NonEmptyStringSchema.max(200);
 
 const SETTINGS_LABELS: Record<string, string> = {
   applicationAutomationMode: "Apply mode",
@@ -314,6 +310,7 @@ export const setAppearanceTool = defineTool({
     );
     context.ports.publishWorkspaceUpdate();
     return {
+      canFinish: true,
       summary: `Appearance is now ${after.settings.appearanceTheme}.`,
       data: { receiptId: recorded.receiptId },
       parts: recorded.parts,
@@ -375,54 +372,9 @@ export const pauseActivityTool = defineTool({
   },
 });
 
-export const selectSearchPlanTool = defineTool({
-  name: "select_search_plan",
-  group: "settings",
-  description:
-    "Makes one search plan the active one (the plan Find jobs shows and searches use).",
-  parameters: json.object({ campaignId: json.string() }, ["campaignId"]),
-  input: z.object({ campaignId: Id }),
-  label: () => "Switching the search plan",
-  effect: "local_write",
-  async execute(input, { service, session, ports }) {
-    session.assertCurrent();
-    await service.selectCampaign(input.campaignId);
-    ports.publishWorkspaceUpdate();
-    return { summary: "Switched the active search plan." };
-  },
-});
 
-export const setCompanyPreferenceTool = defineTool({
-  name: "set_company_preference",
-  group: "settings",
-  description:
-    "Marks a company as followed, preferred, to review, excluded or neutral.",
-  parameters: json.object(
-    {
-      companyId: json.string("From search_workspace."),
-      preference: json.enumOf(CompanyPreferenceSchema.options),
-    },
-    ["companyId", "preference"],
-  ),
-  input: z.object({ companyId: Id, preference: CompanyPreferenceSchema }),
-  label: () => "Updating a company preference",
-  effect: "local_write",
-  async execute(input, { service, session, ports }) {
-    session.assertCurrent();
-    try {
-      await service.setCompanyPreference(input);
-    } catch (error) {
-      throw new AssistantToolError(
-        "invalid_input",
-        error instanceof Error
-          ? error.message
-          : "That company could not be updated.",
-      );
-    }
-    ports.publishWorkspaceUpdate();
-    return { summary: `Company marked ${input.preference}.` };
-  },
-});
+
+
 
 export const setDefaultResumeLevelTool = defineTool({
   name: "set_default_resume_level",
@@ -482,6 +434,4 @@ export const settingsTools = [
   updateAiBehaviorTool,
   updateWorkspaceBehaviorTool,
   pauseActivityTool,
-  selectSearchPlanTool,
-  setCompanyPreferenceTool,
 ];

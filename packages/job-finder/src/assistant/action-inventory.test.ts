@@ -80,6 +80,7 @@ describe("assistant action inventory", () => {
         browserAvailable: true,
         screen: "home",
         loadedGroups: [
+          "workspace",
           "profile",
           "files",
           "resume",
