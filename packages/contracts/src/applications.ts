@@ -80,15 +80,18 @@ export const NeedsYouKindSchema = z.enum([
 ]);
 export type NeedsYouKind = z.infer<typeof NeedsYouKindSchema>;
 
-/** The producer supplies a semantic key, qualified by any country or site. */
+/** The producer supplies a semantic key and a country code or site when relevant. */
 export const FormAnswerScopeSchema = z
   .object({
     country: z
       .string()
       .trim()
-      .max(100)
+      .regex(
+        /^(?:[a-z]{2})?$/iu,
+        "Use a two-letter country code, or leave a global answer unscoped.",
+      )
       .default("")
-      .transform((v) => v.toLowerCase()),
+      .transform((v) => v.toUpperCase()),
     siteOrigin: z
       .string()
       .url()

@@ -198,6 +198,11 @@ describe("applications on the job store", () => {
     expect(
       applications.needsYou.findAnswer("sponsorship", { country: "US" }),
     ).toBe("No");
+    expect(() =>
+      applications.needsYou.findAnswer("sponsorship", {
+        country: "United States",
+      }),
+    ).toThrow("country code");
     expect(
       applications.needsYou.findAnswer("sponsorship", { country: "DE" }),
     ).toBeNull();
