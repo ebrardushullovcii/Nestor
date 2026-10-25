@@ -1,5 +1,4 @@
 import { extractSalaryRangeFromListingBody } from "@nestor/contracts";
-import { yieldToEventLoop } from "@nestor/core";
 export { extractSalaryRangeFromListingBody } from "@nestor/contracts";
 import {
   annualizeCompensationAmount,
@@ -449,32 +448,6 @@ export function evaluateCompensationFit(
 }
 
 /**
- * Site furniture that looks like pay.
- *
- * Some boards print one house salary band in the page chrome — a banner, a
- * filter summary, a footer — and a card-level extraction picks it up for every
- * result on the page. One run then stamped the same "$80000 - 150000" on
- * unrelated jobs, including one whose own listing body read "Pay: $22.00 per
- * hour". A per-board rule for that is exactly what ADR 0007 forbids, so the
- * test is statistical and generic: a band that repeats across most of one
- * run's results and is not written anywhere in the job's own text is the
- * page's furniture, not that job's pay, and is dropped.
- *
- * It is deliberately conservative. A small run proves nothing, and a band the
- * listing body itself states is that listing's pay however many neighbours
- * share it.
- */
-const SITE_FURNITURE_SALARY_MIN_RESULTS = 4;
-const SITE_FURNITURE_SALARY_SHARE = 0.6;
-
-function comparableSalaryText(value: string | null | undefined): string {
-  return (value ?? "")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "")
-    .trim();
-}
-
-/**
  * The listing body is stronger evidence than a separate extracted cell when
  * the two disagree. This repairs malformed structured data such as a stored
  * "$200000 - 500000" beside body copy that says "$100k-$500k USD yearly",
@@ -524,68 +497,4 @@ export function isSalaryTextStatedInBody(
 export interface SalaryFurnitureCandidate {
   description: string;
   salaryText: string | null;
-}
-
-/**
- * The salary strings in this run that are the page's furniture rather than any
- * one job's pay. Compare a job's `salaryText` against the returned set before
- * storing or printing it.
- */
-export async function findSiteFurnitureSalaryTexts(
-  postings: readonly SalaryFurnitureCandidate[],
-): Promise<ReadonlySet<string>> {
-  const furniture = new Set<string>();
-  if (postings.length < SITE_FURNITURE_SALARY_MIN_RESULTS) {
-    return furniture;
-  }
-
-  const byBand = new Map<string, SalaryFurnitureCandidate[]>();
-  let turnStarted = performance.now();
-  for (const posting of postings) {
-    if (performance.now() - turnStarted >= 8) {
-      await yieldToEventLoop();
-      turnStarted = performance.now();
-    }
-    const key = comparableSalaryText(posting.salaryText);
-    if (!key) {
-      continue;
-    }
-    const group = byBand.get(key);
-    if (group) group.push(posting);
-    else byBand.set(key, [posting]);
-  }
-
-  const threshold = Math.max(
-    SITE_FURNITURE_SALARY_MIN_RESULTS,
-    Math.ceil(postings.length * SITE_FURNITURE_SALARY_SHARE),
-  );
-  for (const [key, group] of byBand) {
-    // The existing policy can only reject a band this common. Other bands'
-    // bodies cannot change the result, so leave them in SQLite.
-    if (group.length < threshold) continue;
-    let statedInBody = 0;
-    for (const posting of group) {
-      if (performance.now() - turnStarted >= 8) {
-        await yieldToEventLoop();
-        turnStarted = performance.now();
-      }
-      if (isSalaryTextStatedInBody(posting.description, posting.salaryText))
-        statedInBody += 1;
-    }
-    // A band most of the run shares AND that almost none of the listing
-    // bodies actually state is the page's, not the jobs'.
-    if (statedInBody * 2 < group.length) {
-      furniture.add(key);
-    }
-  }
-  return furniture;
-}
-
-/** Whether one job's salary string is in the furniture set for its run. */
-export function isSiteFurnitureSalaryText(
-  salaryText: string | null | undefined,
-  furniture: ReadonlySet<string>,
-): boolean {
-  const key = comparableSalaryText(salaryText);
-  return key.length > 0 && furniture.has(key);
 }

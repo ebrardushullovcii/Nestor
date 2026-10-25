@@ -59,7 +59,6 @@ import { createMatchAssessmentContextFingerprint } from "./match-assessment-sess
 import type { JobFinderRepositorySeed } from "@nestor/db";
 import { readSavedJobProjectionChanges } from "@nestor/db";
 import { mergeSortedRowChanges } from "./sorted-row-changes";
-import { createListingActivityChangeResolver } from "./listing-activity-changes";
 
 import { runApplicationNoResponseAutomation } from "./application-crm";
 import {
@@ -102,8 +101,6 @@ import { persistAutomaticApplicationSafeguards } from "./automatic-safeguards";
 import { reconcileAutomaticBatchSampleReviews } from "./automatic-batch-review-recovery";
 import { reconcileStaleMissingResumeBlockers } from "./workspace-application-blocker-sync";
 import { terminalizeApplicationAfterPreparedPageLost } from "./workspace-application-user-action";
-import { recordCampaignDiscoveryResult } from "./workspace-campaign-methods";
-import { recoverInterruptedDiscoveryRun } from "./workspace-discovery-run-helpers";
 import {
   deriveSourceAccessPrompts,
   resolveSourceBrowserEntryUrl,
@@ -132,10 +129,7 @@ import {
 } from "./campaign-dashboard";
 import {
   projectDiscoveryJobViews,
-  inactiveListingLedger,
 } from "./listing-activity";
-import { createSyncedJobIdentityIndex } from "./discovery-run-indexes";
-import { warmDiscoveryLedgerIndex } from "./workspace-discovery-ledger";
 import { memoizeSortedBySameElements } from "./same-elements-memo";
 import { settleStoredResumeDrafts } from "./resume-settle-stored-drafts";
 import { rebindLegacyFitVerdicts } from "./legacy-fit-fingerprints";
@@ -152,16 +146,11 @@ function rankBySameElements<T extends SavedJob>() {
   return memoizeSortedBySameElements<T>(compareDiscoveryJobs);
 }
 const rankDiscoveryJobs = rankBySameElements<DiscoveryJobView>();
-const rankDismissedJobs = rankBySameElements<DiscoveryJobView>();
 const rankCompanyJobs = rankBySameElements<SavedJob>();
 
 type JobViewInput = {
   rawSavedJobs: readonly SavedJob[];
   planId: string | null;
-  pendingDiscoveryJobs: readonly SavedJob[];
-  discoveryLedger: Parameters<
-    typeof projectDiscoveryJobViews<SavedJob>
-  >[0]["discoveryLedger"];
   listingSignals: Parameters<
     typeof projectDiscoveryJobViews<SavedJob>
   >[0]["listingSignals"];
@@ -173,43 +162,21 @@ type JobViewInput = {
   companies: readonly { canonicalName: string; jobIds: readonly string[] }[];
 };
 
-type JobViewIdentityIndex = NonNullable<
-  Parameters<typeof projectDiscoveryJobViews<SavedJob>>[0]["identityIndex"]
->;
-
 /** The workspace's job lists, from its saved and staged jobs. */
-function buildJobViews(
-  input: JobViewInput,
-  identityIndex?: JobViewIdentityIndex,
-) {
+function buildJobViews(input: JobViewInput) {
   const savedJobs = input.rawSavedJobs.map((job) =>
     readPlanAssessment(job, input.planId),
   );
   // Ranked below with the rest of the list; ordering them here as well
   // sorted every saved job twice on each refresh.
   const persistedDiscoveryJobs = selectVisibleDiscoveryJobs(savedJobs);
-  const savedJobIds = new Set(savedJobs.map((job) => job.id));
-  const mergedPendingJobs = input.pendingDiscoveryJobs
-    .filter((job) => !savedJobIds.has(job.id))
-    .map((job) => readPlanAssessment(job, input.planId));
   // Listing activity is projected before anything is ranked: a listing whose
   // own text says it is closed must already be marked closed when the
   // ordering decides what comes first.
   const projectedJobs = projectDiscoveryJobViews({
-    jobs: [...savedJobs, ...mergedPendingJobs],
-    discoveryLedger: input.discoveryLedger,
+    jobs: savedJobs,
     listingSignals: input.listingSignals,
     applicationAttempts: input.applicationAttempts,
-    identityJobs:
-      input.pendingDiscoveryJobs.length === 0
-        ? input.rawSavedJobs
-        : [
-            ...input.rawSavedJobs,
-            ...input.pendingDiscoveryJobs.filter(
-              (job) => !savedJobIds.has(job.id),
-            ),
-          ],
-    ...(identityIndex ? { identityIndex } : {}),
   });
   const projectedJobById = new Map(
     projectedJobs.map((job) => [job.id, job] as const),
@@ -219,16 +186,7 @@ function buildJobViews(
       const projected = projectedJobById.get(job.id);
       return projected ? [projected] : [];
     });
-  const discoveryJobs = rankDiscoveryJobs(
-    project([...persistedDiscoveryJobs, ...mergedPendingJobs]),
-  );
-  const projectedDismissedDiscoveryJobs = rankDismissedJobs(
-    project(
-      savedJobs.filter(
-        (job) => job.status === "archived" && job.discoveryFeedback !== null,
-      ),
-    ),
-  );
+  const discoveryJobs = rankDiscoveryJobs(project(persistedDiscoveryJobs));
   const companyJobIds = new Set(
     input.companies
       .filter((company) => isListableCompanyName(company.canonicalName))
@@ -252,7 +210,6 @@ function buildJobViews(
   return {
     savedJobs,
     discoveryJobs,
-    projectedDismissedDiscoveryJobs,
     companyJobs,
     projectedJobById,
     companyJobIds,
@@ -266,7 +223,7 @@ function buildJobViews(
  * ordering caches stay its own.
  */
 function buildHomeTierJobViews(
-  input: Omit<JobViewInput, "pendingDiscoveryJobs" | "companies"> & {
+  input: Omit<JobViewInput, "companies"> & {
     /** Each job's listing activity as the full list states it (indexed). */
     listingActivities: ReadonlyMap<string, ListingActivity>;
   },
@@ -276,8 +233,6 @@ function buildHomeTierJobViews(
   );
   const discoveryJobs = projectDiscoveryJobViews({
     jobs: selectVisibleDiscoveryJobs(savedJobs),
-    identityJobs: input.rawSavedJobs,
-    discoveryLedger: input.discoveryLedger,
     listingSignals: input.listingSignals,
     applicationAttempts: input.applicationAttempts,
   }).map((view) => {
@@ -287,7 +242,6 @@ function buildHomeTierJobViews(
   return {
     savedJobs,
     discoveryJobs,
-    projectedDismissedDiscoveryJobs: [],
     companyJobs: [],
   };
 }
@@ -298,10 +252,7 @@ function buildHomeTierJobViews(
 // loses Zod's cached shape.
 const BorrowedSnapshotRestSchema = JobFinderWorkspaceSnapshotSchema.omit({
   discoveryJobs: true,
-  dismissedDiscoveryJobs: true,
   companyJobs: true,
-  activeDiscoveryRun: true,
-  recentDiscoveryRuns: true,
   activeSourceDebugRun: true,
   recentSourceDebugRuns: true,
   tailoredAssets: true,
@@ -618,7 +569,6 @@ export function createWorkspaceSnapshotProfileMethods(
   // whole-profile fingerprint are re-bound before any edit can strand them.
   let legacyFitFingerprintRebinding: Promise<unknown> | null = null;
   let lastNoResponseAutomationRunAt: number | null = null;
-  let ledgerWarmup: Promise<void> | null = null;
   const normalizedDraftRows = new WeakMap<
     object,
     {
@@ -687,19 +637,11 @@ export function createWorkspaceSnapshotProfileMethods(
     // Service-private lookup; published rows and lists remain immutable.
     rawById: Map<string, SavedJob>;
   } | null = null;
-  // Kept in step with the listed jobs from one refresh to the next, so a
-  // refresh indexes only the jobs that changed since the last one.
-  const jobViewIdentityIndex =
-    ctx.listingActivityIdentityIndex ??
-    createSyncedJobIdentityIndex<SavedJob>((job) => job);
-  const listingActivityChanges =
-    createListingActivityChangeResolver(jobViewIdentityIndex);
   function deriveJobViews(input: JobViewInput) {
     const last = lastJobViews;
     const sameEvidence =
       last &&
       last.input.planId === input.planId &&
-      last.input.pendingDiscoveryJobs === input.pendingDiscoveryJobs &&
       last.input.listingSignals === input.listingSignals &&
       last.input.applicationAttempts === input.applicationAttempts;
     let companyJobIds = last?.views.companyJobIds ?? new Set<string>();
@@ -715,13 +657,8 @@ export function createWorkspaceSnapshotProfileMethods(
       )
         companyJobIds = next;
     }
-    const sameInactive =
-      last &&
-      inactiveListingLedger(last.input.discoveryLedger) ===
-        inactiveListingLedger(input.discoveryLedger);
     if (
       sameEvidence &&
-      sameInactive &&
       companyJobIds === last.views.companyJobIds &&
       last.input.rawSavedJobs === input.rawSavedJobs
     ) {
@@ -751,35 +688,9 @@ export function createWorkspaceSnapshotProfileMethods(
       const removed = changes
         ? changes.removedIds.map((id) => last.rawById.get(id)!).filter(Boolean)
         : [...last.rawById.values()].filter((job) => !rawById.has(job.id));
-      const evidenceIds = listingActivityChanges({
-        beforeJobs:
-          input.pendingDiscoveryJobs.length === 0
-            ? last.input.rawSavedJobs
-            : [
-                ...last.input.rawSavedJobs,
-                ...input.pendingDiscoveryJobs.filter(
-                  (row) => !last.rawById.has(row.id),
-                ),
-              ],
-        jobs:
-          input.pendingDiscoveryJobs.length === 0
-            ? input.rawSavedJobs
-            : [
-                ...input.rawSavedJobs,
-                ...input.pendingDiscoveryJobs.filter(
-                  (row) => !hasCurrentRaw(row.id),
-                ),
-              ],
-        beforeById: last.rawById,
-        changed: rawChanged,
-        removed,
-        beforeLedger: last.input.discoveryLedger,
-        ledger: input.discoveryLedger,
-      });
       const changedIds = new Set([
         ...rawChanged.map((row) => row.id),
         ...removed.map((row) => row.id),
-        ...evidenceIds,
       ]);
       if (companyJobIds !== last.views.companyJobIds) {
         for (const id of last.views.companyJobIds)
@@ -791,26 +702,12 @@ export function createWorkspaceSnapshotProfileMethods(
         const row = currentRaw(id);
         return row ? [readPlanAssessment(row, input.planId)] : [];
       });
-      for (const job of input.pendingDiscoveryJobs)
-        if (changedIds.has(job.id) && !hasCurrentRaw(job.id))
-          changed.push(readPlanAssessment(job, input.planId));
       const projectedJobById = last.views.projectedJobById;
       const projectedEdits = new Map(
         projectDiscoveryJobViews({
           jobs: changed,
-          identityJobs:
-            input.pendingDiscoveryJobs.length === 0
-              ? input.rawSavedJobs
-              : [
-                  ...input.rawSavedJobs,
-                  ...input.pendingDiscoveryJobs.filter(
-                    (job) => !hasCurrentRaw(job.id),
-                  ),
-                ],
-          discoveryLedger: input.discoveryLedger,
           listingSignals: input.listingSignals,
           applicationAttempts: input.applicationAttempts,
-          identityIndex: jobViewIdentityIndex,
         }).map((view) => [view.id, view]),
       );
       const project = (jobs: readonly SavedJob[]) =>
@@ -854,17 +751,6 @@ export function createWorkspaceSnapshotProfileMethods(
           project(selectVisibleDiscoveryJobs(changed)),
           compareDiscoveryJobs,
         ),
-        projectedDismissedDiscoveryJobs: mergeSortedRowChanges(
-          last.views.projectedDismissedDiscoveryJobs,
-          changedIds,
-          project(
-            changed.filter(
-              (job) =>
-                job.status === "archived" && job.discoveryFeedback !== null,
-            ),
-          ),
-          compareDiscoveryJobs,
-        ),
         companyJobs: mergeSortedRowChanges(
           last.views.companyJobs,
           changedIds,
@@ -895,10 +781,7 @@ export function createWorkspaceSnapshotProfileMethods(
       return views;
     }
     // Only the borrowed display rows keep their identity between refreshes.
-    const views = buildJobViews(
-      input,
-      Object.isFrozen(input.rawSavedJobs) ? jobViewIdentityIndex : undefined,
-    );
+    const views = buildJobViews(input);
     lastJobViews = Object.isFrozen(input.rawSavedJobs)
       ? {
           input,
@@ -1444,111 +1327,15 @@ export function createWorkspaceSnapshotProfileMethods(
   }
 
   async function recoverInterruptedDiscoveryStateOnLoad(): Promise<void> {
-    if (
-      ctx.activeDiscoveryAbortControllerRef.current ||
-      ctx.activeDiscoveryPromiseRef.current
-    ) {
-      return;
-    }
-
     if (interruptedDiscoveryRecoveryPromise) {
       await interruptedDiscoveryRecoveryPromise;
       return;
     }
 
     const recoveryPromise = (async () => {
-      // Startup checks once using current run ownership, outside snapshots.
-      // Read canonical state only inside the commit to retain every checkpoint.
       const discoveryState =
         await ctx.repository.readDiscoveryBootstrapProjection();
-      if (
-        ctx.activeDiscoveryAbortControllerRef.current ||
-        ctx.activeDiscoveryPromiseRef.current
-      ) {
-        return;
-      }
-
       await recoverInterruptedSourceDebugOnLoad(discoveryState);
-      const activeRun = discoveryState.activeRun;
-      if (discoveryState.runState !== "running" && !activeRun) {
-        return;
-      }
-      const [searchPreferences, campaignState] = await Promise.all([
-        ctx.repository.getSearchPreferences(),
-        ctx.repository.getCampaignState(),
-      ]);
-      if (
-        ctx.activeDiscoveryAbortControllerRef.current ||
-        ctx.activeDiscoveryPromiseRef.current
-      ) {
-        return;
-      }
-
-      const completedAt = new Date().toISOString();
-      const historyLimit =
-        normalizeSearchPreferences(searchPreferences).discovery.historyLimit;
-      // Recheck ownership at commit time: a newer writer (for example a run
-      // started between the read above and this transaction) that replaced
-      // the observed run must survive untouched.
-      const observedRunState = discoveryState.runState;
-      const observedActiveRunId = activeRun?.id ?? null;
-      const observedActiveRunState = activeRun?.state ?? null;
-
-      const persisted = await ctx.repository.commitDiscoveryStateUpdate(
-        (current) => {
-          if (
-            current.runState !== observedRunState ||
-            (current.activeRun?.id ?? null) !== observedActiveRunId ||
-            (current.activeRun?.state ?? null) !== observedActiveRunState
-          ) {
-            return current;
-          }
-
-          // The cheap read above only detects recovery work. Recover the
-          // transaction-current canonical run so every checkpoint (including
-          // updates since that read) survives the move into history.
-          const recoveredRunBase =
-            current.activeRun?.state === "running"
-              ? recoverInterruptedDiscoveryRun(current.activeRun, completedAt)
-              : current.activeRun;
-          const recoveredRun = recoveredRunBase
-            ? {
-                ...recoveredRunBase,
-                campaignId:
-                  recoveredRunBase.campaignId ??
-                  campaignState?.activeCampaignId ??
-                  null,
-              }
-            : null;
-          return {
-            ...current,
-            runState: recoveredRun?.state ?? "failed",
-            activeRun: null,
-            recentRuns: recoveredRun
-              ? [
-                  recoveredRun,
-                  ...current.recentRuns.filter(
-                    (run) => run.id !== recoveredRun.id,
-                  ),
-                ].slice(0, historyLimit)
-              : current.recentRuns,
-          };
-        },
-      );
-      const recoveredRun = persisted.recentRuns.find(
-        (run) =>
-          run.id === observedActiveRunId && run.runPhase === "interrupted",
-      );
-      if (
-        recoveredRun?.campaignId &&
-        persisted.activeRun?.id !== recoveredRun.id
-      ) {
-        await recordCampaignDiscoveryResult({
-          ctx,
-          campaignId: recoveredRun.campaignId,
-          beforeJobProvenanceFingerprints: new Map(),
-        });
-      }
     })();
 
     interruptedDiscoveryRecoveryPromise = recoveryPromise;
@@ -1674,7 +1461,6 @@ export function createWorkspaceSnapshotProfileMethods(
     if (!homeTier)
       legacyFitFingerprintRebinding ??= rebindLegacyFitVerdicts(ctx, {
         savedJobs: rawSavedJobs,
-        pendingDiscoveryJobs: discovery.pendingDiscoveryJobs,
       }).catch((error: unknown) => {
         console.warn(
           "[Job Finder] Re-binding stored fit verdicts failed",
@@ -1812,22 +1598,10 @@ export function createWorkspaceSnapshotProfileMethods(
           of: (job) => readPlanAssessment(job, snapshotPlanId),
         },
       );
-    if (
-      !homeTier &&
-      !lastJobViews &&
-      inactiveListingLedger(discovery.discoveryLedger).length > 0
-    )
-      await jobViewIdentityIndex.warm?.(rawSavedJobs);
-    const {
-      savedJobs,
-      discoveryJobs,
-      projectedDismissedDiscoveryJobs,
-      companyJobs,
-    } = homeTier
+    const { savedJobs, discoveryJobs, companyJobs } = homeTier
       ? buildHomeTierJobViews({
           rawSavedJobs,
           planId: snapshotPlanId,
-          discoveryLedger: discovery.discoveryLedger,
           listingSignals: intelligence.safeguards.listingSignals,
           applicationAttempts,
           listingActivities: (await homeTierRead!).listingActivities,
@@ -1835,8 +1609,6 @@ export function createWorkspaceSnapshotProfileMethods(
       : deriveJobViews({
           rawSavedJobs,
           planId: snapshotPlanId,
-          pendingDiscoveryJobs: discovery.pendingDiscoveryJobs,
-          discoveryLedger: discovery.discoveryLedger,
           listingSignals: intelligence.safeguards.listingSignals,
           applicationAttempts,
           companies: intelligence.companies,
@@ -1952,20 +1724,6 @@ export function createWorkspaceSnapshotProfileMethods(
     const campaignUserActionEvents = userActionEvents.filter((event) =>
       campaignUserActionRequestIds.has(event.requestId),
     );
-    const activeCampaignRunIds = new Set(
-      activeCampaign.history.flatMap((entry) =>
-        entry.discoveryRunId ? [entry.discoveryRunId] : [],
-      ),
-    );
-    const activeCampaignRecentRuns = discovery.recentRuns.filter(
-      (run) =>
-        run.campaignId === activeCampaign.id ||
-        activeCampaignRunIds.has(run.id),
-    );
-    const activeCampaignActiveRun =
-      discovery.activeRun?.campaignId === activeCampaign.id
-        ? discovery.activeRun
-        : null;
     const nextProgress = deriveCampaignProgress({
       campaign: activeCampaign,
       savedJobs: campaignSavedJobs,
@@ -1974,10 +1732,7 @@ export function createWorkspaceSnapshotProfileMethods(
       applyRuns: campaignApplyRuns,
       applyJobResults: campaignApplyJobResults,
       unresolvedActions: campaignUnresolvedActionCount,
-      lastRunAt:
-        activeCampaignActiveRun?.startedAt ??
-        activeCampaignRecentRuns[0]?.startedAt ??
-        null,
+      lastRunAt: null,
       now: generatedAt,
     });
     // Progress is derived and carries its own time; the plan's updatedAt is
@@ -2104,14 +1859,9 @@ export function createWorkspaceSnapshotProfileMethods(
       browserSession,
       sourceAccessPrompts,
       discoverySessions,
-      discoveryRunState: discovery.runState,
-      fitJudgmentProgress: ctx.fitJudgmentProgressRef?.current ?? null,
-      activeDiscoveryRun: discovery.activeRun,
-      recentDiscoveryRuns: activeCampaignRecentRuns,
       activeSourceDebugRun: discovery.activeSourceDebugRun,
       recentSourceDebugRuns: discovery.recentSourceDebugRuns,
       discoveryJobs,
-      dismissedDiscoveryJobs: projectedDismissedDiscoveryJobs,
       companyJobs,
       // The first view's rows are not Find jobs' order; it picks no default.
       selectedDiscoveryJobId: homeTier ? null : (discoveryJobs[0]?.id ?? null),
@@ -2149,20 +1899,6 @@ export function createWorkspaceSnapshotProfileMethods(
     };
     if (!borrowValidatedJobs)
       return JobFinderWorkspaceSnapshotSchema.parse(snapshot);
-    // The window only needs display evidence. Keep the canonical feedback
-    // cache warm for triage after the first full view has reached the window.
-    if (!homeTier)
-      ledgerWarmup ??= (async () => {
-        await ctx.backgroundWorkReady;
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        if (ctx.isWorkspaceClosing?.()) return;
-        const canonical = await ctx.repository.readDiscoveryStateForRun?.();
-        await warmDiscoveryLedgerIndex(
-          canonical?.discoveryLedger ?? discovery.discoveryLedger,
-        );
-      })().catch((error: unknown) => {
-        console.warn("[Job Finder] Warming triage history failed", error);
-      });
     // Rows were validated on entering the immutable repository projection.
     // Re-parsing the same jobs in three lists deep-copied every listing again
     // on each progress update. Only display callers borrow these values; IPC
@@ -2172,12 +1908,9 @@ export function createWorkspaceSnapshotProfileMethods(
       searchPreferences: snapshot.searchPreferences,
       campaigns: snapshot.campaigns,
       intelligence: snapshot.intelligence,
-      activeDiscoveryRun: discovery.activeRun,
-      recentDiscoveryRuns: activeCampaignRecentRuns,
       activeSourceDebugRun: discovery.activeSourceDebugRun,
       recentSourceDebugRuns: discovery.recentSourceDebugRuns,
       discoveryJobs,
-      dismissedDiscoveryJobs: projectedDismissedDiscoveryJobs,
       companyJobs,
       tailoredAssets:
         tailoredAssets as JobFinderWorkspaceSnapshot["tailoredAssets"],
@@ -2361,9 +2094,6 @@ export function createWorkspaceSnapshotProfileMethods(
       applyRuns: [],
       userActionRequests: bootstrapUserActionRequests,
       discovery: {
-        runState: discovery.runState,
-        activeRun: discovery.activeRun,
-        recentRuns: [],
         activeSourceDebugRun: discovery.activeSourceDebugRun,
       },
       searchPreferences: bootstrapSearchPreferences,
@@ -2389,13 +2119,9 @@ export function createWorkspaceSnapshotProfileMethods(
       ),
       sourceAccessPrompts: [],
       discoverySessions: discovery.sessions,
-      discoveryRunState: discovery.runState,
-      activeDiscoveryRun: discovery.activeRun,
-      recentDiscoveryRuns: [],
       activeSourceDebugRun: discovery.activeSourceDebugRun,
       recentSourceDebugRuns: [],
       discoveryJobs: [],
-      dismissedDiscoveryJobs: [],
       companyJobs: [],
       selectedDiscoveryJobId: null,
       reviewQueue: [],
@@ -2473,14 +2199,7 @@ export function createWorkspaceSnapshotProfileMethods(
               },
         ),
       });
-      await ctx.repository.commitSavedJobDelta({
-        update: preserveLabels,
-        updateDiscoveryState: (current) => ({
-          ...current,
-          pendingDiscoveryJobs:
-            current.pendingDiscoveryJobs.map(preserveLabels),
-        }),
-      });
+      await ctx.repository.commitSavedJobDelta({ update: preserveLabels });
     }
   }
 

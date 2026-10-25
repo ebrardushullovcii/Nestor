@@ -1,22 +1,7 @@
 export {
   createBrowserSessionSnapshot,
-  mergePendingJobs,
-  mergeSavedJobs,
   mergeSessionStates,
-  overlayTouchedPendingJobs,
-  overlayTouchedSavedJobs,
 } from "./workspace-discovery-state-helpers";
-export {
-  applyInactiveLedgerMarks,
-  createDiscoveryFreshnessDigest,
-  createDiscoveryLedgerIndex,
-  createDiscoveryProvenance,
-  findDiscoveryLedgerEntry,
-  formatDiscoveryFreshnessDigest,
-  markSavedJobStatusInLedger,
-  recordDiscoveredPostingInLedger,
-  shouldSkipPostingFromLedger,
-} from "./workspace-discovery-ledger";
 export {
   buildSourceDebugPhasePacket,
   buildSourceDebugPhaseSummary,

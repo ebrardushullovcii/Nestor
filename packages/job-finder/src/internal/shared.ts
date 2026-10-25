@@ -34,27 +34,3 @@ export function createUniqueId(prefix: string): string {
 
   return `${prefix}_${suffix}`;
 }
-
-/**
- * Source-generic absence phrasing.
- *
- * Discovery stores a readable placeholder ("Location not stated", "Employer
- * not listed") when a board exposes no value at all, so by the time the text
- * reaches matching it is never an empty string. Reading that placeholder as a
- * real value produced a fabricated conflict — the app claiming it had compared
- * a location it never saw. Absence must read as unknown, never as evidence,
- * and never as a conflict, on every board.
- */
-const absentFieldTextPattern =
-  /^(?:[-–—]+|n\/?a|tbd|unknown|none|null|undefined|(?:[\p{L} ]{0,24}?)not\s+(?:stated|listed|specified|provided|disclosed|given|available|mentioned|set|shared|posted|defined))$/iu;
-
-export function isAbsentFieldText(value: string): boolean {
-  const normalized = value
-    .replace(/\s+/gu, " ")
-    .trim()
-    .replace(/[.:;,]+$/u, "");
-  if (normalized.length === 0) {
-    return true;
-  }
-  return absentFieldTextPattern.test(normalized);
-}

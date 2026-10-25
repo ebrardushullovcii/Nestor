@@ -37,7 +37,6 @@ export * from "./resume-commands";
 export * from "./job-search-engine";
 export * from "./listing-search";
 export * from "./discovery-cpu";
-export * from "./discovery-feedback-batch";
 export * from "./starter-job-sources";
 export * from "./diagnostic-export";
 export * from "./performance";

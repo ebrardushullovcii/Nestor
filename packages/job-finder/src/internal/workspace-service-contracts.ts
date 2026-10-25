@@ -27,25 +27,16 @@ import type {
   CandidateAssetListResult,
   CandidateProfile,
   ClearApplicationAnswerCommandInput,
-  DiscoveryActivityEvent,
-  DiscoveryFeedbackBatchResult,
-  DiscoveryRunScope,
   EditableSourceInstructionArtifact,
-  EmployerExclusionPreview,
   JobFinderActivityControl,
   JobFinderApplyCopilotActionInput,
-  JobFinderDiscoveryCancellationReply,
-  JobFinderDiscoveryCommandReply,
-  JobFinderDismissDiscoveryJobInput,
   JobFinderInterviewFollowUpInput,
   JobFinderOpenBrowserSessionInput,
   JobFinderPreparedApplicationPageInput,
   JobFinderResumePreview,
-  JobFinderSearchRequest,
   JobFinderSettings,
   JobFinderWorkspaceSnapshot,
   JobPosting,
-  JobSearchCampaignMode,
   JobSearchPreferences,
   ProfileCopilotContext,
   ProfileCopilotPatchOperation,
@@ -54,7 +45,6 @@ import type {
   ProfileSetupState,
   ProjectGroupedManualAnswerCommand,
   RawApplyPage,
-  RemoveEmployerExclusionInput,
   ResumeDocumentBundle,
   ResumeDraftProcessor,
   ResumeImportFieldCandidate,
@@ -95,12 +85,6 @@ export interface JobFinderWorkspaceResetOptions {
    * reset.
    */
   beforeStateReset?: () => Promise<void>;
-}
-
-export interface DiscoveryFeedbackBatchOptions {
-  signal?: AbortSignal;
-  /** Checked before every write, including inside the repository transaction. */
-  assertCurrent?: () => void;
 }
 
 export interface JobFinderWorkspaceService {
@@ -278,27 +262,6 @@ export interface JobFinderWorkspaceService {
   setActivityControl(
     input: SetJobFinderActivityControlInput,
   ): Promise<JobFinderWorkspaceSnapshot>;
-  runDiscovery(targetId?: string): Promise<JobFinderWorkspaceSnapshot>;
-  runAgentDiscovery(
-    onActivity?: (event: DiscoveryActivityEvent) => void,
-    signal?: AbortSignal,
-    targetId?: string,
-    searchRequest?: JobFinderSearchRequest,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  runAgentDiscoveryCommand(
-    onActivity?: (event: DiscoveryActivityEvent) => void,
-    targetId?: string,
-    searchRequest?: JobFinderSearchRequest,
-  ): Promise<JobFinderDiscoveryCommandReply>;
-  cancelDiscoveryRunCommand(
-    runId: string,
-  ): Promise<JobFinderDiscoveryCancellationReply>;
-  runDiscoveryForTarget(
-    targetId: string,
-    onActivity?: (event: DiscoveryActivityEvent) => void,
-    signal?: AbortSignal,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  cancelDiscoveryRun(runId: string): Promise<JobFinderWorkspaceSnapshot>;
   runSourceDebug(
     targetId: string,
     signal?: AbortSignal,
@@ -332,32 +295,6 @@ export interface JobFinderWorkspaceService {
   removeJobFromReview(jobId: string): Promise<JobFinderWorkspaceSnapshot>;
   /** Moves several jobs back to Find jobs, then reads the workspace once. */
   removeJobsFromReview?(jobIds: readonly string[]): Promise<void>;
-  dismissDiscoveryJob(
-    input: JobFinderDismissDiscoveryJobInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  dismissDiscoveryJobs?(
-    inputs: readonly JobFinderDismissDiscoveryJobInput[],
-    options?: DiscoveryFeedbackBatchOptions,
-  ): Promise<DiscoveryFeedbackBatchResult>;
-  excludeEmployerDiscoveryJobs?(
-    input: {
-      jobId: string;
-      jobIds: readonly string[];
-      expectedNormalizedCompanyName: string;
-    },
-    options?: DiscoveryFeedbackBatchOptions,
-  ): Promise<DiscoveryFeedbackBatchResult>;
-  previewEmployerExclusion(jobId: string): Promise<EmployerExclusionPreview>;
-  removeEmployerExclusion(
-    input: RemoveEmployerExclusionInput,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  restoreDismissedDiscoveryJob(
-    jobId: string,
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  restoreDismissedDiscoveryJobs?(
-    jobIds: readonly string[],
-    options?: DiscoveryFeedbackBatchOptions,
-  ): Promise<DiscoveryFeedbackBatchResult>;
   getApplyRunDetails(
     runId: string,
     jobId: string,
@@ -432,8 +369,6 @@ export interface JobFinderWorkspaceService {
    * they were handed (the site showed its confirmation). Returns how many.
    */
   recordApplicationsSentByPerson(): Promise<number>;
-  /** Judges every job of the active plan that has no current fit verdict. */
-  judgeUnjudgedJobs(): Promise<JobFinderWorkspaceSnapshot>;
   /**
    * Sends one application the person already looked over.
    *
@@ -516,27 +451,6 @@ export interface JobFinderWorkspaceService {
   }>;
 }
 
-type DiscoveryTargetPipelineSharedOptions = {
-  onActivity?: (event: DiscoveryActivityEvent) => void;
-  signal?: AbortSignal;
-  allowInactiveMarking?: boolean;
-  useAgentRuntime?: boolean;
-  /** Explicit campaign context; discovery then uses the campaign's preferences. */
-  campaign?: CampaignRunContext;
-  /** The person's instruction and run-scoped search knobs. */
-  searchRequest?: JobFinderSearchRequest;
-};
-
-export type DiscoveryTargetPipelineOptions =
-  | (DiscoveryTargetPipelineSharedOptions & {
-      scope: "single_target";
-      targetId: string;
-    })
-  | (DiscoveryTargetPipelineSharedOptions & {
-      scope: Exclude<DiscoveryRunScope, "single_target">;
-      targetId?: never;
-    });
-
 export interface RenderedResumeArtifact {
   fileName: string | null;
   storagePath: string | null;
@@ -546,23 +460,6 @@ export interface RenderedResumeArtifact {
   intermediateStoragePath?: string | null;
   pageCount?: number | null;
   warnings?: readonly string[];
-}
-
-/**
- * Explicit campaign discovery context: run the pipeline against a specific
- * campaign's preferences and tag the run record with that campaign id without
- * changing the active campaign or the global search preferences.
- *
- * `runJobBudget` carries the campaign's explicit discovery run budget (from
- * `limits.discoveryRunJobBudget`). When omitted or null the pipeline falls back
- * to the campaign search preferences' `discovery.runJobBudget`, then to the
- * interactive precision default.
- */
-export interface CampaignRunContext {
-  campaignId: string;
-  mode: JobSearchCampaignMode;
-  searchPreferences: JobSearchPreferences;
-  runJobBudget?: number | null;
 }
 
 export interface JobFinderDocumentManager {
@@ -702,4 +599,6 @@ export interface CreateJobFinderWorkspaceServiceOptions {
    * (closing the browser mid-run), so the start is not refused.
    */
   onExplicitUserStart?: () => void | Promise<void>;
+  /** Whether a search has finished on the job store; it completes setup. */
+  hasRunJobSearch?: () => boolean;
 }

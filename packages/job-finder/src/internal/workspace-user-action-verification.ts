@@ -90,9 +90,6 @@ export async function verifySourceAccessUserAction(input: {
   browserRuntime: BrowserSessionRuntime;
   repository: JobFinderRepository;
   request: UserActionRequest;
-  onVerified?: (
-    request: UserActionRequest,
-  ) => Promise<{ status: "continued" } | { status: "blocked"; message: string }>;
 }): Promise<UserActionRequest | null> {
   const request = UserActionRequestSchema.parse(input.request);
   if (request.state !== "verifying" || !isSourceAccessUserAction(request)) {
@@ -115,14 +112,6 @@ export async function verifySourceAccessUserAction(input: {
     return null;
   }
 
-  let verifiedContinuationMessage: string | null = null;
-  if (outcome === "verified" && input.onVerified) {
-    const continuation = await input.onVerified(currentRequest);
-    if (continuation.status === "blocked") {
-      verifiedContinuationMessage = continuation.message;
-    }
-  }
-
   const checkedAt = new Date().toISOString();
   const reduction = reduceUserActionVerification(
     currentRequest,
@@ -130,7 +119,7 @@ export async function verifySourceAccessUserAction(input: {
       requestId: currentRequest.id,
       verificationId: getVerificationEventId(currentRequest),
       expectedRevision: currentRequest.revision,
-      outcome: verifiedContinuationMessage ? "still_blocked" : outcome,
+      outcome,
       checkedAt,
       credentialsPolicy: "browser_only",
       submitAuthorized: false,
@@ -142,16 +131,8 @@ export async function verifySourceAccessUserAction(input: {
     return null;
   }
 
-  const nextRequest = verifiedContinuationMessage
-    ? UserActionRequestSchema.parse({
-        ...reduction.request,
-        summary: verifiedContinuationMessage,
-        instructions: [verifiedContinuationMessage],
-      })
-    : reduction.request;
-
   const commit = await input.repository.commitUserActionTransition({
-    request: nextRequest,
+    request: reduction.request,
     event: reduction.event,
   });
   return commit.request.state === "resolved"

@@ -1122,9 +1122,6 @@ function createBenchmarkContext(input: {
     browserRuntime,
     documentManager,
     repository,
-    activeDiscoveryAbortControllerRef: { current: null },
-    activeDiscoveryRunIdRef: { current: null },
-    activeDiscoveryPromiseRef: { current: null },
     activeSourceDebugExecutionIdRef: { current: null },
     activeSourceDebugAbortControllerRef: { current: null },
     activeSourceDebugPromiseRef: { current: null },
@@ -1156,8 +1153,6 @@ function createBenchmarkContext(input: {
       ),
     getActiveCampaignId: () => Promise.resolve(null),
     resumeApplicationUserAction: () => Promise.resolve(undefined),
-    continueDiscoveryForSource: () =>
-      Promise.resolve({ status: "continued" as const }),
     runSourceDebugWorkflow: () =>
       Promise.reject(
         new Error("Source debug is not available in the benchmark harness."),
@@ -1165,7 +1160,6 @@ function createBenchmarkContext(input: {
     persistDiscoveryState: (updater) =>
       repository.commitDiscoveryStateUpdate(updater),
     refreshDiscoverySessions: () => Promise.resolve([]),
-    saveDiscoveryTargetUpdate: () => repository.getSearchPreferences(),
     saveJobSiteMetadata: () =>
       Promise.reject(
         new Error("Source metadata is not used by resume import."),

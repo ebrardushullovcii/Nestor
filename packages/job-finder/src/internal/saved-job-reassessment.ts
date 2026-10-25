@@ -89,10 +89,7 @@ export async function reassessSavedJobs(
       ? job
       : { ...job, matchAssessment: next };
   };
-  const [savedJobs, discovery] = await Promise.all([
-    ctx.repository.readSavedJobsProjection(),
-    ctx.repository.readDiscoveryDisplayProjection(),
-  ]);
+  const savedJobs = await ctx.repository.readSavedJobsProjection();
 
   const changedIds: string[] = [];
   for (let start = 0; start < savedJobs.length; start += JOBS_PER_TURN) {
@@ -111,26 +108,5 @@ export async function reassessSavedJobs(
     });
   }
 
-  let pendingChanged = false;
-  for (
-    let start = 0;
-    start < discovery.pendingDiscoveryJobs.length && !pendingChanged;
-    start += JOBS_PER_TURN
-  ) {
-    if (start > 0) await nextTurn();
-    if (closing()) return changedIds.length > 0;
-    pendingChanged = discovery.pendingDiscoveryJobs
-      .slice(start, start + JOBS_PER_TURN)
-      .some((job) => reassess(job) !== job);
-  }
-  if (!pendingChanged) return changedIds.length > 0;
-  await ctx.persistDiscoveryState((current) => {
-    const pendingDiscoveryJobs = current.pendingDiscoveryJobs.map(reassess);
-    return pendingDiscoveryJobs.every(
-      (job, index) => job === current.pendingDiscoveryJobs[index],
-    )
-      ? current
-      : { ...current, pendingDiscoveryJobs };
-  });
-  return true;
+  return changedIds.length > 0;
 }

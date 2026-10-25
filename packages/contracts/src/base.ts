@@ -438,7 +438,6 @@ export const jobDiscoveryMethodValues = [
 ] as const;
 
 export const JobDiscoveryMethodSchema = z.enum(jobDiscoveryMethodValues);
-export type JobDiscoveryMethod = z.infer<typeof JobDiscoveryMethodSchema>;
 
 export const jobDiscoveryCollectionMethodValues = [
   "api",
@@ -457,7 +456,6 @@ export type JobDiscoveryCollectionMethod = z.infer<
 export const discoveryRunScopeValues = ["single_target", "run_all"] as const;
 
 export const DiscoveryRunScopeSchema = z.enum(discoveryRunScopeValues);
-export type DiscoveryRunScope = z.infer<typeof DiscoveryRunScopeSchema>;
 
 export const discoveryTitleTriageOutcomeValues = [
   "pass",
@@ -491,9 +489,6 @@ export const sourceIntelligenceProviderKeyValues = [
 export const SourceIntelligenceProviderKeySchema = z.enum(
   sourceIntelligenceProviderKeyValues,
 );
-export type SourceIntelligenceProviderKey = z.infer<
-  typeof SourceIntelligenceProviderKeySchema
->;
 
 export const sourceIntelligenceApiAvailabilityValues = [
   "available",
@@ -561,7 +556,6 @@ export const browserRunWaitReasonValues = [
 ] as const;
 
 export const BrowserRunWaitReasonSchema = z.enum(browserRunWaitReasonValues);
-export type BrowserRunWaitReason = z.infer<typeof BrowserRunWaitReasonSchema>;
 
 export const sourceDebugAttemptOutcomeValues = [
   "succeeded",
@@ -665,22 +659,6 @@ export const DiscoveryTargetExecutionStateSchema = z.enum(
 export type DiscoveryTargetExecutionState = z.infer<
   typeof DiscoveryTargetExecutionStateSchema
 >;
-
-/**
- * Whether a source actually finished its work, for the "N of M sources
- * finished" readout.
- *
- * `cancelled` is deliberately excluded. A stopped run finalises every source
- * that was still running as `cancelled`, so counting "anything past running"
- * made Stop flip "1 of 2 sources finished" to "2 of 2 sources finished" — the
- * app claiming credit for work the user had just interrupted. A cancelled
- * source is over, but it never finished.
- */
-export function isFinishedDiscoveryTargetExecutionState(
-  state: DiscoveryTargetExecutionState,
-): boolean {
-  return state === "completed" || state === "failed" || state === "skipped";
-}
 
 export const discoveryActivityKindValues = [
   "info",
@@ -866,46 +844,6 @@ export const WriteClipboardTextResultSchema = z.object({
 export type WriteClipboardTextResult = z.infer<
   typeof WriteClipboardTextResultSchema
 >;
-
-/** The same frozen accounting sentence for history, plans, Home and Activity. */
-export function formatDiscoveryAccounting(
-  report: Pick<
-    DiscoveryRunReport,
-    | "found"
-    | "unique"
-    | "new"
-    | "retained"
-    | "duplicates"
-    | "rejected"
-    | "deferred"
-    | "pagesCovered"
-  >,
-): string {
-  const count = (value: number | null | undefined, label: string) =>
-    value == null
-      ? null
-      : `${value} ${value === 1 && label === "pages covered" ? "page covered" : label}`;
-  // Merges, rejects, deferrals and pages are left out at zero ("0 deferred"
-  // was noise); what was seen, new and kept is said even when it is zero.
-  const nonZero = (value: number | null | undefined, label: string) =>
-    value === 0 ? null : count(value, label);
-  return [
-    count(report.found, "postings seen"),
-    count(report.unique, "unique jobs"),
-    count(report.new, "new to you"),
-    count(report.retained, "kept by this plan"),
-    nonZero(report.duplicates, "duplicates merged"),
-    ...(report.rejected !== undefined
-      ? [
-          nonZero(report.rejected, "rejected"),
-          nonZero(report.deferred, "deferred"),
-          nonZero(report.pagesCovered, "pages covered"),
-        ]
-      : []),
-  ]
-    .filter((segment) => segment !== null)
-    .join(" · ");
-}
 
 /** Add the missing scheme on a public domain; leave malformed input for validation. */
 export function normalizePublicLinkUrl(value: string): string {

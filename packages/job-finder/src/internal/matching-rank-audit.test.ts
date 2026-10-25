@@ -10,7 +10,6 @@ import { describe, expect, it } from "vitest";
 import { createSeed } from "../workspace-service.test-fixtures";
 import { createMatchAssessmentChangeAudit } from "./match-assessment-change-audit";
 import { mergeDiscoveredPostings } from "./matching";
-import { mergeSavedJobs } from "./workspace-discovery-state-helpers";
 
 function createAssessment(
   base: MatchAssessment,
@@ -246,30 +245,5 @@ describe("discovery match-assessment audit persistence", () => {
         (change) => change.code,
       ),
     ).toContain("score_changed");
-  });
-
-  it("does not let an overlay without a new audit erase the saved audit", () => {
-    const current = createSavedJob("overlay", 80);
-    const priorAudit = createMatchAssessmentChangeAudit({
-      previous: createAssessment(
-        current.matchAssessment,
-        70,
-        "match_posting_v4_overlay_before",
-      ),
-      current: current.matchAssessment,
-      recordedAt: "2026-08-08T09:00:00.000Z",
-    });
-    const saved = SavedJobSchema.parse({
-      ...current,
-      latestMatchAssessmentAudit: priorAudit,
-    });
-    const incoming = SavedJobSchema.parse({
-      ...saved,
-      latestMatchAssessmentAudit: null,
-    });
-
-    expect(
-      mergeSavedJobs([saved], [incoming])[0]?.latestMatchAssessmentAudit,
-    ).toEqual(priorAudit);
   });
 });

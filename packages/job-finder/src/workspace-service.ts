@@ -7,11 +7,7 @@ import type {
   ApplicationAutomationMode,
   ApplyJobResult,
   ApplyRun,
-  FitJudgmentProgress,
-  JobFinderDiscoveryCancellationReply,
-  JobFinderDiscoveryCommandReply,
   JobFinderDiscoveryState,
-  JobDiscoveryTarget,
   JobFinderWorkspaceSnapshot,
   JobSearchCampaign,
   JobSearchPreferences,
@@ -24,8 +20,6 @@ import {
   ACTIVITY_PAUSED_MESSAGE,
   ApplicationRecordSchema,
   JobFinderActivityControlSchema,
-  JobFinderDiscoveryCancellationInputSchema,
-  JobSearchCampaignCollectionSchema,
   jobSourceValues,
   SavedJobSchema,
   SetJobFinderActivityControlInputSchema,
@@ -39,11 +33,8 @@ import {
   MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN,
 } from "./internal/application-preparation-capacity";
 import { recordApplicationsSentByPerson } from "./internal/application-sent-by-person";
-import { judgeUnjudgedPlanJobs } from "./internal/backlog-fit-judgment";
 import {
-  assertCampaignCanRun,
   ensureCampaignState,
-  searchPreferencesForCampaignRun,
 } from "./internal/campaign-dashboard";
 import { toDiscoverySessionState } from "./internal/discovery-state";
 import { createListingActivityIdentityIndex } from "./internal/listing-activity-identity-index";
@@ -69,22 +60,17 @@ import {
   saveJobsFromPage,
 } from "./internal/workspace-assistant-page-jobs";
 import { addJobFromBrowserPage } from "./internal/workspace-browser-job";
-import { recordCampaignDiscoveryResult } from "./internal/workspace-campaign-methods";
 import { createWorkspaceCrmMethods } from "./internal/workspace-crm-methods";
 import { SOURCE_DEBUG_RECENT_HISTORY_LIMIT } from "./internal/workspace-defaults";
-import { createWorkspaceDiscoveryMethods } from "./internal/workspace-discovery-methods";
 import { createWorkspaceGroupedAnswerMethods } from "./internal/workspace-grouped-answer-methods";
 import {
   getPreferredSessionAdapter,
-  updateDiscoveryTarget,
 } from "./internal/workspace-helpers";
-import { createWorkspaceSafeguardMethods } from "./internal/workspace-safeguard-methods";
 import type {
   ApplicationPreparationCapacityToken,
   WorkspaceServiceContext,
 } from "./internal/workspace-service-context";
 import type {
-  CampaignRunContext,
   CreateJobFinderWorkspaceServiceOptions,
   JobFinderWorkspaceResetOptions,
   JobFinderWorkspaceService,
@@ -105,11 +91,6 @@ const applicationPageOwningStates = new Set<ApplyJobResult["state"]>([
   "submitting",
   "blocked",
 ]);
-
-/** One turn of the event loop, so pending window messages are served. */
-function yieldToEventLoop(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve));
-}
 
 /**
  * Automatic workflow cleanup must not destroy a different application that is
@@ -273,18 +254,8 @@ export function createJobFinderWorkspaceService(
     onListingAssessmentFinished,
     onSavedJobsRescored,
     onExplicitUserStart,
+    hasRunJobSearch,
   } = options;
-  const activeDiscoveryAbortControllerRef = {
-    current: null as AbortController | null,
-  };
-  const activeDiscoveryRunIdRef = { current: null as string | null };
-  const fitJudgmentProgressRef = {
-    current: null as FitJudgmentProgress | null,
-  };
-  let fitJudgmentAbortController: AbortController | null = null;
-  const activeDiscoveryPromiseRef = {
-    current: null as Promise<unknown> | null,
-  };
   const activeSourceDebugExecutionIdRef = { current: null as string | null };
   const activeSourceDebugAbortControllerRef = {
     current: null as AbortController | null,
@@ -323,12 +294,6 @@ export function createJobFinderWorkspaceService(
   function activeWorkspaceOperationLabels(): string[] {
     const labels = new Set(activeWorkspaceOperations.keys());
 
-    if (
-      activeDiscoveryAbortControllerRef.current ||
-      activeDiscoveryPromiseRef.current
-    ) {
-      labels.add("discovery");
-    }
     if (
       activeSourceDebugAbortControllerRef.current ||
       activeSourceDebugPromiseRef.current
@@ -441,12 +406,9 @@ export function createJobFinderWorkspaceService(
     listingAssessmentAbortControllerRef: { current: new AbortController() },
     isWorkspaceClosing: () =>
       workspaceResetInProgress || shutdownPromiseRef.current !== null,
-    fitJudgmentProgressRef,
     ...(onListingAssessmentFinished ? { onListingAssessmentFinished } : {}),
     ...(onSavedJobsRescored ? { onSavedJobsRescored } : {}),
-    activeDiscoveryAbortControllerRef,
-    activeDiscoveryRunIdRef,
-    activeDiscoveryPromiseRef,
+    ...(hasRunJobSearch ? { hasRunJobSearch } : {}),
     activeSourceDebugExecutionIdRef,
     activeSourceDebugAbortControllerRef,
     activeSourceDebugPromiseRef,
@@ -491,10 +453,6 @@ export function createJobFinderWorkspaceService(
     resumeApplicationUserAction: () =>
       Promise.reject(
         new Error("Application user action resumer not initialized."),
-      ),
-    continueDiscoveryForSource: () =>
-      Promise.reject(
-        new Error("Discovery source continuation not initialized."),
       ),
     runSourceDebugWorkflow: () =>
       Promise.reject(new Error("Source debug workflow not initialized.")),
@@ -565,64 +523,6 @@ export function createJobFinderWorkspaceService(
         sessions: merge(current.sessions),
       }));
       return next.sessions;
-    },
-    async saveDiscoveryTargetUpdate(
-      targetId: string,
-      updater: (target: JobDiscoveryTarget) => JobDiscoveryTarget,
-    ): Promise<JobSearchPreferences> {
-      // Kept for the legacy discovery caller until pipeline deletion.
-      // Source-debug writes the site row through saveJobSiteMetadata below.
-      return context.withCampaignTransition(async () => {
-        const campaignState = await repository.getCampaignState();
-        if (!campaignState) {
-          // No collection exists yet, so there is nothing to mirror; every
-          // collection creator holds this same transition and therefore none
-          // can appear between this read and the write below.
-          const searchPreferences = await repository.getSearchPreferences();
-          const nextSearchPreferences = updateDiscoveryTarget(
-            searchPreferences,
-            targetId,
-            updater,
-          );
-          await repository.saveSearchPreferences(nextSearchPreferences);
-          return nextSearchPreferences;
-        }
-        return repository.commitCampaignPreferencesUpdate((current) => {
-          const state = current.campaignState;
-          if (!state) {
-            throw new Error("Campaign state is unavailable.");
-          }
-          const nextSearchPreferences = updateDiscoveryTarget(
-            current.searchPreferences,
-            targetId,
-            updater,
-          );
-          const now = new Date().toISOString();
-          const nextState = JobSearchCampaignCollectionSchema.parse({
-            ...state,
-            campaigns: state.campaigns.map((campaign) =>
-              campaign.id === state.activeCampaignId &&
-              campaign.searchPreferences.discovery.targets.some(
-                (candidate) => candidate.id === targetId,
-              )
-                ? {
-                    ...campaign,
-                    searchPreferences: nextSearchPreferences,
-                    sourceTargetIds: nextSearchPreferences.discovery.targets
-                      .filter((target) => target.enabled)
-                      .map((target) => target.id),
-                    updatedAt: now,
-                  }
-                : campaign,
-            ),
-          });
-          return {
-            result: nextSearchPreferences,
-            campaignState: nextState,
-            searchPreferences: nextSearchPreferences,
-          };
-        });
-      });
     },
     saveJobSiteMetadata(targetId, updater) {
       return Promise.resolve().then(() => {
@@ -785,8 +685,6 @@ export function createJobFinderWorkspaceService(
       await requireActivityEnabled();
     },
     hasActiveBrowserWorkflow: () =>
-      activeDiscoveryAbortControllerRef.current !== null ||
-      activeDiscoveryPromiseRef.current !== null ||
       activeSourceDebugAbortControllerRef.current !== null ||
       activeSourceDebugPromiseRef.current !== null ||
       activeApplyRunAbortControllers.size > 0 ||
@@ -849,7 +747,6 @@ export function createJobFinderWorkspaceService(
     );
   const userActionMethods = createWorkspaceUserActionMethods(context);
   let userActionRecoveryPromise: Promise<void> | null = null;
-  let unjudgedJobsJudging: Promise<JobFinderWorkspaceSnapshot> | null = null;
 
   async function resumeVerifyingUserActions(): Promise<void> {
     if (!userActionRecoveryPromise) {
@@ -885,59 +782,14 @@ export function createJobFinderWorkspaceService(
     }
   }
 
-  async function cancelDiscoveryRunCommand(
-    runId: string,
-  ): Promise<JobFinderDiscoveryCancellationReply> {
-    const input = JobFinderDiscoveryCancellationInputSchema.parse({ runId });
-    const requestedAt = new Date().toISOString();
-    let accepted = false;
-    await context.persistDiscoveryState((current) => {
-      if (
-        current.activeRun?.id !== input.runId ||
-        current.activeRun.state !== "running"
-      )
-        return current;
-      accepted = true;
-      return {
-        ...current,
-        activeRun: {
-          ...current.activeRun,
-          cancellationRequestedAt:
-            current.activeRun.cancellationRequestedAt ?? requestedAt,
-        },
-      };
-    });
-    // The live identity reaches the window before the first durable run row.
-    if (activeDiscoveryRunIdRef.current === input.runId) accepted = true;
-    if (accepted) activeDiscoveryAbortControllerRef.current?.abort();
-    return { runId: input.runId, accepted };
-  }
-
-  let lastDisplayProjection: JobFinderWorkspaceSnapshot | undefined;
-  let runningDiscoveryCommands = 0;
   async function readDisplayProjection() {
-    // Query screens follow committed rows. Legacy readers can retain their
-    // last complete view while search writes, rather than rebuilding it per beat.
-    if (
-      lastDisplayProjection &&
-      (runningDiscoveryCommands > 0 ||
-        activeDiscoveryAbortControllerRef.current)
-    )
-      return lastDisplayProjection;
-    lastDisplayProjection =
-      await (snapshotProfileMethods.getWorkspaceProjection?.() ??
-        snapshotProfileMethods.getWorkspaceSnapshot());
-    return lastDisplayProjection;
+    return (
+      (await snapshotProfileMethods.getWorkspaceProjection?.()) ??
+      snapshotProfileMethods.getWorkspaceSnapshot()
+    );
   }
 
   async function getWorkspaceSnapshot(borrowValidatedJobs = false) {
-    if (
-      borrowValidatedJobs &&
-      lastDisplayProjection &&
-      (runningDiscoveryCommands > 0 ||
-        activeDiscoveryAbortControllerRef.current)
-    )
-      return lastDisplayProjection;
     await waitForUserActionRecovery();
     return borrowValidatedJobs
       ? readDisplayProjection()
@@ -991,136 +843,9 @@ export function createJobFinderWorkspaceService(
     ctx: context,
     getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
   });
-  const safeguardMethods = createWorkspaceSafeguardMethods({
-    ctx: context,
-  });
 
   const sourceDebugMethods = createWorkspaceSourceDebugMethods(context);
   context.runSourceDebugWorkflow = sourceDebugMethods.runSourceDebugWorkflow;
-  const discoveryMethods = createWorkspaceDiscoveryMethods(context);
-  function runCampaignScopedDiscovery(
-    executor: (
-      campaign: CampaignRunContext,
-    ) => Promise<JobFinderDiscoveryCommandReply>,
-    requestedCampaignId: string | undefined,
-    options: { commandOnly: true },
-  ): Promise<JobFinderDiscoveryCommandReply>;
-  function runCampaignScopedDiscovery(
-    executor: (
-      campaign: CampaignRunContext,
-    ) => Promise<JobFinderWorkspaceSnapshot>,
-    requestedCampaignId?: string,
-    options?: { nestedUserActionRecovery?: boolean },
-  ): Promise<JobFinderWorkspaceSnapshot>;
-  async function runCampaignScopedDiscovery(
-    executor: (
-      campaign: CampaignRunContext,
-    ) => Promise<JobFinderWorkspaceSnapshot | JobFinderDiscoveryCommandReply>,
-    requestedCampaignId?: string,
-    options: { nestedUserActionRecovery?: boolean; commandOnly?: boolean } = {},
-  ) {
-    await discoveryRecoveryReady;
-    await requireDiscoverySafeguardClearance();
-    let campaignState = await repository.getCampaignState();
-    if (!campaignState && requestedCampaignId) {
-      throw new Error("This search plan was removed; run the plan again");
-    }
-    if (!campaignState) {
-      // The stale missing-read only nominates this path: state is re-read
-      // inside one campaign transition and the default is created only if it
-      // is still absent, so a concurrently created or mutated collection can
-      // never be overwritten by an unlocked bootstrap.
-      campaignState = await context.withCampaignTransition(async () => {
-        const latestState = await repository.getCampaignState();
-        if (latestState) return latestState;
-        return ensureCampaignState({
-          repository,
-          searchPreferences: await repository.getSearchPreferences(),
-        });
-      });
-    }
-    const campaignId = requestedCampaignId ?? campaignState.activeCampaignId;
-    const campaign = campaignState.campaigns.find(
-      (candidate) => candidate.id === campaignId,
-    );
-    if (!campaign) {
-      throw new Error(
-        requestedCampaignId
-          ? "This search plan was removed; run the plan again"
-          : "The active job search campaign is unavailable.",
-      );
-    }
-    assertCampaignCanRun(campaign);
-    const result = await executor({
-      campaignId: campaign.id,
-      mode: campaign.mode,
-      searchPreferences: searchPreferencesForCampaignRun(campaign),
-      runJobBudget: campaign.limits.discoveryRunJobBudget ?? null,
-    });
-    // The steps that close a search each take a while on a large workspace
-    // and none of them waits on anything outside main, so together they held
-    // main (and every window) for seconds at once. A turn of the event loop
-    // between them lets the window's messages through.
-    await yieldToEventLoop();
-    await recordCampaignDiscoveryResult({
-      ctx: context,
-      campaignId,
-      beforeCampaignJobIds: campaign.jobIds,
-    });
-    await yieldToEventLoop();
-    if (options.commandOnly) {
-      return result;
-    }
-    if (options.nestedUserActionRecovery) {
-      return context.readWorkspaceSnapshot();
-    }
-    return getWorkspaceSnapshot(true);
-  }
-
-  context.continueDiscoveryForSource = async (targetId, discoveryRunId) => {
-    const discoveryState = await repository.getDiscoveryState();
-    const originatingRun = [
-      discoveryState.activeRun,
-      ...discoveryState.recentRuns,
-    ].find((candidate) => candidate?.id === discoveryRunId);
-    if (!originatingRun?.campaignId) {
-      return {
-        status: "origin_removed",
-        message: "This search plan was removed; run the plan again",
-      };
-    }
-
-    const campaignState = await repository.getCampaignState();
-    if (
-      !campaignState?.campaigns.some(
-        (campaign) => campaign.id === originatingRun.campaignId,
-      )
-    ) {
-      return {
-        status: "origin_removed",
-        message: "This search plan was removed; run the plan again",
-      };
-    }
-
-    try {
-      await runCampaignScopedDiscovery(
-        (campaign) =>
-          discoveryMethods.runCampaignDiscoveryForTarget(campaign, targetId),
-        originatingRun.campaignId,
-        { nestedUserActionRecovery: true },
-      );
-      return { status: "continued" };
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === "This search plan was removed; run the plan again"
-      ) {
-        return { status: "origin_removed", message: error.message };
-      }
-      throw error;
-    }
-  };
-
   /**
    * Explicit user actions (Search now, Check source, Prepare, opening the
    * browser) resume paused background work instead of failing. The pause is
@@ -1354,11 +1079,6 @@ export function createJobFinderWorkspaceService(
     });
   }
 
-  async function requireDiscoverySafeguardClearance(): Promise<void> {
-    const blockers = await safeguardMethods.evaluateGlobalDiscoveryBlockers();
-    safeguardMethods.requireNoBlockers(blockers);
-  }
-
   async function commitActivityControl(
     rawInput: SetJobFinderActivityControlInput,
   ) {
@@ -1380,14 +1100,12 @@ export function createJobFinderWorkspaceService(
     // run. Browser takeover and shutdown still abort immediately.
     if (input.paused && input.pauseBehavior !== "finish_current") {
       const activeRunIds = [...activeApplyRunAbortControllers.keys()];
-      activeDiscoveryAbortControllerRef.current?.abort();
       activeSourceDebugAbortControllerRef.current?.abort();
       for (const controller of activeApplyRunAbortControllers.values()) {
         controller.abort();
       }
       await Promise.allSettled(
         [
-          activeDiscoveryPromiseRef.current,
           activeSourceDebugPromiseRef.current,
           ...activeApplyRunPromises.values(),
         ].filter((value): value is Promise<unknown> => value != null),
@@ -1443,8 +1161,6 @@ export function createJobFinderWorkspaceService(
     shutdownPromiseRef.current = (async () => {
       invalidateListingReads();
       const activeApplyRunIds = [...activeApplyRunAbortControllers.keys()];
-      fitJudgmentAbortController?.abort();
-      activeDiscoveryAbortControllerRef.current?.abort();
       activeSourceDebugAbortControllerRef.current?.abort();
       for (const controller of activeApplyRunAbortControllers.values()) {
         controller.abort();
@@ -1452,7 +1168,6 @@ export function createJobFinderWorkspaceService(
 
       await Promise.allSettled(
         [
-          activeDiscoveryPromiseRef.current,
           activeSourceDebugPromiseRef.current,
           ...activeApplyRunPromises.values(),
         ].filter((value): value is Promise<unknown> => value != null),
@@ -1664,61 +1379,6 @@ export function createJobFinderWorkspaceService(
     },
     getWorkspaceBootstrap,
     getWorkspaceHomeSnapshot,
-    ...discoveryMethods,
-    runDiscovery: (targetId) =>
-      trackWorkspaceOperation("discovery", async () => {
-        await requireActivityEnabled();
-        return runCampaignScopedDiscovery(() =>
-          discoveryMethods.runDiscovery(targetId),
-        );
-      }),
-    runAgentDiscovery: (onActivity, signal, targetId, searchRequest) =>
-      trackWorkspaceOperation("discovery", async () => {
-        await requireActivityEnabled();
-        return runCampaignScopedDiscovery(() =>
-          discoveryMethods.runAgentDiscovery(
-            onActivity,
-            signal,
-            targetId,
-            searchRequest,
-          ),
-        );
-      }),
-    runDiscoveryForTarget: (targetId, onActivity, signal) =>
-      trackWorkspaceOperation("discovery", async () => {
-        await requireActivityEnabled();
-        return runCampaignScopedDiscovery(() =>
-          discoveryMethods.runDiscoveryForTarget(targetId, onActivity, signal),
-        );
-      }),
-    runAgentDiscoveryCommand: (onActivity, targetId, searchRequest) =>
-      trackWorkspaceOperation("discovery", async () => {
-        runningDiscoveryCommands += 1;
-        try {
-          await requireActivityEnabled();
-          return await runCampaignScopedDiscovery(
-            () =>
-              discoveryMethods.runAgentDiscoveryCommand(
-                onActivity,
-                targetId,
-                searchRequest,
-              ),
-            undefined,
-            { commandOnly: true },
-          );
-        } finally {
-          runningDiscoveryCommands -= 1;
-        }
-      }),
-    cancelDiscoveryRunCommand: (runId) =>
-      trackWorkspaceOperation("discovery cancellation", () =>
-        cancelDiscoveryRunCommand(runId),
-      ),
-    cancelDiscoveryRun: (runId) =>
-      trackWorkspaceOperation("discovery cancellation", async () => {
-        await cancelDiscoveryRunCommand(runId);
-        return getWorkspaceSnapshot();
-      }),
     ...sourceDebugMethods,
     runSourceDebug: (targetId, signal, onProgress) =>
       trackWorkspaceOperation("source debug", async () => {
@@ -1748,26 +1408,6 @@ export function createJobFinderWorkspaceService(
         userActionMethods.performUserAction(command),
       ),
     ...applicationMethods,
-    dismissDiscoveryJob: (input) =>
-      trackWorkspaceOperation("hiding jobs", () =>
-        applicationMethods.dismissDiscoveryJob(input),
-      ),
-    dismissDiscoveryJobs: (inputs, options) =>
-      trackWorkspaceOperation("hiding jobs", () =>
-        applicationMethods.dismissDiscoveryJobs!(inputs, options),
-      ),
-    excludeEmployerDiscoveryJobs: (input, options) =>
-      trackWorkspaceOperation("excluding an employer", () =>
-        applicationMethods.excludeEmployerDiscoveryJobs!(input, options),
-      ),
-    restoreDismissedDiscoveryJob: (jobId) =>
-      trackWorkspaceOperation("restoring hidden jobs", () =>
-        applicationMethods.restoreDismissedDiscoveryJob(jobId),
-      ),
-    restoreDismissedDiscoveryJobs: (jobIds, options) =>
-      trackWorkspaceOperation("restoring hidden jobs", () =>
-        applicationMethods.restoreDismissedDiscoveryJobs!(jobIds, options),
-      ),
     queueJobForReview: (jobId) =>
       trackWorkspaceOperation("shortlisting jobs", () =>
         applicationMethods.queueJobForReview(jobId),
@@ -1778,51 +1418,6 @@ export function createJobFinderWorkspaceService(
       ),
     recordApplicationsSentByPerson: () =>
       recordApplicationsSentByPerson(context),
-    judgeUnjudgedJobs: () => {
-      // One pass at a time; a second press joins the one already running.
-      unjudgedJobsJudging ??= trackWorkspaceOperation(
-        "fit judging",
-        async () => {
-          fitJudgmentProgressRef.current = null;
-          options.onFitJudgmentProgress?.();
-          const controller = new AbortController();
-          fitJudgmentAbortController = controller;
-          const startedAt = new Date().toISOString();
-          try {
-            await judgeUnjudgedPlanJobs({
-              ctx: context,
-              signal: controller.signal,
-              onProgress: (progress) => {
-                fitJudgmentProgressRef.current = {
-                  ...progress,
-                  startedAt,
-                  updatedAt: new Date().toISOString(),
-                };
-                options.onFitJudgmentProgress?.();
-              },
-            });
-            return getWorkspaceSnapshot();
-          } catch (error) {
-            const currentProgress = context.fitJudgmentProgressRef?.current;
-            controller.abort();
-            if (currentProgress) {
-              fitJudgmentProgressRef.current = {
-                ...currentProgress,
-                phase: "failed",
-                updatedAt: new Date().toISOString(),
-              };
-              options.onFitJudgmentProgress?.();
-            }
-            throw error;
-          } finally {
-            fitJudgmentAbortController = null;
-          }
-        },
-      ).finally(() => {
-        unjudgedJobsJudging = null;
-      });
-      return unjudgedJobsJudging;
-    },
     startApplyCopilotRun: (jobId, options, applicationRecordId) =>
       trackWorkspaceOperation("application preparation", async () => {
         return withApplicationPreparationReservation(

@@ -102,10 +102,7 @@ export function rebindJobLegacyVerdicts<T extends SavedJob>(
 export async function rebindLegacyFitVerdicts(
   ctx: Pick<WorkspaceServiceContext, "repository" | "persistDiscoveryState">,
   /** Jobs the caller already read; the writes still apply to current rows. */
-  loaded?: {
-    savedJobs: readonly SavedJob[];
-    pendingDiscoveryJobs: readonly SavedJob[];
-  },
+  loaded?: { savedJobs: readonly SavedJob[] },
 ): Promise<number> {
   const [profile, searchPreferences, settings, campaignState] =
     await Promise.all([
@@ -122,14 +119,8 @@ export async function rebindLegacyFitVerdicts(
   });
   const rebind = <T extends SavedJob>(job: T) =>
     rebindJobLegacyVerdicts(job, map);
-  const [savedJobs, pendingDiscoveryJobs] = loaded
-    ? [loaded.savedJobs, loaded.pendingDiscoveryJobs]
-    : await Promise.all([
-        ctx.repository.readSavedJobsProjection(),
-        ctx.repository
-          .readDiscoveryDisplayProjection()
-          .then((discovery) => discovery.pendingDiscoveryJobs),
-      ]);
+  const savedJobs =
+    loaded?.savedJobs ?? (await ctx.repository.readSavedJobsProjection());
   const changedIds = savedJobs
     .filter((job) => rebind(job) !== job)
     .map((job) => job.id);
@@ -138,17 +129,5 @@ export async function rebindLegacyFitVerdicts(
       updateJobIds: changedIds,
       update: rebind,
     });
-  const pendingChanged = pendingDiscoveryJobs.filter(
-    (job) => rebind(job) !== job,
-  ).length;
-  if (pendingChanged > 0)
-    await ctx.persistDiscoveryState((current) => {
-      const pendingDiscoveryJobs = current.pendingDiscoveryJobs.map(rebind);
-      return pendingDiscoveryJobs.every(
-        (job, index) => job === current.pendingDiscoveryJobs[index],
-      )
-        ? current
-        : { ...current, pendingDiscoveryJobs };
-    });
-  return changedIds.length + pendingChanged;
+  return changedIds.length;
 }

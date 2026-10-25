@@ -29,17 +29,6 @@ import { toProviderAwarePosting } from "./discovery-posting-normalization";
 import { inferSourceIntelligenceFromTarget } from "./workspace-source-intelligence";
 import * as compensation from "./matching-compensation";
 import * as contracts from "@nestor/contracts";
-import { copyView } from "@nestor/core";
-import {
-  applySavedJobDelta,
-  prepareSavedJobForSearch,
-} from "./workspace-discovery-methods";
-import { createDiscoverySavedJobWriter } from "./discovery-saved-job-writer";
-import {
-  carryPreparedDiscoveryPosting,
-  rememberPreparedDiscoveryPosting,
-  takePreparedDiscoveryPosting,
-} from "./discovery-feed-executor";
 
 const body =
   "Build reliable software with a collaborative product and engineering team. ".repeat(
@@ -103,61 +92,6 @@ test("worker messages reattach the fit hash, while a missing transfer recomputes
   rememberDiscoveryListingFingerprints(missing, message.fingerprints);
   expect(readPreparedMatchAssessmentPostingFingerprint(missing)).toBeNull();
   expect(createMatchAssessmentPostingFingerprint(missing)).toBe(expected);
-});
-
-test("preparing a legacy job preserves lazy fields for plan-only writes and releases raw preparation", async () => {
-  const legacy = structuredClone(preparedJob());
-  const read = vi.fn(() => body);
-  Object.defineProperty(legacy, "description", {
-    enumerable: true,
-    configurable: true,
-    get: read,
-  });
-  Object.freeze(legacy);
-  const { prepared, working } = prepareSavedJobForSearch(legacy);
-  expect(Object.getOwnPropertyDescriptor(working, "description")).toMatchObject(
-    { get: read },
-  );
-  expect(
-    Object.getOwnPropertyDescriptor(prepared, "description"),
-  ).toMatchObject({ value: body });
-  expect(readDiscoveryPreparation(working)?.content).toBeUndefined();
-  expect(
-    readDiscoveryPreparation(working)?.fingerprints?.basis,
-  ).toBeUndefined();
-  expect(
-    readDiscoveryPreparation(working)?.savedIdentity?.basis,
-  ).toBeUndefined();
-  const reads = read.mock.calls.length;
-  expect(contracts.readPreparedSavedJobIdentity(working)).not.toBeNull();
-  expect(readPreparedMatchAssessmentPostingFingerprint(working)).toBe(
-    computeMatchAssessmentPostingFingerprint(prepared),
-  );
-  expect(read.mock.calls.length).toBe(reads);
-  const commit = vi.fn().mockResolvedValue(undefined);
-  const writer = createDiscoverySavedJobWriter({
-    persistedJobs: [legacy],
-    toStoredJob: (job) => job,
-    merge: applySavedJobDelta,
-    commit,
-    persistDiscovery: () => Promise.resolve(),
-  });
-  writer.stage(
-    copyView(working, {
-      planAssessments: { test: { ...working.matchAssessment, score: 71 } },
-    }),
-  );
-  await writer.persist();
-  expect(commit).toHaveBeenCalledWith(
-    expect.objectContaining({
-      upserts: [],
-      updateJobIds: [],
-      planAssessments: [
-        expect.objectContaining({ jobId: legacy.id, planId: "test" }),
-      ],
-    }),
-  );
-  expect(read).toHaveBeenCalledTimes(reads);
 });
 
 test("triage and merge carry the same computed screening hints", () => {
@@ -309,50 +243,6 @@ const paths = {
     ).job,
 };
 
-test.each(Object.entries(mutations))(
-  "a changed %s cannot retain the worker's old normalized posting",
-  (_name, mutate) => {
-    const before = preparedJob();
-    rememberPreparedDiscoveryPosting(before, paths.normalization(before));
-    Object.freeze(before);
-    expect(takePreparedDiscoveryPosting(before)).not.toBeNull();
-    const changed = { ...before };
-    mutate(changed);
-    carryPreparedDiscoveryPosting(before, changed);
-    Object.freeze(changed);
-    expect(takePreparedDiscoveryPosting(changed)).toBeNull();
-    const expected = paths.normalization(structuredClone(changed));
-    expect(structuredClone(paths.normalization(changed))).toEqual(
-      structuredClone(expected),
-    );
-  },
-);
-
-test("only an explicit unchanged screen copy carries worker normalization; mutable and cloned inputs fall back", () => {
-  const before = preparedJob();
-  rememberPreparedDiscoveryPosting(before, paths.normalization(before));
-  expect(takePreparedDiscoveryPosting(before)).toBeNull();
-  Object.freeze(before);
-  const after = carryPreparedDiscoveryPosting(before, {
-    ...before,
-    searchRejection: { category: "role", reason: "Synthetic screen result" },
-  });
-  expect(takePreparedDiscoveryPosting(after)!.searchRejection).toEqual(
-    after.searchRejection,
-  );
-  expect(takePreparedDiscoveryPosting(Object.freeze({ ...before }))).toBeNull();
-  const normalized = paths.normalization(Object.freeze({ ...before }));
-  expect(
-    readDiscoveryPreparation(normalized)!.normalizedPosting,
-  ).toBeUndefined();
-  expect(
-    readDiscoveryPreparation(normalized)!.normalizedPostingSource,
-  ).toBeUndefined();
-  expect(
-    takePreparedDiscoveryPosting(Object.freeze(structuredClone(before))),
-  ).toBeNull();
-});
-
 for (const [path, apply] of Object.entries(paths))
   for (const [field, mutate] of Object.entries(mutations)) {
     test(`${path} prepares changed ${field} facts`, async () => {
@@ -436,58 +326,4 @@ test("salary is parsed once per arriving text and carried without changing the l
   } finally {
     parse.mockRestore();
   }
-});
-
-test("a plan-only delta preserves concurrent status and proven lazy listing fields without opening them", () => {
-  const baseline = preparedJob();
-  const fingerprints = createDiscoveryListingFingerprints(baseline);
-  contracts.writeDiscoveryPreparation(baseline, {
-    fingerprints: { owner: baseline, value: fingerprints },
-  });
-  const read = vi.fn(() => {
-    throw new Error("A plan update opened listing text");
-  });
-  Object.defineProperty(baseline, "description", {
-    enumerable: true,
-    configurable: true,
-    get: read,
-  });
-  Object.freeze(baseline);
-  const current = copyView(baseline, { status: "shortlisted" as const });
-  const salary = readPreparedBodySalaryRange(baseline)!;
-  contracts.writeDiscoveryPreparation(current, {
-    fingerprints: { owner: current, value: fingerprints },
-    bodySalaryRange: salary,
-  });
-  Object.freeze(current);
-  const intended = copyView(baseline, {
-    planAssessments: { synthetic_plan: baseline.matchAssessment },
-  });
-  const next = applySavedJobDelta(current, baseline, intended);
-  expect(next.status).toBe("shortlisted");
-  expect(next.planAssessments?.synthetic_plan).toEqual(
-    baseline.matchAssessment,
-  );
-  expect(Object.getOwnPropertyDescriptor(next, "description")).toMatchObject({
-    get: read,
-  });
-  expect(readPreparedDiscoveryFingerprints(next)).toEqual(fingerprints);
-  expect(readPreparedBodySalaryRange(next)).toBe(salary);
-  expect(read).not.toHaveBeenCalled();
-});
-
-test("a delta changing the listing body recomputes its fingerprints and salary evidence", () => {
-  const baseline = preparedJob();
-  const before = createDiscoveryListingFingerprints(baseline);
-  const intended = prepareDiscoveryPosting({
-    ...baseline,
-    description: body + " Pay: EUR 96,000 per year.",
-  });
-  const next = applySavedJobDelta(baseline, baseline, intended);
-  expect(next.description).toBe(intended.description);
-  expect(createDiscoveryListingFingerprints(next)).toEqual(
-    createDiscoveryListingFingerprints(intended),
-  );
-  expect(createDiscoveryListingFingerprints(next)).not.toEqual(before);
-  expect(readPreparedBodySalaryRange(next)).toBe("EUR 96,000 per year");
 });

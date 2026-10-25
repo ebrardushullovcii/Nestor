@@ -4,7 +4,6 @@ import {
   ApplicationRecordSchema,
   FitJudgmentSchema,
   QueryJobListInputSchema,
-  DiscoveryLedgerEntrySchema,
   JobDiscoveryTargetSchema,
   SavedJobDiscoveryProvenanceSchema,
   ResumeDraftSchema,
@@ -564,100 +563,6 @@ describe("independent workspace queries", () => {
         })
         .rows.map((row) => row.id),
     ).toEqual(["labeled"]);
-  });
-  test("uses the existing identity ambiguity and newer activity rules for ledger and signal facts", async () => {
-    const { writer, reader } = await fixture();
-    const job = assessedJob({
-      id: "activity",
-      canonicalUrl: "https://example.test/jobs/activity",
-      applicationUrl: null,
-    });
-    await writer.commitSavedJobDelta({ upserts: [job] });
-    await writer.commitDiscoveryStateUpdate((current) => ({
-      ...current,
-      discoveryLedger: [
-        DiscoveryLedgerEntrySchema.parse({
-          id: "inactive",
-          canonicalUrl: job.canonicalUrl,
-          source: job.source,
-          sourceJobId: job.sourceJobId,
-          title: job.title,
-          company: job.company,
-          location: job.location,
-          targetId: "synthetic",
-          firstSeenAt: job.firstSeenAt,
-          lastSeenAt: job.lastSeenAt,
-          inactiveAt: "2026-10-22T00:00:00.000Z",
-          latestStatus: "inactive",
-        }),
-      ],
-    }));
-    const read = () =>
-      reader.queryJobList({ list: "discovery", filters: { planId: null } });
-    expect(read().rows[0]).toMatchObject({
-      id: "activity",
-      listingClosed: true,
-      listingActivity: { status: "inactive", ledgerEntryId: "inactive" },
-    });
-    await writer.commitSavedJobDelta({
-      upserts: [{ ...job, id: "ambiguous" }],
-    });
-    expect(
-      read().rows.every((row) => row.listingActivity.status === "active"),
-    ).toBe(true);
-    expect(read().rows.every((row) => row.indistinguishable)).toBe(true);
-    const intelligence = await writer.getIntelligenceState();
-    await writer.saveIntelligenceState({
-      ...intelligence,
-      safeguards: {
-        ...intelligence.safeguards,
-        listingSignals: [
-          {
-            id: "closed-signal",
-            jobId: job.id,
-            signal: "closed",
-            detail: null,
-            detectedAt: "2026-10-23T00:00:00.000Z",
-            confidence: 1,
-            provenance: "provider",
-            explanation: "The source reported this listing closed.",
-            recoveryGuidance: "Choose another listing.",
-          },
-        ],
-      },
-    });
-    const closed = reader.queryJobList({
-      list: "discovery",
-      filters: { planId: null, activities: ["closed"] },
-    });
-    expect(closed.rows.map((row) => row.id)).toEqual(["activity"]);
-    expect(closed.rows[0]?.listingActivity).toMatchObject({
-      status: "closed",
-      signalId: "closed-signal",
-    });
-    expect(closed.facets.activities).toEqual([
-      { value: "active", count: 1 },
-      { value: "closed", count: 1 },
-    ]);
-    await writer.commitSavedJobDelta({
-      upserts: [
-        assessedJob({
-          id: "unknown",
-          sourceJobId: "unknown",
-          canonicalUrl: "https://example.test/jobs/unknown",
-          lastSeenAt: null,
-          lastVerifiedActiveAt: null,
-        }),
-      ],
-    });
-    expect(
-      reader
-        .queryJobList({
-          list: "discovery",
-          filters: { planId: null, activities: ["unknown"] },
-        })
-        .rows.map((row) => row.id),
-    ).toEqual(["unknown"]);
   });
   test("pending intake reads real missing-employer body facts and retains curated rows", async () => {
     const { writer, reader } = await fixture();

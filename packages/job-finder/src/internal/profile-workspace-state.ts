@@ -134,9 +134,7 @@ export async function deriveAndPersistProfileSetupState(
       input.searchPreferences,
       ctx.jobSites?.counts().enabled,
     ).materiallyComplete &&
-    (await ctx.repository.readDiscoveryRunStates()).some(
-      (run) => !run.isActive,
-    );
+    (ctx.hasRunJobSearch?.() ?? false);
   const derivedState = deriveProfileSetupState(
     input.profile,
     input.searchPreferences,

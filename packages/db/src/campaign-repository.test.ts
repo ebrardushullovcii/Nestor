@@ -11,8 +11,6 @@ import {
 
 import {
   createFileJobFinderRepository,
-  createInMemoryJobFinderRepository,
-  type JobFinderRepository,
 } from "./index";
 import {
   cleanupTempDirectoryWithRetry,
@@ -46,126 +44,7 @@ function createPersistedCampaign(
   });
 }
 
-async function expectCampaignPreferencesCommitAtomicity(
-  repository: JobFinderRepository,
-): Promise<void> {
-  const seed = createSeed();
-  const campaign = createPersistedCampaign(
-    "campaign_atomic",
-    seed.searchPreferences,
-  );
-  await repository.saveCampaignState({
-    notifications: [],
-    activeCampaignId: campaign.id,
-    campaigns: [campaign],
-  });
-
-  await repository.commitCampaignPreferencesUpdate((current) => {
-    expect(current.campaignState?.activeCampaignId).toBe(campaign.id);
-    const preferences = {
-      ...current.searchPreferences,
-      companyBlacklist: ["Atomic Employer"],
-    };
-    return {
-      result: null,
-      campaignState: {
-        ...current.campaignState!,
-        campaigns: current.campaignState!.campaigns.map((entry) => ({
-          ...entry,
-          searchPreferences: preferences,
-        })),
-      },
-      searchPreferences: preferences,
-      intelligenceState: {
-        ...current.intelligenceState,
-        updatedAt: "2026-08-15T10:01:00.000Z",
-      },
-    };
-  });
-
-  expect((await repository.getSearchPreferences()).companyBlacklist).toEqual([
-    "Atomic Employer",
-  ]);
-  expect(
-    (await repository.getCampaignState())?.campaigns[0]?.searchPreferences
-      .companyBlacklist,
-  ).toEqual(["Atomic Employer"]);
-  expect((await repository.getIntelligenceState()).updatedAt).toBe(
-    "2026-08-15T10:01:00.000Z",
-  );
-
-  await expect(
-    repository.commitCampaignPreferencesUpdate((current) => ({
-      result: null,
-      campaignState: current.campaignState!,
-      searchPreferences: {
-        ...current.searchPreferences,
-        companyBlacklist: ["Invalid intelligence must roll back preferences"],
-      },
-      intelligenceState: { ...current.intelligenceState, updatedAt: "invalid" },
-    })),
-  ).rejects.toThrow();
-  expect((await repository.getSearchPreferences()).companyBlacklist).toEqual([
-    "Atomic Employer",
-  ]);
-  expect((await repository.getIntelligenceState()).updatedAt).toBe(
-    "2026-08-15T10:01:00.000Z",
-  );
-
-  await expect(
-    repository.commitCampaignPreferencesUpdate((current) => ({
-      result: null,
-      campaignState: {
-        ...current.campaignState!,
-        activeCampaignId: "missing_campaign",
-      },
-      searchPreferences: {
-        ...current.searchPreferences,
-        companyBlacklist: ["Must Roll Back"],
-      },
-    })),
-  ).rejects.toThrow();
-  expect((await repository.getSearchPreferences()).companyBlacklist).toEqual([
-    "Atomic Employer",
-  ]);
-  expect(
-    (await repository.getCampaignState())?.campaigns[0]?.searchPreferences
-      .companyBlacklist,
-  ).toEqual(["Atomic Employer"]);
-}
-
 describe("campaign and activity persistence", () => {
-  test("commits campaign preferences atomically in memory", async () => {
-    const repository = createInMemoryJobFinderRepository(createSeed());
-    try {
-      await expectCampaignPreferencesCommitAtomicity(repository);
-    } finally {
-      await repository.close();
-    }
-  });
-
-  test("commits campaign preferences atomically in SQLite and survives restart", async () => {
-    const temp = await createTempRepository("nestor-db-campaign-atomic-");
-    let repository = await temp.createRepository();
-    try {
-      await expectCampaignPreferencesCommitAtomicity(repository);
-      await repository.close();
-      repository = await temp.createRepository();
-      expect((await repository.getIntelligenceState()).updatedAt).toBe(
-        "2026-08-15T10:01:00.000Z",
-      );
-      expect(
-        (await repository.getSearchPreferences()).companyBlacklist,
-      ).toEqual(["Atomic Employer"]);
-      expect(
-        (await repository.getCampaignState())?.campaigns[0]?.searchPreferences
-          .companyBlacklist,
-      ).toEqual(["Atomic Employer"]);
-    } finally {
-      await repository.close().catch(() => undefined);
-      await cleanupTempDirectoryWithRetry(temp.tempDirectory);
-    }
-  });
 
   test("backfills legacy jobs and discovery history into one default campaign", () => {
     const database = new DatabaseSync(":memory:");

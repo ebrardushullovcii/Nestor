@@ -165,36 +165,6 @@ export type ApplicationRecordBatchCommitResult =
       recordIds: readonly string[];
     };
 
-export interface DiscoveryFeedbackCommitCurrent {
-  job: SavedJob | null;
-  jobIsPending: boolean;
-  searchPreferences: JobSearchPreferences;
-  campaignState: JobSearchCampaignCollection | null;
-  intelligenceState: JobFinderIntelligenceState;
-  discoveryState: BorrowedDiscoveryState;
-}
-
-export interface DiscoveryFeedbackCommitNext<TResult> {
-  result: TResult;
-  savedJob?: SavedJob;
-  searchPreferences: JobSearchPreferences;
-  campaignState: JobSearchCampaignCollection | null;
-  discoveryState: JobFinderDiscoveryState;
-}
-
-export interface CampaignPreferencesCommitCurrent {
-  campaignState: JobSearchCampaignCollection | null;
-  searchPreferences: JobSearchPreferences;
-  intelligenceState: JobFinderIntelligenceState;
-}
-
-export interface CampaignPreferencesCommitNext<TResult> {
-  result: TResult;
-  campaignState: JobSearchCampaignCollection;
-  searchPreferences: JobSearchPreferences;
-  intelligenceState?: JobFinderIntelligenceState;
-}
-
 export interface JobFinderRepository
   extends ApplicationAuthorityRepository, ApplicationAnswerSnapshotRepository {
   /** Optional for custom repositories; ordinary reads remain caller-owned. */
@@ -378,19 +348,6 @@ export interface JobFinderRepository
       current: BorrowedDiscoveryState,
     ) => CanonicalDiscoveryWrite;
   }): Promise<void>;
-  /**
-   * Applies discovery feedback against transaction-current job, preference,
-   * campaign, intelligence, and discovery state. A thrown updater or invalid
-   * output leaves every owned value unchanged.
-   */
-  commitDiscoveryFeedbackUpdate<TResult>(
-    jobId: string,
-    update: (
-      current: DiscoveryFeedbackCommitCurrent,
-    ) => DiscoveryFeedbackCommitNext<TResult>,
-    /** Borrow frozen transaction-current singletons; replace changed values. */
-    options?: { borrowUnchangedState: boolean },
-  ): Promise<TResult>;
   /**
    * Destructively replaces the complete saved-job collection. The caller must
    * provide an authoritative full snapshot; paged or stale reads are invalid.
@@ -737,17 +694,6 @@ export interface JobFinderRepository
   getCampaignState(): Promise<JobSearchCampaignCollection | null>;
   readCampaignProjection?(): Promise<JobSearchCampaignCollection | null>;
   saveCampaignState(campaignState: JobSearchCampaignCollection): Promise<void>;
-  /**
-   * Applies a campaign collection and its corresponding global preferences
-   * against transaction-current values. A company preference can include its
-   * directory state so the marker and enforced exclusions commit together.
-   * Invalid output or a thrown updater leaves every singleton unchanged.
-   */
-  commitCampaignPreferencesUpdate<TResult>(
-    update: (
-      current: CampaignPreferencesCommitCurrent,
-    ) => CampaignPreferencesCommitNext<TResult>,
-  ): Promise<TResult>;
   getIntelligenceState(): Promise<JobFinderIntelligenceState>;
   /** Borrowed immutable display state. Canonical reads remain caller-owned. */
   readIntelligenceProjection?(): Promise<JobFinderIntelligenceState>;

@@ -8,7 +8,6 @@ import { jobNeedsFitJudgment, toFitJudgment } from "./fit-judgment";
 import { createMatchAssessmentPostingFingerprint } from "./match-assessment-session";
 import { createSeed } from "../workspace-service.test-fixtures";
 import {
-  personPickedJob,
   readPlanAssessment,
   withPlanAssessment,
 } from "./plan-assessment";
@@ -89,43 +88,6 @@ it("reuses immutable plan views and replaces them when the plan or saved evidenc
   const changed = Object.freeze({ ...saved, planAssessments: { a: b, b } });
   expect(readPlanAssessment(changed, "a").matchAssessment.score).toBe(20);
   expect(readPlanAssessment(changed, "a")).not.toBe(first);
-});
-it("stores each plan's verdict independently and shows the selected plan's score", () => {
-  const job = createSeed().savedJobs[0]!;
-  const a = { ...job.matchAssessment, score: 90 };
-  const b = { ...job.matchAssessment, score: 20 };
-  const shared = withPlanAssessment(
-    withPlanAssessment(job, "design", a),
-    "engineering",
-    b,
-  );
-  expect(readPlanAssessment(shared, "design").matchAssessment.score).toBe(90);
-  expect(readPlanAssessment(shared, "engineering").matchAssessment.score).toBe(
-    20,
-  );
-  expect(
-    personPickedJob({ ...job, status: "discovered", personSupplied: true }),
-  ).toBe(true);
-  expect(personPickedJob({ ...job, status: "shortlisted" })).toBe(true);
-  expect(
-    personPickedJob({
-      ...job,
-      status: "discovered",
-      provenance: [{ ...job.provenance[0]!, targetId: "assistant_page" }],
-    }),
-  ).toBe(true);
-});
-
-it("prioritizes a person-supplied job even after its source has been named", () => {
-  const job = createSeed().savedJobs[0]!;
-  expect(
-    personPickedJob({
-      ...job,
-      status: "discovered",
-      personSupplied: true,
-      provenance: [],
-    }),
-  ).toBe(true);
 });
 
 it("another plan's verdict leaves the shared fit unchanged, and a plan without its own verdict shows the shared one", () => {

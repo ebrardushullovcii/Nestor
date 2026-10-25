@@ -113,23 +113,6 @@ export function hasResumeAffectingJobChange(
   );
 }
 
-export function collectResumeAffectingChangedJobIds(
-  currentJobs: readonly SavedJob[],
-  nextJobs: readonly SavedJob[],
-): string[] {
-  const currentJobsById = new Map(currentJobs.map((job) => [job.id, job]));
-
-  return nextJobs.flatMap((job) => {
-    const currentJob = currentJobsById.get(job.id);
-
-    if (!currentJob || !hasResumeAffectingJobChange(currentJob, job)) {
-      return [];
-    }
-
-    return [job.id];
-  });
-}
-
 export function buildStaleResumeDraft(
   draft: ResumeDraft,
   staleReason: string,

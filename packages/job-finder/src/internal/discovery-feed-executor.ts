@@ -1,5 +1,4 @@
 import {
-  readDiscoveryPreparation,
   writeDiscoveryPreparation,
   type DiscoveryFeedResult,
   type DiscoveryFeedTask,
@@ -21,41 +20,6 @@ export function rememberPreparedDiscoveryPosting(
     normalizedPosting: prepared,
     normalizedPostingSource: raw,
   });
-}
-
-export function takePreparedDiscoveryPosting(
-  raw: JobPosting,
-): JobPosting | null {
-  const preparation = readDiscoveryPreparation(raw);
-  return Object.isFrozen(raw) && preparation?.normalizedPostingSource === raw
-    ? (preparation.normalizedPosting ?? null)
-    : null;
-}
-
-export function carryPreparedDiscoveryPosting(
-  before: JobPosting,
-  after: JobPosting,
-): JobPosting {
-  const prepared = takePreparedDiscoveryPosting(before);
-  if (
-    prepared &&
-    [...new Set([...Object.keys(before), ...Object.keys(after)])].every(
-      (key) =>
-        key === "searchRejection" ||
-        Reflect.get(before, key) === Reflect.get(after, key),
-    )
-  ) {
-    rememberPreparedDiscoveryPosting(after, {
-      ...prepared,
-      searchRejection: after.searchRejection,
-    });
-    Object.freeze(after);
-  } else if (readDiscoveryPreparation(after)?.normalizedPosting)
-    writeDiscoveryPreparation(after, {
-      normalizedPosting: undefined,
-      normalizedPostingSource: undefined,
-    });
-  return after;
 }
 
 /** Desktop installs its bounded pool; other hosts retain the same pure reader. */

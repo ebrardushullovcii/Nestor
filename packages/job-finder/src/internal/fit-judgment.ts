@@ -1,13 +1,9 @@
 import {
-  JOB_FIT_JUDGING_BATCH_SIZE,
-  type JobFinderAiClient,
   type JobFitJudgmentResult,
 } from "@nestor/ai-providers";
 import type {
-  CandidateProfile,
   FitJudgment,
   JobPosting,
-  JobSearchPreferences,
   MatchAssessment,
 } from "@nestor/contracts";
 
@@ -91,143 +87,7 @@ export function jobNeedsFitJudgment(
   );
 }
 
-/**
- * How worth a model call a job is when not every unjudged job will get one.
- * An out-of-date verdict's score is the best guess there is; a job never
- * judged sits in the middle; one the model already called a skip or an
- * unrelated role goes last, so a capped or stopped pass spends its calls on
- * the likeliest fits.
- */
-function fitJudgingPromise(job: { matchAssessment: MatchAssessment }): number {
-  const assessment = job.matchAssessment;
-  if (
-    assessment.recommendation === "skip" ||
-    assessment.titleFamilyMatch === "unrelated"
-  ) {
-    return 0;
-  }
-  return assessment.judgment ? 1 + assessment.score / 100 : 1.5;
-}
-
-/** Most promising first, then the newest find. */
-export function compareFitJudgingPromise(
-  left: { matchAssessment: MatchAssessment; discoveredAt?: string | null },
-  right: { matchAssessment: MatchAssessment; discoveredAt?: string | null },
-): number {
-  return (
-    fitJudgingPromise(right) - fitJudgingPromise(left) ||
-    (right.discoveredAt ?? "").localeCompare(left.discoveredAt ?? "")
-  );
-}
-
 /** What a verdict was given on: it changes when the listing does. */
 export function fitPostingFingerprint(job: JobPosting): string {
   return createMatchAssessmentPostingFingerprint(job);
-}
-
-/** Batches sent to the model at once; the work happens on its servers. */
-const JUDGING_CONCURRENCY = 5;
-
-/**
- * Asks the model to judge jobs, a batch per call, several batches at once.
- * Returns the verdicts it gave; a job missing from the result stays as it
- * was and is asked about on the next pass. A failed batch does not stop the
- * others, and is not asked again here: the request layer already retried it
- * for passing failures (ADR 0020), so another round would only repeat paid
- * attempts.
- */
-export async function judgeJobFitsInBatches<
-  TJob extends JobPosting & { id: string },
->(input: {
-  aiClient: Pick<JobFinderAiClient, "judgeJobFits">;
-  profile: CandidateProfile;
-  searchPreferences: JobSearchPreferences;
-  jobs: readonly TJob[];
-  contextFingerprint: string;
-  now?: () => string;
-  signal?: AbortSignal;
-  batchSize?: number;
-  concurrency?: number;
-  onProgress?: (completed: number, total: number) => void;
-  onBatchJudged?: (
-    judgments: ReadonlyMap<string, FitJudgment>,
-  ) => Promise<void>;
-}): Promise<Map<string, FitJudgment>> {
-  const judgments = new Map<string, FitJudgment>();
-  const judgeJobFits = input.aiClient.judgeJobFits?.bind(input.aiClient);
-  if (!judgeJobFits || input.jobs.length === 0) {
-    return judgments;
-  }
-  const now = input.now ?? (() => new Date().toISOString());
-  const batchSize = Math.max(1, input.batchSize ?? JOB_FIT_JUDGING_BATCH_SIZE);
-  const batches: TJob[][] = [];
-  for (let start = 0; start < input.jobs.length; start += batchSize) {
-    batches.push(input.jobs.slice(start, start + batchSize));
-  }
-
-  const judgeBatch = async (batch: readonly TJob[]): Promise<void> => {
-    let results: JobFitJudgmentResult[];
-    try {
-      results = await judgeJobFits({
-        ...(input.signal ? { signal: input.signal } : {}),
-        assessmentDate: now().slice(0, 10),
-        profile: input.profile,
-        searchPreferences: input.searchPreferences,
-        jobs: batch.map((job) => ({ jobId: job.id, posting: job })),
-      });
-    } catch (error) {
-      if (input.signal?.aborted) throw error;
-      return;
-    }
-    const byId = new Map(batch.map((job) => [job.id, job]));
-    const judgedAt = now();
-    for (const result of results) {
-      const job = byId.get(result.jobId);
-      if (!job) continue;
-      judgments.set(
-        job.id,
-        toFitJudgment(result, {
-          source: "batch",
-          judgedAt,
-          contextFingerprint: input.contextFingerprint,
-          postingFingerprint: createMatchAssessmentPostingFingerprint(job),
-        }),
-      );
-    }
-    await input.onBatchJudged?.(
-      new Map(
-        batch.flatMap((job) => {
-          const judgment = judgments.get(job.id);
-          return judgment ? [[job.id, judgment] as const] : [];
-        }),
-      ),
-    );
-  };
-
-  let completed = 0;
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < batches.length) {
-      input.signal?.throwIfAborted();
-      const batch = batches[next];
-      next += 1;
-      if (batch) {
-        await judgeBatch(batch);
-        completed += batch.length;
-        input.onProgress?.(completed, input.jobs.length);
-      }
-    }
-  };
-  await Promise.all(
-    Array.from(
-      {
-        length: Math.min(
-          Math.max(1, input.concurrency ?? JUDGING_CONCURRENCY),
-          batches.length,
-        ),
-      },
-      () => worker(),
-    ),
-  );
-  return judgments;
 }

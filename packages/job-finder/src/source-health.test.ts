@@ -4,7 +4,6 @@ import {
   classifyEnabledSourceHealth,
   deriveEnabledSourceHealthCounts,
   deriveRepeatedlyFailingTargetIds,
-  deriveDiscoverySourceOutcome,
   deriveSourceHealthSignals,
   deriveSucceededDiscoveryTargetIds,
   describeEnabledSourceHealth,
@@ -40,18 +39,6 @@ function run(
 }
 
 const VERIFIED_AT = "2026-08-20T09:00:00.000Z";
-
-test("failed sources are terminal but never counted as completed", () => {
-  expect(
-    deriveDiscoverySourceOutcome(
-      run([
-        { targetId: "one", state: "completed" },
-        { targetId: "two", state: "completed" },
-        { targetId: "three", state: "failed" },
-      ]),
-    ),
-  ).toEqual({ completed: 2, planned: 3 });
-});
 
 function source(
   overrides: Partial<DiscoverySourceHealthFields> & {

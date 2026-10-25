@@ -1,13 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
-import { discoveryLedgerValueSql } from "./discovery-ledger-storage";
 import type {
   ApplicationAttempt,
-  DiscoveryLedgerEntry,
   ListingSignalRecord,
   WorkspaceJobListingActivity,
 } from "@nestor/contracts";
 import {
-  createJobIdentityIndex,
   projectDiscoveryJobViews,
   type ListingActivityJob,
   type JobIdentityInput,
@@ -23,7 +20,6 @@ export function createWorkspaceListActivityReader(
     PRIMARY KEY(plan_id,origin,id))`);
   type Identity = JobIdentityInput & { id: string; origin: string };
   const identities = new Map<string, { text: string; value: Identity }>();
-  const index = createJobIdentityIndex<Identity>([], (job) => job);
   const planVersions = new Map<string, string>();
   const ensure = (planId: string, version: string) => {
     if (planVersions.get(planId) === version) return;
@@ -39,20 +35,15 @@ export function createWorkspaceListActivityReader(
       present.add(key);
       const old = identities.get(key);
       if (old?.text === text) continue;
-      if (old) index.remove(old.value);
       const value: Identity = {
         ...(JSON.parse(text) as JobIdentityInput),
         id: String(row.id),
         origin: String(row.origin),
       };
       identities.set(key, { text, value });
-      index.add(value);
     }
-    for (const [key, old] of identities)
-      if (!present.has(key)) {
-        index.remove(old.value);
-        identities.delete(key);
-      }
+    for (const key of identities.keys())
+      if (!present.has(key)) identities.delete(key);
     const identityJobs = [...identities.values()].map((row) => row.value);
     const byKey = new Map(
       identityJobs.map((job) => [`${job.origin}:${job.id}`, job]),
@@ -95,25 +86,6 @@ export function createWorkspaceListActivityReader(
         },
       });
     }
-    const normalizedLedger = Boolean(
-      db
-        .prepare(
-          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='discovery_ledger_observations'",
-        )
-        .get(),
-    );
-    const ledger = db
-      .prepare(
-        normalizedLedger
-          ? `SELECT ${discoveryLedgerValueSql()} AS value FROM discovery_ledger
-      WHERE json_extract(value,'$.latestStatus')='inactive' AND EXISTS (
-        SELECT 1 FROM discovery_ledger_observations observation
-        WHERE observation.id=discovery_ledger.id AND observation.inactive_at IS NOT NULL) ORDER BY position`
-          : `SELECT value FROM discovery_ledger WHERE json_extract(value,'$.latestStatus')='inactive'
-          AND json_extract(value,'$.inactiveAt') IS NOT NULL ORDER BY position`,
-      )
-      .all()
-      .map((row) => JSON.parse(String(row.value)) as DiscoveryLedgerEntry);
     const signals = db
       .prepare(
         "SELECT json_extract(value,'$.safeguards.listingSignals') AS value FROM singleton_state WHERE key='intelligence_state'",
@@ -127,12 +99,10 @@ export function createWorkspaceListActivityReader(
       .map((row) => JSON.parse(String(row.value)) as ApplicationAttempt);
     const projected = projectDiscoveryJobViews({
       jobs,
-      discoveryLedger: ledger,
       listingSignals: signals
         ? (JSON.parse(String(signals)) as ListingSignalRecord[])
         : [],
       applicationAttempts: attempts,
-      identityIndex: { sync: () => index },
     });
     db.prepare("DELETE FROM workspace_listing_activity WHERE plan_id=?").run(
       planId,
