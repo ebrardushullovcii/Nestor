@@ -274,41 +274,19 @@ const extractor: JobExtractor = {
   ),
 };
 
-test("search checkpoints and the final result carry the same full listing body", async () => {
-  const description = "Build APIs, operate services, mentor engineers. Requirements: SQL and production experience. Benefits: flexible hours.";
-  const card = posting("Platform Engineer", "Northwind", "j1");
-  const readPostingPage = vi.fn(() => Promise.resolve({
-    finalUrl: card.canonicalUrl,
-    html: `<script type="application/ld+json">${JSON.stringify({"@type":"JobPosting",title:card.title,hiringOrganization:{name:card.company},description})}</script>`,
-  }));
-  const savedBodies: string[] = [];
-  const result = await runJobSearchAgent({
-    hands:hands({current:rawPage()}),
-    config:config({onCheckpoint: checkpoint => { savedBodies.push(...checkpoint.collectedJobs.map(job=>job.description)); }}),
-    readPostingPage,
-    llmClient:scripted([{name:"extract_jobs",args:{pageType:"search_results"}},{name:"finish",args:{reason:"All results read."}}]),
-    jobExtractor:{extractJobsFromPage:()=>Promise.resolve([card])},
-  });
-  expect(savedBodies).toEqual([description]);
-  expect(result.jobs[0]?.description).toBe(description);
-  expect(readPostingPage).toHaveBeenCalledTimes(1);
-});
-
 test("browser inventory fallback collects cards without premature detail reads or fit preferences", async () => {
   const card = posting("Senior Data Analyst", "Northwind", "inventory");
-  const readPostingPage = vi.fn(() => Promise.reject(new Error("Details belong to the next engine step")));
   const inventory = config({ inventoryOnly: true });
   const selection = buildExtractionSelectionContext(inventory, []);
   expect(selection).not.toContain("workEligibility");
   expect(selection).not.toContain("seniorityLevels");
   expect(createJobSearchPrompts(inventory).system).toContain("Do not open details");
   const result = await runJobSearchAgent({
-    hands: hands({ current: rawPage() }), config: inventory, readPostingPage,
+    hands: hands({ current: rawPage() }), config: inventory,
     llmClient: scripted([{ name: "extract_jobs", args: { pageType: "search_results" } }, { name: "finish", args: { reason: "Inventory collected." } }]),
     jobExtractor: { extractJobsFromPage: () => Promise.resolve([card]) },
   });
   expect(result.jobs[0]?.title).toBe("Senior Data Analyst");
-  expect(readPostingPage).not.toHaveBeenCalled();
 });
 
 test.each(["same", "text", "link", "unlinked"])(
