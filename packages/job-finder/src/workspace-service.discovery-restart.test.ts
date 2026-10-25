@@ -78,9 +78,9 @@ describe("discovery restart recovery", () => {
       release = resolve;
     });
     const originalRead =
-      repository.readDiscoveryDisplayProjection.bind(repository);
+      repository.readDiscoveryBootstrapProjection.bind(repository);
     let recoveryReads = 0;
-    vi.spyOn(repository, "readDiscoveryDisplayProjection").mockImplementation(
+    vi.spyOn(repository, "readDiscoveryBootstrapProjection").mockImplementation(
       () => {
         if (
           new Error().stack?.includes("recoverInterruptedDiscoveryStateOnLoad")

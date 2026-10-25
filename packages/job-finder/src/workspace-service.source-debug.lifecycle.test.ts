@@ -195,7 +195,7 @@ describe("createJobFinderWorkspaceService", () => {
     });
   });
 
-  test("marks lingering running source-debug runs as interrupted on workspace load", async () => {
+  test("marks lingering running source-debug runs as interrupted in the background without a snapshot", async () => {
     const repository = createInMemoryJobFinderRepository({
       ...createSeed(),
       discovery: {
@@ -260,6 +260,12 @@ describe("createJobFinderWorkspaceService", () => {
       documentManager: createDocumentManager(),
     });
 
+    await vi.waitFor(async () =>
+      expect(
+        (await repository.readDiscoveryBootstrapProjection())
+          .activeSourceDebugRun,
+      ).toBeNull(),
+    );
     const snapshot = await workspaceService.getWorkspaceSnapshot();
     const runs = await repository.listSourceDebugRuns();
 

@@ -122,13 +122,19 @@ export async function deriveAndPersistProfileSetupState(
       searchPreferences: input.searchPreferences,
     }),
   });
-  const discoveryRuns = await ctx.repository.readDiscoveryRunStates();
+  // Explicit completion already supplies this evidence to the derivation.
+  // Reading past searches cannot change that result on an unchanged view.
+  const hasRunSearch =
+    nextState.status !== "completed" &&
+    (await ctx.repository.readDiscoveryRunStates()).some(
+      (run) => !run.isActive,
+    );
   const derivedState = deriveProfileSetupState(
     input.profile,
     input.searchPreferences,
     {
       currentState: nextState,
-      hasRunSearch: discoveryRuns.some((run) => !run.isActive),
+      hasRunSearch,
       now,
     },
   );
