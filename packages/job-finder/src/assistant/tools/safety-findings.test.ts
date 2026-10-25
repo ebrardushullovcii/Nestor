@@ -5,7 +5,6 @@ import {
   ApplyRunSchema,
   ApplicationCrmDataSchema,
   ApplicationRecordSchema,
-  ListingActivitySchema,
   type ApplicationRecord,
   AssistantResultSetSchema,
   AssistantMessageSchema,
@@ -27,11 +26,6 @@ import {
   browserUseApplicationTool,
   browserTools,
 } from "./browser-tools";
-import {
-  assessJobListingTool,
-  shortlistResultSetTool,
-  shortlistJobsTool,
-} from "./jobs-tools";
 import { editProfileTool, PROFILE_EDITING_RULES } from "./profile-tools";
 import {
   setDefaultResumeLevelTool,
@@ -667,85 +661,8 @@ describe("R3 assistant safety findings", () => {
     );
   });
 
-  it("R3-035 shortlists the whole result set in one call, preserving existing selections", async () => {
-    const ctx = world();
-    const seed = createSeed();
-    seed.savedJobs = Array.from({ length: 33 }, (_, index) => ({
-      ...seed.savedJobs[0]!,
-      id: `bulk_${index}`,
-      sourceJobId: `source_${index}`,
-      status: "discovered" as const,
-      canonicalUrl: `https://example.test/jobs/${index}`,
-    }));
-    seed.tailoredAssets = [];
-    seed.applicationRecords = [];
-    const service = createWorkspaceServiceHarness({ seed }).workspaceService;
-    await service.queueJobForReview("bulk_0");
-    await service.queueJobForReview("bulk_1");
-    const set = AssistantResultSetSchema.parse({
-      id: "all",
-      kind: "jobs",
-      label: "All jobs",
-      itemIds: seed.savedJobs.map((job) => job.id),
-      source: "tool_query",
-      conversationId: "conversation",
-      createdAt: ctx.session.now(),
-    });
-    ctx.session.getResultSet = () => Promise.resolve(set);
-    const result = await shortlistResultSetTool.execute(
-      { resultSetId: "all", limit: 30, evenIfExcludedOrApplied: false },
-      { ...ctx, service },
-    );
-    expect(result.summary).toContain("Shortlisted 30 jobs");
-    expect((await service.getWorkspaceSnapshot()).reviewQueue).toHaveLength(32);
-  });
 
-  it("R3-035 keeps exact partial progress when selection stops", async () => {
-    const ctx = world();
-    delete ctx.service.queueJobsForReview;
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    const job = {
-      ...snapshot.discoveryJobs[0]!,
-      status: "discovered" as const,
-      listingActivity: { status: "unknown" as const },
-      company: "Synthetic",
-    };
-    snapshot.applicationRecords = [];
-    snapshot.discoveryJobs = [1, 2, 3].map((index) => ({
-      ...job,
-      id: `stop_${index}`,
-    }));
-    vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-    const controller = new AbortController();
-    ctx.session.signal = controller.signal;
-    vi.spyOn(ctx.service, "queueJobForReview").mockImplementation(() => {
-      controller.abort();
-      return Promise.resolve(snapshot);
-    });
-    const result = await shortlistJobsTool.execute(
-      {
-        jobIds: ["stop_1", "stop_2", "stop_3"],
-        evenIfExcludedOrApplied: false,
-      },
-      ctx,
-    );
-    expect(result.summary).toContain("Shortlisted 1 job of 3; 2 not started");
-  });
 
-  it("R3-037 runs the detail button's assessment action and returns its saved evidence", async () => {
-    const ctx = world();
-    const snapshot = await ctx.service.getWorkspaceSnapshot();
-    const assess = vi
-      .spyOn(ctx.service, "assessJobListing")
-      .mockResolvedValue(snapshot);
-    const result = await assessJobListingTool.execute(
-      { jobId: snapshot.discoveryJobs[0]!.id },
-      ctx,
-    );
-    expect(assess).toHaveBeenCalledWith(snapshot.discoveryJobs[0]!.id);
-    expect(ctx.publishWorkspaceUpdate).toHaveBeenCalled();
-    expect(result.data).toMatchObject({ id: snapshot.discoveryJobs[0]!.id });
-  });
 });
 
 it("partial AI settings never restore withdrawn declaration approvals", async () => {
@@ -790,93 +707,7 @@ it("partial AI settings never restore withdrawn declaration approvals", async ()
   ).toEqual([]);
 });
 
-it("bulk selection submits eligible jobs once and preserves held-back outcomes", async () => {
-  const ctx = world();
-  const snapshot = await ctx.service.getWorkspaceSnapshot();
-  snapshot.applicationRecords = [];
-  const job = snapshot.discoveryJobs[0]!;
-  snapshot.discoveryJobs = Array.from({ length: 50 }, (_, index) => ({
-    ...job,
-    id: `batch_${index}`,
-    status: "discovered",
-    listingActivity:
-      index === 49
-        ? ListingActivitySchema.parse({
-            status: "closed",
-            observedAt: new Date().toISOString(),
-            signalId: "synthetic_closed",
-            provenance: "system",
-            explanation: "The listing is closed.",
-            detail: null,
-            confidence: 1,
-          })
-        : { status: "unknown" },
-  }));
-  vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-  const single = vi.spyOn(ctx.service, "queueJobForReview");
-  const batch = vi.fn<(jobIds: readonly string[]) => Promise<void>>(() =>
-    Promise.resolve(),
-  );
-  ctx.service.queueJobsForReview = batch;
-  const result = await shortlistJobsTool.execute(
-    {
-      jobIds: snapshot.discoveryJobs.map((job) => job.id),
-      evenIfExcludedOrApplied: false,
-    },
-    ctx,
-  );
-  expect(batch).toHaveBeenCalledOnce();
-  expect(batch.mock.calls[0]?.[0]).toHaveLength(49);
-  expect(single).not.toHaveBeenCalled();
-  expect(result.summary).toContain("Shortlisted 49 jobs of 50");
-  expect(result.data).toContainEqual({
-    jobId: "batch_49",
-    outcome: "refused: the listing says it is closed",
-  });
-});
 
-it("bulk selection starts at most three slow reads and retains out-of-order outcomes on Stop", async () => {
-  const ctx = world();
-  delete ctx.service.queueJobsForReview;
-  const snapshot = await ctx.service.getWorkspaceSnapshot();
-  snapshot.applicationRecords = [];
-  const job = snapshot.discoveryJobs[0]!;
-  snapshot.discoveryJobs = Array.from({ length: 5 }, (_, index) => ({
-    ...job,
-    id: `parallel_${index}`,
-    status: "discovered",
-    listingActivity: { status: "unknown" },
-  }));
-  vi.spyOn(ctx.service, "getWorkspaceSnapshot").mockResolvedValue(snapshot);
-  const controller = new AbortController();
-  ctx.session.signal = controller.signal;
-  const finish = new Map<string, () => void>();
-  const queue = vi
-    .spyOn(ctx.service, "queueJobForReview")
-    .mockImplementation(
-      (id) => new Promise((resolve) => finish.set(id, () => resolve(snapshot))),
-    );
-  const pending = shortlistJobsTool.execute(
-    {
-      jobIds: snapshot.discoveryJobs.map((job) => job.id),
-      evenIfExcludedOrApplied: false,
-    },
-    ctx,
-  );
-  await vi.waitFor(() => expect(queue).toHaveBeenCalledTimes(3));
-  controller.abort();
-  finish.get("parallel_2")!();
-  finish.get("parallel_0")!();
-  finish.get("parallel_1")!();
-  const result = await pending;
-  expect(queue).toHaveBeenCalledTimes(3);
-  expect(result.data).toEqual(
-    snapshot.discoveryJobs.map((job, index) => ({
-      jobId: job.id,
-      outcome: index < 3 ? "shortlisted" : "not started: stopped",
-    })),
-  );
-});
 
 it("refuses unmentioned jobs in second person without echoing internal ids", async () => {
   const ctx = world();

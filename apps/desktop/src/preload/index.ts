@@ -26,8 +26,6 @@ import {
   type ApplicationListQuery,
   type ApplyJobsInput,
   type JobChange,
-  type JobFinderDiscoveryCommandReply,
-  type JobFinderDiscoveryCancellationReply,
   ApplicationPageStatesInputSchema,
   ApplicationPageStatesSchema,
   ReopenApplicationPageInputSchema,
@@ -87,10 +85,7 @@ import type {
   DesktopWindowCloseResolution,
   DesktopWindowCloseRequest,
   EditableSourceInstructionArtifact,
-  EmployerExclusionPreview,
   DesktopWindowControlsState,
-  DiscoveryActivityEvent,
-  DiscoveryFeedbackReason,
   ApplicationAuthorityReadiness,
   ApproveCurrentApplicationAnswersInput,
   ApproveCurrentApplicationAnswersResult,
@@ -132,7 +127,6 @@ import type {
   JobFinderApplyRunDetailsQuery,
   JobFinderApplicationStartTarget,
   JobFinderPreparedApplicationPageInput,
-  JobFinderDiscoveryCancellationInput,
   JobFinderOpenBrowserSessionInput,
   JobFinderSetResumeClaimConfirmationInput,
   JobFinderSetWorkHistoryReviewAcknowledgmentInput,
@@ -155,7 +149,6 @@ import type {
   JobFinderResumePdfExportReply,
   RevealSavedFileResult,
   ResumePdfExportIntent,
-  RemoveEmployerExclusionInput,
   RevokeApplicationAuthorityEnvelopeInput,
   ResolveSubmissionOutcomeInput,
   ResumeTimelineRepairAction,
@@ -163,9 +156,6 @@ import type {
   JobFinderResumeWorkspace,
   JobFinderRepositoryState,
   JobFinderTestSaveSurface,
-  JobFinderAgentDiscoveryActionInput,
-  JobFinderAgentDiscoveryReply,
-  JobFinderSearchRequest,
   JobFinderSettings,
   ProfileSetupState,
   ProjectGroupedManualAnswerCommand,
@@ -215,37 +205,6 @@ import {
   UpdateApplicationAuthorityEnvelopeInputSchema,
 } from "@nestor/contracts";
 
-let activeAgentDiscoveryRequestId: string | null = null;
-
-function invokeAgentDiscovery<T>(
-  channel:
-    | "job-finder:run-agent-discovery"
-    | "job-finder:run-agent-discovery-command",
-  onActivity?: (event: DiscoveryActivityEvent) => void,
-  targetId?: string,
-  searchRequest?: JobFinderSearchRequest,
-): Promise<T> {
-  if (activeAgentDiscoveryRequestId)
-    return Promise.reject(new Error("Agent discovery is already running."));
-  const requestId = `agent_discovery_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-  const activityChannel = `job-finder:discovery-activity:${requestId}`;
-  activeAgentDiscoveryRequestId = requestId;
-  const handler = (
-    _event: Electron.IpcRendererEvent,
-    event: DiscoveryActivityEvent,
-  ) => onActivity?.(event);
-  if (onActivity) ipcRenderer.on(activityChannel, handler);
-  const payload: JobFinderAgentDiscoveryActionInput = {
-    requestId,
-    targetId: targetId ?? null,
-    ...(searchRequest ? { searchRequest } : {}),
-  };
-  return (ipcRenderer.invoke(channel, payload) as Promise<T>).finally(() => {
-    if (onActivity) ipcRenderer.off(activityChannel, handler);
-    if (activeAgentDiscoveryRequestId === requestId)
-      activeAgentDiscoveryRequestId = null;
-  });
-}
 let activeResumeImportRequestId: string | null = null;
 let activeSourceDebugRequestId: string | null = null;
 
@@ -907,10 +866,6 @@ const desktopApi = {
         "job-finder:save-workspace-inputs",
         toSaveWorkspaceInputsPayload(profileOrInput, searchPreferences),
       ) as Promise<JobFinderWorkspaceSyncResult>,
-    judgeUnjudgedJobs: () =>
-      ipcRenderer.invoke(
-        "job-finder:judge-unjudged-jobs",
-      ) as Promise<JobFinderWorkspaceSyncResult>,
     analyzeProfileFromResume: () =>
       ipcRenderer.invoke(
         "job-finder:analyze-profile-from-resume",
@@ -1073,36 +1028,6 @@ const desktopApi = {
         activeResumeImportRequestId = null;
       }
     },
-    runDiscovery: () =>
-      ipcRenderer.invoke(
-        "job-finder:run-discovery",
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    runAgentDiscovery: (
-      onActivity?: (event: DiscoveryActivityEvent) => void,
-      targetId?: string,
-      searchRequest?: JobFinderSearchRequest,
-    ) =>
-      invokeAgentDiscovery<JobFinderAgentDiscoveryReply>(
-        "job-finder:run-agent-discovery",
-        onActivity,
-        targetId,
-        searchRequest,
-      ),
-    runAgentDiscoveryCommand: (
-      onActivity?: (event: DiscoveryActivityEvent) => void,
-      targetId?: string,
-      searchRequest?: JobFinderSearchRequest,
-    ) =>
-      invokeAgentDiscovery<JobFinderDiscoveryCommandReply>(
-        "job-finder:run-agent-discovery-command",
-        onActivity,
-        targetId,
-        searchRequest,
-      ),
-    cancelDiscoveryRunCommand: (runId: string) =>
-      ipcRenderer.invoke("job-finder:cancel-discovery-run-command", {
-        runId,
-      }) as Promise<JobFinderDiscoveryCancellationReply>,
     runSourceDebug: (
       targetId: string,
       onProgress?: (event: SourceDebugProgressEvent) => void,
@@ -1237,11 +1162,6 @@ const desktopApi = {
         targetId,
         instructionId,
       }) as Promise<JobFinderWorkspaceSyncResult>,
-    cancelAgentDiscovery: (input: JobFinderDiscoveryCancellationInput) =>
-      ipcRenderer.invoke(
-        "job-finder:cancel-discovery-run",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
     resetBrowser: () =>
       ipcRenderer.invoke(
         "job-finder:reset-browser",
@@ -1284,31 +1204,6 @@ const desktopApi = {
       }) as Promise<JobFinderWorkspaceSyncResult>,
     removeJobFromReview: (jobId: string) =>
       ipcRenderer.invoke("job-finder:remove-job-from-review", {
-        jobId,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    dismissDiscoveryJob: (
-      jobId: string,
-      reasons: readonly DiscoveryFeedbackReason[],
-      action: "hide_job" | "hide_and_exclude_employer" = "hide_job",
-      expectedNormalizedCompanyName: string | null = null,
-    ) =>
-      ipcRenderer.invoke("job-finder:dismiss-discovery-job", {
-        jobId,
-        reasons,
-        action,
-        expectedNormalizedCompanyName,
-      }) as Promise<JobFinderWorkspaceSyncResult>,
-    previewEmployerExclusion: (jobId: string) =>
-      ipcRenderer.invoke("job-finder:preview-employer-exclusion", {
-        jobId,
-      }) as Promise<EmployerExclusionPreview>,
-    removeEmployerExclusion: (input: RemoveEmployerExclusionInput) =>
-      ipcRenderer.invoke(
-        "job-finder:remove-employer-exclusion",
-        input,
-      ) as Promise<JobFinderWorkspaceSyncResult>,
-    restoreDismissedDiscoveryJob: (jobId: string) =>
-      ipcRenderer.invoke("job-finder:restore-dismissed-discovery-job", {
         jobId,
       }) as Promise<JobFinderWorkspaceSyncResult>,
     getResumeWorkspace: (jobId: string) =>

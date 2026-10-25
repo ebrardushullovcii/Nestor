@@ -387,7 +387,6 @@ export function JobFinderProfileRoute() {
     <ProfileScreen
       onApplyProfileSetupReviewAction={context.onApplyProfileSetupReviewAction}
       actionState={context.actionState}
-      discoveryRunFeedback={context.discoveryRunFeedback}
       importResumeGuardMessage={context.importResumeGuardMessage}
       pendingActions={{
         analyzeProfile: context.isPending(
@@ -451,8 +450,6 @@ export function JobFinderProfileRoute() {
       latestResumeImportRun={context.workspace.latestResumeImportRun}
       profile={context.workspace.profile}
       profileSetupState={context.workspace.profileSetupState}
-      activeDiscoveryRun={context.workspace.activeDiscoveryRun}
-      discoveryRuns={context.workspace.recentDiscoveryRuns}
       recentSourceDebugRuns={context.workspace.recentSourceDebugRuns}
       resumeApplicationMode={context.workspace.settings?.resumeApplicationMode}
       onUpdateResumeApproach={(resumeApproach) =>

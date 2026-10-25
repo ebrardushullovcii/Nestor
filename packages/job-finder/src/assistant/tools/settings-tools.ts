@@ -342,15 +342,11 @@ export const pauseActivityTool = defineTool({
     ports.publishWorkspaceUpdate();
     return {
       summary: input.paused
-        ? `Background work is paused. ${resumes?.summary}${work.resumeImport.active ? " Resume import is still running; it was not stopped." : ""}${after.activeDiscoveryRun?.state === "running" ? " The current search is still finishing." : ""}${after.applyRuns.some((run) => run.state === "running") ? " Current applications are still finishing." : ""}${after.activeSourceDebugRun?.state === "running" ? " The source check is still running; it was not stopped." : ""}`
+        ? `Background work is paused. ${resumes?.summary}${work.resumeImport.active ? " Resume import is still running; it was not stopped." : ""}${after.applyRuns.some((run) => run.state === "running") ? " Current applications are still finishing." : ""}${after.activeSourceDebugRun?.state === "running" ? " The source check is still running; it was not stopped." : ""}`
         : "Resumed.",
       data: {
         activityPaused: after.activityControl.paused,
         resumes: resumes?.data ?? null,
-        finishingSearch:
-          after.activeDiscoveryRun?.state === "running"
-            ? after.activeDiscoveryRun.id
-            : null,
         finishingApplications: after.applyRuns
           .filter((run) => run.state === "running")
           .map((run) => ({ id: run.id, jobIds: run.jobIds })),

@@ -6,7 +6,7 @@ import type {
 import { isApplicationTrackedAsSentByPerson } from "@nestor/contracts";
 
 import { readBackgroundBatch } from "./tools";
-import { allJobs, compactJob } from "./tools/format";
+import { allJobs, } from "./tools/format";
 
 /**
  * Whether a background run a conversation waits on has ended, and what the
@@ -38,40 +38,11 @@ export function readRunStatus(
     };
   }
   if (run.kind === "discovery") {
-    const record =
-      snapshot.activeDiscoveryRun?.id === run.id
-        ? snapshot.activeDiscoveryRun
-        : (snapshot.recentDiscoveryRuns.find((entry) => entry.id === run.id) ??
-          null);
-    if (!record) {
-      return {
-        done: true,
-        summary: `The search run ${run.id} is no longer recorded.`,
-        details: null,
-      };
-    }
-    if (record.state === "running") {
-      return { done: false, summary: "Searching.", details: null };
-    }
-    const newJobs = snapshot.discoveryJobs
-      .filter(
-        (job) =>
-          job.discoveredAt >= record.startedAt && job.status === "discovered",
-      )
-      .sort(
-        (left, right) =>
-          right.matchAssessment.score - left.matchAssessment.score,
-      );
+    // Searches run on the job store now; search_status reports them.
     return {
       done: true,
-      summary: `The search ${record.state === "cancelled" ? "was stopped" : "finished"}: ${record.summary.jobsPersisted ?? newJobs.length} new job(s) kept, ${record.summary.duplicatesMerged ?? 0} duplicate(s) merged.`,
-      details: {
-        runId: record.id,
-        state: record.state,
-        summary: record.summary,
-        newJobs: newJobs.slice(0, 15).map(compactJob),
-        newJobIds: newJobs.map((job) => job.id),
-      },
+      summary: "Searches report through search_status.",
+      details: null,
     };
   }
   if (run.kind === "apply_batch" || run.kind === "apply_run") {

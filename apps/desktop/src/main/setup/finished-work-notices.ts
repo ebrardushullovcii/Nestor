@@ -1,11 +1,11 @@
 /**
- * Long work (a search, a resume batch, an Apply queue) shows on the taskbar
+ * Long work (a resume batch, an Apply queue) shows on the taskbar
  * button while it runs, and says once that it finished when the person is
  * not looking at the window (ADR 0051: finished work only; a pause, a stop
  * or a failure stays on the app's own screens).
  */
 
-export type LongWorkKind = "search" | "resumes" | "apply";
+export type LongWorkKind = "resumes" | "apply";
 
 export interface FinishedWorkNotice {
   title: string;
@@ -46,17 +46,6 @@ export interface FinishedWorkNotifier {
 
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
-}
-
-export function searchFinishedNotice(newJobs: number): FinishedWorkNotice {
-  return {
-    title: "Search finished",
-    body:
-      newJobs > 0
-        ? `${plural(newJobs, "new job", "new jobs")} to look at`
-        : "Nothing new this time",
-    route: "/job-finder/discovery",
-  };
 }
 
 export function resumesFinishedNotice(written: number): FinishedWorkNotice {

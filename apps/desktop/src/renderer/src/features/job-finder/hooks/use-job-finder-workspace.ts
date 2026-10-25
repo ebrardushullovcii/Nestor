@@ -7,11 +7,7 @@ import type {
   ApplyGroupedManualAnswerInput,
   CandidateProfile,
   ClearApplicationAnswerCommandInput,
-  DiscoveryActivityEvent,
-  DiscoveryFeedbackReason,
   EditableSourceInstructionArtifact,
-  JobFinderAgentDiscoveryReply,
-  JobFinderAgentDiscoveryResult,
   JobFinderApplicationStartTarget,
   JobFinderApplyConsentActionInput,
   JobFinderApplyCopilotActionInput,
@@ -26,7 +22,6 @@ import type {
   JobFinderRemoveFromApplyQueueInput,
   JobFinderRendererWorkspaceSnapshot,
   JobFinderReturnApplicationToShortlistInput,
-  JobFinderSearchRequest,
   JobFinderSetResumeClaimConfirmationInput,
   JobFinderSettings,
   JobFinderSetWorkHistoryReviewAcknowledgmentInput,
@@ -67,12 +62,8 @@ import { isJobFinderStartupDatabaseRecoveryFact } from "../../../../../shared/jo
 import { applyJobFinderWorkspaceDelta } from "../../../pages/job-finder-workspace-delta";
 import type { JobFinderShellActions } from "../lib/job-finder-types";
 import { whenLaunchReadsSettled } from "../lib/launch-reads";
-import type { SearchChangeFeedFollower } from "../lib/search-change-feed";
 import {
-  createSearchChangeFeedFollower,
-  isSearchRunning,
   publishLiveFindJobsCounts,
-  publishSearchLiveCounts,
 } from "../lib/search-change-feed";
 import {
   markFindJobsListsBehind,
@@ -591,7 +582,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     const next: JobFinderRendererWorkspaceSnapshot = {
       ...view,
       discoveryJobs: lists.discoveryJobs,
-      dismissedDiscoveryJobs: lists.dismissedDiscoveryJobs,
       companyJobs: lists.companyJobs,
       selectedDiscoveryJobId: latest.selectedDiscoveryJobId,
       hydration: latest.hydration,
@@ -673,42 +663,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
     };
   }, [refreshWorkspaceView]);
 
-  // During a search main announces only its start; the change feed says what
-  // the search wrote, and only screens that show the search sync for it.
-  const searchFeedRef = useRef<SearchChangeFeedFollower | null>(null);
-  useEffect(() => {
-    const queries = window.nestor.jobFinder.queries;
-    if (typeof queries?.onChanges !== "function") return undefined;
-    const follower = createSearchChangeFeedFollower({
-      isSearchRunning: () => isSearchRunning(workspaceRef.current),
-      currentRoute: () => window.location.hash.replace(/^#/, ""),
-      requestSync: () => requestBackgroundSyncRef.current?.(),
-      refreshCounts: () => {
-        const workspace = workspaceRef.current;
-        if (!workspace) return;
-        void queries
-          .getListCounts()
-          .then((counts) => {
-            if (workspaceRef.current === workspace)
-              publishSearchLiveCounts({ counts, workspace });
-          })
-          .catch(() => undefined);
-      },
-    });
-    searchFeedRef.current = follower;
-    const unsubscribe = queries.onChanges((changes) =>
-      follower.onChanges(changes),
-    );
-    const onRouteChange = () => follower.onRouteChange();
-    window.addEventListener("hashchange", onRouteChange);
-    return () => {
-      if (searchFeedRef.current === follower) searchFeedRef.current = null;
-      follower.dispose();
-      unsubscribe();
-      window.removeEventListener("hashchange", onRouteChange);
-    };
-  }, []);
-
   /**
    * Asks for a background refresh on the same paced path as main's update
    * notices, so progress refreshes during a search never stack on them.
@@ -716,11 +670,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
    * that do not show the search are not rebuilt for its progress.
    */
   const requestWorkspaceRefresh = useCallback(() => {
-    const follower = searchFeedRef.current;
-    if (follower && isSearchRunning(workspaceRef.current)) {
-      follower.onSearchProgress();
-      return;
-    }
     requestBackgroundSyncRef.current?.();
   }, []);
 
@@ -764,8 +713,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         runWorkspaceAction(() =>
           window.nestor.jobFinder.analyzeProfileFromResume(),
         ),
-      judgeUnjudgedJobs: () =>
-        runWorkspaceAction(() => window.nestor.jobFinder.judgeUnjudgedJobs()),
       openBrowserSession: (input?: JobFinderOpenBrowserSessionInput) =>
         runWorkspaceAction(() =>
           window.nestor.jobFinder.openBrowserSession(input),
@@ -781,43 +728,10 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
         ),
       approveApply: (input: JobFinderApplicationStartTarget) =>
         runWorkspaceAction(() => window.nestor.jobFinder.approveApply(input)),
-      dismissDiscoveryJob: (
-        jobId: string,
-        reasons: readonly DiscoveryFeedbackReason[],
-        action: "hide_job" | "hide_and_exclude_employer" = "hide_job",
-        expectedNormalizedCompanyName: string | null = null,
-      ) =>
-        runWorkspaceEntityMutation({
-          type: "dismiss_discovery_job",
-          jobId,
-          reasons: [...reasons],
-          action,
-          expectedNormalizedCompanyName,
-        }),
-      previewEmployerExclusion: (jobId: string) =>
-        window.nestor.jobFinder.previewEmployerExclusion(jobId),
-      removeEmployerExclusion: (input) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.removeEmployerExclusion(input),
-        ),
-      restoreDismissedDiscoveryJob: (jobId: string) =>
-        runWorkspaceEntityMutation({
-          type: "restore_dismissed_discovery_job",
-          jobId,
-        }),
       removeJobsFromReview: (jobIds: readonly string[]) =>
         runWorkspaceEntityMutation({
           type: "remove_jobs_from_review",
           jobIds: [...jobIds],
-        }),
-      dismissDiscoveryJobs: (
-        jobIds: readonly string[],
-        reasons: readonly DiscoveryFeedbackReason[],
-      ) =>
-        runWorkspaceEntityMutation({
-          type: "dismiss_discovery_jobs",
-          jobIds: [...jobIds],
-          reasons: [...reasons],
         }),
       removeJobFromReview: (jobId: string) =>
         runWorkspaceEntityMutation({
@@ -1082,31 +996,6 @@ export function useJobFinderWorkspace(): JobFinderWorkspaceState {
           clearTailoredAssetDetailCache();
         });
       },
-      runAgentDiscovery: async (
-        onProgress?: (event: DiscoveryActivityEvent) => void,
-        targetId?: string,
-        searchRequest?: JobFinderSearchRequest,
-      ) => {
-        // Main answers with what changed since the revision this window
-        // holds; it is committed like any other change this window asked for.
-        let outcome: JobFinderAgentDiscoveryResult["outcome"] = "completed";
-        const snapshot = await runWorkspaceAction(async () => {
-          const reply = (await window.nestor.jobFinder.runAgentDiscovery(
-            onProgress,
-            targetId,
-            searchRequest,
-          )) as JobFinderAgentDiscoveryReply | JobFinderAgentDiscoveryResult;
-          outcome = reply.outcome;
-          // Test hosts and an older preload may still answer with the
-          // whole workspace.
-          return "sync" in reply ? reply.sync : reply.snapshot;
-        });
-        return { outcome, snapshot };
-      },
-      cancelAgentDiscovery: (input) =>
-        runWorkspaceAction(() =>
-          window.nestor.jobFinder.cancelAgentDiscovery(input),
-        ),
       runSourceDebug: (
         targetId: string,
         onProgress?: (event: SourceDebugProgressEvent) => void,

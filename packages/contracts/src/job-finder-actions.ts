@@ -40,13 +40,6 @@ export const JobFinderReadActionStateInputSchema = z
     limit: z.number().int().min(1).max(25).default(10),
   })
   .strict();
-
-export const JobFinderAssistantSearchInputSchema = z.object({
-  goal: z.string().trim().min(1).max(1000),
-  breadth: z.enum(["best_only", "wide"]).optional(),
-  freshness: z.enum(["any", "recent"]).default("any"),
-  sourceIds: z.array(NonEmptyStringSchema.max(200)).min(1).max(1000).optional(),
-});
 export const JobFinderZoomInputSchema = z
   .object({ command: z.enum(["in", "out", "reset"]) })
   .strict();

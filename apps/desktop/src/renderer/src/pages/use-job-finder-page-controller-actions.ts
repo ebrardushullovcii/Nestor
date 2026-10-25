@@ -14,8 +14,6 @@ import {
 import type {
   AppearanceTheme,
   CandidateProfile,
-  DiscoveryActivityEvent,
-  DiscoveryFeedbackReason,
   JobFinderSearchRequest,
   JobFinderApplyConsentActionInput,
   JobFinderApplyQueueActionInput,
@@ -31,7 +29,6 @@ import type {
   ProfileSetupReviewActionOptions,
   ProfileSetupState,
   ProfileSetupStep,
-  RemoveEmployerExclusionInput,
   ResumeAssistantMessage,
   ResumeApplicationMode,
   ResumeDraft,
@@ -44,10 +41,8 @@ import { isFinishBlockingReviewItem } from "@renderer/features/job-finder/compon
 import type {
   ActionState,
   JobFinderAutoApplyQueueStartOutcome,
-  JobFinderQueuedJobOutcome,
   JobFinderShellActions,
 } from "@renderer/features/job-finder/lib/job-finder-types";
-import { type DiscoveryRunFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
 import {
   getPendingActionGeneration,
   type PendingActionScope,
@@ -155,7 +150,6 @@ type BaseActionArgs = {
   adoptAutosavedResumeDraft: (draft: ResumeDraft) => void;
   resumeAssistantRequestTokenRef: MutableRefObject<number>;
   setActionState: Dispatch<SetStateAction<ActionState>>;
-  setLiveDiscoveryEvents: Dispatch<SetStateAction<DiscoveryActivityEvent[]>>;
   setOptimisticProfileCopilotMessages: Dispatch<
     SetStateAction<readonly ProfileCopilotMessage[]>
   >;
@@ -170,9 +164,6 @@ type BaseActionArgs = {
   clearResumeWorkspaceState: () => void;
   setResumeWorkspaceDirty: Dispatch<SetStateAction<boolean>>;
   setSelectedReviewJobId: (jobId: string) => void;
-  setDiscoveryRunFeedback: Dispatch<
-    SetStateAction<DiscoveryRunFeedback | null>
-  >;
   sourceDebugRunIdRef: MutableRefObject<number>;
   latestWorkspaceRef: MutableRefObject<JobFinderRendererWorkspaceSnapshot | null>;
   workspace: JobFinderRendererWorkspaceSnapshot;
@@ -182,9 +173,6 @@ type BaseActionArgs = {
 const handledRefreshErrorTag = Symbol("handledRefreshError");
 
 export const DISCOVERY_PROGRESS_REFRESH_INTERVAL_MS = 250;
-
-// Context rebuilds must not turn one pending bulk click into several IPC writes.
-let isBulkShortlistActive = false;
 
 /**
  * Route ownership for the single page-level action status (`ActionState`).
@@ -815,7 +803,6 @@ export function createPrimaryPageActions(
     setProfileCopilotBusy,
     setProfileCopilotPendingContextKey,
     setResumeWorkspaceDirty,
-    setSelectedReviewJobId,
     sourceDebugRunIdRef,
     latestWorkspaceRef,
     workspace,
@@ -828,32 +815,6 @@ export function createPrimaryPageActions(
       ) ?? null
     );
   }
-
-  // Route-scopes every status write that is not already owned by an action
-  // runner: the write belongs to the route where its handler started, so a
-  // completion that lands after an unrelated sibling-route change stays hidden
-  // on its owning route instead of leaking onto the new one.
-  // The newest PDF built from the job's saved draft, approved. The export
-  // just ran, so its artifact is the one to freeze.
-  const approveLatestResumeExport = async (jobId: string) => {
-    const workspace = await actions.getResumeWorkspace(jobId);
-    const exportToApprove = workspace.exports
-      .filter(
-        (artifact) =>
-          artifact.jobId === jobId && artifact.draftId === workspace.draft.id,
-      )
-      .sort(
-        (left, right) =>
-          new Date(right.exportedAt).getTime() -
-          new Date(left.exportedAt).getTime(),
-      )[0];
-    if (!exportToApprove) {
-      throw new Error(
-        "Job Finder could not create the application PDF for this resume.",
-      );
-    }
-    return actions.approveResume(jobId, exportToApprove.id);
-  };
   const applyRouteScopedMessage = (
     next: ActionState,
     ownerStartRoute: string | null = jobFinderStatusRoute,
@@ -876,15 +837,11 @@ export function createPrimaryPageActions(
     }
     return null;
   };
-
-  const jobsAre = (count: number) =>
-    count === 1 ? "1 job is" : `${count} jobs are`;
   const describeJobForChange = (jobId: string): string => {
     const current = latestWorkspaceRef.current ?? workspace;
     const job =
       current.reviewQueue.find((item) => item.jobId === jobId) ??
       current.discoveryJobs.find((entry) => entry.id === jobId) ??
-      current.dismissedDiscoveryJobs.find((entry) => entry.id === jobId) ??
       current.applicationRecords.find((record) => record.jobId === jobId);
     return job ? `${job.title} at ${job.company}` : "a job";
   };
@@ -908,8 +865,6 @@ export function createPrimaryPageActions(
       return null;
     }
   };
-  const undoToastFor = (change: RecentChange | null) =>
-    change ? () => void undoRecentChange(change) : null;
   // One way back for every move, shared by each toast's Undo and Activity's
   // Recent changes. A job that moved on since keeps its newer state; the
   // reason says where it went instead.
@@ -918,9 +873,6 @@ export function createPrimaryPageActions(
     const undo = getRecentChangeUndo(
       change,
       {
-        discoveryJobs: current.discoveryJobs,
-        dismissedDiscoveryJobs: current.dismissedDiscoveryJobs,
-        reviewQueue: current.reviewQueue,
         applicationJobIds: collectPreparedApplicationJobIds(
           current.applicationRecords,
         ),
@@ -941,76 +893,6 @@ export function createPrimaryPageActions(
         scope,
       });
     switch (change.kind) {
-      case "shortlisted":
-        return settle(
-          async () => {
-            if (actions.removeJobsFromReview)
-              return actions.removeJobsFromReview(ids);
-            for (const id of ids) await actions.removeJobFromReview(id);
-          },
-          `${jobsAre(ids.length)} back in Find jobs.`,
-          jobFinderPendingActions.resumeJob("bulk-remove"),
-        );
-      case "hidden":
-        return settle(
-          async () => {
-            for (const id of ids)
-              await actions.restoreDismissedDiscoveryJob(id);
-          },
-          `${jobsAre(ids.length)} back in Find jobs.`,
-          jobFinderPendingActions.discoveryJob("bulk-dismiss"),
-        );
-      case "shown_again":
-        return settle(
-          async () => {
-            if (actions.dismissDiscoveryJobs)
-              return actions.dismissDiscoveryJobs(ids, []);
-            for (const id of ids)
-              await actions.dismissDiscoveryJob(id, [], "hide_job", null);
-          },
-          `${ids.length === 1 ? "1 job" : `${ids.length} jobs`} hidden again.`,
-          jobFinderPendingActions.discoveryJob("bulk-dismiss"),
-        );
-      case "moved_to_find_jobs":
-        return settle(
-          async () => {
-            if (actions.queueJobsForReview)
-              return actions.queueJobsForReview(ids);
-            for (const id of ids) await actions.queueJobForReview(id);
-          },
-          `${jobsAre(ids.length)} back in Shortlisted.`,
-          jobFinderPendingActions.resumeJob("bulk-remove"),
-        );
-      case "approved":
-        return settle(
-          async () => {
-            for (const id of ids)
-              await actions.clearResumeApproval(
-                id,
-                change.restoreStatus?.[id] ?? "needs_review",
-              );
-          },
-          ids.length === 1
-            ? "The resume is back under To review."
-            : `${ids.length} resumes are back under To review.`,
-          jobFinderPendingActions.apply(),
-        );
-      case "moved_to_review":
-        return settle(
-          async () => {
-            // Clearing the approval touched the draft, so the old PDF
-            // reads as out of date; a fresh one is built and approved, as
-            // the studio's Approve does.
-            for (const id of ids) {
-              await actions.exportResumePdf(id, "approval");
-              await approveLatestResumeExport(id);
-            }
-          },
-          ids.length === 1
-            ? "Resume approved again."
-            : `${ids.length} resumes approved again.`,
-          jobFinderPendingActions.apply(),
-        );
       case "moved_to_shortlisted":
         return settle(
           async () => {
@@ -1414,71 +1296,6 @@ export function createPrimaryPageActions(
         "Browser status refreshed.",
         { scope: jobFinderPendingActions.browserSession() },
       ),
-    onDismissJob: async (
-      jobId: string,
-      reasons: readonly DiscoveryFeedbackReason[],
-      action: "hide_job" | "hide_and_exclude_employer" = "hide_job",
-      expectedNormalizedCompanyName: string | null = null,
-      options?: { quiet?: boolean },
-    ) => {
-      // Undo shows the job again; excluding the employer is undone where it
-      // was made, so that one keeps its own message.
-      let change: RecentChange | null = null;
-      await runAction(
-        () =>
-          actions.dismissDiscoveryJob(
-            jobId,
-            reasons,
-            action,
-            expectedNormalizedCompanyName,
-          ),
-        () => {
-          if (action === "hide_job")
-            change = recordMove({ kind: "hidden", jobIds: [jobId] });
-        },
-        options?.quiet
-          ? null
-          : action === "hide_and_exclude_employer"
-            ? "Job hidden and the exact employer name excluded from future searches. Fit scoring is unchanged."
-            : "Job hidden.",
-        {
-          rethrowError: true,
-          scope: jobFinderPendingActions.discoveryJob(jobId),
-          ...(action === "hide_job"
-            ? {
-                undo: () => {
-                  if (change) void undoRecentChange(change);
-                },
-              }
-            : {}),
-        },
-      );
-    },
-    onPreviewEmployerExclusion: (jobId: string) =>
-      actions.previewEmployerExclusion(jobId),
-    onRemoveEmployerExclusion: (input: RemoveEmployerExclusionInput) =>
-      void runAction(
-        () => actions.removeEmployerExclusion(input),
-        () => undefined,
-        "Employer allowed in future searches. The hidden job was not restored.",
-        { scope: jobFinderPendingActions.discoveryJob(input.jobId) },
-      ),
-    onRestoreDismissedJob: (jobId: string, options?: { quiet?: boolean }) => {
-      let change: RecentChange | null = null;
-      void runAction(
-        () => actions.restoreDismissedDiscoveryJob(jobId),
-        () => {
-          change = recordMove({ kind: "shown_again", jobIds: [jobId] });
-        },
-        options?.quiet ? null : "Job is back in Find jobs.",
-        {
-          scope: jobFinderPendingActions.discoveryJob(jobId),
-          undo: () => {
-            if (change) void undoRecentChange(change);
-          },
-        },
-      );
-    },
     onUndoRecentChange: undoRecentChange,
     onImportResume: (options?: { retryInterrupted?: boolean }) => {
       if (!canImportResume) {
@@ -1599,151 +1416,10 @@ export function createPrimaryPageActions(
         },
       );
     },
-    ...(actions.judgeUnjudgedJobs
-      ? {
-          onJudgeUnjudgedJobs: async () => {
-            await actions.judgeUnjudgedJobs?.();
-          },
-        }
-      : {}),
     onAssessJobListing: async (jobId: string) => {
       await withPendingScope(jobFinderPendingActions.discoveryJob(jobId), () =>
         actions.assessJobListing(jobId),
       );
-    },
-    ...(actions.dismissDiscoveryJobs
-      ? {
-          onDismissJobs: async (jobIds: readonly string[]) => {
-            const ids = [...new Set(jobIds)];
-            if (ids.length === 0) return;
-            let change: RecentChange | null = null;
-            await runAction(
-              () => actions.dismissDiscoveryJobs!(ids, []),
-              () => {
-                change = recordMove({ kind: "hidden", jobIds: ids });
-              },
-              `${ids.length} ${ids.length === 1 ? "job" : "jobs"} hidden.`,
-              {
-                rethrowError: true,
-                scope: jobFinderPendingActions.discoveryJob("bulk-dismiss"),
-                undo: () => {
-                  if (change) void undoRecentChange(change);
-                },
-                ...(ids.length > 1 ? { undoLabel: "Undo all" } : {}),
-              },
-            );
-          },
-        }
-      : {}),
-    ...(actions.queueJobsForReview
-      ? {
-          onQueueJobs: async (
-            jobIds: readonly string[],
-          ): Promise<JobFinderQueuedJobOutcome> => {
-            if (isBulkShortlistActive)
-              return {
-                status: "failure",
-                message: "Shortlisting is already in progress.",
-              };
-            const ids = [...new Set(jobIds)];
-            if (ids.length === 0)
-              return {
-                status: "failure",
-                message: "Select a job to shortlist.",
-              };
-            isBulkShortlistActive = true;
-            const ownerRoute = jobFinderStatusRoute;
-            applyRouteScopedMessage({ message: null }, ownerRoute);
-            try {
-              await withPendingScope(
-                jobFinderPendingActions.discoveryJob("bulk-shortlist"),
-                () => actions.queueJobsForReview!(ids),
-              );
-              // Shortlisted keeps its own selection: the new jobs join the end
-              // of the list, so selecting one there opened Shortlisted on its
-              // last page the next time the person went to it. The toast
-              // offers Undo instead.
-              const message = `Shortlisted ${ids.length === 1 ? "1 job" : `${ids.length} jobs`}.`;
-              const change = recordMove({ kind: "shortlisted", jobIds: ids });
-              applyRouteScopedMessage(
-                {
-                  message,
-                  tone: "success",
-                  undo: undoToastFor(change),
-                  undoLabel: ids.length > 1 ? "Undo all" : null,
-                },
-                ownerRoute,
-              );
-              return { status: "success", message };
-            } catch (error) {
-              const message = getJobFinderErrorMessage(
-                error,
-                "The requested Job Finder action failed.",
-              );
-              if (!isHandledRefreshError(error))
-                applyRouteScopedMessage(
-                  { message, tone: "failure" },
-                  ownerRoute,
-                );
-              return { status: "failure", message };
-            } finally {
-              isBulkShortlistActive = false;
-            }
-          },
-        }
-      : {}),
-    onQueueJob: async (
-      jobId: string,
-      options?: { quiet?: boolean },
-    ): Promise<JobFinderQueuedJobOutcome> => {
-      // Request-local shortlist outcome: the awaited result belongs to this
-      // exact click, so overlapping shortlists resolving out of order can
-      // never label another row and shared route messages cannot steal
-      // attribution. The route-scoped write is preserved for other surfaces.
-      const ownerStartRoute = jobFinderStatusRoute;
-      const successMessage = "Job added to Shortlisted.";
-      try {
-        applyRouteScopedMessage({ message: null }, ownerStartRoute);
-        await withPendingScope(
-          jobFinderPendingActions.discoveryJob(jobId),
-          () => actions.queueJobForReview(jobId),
-        );
-        // The workspace mutation may reorder or replace the discovery and
-        // review collections. Retain the exact clicked id so the refreshed
-        // Shortlisted surface cannot silently fall back to another row.
-        setSelectedReviewJobId(jobId);
-        const change = recordMove({ kind: "shortlisted", jobIds: [jobId] });
-        // A triage pass says each decision on its own bar with Undo; a
-        // toast for every one of a hundred shortlists would only stack up.
-        if (!options?.quiet)
-          applyRouteScopedMessage(
-            {
-              message: successMessage,
-              tone: "success",
-              undo: undoToastFor(change),
-            },
-            ownerStartRoute,
-          );
-        return { status: "success", message: successMessage };
-      } catch (error) {
-        if (isHandledRefreshError(error)) {
-          // Same silent contract as runAction for handled refresh prompts:
-          // their own UI reports them, so only the local outcome resolves.
-          return {
-            status: "failure",
-            message: "The requested Job Finder action failed.",
-          };
-        }
-        const failureMessage = getJobFinderErrorMessage(
-          error,
-          "The requested Job Finder action failed.",
-        );
-        applyRouteScopedMessage(
-          { message: failureMessage, tone: "failure" },
-          ownerStartRoute,
-        );
-        return { status: "failure", message: failureMessage };
-      }
     },
     onRejectProfileCopilotPatchGroup: (patchGroupId: string) =>
       void runAction(
@@ -1756,27 +1432,6 @@ export function createPrimaryPageActions(
       startJobSearch({ note: searchRequest?.intent ?? "" }),
     onRunDiscoveryForTarget: (targetId: string) =>
       startJobSearch({ sites: { ids: [Number(targetId)] } }),
-    onCancelDiscovery: async (runId: string) => {
-      try {
-        const nextWorkspace = await actions.cancelAgentDiscovery({ runId });
-        const currentRun = nextWorkspace.activeDiscoveryRun;
-        return (
-          (currentRun?.id === runId &&
-            Boolean(currentRun.cancellationRequestedAt)) ||
-          nextWorkspace.recentDiscoveryRuns.some(
-            (run) => run.id === runId && run.state === "cancelled",
-          )
-        );
-      } catch (error) {
-        applyRouteScopedMessage({
-          message: getJobFinderErrorMessage(
-            error,
-            "The search could not be stopped. Check its status, then try again.",
-          ),
-        });
-        return false;
-      }
-    },
     onRunSourceDebug: (
       targetId: string,
       options?: { readabilityTimeoutMs?: number },

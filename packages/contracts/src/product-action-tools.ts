@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import { ApplyRunDetailsSchema } from "./apply";
 import { IsoDateTimeSchema, NonEmptyStringSchema } from "./base";
-import { DiscoveryFeedbackReasonSchema } from "./discovery";
 import {
   ProfileCopilotContextSchema,
   ProfileCopilotPatchGroupSchema,
@@ -15,8 +14,6 @@ export const jobFinderProductActionToolNameValues = [
   "get_apply_run_details",
   "propose_profile_change",
   "shortlist_job",
-  "dismiss_job",
-  "restore_job",
   "open_user_action",
 ] as const;
 export const JobFinderProductActionToolNameSchema = z.enum(
@@ -41,12 +38,6 @@ export const ProposeProfileChangeToolInputSchema = z
   .strict();
 export const JobIdProductActionToolInputSchema = z
   .object({ jobId: NonEmptyStringSchema.max(160) })
-  .strict();
-export const DismissJobToolInputSchema = z
-  .object({
-    jobId: NonEmptyStringSchema.max(160),
-    reasons: z.array(DiscoveryFeedbackReasonSchema).min(1).max(9),
-  })
   .strict();
 export const OpenUserActionToolInputSchema = z
   .object({ requestId: NonEmptyStringSchema.max(160) })
@@ -134,7 +125,6 @@ export const ProductActionWorkspaceSummarySchema = z
     shortlistedJobs: z.number().int().nonnegative(),
     applications: z.number().int().nonnegative(),
     unresolvedUserActions: z.number().int().nonnegative(),
-    discoveryRunState: NonEmptyStringSchema.max(80),
   })
   .strict();
 
@@ -171,14 +161,6 @@ export const ProductActionSuccessSchema = z.discriminatedUnion("tool", [
   ProductActionSuccessBaseSchema.extend({
     tool: z.literal("shortlist_job"),
     data: z.object({ jobId: NonEmptyStringSchema, status: z.literal("shortlisted") }).strict(),
-  }).strict(),
-  ProductActionSuccessBaseSchema.extend({
-    tool: z.literal("dismiss_job"),
-    data: z.object({ jobId: NonEmptyStringSchema, status: z.literal("dismissed") }).strict(),
-  }).strict(),
-  ProductActionSuccessBaseSchema.extend({
-    tool: z.literal("restore_job"),
-    data: z.object({ jobId: NonEmptyStringSchema, status: z.literal("restored") }).strict(),
   }).strict(),
   ProductActionSuccessBaseSchema.extend({
     tool: z.literal("open_user_action"),

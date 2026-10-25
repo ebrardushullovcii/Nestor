@@ -5,7 +5,6 @@ import { useResumeOperationStarts } from "./use-resume-operation-starts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type {
-  DiscoveryActivityEvent,
   JobFinderResumeWorkspace,
   JobFinderRendererWorkspaceSnapshot,
   ProfileCopilotMessage,
@@ -21,7 +20,6 @@ import type {
   ActionState,
   JobFinderShellActions,
 } from "@renderer/features/job-finder/lib/job-finder-types";
-import type { DiscoveryRunFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
 import { useBlocker, useLocation, useNavigate } from "react-router-dom";
 import {
   clearPendingActionScopes,
@@ -459,11 +457,6 @@ export function useJobFinderPageController() {
     },
     [clearResumeLifecyclePending],
   );
-  const [liveDiscoveryEvents, setLiveDiscoveryEvents] = useState<
-    DiscoveryActivityEvent[]
-  >([]);
-  const [discoveryRunFeedback, setDiscoveryRunFeedback] =
-    useState<DiscoveryRunFeedback | null>(null);
   const [resumeWorkspace, setResumeWorkspace] =
     useState<JobFinderResumeWorkspace | null>(null);
   const [resumeAssistantMessages, setResumeAssistantMessages] = useState<
@@ -1314,8 +1307,6 @@ export function useJobFinderPageController() {
       isPendingAction,
       isCurrentResumeAssistantRequest,
       isCurrentResumeWorkspaceJob,
-      discoveryRunFeedback,
-      liveDiscoveryEvents,
       latestWorkspaceRef,
       getLocationPathname,
       navigate: (path, options) => {
@@ -1342,8 +1333,6 @@ export function useJobFinderPageController() {
       selectedReviewJob,
       selectedTailoredAsset,
       setActionState: applyScopedActionState,
-      setDiscoveryRunFeedback,
-      setLiveDiscoveryEvents,
       setOptimisticProfileCopilotMessages,
       setPendingActionState,
       setProfileCopilotBusy,
@@ -1374,13 +1363,11 @@ export function useJobFinderPageController() {
     applyResumeWorkspaceSnapshot,
     clearResumeWorkspaceState,
     confirmLeaveDirtyResumeWorkspace,
-    discoveryRunFeedback,
     resumeOperationStarts,
     isAnyPendingAction,
     isPendingAction,
     isCurrentResumeAssistantRequest,
     isCurrentResumeWorkspaceJob,
-    liveDiscoveryEvents,
     getLocationPathname,
     navigate,
     navigateFromShell,

@@ -47,7 +47,6 @@ vi.mock("../job-finder/test-api", () => ({
   isDesktopTestApiEnabled: () => false,
 }));
 vi.mock("../job-finder/workspace-updates", () => ({
-  createSearchProgressPublisher: vi.fn(() => vi.fn()),
   publishJobFinderWorkspaceUpdate: vi.fn(),
 }));
 vi.mock("../job-finder/workspace-service", () => ({
@@ -58,14 +57,12 @@ vi.mock("./assistant-browser-port", () => ({
 }));
 
 import {
-  DiscoveryRunRecordSchema,
   ResumeExportArtifactSummarySchema,
 } from "@nestor/contracts";
 import type { JobFinderWorkspaceService } from "@nestor/job-finder";
 import { getJobFinderRepositoryForWorkspaceService } from "../job-finder/create-workspace-service";
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { getJobFinderWorkspaceService } from "../job-finder/workspace-service";
-import { createSearchProgressPublisher } from "../job-finder/workspace-updates";
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { createAssistantHostPorts } from "./assistant-ports";
@@ -269,101 +266,7 @@ describe("assistant approved resume files", () => {
 });
 
 describe("assistant interactive workspace reads", () => {
-  it("returns the activity's run id without polling and forwards the same search request", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-10-13T12:00:00.000Z"));
-    const run = DiscoveryRunRecordSchema.parse({
-      id: "search-new",
-      state: "running",
-      startedAt: new Date().toISOString(),
-    });
-    const idle = { activeDiscoveryRun: null, recentDiscoveryRuns: [] };
-    const getWorkspaceSnapshot = vi.fn(() => {
-      throw new Error(
-        "Canonical reads are forbidden while polling search startup",
-      );
-    });
-    const getWorkspaceProjection = vi.fn().mockResolvedValue(idle);
-    let finish!: () => void;
-    const runAgentDiscovery = vi.fn(
-      (onActivity: (event: { runId: string }) => void) => {
-        onActivity({ runId: run.id });
-        return (
-        new Promise<{ activeDiscoveryRun: typeof run; recentDiscoveryRuns: [] }>((resolve) => {
-          finish = () => resolve({ activeDiscoveryRun: run, recentDiscoveryRuns: [] });
-        }));
-      },
-    );
-    vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
-      getWorkspaceSnapshot,
-      getWorkspaceProjection,
-      runAgentDiscovery,
-    } as unknown as JobFinderWorkspaceService);
-    const searchRequest = {
-      intent: "Software engineering",
-      breadth: "wide" as const,
-      freshness: "recent" as const,
-      sourceIds: ["synthetic-source"],
-    };
-    const ports = createAssistantHostPorts({ browserHost: "external" });
-    const started = ports.startSearch({
-      searchRequest,
-      targetId: "synthetic-source",
-    });
-    await vi.advanceTimersByTimeAsync(500);
-    await expect(started).resolves.toEqual({
-      runId: run.id,
-      message: "The search started.",
-    });
-    expect(getWorkspaceProjection).toHaveBeenCalledTimes(1);
-    expect(createSearchProgressPublisher).toHaveBeenCalledTimes(1);
-    expect(
-      vi.mocked(createSearchProgressPublisher).mock.results[0]?.value,
-    ).toHaveBeenCalledTimes(1);
-    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
-    expect(runAgentDiscovery).toHaveBeenCalledWith(
-      expect.any(Function),
-      undefined,
-      "synthetic-source",
-      searchRequest,
-    );
-    finish();
-    await vi.advanceTimersByTimeAsync(0);
-  });
 
-  it("reports an already running search without starting another run", async () => {
-    const run = DiscoveryRunRecordSchema.parse({
-      id: "existing-search",
-      state: "running",
-      startedAt: "2026-10-13T12:00:00.000Z",
-    });
-    const getWorkspaceSnapshot = vi.fn();
-    const runAgentDiscovery = vi.fn();
-    vi.mocked(getJobFinderWorkspaceService).mockResolvedValue({
-      getWorkspaceSnapshot,
-      getWorkspaceProjection: vi
-        .fn()
-        .mockResolvedValue({ activeDiscoveryRun: run }),
-      runAgentDiscovery,
-    } as unknown as JobFinderWorkspaceService);
-    const ports = createAssistantHostPorts({ browserHost: "external" });
-    await expect(
-      ports.startSearch({
-        targetId: null,
-        searchRequest: {
-          intent: "Engineering",
-          breadth: "wide",
-          freshness: "recent",
-          sourceIds: [],
-        },
-      }),
-    ).resolves.toEqual({
-      runId: run.id,
-      message: "A search is already running.",
-    });
-    expect(runAgentDiscovery).not.toHaveBeenCalled();
-    expect(getWorkspaceSnapshot).not.toHaveBeenCalled();
-  });
 
   it("reads the original resume text from the stored profile without projecting the workspace", async () => {
     const profile = createEmptyJobFinderRepositoryState().profile;

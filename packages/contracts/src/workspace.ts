@@ -56,7 +56,6 @@ import {
   DiscoveryFeedbackReasonSchema,
   DiscoveryAdapterSessionStateSchema,
   DiscoveryRunRecordSchema,
-  JobFinderSearchRequestSchema,
   JobSearchPreferencesSchema,
   ReviewQueueItemSchema,
   SavedJobSchema,
@@ -511,15 +510,6 @@ export const JobFinderDiscoveryTargetActionInputSchema = z.object({
 });
 export type JobFinderDiscoveryTargetActionInput = z.infer<
   typeof JobFinderDiscoveryTargetActionInputSchema
->;
-
-export const JobFinderAgentDiscoveryActionInputSchema = z.object({
-  requestId: NonEmptyStringSchema,
-  targetId: NonEmptyStringSchema.nullable().default(null),
-  searchRequest: JobFinderSearchRequestSchema.optional(),
-});
-export type JobFinderAgentDiscoveryActionInput = z.infer<
-  typeof JobFinderAgentDiscoveryActionInputSchema
 >;
 
 export const JobFinderSourceDebugRunQuerySchema = z.object({
@@ -1616,30 +1606,8 @@ export const JobFinderWorkspaceEntityMutationSchema = z.discriminatedUnion(
       .strict(),
     z
       .object({
-        type: z.literal("dismiss_discovery_job"),
-        jobId: NonEmptyStringSchema,
-        reasons: z.array(DiscoveryFeedbackReasonSchema).max(9),
-        action: z.enum(["hide_job", "hide_and_exclude_employer"]).optional(),
-        expectedNormalizedCompanyName: NonEmptyStringSchema.nullish(),
-      })
-      .strict(),
-    z
-      .object({
-        type: z.literal("restore_dismissed_discovery_job"),
-        jobId: NonEmptyStringSchema,
-      })
-      .strict(),
-    z
-      .object({
         type: z.literal("remove_jobs_from_review"),
         jobIds: z.array(NonEmptyStringSchema).min(1).max(10_000),
-      })
-      .strict(),
-    z
-      .object({
-        type: z.literal("dismiss_discovery_jobs"),
-        jobIds: z.array(NonEmptyStringSchema).min(1).max(10_000),
-        reasons: z.array(DiscoveryFeedbackReasonSchema).max(9),
       })
       .strict(),
   ],
@@ -1653,21 +1621,7 @@ export const JobFinderWorkspaceEntityMutationInputSchema = z
     baseRevision: WorkspaceRevisionSchema.nullable(),
     mutation: JobFinderWorkspaceEntityMutationSchema,
   })
-  .strict()
-  .superRefine((input, context) => {
-    if (
-      input.mutation.type === "dismiss_discovery_job" &&
-      input.mutation.action === "hide_and_exclude_employer" &&
-      input.mutation.expectedNormalizedCompanyName == null
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["mutation", "expectedNormalizedCompanyName"],
-        message:
-          "Employer exclusion requires the previewed normalized company name.",
-      });
-    }
-  });
+  .strict();
 export type JobFinderWorkspaceEntityMutationInput = z.infer<
   typeof JobFinderWorkspaceEntityMutationInputSchema
 >;

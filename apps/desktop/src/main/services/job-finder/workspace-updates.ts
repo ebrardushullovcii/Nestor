@@ -5,19 +5,6 @@ export const JOB_FINDER_WORKSPACE_UPDATED_CHANNEL =
   "job-finder:workspace-updated";
 
 const workspaceUpdateListeners = new Set<() => void>();
-let discoveryUpdateHolds = 0;
-
-/** Search progress uses its activity channel and committed query feed. */
-export function holdDiscoveryWorkspaceUpdates(): () => void {
-  discoveryUpdateHolds += 1;
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    discoveryUpdateHolds -= 1;
-    if (discoveryUpdateHolds === 0) publishJobFinderWorkspaceUpdate();
-  };
-}
 
 /**
  * Main-process listeners told about every workspace update (the assistant
@@ -42,7 +29,6 @@ export function notifyJobFinderWorkspaceListeners(): void {
 /** Tells mounted renderers to converge through the existing delta sync. */
 export function publishJobFinderWorkspaceUpdate(target?: WebContents): void {
   notifyJobFinderWorkspaceListeners();
-  if (discoveryUpdateHolds > 0) return;
   if (target) {
     const canSend = typeof target.send === "function";
     const isDestroyed =
@@ -61,25 +47,6 @@ export function publishJobFinderWorkspaceUpdate(target?: WebContents): void {
       window.webContents.send(JOB_FINDER_WORKSPACE_UPDATED_CHANNEL);
     }
   }
-}
-
-/**
- * A search writes progress several times a second. Windows follow those
- * writes through the change feed (ADR 0075), so only its first event asks
- * them to sync; main listeners still hear every event.
- */
-export function createSearchProgressPublisher(
-  target?: WebContents,
-): () => void {
-  let announced = false;
-  return () => {
-    if (announced) {
-      notifyJobFinderWorkspaceListeners();
-      return;
-    }
-    announced = true;
-    publishJobFinderWorkspaceUpdate(target);
-  };
 }
 
 const FIRST_UPDATE_DELAY_MS = 500;

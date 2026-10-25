@@ -405,7 +405,6 @@ describe("sidebar resume import outcomes", () => {
     };
     const { workspaceService } = createWorkspaceServiceHarness({ seed });
     const save = vi.spyOn(workspaceService, "saveProfileSetupState");
-    const startSearch = vi.fn();
     const startApplications = vi.fn();
     const result = await finishProfileSetupTool.execute(
       {},
@@ -416,7 +415,6 @@ describe("sidebar resume import outcomes", () => {
         } as unknown as AssistantTurnSession,
         ports: {
           publishWorkspaceUpdate: () => undefined,
-          startSearch,
           startApplications,
         } as unknown as AssistantHostPorts,
       },
@@ -430,7 +428,6 @@ describe("sidebar resume import outcomes", () => {
     expect(after.profileSetupState.status).toBe("completed");
     expect(after.profileSetupState.completedAt).not.toBeNull();
     expect(after.profileSetupState.currentStep).toBe("targeting");
-    expect(startSearch).not.toHaveBeenCalled();
     expect(startApplications).not.toHaveBeenCalled();
   });
 

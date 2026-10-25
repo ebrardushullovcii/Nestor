@@ -18,8 +18,6 @@ async function freshSnapshot() {
     driver: "uninitialized",
     status: "unknown",
   };
-  snapshot.recentDiscoveryRuns = [];
-  snapshot.activeDiscoveryRun = null;
   snapshot.activityControl.paused = false;
   return snapshot;
 }

@@ -7,10 +7,7 @@ import type {
   ApplyRunDetails,
   ClearApplicationAnswerCommandInput,
   CandidateProfile,
-  DiscoveryActivityEvent,
-  DiscoveryFeedbackReason,
   EditableSourceInstructionArtifact,
-  EmployerExclusionPreview,
   JobFinderApplyConsentActionInput,
   JobFinderApplyQueueActionInput,
   JobFinderApplyRunActionInput,
@@ -25,7 +22,6 @@ import type {
   ProfileSetupReviewActionOptions,
   ProfileSetupStep,
   ProjectGroupedManualAnswerCommand,
-  RemoveEmployerExclusionInput,
   ResumeImportProgressEvent,
   ResumeTimelineRepairAction,
   SaveApplicationAnswerCommandInput,
@@ -41,9 +37,7 @@ import type { PendingActionScope } from "./job-finder-pending-actions";
 import type {
   ActionState,
   JobFinderAutoApplyQueueStartOutcome,
-  JobFinderQueuedJobOutcome,
 } from "@renderer/features/job-finder/lib/job-finder-types";
-import type { DiscoveryRunFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
 import type { JobFinderSaveState } from "./job-finder-save-state";
 import type { ApplyQueueControlAction } from "@renderer/features/job-finder/lib/apply-queue-view";
 import type { RecentChange } from "@renderer/features/job-finder/lib/recent-changes";
@@ -67,7 +61,6 @@ export type JobFinderActionFailureReporting = {
 export interface JobFinderPageContext {
   actionState: ActionState;
   canImportResume: boolean;
-  discoveryRunFeedback: DiscoveryRunFeedback | null;
   importResumeGuardMessage: string | null;
   isPending: (scope: PendingActionScope) => boolean;
   resumeOperationStarts?: Readonly<Record<string, number>>;
@@ -75,7 +68,6 @@ export interface JobFinderPageContext {
   profileCopilotBusy: boolean;
   resumeImportProgress: ResumeImportProgressEvent | null;
   saveState: JobFinderSaveState;
-  liveDiscoveryEvents: readonly DiscoveryActivityEvent[];
   onAnalyzeProfileFromResume: () => void;
   onApplyGroupedManualAnswer: (input: ApplyGroupedManualAnswerInput) => void;
   onApproveApplyRun: (input: JobFinderApplyRunActionInput) => void;
@@ -113,20 +105,6 @@ export interface JobFinderPageContext {
     action: ResumeTimelineRepairAction,
   ) => Promise<void>;
   onCheckBrowserSession: () => void;
-  onDismissJob: (
-    jobId: string,
-    reasons: readonly DiscoveryFeedbackReason[],
-    action?: "hide_job" | "hide_and_exclude_employer",
-    expectedNormalizedCompanyName?: string | null,
-    /** `quiet`: no success message; the triage bar says it and offers Undo. */
-    options?: { quiet?: boolean },
-  ) => Promise<void>;
-  onPreviewEmployerExclusion: (
-    jobId: string,
-  ) => Promise<EmployerExclusionPreview>;
-  onRemoveEmployerExclusion: (input: RemoveEmployerExclusionInput) => void;
-  /** `quiet`: no success message; the triage bar's Undo asked for it. */
-  onRestoreDismissedJob: (jobId: string, options?: { quiet?: boolean }) => void;
   /** Takes waiting jobs out of the Apply queue before a run takes them. */
   onTakeOutOfApplyQueue: (jobIds: readonly string[]) => Promise<boolean>;
   /**
@@ -217,26 +195,11 @@ export interface JobFinderPageContext {
   onSettingsDraftEdited: () => void;
   profileCopilotPendingContextKey: string | null;
   onAssessJobListing: (jobId: string) => Promise<void>;
-  onJudgeUnjudgedJobs?: () => Promise<void>;
-  /** `quiet`: no success message; the triage bar says it and offers Undo. */
-  onQueueJob: (
-    jobId: string,
-    options?: { quiet?: boolean },
-  ) => Promise<JobFinderQueuedJobOutcome>;
-  onQueueJobs?: (
-    jobIds: readonly string[],
-  ) => Promise<JobFinderQueuedJobOutcome>;
-  onDismissJobs?: (jobIds: readonly string[]) => Promise<void>;
   onRejectProfileCopilotPatchGroup: (patchGroupId: string) => void;
   onResetWorkspace: () => void | Promise<boolean | void>;
   onResetBrowser: () => Promise<boolean>;
   onResumeProfileSetup: (step?: ProfileSetupStep) => void;
   onRunAgentDiscovery?: (searchRequest?: JobFinderSearchRequest) => void;
-  /**
-   * Cancels the active discovery run through the same fenced preload request
-   * the shell Task Center uses; when absent, no surface offers a stop action.
-   */
-  onCancelDiscovery?: (runId: string) => Promise<boolean>;
   onRunDiscoveryForTarget?: (targetId: string) => void;
   onSaveSetupStep: (
     profile: CandidateProfile,

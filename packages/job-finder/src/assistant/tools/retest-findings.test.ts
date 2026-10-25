@@ -1,7 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
-import type { AssistantHostPorts } from "../ports";
 import {
   ASSISTANT_SYSTEM_PROMPT,
   buildContextBlock,
@@ -10,7 +9,6 @@ import {
 } from "../prompt";
 import type { AssistantTurnSession } from "../tool-kit";
 import { listDocumentsTool } from "./profile-tools";
-import { searchForJobsTool } from "./jobs-tools";
 import { setResumeTemplateTool } from "./resume-tools";
 
 const session = {
@@ -20,40 +18,6 @@ const session = {
   watchRun: () => Promise.resolve(),
   grants: { list: () => Promise.resolve([]) },
 } as unknown as AssistantTurnSession;
-
-async function rejection(work: Promise<unknown>): Promise<Error | null> {
-  return work.then(
-    () => null,
-    (caught: unknown) => caught as Error,
-  );
-}
-
-describe("the person's pause (R2)", () => {
-  it("does not start a search or lift the pause; it tells the model to ask", async () => {
-    const { workspaceService } = createWorkspaceServiceHarness();
-    await workspaceService.setActivityControl({
-      paused: true,
-      reason: "Taking a break",
-    });
-    const startSearch = vi.fn();
-    const error = await rejection(
-      searchForJobsTool.execute(
-        { goal: "frontend roles", freshness: "any" },
-        {
-          service: workspaceService,
-          session,
-          ports: { startSearch } as unknown as AssistantHostPorts,
-        },
-      ),
-    );
-    expect(error?.message).toContain("the person paused background work");
-    expect(error?.message).toContain("ask whether to resume");
-    expect(error?.message).toContain("Taking a break");
-    expect(startSearch).not.toHaveBeenCalled();
-    const after = await workspaceService.getWorkspaceSnapshot();
-    expect(after.activityControl.paused).toBe(true);
-  });
-});
 
 describe("a template change on an approved resume (R3)", () => {
   it("says in the same result that approval was cleared", async () => {

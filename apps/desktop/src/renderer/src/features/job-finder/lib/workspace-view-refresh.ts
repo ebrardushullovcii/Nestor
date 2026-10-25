@@ -25,17 +25,13 @@ type ListedJob = Workspace["discoveryJobs"][number];
  * (listing activity and the rest) comes only from a full read.
  */
 export function patchFindJobsLists(input: {
-  current: Pick<
-    Workspace,
-    "discoveryJobs" | "dismissedDiscoveryJobs" | "companyJobs"
-  >;
+  current: Pick<Workspace, "discoveryJobs" | "companyJobs">;
   /** The first view's rows for the jobs past Find jobs, freshly projected. */
   curated: readonly ListedJob[];
   jobIds: readonly string[];
   details: readonly (JobFinderJobDetail | null | undefined)[];
 }): {
   discoveryJobs: Workspace["discoveryJobs"];
-  dismissedDiscoveryJobs: Workspace["dismissedDiscoveryJobs"];
   companyJobs: Workspace["companyJobs"];
   complete: boolean;
 } {
@@ -57,11 +53,7 @@ export function patchFindJobsLists(input: {
     return job ? ({ ...row, ...job } as ListedJob) : null;
   };
   const knownRows = new Map<string, ListedJob>();
-  for (const row of [
-    ...current.discoveryJobs,
-    ...current.dismissedDiscoveryJobs,
-  ])
-    knownRows.set(row.id, row);
+  for (const row of current.discoveryJobs) knownRows.set(row.id, row);
 
   const discoveryJobs: ListedJob[] = [];
   const listed = new Set<string>();
@@ -71,29 +63,17 @@ export function patchFindJobsLists(input: {
     discoveryJobs.push(next);
     listed.add(next.id);
   }
-  const dismissed: ListedJob[] = [];
-  const hidden = new Set<string>();
-  for (const row of current.dismissedDiscoveryJobs) {
-    const next = fresh(row);
-    if (!next || next.status !== "archived" || !next.discoveryFeedback)
-      continue;
-    dismissed.push(next);
-    hidden.add(next.id);
-  }
   for (const [jobId, job] of changed) {
-    if (!job || listed.has(jobId) || hidden.has(jobId)) continue;
+    if (!job || listed.has(jobId)) continue;
     const known = knownRows.get(jobId) ?? curated.get(jobId);
-    const isHidden = job.status === "archived" && Boolean(job.discoveryFeedback);
-    if (job.status === "archived" && !isHidden) continue;
+    if (job.status === "archived") continue;
     if (!known) {
       // A job new to these lists (one a search found): its row needs the
       // full read's projection.
       complete = false;
       continue;
     }
-    const row = { ...known, ...job } as ListedJob;
-    if (isHidden) dismissed.push(row);
-    else discoveryJobs.push(row);
+    discoveryJobs.push({ ...known, ...job } as ListedJob);
   }
   const companyJobs = current.companyJobs.map((row) => {
     const next = fresh(row);
@@ -101,7 +81,6 @@ export function patchFindJobsLists(input: {
   });
   return {
     discoveryJobs,
-    dismissedDiscoveryJobs: dismissed,
     companyJobs,
     complete,
   };

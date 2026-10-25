@@ -15,11 +15,10 @@ import {
 import { z } from "zod";
 import { projectWorkspaceAttention } from "../attention";
 import {
-  getAssistantSavedSearch,
   getAssistantSearchReadiness,
 } from "../prompt";
 import { AssistantToolError, defineTool, json } from "../tool-kit";
-import { readAssistantWorkState, runningSearchState } from "../work-state";
+import { readAssistantWorkState } from "../work-state";
 import { allJobs, compactApplication, compactJob, plural } from "./format";
 
 const Id = NonEmptyStringSchema.max(200);
@@ -87,9 +86,7 @@ export const getWorkspaceSummaryTool = defineTool({
     const searchReadiness = getAssistantSearchReadiness(snapshot);
     return {
       summary: `${plural(snapshot.discoveryJobs.length, "job")} found, ${snapshot.reviewQueue.length} shortlisted, ${plural(applications.length, "application")}, ${attention.count} Needs you items, ${attention.readyToSend.length} ready to send, ${attention.resumeReviews.length} resume reviews. ${
-        searchReadiness.runningRunId
-          ? "A search is already running."
-          : searchReadiness.canStartSearch
+        searchReadiness.canStartSearch
             ? `Ready to search ${plural(searchReadiness.enabledSourceCount, "enabled source")}.`
             : searchReadiness.missingRequirements.join(" ")
       }`,
@@ -104,7 +101,6 @@ export const getWorkspaceSummaryTool = defineTool({
         jobs: {
           found: snapshot.discoveryJobs.length,
           shortlisted: snapshot.reviewQueue.length,
-          dismissed: snapshot.dismissedDiscoveryJobs.length,
         },
         applications: Object.fromEntries(byStatus),
         runningApplyRuns: running.map((run) => ({
@@ -113,10 +109,6 @@ export const getWorkspaceSummaryTool = defineTool({
           jobIds: run.jobIds,
         })),
         search: {
-          latestSavedSearch: getAssistantSavedSearch(snapshot),
-          state: snapshot.discoveryRunState,
-          activeRunId: snapshot.activeDiscoveryRun?.id ?? null,
-          running: runningSearchState(snapshot),
           ...searchReadiness,
           enabledSources: searchReadiness.enabledSources.slice(0, 40),
         },

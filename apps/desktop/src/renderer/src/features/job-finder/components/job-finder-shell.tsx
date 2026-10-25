@@ -34,7 +34,6 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type {
   DesktopWindowControlsState,
-  DiscoveryActivityEvent,
   JobFinderRendererWorkspaceSnapshot,
   ResumeImportProgressEvent,
   SuiteModule,
@@ -97,11 +96,8 @@ import { readFullWorkspaceIfBehind } from "../lib/workspace-view-refresh";
 
 interface JobFinderShellProps {
   children: ReactNode;
-  isDiscoveryPending?: boolean;
   isResumeImportPending?: boolean;
-  liveDiscoveryEvents?: readonly DiscoveryActivityEvent[];
   onCancelApplyRun?: (runId: string) => Promise<boolean>;
-  onCancelDiscovery?: (runId: string) => Promise<boolean>;
   onDismissSavedStatus?: () => void;
   onNavigate?: (path: string) => void;
   onPrepareRemainingJobs?: (
@@ -477,11 +473,8 @@ function getActiveScreen(pathname: string): JobFinderScreen {
 
 export function JobFinderShell({
   children,
-  isDiscoveryPending = false,
   isResumeImportPending = false,
-  liveDiscoveryEvents = [],
   onCancelApplyRun,
-  onCancelDiscovery,
   onDismissSavedStatus,
   onNavigate,
   onPrepareRemainingJobs,
@@ -1729,11 +1722,8 @@ export function JobFinderShell({
               <Search aria-hidden="true" className="size-4 shrink-0" />
             </button>
             <JobFinderTaskCenter
-              isDiscoveryPending={isDiscoveryPending}
               isResumeImportPending={isResumeImportPending}
-              liveDiscoveryEvents={liveDiscoveryEvents}
               onCancelApplyRun={onCancelApplyRun}
-              onCancelDiscovery={onCancelDiscovery}
               onNavigate={(path) => {
                 if (onNavigate) {
                   onNavigate(path);

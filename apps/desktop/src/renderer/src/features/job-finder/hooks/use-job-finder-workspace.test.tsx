@@ -12,20 +12,17 @@ import type {
 import {
   createFreshStartCandidateProfile,
   DiscoveryJobViewSchema,
-  DiscoveryRunRecordSchema,
   getDefaultCampaignConfiguration,
   JobFinderRendererWorkspaceSnapshotSchema,
   JobFinderSettingsSchema,
   JobFinderWorkspaceDeltaSchema,
   JobFinderWorkspaceSyncResultSchema,
-  JobListRowSchema,
   JobSearchCampaignSchema,
   JobSearchPreferencesSchema,
 } from "@nestor/contracts";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createJobFinderWorkspaceDeltaTracker } from "../../../../../main/services/job-finder/workspace-delta";
-import { applyJobFinderWorkspaceDelta } from "../../../pages/job-finder-workspace-delta";
 import { startLaunchReads } from "../lib/launch-reads";
 import { useJobFinderWorkspace } from "./use-job-finder-workspace";
 
@@ -353,105 +350,6 @@ describe("useJobFinderWorkspace revision window", () => {
     );
   }
 
-  it.each(["delta", "snapshot"] as const)(
-    "parses tracker 1→3 from held 1 after a %s at 2 without a full fetch",
-    async (updateKind) => {
-      const initial = JobFinderRendererWorkspaceSnapshotSchema.parse(
-        createWorkspace("kept-job"),
-      );
-      initial.fitJudgmentProgress = null;
-      const run = (id: string, activityIds: string[]) =>
-        DiscoveryRunRecordSchema.parse({
-          id,
-          state: "running",
-          startedAt: initial.generatedAt,
-          activity: activityIds.map((eventId) => ({
-            id: eventId,
-            runId: id,
-            timestamp: initial.generatedAt,
-            kind: "info",
-            stage: "run",
-            message: eventId,
-          })),
-        });
-      initial.activeDiscoveryRun = run("held-run", ["held-prefix"]);
-      const intermediate: JobFinderRendererWorkspaceSnapshot = {
-        ...initial,
-        generatedAt: "2026-08-09T10:01:00.000Z",
-        profile:
-          updateKind === "snapshot"
-            ? { ...initial.profile, summary: "Intermediate summary" }
-            : initial.profile,
-        discoveryJobs: [
-          { ...initial.discoveryJobs[0]!, title: "Intermediate title" },
-          JobListRowSchema.parse(
-            createDiscoveryJob("temporary-job", initial.generatedAt),
-          ),
-        ],
-        activeDiscoveryRun: run("intermediate-run", ["wrong-prefix"]),
-      };
-      const final: JobFinderRendererWorkspaceSnapshot = {
-        ...initial,
-        generatedAt: "2026-08-09T10:02:00.000Z",
-        activeDiscoveryRun: run("held-run", ["held-prefix", "final-tail"]),
-      };
-      const tracker = createJobFinderWorkspaceDeltaTracker();
-      const first = JobFinderWorkspaceSyncResultSchema.parse(
-        tracker.synchronize(null, initial),
-      );
-      // A changed field now travels inside a delta; a full snapshot at 2 is
-      // what another receiver with an unknown revision gets.
-      const second = JobFinderWorkspaceSyncResultSchema.parse(
-        tracker.synchronize(updateKind === "snapshot" ? 99 : 1, intermediate),
-      );
-      expect(second.kind).toBe(updateKind);
-      const cumulative = parsedDelta(tracker.synchronize(1, final));
-      expect(cumulative.delta).toMatchObject({
-        baseRevision: 1,
-        currentRevision: 3,
-        discoveryJobs: { upserts: [], removedIds: [] },
-        activeDiscoveryRunActivityFrom: 1,
-      });
-      const direct = applyJobFinderWorkspaceDelta({
-        revision: 1,
-        workspace: initial,
-        delta: cumulative.delta,
-      });
-      expect(direct.status).toBe("applied");
-      if (direct.status === "applied") expect(direct.workspace).toEqual(final);
-      const mutation = deferred<JobFinderWorkspaceSyncResult>();
-      syncWorkspace.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
-      mutateWorkspaceEntities.mockReturnValueOnce(mutation.promise);
-      const { result } = renderHook(() => useJobFinderWorkspace());
-      await waitFor(() => expect(result.current.status).toBe("ready"));
-      const baseline = requireReadyWorkspace(result.current).workspace;
-      let pending!: Promise<unknown>;
-      act(() => {
-        pending = requireReadyWorkspace(
-          result.current,
-        ).actions.queueJobForReview("kept-job");
-      });
-      await publishUpdate(result, intermediate);
-      expect(
-        requireReadyWorkspace(result.current).workspace.discoveryJobs,
-      ).toEqual(intermediate.discoveryJobs);
-      await act(async () => {
-        mutation.resolve(cumulative);
-        await pending;
-      });
-      const actual = requireReadyWorkspace(result.current).workspace;
-      expect(actual).toEqual(final);
-      expect(actual.discoveryJobs).toBe(baseline.discoveryJobs);
-      expect(actual.discoveryJobs[0]).toBe(baseline.discoveryJobs[0]);
-      expect(actual.activeDiscoveryRun?.activity.map(({ id }) => id)).toEqual([
-        "held-prefix",
-        "final-tail",
-      ]);
-      expect(syncWorkspace.mock.calls).toEqual([[null], [1]]);
-      expect(getWorkspace).not.toHaveBeenCalled();
-    },
-  );
-
   it("ignores an older mutation delta after a cumulative update already reached 3", async () => {
     const initial = createWorkspace("initial-job");
     const intermediate = {
@@ -547,53 +445,6 @@ describe("useJobFinderWorkspace revision window", () => {
         ).toBe("stale-job");
         expect(syncWorkspace.mock.calls).toEqual([[null], [1], [2], [3]]);
       }
-      expect(getWorkspace).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each([
-    "checkBrowserSession",
-    "resetWorkspace",
-    "runAgentDiscovery",
-  ] as const)(
-    "invalidates all held baselines after %s returns a bare snapshot",
-    async (action) => {
-      const initial = createWorkspace("initial-job");
-      const bare = createWorkspace("bare-job");
-      const recovered = createWorkspace("recovered-job");
-      syncWorkspace
-        .mockResolvedValueOnce(snapshotResult(initial, 1))
-        .mockResolvedValueOnce(snapshotResult(recovered, 4));
-      bareSnapshotAction.mockResolvedValueOnce(bare);
-      Object.assign(window.nestor.jobFinder as object, {
-        runAgentDiscovery: () => Promise.resolve({ snapshot: bare }),
-      });
-      mutateWorkspaceEntities.mockResolvedValueOnce({
-        kind: "delta",
-        delta: createJobReplacementDelta({
-          baseRevision: 1,
-          currentRevision: 3,
-          previousJobId: "initial-job",
-          currentJobId: "stale-job",
-        }),
-      });
-      const { result } = renderHook(() => useJobFinderWorkspace());
-      await waitFor(() => expect(result.current.status).toBe("ready"));
-      await act(async () => {
-        await requireReadyWorkspace(result.current).actions[action]();
-      });
-      expect(requireReadyWorkspace(result.current).workspace).toBe(bare);
-      await act(async () => {
-        await requireReadyWorkspace(result.current).actions.queueJobForReview(
-          "bare-job",
-        );
-      });
-      expect(mutateWorkspaceEntities).toHaveBeenCalledWith({
-        baseRevision: null,
-        mutation: { type: "queue_job_for_review", jobId: "bare-job" },
-      });
-      expect(requireReadyWorkspace(result.current).workspace).toBe(recovered);
-      expect(syncWorkspace.mock.calls).toEqual([[null], [null]]);
       expect(getWorkspace).not.toHaveBeenCalled();
     },
   );
@@ -725,51 +576,6 @@ describe("useJobFinderWorkspace revision window", () => {
       await requireReadyWorkspace(result.current).actions.refreshWorkspace();
     });
     expect(syncWorkspace.mock.calls).toEqual([[null], [2]]);
-    expect(getWorkspace).not.toHaveBeenCalled();
-  });
-
-  it("applies a finished search answered as a delta and keeps its revision", async () => {
-    const initial = createWorkspace("initial-job");
-    const noteWorkspaceRevision = vi.fn<(revision: number) => void>();
-    Object.assign(window.nestor.jobFinder as object, {
-      noteWorkspaceRevision,
-      runAgentDiscovery: () =>
-        Promise.resolve({
-          outcome: "cancelled",
-          sync: {
-            kind: "delta",
-            delta: createJobReplacementDelta({
-              baseRevision: 1,
-              currentRevision: 2,
-              previousJobId: "initial-job",
-              currentJobId: "found-job",
-            }),
-          },
-        }),
-    });
-    syncWorkspace.mockResolvedValueOnce(snapshotResult(initial, 1));
-    const { result } = renderHook(() => useJobFinderWorkspace());
-    await waitFor(() => expect(result.current.status).toBe("ready"));
-
-    let reply: Awaited<
-      ReturnType<
-        ReturnType<typeof requireReadyWorkspace>["actions"]["runAgentDiscovery"]
-      >
-    > | null = null;
-    await act(async () => {
-      reply = await requireReadyWorkspace(
-        result.current,
-      ).actions.runAgentDiscovery();
-    });
-
-    expect(reply).toMatchObject({
-      outcome: "cancelled",
-      snapshot: { selectedDiscoveryJobId: "found-job" },
-    });
-    expect(
-      requireReadyWorkspace(result.current).workspace.selectedDiscoveryJobId,
-    ).toBe("found-job");
-    expect(noteWorkspaceRevision.mock.calls).toEqual([[1], [2]]);
     expect(getWorkspace).not.toHaveBeenCalled();
   });
 
@@ -1283,76 +1089,12 @@ describe("useJobFinderWorkspace entity mutations", () => {
     }
   });
 
-  it("keeps an update-triggered sync from invalidating an in-flight cancellation", async () => {
-    const beforeCancellation = createWorkspace("job-running");
-    const cancelled = createWorkspace(
-      "job-cancelled",
-      "2026-08-09T10:05:00.000Z",
-    );
-    const cancellation = deferred<JobFinderRendererWorkspaceSnapshot>();
-    const updateSync = deferred<JobFinderWorkspaceSyncResult>();
-    const updateListeners: Array<() => void> = [];
-    const cancelAgentDiscovery = vi.fn(() => cancellation.promise);
-    const onWorkspaceUpdate = vi.fn((listener: () => void) => {
-      updateListeners.push(listener);
-      return () => undefined;
-    });
-
-    syncWorkspace
-      .mockResolvedValueOnce({
-        kind: "snapshot",
-        currentRevision: 1,
-        reason: "initial",
-        snapshot: beforeCancellation,
-      })
-      .mockReturnValueOnce(updateSync.promise);
-    Object.assign(window.nestor.jobFinder as object, {
-      cancelAgentDiscovery,
-      onWorkspaceUpdate,
-    });
-
-    const { result } = renderHook(() => useJobFinderWorkspace());
-    await waitFor(() => expect(result.current.status).toBe("ready"));
-
-    let cancellationPromise!: Promise<JobFinderRendererWorkspaceSnapshot>;
-    act(() => {
-      cancellationPromise = requireReadyWorkspace(
-        result.current,
-      ).actions.cancelAgentDiscovery({ runId: "discovery_run_1" });
-    });
-    expect(cancelAgentDiscovery).toHaveBeenCalledOnce();
-
-    act(() => updateListeners[0]?.());
-    await waitFor(() => expect(syncWorkspace).toHaveBeenCalledTimes(2));
-
-    let cancellationResult: JobFinderRendererWorkspaceSnapshot | undefined;
-    await act(async () => {
-      cancellation.resolve(cancelled);
-      cancellationResult = await cancellationPromise;
-    });
-    expect(cancellationResult).toBe(cancelled);
-    expect(requireReadyWorkspace(result.current).workspace).toBe(cancelled);
-
-    act(() => {
-      updateSync.resolve({
-        kind: "snapshot",
-        currentRevision: 1,
-        reason: "initial",
-        snapshot: beforeCancellation,
-      });
-    });
-    await act(() => Promise.resolve());
-
-    expect(requireReadyWorkspace(result.current).workspace).toBe(cancelled);
-  });
-
   it("takes a workspace update from the first view and the change feed, never the full sync", async () => {
     const loaded = createWorkspace("job-listed");
     const listed = loaded.discoveryJobs[0]!;
     const view: JobFinderRendererWorkspaceSnapshot = {
       ...createWorkspace("job-other"),
       discoveryJobs: [],
-      dismissedDiscoveryJobs: [],
       companyJobs: [],
       hydration: {
         phase: "bootstrap" as const,

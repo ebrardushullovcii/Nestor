@@ -46,30 +46,3 @@ export type AssistantWorkState = Awaited<
   ReturnType<typeof readAssistantWorkState>
 >;
 
-/** Run scope comes from the run, never the currently selected plan. */
-export function runningSearchState(snapshot: JobFinderWorkspaceSnapshot) {
-  const run = snapshot.activeDiscoveryRun;
-  if (!run || run.state !== "running") return null;
-  const plan = snapshot.campaigns.find(
-    (campaign) => campaign.id === run.campaignId,
-  );
-  return {
-    runId: run.id,
-    plan: run.campaignId
-      ? { id: run.campaignId, name: plan?.name ?? null }
-      : null,
-    intent: run.searchIntent ?? null,
-    breadth: run.searchBreadth ?? null,
-    sources: run.targetIds.map((id) => {
-      const source = (
-        plan?.searchPreferences.discovery.targets ??
-        snapshot.searchPreferences.discovery.targets
-      ).find((target) => target.id === id);
-      return {
-        id,
-        label: source?.label ?? null,
-        url: source?.startingUrl ?? null,
-      };
-    }),
-  };
-}

@@ -66,9 +66,6 @@ function createPorts(): AssistantHostPorts & {
   return {
     started,
     sent,
-    startSearch: () =>
-      Promise.resolve({ runId: "run_search_1", message: "started" }),
-    cancelSearch: () => Promise.resolve(),
     checkSource: () => Promise.resolve(),
     listDocuments: () => Promise.resolve([]),
     readDocumentText: () => Promise.resolve(null),
@@ -1382,47 +1379,6 @@ describe("assistant session host", () => {
     );
   });
 
-  it("acts on the ticked rows, not the open row, for 'the ones I ticked'", async () => {
-    const seed = createSeed();
-    const base = seed.savedJobs[0]!;
-    seed.savedJobs = [
-      ...seed.savedJobs,
-      ...["job_found_a", "job_found_b", "job_found_c"].map((id, index) => ({
-        ...base,
-        id,
-        sourceJobId: `${id}_source`,
-        canonicalUrl: `https://jobs.example.test/${id}`,
-        applicationUrl: `https://jobs.example.test/${id}/apply`,
-        title: `Found role ${index + 1}`,
-        status: "discovered" as const,
-      })),
-    ];
-    const { host, harness } = setup({ seed });
-    await sendAndWait(
-      host,
-      "Shortlist the ones I ticked",
-      context({
-        screen: "discovery",
-        route: "/job-finder/discovery",
-        focus: { kind: "job", id: "job_found_a", label: "Found role 1" },
-        list: {
-          listKind: "jobs",
-          selectedIds: ["job_found_b", "job_found_c"],
-          displayedIds: ["job_found_a", "job_found_b", "job_found_c"],
-          filteredIds: ["job_found_a", "job_found_b", "job_found_c"],
-          totalFilteredCount: 3,
-          filterSummary: null,
-          campaignId: null,
-        },
-      }),
-    );
-    const snapshot = await harness.workspaceService.getWorkspaceSnapshot();
-    const shortlisted = new Set(snapshot.reviewQueue.map((item) => item.jobId));
-    expect(shortlisted.has("job_found_b")).toBe(true);
-    expect(shortlisted.has("job_found_c")).toBe(true);
-    expect(shortlisted.has("job_found_a")).toBe(false);
-  });
-
   it("reports login once, follows human verification and filling, then reports its receipt once", async () => {
     const fixture = applicationHandoff();
     const chat = vi.fn(() =>
@@ -2013,53 +1969,6 @@ describe("assistant session host", () => {
             : "blocked",
       });
     }
-  });
-  it("follows a tool-only job card with a text answer placed before the card", async () => {
-    let calls = 0;
-    const { host } = setup({
-      modelHandle: {
-        ...createScriptedAssistantModelHandle(),
-        createModel: () => ({
-          chatWithTools: () => {
-            calls += 1;
-            return Promise.resolve(
-              calls === 1
-                ? {
-                    content: "",
-                    toolCalls: [
-                      {
-                        id: "show",
-                        type: "function" as const,
-                        function: {
-                          name: "show_jobs",
-                          arguments: '{"jobIds":["job_ready"]}',
-                        },
-                      },
-                    ],
-                  }
-                : {
-                    content:
-                      "The listing asks for design experience. Your saved profile shows that experience.",
-                  },
-            );
-          },
-        }),
-      },
-    });
-    const { conversationId } = await sendAndWait(
-      host,
-      "Do I meet this job's qualifications?",
-    );
-    const view = await host.readConversation({ conversationId });
-    const parts = reply(view.messages).parts;
-    expect(calls).toBe(2);
-    expect(parts[0]).toMatchObject({
-      type: "text",
-      text: expect.stringContaining("design experience") as unknown,
-    });
-    expect(
-      parts.some((part) => part.type === "records" && part.kind === "jobs"),
-    ).toBe(true);
   });
 
   it("keeps later browser steps on the opened retained application during the same turn", async () => {

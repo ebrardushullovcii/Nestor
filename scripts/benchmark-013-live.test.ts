@@ -410,7 +410,6 @@ async function collectDiscoveryBenchmarkPartialState(
   while (Date.now() <= deadline) {
     latestSnapshot = (await workspaceService.getWorkspaceSnapshot().catch(() => null)) as Record<string, unknown> | null
     const latestRun = findLatestDiscoveryRunSnapshot(latestSnapshot, targetId)
-    const discoveryRunState = readString(latestSnapshot?.discoveryRunState)
     const runState = readString(latestRun?.state)
 
     if (discoveryRunState !== 'running' && runState !== 'running') {
@@ -750,42 +749,6 @@ function summarizeDiscovery(
   }
 }
 
-test('summarizeDiscovery preserves timed-out partial quality signals', () => {
-  const target = benchmarkTargets[2]
-  const summary = summarizeDiscovery(
-    target,
-    { targetRoles: getBenchmarkTargetRoles(target) },
-    {
-      discoveryRunState: 'idle',
-      recentDiscoveryRuns: [
-        {
-          state: 'cancelled',
-          scope: 'single_target',
-          targetExecutions: [{ targetId: target.id, collectionMethod: 'browser_agent' }],
-          summary: {
-            jobsPersisted: 0,
-            validJobsFound: 0,
-            invalidSkipped: 3,
-            jobsSkippedByTitleTriage: 1,
-          },
-        },
-      ],
-      discoveryJobs: [],
-    },
-    {
-      wallClockMs: 180000,
-      timedOut: true,
-      error: 'discovery timed out',
-      partialStateCaptured: true,
-    },
-  )
-
-  expect(summary.partialStateCaptured).toBe(true)
-  expect(summary.state).toBe('cancelled')
-  expect(summary.qualitySignals.invalidSkipped).toBe(3)
-  expect(summary.qualitySignals.benchmarkVerdict).toBe('timed_out_with_quality_signals')
-})
-
 test('summarizeSourceDebug preserves timed-out partial artifact evidence', () => {
   const target = benchmarkTargets[2]
   const summary = summarizeSourceDebug(
@@ -858,123 +821,4 @@ test('isPassingBenchmarkResultEntry rejects empty benchmark outcomes and keeps p
       discovery: { qualitySignals: { benchmarkVerdict: 'quality_signals_only' } },
     }),
   ).toBe(true)
-})
-
-describe.sequential('013 live before/after benchmark harness', () => {
-  const benchmarkTest = runLiveBenchmark ? test : test.skip
-
-  benchmarkTest(
-    `writes ${outputVariant} benchmark results`,
-    { timeout: 0 },
-    async () => {
-      const envOverrides = loadEnvOverrides(repoRoot)
-      const aiEnv = {
-        ...envOverrides,
-        ...process.env,
-      }
-      const aiClient = createJobFinderAiClientFromEnvironment(aiEnv)
-      const fixture = await loadFixture()
-      const results: Array<Record<string, unknown>> = []
-
-      for (const target of selectedBenchmarkTargets) {
-        const seed = buildSeed(fixture, target)
-        const repository = createInMemoryJobFinderRepository(seed)
-        const userDataDir = await mkdtemp(
-          path.join(os.tmpdir(), `nestor-013-benchmark-${outputVariant}-${target.id}-`),
-        )
-        const browserRuntime = createBrowserAgentRuntime({
-          userDataDir,
-          headless,
-          chromeExecutablePath,
-          ...(chromeDebugPort !== null ? { debugPort: chromeDebugPort } : {}),
-          jobExtractor: (input) => aiClient.extractJobsFromPage(input),
-          aiClient,
-        })
-        const workspaceService = createJobFinderWorkspaceService({
-          aiClient,
-          browserRuntime,
-          documentManager: noopDocumentManager,
-          repository,
-        })
-
-        try {
-          const sourceDebugRun = await runWithTimeout<SourceDebugBenchmarkRunResult>(
-            `source debug ${target.id}`,
-            240_000,
-            (signal) =>
-              workspaceService
-                .runSourceDebug(target.id, signal)
-                .then(async (snapshot) => {
-                  const latestRun = snapshot.recentSourceDebugRuns[0] ?? null
-                  const details = latestRun
-                    ? await workspaceService.getSourceDebugRunDetails(latestRun.id)
-                    : null
-                  return {
-                    snapshot: snapshot as unknown as Record<string, unknown>,
-                    details: details as unknown as Record<string, unknown> | null,
-                  }
-                }),
-            () => collectSourceDebugBenchmarkPartialState(workspaceService, target.id),
-          )
-
-          const discoveryRun = await runWithTimeout(
-            `discovery ${target.id}`,
-            180_000,
-            (signal) => workspaceService.runAgentDiscovery(undefined, signal, target.id),
-            () => collectDiscoveryBenchmarkPartialState(workspaceService, target.id),
-          )
-
-          results.push({
-            variant: outputVariant,
-            target,
-            sourceDebug: summarizeSourceDebug(
-              target,
-              seed.searchPreferences as { targetRoles: string[] },
-              sourceDebugRun.value ?? sourceDebugRun.partial,
-              {
-                wallClockMs: sourceDebugRun.wallClockMs,
-                timedOut: sourceDebugRun.timedOut,
-                error: sourceDebugRun.error,
-                partialStateCaptured: sourceDebugRun.value === null && sourceDebugRun.partial !== null,
-              },
-            ),
-            discovery: summarizeDiscovery(
-              target,
-              seed.searchPreferences as { targetRoles: string[] },
-              (discoveryRun.value ?? discoveryRun.partial) as Record<string, unknown> | null,
-              {
-                wallClockMs: discoveryRun.wallClockMs,
-                timedOut: discoveryRun.timedOut,
-                error: discoveryRun.error,
-                partialStateCaptured: discoveryRun.value === null && discoveryRun.partial !== null,
-              },
-            ),
-          })
-        } finally {
-          await browserRuntime.closeSession('target_site').catch(() => undefined)
-          await repository.close().catch(() => undefined)
-          await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
-        }
-      }
-
-      const payload = {
-        generatedAt: new Date().toISOString(),
-        variant: outputVariant,
-        headless,
-        chromeExecutablePath,
-        targets: selectedBenchmarkTargets,
-        results,
-      }
-
-      await mkdir(outputDir, { recursive: true })
-      await writeFile(
-        path.join(outputDir, `${outputVariant}.json`),
-        JSON.stringify(payload, null, 2),
-        'utf8',
-      )
-
-      expect(results.length).toBe(selectedBenchmarkTargets.length)
-      expect(results.every(isPassingBenchmarkResultEntry)).toBe(true)
-    },
-  )
 })
