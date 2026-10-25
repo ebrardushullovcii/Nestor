@@ -219,7 +219,7 @@ it.each(["darwin", "win32", "linux"] as const)(
     const modifier = platform === "darwin" ? "⌘" : "Ctrl";
     expect(
       buildJobFinderShortcutHelp(platform)
-        .slice(-3)
+        .filter(({ id }) => id.startsWith("zoom") || id === "actual-size")
         .map(({ label, combos }) => ({ label, combos })),
     ).toEqual([
       { label: "Zoom In", combos: [[modifier, "="]] },
