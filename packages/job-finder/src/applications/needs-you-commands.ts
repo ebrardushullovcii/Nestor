@@ -1,3 +1,4 @@
+import { describeSavedFormAnswer } from "./questions";
 import {
   NEEDS_YOU_COMMANDS,
   type NeedsYouCommandName,
@@ -26,6 +27,12 @@ export function createNeedsYouCommandRunner(
     answer_need: (input) => getStore().needsYou.answer(input),
     list_form_answers: (input) => getStore().needsYou.listAnswers(input),
     get_form_answer: ({ id }) => getStore().needsYou.savedAnswer(id),
+    create_form_answer: (input) =>
+      getStore().needsYou.remember({
+        ...describeSavedFormAnswer(input.prompt, input.answer),
+        prompt: input.prompt,
+        scope: {},
+      }),
     save_form_answer: (input) => getStore().needsYou.saveAnswer(input),
     forget_form_answers: (input) => getStore().needsYou.forgetAnswers(input),
     open_need: ({ id }) => browser.open(id),

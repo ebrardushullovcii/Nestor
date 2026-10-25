@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
+import { normalizeFormQuestionPrompt } from "@nestor/contracts";
 import type {
   ApplicationAttemptQuestion,
   RequestNeedsYouInput,
   CandidateReusableAnswer,
+  RememberFormAnswerInput,
 } from "@nestor/contracts";
 
 export type FormQuestion = Pick<
@@ -10,12 +12,7 @@ export type FormQuestion = Pick<
   "prompt" | "kind" | "answerControlType" | "answerOptions" | "inputConstraints"
 >;
 
-const normalize = (value: string) =>
-  value
-    .toLocaleLowerCase("en")
-    .replace(/^application\s*[—–-]\s*/u, "")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim();
+const normalize = normalizeFormQuestionPrompt;
 const digest = (value: string) =>
   createHash("sha256").update(value).digest("hex").slice(0, 24);
 const geographic = new Set([
@@ -32,6 +29,7 @@ export function describeFormQuestion(
   key: string;
   input: RequestNeedsYouInput["input"];
   options: string[];
+  reusePrompt: boolean;
 } {
   const options = [
     ...new Set(
@@ -56,13 +54,40 @@ export function describeFormQuestion(
     input === "choice"
       ? `${input}:${options.map(normalize).sort().join("|")}`
       : input;
-  const place = geographic.has(question.kind)
-    ? normalize(job.location) || `unknown place for job ${job.id}`
-    : "";
+  const jobSpecific = question.kind === "cover_letter";
+  const place = jobSpecific
+    ? `job ${job.id}`
+    : geographic.has(question.kind)
+      ? normalize(job.location) || `unknown place for job ${job.id}`
+      : "";
   return {
     key: `question:${digest(`${normalize(question.prompt)}|${format}|${place}`)}`,
     input,
     options: input === "choice" ? options : [],
+    reusePrompt:
+      input !== "file" && !jobSpecific && !geographic.has(question.kind),
+  };
+}
+
+export function describeSavedFormAnswer(
+  prompt: string,
+  answer: string,
+): Pick<RememberFormAnswerInput, "key" | "input" | "options" | "answer"> {
+  const input = /^(?:yes|no)$/iu.test(answer)
+    ? "boolean"
+    : /^[-+]?\d+(?:\.\d+)?$/u.test(answer)
+      ? "number"
+      : "text";
+  return {
+    key: `question:${digest(`${normalize(prompt)}|${input}|`)}`,
+    input,
+    options: [],
+    answer:
+      input === "boolean"
+        ? answer.toLowerCase() === "yes"
+          ? "Yes"
+          : "No"
+        : answer,
   };
 }
 
@@ -98,13 +123,16 @@ export function toKnownFormAnswer(
     kind,
     roleFamilies: [],
     proofEntryIds: [],
-    ...(input.local || geographic.has(question.kind)
+    ...(input.local ||
+    question.kind === "cover_letter" ||
+    geographic.has(question.kind)
       ? {
           applicationScope: {
             resultId: null,
-            applicationRecordId: input.local
-              ? `application_${applicationId}`
-              : null,
+            applicationRecordId:
+              input.local || question.kind === "cover_letter"
+                ? `application_${applicationId}`
+                : null,
             location: geographic.has(question.kind) ? location : null,
           },
         }

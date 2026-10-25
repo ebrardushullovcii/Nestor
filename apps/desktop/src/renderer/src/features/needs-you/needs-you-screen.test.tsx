@@ -16,7 +16,7 @@ import {
 } from "@nestor/db/applications";
 import { openJobStore, type JobStore } from "@nestor/db/job-store";
 import { ToastProvider } from "@renderer/components/ui/toast";
-import { createNeedsYouCommandRunner } from "../../../../main/services/needs-you-commands";
+import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
 import { NeedsYouScreen } from "./needs-you-screen";
 import { SourceNeedPane } from "./source-need-pane";
 
@@ -210,4 +210,69 @@ it("edits and forgets remembered answers from Needs you", async () => {
   );
   fireEvent.click(within(pane).getByRole("button", { name: "Forget answer" }));
   await waitFor(() => expect(applications.needsYou.counts().saved).toBe(0));
+});
+
+it("saves numeric answers before Apply and reuses the same facts in number or text fields", async () => {
+  show();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Saved answers 0" }),
+  );
+  for (const [prompt, answer] of [
+    ["Years of analysis experience", "5"],
+    ["Years of coordination experience", "14"],
+  ]) {
+    fireEvent.click(screen.getByRole("button", { name: "Add answer" }));
+    const pane = await screen.findByRole("region", {
+      name: "New saved answer",
+    });
+    fireEvent.change(within(pane).getByLabelText("Question"), {
+      target: { value: prompt },
+    });
+    fireEvent.change(within(pane).getByLabelText("Your answer"), {
+      target: { value: answer },
+    });
+    fireEvent.click(within(pane).getByRole("button", { name: "Save answer" }));
+    await waitFor(() =>
+      expect(
+        applications.needsYou.listAnswers({ text: prompt }).rows.length,
+      ).toBe(1),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: "New saved answer" }),
+      ).toBeNull(),
+    );
+  }
+  const lookup = [
+    {
+      key: "number-analysis",
+      prompt: "Years of analysis experience?",
+      reusePrompt: true,
+    },
+    {
+      key: "text-coordination",
+      prompt: "Years of coordination experience",
+      reusePrompt: true,
+    },
+  ];
+  expect(
+    applications.needsYou
+      .answersForQuestions(claimed[0]!.id, lookup, "https://jobs.example.test")
+      .map((value) => value.answer),
+  ).toEqual(["5", "14"]);
+  expect(
+    applications.needsYou.request({
+      applicationId: claimed[0]!.id,
+      attempt: claimed[0]!.attempt,
+      fieldKey: "years",
+      key: "number-analysis",
+      prompt: lookup[0]!.prompt,
+      scope: {},
+      kind: "question",
+      input: "number",
+      options: [],
+      reusePrompt: true,
+    }),
+  ).toEqual({ status: "answered", answer: "5" });
+  expect(applications.needsYou.list().rows).toEqual([]);
 });

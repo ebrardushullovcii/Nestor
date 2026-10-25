@@ -1,3 +1,4 @@
+import { CreateAnswerPane } from "./create-answer-pane";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   NeedsYouCounts,
@@ -50,6 +51,8 @@ export function NeedsYouScreen() {
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const pinned = useRef<number | null>(null);
   const list = useStoreList<Item, NeedsYouCounts>({
     key: JSON.stringify([tab, text]),
     emptyCounts: EMPTY_COUNTS,
@@ -83,19 +86,31 @@ export function NeedsYouScreen() {
     setActiveId(null);
     setSelection(NO_SELECTION);
     setEditing(false);
+    setCreating(false);
+    pinned.current = null;
   }, [tab, text]);
   useEffect(() => {
     if (
+      pinned.current !== null &&
+      pinned.current === activeId &&
+      !list.rows.some((row) => row.id === activeId)
+    )
+      return;
+    pinned.current = null;
+    if (
+      !creating &&
       !editing &&
       !list.loading &&
       (activeId === null || !list.rows.some((row) => row.id === activeId))
     )
       setActiveId(list.rows[0]?.id ?? null);
-  }, [activeId, editing, list.loading, list.rows]);
+  }, [activeId, creating, editing, list.loading, list.rows]);
 
   const activate = useCallback((id: number) => {
     setEditing(false);
     setActiveId(id);
+    pinned.current = null;
+    setCreating(false);
   }, []);
   const toggle = (id: number, shift: boolean) =>
     setSelection((value) => toggleSelection(value, id, shift, list.rows));
@@ -165,6 +180,20 @@ export function NeedsYouScreen() {
       topContent={
         <div className="grid gap-3 pb-4">
           <PageHeader
+            actions={
+              tab === "saved" ? (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setCreating(true);
+                    setEditing(false);
+                    setSelection(NO_SELECTION);
+                  }}
+                >
+                  Add answer
+                </Button>
+              ) : undefined
+            }
             title="Needs you"
             description="Answer once. Finish the steps only you can do."
           />
@@ -279,7 +308,19 @@ export function NeedsYouScreen() {
           />
         }
         detail={
-          activeId === null ? (
+          tab === "saved" && creating ? (
+            <CreateAnswerPane
+              onEditing={setEditing}
+              onCreated={(value) => {
+                setCreating(false);
+                setEditing(false);
+                pinned.current = value.id;
+                setActiveId(value.id);
+                showToast({ title: "Answer saved for future forms." });
+                void list.refresh();
+              }}
+            />
+          ) : activeId === null ? (
             <section
               id="list-detail"
               className="surface-panel-shell rounded-(--radius-panel) border border-(--surface-panel-border) p-5 text-sm text-foreground-soft"

@@ -14,6 +14,7 @@ import {
   SavedFormAnswersPageSchema,
   SaveFormAnswerInputSchema,
   ForgetFormAnswersInputSchema,
+  CreateFormAnswerInputSchema,
 } from "./applications";
 
 export const NEEDS_YOU_COMMANDS = {
@@ -62,7 +63,7 @@ export const NEEDS_YOU_COMMANDS = {
   check_need: {
     effect: "local_write",
     description:
-      "Check the exact application page after the person completed a browser step. A remaining wall keeps it open.",
+      "Check the exact application page after the person completed a browser step. A remaining wall keeps it open. Source items use retry_source instead.",
     input: ApplicationTargetSchema,
     output: z.boolean(),
   },
@@ -86,6 +87,13 @@ export const NEEDS_YOU_COMMANDS = {
       "Update the person's remembered answer, preserving the question and its scope.",
     input: SaveFormAnswerInputSchema,
     output: z.boolean(),
+  },
+  create_form_answer: {
+    effect: "local_write",
+    description:
+      "Save a question and the person's answer in Needs you before a form asks. Numeric answers are reused as facts even when another form uses a text field.",
+    input: CreateFormAnswerInputSchema,
+    output: SavedFormAnswerSchema,
   },
   forget_form_answers: {
     effect: "local_write",

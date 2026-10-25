@@ -494,9 +494,10 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "apply.authority":
     "Let Job Finder send applications without asking me each time.",
   "apply.uncertain": "Did my last application actually go through?",
-  "needs_you.act": "Mark the first step waiting on me as done.",
-  "needs_you.grouped":
-    "Answer the work authorization question once for every application that asks.",
+  "needs_you.act":
+    "Check whether the first browser step waiting on me is complete.",
+  "needs_you.answers":
+    "Remember in Needs you that I have 5 years of analysis experience, and show the saved answer.",
   "tracking.commands":
     "Move my Northwind application to Interview and add a note: first call on Monday.",
   "companies.preference": "Prefer Northwind Labs in my results.",

@@ -1,4 +1,9 @@
 import {
+  normalizeFormQuestionPrompt,
+  RememberFormAnswerInputSchema,
+  type RememberFormAnswerInput,
+  type FormAnswerLookup,
+  type FormAnswerMatch,
   AnswerNeedsYouInputSchema,
   FormAnswerScopeSchema,
   NeedsYouTaskSchema,
@@ -39,6 +44,8 @@ type Task = {
   country: string;
   site_origin: string;
   prompt: string;
+  prompt_key: string;
+  reuse_prompt: number;
   input: NeedsYouTask["input"];
   options_json: string;
   opened_at: number;
@@ -188,8 +195,61 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       : null;
   };
 
+  function writeAnswer(input: RememberFormAnswerInput): number {
+    const value = RememberFormAnswerInputSchema.parse(input);
+    const result =
+      sql(`INSERT INTO form_answers(answer_key,country,site_origin,prompt,prompt_key,answer,input,options_json,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(answer_key,country,site_origin) DO UPDATE SET
+      prompt=excluded.prompt,prompt_key=excluded.prompt_key,answer=excluded.answer,input=excluded.input,options_json=excluded.options_json,updated_at=excluded.updated_at RETURNING id`).get(
+        value.key,
+        value.scope.country,
+        value.scope.siteOrigin,
+        value.prompt,
+        normalizeFormQuestionPrompt(value.prompt),
+        value.answer,
+        value.input,
+        JSON.stringify(value.options),
+        Date.now(),
+      ) as { id: number };
+    return result.id;
+  }
+  function resolveMatching(
+    key: string,
+    prompt: string,
+    country: string,
+    origin: string,
+    answer: string,
+  ): number {
+    const waiting =
+      sql(`SELECT * FROM needs_you WHERE kind='question' AND resolved_at IS NULL AND answer_key=? AND country=? AND site_origin=?
+      UNION SELECT * FROM needs_you WHERE kind='question' AND resolved_at IS NULL AND reuse_prompt=1 AND prompt_key=? AND country=? AND site_origin=?`).all(
+        key,
+        country,
+        origin,
+        prompt,
+        country,
+        origin,
+      ) as Task[];
+    return waiting.reduce((queued, task) => queued + resolve(task, answer), 0);
+  }
+
   return {
     counts,
+    remember(input: RememberFormAnswerInput): SavedFormAnswer {
+      return store.transaction(() => {
+        const value = RememberFormAnswerInputSchema.parse(input);
+        const id = writeAnswer(value);
+        resolveMatching(
+          value.key,
+          normalizeFormQuestionPrompt(value.prompt),
+          value.scope.country,
+          value.scope.siteOrigin,
+          value.answer,
+        );
+        changed();
+        return savedAnswer(id)!;
+      });
+    },
     details(id: number): NeedsYouDetails | null {
       const task = get(id);
       if (!task || task.resolved_at !== null) return null;
@@ -254,8 +314,9 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       const params: SQLInputValue[] = match && query.text ? [match] : [];
       const records =
         sql(`SELECT id,prompt,substr(answer,1,140) AS preview,country,site_origin,input,updated_at
-        FROM form_answers WHERE ${where} AND id > ? ORDER BY id LIMIT ?`).all(
+        FROM form_answers WHERE ${where} AND (? = 0 OR id < ?) ORDER BY id DESC LIMIT ?`).all(
           ...params,
+          query.after,
           query.after,
           query.limit + 1,
         ) as Array<{
@@ -293,13 +354,30 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       const value = SaveFormAnswerInputSchema.parse(input);
       return store.transaction(() => {
         const previous = sql(
-          "SELECT input,options_json FROM form_answers WHERE id = ?",
-        ).get(value.id) as Pick<Task, "input" | "options_json"> | undefined;
+          "SELECT input,options_json,answer_key,prompt_key,country,site_origin FROM form_answers WHERE id = ?",
+        ).get(value.id) as
+          | Pick<
+              Task,
+              | "input"
+              | "options_json"
+              | "answer_key"
+              | "prompt_key"
+              | "country"
+              | "site_origin"
+            >
+          | undefined;
         if (!previous) return false;
         const answer = validateAnswer(previous, value.answer);
         sql(
           "UPDATE form_answers SET answer = ?, updated_at = ? WHERE id = ?",
         ).run(answer, Date.now(), value.id);
+        resolveMatching(
+          previous.answer_key,
+          previous.prompt_key,
+          previous.country,
+          previous.site_origin,
+          answer,
+        );
         changed();
         return true;
       });
@@ -326,41 +404,53 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         return Number(result.changes);
       });
     },
-    /** Answers for the questions currently on a page, scoped before any AI call. */
+    /** Read only visible questions. The same fact may fill numeric, text or choice controls. */
     answersForQuestions(
       applicationId: number,
-      keys: readonly string[],
+      questions: readonly FormAnswerLookup[],
       siteOrigin: string,
-    ): Array<{
-      id: string;
-      key: string;
-      prompt: string;
-      answer: string;
-      local: boolean;
-    }> {
-      if (keys.length === 0) return [];
-      const scope = FormAnswerScopeSchema.parse({ siteOrigin });
-      const records =
-        sql(`SELECT 'saved:' || answer_key AS id, answer_key AS key, prompt, answer, 0 AS local
-        FROM form_answers WHERE answer_key IN (SELECT value FROM json_each(?))
-          AND country = '' AND site_origin IN ('', ?)
-        UNION ALL
-        SELECT 'application:' || t.id AS id, t.answer_key AS key, t.prompt, t.answer, 1 AS local
-        FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
-        WHERE n.application_id = ? AND t.kind = 'question' AND t.answer IS NOT NULL
-          AND t.answer_key IN (SELECT value FROM json_each(?))`).all(
-          JSON.stringify(keys),
-          scope.siteOrigin,
-          applicationId,
-          JSON.stringify(keys),
-        ) as Array<{
-          id: string;
-          key: string;
-          prompt: string;
-          answer: string;
-          local: number;
-        }>;
-      return records.map((row) => ({ ...row, local: row.local === 1 }));
+    ): FormAnswerMatch[] {
+      const origin = FormAnswerScopeSchema.parse({ siteOrigin }).siteOrigin;
+      return questions.flatMap<FormAnswerMatch>((question) => {
+        const key = question.reusePrompt
+          ? normalizeFormQuestionPrompt(question.prompt)
+          : question.key;
+        const local =
+          sql(`SELECT t.id,t.prompt,t.answer FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
+          WHERE n.application_id=? AND t.kind='question' AND t.answer IS NOT NULL AND ${question.reusePrompt ? "t.reuse_prompt=1 AND t.prompt_key=?" : "t.answer_key=?"}
+          ORDER BY t.resolved_at DESC,t.id DESC LIMIT 1`).get(
+            applicationId,
+            key,
+          ) as { id: number; prompt: string; answer: string } | undefined;
+        if (local)
+          return [
+            {
+              id: `application:${local.id}`,
+              key: question.key,
+              prompt: local.prompt,
+              answer: local.answer,
+              local: true,
+            },
+          ];
+        const saved =
+          sql(`SELECT id,prompt,answer FROM form_answers WHERE ${question.reusePrompt ? "prompt_key" : "answer_key"}=? AND country='' AND site_origin IN ('',?)
+          ORDER BY (site_origin=?) DESC,updated_at DESC,id DESC LIMIT 1`).get(
+            key,
+            origin,
+            origin,
+          ) as { id: number; prompt: string; answer: string } | undefined;
+        return saved
+          ? [
+              {
+                id: `saved:${saved.id}`,
+                key: question.key,
+                prompt: saved.prompt,
+                answer: saved.answer,
+                local: false,
+              },
+            ]
+          : [];
+      });
     },
     findAnswer: (key: string, scope: Partial<FormAnswerScope> = {}) =>
       findAnswerRecord(key, scope)?.answer ?? null,
@@ -400,9 +490,22 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             link(value, previous.id);
             return { status: "answered", answer: previous.answer };
           }
-          const saved = findAnswerRecord(value.key, value.scope);
-          if (saved !== null) {
-            if (!sameFormat(saved.input, saved.options_json, value))
+          const saved = value.reusePrompt
+            ? (sql(
+                "SELECT answer,input,options_json FROM form_answers WHERE prompt_key=? AND country=? AND site_origin=? ORDER BY updated_at DESC,id DESC LIMIT 1",
+              ).get(
+                normalizeFormQuestionPrompt(value.prompt),
+                value.scope.country,
+                value.scope.siteOrigin,
+              ) as
+                | { answer: string; input: string; options_json: string }
+                | undefined)
+            : findAnswerRecord(value.key, value.scope);
+          if (saved) {
+            if (
+              !value.reusePrompt &&
+              !sameFormat(saved.input, saved.options_json, value)
+            )
               throw new Error(
                 "A shared question key must use the same answer format.",
               );
@@ -427,8 +530,8 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         if (!task) {
           const created = sql(
             `INSERT INTO needs_you
-             (kind, answer_key, country, site_origin, prompt, input, options_json, opened_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             (kind, answer_key, country, site_origin, prompt, input, options_json, opened_at, prompt_key, reuse_prompt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           ).run(
             value.kind,
             value.key,
@@ -438,6 +541,8 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             value.input,
             JSON.stringify(value.options),
             Date.now(),
+            normalizeFormQuestionPrompt(value.prompt),
+            value.reusePrompt ? 1 : 0,
           );
           task = get(Number(created.lastInsertRowid))!;
         }
@@ -508,22 +613,24 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           throw new Error("Finish this step in the browser.");
         const answer = validateAnswer(task, value.answer);
         if (value.remember)
-          sql(
-            `INSERT INTO form_answers (answer_key, country, site_origin, prompt, answer, input, options_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(answer_key, country, site_origin)
-           DO UPDATE SET prompt = excluded.prompt, answer = excluded.answer, input = excluded.input,
-             options_json = excluded.options_json, updated_at = excluded.updated_at`,
-          ).run(
+          writeAnswer({
+            key: task.answer_key,
+            scope: { country: task.country, siteOrigin: task.site_origin },
+            prompt: task.prompt,
+            input: task.input,
+            options: JSON.parse(task.options_json) as string[],
+            answer,
+          });
+        let queued = resolve(task, answer);
+        if (value.remember && task.reuse_prompt === 1)
+          queued += resolveMatching(
             task.answer_key,
+            task.prompt_key,
             task.country,
             task.site_origin,
-            task.prompt,
             answer,
-            task.input,
-            task.options_json,
-            Date.now(),
           );
-        return { resolved: true, queued: resolve(task, answer) };
+        return { resolved: true, queued };
       });
     },
 

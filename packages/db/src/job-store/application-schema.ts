@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS needs_you (
   country TEXT NOT NULL,
   site_origin TEXT NOT NULL,
   prompt TEXT NOT NULL,
+  prompt_key TEXT NOT NULL DEFAULT '',
+  reuse_prompt INTEGER NOT NULL DEFAULT 0,
   input TEXT NOT NULL CHECK (input IN ('text', 'boolean', 'choice', 'number', 'file')),
   options_json TEXT NOT NULL,
   opened_at INTEGER NOT NULL,
@@ -61,6 +63,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS needs_you_open_key
   ON needs_you(kind, answer_key, country, site_origin) WHERE resolved_at IS NULL;
 CREATE INDEX IF NOT EXISTS needs_you_open ON needs_you(id) WHERE resolved_at IS NULL;
 CREATE INDEX IF NOT EXISTS needs_you_by_kind ON needs_you(kind, id) WHERE resolved_at IS NULL;
+CREATE INDEX IF NOT EXISTS needs_you_by_prompt ON needs_you(prompt_key,country,site_origin) WHERE kind='question' AND resolved_at IS NULL AND reuse_prompt=1;
 CREATE TABLE IF NOT EXISTS needs_you_counts (kind TEXT PRIMARY KEY, n INTEGER NOT NULL) WITHOUT ROWID;
 INSERT OR IGNORE INTO needs_you_counts (kind, n) VALUES ('question',0),('sign_in',0),('captcha',0),('mfa',0),('saved',0);
 CREATE TRIGGER IF NOT EXISTS needs_you_count_insert AFTER INSERT ON needs_you WHEN NEW.resolved_at IS NULL BEGIN
@@ -139,12 +142,14 @@ CREATE TABLE IF NOT EXISTS form_answers (
   country TEXT NOT NULL,
   site_origin TEXT NOT NULL,
   prompt TEXT NOT NULL,
+  prompt_key TEXT NOT NULL DEFAULT '',
   answer TEXT NOT NULL,
   input TEXT NOT NULL,
   options_json TEXT NOT NULL,
   updated_at INTEGER NOT NULL,
   UNIQUE (answer_key, country, site_origin)
 );
+CREATE INDEX IF NOT EXISTS form_answers_by_prompt ON form_answers(prompt_key,country,site_origin,updated_at DESC);
 CREATE TRIGGER IF NOT EXISTS form_answers_count_insert AFTER INSERT ON form_answers BEGIN
   UPDATE needs_you_counts SET n = n + 1 WHERE kind = 'saved';
 END;

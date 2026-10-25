@@ -404,7 +404,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             );
             return Promise.resolve(
               applications.needsYou
-                .answersForQuestions(row.id, [...byKey.keys()], origin)
+                .answersForQuestions(
+                  row.id,
+                  questions.map((question) => ({
+                    ...describeFormQuestion(question, job),
+                    prompt: question.prompt,
+                  })),
+                  origin,
+                )
                 .map((answer) =>
                   toKnownFormAnswer(
                     answer,
@@ -464,6 +471,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         prompt: question.prompt,
         input: known.input,
         options: known.options,
+        reusePrompt: known.reusePrompt,
       });
       fromMemory ||= requested.status === "answered";
     }

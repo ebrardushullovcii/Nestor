@@ -1,4 +1,6 @@
 import { openJobStore } from "@nestor/db/job-store";
+import { createApplicationStore } from "@nestor/db/applications";
+import { createNeedsYouCommandRunner } from "../applications/needs-you-commands";
 import { JOB_COMMANDS, type JobCommandOutputs } from "@nestor/contracts";
 import { expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -12,6 +14,59 @@ import {
   needsYouCommandTools,
   type RunNeedsYouCommand,
 } from "./needs-you-commands";
+
+it("creates and reads the real Needs you answer library through MCP", async () => {
+  const store = openJobStore(":memory:");
+  const applications = createApplicationStore(store);
+  const run = createNeedsYouCommandRunner(() => applications, {
+    open: () => Promise.resolve(false),
+    check: () => Promise.resolve(false),
+  });
+  const ctx = context();
+  ctx.session.assertPersonAnswerAuthority = () => Promise.resolve();
+  const mcp = await connectAssistantMcp(needsYouCommandTools(run), ctx);
+  try {
+    for (const [prompt, answer] of [
+      ["Years of analysis experience", "5"],
+      ["Years of coordination experience", "14"],
+    ] as const)
+      await mcp.tools
+        .find((tool) => tool.name === "create_form_answer")!
+        .execute({ prompt, answer }, ctx);
+    const listed = await mcp.tools
+      .find((tool) => tool.name === "list_form_answers")!
+      .execute({}, ctx);
+    expect(listed.data).toMatchObject({
+      total: 2,
+      rows: expect.arrayContaining([
+        expect.objectContaining({
+          prompt: "Years of analysis experience",
+          preview: "5",
+        }),
+        expect.objectContaining({
+          prompt: "Years of coordination experience",
+          preview: "14",
+        }),
+      ]),
+    });
+    expect(
+      applications.needsYou.answersForQuestions(
+        1,
+        [
+          {
+            key: "field",
+            prompt: "Years of analysis experience",
+            reusePrompt: true,
+          },
+        ],
+        "https://jobs.example.test",
+      )[0]?.answer,
+    ).toBe("5");
+  } finally {
+    await mcp.close();
+    store.close();
+  }
+});
 
 it("checks the person's answer before a Needs you MCP write", async () => {
   const run = vi.fn((name: string) => {

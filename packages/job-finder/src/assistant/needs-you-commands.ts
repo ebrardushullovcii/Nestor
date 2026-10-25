@@ -25,6 +25,12 @@ export function needsYouCommandTools(run: RunNeedsYouCommand) {
       answer_need: ["resolve_needs_you", "answer_application_question"],
     },
     before: {
+      async create_form_answer(input, { session }) {
+        await assertPersonAnswerAuthority(session, {
+          answers: [{ question: input.prompt, answer: input.answer }],
+          saveForFuture: true,
+        });
+      },
       async answer_need(input, { session }) {
         const details = await run("get_need", { id: input.id });
         if (!details || details.task.kind !== "question")

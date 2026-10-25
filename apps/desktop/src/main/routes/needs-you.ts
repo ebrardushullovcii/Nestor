@@ -1,4 +1,4 @@
-import { createNeedsYouCommandRunner } from "../services/needs-you-commands";
+import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
 import {
   NEEDS_YOU_RUN_CHANNEL,
   type NeedsYouCommandName,
@@ -12,6 +12,17 @@ import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
 
 const run = createNeedsYouCommandRunner(getApplicationStore, {
   open: async (id) => {
+    const task = getApplicationStore().needsYou.list({
+      after: id - 1,
+      limit: 1,
+    }).rows[0];
+    if (task?.id === id && task.source) {
+      await getEmbeddedBrowser().command({
+        type: "open",
+        url: task.source.url,
+      });
+      return true;
+    }
     await getJobFinderWorkspaceService();
     const application =
       getApplicationStore().needsYou.details(id)?.applications[0];

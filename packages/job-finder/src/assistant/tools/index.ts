@@ -129,7 +129,7 @@ const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
     "applications_for_jobs",
     "answer_need",
   ],
-  actions: ["list_needs_you","answer_need","get_need","open_need","check_need","list_form_answers","get_form_answer","save_form_answer","forget_form_answers"],
+  actions: ["list_needs_you","answer_need","get_need","open_need","check_need","list_form_answers","get_form_answer","create_form_answer","save_form_answer","forget_form_answers"],
   settings: [
     "read_settings",
     "update_apply_settings",

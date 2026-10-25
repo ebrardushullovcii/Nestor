@@ -157,7 +157,13 @@ describe("applications on the job store", () => {
       applications.needsYou
         .answersForQuestions(
           second.id,
-          ["sponsorship"],
+          [
+            {
+              key: "sponsorship",
+              prompt: "Will you need visa sponsorship?",
+              reusePrompt: false,
+            },
+          ],
           "https://jobs.example.test",
         )
         .map((answer) => answer.answer),
@@ -165,7 +171,13 @@ describe("applications on the job store", () => {
     expect(
       applications.needsYou.answersForQuestions(
         second.id,
-        ["different-question"],
+        [
+          {
+            key: "different-question",
+            prompt: "Different",
+            reusePrompt: false,
+          },
+        ],
         "https://jobs.example.test",
       ),
     ).toEqual([]);
@@ -504,7 +516,9 @@ describe("applications on the job store", () => {
     const page = memory.listAnswers({ limit: 1 });
     expect(page.total).toBe(2);
     expect(page.nextCursor).toBe(page.rows[0]!.id);
-    const us = memory.savedAnswer(page.rows[0]!.id)!;
+    const us = memory.savedAnswer(
+      memory.listAnswers({}).rows.find((row) => row.scope.country === "US")!.id,
+    )!;
     expect(us.scope.country).toBe("US");
     expect(() => memory.saveAnswer({ id: us.id, answer: "Maybe" })).toThrow(
       "valid answer",
@@ -526,5 +540,69 @@ describe("applications on the job store", () => {
     expect(memory.forgetAnswers({ ids: [us.id] })).toBe(1);
     expect(memory.counts().saved).toBe(0);
     expect(memory.listAnswers({ text: "Yes" }).total).toBe(0);
+  });
+
+  it("one saved fact releases text and numeric versions, while country-dependent questions keep their scope", () => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 3) } });
+    const first = applications.claimNext()!,
+      second = applications.claimNext()!,
+      third = applications.claimNext()!;
+    const memory = applications.needsYou;
+    for (const [row, input, key] of [
+      [first, "number", "numeric"],
+      [second, "text", "textual"],
+    ] as const)
+      memory.request(
+        question(row.id, row.attempt, {
+          key,
+          fieldKey: key,
+          scope: {},
+          prompt: "Years of analysis experience",
+          input,
+          reusePrompt: true,
+        }),
+      );
+    const geographic = memory.request(
+      question(third.id, third.attempt, {
+        key: "sponsorship-for-specific-country",
+        scope: {},
+        reusePrompt: false,
+      }),
+    );
+    memory.remember({
+      key: "saved-analysis",
+      scope: {},
+      prompt: "Years of analysis experience",
+      answer: "5",
+      input: "number",
+      options: [],
+    });
+    expect(applications.getApplication(first.id)?.state).toBe("queued");
+    expect(applications.getApplication(second.id)?.state).toBe("queued");
+    expect(memory.counts().question).toBe(1);
+    memory.remember({
+      key: "saved-sponsorship",
+      scope: {},
+      prompt: "Will you need visa sponsorship?",
+      answer: "No",
+      input: "boolean",
+      options: [],
+    });
+    expect(applications.getApplication(third.id)?.state).toBe("needs_you");
+    expect(geographic.status).toBe("needs_you");
+    expect(
+      memory.answersForQuestions(
+        third.id,
+        [
+          {
+            key: "sponsorship-for-specific-country",
+            prompt: "Will you need visa sponsorship?",
+            reusePrompt: false,
+          },
+        ],
+        "https://jobs.example.test",
+      ),
+    ).toEqual([]);
   });
 });

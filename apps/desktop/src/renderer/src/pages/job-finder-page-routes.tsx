@@ -12,9 +12,7 @@ import {
   shouldAutoOpenGuidedSetup,
 } from "@renderer/features/job-finder/components/profile/setup/guided-setup-auto-open";
 import type { JobFinderPageContext } from "./job-finder-page-context";
-import type {
-  JobFinderRendererWorkspaceSnapshot,
-} from "@nestor/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { ProfileScreen } from "@renderer/features/job-finder/screens/profile-screen";
 import { HomeScreen } from "@renderer/features/home/home-screen";
 
@@ -75,10 +73,7 @@ const loadSettingsScreen = createSharedRouteLoader(async () => ({
 // click on any of them renders at once instead of waiting on its chunk.
 if (import.meta.env.MODE !== "test" && typeof window !== "undefined") {
   const preloadScreens = () => {
-    for (const load of [
-      loadSettingsScreen,
-      loadProfileSetupScreen,
-    ])
+    for (const load of [loadSettingsScreen, loadProfileSetupScreen])
       void load().catch(() => undefined);
   };
   if (typeof window.requestIdleCallback === "function")

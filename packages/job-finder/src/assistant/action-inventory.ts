@@ -484,6 +484,19 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
 
   // Store commands are shared with Applications; their runtime tests exercise them over MCP.
   {
+    id: "needs_you.answers",
+    screen: "Needs you",
+    action: "Add, read, edit and forget saved form answers",
+    channels: ["needs-you:run"],
+    coverage: tools(
+      "create_form_answer",
+      "list_form_answers",
+      "get_form_answer",
+      "save_form_answer",
+      "forget_form_answers",
+    ),
+  },
+  {
     id: "tracking.commands",
     screen: "Applications",
     action: "Status, history, tags, saved views, export and per-change Undo",

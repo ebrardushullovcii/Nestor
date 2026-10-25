@@ -169,6 +169,8 @@ export const RequestNeedsYouInputSchema = NeedsYouTaskSchema.omit({
     applicationId: ApplicationIdSchema,
     attempt: z.number().int().positive(),
     fieldKey: z.string().min(1).max(500),
+    /** Reuse the same fact across input formats; country-dependent questions stay exact. */
+    reusePrompt: z.boolean().default(false),
   })
   .strict();
 export type RequestNeedsYouInput = z.input<typeof RequestNeedsYouInputSchema>;
@@ -290,6 +292,44 @@ export const SaveFormAnswerInputSchema = z
   })
   .strict();
 export type SaveFormAnswerInput = z.infer<typeof SaveFormAnswerInputSchema>;
+export const CreateFormAnswerInputSchema = z
+  .object({
+    prompt: z.string().trim().min(1).max(2000),
+    answer: z.string().trim().min(1).max(20000),
+  })
+  .strict();
+export type CreateFormAnswerInput = z.infer<typeof CreateFormAnswerInputSchema>;
+export const RememberFormAnswerInputSchema = NeedsYouTaskSchema.pick({
+  key: true,
+  scope: true,
+  prompt: true,
+  input: true,
+  options: true,
+})
+  .extend({ answer: z.string().trim().min(1).max(20000) })
+  .strict();
+export type RememberFormAnswerInput = z.input<
+  typeof RememberFormAnswerInputSchema
+>;
+export interface FormAnswerLookup {
+  key: string;
+  prompt: string;
+  reusePrompt: boolean;
+}
+export interface FormAnswerMatch {
+  id: string;
+  key: string;
+  prompt: string;
+  answer: string;
+  local: boolean;
+}
+export function normalizeFormQuestionPrompt(value: string): string {
+  return value
+    .toLocaleLowerCase("en")
+    .replace(/^application\s*[—–-]\s*/u, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
 export const ForgetFormAnswersInputSchema = z.union([
   z
     .object({ ids: z.array(z.number().int().positive()).min(1).max(2000) })
