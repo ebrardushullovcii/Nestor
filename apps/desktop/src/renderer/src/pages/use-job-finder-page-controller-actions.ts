@@ -14,7 +14,6 @@ import {
 } from "@nestor/contracts";
 import type {
   AppearanceTheme,
-  ApplicationCrmSettings,
   CandidateProfile,
   DiscoveryActivityEvent,
   DiscoveryFeedbackReason,
@@ -2201,17 +2200,6 @@ export function createPrimaryPageActions(
         label: "Appearance",
         onSuccess: () => undefined,
         savedMessage: "Appearance saved.",
-        scope: jobFinderPendingActions.settingsSave(),
-        surface: "settings",
-      }),
-    onUpdateTrackerCrm: (applicationCrm: ApplicationCrmSettings) =>
-      runSaveAction({
-        action: () => actions.updateTrackerCrm(applicationCrm),
-        dedupeKey: createSaveDedupeKey("settings", applicationCrm),
-        failedFallback: "The application tracker settings could not be saved.",
-        label: "Tracker settings",
-        onSuccess: () => undefined,
-        savedMessage: "Tracker settings saved.",
         scope: jobFinderPendingActions.settingsSave(),
         surface: "settings",
       }),

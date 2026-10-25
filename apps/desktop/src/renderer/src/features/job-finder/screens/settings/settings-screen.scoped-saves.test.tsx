@@ -10,10 +10,7 @@ import type {
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
 } from "@nestor/contracts";
-import {
-  ApplicationCrmSettingsSchema,
-  JobFinderSettingsSchema,
-} from "@nestor/contracts";
+import { JobFinderSettingsSchema } from "@nestor/contracts";
 import {
   cleanup,
   fireEvent,
@@ -109,7 +106,6 @@ function renderScreen(settings: JobFinderSettings, callbacks: Callbacks) {
         onUpdateApplicationDefaults={(input) =>
           callbacks.onUpdateApplicationDefaults(input)
         }
-        onUpdateTrackerCrm={(crm) => callbacks.onUpdateTrackerCrm(crm)}
         onUpdateWorkspaceBehavior={(input) =>
           callbacks.onUpdateWorkspaceBehavior(input)
         }
@@ -176,9 +172,9 @@ describe("SettingsScreen scoped section saves", () => {
     );
     await waitFor(() =>
       expect(
-        within(appDevice)
-          .getByRole<HTMLButtonElement>("button", { name: "Dark" })
-          .disabled,
+        within(appDevice).getByRole<HTMLButtonElement>("button", {
+          name: "Dark",
+        }).disabled,
       ).toBe(false),
     );
 
@@ -271,10 +267,7 @@ describe("SettingsScreen scoped section saves", () => {
     // No whole JobFinderSettings payload and no workspace fields leaked.
     const payload = callbacks.onUpdateAiBehavior.mock
       .calls[0]?.[0] as UpdateAiBehaviorInput;
-    expect(Object.keys(payload).sort()).toEqual([
-      "aiBehavior",
-      "coverLetter",
-    ]);
+    expect(Object.keys(payload).sort()).toEqual(["aiBehavior", "coverLetter"]);
     expect(callbacks.onUpdateWorkspaceBehavior).not.toHaveBeenCalled();
     expect(callbacks.onUpdateApplicationDefaults).not.toHaveBeenCalled();
 
@@ -296,7 +289,9 @@ describe("SettingsScreen scoped section saves", () => {
     );
 
     const aiRegion = screen.getByRole("region", { name: AI_BEHAVIOR_LABEL });
-    fireEvent.click(within(aiRegion).getByRole("radio", { name: /^Proactive/ }));
+    fireEvent.click(
+      within(aiRegion).getByRole("radio", { name: /^Proactive/ }),
+    );
 
     // The click started the save; it shows as pending until it settles.
     expect(
@@ -325,39 +320,6 @@ describe("SettingsScreen scoped section saves", () => {
     await waitFor(() =>
       expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(2),
     );
-
-    view.unmount();
-  });
-
-  it("wires the tracker editor to the scoped CRM callback only", async () => {
-    const callbacks = createCallbacks();
-    const crmSettings = ApplicationCrmSettingsSchema.parse({});
-    const view = renderScreen(
-      parseSettings({ applicationCrm: crmSettings }),
-      callbacks,
-    );
-
-    const tracker = screen.getByRole("region", { name: "Tracker" });
-    const afterDaysInput = within(tracker).getByLabelText("After days");
-    fireEvent.change(afterDaysInput, { target: { value: "7" } });
-
-    fireEvent.click(
-      within(tracker).getByRole<HTMLButtonElement>("button", {
-        name: "Save tracker settings",
-      }),
-    );
-
-    await waitFor(() =>
-      expect(callbacks.onUpdateTrackerCrm).toHaveBeenCalledTimes(1),
-    );
-    expect(callbacks.onUpdateTrackerCrm).toHaveBeenCalledWith(
-      expect.objectContaining({
-        noResponseAutomation: { afterDays: 7, enabled: true },
-      }),
-    );
-    expect(callbacks.onUpdateApplicationDefaults).not.toHaveBeenCalled();
-    expect(callbacks.onUpdateAiBehavior).not.toHaveBeenCalled();
-    expect(callbacks.onUpdateWorkspaceBehavior).not.toHaveBeenCalled();
 
     view.unmount();
   });
@@ -429,7 +391,9 @@ describe("SettingsScreen scoped section saves", () => {
     const view = renderScreen(parseSettings(), callbacks);
 
     const aiRegion = screen.getByRole("region", { name: AI_BEHAVIOR_LABEL });
-    fireEvent.click(within(aiRegion).getByRole("radio", { name: /^Proactive/ }));
+    fireEvent.click(
+      within(aiRegion).getByRole("radio", { name: /^Proactive/ }),
+    );
 
     await waitFor(() =>
       expect(
@@ -487,100 +451,6 @@ describe("SettingsScreen scoped section saves", () => {
     expect(
       within(workspace).getAllByRole("switch")[0]!.getAttribute("aria-checked"),
     ).toBe("true");
-
-    view.unmount();
-  });
-
-  it("keeps tracker edits staged while the CRM save pends and when it resolves false", async () => {
-    let resolveTracker: ((saved: boolean) => void) | null = null;
-    const callbacks = createCallbacks();
-    callbacks.onUpdateTrackerCrm.mockImplementationOnce(
-      () =>
-        new Promise<boolean>((resolve) => {
-          resolveTracker = resolve;
-        }),
-    );
-    const crmSettings = ApplicationCrmSettingsSchema.parse({});
-    const view = renderScreen(
-      parseSettings({ applicationCrm: crmSettings }),
-      callbacks,
-    );
-
-    const tracker = screen.getByRole("region", { name: "Tracker" });
-    fireEvent.change(within(tracker).getByLabelText("After days"), {
-      target: { value: "9" },
-    });
-    fireEvent.click(
-      within(tracker).getByRole<HTMLButtonElement>("button", {
-        name: "Save tracker settings",
-      }),
-    );
-
-    // Submit stays pending for the IPC promise. Tracker now uses the shared
-    // settings save control, so the pending label matches every other section
-    // ("Saving tracker settings") instead of a bespoke "Saving…".
-    await act(async () => {});
-    expect(
-      within(tracker)
-        .getByRole<HTMLButtonElement>("button", {
-          name: "Saving tracker settings",
-        })
-        .getAttribute("aria-disabled"),
-    ).toBe("true");
-
-    await act(() => {
-      resolveTracker?.(false);
-      return Promise.resolve();
-    });
-
-    expect(within(tracker).getByRole("status").textContent).toBe(
-      "The application tracker settings could not be saved.",
-    );
-    // A failed save must not reset the staged tracker values.
-    expect(
-      within(tracker).getByLabelText<HTMLInputElement>("After days").value,
-    ).toBe("9");
-    // A failed save offers the retry, named the way every other section
-    // names its retry.
-    expect(
-      within(tracker).getByRole<HTMLButtonElement>("button", {
-        name: "Retry tracker settings",
-      }).disabled,
-    ).toBe(false);
-
-    view.unmount();
-  });
-
-  it("resets tracker edits only after the CRM save resolves true", async () => {
-    const callbacks = createCallbacks();
-    callbacks.onUpdateTrackerCrm.mockResolvedValueOnce(true);
-    const crmSettings = ApplicationCrmSettingsSchema.parse({});
-    const view = renderScreen(
-      parseSettings({ applicationCrm: crmSettings }),
-      callbacks,
-    );
-
-    const tracker = screen.getByRole("region", { name: "Tracker" });
-    fireEvent.change(within(tracker).getByLabelText("After days"), {
-      target: { value: "9" },
-    });
-    fireEvent.click(
-      within(tracker).getByRole<HTMLButtonElement>("button", {
-        name: "Save tracker settings",
-      }),
-    );
-
-    // Saved: the button goes away and nothing offers a retry.
-    await waitFor(() =>
-      expect(
-        within(tracker).queryByRole("button", {
-          name: "Save tracker settings",
-        }),
-      ).toBeNull(),
-    );
-    expect(
-      within(tracker).queryByRole("button", { name: "Retry tracker settings" }),
-    ).toBeNull();
 
     view.unmount();
   });

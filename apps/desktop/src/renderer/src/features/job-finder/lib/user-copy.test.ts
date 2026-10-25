@@ -229,11 +229,6 @@ export const PENDING_ADOPTION = {
   rawThrownMessage: [
     "features/job-finder/components/profile/use-profile-source-debug-review.ts",
     "features/job-finder/hooks/use-job-finder-workspace.ts",
-    "features/job-finder/screens/applications/application-form-open.ts",
-    "features/job-finder/screens/applications/applications-crm-detail.tsx",
-    "features/job-finder/screens/applications/applications-crm-settings.tsx",
-    "features/job-finder/screens/applications/applications-detail-panel-review-data-section.tsx",
-    "features/job-finder/screens/applications/use-applications-apply-run-details.ts",
     "pages/use-job-finder-page-controller-actions.ts",
   ],
   formatStatusLabel: [
@@ -243,21 +238,13 @@ export const PENDING_ADOPTION = {
     "features/job-finder/components/profile/profile-preferences-eligibility-section.tsx",
     "features/job-finder/components/profile/profile-preferences-sections.tsx",
     "features/job-finder/components/profile/setup/profile-setup-step-sections.tsx",
-    "features/job-finder/screens/applications/applications-application-documents.tsx",
-    "features/job-finder/screens/applications/applications-detail-fact-strip.tsx",
-    "features/job-finder/screens/applications/applications-detail-panel-attempt-section.tsx",
     "features/job-finder/screens/applications/applications-detail-panel-helpers.ts",
-    "features/job-finder/screens/applications/applications-detail-panel-privacy-receipt-section.tsx",
-    "features/job-finder/screens/applications/applications-detail-panel-review-data-section.tsx",
-    "features/job-finder/screens/applications/applications-detail-panel-run-history-section.tsx",
     "features/job-finder/screens/applications/applications-status.ts",
     "features/job-finder/screens/settings/settings-runtime-summary.tsx",
   ],
   underscoreDisplay: [
     "features/job-finder/components/profile/profile-timeline-repair-list.tsx",
     "features/job-finder/lib/source-intelligence-utils.ts",
-    "features/job-finder/screens/applications/applications-crm-detail.tsx",
-    "features/job-finder/screens/applications/applications-crm-views.tsx",
   ],
   legacyErrorMessageMapper: ["pages/use-job-finder-page-controller-actions.ts"],
   // Empty on purpose, and it must stay empty: the sweep that added this rule

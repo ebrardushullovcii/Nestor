@@ -14,7 +14,6 @@ import {
   getApplicationSubmissionAnswer,
   applicationRecordAwaitsUser,
 } from "./applications-status";
-import { applicationRecordNeedsUser } from "./applications-screen-helpers";
 
 function createRecord(
   overrides: Partial<ReturnType<typeof ApplicationRecordSchema.parse>> = {},
@@ -291,9 +290,7 @@ describe("applications status helpers", () => {
     expect(getApplicationLatestActivityLabel(record)).toBe(
       "Submitted via apply copilot.",
     );
-    expect(getApplicationNextStepLabel(record)).toBe(
-      "View application",
-    );
+    expect(getApplicationNextStepLabel(record)).toBe("View application");
   });
 
   it("uses terminal unsupported copy ahead of consent-approved fallback copy", () => {
@@ -762,32 +759,16 @@ describe("one pending-question list for both screens", () => {
     ).toEqual(["q_current"]);
   });
 
-it("reads View application on a sent application with no saved next step", () => {
-  // Sent during a batch run, the record carries no label of its own.
-  const record = createRecord({
-    status: "submitted",
-    lastAttemptState: "submitted",
-    nextActionLabel: null,
-  });
-  expect(getApplicationNextStepLabel(record)).toBe("View application");
-});
-});
-
-describe("an application the person cancelled", () => {
-  it("is not waiting on them", () => {
-    const cancelled = createRecord({
-      status: "drafting",
-      lastAttemptState: "cancelled",
-      lastActionLabel: "Cancelled by you",
-      nextActionLabel: "Try again, or finish it yourself on the job site.",
+  it("reads View application on a sent application with no saved next step", () => {
+    // Sent during a batch run, the record carries no label of its own.
+    const record = createRecord({
+      status: "submitted",
+      lastAttemptState: "submitted",
+      nextActionLabel: null,
     });
-    expect(applicationRecordNeedsUser(cancelled)).toBe(false);
-    expect(
-      applicationRecordNeedsUser({ ...cancelled, lastAttemptState: "failed" }),
-    ).toBe(true);
+    expect(getApplicationNextStepLabel(record)).toBe("View application");
   });
 });
-
 
 it("ignores legacy Prepare again next steps after the application was sent", () => {
   expect(

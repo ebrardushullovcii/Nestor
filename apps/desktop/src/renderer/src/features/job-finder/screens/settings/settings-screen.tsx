@@ -1,6 +1,5 @@
 import type {
   AppearanceTheme,
-  ApplicationCrmSettings,
   BrowserSessionState,
   JobFinderSettings,
   ResumeTemplateDefinition,
@@ -8,7 +7,6 @@ import type {
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
 } from "@nestor/contracts";
-import { ApplicationCrmSettingsSchema } from "@nestor/contracts";
 import {
   Activity,
   AppWindow,
@@ -16,16 +14,14 @@ import {
   Palette,
   Send,
   Sparkles,
-  SquareKanban,
   Trash2,
 } from "lucide-react";
 import type { CSSProperties, MouseEvent } from "react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { cn } from "@renderer/lib/cn";
 import { SHELL_SCROLLING_ROUTE_BOTTOM_GUTTER_CANCEL_CLASS } from "../../lib/job-finder-shell-gutters";
 import { PageHeaderStack } from "../../components/page-header";
-import { ApplicationsCrmSettingsEditor } from "../applications/applications-crm-settings";
 import {
   SETTINGS_AI_BEHAVIOR_LABEL,
   SettingsAiBehaviorSection,
@@ -95,14 +91,6 @@ const settingsSections = [
     icon: AppWindow,
     id: "settings-workspace-behavior",
     label: SETTINGS_WORKSPACE_BEHAVIOR_LABEL,
-    tone: "default",
-  },
-  {
-    headingId: "settings-tracker-heading",
-    href: "#settings-tracker",
-    icon: SquareKanban,
-    id: "settings-tracker",
-    label: "Tracker",
     tone: "default",
   },
   {
@@ -207,9 +195,6 @@ export function SettingsScreen(props: {
   onUpdateApplicationDefaults: (
     input: UpdateApplicationDefaultsInput,
   ) => Promise<boolean | void> | void;
-  onUpdateTrackerCrm: (
-    settings: ApplicationCrmSettings,
-  ) => Promise<boolean | void> | void;
   onUpdateWorkspaceBehavior: (
     input: UpdateWorkspaceBehaviorInput,
   ) => Promise<boolean | void> | void;
@@ -224,7 +209,6 @@ export function SettingsScreen(props: {
     onUpdateAiBehavior,
     onUpdateAppearanceTheme,
     onUpdateApplicationDefaults,
-    onUpdateTrackerCrm,
     onUpdateWorkspaceBehavior,
     settings,
   } = props;
@@ -263,17 +247,6 @@ export function SettingsScreen(props: {
       setActiveSectionId(owningSection.id);
     }
   }, [location.hash]);
-
-  // A workspace that has never saved tracker settings has no persisted
-  // `applicationCrm`, and parsing a fresh default inline handed the Tracker
-  // editor a new object identity on every render of this screen. Its
-  // "reseed from persisted settings" effect then fired on every render and
-  // reset the form, so a tracker edit could never become dirty, never
-  // published to the save bar, and never reached its own Save.
-  const applicationCrmSettings = useMemo(
-    () => settings.applicationCrm ?? ApplicationCrmSettingsSchema.parse({}),
-    [settings.applicationCrm],
-  );
 
   useEffect(() => {
     if (typeof IntersectionObserver === "undefined") {
@@ -615,32 +588,6 @@ export function SettingsScreen(props: {
             onSettingsDraftEdited={onSettingsDraftEdited}
             onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
             settings={settings}
-          />
-        </section>
-
-        <section
-          aria-labelledby="settings-tracker-heading"
-          className={SETTINGS_LATER_SECTION_CLASS}
-          id="settings-tracker"
-          tabIndex={-1}
-        >
-          <h2 className="sr-only" id="settings-tracker-heading">
-            Tracker
-          </h2>
-          <ApplicationsCrmSettingsEditor
-            onDraftEdited={onSettingsDraftEdited}
-            onSave={async (crmSettings) => {
-              const saved = await onUpdateTrackerCrm(crmSettings);
-              // Scoped saves resolve false instead of rejecting when the save
-              // did not commit. Throwing here enters the editor's existing
-              // failure path so its staged values are kept for a retry.
-              if (saved === false) {
-                throw new Error(
-                  "The application tracker settings could not be saved.",
-                );
-              }
-            }}
-            settings={applicationCrmSettings}
           />
         </section>
 

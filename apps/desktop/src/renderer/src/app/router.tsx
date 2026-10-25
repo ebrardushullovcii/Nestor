@@ -1,10 +1,10 @@
 import { Navigate, createHashRouter } from "react-router-dom";
 import { lazy, Suspense, type ReactNode } from "react";
+import { ApplicationsScreen } from "../features/applications/applications-screen";
 import { FindJobsScreen } from "../features/find-jobs/find-jobs-screen";
 import { ShortlistedScreen } from "../features/shortlisted/shortlisted-screen";
 import {
   JobFinderActionsRoute,
-  JobFinderApplicationsRoute,
   JobFinderPage,
   JobFinderProfileRoute,
   JobFinderProfileSetupRoute,
@@ -110,7 +110,7 @@ export const appRouter = createHashRouter([
       {
         path: "applications",
         errorElement: <JobFinderRouteErrorBoundary scope="route" />,
-        element: <JobFinderApplicationsRoute />,
+        element: <ApplicationsScreen />,
       },
       {
         // The former Documents destination. Its files live under Profile ›

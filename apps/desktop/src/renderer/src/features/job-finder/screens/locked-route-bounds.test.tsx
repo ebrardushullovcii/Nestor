@@ -28,12 +28,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cleanup, render } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ApplicationRecord } from "@nestor/contracts";
-import { ApplicationRecordSchema } from "@nestor/contracts";
-import { ApplicationsScreen } from "./applications/applications-screen";
 
 const SCREENS_DIR = dirname(fileURLToPath(import.meta.url));
 const FEATURE_DIR = join(SCREENS_DIR, "..");
@@ -43,7 +39,7 @@ const SCROLL_REGION_MARKER = "data-locked-pane-scroll-region";
 const LOCKED_SCREEN_FILES: Readonly<Record<string, string>> = {
   profile: "screens/profile-screen.tsx",
   "review-queue": "../shortlisted/shortlisted-screen.tsx",
-  applications: "screens/applications/applications-screen.tsx",
+  applications: "../applications/applications-screen.tsx",
 };
 
 /** Feature-relative path prefix -> the locked route that owns those files. */
@@ -140,96 +136,6 @@ function ownerRouteForFile(relativePath: string): string | null {
   );
 }
 
-class ResizeObserverMock {
-  observe() {}
-
-  unobserve() {}
-
-  disconnect() {}
-}
-
-/**
- * One stub for all three routes: below 1280px / 80rem. Find jobs asks
- * `(width < 80rem)` and Applications and Shortlisted ask
- * `(min-width: 1280px)`, so answering both correctly from one viewport is
- * itself part of the parity claim.
- */
-function stubStackedViewport(): void {
-  vi.stubGlobal("ResizeObserver", ResizeObserverMock);
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn((query: string) => ({
-      matches: /width\s*<\s*80rem/.test(query),
-      media: query,
-    })),
-  );
-  vi.stubGlobal(
-    "requestAnimationFrame",
-    vi.fn((callback: FrameRequestCallback) => {
-      callback(0);
-      return 1;
-    }),
-  );
-}
-
-function createTrackedApplication(): ApplicationRecord {
-  return ApplicationRecordSchema.parse({
-    id: "application_beta",
-    jobId: "job_beta",
-    title: "Backend Engineer",
-    company: "Beta",
-    status: "approved",
-    lastActionLabel: "Prepared",
-    nextActionLabel: "Review",
-    lastUpdatedAt: "2026-08-15T10:00:00.000Z",
-    crm: {
-      stage: "ready_for_approval",
-      stageChangedAt: "2026-08-15T10:00:00.000Z",
-    },
-  });
-}
-
-function renderApplicationsScreen(
-  onSelectRecord: (recordId: string) => void,
-): ApplicationRecord {
-  const record = createTrackedApplication();
-
-  render(
-    <MemoryRouter>
-      <ApplicationsScreen
-        applicationAttempts={[]}
-        applicationRecords={[record]}
-        applyRuns={[]}
-        applyJobResults={[]}
-        discoveryJobs={[]}
-        isApplyPending={false}
-        isApplyRequestPending={() => false}
-        isApplyRunPending={() => false}
-        onApproveApplyRun={vi.fn()}
-        onCancelApplyRun={vi.fn()}
-        onClearApplicationAnswer={vi.fn(() =>
-          Promise.reject(new Error("unused in this scenario")),
-        )}
-        onExportApplicationPacket={vi.fn()}
-        onGetApplyRunDetails={vi.fn()}
-        onResolveApplyConsentRequest={vi.fn()}
-        onRevokeApplyRunApproval={vi.fn()}
-        onSaveApplicationAnswer={vi.fn(() =>
-          Promise.reject(new Error("unused in this scenario")),
-        )}
-        onSelectRecord={onSelectRecord}
-        onStartApplyCopilot={vi.fn()}
-        onStartAutoApplyQueue={vi.fn()}
-        selectedApplyRunId={null}
-        selectedAttempt={null}
-        selectedRecord={record}
-      />
-    </MemoryRouter>,
-  );
-
-  return record;
-}
-
 describe("locked route bounds", () => {
   afterEach(() => {
     cleanup();
@@ -292,27 +198,6 @@ describe("locked route bounds", () => {
         isBoundedLayout(props),
         `${file} advertises a pane scroll owner, but ${screenFile} renders an unbounded LockedScreenLayout, so that pane can never get a scroll range`,
       ).toBe(true);
-    }
-  });
-
-  it("marks the Applications layout as height-locked in the DOM", () => {
-    stubStackedViewport();
-    renderApplicationsScreen(vi.fn());
-
-    const lockedContent = document.querySelector(
-      '[data-locked-screen-content-height="locked"]',
-    );
-
-    expect(lockedContent).toBeTruthy();
-
-    const regions = Array.from(
-      document.querySelectorAll(`[${SCROLL_REGION_MARKER}]`),
-    );
-
-    expect(regions.length).toBeGreaterThan(0);
-
-    for (const region of regions) {
-      expect(lockedContent?.contains(region)).toBe(true);
     }
   });
 });

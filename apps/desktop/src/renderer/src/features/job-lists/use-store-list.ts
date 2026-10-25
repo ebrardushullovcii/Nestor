@@ -2,15 +2,18 @@ import type { JobChange, JobStageCounts } from "@nestor/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /** One page of any store-backed list: `list_jobs`, `list_shortlisted`, … */
-export interface StoreListPage<Row> {
+export interface StoreListPage<Row, Counts = JobStageCounts> {
   rows: Row[];
   nextCursor: string | null;
   total: number;
   totalCapped: boolean;
-  counts: JobStageCounts;
+  counts: Counts;
 }
 
-export interface StoreListState<Row> extends StoreListPage<Row> {
+export interface StoreListState<
+  Row,
+  Counts = JobStageCounts,
+> extends StoreListPage<Row, Counts> {
   /** True until the first page of this list arrives. */
   loading: boolean;
   error: string | null;
@@ -43,13 +46,18 @@ function describe(error: unknown): string {
  * fetches one page from a cursor. `refreshOn` decides which changes matter
  * (default: any change that names a stage, since the counts move too).
  */
-export function useStoreList<Row extends { id: number }>(options: {
+export function useStoreList<
+  Row extends { id: number },
+  Counts = JobStageCounts,
+>(options: {
   key: string;
   load: (page: {
     cursor: string | null;
     limit: number;
-  }) => Promise<StoreListPage<Row>>;
+  }) => Promise<StoreListPage<Row, Counts>>;
   refreshOn?: (change: JobChange) => boolean;
+  /** Counts before the first page arrives; job stage counts by default. */
+  emptyCounts?: Counts;
 }) {
   const { key } = options;
   const loadRef = useRef(options.load);
@@ -57,12 +65,12 @@ export function useStoreList<Row extends { id: number }>(options: {
   const refreshOnRef = useRef(options.refreshOn);
   refreshOnRef.current = options.refreshOn;
 
-  const [state, setState] = useState<StoreListState<Row>>({
+  const [state, setState] = useState<StoreListState<Row, Counts>>({
     rows: [],
     nextCursor: null,
     total: 0,
     totalCapped: false,
-    counts: EMPTY_COUNTS,
+    counts: options.emptyCounts ?? (EMPTY_COUNTS as Counts),
     loading: true,
     error: null,
   });
@@ -72,7 +80,7 @@ export function useStoreList<Row extends { id: number }>(options: {
   const loadingMore = useRef(false);
 
   const apply = useCallback(
-    (page: StoreListPage<Row>, rows: Row[]) =>
+    (page: StoreListPage<Row, Counts>, rows: Row[]) =>
       setState({
         rows,
         nextCursor: page.nextCursor,

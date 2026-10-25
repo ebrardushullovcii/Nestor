@@ -2,7 +2,6 @@ import type {
   ApplicationCrmBulkStageMutationInput,
   ApplicationCrmExportFormat,
   ApplicationCrmMutationInput,
-  ApplicationCrmSettings,
   AppearanceTheme,
   ApplyGroupedManualAnswerInput,
   ApplyRunDetails,
@@ -301,9 +300,6 @@ export interface JobFinderPageContext {
   ) => Promise<boolean>;
   onUpdateAppearanceTheme: (
     appearanceTheme: AppearanceTheme,
-  ) => Promise<boolean>;
-  onUpdateTrackerCrm: (
-    applicationCrm: ApplicationCrmSettings,
   ) => Promise<boolean>;
   onSaveSourceInstructionArtifact: (
     targetId: string,
