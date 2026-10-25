@@ -199,7 +199,6 @@ async function renderScreen(options?: {
         isJobPending={() => false}
         isTargetPending={() => false}
         jobs={jobs}
-        dismissedJobs={[]}
         liveEvents={[]}
         onDismissJob={vi.fn()}
         onRestoreDismissedJob={vi.fn()}
@@ -391,7 +390,6 @@ describe("DiscoveryScreen inspector sync across pagination and search", () => {
           isJobPending={() => false}
           isTargetPending={() => false}
           jobs={jobs}
-          dismissedJobs={[]}
           liveEvents={[]}
           onDismissJob={vi.fn()}
           onRestoreDismissedJob={vi.fn()}
@@ -458,7 +456,6 @@ it("announces the assessed fit when the job moves to weaker matches", async () =
             isJobPending={() => false}
             isTargetPending={() => false}
             jobs={jobs}
-            dismissedJobs={[]}
             liveEvents={[]}
             onDismissJob={vi.fn()}
             onRestoreDismissedJob={vi.fn()}

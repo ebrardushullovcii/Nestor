@@ -154,7 +154,6 @@ function buildScreen(overrides?: {
         isJobPending={() => false}
         isTargetPending={() => false}
         jobs={[createJob("strong")]}
-        dismissedJobs={[]}
         liveEvents={[]}
         {...(overrides?.onCancelDiscovery
           ? { onCancelDiscovery: overrides.onCancelDiscovery }

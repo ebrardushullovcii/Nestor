@@ -107,6 +107,7 @@ import {
   JOB_FINDER_SHORTCUTS_DIALOG_LABEL,
   JobFinderShortcutsDialog,
 } from "./job-finder-shortcuts-dialog";
+import { readFullWorkspaceIfBehind } from "../lib/workspace-view-refresh";
 
 interface JobFinderShellProps {
   children: ReactNode;
@@ -647,7 +648,11 @@ export function JobFinderShell({
   // workspace, and never while the palette is closed.
   const loadGlobalSearchEntries = useMemo(() => {
     let entries: readonly JobFinderGlobalSearchEntry[] | null = null;
-    return () => (entries ??= buildJobFinderGlobalSearchEntries(workspace));
+    return () => {
+      // The palette lists every job: one full read if the lists fell behind.
+      readFullWorkspaceIfBehind();
+      return (entries ??= buildJobFinderGlobalSearchEntries(workspace));
+    };
   }, [workspace]);
 
   const activeScreen = useMemo(

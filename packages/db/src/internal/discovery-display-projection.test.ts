@@ -3,6 +3,7 @@ import {
   DiscoveryLedgerEntrySchema,
   DiscoveryRunRecordSchema,
   JobFinderDiscoveryStateSchema,
+  SourceDebugRunRecordSchema,
 } from "@nestor/contracts";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createInMemoryJobFinderRepository } from "../index";
@@ -49,13 +50,36 @@ function discoveryFixture() {
       },
     ],
     activity: [],
-    summary: { targetsPlanned: 1, outcome: "running" },
+    summary: {
+      targetsPlanned: 1,
+      outcome: "running",
+      sourceHealth: [
+        {
+          targetId: "target_checkpoint",
+          health: "warning",
+          durationMs: 27,
+          warnings: ["Synthetic source problem"],
+        },
+      ],
+    },
   });
   return JobFinderDiscoveryStateSchema.parse({
     ...createSeed().discovery,
     runState: "running",
     activeRun: run,
     recentRuns: [{ ...run, id: "previous_checkpoint", state: "failed" }],
+    recentSourceDebugRuns: [
+      SourceDebugRunRecordSchema.parse({
+        id: "recent_source_problem",
+        targetId: "target_checkpoint",
+        startedAt: "2026-10-13T10:00:00.000Z",
+        updatedAt: "2026-10-13T10:00:00.000Z",
+        targetLabel: "Synthetic source",
+        targetUrl: "https://jobs.example.com",
+        targetHostname: "jobs.example.com",
+        finalSummary: "Synthetic source access prompt",
+      }),
+    ],
     pendingDiscoveryJobs: [
       createSavedJob({ id: "pending_display", title: "Pending listing" }),
     ],
@@ -208,6 +232,18 @@ for (const storage of ["memory", "file"] as const) {
       await repo.commitDiscoveryStateUpdate(() => canonical);
       const display = await repo.readDiscoveryDisplayProjection();
       expect(await repo.readDiscoveryDisplayProjection()).toBe(display);
+      const home = await repo.readDiscoveryHomeProjection([]);
+      expect(home).toEqual({
+        sessions: display.sessions,
+        runState: display.runState,
+        activeRun: display.activeRun,
+        recentRuns: display.recentRuns,
+        activeSourceDebugRun: display.activeSourceDebugRun,
+        recentSourceDebugRuns: display.recentSourceDebugRuns,
+        listingActivities: [],
+      });
+      expect(home).not.toHaveProperty("discoveryLedger");
+      expect(home).not.toHaveProperty("pendingDiscoveryJobs");
       const bootstrap = await repo.readDiscoveryBootstrapProjection();
       expect(bootstrap).toEqual({
         sessions: display.sessions,

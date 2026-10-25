@@ -20,6 +20,7 @@ import {
   type BrowserAgentRunCheckpoint,
   type JobFinderDiscoveryState,
   type DiscoveryBootstrapState,
+  type DiscoveryHomeState,
   type DiscoveryRunStateProjection,
 } from "@nestor/contracts";
 import { normalizeLegacyDiscoveryState } from "./legacy";
@@ -550,6 +551,35 @@ export function readDiscoveryBootstrapStorage(
           false,
         )
       : null,
+  });
+}
+
+/** Recent run evidence is visible on Home; unrelated listing inventories are not. */
+export function readDiscoveryHomeStorage(
+  database: DatabaseSync,
+  fallback: JobFinderDiscoveryState,
+): Omit<DiscoveryHomeState, "listingActivities"> {
+  const row = database
+    .prepare("SELECT value FROM singleton_state WHERE key='discovery_state'")
+    .get();
+  const small = row
+    ? parseRow<SmallState>("singleton_state", "discovery_state", row.value)
+    : fallback;
+  const runs = database
+    .prepare("SELECT id,active,value,progress FROM discovery_runs ORDER BY active DESC,position")
+    .all();
+  const active = runs.find((run) => run.active === 1);
+  return frozen({
+    sessions: small.sessions,
+    runState: small.runState,
+    activeSourceDebugRun: small.activeSourceDebugRun,
+    recentSourceDebugRuns: small.recentSourceDebugRuns,
+    activeRun: active
+      ? readRun(database, { id: active.id, value: active.value, progress: active.progress }, false)
+      : null,
+    recentRuns: runs
+      .filter((run) => run.active !== 1)
+      .map((run) => readRun(database, { id: run.id, value: run.value, progress: run.progress }, false)),
   });
 }
 

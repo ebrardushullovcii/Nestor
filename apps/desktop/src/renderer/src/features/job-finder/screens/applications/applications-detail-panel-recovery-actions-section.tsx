@@ -56,6 +56,7 @@ export type {
   FinishInBrowserInput,
   FinishInBrowserOutcome,
 } from "./application-form-open";
+import type { ApplicationQueueHold } from "./application-queue-hold";
 
 /**
  * Resolution state of the "I finished this step" verification, derived from
@@ -78,6 +79,10 @@ const RECOVERY_PRIMARY_ACTION_CLASS_NAME = `${RECOVERY_ACTION_CLASS_NAME} font-s
 
 export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   progressNow?: number | undefined;
+  /** The Apply queue set this job aside before it started. */
+  queueHold?: ApplicationQueueHold | null;
+  /** The employer, for a held job's sentence. */
+  company?: string;
   /** The mode saved in Settings; a retry runs in it and is named for it. */
   applyMode?: ApplyMode;
   canRestageAutoRun: boolean;
@@ -204,6 +209,8 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
     pausedQuestionCount: pausedQuestionCount ?? null,
     run: visibleApplyRunContext,
     applicationPageState: props.applicationPageState ?? null,
+    queueHold: props.queueHold ?? null,
+    ...(props.company ? { company: props.company } : {}),
     visibleApplyResult,
   });
   const { primaryAction } = presentation;

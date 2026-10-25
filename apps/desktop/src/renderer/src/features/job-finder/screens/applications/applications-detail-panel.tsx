@@ -67,6 +67,10 @@ import {
   listPendingApplicationQuestions,
 } from "./applications-status";
 import { formatApplicationEmployerLine } from "../../lib/job-employer-location-display";
+import {
+  describeApplicationQueueHold,
+  type ApplicationQueueHold,
+} from "./application-queue-hold";
 
 function buildLiveAssistantApplicationHref(input: {
   record: ApplicationRecord;
@@ -109,6 +113,8 @@ function buildLiveAssistantApplicationHref(input: {
 
 interface ApplicationsDetailPanelProps {
   progressNow?: number | undefined;
+  /** Jobs the Apply queue set aside before they started, by job id. */
+  queueHolds?: ReadonlyMap<string, ApplicationQueueHold>;
   /** Applications -> Shortlisted, shown only for an unsent application. */
   onReturnToShortlist?: (record: ApplicationRecord) => void;
   answerDraft?: QuestionAnswerDraft | undefined;
@@ -208,6 +214,7 @@ interface ApplicationsDetailPanelProps {
 
 export function ApplicationsDetailPanel({
   progressNow,
+  queueHolds,
   onReturnToShortlist,
   applyMode,
   activeFilter,
@@ -432,6 +439,11 @@ export function ApplicationsDetailPanel({
     : selectedRecord
       ? getApplicationStagePresentation(selectedRecord)
       : null;
+  // Set aside by the Apply queue before it started: not being prepared.
+  const selectedQueueHold =
+    selectedRecord && !visibleApplyResult
+      ? queueHolds?.get(selectedRecord.jobId)
+      : undefined;
   const selectedStage = selectedHiringStage ?? selectedApplyStage;
   // Prepare-only runs never reach a "submitted" status, so the tracker stage
   // the user records by hand is the path that actually enables this.
@@ -481,6 +493,8 @@ export function ApplicationsDetailPanel({
   const recoverySection = selectedRecord ? (
     <ApplicationsDetailPanelRecoverySections
       progressNow={progressNow}
+      queueHold={queueHolds?.get(selectedRecord.jobId) ?? null}
+      company={selectedRecord.company}
       {...(applyMode ? { applyMode } : {})}
       canRestageAutoRun={canRestageAutoRun}
       canRestageQueueRun={canRestageQueueRun}
@@ -640,7 +654,12 @@ export function ApplicationsDetailPanel({
       ? (selectedHiringStage?.label ??
         (visibleApplyResult
           ? selectedApplyStage?.label
-          : applicationCrmStageLabelForView(selectedRecord, customStages)) ??
+          : selectedQueueHold
+            ? describeApplicationQueueHold(
+                selectedQueueHold,
+                selectedRecord.company,
+              )
+            : applicationCrmStageLabelForView(selectedRecord, customStages)) ??
         null)
       : "Nothing selected";
 

@@ -2639,6 +2639,8 @@ export function buildTailoredAssetBridge(input: {
           generationReason,
           generationDetail: input.existingAsset?.generationDetail ?? null,
         }),
+    // Edits, exports and approvals keep the level the text was written at.
+    tailoringMode: input.existingAsset?.tailoringMode ?? null,
     notes: uniqueStrings([
       ...(input.existingAsset?.notes ?? []),
       ...(input.notes ?? []),

@@ -4,6 +4,7 @@ import type {
   ApplicationAttempt,
   DiscoveryLedgerEntry,
   ListingSignalRecord,
+  WorkspaceJobListingActivity,
 } from "@nestor/contracts";
 import {
   createJobIdentityIndex,
@@ -13,7 +14,10 @@ import {
 } from "@nestor/job-list-policy";
 
 /** TEMP rows contain only the existing activity projection and never alter canonical data. */
-export function createWorkspaceListActivityReader(db: DatabaseSync) {
+export function createWorkspaceListActivityReader(
+  db: DatabaseSync,
+  includeAllSaved = false,
+) {
   db.exec(`CREATE TEMP TABLE workspace_listing_activity (
     plan_id TEXT, origin TEXT, id TEXT, status TEXT NOT NULL, value TEXT NOT NULL,
     PRIMARY KEY(plan_id,origin,id))`);
@@ -56,10 +60,20 @@ export function createWorkspaceListActivityReader(db: DatabaseSync) {
     const jobs: Array<ListingActivityJob & { origin: string }> = [];
     for (const row of db
       .prepare(
-        `SELECT origin,id,first_seen_at,last_seen_at,last_verified_active_at,discovered_at,closed,listing_closed_evidence
+        includeAllSaved
+          ? `SELECT i.origin,i.id,i.first_seen_at,i.last_seen_at,i.last_verified_active_at,i.discovered_at,
+        CASE WHEN verdict.value IS NOT NULL THEN COALESCE(json_extract(verdict.value,'$.judgment.listingClosed'),0)
+          ELSE COALESCE(p.closed,i.closed) END AS closed,
+        CASE WHEN verdict.value IS NOT NULL THEN json_extract(verdict.value,'$.judgment.listingClosedEvidence')
+          WHEN p.id IS NOT NULL THEN p.listing_closed_evidence ELSE i.listing_closed_evidence END AS listing_closed_evidence
+      FROM workspace_job_index i LEFT JOIN workspace_job_index p
+        ON p.origin=i.origin AND p.id=i.id AND p.plan_id=?
+      LEFT JOIN job_plan_assessments verdict ON i.origin='saved_jobs' AND verdict.job_id=i.id AND verdict.plan_id=?
+      WHERE i.plan_id=''`
+          : `SELECT origin,id,first_seen_at,last_seen_at,last_verified_active_at,discovered_at,closed,listing_closed_evidence
       FROM workspace_job_index WHERE plan_id=?`,
       )
-      .all(planId)) {
+      .all(...(includeAllSaved ? [planId, planId] : [planId]))) {
       const identity = byKey.get(`${String(row.origin)}:${String(row.id)}`);
       if (!identity) continue;
       jobs.push({
@@ -81,14 +95,21 @@ export function createWorkspaceListActivityReader(db: DatabaseSync) {
         },
       });
     }
-    const normalizedLedger = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='discovery_ledger_observations'").get());
+    const normalizedLedger = Boolean(
+      db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='discovery_ledger_observations'",
+        )
+        .get(),
+    );
     const ledger = db
       .prepare(
-        normalizedLedger ? `SELECT ${discoveryLedgerValueSql()} AS value FROM discovery_ledger
+        normalizedLedger
+          ? `SELECT ${discoveryLedgerValueSql()} AS value FROM discovery_ledger
       WHERE json_extract(value,'$.latestStatus')='inactive' AND EXISTS (
         SELECT 1 FROM discovery_ledger_observations observation
         WHERE observation.id=discovery_ledger.id AND observation.inactive_at IS NOT NULL) ORDER BY position`
-        : `SELECT value FROM discovery_ledger WHERE json_extract(value,'$.latestStatus')='inactive'
+          : `SELECT value FROM discovery_ledger WHERE json_extract(value,'$.latestStatus')='inactive'
           AND json_extract(value,'$.inactiveAt') IS NOT NULL ORDER BY position`,
       )
       .all()
@@ -129,5 +150,42 @@ export function createWorkspaceListActivityReader(db: DatabaseSync) {
       );
     planVersions.set(planId, version);
   };
-  return { ensure, invalidate: () => planVersions.clear() };
+  return {
+    ensure,
+    read(
+      jobIds: readonly string[],
+      planId: string | null,
+    ): WorkspaceJobListingActivity[] {
+      if (!jobIds.length) return [];
+      const version =
+        String(
+          db
+            .prepare(
+              "SELECT value FROM workspace_read_meta WHERE key='activity_revision'",
+            )
+            .get()?.value ?? "0",
+        ) +
+        (includeAllSaved && planId
+          ? `:${String(db.prepare("SELECT MAX(revision) AS revision FROM workspace_changes").get()?.revision ?? 0)}`
+          : "");
+      // Out-of-plan verdicts have no plan index row. Their committed feed
+      // revision also invalidates Home's complete saved-job activity view.
+      ensure(planId ?? "", version);
+      // The existing activity primary key gives one lookup per requested id.
+      // Keep the complete inventory for identity ambiguity checks inside ensure.
+      return db
+        .prepare(
+          `SELECT a.id,a.value FROM json_each(?) requested
+        CROSS JOIN workspace_listing_activity a ON a.plan_id=? AND a.origin='saved_jobs' AND a.id=requested.value`,
+        )
+        .all(JSON.stringify([...new Set(jobIds)]), planId ?? "")
+        .map((row) => ({
+          jobId: String(row.id),
+          listingActivity: JSON.parse(
+            String(row.value),
+          ) as WorkspaceJobListingActivity["listingActivity"],
+        }));
+    },
+    invalidate: () => planVersions.clear(),
+  };
 }

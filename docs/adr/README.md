@@ -75,18 +75,15 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0066](0066-share-listing-policy-with-bounded-read-models.md) | accepted | Share listing policy with bounded read models |
 | [0067](0067-direct-preload-reads-outside-busy-main.md) | accepted | Read screens outside the main event loop |
 | [0068](0068-discovery-commands-return-run-facts.md) | accepted | Search and Stop return run facts; query screens follow commits while legacy refreshes wait for search completion |
-<<<<<<< HEAD
 | [0069](0069-sliced-evidence-conversion-retains-screen-facts.md) | accepted | Convert evidence in slices and retain screen facts |
 | [0070](0070-read-original-rows-during-startup-conversion.md) | accepted | Original rows answer startup queries before index preparation, and typed writers open before evidence conversion completes |
 | [0071](0071-store-evidence-once-and-query-startup-facts.md) | accepted | Store evidence once and query startup facts |
 | [0072](0072-background-database-backups-and-export-retention.md) | accepted | Background database backups and generated export retention |
 | [0074](0074-one-index-before-inventory-reads.md) | accepted | One stored index owns inventory reads; measured duplicate startup facts did not deliver earlier counts or pages |
-| [0078](0078-ledger-observations-and-wal-growth.md) | accepted | Ledger observations use small columns; checkpoints follow WAL growth rather than retained file size |
-=======
 | [0075](0075-find-jobs-reads-its-page-from-queries.md) | accepted | Find jobs reads its page, facets and order from queries and follows the change feed; during a search the snapshot syncs only where a screen still needs it |
 | [0076](0076-write-resumes-when-a-job-is-shortlisted.md) | accepted | A shortlisted job's resume starts writing at once through the batch path (switch in Settings, default on); move back, Undo or hide withdraw it; pause holds it; it carries on after a restart |
 | [0077](0077-home-opens-on-a-first-view-before-the-full-snapshot.md) | accepted | Home opens on a first view (everything but the Find jobs lists, nothing written) before the full snapshot; early presses wait for the full one |
->>>>>>> origin/overnight2/ux-r8
+| [0078](0078-ledger-observations-and-wal-growth.md) | accepted | Ledger observations use small columns; checkpoints follow WAL growth rather than retained file size |
 
 ## Policy
 

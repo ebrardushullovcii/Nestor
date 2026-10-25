@@ -171,7 +171,6 @@ async function renderEstablishedResults() {
         isJobPending={() => false}
         isTargetPending={() => false}
         jobs={[selectedJob, hiddenMismatch]}
-        dismissedJobs={[]}
         liveEvents={[]}
         onDismissJob={vi.fn()}
         onRestoreDismissedJob={vi.fn()}
@@ -216,7 +215,6 @@ describe("DiscoveryScreen established-results layout", () => {
           isJobPending={() => false}
           isTargetPending={() => false}
           jobs={[catalogJob]}
-          dismissedJobs={[]}
           liveEvents={[]}
           onDismissJob={vi.fn()}
           onRestoreDismissedJob={vi.fn()}
@@ -265,7 +263,6 @@ describe("DiscoveryScreen established-results layout", () => {
           isJobPending={() => false}
           isTargetPending={() => false}
           jobs={[selectedJob]}
-          dismissedJobs={[]}
           liveEvents={[]}
           onDismissJob={vi.fn()}
           onRestoreDismissedJob={vi.fn()}
@@ -298,7 +295,6 @@ describe("DiscoveryScreen established-results layout", () => {
           isJobPending={() => false}
           isTargetPending={() => false}
           jobs={[]}
-          dismissedJobs={[]}
           liveEvents={[]}
           onDismissJob={vi.fn()}
           onRestoreDismissedJob={vi.fn()}
@@ -382,8 +378,9 @@ describe("DiscoveryScreen established-results layout", () => {
     await flushFindJobsQueries();
     fireEvent.click(screen.getByText(/^Hidden \(\d+\)$/u));
     await flushFindJobsQueries();
+    // Why it was hidden comes with the job's own record, read by id.
     fireEvent.click(
-      screen.getByRole("button", {
+      await screen.findByRole("button", {
         name: "Allow this employer in future searches",
       }),
     );

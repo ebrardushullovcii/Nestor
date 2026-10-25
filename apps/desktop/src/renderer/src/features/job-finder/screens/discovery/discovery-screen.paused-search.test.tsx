@@ -133,7 +133,6 @@ function buildScreen(overrides?: {
         isJobPending={() => false}
         isTargetPending={() => false}
         jobs={[createJob("strong")]}
-        dismissedJobs={[]}
         liveEvents={[]}
         onDismissJob={vi.fn()}
         onRestoreDismissedJob={vi.fn()}

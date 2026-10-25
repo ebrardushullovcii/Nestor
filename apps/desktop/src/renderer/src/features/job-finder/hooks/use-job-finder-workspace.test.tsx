@@ -1348,6 +1348,82 @@ describe("useJobFinderWorkspace entity mutations", () => {
     expect(requireReadyWorkspace(result.current).workspace).toBe(cancelled);
   });
 
+  it("takes a workspace update from the first view and the change feed, never the full sync", async () => {
+    const loaded = createWorkspace("job-listed");
+    const listed = loaded.discoveryJobs[0]!;
+    const view: JobFinderRendererWorkspaceSnapshot = {
+      ...createWorkspace("job-other"),
+      discoveryJobs: [],
+      dismissedDiscoveryJobs: [],
+      companyJobs: [],
+      hydration: {
+        phase: "bootstrap" as const,
+        deferredCollections: ["discovery_jobs"] as const,
+      },
+    };
+    const updateListeners: Array<() => void> = [];
+    const feedListeners: Array<(changes: unknown) => void> = [];
+    const getWorkspaceHome = vi.fn(() => Promise.resolve(view));
+    const getJobDetail = vi.fn((jobId: string) =>
+      Promise.resolve({
+        job: { ...listed, id: jobId, title: "Renamed by the feed" },
+        planId: null,
+      }),
+    );
+    Object.assign(window.nestor.jobFinder as object, {
+      getWorkspaceHome,
+      onWorkspaceUpdate: vi.fn((listener: () => void) => {
+        updateListeners.push(listener);
+        return () => undefined;
+      }),
+      queries: {
+        onChanges: (listener: (changes: unknown) => void) => {
+          feedListeners.push(listener);
+          return () => undefined;
+        },
+        getJobDetail,
+        getListCounts: () => new Promise(() => {}),
+        queryJobList: () => new Promise(() => {}),
+      },
+    });
+    syncWorkspace.mockResolvedValueOnce({
+      kind: "snapshot",
+      currentRevision: 1,
+      reason: "initial",
+      snapshot: loaded,
+    });
+
+    const { result } = renderHook(() => useJobFinderWorkspace());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(syncWorkspace).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      for (const listener of feedListeners)
+        listener({
+          changes: [
+            { revision: 2, table: "saved_jobs", id: listed.id, operation: "upsert" },
+          ],
+          revision: 2,
+          hasMore: false,
+          lists: ["discovery"],
+        });
+      for (const listener of updateListeners) listener();
+    });
+    await waitFor(() => expect(getWorkspaceHome).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(requireReadyWorkspace(result.current).workspace.generatedAt).toBe(
+        view.generatedAt,
+      ),
+    );
+    const workspace = requireReadyWorkspace(result.current).workspace;
+    expect(syncWorkspace).toHaveBeenCalledTimes(1);
+    expect(getJobDetail).toHaveBeenCalledWith(listed.id, loaded.activeCampaignId);
+    // Everything else from the first view; the Find jobs list kept, patched.
+    expect(workspace.hydration.phase).toBe("complete");
+    expect(workspace.discoveryJobs.map((job) => job.id)).toEqual([listed.id]);
+    expect(workspace.discoveryJobs[0]?.title).toBe("Renamed by the feed");
+  });
+
   it("rests between update-driven syncs for twice as long as the last one took", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-09T10:00:00.000Z"));

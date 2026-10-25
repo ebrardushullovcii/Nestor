@@ -48,6 +48,7 @@ import {
   type ResumeApplicationMode,
   type ResumeTimelineRepairAction,
   type DiscoveryJobView,
+  type ListingActivity,
   type SavedJob,
   type UpdateAiBehaviorInput,
   type UpdateApplicationDefaultsInput,
@@ -270,7 +271,10 @@ function buildJobViews(
  * ordering caches stay its own.
  */
 function buildHomeTierJobViews(
-  input: Omit<JobViewInput, "pendingDiscoveryJobs" | "companies">,
+  input: Omit<JobViewInput, "pendingDiscoveryJobs" | "companies"> & {
+    /** Each job's listing activity as the full list states it (indexed). */
+    listingActivities: ReadonlyMap<string, ListingActivity>;
+  },
 ) {
   const savedJobs = input.rawSavedJobs.map((job) =>
     readPlanAssessment(job, input.planId),
@@ -281,6 +285,9 @@ function buildHomeTierJobViews(
     discoveryLedger: input.discoveryLedger,
     listingSignals: input.listingSignals,
     applicationAttempts: input.applicationAttempts,
+  }).map((view) => {
+    const listingActivity = input.listingActivities.get(view.id);
+    return listingActivity ? { ...view, listingActivity } : view;
   });
   return {
     savedJobs,
@@ -1589,9 +1596,11 @@ export function createWorkspaceSnapshotProfileMethods(
 
     // Display reads exclude resume checkpoints before parsing and reuse
     // unchanged state. Canonical snapshots still load the complete state.
+
     const display = borrowValidatedJobs
       ? await ctx.repository.readDisplayCollections?.()
       : undefined;
+    const homeTierRead = homeTier ? readHomeTierInputs() : null;
     const [
       setupContext,
       rawSavedJobs,
@@ -1616,8 +1625,8 @@ export function createWorkspaceSnapshotProfileMethods(
       applyQueue,
     ] = await Promise.all([
       getCurrentSetupStateContext(borrowValidatedJobs),
-      homeTier
-        ? readHomeTierSavedJobs()
+      homeTierRead
+        ? homeTierRead.then((read) => read.savedJobs)
         : borrowValidatedJobs
           ? ctx.repository.readSavedJobsProjection()
           : ctx.repository.listSavedJobs(),
@@ -1638,9 +1647,11 @@ export function createWorkspaceSnapshotProfileMethods(
         ctx.repository.listProfileCopilotMessages(),
       display?.profileRevisions ?? ctx.repository.listProfileRevisions(),
       ctx.repository.getSettings(),
-      borrowValidatedJobs
-        ? ctx.repository.readDiscoveryDisplayProjection()
-        : ctx.repository.getDiscoveryState(),
+      homeTierRead
+        ? homeTierRead.then((read) => read.discovery)
+        : borrowValidatedJobs
+          ? ctx.repository.readDiscoveryDisplayProjection()
+          : ctx.repository.getDiscoveryState(),
       display?.userActionRequests ?? ctx.repository.listUserActionRequests(),
       display?.userActionEvents ?? ctx.repository.listUserActionEvents(),
       ctx.repository.getActivityControl(),
@@ -1790,8 +1801,8 @@ export function createWorkspaceSnapshotProfileMethods(
         prompts: sourceAccessPrompts,
       };
 
-    let campaignState = homeTier
-      ? await readHomeTierCampaignState()
+    let campaignState = homeTierRead
+      ? (await homeTierRead).campaigns
       : await ctx.withCampaignTransition(() =>
           ensureCampaignState({
             repository: ctx.repository,
@@ -1836,6 +1847,7 @@ export function createWorkspaceSnapshotProfileMethods(
           discoveryLedger: discovery.discoveryLedger,
           listingSignals: intelligence.safeguards.listingSignals,
           applicationAttempts,
+          listingActivities: (await homeTierRead!).listingActivities,
         })
       : deriveJobViews({
           rawSavedJobs,
@@ -2130,7 +2142,8 @@ export function createWorkspaceSnapshotProfileMethods(
       discoveryJobs,
       dismissedDiscoveryJobs: projectedDismissedDiscoveryJobs,
       companyJobs,
-      selectedDiscoveryJobId: discoveryJobs[0]?.id ?? null,
+      // The first view's rows are not Find jobs' order; it picks no default.
+      selectedDiscoveryJobId: homeTier ? null : (discoveryJobs[0]?.id ?? null),
       reviewQueue,
       selectedReviewJobId: reviewQueue[0]?.jobId ?? null,
       tailoredAssets,
@@ -2225,6 +2238,36 @@ export function createWorkspaceSnapshotProfileMethods(
     return ctx.repository.listSavedJobsByIds([
       ...new Set([...curated, ...records.map((record) => record.jobId)]),
     ]);
+  }
+
+  /**
+   * The first view's inputs: the jobs past Find jobs, the plans, and the
+   * discovery facts with those jobs' listing activity from the read index;
+   * no pending jobs and no ledger (read-path round 7).
+   */
+  async function readHomeTierInputs() {
+    const [savedJobs, campaigns] = await Promise.all([
+      readHomeTierSavedJobs(),
+      readHomeTierCampaignState(),
+    ]);
+    const { listingActivities, ...facts } =
+      await ctx.repository.readDiscoveryHomeProjection(
+        savedJobs.map((job) => job.id),
+        campaigns.activeCampaignId,
+      );
+    const discovery: JobFinderDiscoveryState = {
+      ...facts,
+      discoveryLedger: [],
+      pendingDiscoveryJobs: [],
+    };
+    return {
+      savedJobs,
+      campaigns,
+      discovery,
+      listingActivities: new Map(
+        listingActivities.map((entry) => [entry.jobId, entry.listingActivity]),
+      ),
+    };
   }
 
   async function readHomeTierCampaignState(): Promise<JobSearchCampaignCollection> {

@@ -34,6 +34,7 @@ import {
   applyResultNeedsResumeAttachment,
   getCustomerFacingApplyText,
 } from "./applications-detail-panel-helpers";
+import type { ApplicationQueueHold } from "./application-queue-hold";
 
 type ApplyResult = JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null;
 
@@ -458,6 +459,10 @@ type ApplicationRecoveryInput = {
   run?: ApplyRunContext | null;
   /** Whether the filled-in form is open, can be reopened, or is gone. */
   applicationPageState?: ApplicationPageState | null;
+  /** The Apply queue set this job aside before it started (STAB-005). */
+  queueHold?: ApplicationQueueHold | null;
+  /** The employer, for a held job's sentence. */
+  company?: string;
   visibleApplyResult: ApplyResult;
 };
 
@@ -510,6 +515,26 @@ function resolveRecoveryForRun(
       primaryAction: "try_again",
       primaryActionLabel: "Prepare again",
     };
+  }
+  // Set aside by the queue before any attempt: it never started, so it is
+  // neither being prepared nor stopped part way.
+  if (!visibleApplyResult && input.queueHold) {
+    const company = input.company ?? "this employer";
+    return input.queueHold.waitingForChoice
+      ? {
+          state: "retry",
+          statusLine: `Not started: waiting for your choice on ${company}`,
+          reasonSentence: `${input.queueHold.reason} Nothing was filled in or sent.`,
+          primaryAction: canOpenSafeguards ? "open_safeguards" : "none",
+          primaryActionLabel: canOpenSafeguards ? "Open Safeguards" : null,
+        }
+      : {
+          state: "retry",
+          statusLine: "Not started",
+          reasonSentence: `You chose to send both applications at ${company}. Nothing was filled in for this one yet.`,
+          primaryAction: "try_again",
+          primaryActionLabel: TRY_AGAIN_ACTION,
+        };
   }
   const isServiceWorkerBlocked =
     applyResultIsServiceWorkerBlocked(visibleApplyResult);

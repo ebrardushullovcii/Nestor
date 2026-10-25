@@ -148,9 +148,11 @@ import {
   createDiscoveryStorage,
   replaceDiscoveryStorage,
   readDiscoveryBootstrapStorage,
+  readDiscoveryHomeStorage,
   readDiscoveryRunStates,
 } from "./internal/discovery-storage";
 import { createIntelligenceProjectionReader } from "./internal/intelligence-projection";
+import { createWorkspaceListActivityReader } from "./internal/workspace-list-activity";
 import { createDisplayCollectionsReader } from "./internal/display-collections";
 import { createSingletonProjectionReader } from "./internal/singleton-projection";
 import { createResumeApprovalFolder } from "./internal/resume-approval-fold";
@@ -371,6 +373,9 @@ export async function createFileJobFinderRepository(
   }
 
   const database = await openWorkspaceDatabaseWithRecovery();
+  let homeActivity:
+    | ReturnType<typeof createWorkspaceListActivityReader>
+    | undefined;
   let writeReader: ReturnType<typeof createSavedJobWriteReader> | null = null;
   const readJobsForWrite = (ids: readonly string[]) =>
     (writeReader ??= createSavedJobWriteReader(database))(ids);
@@ -2549,6 +2554,31 @@ export async function createFileJobFinderRepository(
       return Promise.resolve(
         readDiscoveryBootstrapStorage(database, normalizedSeed.discovery),
       );
+    },
+    readDiscoveryHomeProjection(jobIds, planId = null) {
+      const ownTransaction = !database.isTransaction;
+      try {
+        homeActivity ??= createWorkspaceListActivityReader(database, true);
+        if (ownTransaction) database.exec("BEGIN");
+        const discovery = readDiscoveryHomeStorage(
+          database,
+          normalizedSeed.discovery,
+        );
+        const result = {
+          ...discovery,
+          listingActivities: homeActivity.read(jobIds, planId),
+        };
+        if (ownTransaction) database.exec("COMMIT");
+        return Promise.resolve(result);
+      } catch (error) {
+        if (ownTransaction && database.isTransaction) database.exec("ROLLBACK");
+        homeActivity?.invalidate();
+        return Promise.reject(
+          error instanceof Error
+            ? error
+            : new Error("The Home discovery projection could not be read."),
+        );
+      }
     },
     readDiscoveryRunStates() {
       return Promise.resolve(readDiscoveryRunStates(database));

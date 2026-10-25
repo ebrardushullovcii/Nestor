@@ -54,6 +54,7 @@ const LIST_PANEL_PATHS = [
 const LIST_ROW_PATHS = [
   "screens/applications/applications-records-panel.tsx",
   "screens/discovery/discovery-results-panel.tsx",
+  // The launch page's rows stand in for the results list until it loads.
   "screens/discovery/find-jobs-launch.tsx",
   "screens/review-queue/review-queue-list-row.tsx",
 ];

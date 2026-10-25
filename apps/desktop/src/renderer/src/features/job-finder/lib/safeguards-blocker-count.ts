@@ -33,7 +33,8 @@ export function countActiveSafeguardBlockers(
   for (const conflict of safeguards.simultaneousApplicationConflicts) {
     if (
       conflict.status === "detected" &&
-      !dismissed("simultaneous_application_conflict", conflict.id)
+      !dismissed("simultaneous_application_conflict", conflict.id) &&
+      sameCompanyConflictStillHolds(conflict)
     ) {
       count += 1;
     }
@@ -63,4 +64,28 @@ export function countActiveSafeguardBlockers(
   }
 
   return count;
+}
+
+/**
+ * A company's conflict (one record per company) holds work only while some
+ * pair of its jobs has not been allowed: the service checks each send against
+ * the allowed pairs and lets an allowed pair through. "Send both anyway" left
+ * the hold notice up after both applications were sent (STAB-006). An older
+ * per-record conflict has no pairs and holds until it is resolved.
+ */
+export function sameCompanyConflictStillHolds(
+  conflict: JobFinderIntelligenceSafeguards["simultaneousApplicationConflicts"][number],
+): boolean {
+  const jobIds = conflict.jobIds ?? [];
+  if (!conflict.companyKey || jobIds.length < 2) return true;
+  const allowed = new Set(
+    (conflict.allowedPairs ?? [])
+      .filter((pair) => pair.revokedAt === null)
+      .map((pair) => [...pair.jobIds].sort().join("\u0000")),
+  );
+  for (let left = 0; left < jobIds.length; left += 1)
+    for (let right = left + 1; right < jobIds.length; right += 1)
+      if (!allowed.has([jobIds[left]!, jobIds[right]!].sort().join("\u0000")))
+        return true;
+  return false;
 }

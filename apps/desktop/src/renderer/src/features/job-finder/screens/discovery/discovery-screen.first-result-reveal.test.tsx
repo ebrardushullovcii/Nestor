@@ -174,7 +174,6 @@ function buildScreen(overrides?: ScreenOverrides) {
         isJobPending={() => false}
         isTargetPending={() => false}
         jobs={overrides?.jobs ?? []}
-        dismissedJobs={[]}
         liveEvents={[]}
         onDismissJob={vi.fn()}
         onRestoreDismissedJob={vi.fn()}

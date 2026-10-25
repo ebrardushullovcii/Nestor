@@ -264,9 +264,12 @@ export function installFindJobsQueries(
     targets?: readonly JobDiscoveryTarget[];
     shortlistedJobIds?: Iterable<string>;
     visibleJobIds?: Iterable<string>;
+    /** Jobs the person hid: the "dismissed" list. */
+    dismissedJobs?: readonly JobListRow[];
   } = {},
 ): FindJobsQueryFixture {
   let jobs = initialJobs;
+  const dismissed = options.dismissedJobs ?? [];
   let targets = options.targets;
   const calls: QueryJobListInput[] = [];
   const listeners = new Set<(changes: WorkspaceChanges) => void>();
@@ -288,7 +291,9 @@ export function installFindJobsQueries(
     jobs.find((candidate) => candidate.id === jobId) ?? null;
   // The inspector reads the job by id, as it does from the database.
   jobFinder.getJobDetail = (jobId: string, planId: string | null) => {
-    const job = jobs.find((candidate) => candidate.id === jobId);
+    const job =
+      jobs.find((candidate) => candidate.id === jobId) ??
+      dismissed.find((candidate) => candidate.id === jobId);
     return job
       ? Promise.resolve({ job, planId })
       : (previousDetail?.(jobId, planId) ??
@@ -296,8 +301,20 @@ export function installFindJobsQueries(
   };
   jobFinder.queries = {
     ...(previous as object | undefined),
+    // The query API reads a job by id the same way.
+    getJobDetail: (jobId: string, planId: string | null) =>
+      (
+        jobFinder.getJobDetail as (
+          jobId: string,
+          planId: string | null,
+        ) => Promise<unknown>
+      )(jobId, planId),
     queryJobList: (input: QueryJobListInput) => {
       calls.push(input);
+      if (input.list === "dismissed")
+        return Promise.resolve(
+          answerFindJobsQuery(dismissed, { ...input, list: "all" }),
+        );
       return Promise.resolve(
         answerFindJobsQuery(jobs, input, {
           ...(targets ? { targets } : {}),
@@ -449,14 +466,18 @@ function hiddenMismatchRow(index: number): JobListRow {
 export function DiscoveryScreenWithJobs(
   props: Omit<ComponentProps<typeof DiscoveryScreen>, "planJobCount"> & {
     jobs: readonly JobListRow[];
+    /** Jobs the person hid, answered as the "dismissed" list. */
+    dismissedJobs?: readonly JobListRow[];
   },
 ) {
-  const { jobs, ...rest } = props;
+  const { jobs, dismissedJobs, ...rest } = props;
   const screenProps = { ...rest, planJobCount: jobs.length };
   useFixtureJobs(
     jobs,
     props.searchPreferences.discovery.targets,
     (props.reviewQueue ?? []).map((item) => item.jobId),
+    undefined,
+    dismissedJobs,
   );
   return <DiscoveryScreen {...screenProps} />;
 }
@@ -466,6 +487,7 @@ function useFixtureJobs(
   targets: readonly JobDiscoveryTarget[] | undefined,
   shortlistedJobIds: Iterable<string> | undefined,
   visibleJobs?: readonly JobListRow[],
+  dismissedJobs?: readonly JobListRow[],
 ) {
   const visibleJobIds = visibleJobs?.map((job) => job.id);
   const fixtureRef = useRef<FindJobsQueryFixture | null>(null);
@@ -476,6 +498,7 @@ function useFixtureJobs(
       ...(targets ? { targets } : {}),
       ...(shortlistedJobIds ? { shortlistedJobIds } : {}),
       ...(visibleJobIds ? { visibleJobIds } : {}),
+      ...(dismissedJobs ? { dismissedJobs } : {}),
     });
   // Updated while rendering, so the screen's own effects already read the
   // new rows; the change is announced once the render commits.

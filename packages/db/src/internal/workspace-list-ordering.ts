@@ -38,12 +38,20 @@ export function createWorkspaceListOrdering(db: DatabaseSync) {
   );
   return (version: string) => {
     if (generation === version) return;
-    const values = db
-      .prepare(
-        "SELECT title AS value FROM workspace_job_index UNION SELECT company FROM workspace_job_index UNION SELECT id FROM workspace_job_index",
-      )
-      .all()
-      .map((row) => String(row.value));
+    const values = [
+      ...new Set(
+        db
+          .prepare(
+            "SELECT title,company,id FROM workspace_job_index WHERE plan_id=''",
+          )
+          .all()
+          .flatMap((row) => [
+            String(row.title),
+            String(row.company),
+            String(row.id),
+          ]),
+      ),
+    ];
     for (const [target, compare] of [
       [lexical, (a: string, b: string) => a.localeCompare(b)],
       [company, (a: string, b: string) => collator.compare(a, b)],
@@ -90,16 +98,11 @@ export function createWorkspacePageOrder(db: DatabaseSync) {
       db.prepare(
         "DELETE FROM workspace_page_order WHERE plan_id=? AND sort=?",
       ).run(planId, sort);
-      const put = db.prepare(
-        "INSERT INTO workspace_page_order VALUES (?,?,?,?,?)",
-      );
-      let position = 0;
-      for (const row of db
-        .prepare(
-          `SELECT i.origin,i.id ${from} WHERE i.plan_id=? ORDER BY ${workspaceJobOrder[sort]}`,
-        )
-        .iterate(planId))
-        put.run(planId, sort, position++, row.origin!, row.id!);
+      db.prepare(
+        `INSERT INTO workspace_page_order
+        SELECT ?,?,row_number() OVER (ORDER BY ${workspaceJobOrder[sort]})-1,i.origin,i.id
+        ${from} WHERE i.plan_id=?`,
+      ).run(planId, sort, planId);
       versions.set(key, version);
     },
     invalidate() {

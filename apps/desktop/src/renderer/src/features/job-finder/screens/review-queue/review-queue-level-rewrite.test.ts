@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldRewriteResumeAfterLevelChange } from "./review-queue-status";
+import {
+  describeInterruptedResumeRewrite,
+  describeQueueItemResumeLevel,
+  shouldRewriteResumeAfterLevelChange,
+} from "./review-queue-status";
 
 const writtenLight = {
   assetStatus: "ready" as const,
@@ -76,5 +80,63 @@ describe("shouldRewriteResumeAfterLevelChange", () => {
         nextTailoringMode: "balanced",
       }),
     ).toBe(false);
+  });
+});
+
+describe("a level rewrite the app closed during (STAB-010)", () => {
+  // Aggressive was picked and saved, then the app closed before the rewrite
+  // finished: the resume is still the Light one.
+  const interrupted = {
+    ...writtenLight,
+    resumeTailoringMode: "aggressive" as const,
+    resumeWrittenTailoringMode: "conservative" as const,
+  };
+
+  it("names the level the resume was written at, not the saved one", () => {
+    expect(describeQueueItemResumeLevel(interrupted)).toBe("Light");
+    expect(
+      describeQueueItemResumeLevel({
+        ...interrupted,
+        resumeWrittenTailoringMode: null,
+      }),
+    ).toBe("Aggressive");
+  });
+
+  it("says the rewrite did not finish, and picking the level again rewrites", () => {
+    expect(describeInterruptedResumeRewrite(interrupted)).toEqual({
+      chosen: "aggressive",
+      chosenLabel: "Aggressive",
+      writtenLabel: "Light",
+    });
+    expect(
+      shouldRewriteResumeAfterLevelChange({
+        item: interrupted,
+        defaultTailoringMode: "balanced",
+        nextApplicationMode: "tailored_per_job",
+        nextTailoringMode: "aggressive",
+      }),
+    ).toBe(true);
+  });
+
+  it("says nothing when the resume matches its level or is being written", () => {
+    expect(
+      describeInterruptedResumeRewrite({
+        ...interrupted,
+        resumeWrittenTailoringMode: "aggressive",
+      }),
+    ).toBeNull();
+    expect(
+      describeInterruptedResumeRewrite({
+        ...interrupted,
+        assetStatus: "generating",
+      }),
+    ).toBeNull();
+    // Written before the asset recorded its level.
+    expect(
+      describeInterruptedResumeRewrite({
+        ...interrupted,
+        resumeWrittenTailoringMode: undefined,
+      }),
+    ).toBeNull();
   });
 });

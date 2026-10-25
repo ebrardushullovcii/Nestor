@@ -16,6 +16,12 @@ import {
 import { projectPlanSafeguardPauses } from "@nestor/job-finder/plan-safeguard-pauses";
 import type { ComponentType, ReactNode } from "react";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
+import { readInspectedSelectionId } from "./use-job-finder-page-controller-helpers";
+import { useLiveFindJobsCounts } from "@renderer/features/job-finder/lib/search-change-feed";
+import {
+  readFullWorkspaceIfBehind,
+  useFindJobsListsCurrent,
+} from "@renderer/features/job-finder/lib/workspace-view-refresh";
 import { describeSavedResumeLevel } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
 import {
   describeResumeReviewProgress,
@@ -611,6 +617,8 @@ export { JobFinderRouteErrorBoundary };
 
 export function JobFinderCompaniesRoute() {
   const context = useJobFinderPageContext();
+  // Lists every job: one full read if the lists fell behind.
+  useEffect(readFullWorkspaceIfBehind, []);
 
   return (
     <JobFinderHydrationGate
@@ -655,6 +663,8 @@ export function JobFinderCompaniesRoute() {
 
 export function JobFinderCompanyDetailRoute() {
   const context = useJobFinderPageContext();
+  // Lists every job: one full read if the lists fell behind.
+  useEffect(readFullWorkspaceIfBehind, []);
   const { companyId } = useParams<{ companyId: string }>();
   const [searchParams] = useSearchParams();
   const navigationContext = readJobFinderNavigationContext(searchParams);
@@ -781,7 +791,9 @@ export function JobFinderHomeRoute() {
   // runs or jobs yet) it told a person with thousands of jobs to "Run your
   // first search" for several seconds after launch. Its first view (ADR
   // 0077) has all of them but the Find jobs lists, whose two numbers Home
-  // takes from the database until the lists land.
+  // takes from the database until the lists land. After a view refresh the
+  // lists are only patched, so the numbers come from the same queries.
+  const liveFindJobsCounts = useLiveFindJobsCounts(context.workspace);
   const findJobsCounts =
     launchReads.findJobs &&
     isJobFinderHydratingCollections(context.workspace, ["discovery_jobs"])
@@ -793,7 +805,7 @@ export function JobFinderHomeRoute() {
               launchReads.findJobs.focused.total,
           ),
         }
-      : null;
+      : liveFindJobsCounts;
   return (
     <JobFinderHydrationGate
       collections={
@@ -1295,16 +1307,10 @@ export function JobFinderProfileSetupRoute() {
 const selectPlanDiscoveryJobs = createIdentityMemo(
   (
     discoveryJobs: readonly JobListRow[],
-    dismissedDiscoveryJobs: readonly JobListRow[],
     activeCampaignJobIds: readonly string[] | undefined,
   ) => {
     const campaignJobIds = new Set(activeCampaignJobIds ?? []);
-    return {
-      jobs: discoveryJobs.filter((job) => campaignJobIds.has(job.id)),
-      dismissedJobs: dismissedDiscoveryJobs.filter((job) =>
-        campaignJobIds.has(job.id),
-      ),
-    };
+    return discoveryJobs.filter((job) => campaignJobIds.has(job.id));
   },
 );
 
@@ -1347,10 +1353,8 @@ export function JobFinderDiscoveryRoute() {
   const activeCampaignJobIds = activeCampaign?.jobIds;
   // Kept across visits too, so an unchanged plan hands Find jobs the same
   // list and everything it derives from that list is reused.
-  const { discoveryJobs, dismissedDiscoveryJobs } = context.workspace;
-  const { jobs, dismissedJobs } = selectPlanDiscoveryJobs(
-    discoveryJobs,
-    dismissedDiscoveryJobs,
+  const jobs = selectPlanDiscoveryJobs(
+    context.workspace.discoveryJobs,
     activeCampaignJobIds,
   );
   const requestedJob = navigationContext.jobId
@@ -1371,9 +1375,28 @@ export function JobFinderDiscoveryRoute() {
         (target) => target.id === navigationContext.targetId,
       ) ?? null)
     : null;
-  const isHydrating = isJobFinderHydratingCollections(context.workspace, [
-    "discovery_jobs",
-  ]);
+  // Find jobs reads its list, counts and hidden jobs from the database, so it
+  // opens on Home's first view (ADR 0077) instead of waiting for every job.
+  // A link to one job still waits: whether it is in this plan, another plan
+  // or gone is read from the full list.
+  const opensOnFirstView =
+    !navigationContext.jobId &&
+    launchReads.counts !== null &&
+    jobRowsFor(context.workspace).length === 0;
+  // A link to one job checks it against every job, so it waits for a full
+  // read when the lists fell behind (a view refresh only patches them).
+  const listsCurrent = useFindJobsListsCurrent();
+  useEffect(() => {
+    if (navigationContext.jobId) readFullWorkspaceIfBehind();
+  }, [navigationContext.jobId]);
+  const isHydrating =
+    (!opensOnFirstView &&
+      isJobFinderHydratingCollections(context.workspace, ["discovery_jobs"])) ||
+    (Boolean(navigationContext.jobId) && !listsCurrent);
+  // On the first view the workspace holds only the jobs past Find jobs, so
+  // the open job is the person's pick, else the one remembered from last
+  // time; the full list keeps both, so nothing moves when it lands.
+  const [firstViewPick, setFirstViewPick] = useState<string | null>(null);
 
   useEffect(() => {
     if (!navigationContext.jobId || !crossPlanCampaign) {
@@ -1424,11 +1447,15 @@ export function JobFinderDiscoveryRoute() {
   useLayoutEffect(() => {
     if (launchClickedJobId === null) return;
     context.onSelectDiscoveryJob(launchClickedJobId);
-    if (!isHydrating) forgetLaunchClickedJob();
+    if (!isHydrating) {
+      setFirstViewPick(launchClickedJobId);
+      forgetLaunchClickedJob();
+    }
   }, [context.onSelectDiscoveryJob, isHydrating, launchClickedJobId]);
 
   const handleSelectJob = useCallback(
     (jobId: string) => {
+      setFirstViewPick(jobId);
       context.onSelectDiscoveryJob(jobId);
       if (navigationContext.jobId) {
         setSearchParams(
@@ -1523,16 +1550,29 @@ export function JobFinderDiscoveryRoute() {
     );
   }
 
-  const selectedJob = selectJobFinderContext(
-    jobs,
-    navigationContext.jobId,
-    context.selectedDiscoveryJob?.id,
-    (job) => job.id,
-  );
+  const firstViewOpenJobId = opensOnFirstView
+    ? (firstViewPick ??
+      launchClickedJobId ??
+      readInspectedSelectionId({
+        storage: window.localStorage,
+        surface: "discovery",
+        campaignId: context.workspace.activeCampaignId,
+      }))
+    : null;
+  const selectedJob = opensOnFirstView
+    ? firstViewOpenJobId
+      ? { id: firstViewOpenJobId }
+      : null
+    : selectJobFinderContext(
+        jobs,
+        navigationContext.jobId,
+        context.selectedDiscoveryJob?.id,
+        (job) => job.id,
+      );
 
   return (
     <JobFinderHydrationGate
-      collections={["discovery_jobs"]}
+      collections={opensOnFirstView ? [] : ["discovery_jobs"]}
       workspace={context.workspace}
     >
       <DiscoveryScreen
@@ -1571,8 +1611,9 @@ export function JobFinderDiscoveryRoute() {
         )}
         isActivityPausePending={activityPausePending}
         discoverySessions={context.workspace.discoverySessions}
-        planJobCount={jobs.length}
-        dismissedJobs={dismissedJobs}
+        planJobCount={
+          opensOnFirstView ? (launchReads.counts?.all ?? 0) : jobs.length
+        }
         liveEvents={context.liveDiscoveryEvents}
         isJobPending={(jobId) =>
           context.isAnyPending([
@@ -1656,6 +1697,8 @@ export function JobFinderDiscoveryRoute() {
 
 export function JobFinderRapidReviewRoute() {
   const context = useJobFinderPageContext();
+  // Lists every job: one full read if the lists fell behind.
+  useEffect(readFullWorkspaceIfBehind, []);
   const { campaign, jobs, log } = useMemo(
     () => selectRapidReviewScope(context.workspace),
     [context.workspace],
@@ -1882,9 +1925,14 @@ function JobFinderReviewQueueRouteContent() {
         onOpenBrowserSession={() => {
           void context.onOpenBrowserSession();
         }}
+        // A link to the job: Find jobs lists only jobs still waiting on a
+        // decision, so a shortlisted job opened by selection alone left an
+        // empty page (STAB-004). The link holds it open there.
         onOpenJobDetails={(jobId) => {
           context.onSelectDiscoveryJob(jobId);
-          context.onNavigateSafely("/job-finder/discovery");
+          context.onNavigateSafely(
+            buildJobFinderContextRoute("/job-finder/discovery", { jobId }),
+          );
         }}
         onOpenApplication={(recordId) => {
           context.onSelectApplicationRecord(recordId);
@@ -2825,6 +2873,10 @@ export function JobFinderApplicationsRoute() {
           void context.onStartAutoApplyQueue(jobIds, applicationAutomationMode);
         }}
         applyQueue={context.workspace.applyQueue}
+        sameCompanyConflicts={
+          context.workspace.intelligence.safeguards
+            .simultaneousApplicationConflicts
+        }
         onControlApplyQueue={context.onControlApplyQueue}
         onRaiseDailyLimit={() =>
           context.onNavigateSafely(
@@ -3001,6 +3053,8 @@ export function selectJobFinderActionsScope(context: JobFinderPageContext) {
 
 export function JobFinderActionsRoute() {
   const context = useJobFinderPageContext();
+  // Lists every job: one full read if the lists fell behind.
+  useEffect(readFullWorkspaceIfBehind, []);
   const [searchParams] = useSearchParams();
   const scope = useMemo(
     () => selectJobFinderActionsScope(context),
@@ -3154,6 +3208,8 @@ export function JobFinderSettingsRoute() {
 
 export function JobFinderSafeguardsRoute() {
   const context = useJobFinderPageContext();
+  // Lists every job: one full read if the lists fell behind.
+  useEffect(readFullWorkspaceIfBehind, []);
 
   return (
     <JobFinderHydrationGate

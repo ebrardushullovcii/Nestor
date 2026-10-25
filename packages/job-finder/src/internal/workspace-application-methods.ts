@@ -346,6 +346,7 @@ function buildFailedTailoredAsset(input: {
     contentText: input.existingAsset?.contentText ?? null,
     previewSections: input.existingAsset?.previewSections ?? [],
     generationMethod: input.existingAsset?.generationMethod ?? "deterministic",
+    tailoringMode: input.existingAsset?.tailoringMode ?? null,
     notes: input.existingAsset?.notes ?? [],
     failureMessage: sanitizeTailoredAssetFailureMessage(input.error),
     failedAt,
@@ -4773,6 +4774,7 @@ export function createWorkspaceApplicationMethods(
           generationMethod,
           generationReason,
           generationDetail,
+          tailoringMode: effectiveTailoringMode,
           notes: uniqueStrings([
             ...draft.notes,
             ...(strategyTemplateId && !existingDraft

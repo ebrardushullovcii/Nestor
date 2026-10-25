@@ -136,7 +136,6 @@ describe("Find jobs links to the selected plan's editor", () => {
           isJobPending={() => false}
           isTargetPending={() => false}
           jobs={jobs}
-          dismissedJobs={[]}
           liveEvents={[]}
           onDismissJob={vi.fn()}
           onRestoreDismissedJob={vi.fn()}
