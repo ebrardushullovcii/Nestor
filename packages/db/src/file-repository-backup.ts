@@ -150,11 +150,11 @@ export async function createWorkspaceDatabaseBackup(input: {
 }
 
 const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-
 /** A single cancellable background task; quitting never starts a backup. */
 export function scheduleWorkspaceDatabaseBackups(input: {
   filePath: string;
   schemaVersion: number;
+  firstCheckDelayMs?: number;
 }): () => Promise<void> {
   const controller = new AbortController();
   let pending: Promise<void> = Promise.resolve();
@@ -211,7 +211,7 @@ export function scheduleWorkspaceDatabaseBackups(input: {
   };
   timer = setTimeout(() => {
     pending = run();
-  }, 0);
+  }, input.firstCheckDelayMs ?? 0);
   timer.unref?.();
   return async () => {
     controller.abort();

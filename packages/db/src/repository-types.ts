@@ -790,6 +790,8 @@ export interface AutomaticWorkspaceBackupOptions {
    * most daily, retaining one previous generation. Quit cancels unfinished work.
    */
   inBackground?: boolean;
+  /** How long after opening the first background check waits. Default 0. */
+  firstCheckDelayMs?: number;
   /**
    * Snapshot the pre-reset state into the dedicated `<filePath>.reset-backup`
    * destination right before a destructive full-state reset overwrites it.

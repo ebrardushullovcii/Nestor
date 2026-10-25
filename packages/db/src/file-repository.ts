@@ -531,6 +531,7 @@ export async function createFileJobFinderRepository(
     automaticBackup.inBackground
       ? scheduleWorkspaceDatabaseBackups({
           filePath: options.filePath,
+          firstCheckDelayMs: automaticBackup.firstCheckDelayMs ?? 0,
           schemaVersion: Number(
             database
               .prepare("SELECT MAX(version) AS version FROM schema_migrations")
