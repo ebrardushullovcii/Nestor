@@ -47,6 +47,68 @@ const documentBundle: ResumeDocumentBundle = {
 };
 
 describe("extractOpenAiCompatibleResumeImportStage", () => {
+  test("accepts a bare candidate object instead of the candidates envelope", async () => {
+    // Observed from the production route: with one record to return, the
+    // model answered with the candidate itself as the root object.
+    const result = await extractOpenAiCompatibleResumeImportStage({
+      stageInput: {
+        stage: "identity_summary",
+        existingProfile: createProfile(),
+        existingSearchPreferences: createPreferences(),
+        documentBundle,
+      },
+      status,
+      fetchModelJson: () =>
+        Promise.resolve({
+          target: { section: "identity", key: "fullName", recordId: null },
+          label: "Full name",
+          value: "Elian Morava",
+          normalizedValue: null,
+          evidenceText: "Elian Morava",
+          sourceBlockIds: ["block_1"],
+          confidence: 0.84,
+          notes: ["top line"],
+          alternatives: [],
+        }),
+      timeoutMs: 1_000,
+    });
+
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      target: { section: "identity", key: "fullName" },
+      value: "Elian Morava",
+    });
+  });
+
+  test("accepts a bare candidate array instead of the candidates envelope", async () => {
+    const result = await extractOpenAiCompatibleResumeImportStage({
+      stageInput: {
+        stage: "identity_summary",
+        existingProfile: createProfile(),
+        existingSearchPreferences: createPreferences(),
+        documentBundle,
+      },
+      status,
+      fetchModelJson: () =>
+        Promise.resolve([
+          {
+            target: { section: "identity", key: "fullName", recordId: null },
+            label: "Full name",
+            value: "Elian Morava",
+            normalizedValue: null,
+            evidenceText: "Elian Morava",
+            sourceBlockIds: ["block_1"],
+            confidence: 0.84,
+            notes: [],
+            alternatives: [],
+          },
+        ]),
+      timeoutMs: 1_000,
+    });
+
+    expect(result.candidates).toHaveLength(1);
+  });
+
   test("normalizes string notes into an array instead of failing the stage", async () => {
     const result = await extractOpenAiCompatibleResumeImportStage({
       stageInput: {

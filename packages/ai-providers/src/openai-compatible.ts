@@ -286,6 +286,9 @@ export function createOpenAiCompatibleJobFinderAiClient(
     if (!task) return agentReasoningEffort;
     const configured = validatedOptions?.taskReasoningEfforts?.[task];
     if (configured) return configured;
+    // Extraction reads the document into typed fields; unconfigured it
+    // runs low like the other read tasks, not at the agent effort.
+    if (task === "resume_import") return "low";
     // Muse already has the complete evidence and proposal shape. Keep its
     // writing effort separate from full listing reads and the agent loop;
     // the independent claim check and repairs still run at their own effort.
@@ -509,6 +512,10 @@ export function createOpenAiCompatibleJobFinderAiClient(
         stageInput: input,
         status,
         fetchModelJson,
+        // Reading a resume into typed candidates is extraction, not deep
+        // reasoning: run it at the resume_import task effort (low unless
+        // configured otherwise), not the client's main effort.
+        reasoningEffort: reasoningEffortFor("resume_import"),
         timeoutMs: resumeImportStageTimeoutMs(
           input.stage,
           validatedOptions?.resumeExtractionTimeoutMs,
@@ -1123,6 +1130,43 @@ function waitBeforeResumeImportRetry(attempt: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
+/**
+ * Whether the document plainly contains the section a stage reads, so an
+ * empty fast read means the read missed it rather than the resume lacking
+ * it. Identity is present in any readable resume; the other core stages go
+ * by the parser's section hints. Shared memory is optional by nature and
+ * never escalates.
+ */
+function resumeImportStageSectionPresent(
+  input: Parameters<JobFinderAiClient["extractResumeImportStage"]>[0],
+): boolean {
+  const bundle = input.documentBundle;
+  switch (input.stage) {
+    case "identity_summary":
+      return (
+        (bundle.fullText?.trim().length ?? 0) > 0 || bundle.blocks.length > 0
+      );
+    case "experience":
+      return bundle.blocks.some(
+        (block) =>
+          block.sectionHint === "experience" ||
+          block.kind === "experience_header",
+      );
+    case "background":
+      return bundle.blocks.some((block) =>
+        [
+          "education",
+          "certifications",
+          "skills",
+          "projects",
+          "languages",
+        ].includes(block.sectionHint),
+      );
+    case "shared_memory":
+      return false;
+  }
+}
+
 export function createJobFinderAiClientFromEnvironment(
   env: StringMap = process.env,
 ): JobFinderAiClient {
@@ -1302,6 +1346,12 @@ export function createJobFinderAiClientFromEnvironment(
       // connection) is asked again. A section it still cannot read fails
       // with a sentence for the person, instead of being filled from rule
       // guesses that would land in the profile unseen.
+      //
+      // Each stage is one extraction request: the full document and saved
+      // profile travel in the payload. The agent reader (tool loop reading
+      // the same evidence back over several turns) measured 23-36s per
+      // stage on a one-page resume, so it now runs only as a rescue when a
+      // core read comes back empty for a section the document plainly has.
       let lastError: unknown = null;
       for (
         let attempt = 0;
@@ -1313,10 +1363,25 @@ export function createJobFinderAiClientFromEnvironment(
         }
         const primaryStartedAtMs = performance.now();
         try {
-          const primary = await runResumeImportStageAgentTask({
-            client: primaryClient,
-            request: input,
-          });
+          let primary = await primaryClient.extractResumeImportStage(input);
+          if (
+            primary.candidates.length === 0 &&
+            resumeImportStageSectionPresent(input)
+          ) {
+            try {
+              const rescued = await runResumeImportStageAgentTask({
+                client: primaryClient,
+                request: input,
+              });
+              if (rescued.candidates.length > 0) {
+                primary = rescued;
+              }
+            } catch (error) {
+              // The fast read already answered; a failed rescue must not
+              // turn a completed stage into an import failure.
+              logFallbackError("extractResumeImportStage", error);
+            }
+          }
           return {
             ...primary,
             timing: {

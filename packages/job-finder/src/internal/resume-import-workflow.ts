@@ -1797,28 +1797,17 @@ async function runResumeImportWorkflowInProcess(
                 existingSearchPreferences: input.searchPreferences,
                 documentBundle: bundle,
               };
-              let result = ResumeImportStageExtractionResultSchema.parse(
+              const result = ResumeImportStageExtractionResultSchema.parse(
                 await ctx.aiClient.extractResumeImportStage(stageInput),
               );
               if (result.stage !== stage)
                 throw new Error(
                   `The provider returned ${result.stage} instead of ${stage}.`,
                 );
-              if (
-                stage === "shared_memory" &&
-                result.candidates.length === 0 &&
-                !readsWithoutModel(ctx)
-              ) {
-                if (input.signal?.aborted)
-                  throw new Error(RESUME_IMPORT_CANCELLED_MESSAGE);
-                result = ResumeImportStageExtractionResultSchema.parse(
-                  await ctx.aiClient.extractResumeImportStage(stageInput),
-                );
-                if (result.candidates.length === 0)
-                  throw new Error(
-                    "No reusable evidence was returned after two reads. Read the resume again to retry optional suggestions.",
-                  );
-              }
+              // An empty shared-memory read is a completed read: the resume
+              // simply holds nothing reusable to suggest. It used to trigger
+              // a second full read and then fail the stage, spending another
+              // model call to report the absence as an error.
               return result;
             })
             .finally(() => {

@@ -509,6 +509,7 @@ export function parseModelReasoningEffort(
  */
 export const modelReasoningTasks = [
   "resume_writer",
+  "resume_import",
   "listing_read",
   "search",
   "page_read",
@@ -534,6 +535,12 @@ const TASK_REASONING_EFFORT_SETTINGS: Record<
   resume_writer: {
     env: "NESTOR_AI_RESUME_WRITER_REASONING_EFFORT",
     fallback: null,
+  },
+  // Reading a resume into typed candidates is extraction: the document is
+  // the answer, so it thinks at low effort like the other read tasks.
+  resume_import: {
+    env: "NESTOR_AI_RESUME_IMPORT_REASONING_EFFORT",
+    fallback: "low",
   },
   listing_read: {
     env: "NESTOR_AI_LISTING_READ_REASONING_EFFORT",

@@ -17,6 +17,7 @@ import {
 } from "./resume-import";
 import { buildCandidateConfidenceBreakdown } from "./resume-import-helpers";
 import type { OpenAiCompatibleJsonOperation } from "./openai-compatible-request-compaction";
+import type { ModelReasoningEffort } from "./openai-compatible-transport";
 
 const ADJUDICATION_BLOCK_LIMIT = 80;
 const ADJUDICATION_CANDIDATE_LIMIT = 24;
@@ -254,9 +255,14 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
     operation: OpenAiCompatibleJsonOperation,
     systemPrompt: string,
     userPayload: unknown,
-    options?: { timeoutMs?: number },
+    options?: {
+      timeoutMs?: number;
+      reasoningEffort?: ModelReasoningEffort | undefined;
+    },
   ) => Promise<unknown>;
   timeoutMs: number;
+  /** Extraction is read-and-structure work; callers pass a low read effort. */
+  reasoningEffort?: ModelReasoningEffort | undefined;
 }): Promise<ResumeImportStageExtractionResult> {
   // Section hints are parser guesses; each model read needs the complete document.
   const blocks = [...input.stageInput.documentBundle.blocks].sort(
@@ -268,10 +274,10 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
     "extractResumeImportStage",
     [
       "You extract structured resume import candidates from parsed document blocks.",
-      "Return JSON only.",
+      'Return JSON only, as one object: {"candidates":[...],"notes":[...]}. Never return a bare candidate or a bare array.',
       "Use only the provided document as evidence.",
       "Each candidate must include target, label, value, normalizedValue when helpful, evidenceText, sourceBlockIds, confidence, notes, and alternatives.",
-      'Example candidate: {"target":{"section":"identity","key":"fullName","recordId":null},"label":"Full name","value":"Jane Doe","normalizedValue":"Jane Doe","evidenceText":"Jane Doe","sourceBlockIds":["block_1"],"confidence":0.98,"notes":[],"alternatives":[]}',
+      'Example response: {"candidates":[{"target":{"section":"identity","key":"fullName","recordId":null},"label":"Full name","value":"Jane Doe","normalizedValue":"Jane Doe","evidenceText":"Jane Doe","sourceBlockIds":["block_1"],"confidence":0.98,"notes":[],"alternatives":[]}],"notes":[]}',
       "Only use sourceBlockIds that exist in the input block list.",
       "Confidence must be a number between 0 and 1.",
       buildResumeImportStageInstructions(input.stageInput.stage),
@@ -304,13 +310,26 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
         })),
       },
     },
-    { timeoutMs: input.timeoutMs },
+    { timeoutMs: input.timeoutMs, reasoningEffort: input.reasoningEffort },
   );
 
-  const normalizedPayload =
-    payload && typeof payload === "object" && !Array.isArray(payload)
+  // Models sometimes answer with one bare candidate (or a bare array)
+  // instead of the {"candidates":[...]} envelope — observed verbatim from
+  // the production route, where a complete experience record was dropped
+  // for its wrapping alone. Accept all three shapes.
+  const normalizedPayload: Record<string, unknown> = Array.isArray(payload)
+    ? { candidates: payload }
+    : payload && typeof payload === "object"
       ? (payload as Record<string, unknown>)
       : {};
+  const rawCandidates: unknown[] = Array.isArray(normalizedPayload.candidates)
+    ? normalizedPayload.candidates
+    : normalizedPayload.candidates &&
+        typeof normalizedPayload.candidates === "object"
+      ? [normalizedPayload.candidates]
+      : "target" in normalizedPayload
+        ? [normalizedPayload]
+        : [];
 
   return sanitizeStageCandidates(
     input.stageInput,
@@ -318,24 +337,22 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
       stage: input.stageInput.stage,
       analysisProviderKind: "openai_compatible",
       analysisProviderLabel: input.status.label,
-      candidates: Array.isArray(normalizedPayload.candidates)
-        ? normalizedPayload.candidates
-            .map((candidate) => normalizeCandidate(candidate))
-            .filter((candidate): candidate is ResumeImportFieldCandidateDraft =>
-              Boolean(candidate),
-            )
-            .map((candidate) => ({
-              ...candidate,
-              confidenceBreakdown: buildCandidateConfidenceBreakdown({
-                candidate: {
-                  target: candidate.target,
-                  confidence: candidate.confidence,
-                  sourceBlockIds: candidate.sourceBlockIds,
-                },
-                bundle: input.stageInput.documentBundle,
-              }),
-            }))
-        : [],
+      candidates: rawCandidates
+        .map((candidate) => normalizeCandidate(candidate))
+        .filter((candidate): candidate is ResumeImportFieldCandidateDraft =>
+          Boolean(candidate),
+        )
+        .map((candidate) => ({
+          ...candidate,
+          confidenceBreakdown: buildCandidateConfidenceBreakdown({
+            candidate: {
+              target: candidate.target,
+              confidence: candidate.confidence,
+              sourceBlockIds: candidate.sourceBlockIds,
+            },
+            bundle: input.stageInput.documentBundle,
+          }),
+        })),
       notes: toStringArray(normalizedPayload.notes),
     }),
   );
