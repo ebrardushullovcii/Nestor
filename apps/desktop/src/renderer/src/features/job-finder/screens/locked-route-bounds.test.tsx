@@ -47,7 +47,6 @@ const LOCKED_SCREEN_FILES: Readonly<Record<string, string>> = {
 const ROUTE_OWNERSHIP: readonly (readonly [string, string])[] = [
   ["screens/profile-screen.tsx", "profile"],
   ["components/profile/", "profile"],
-  ["screens/applications/", "applications"],
 ];
 
 function readFeatureSource(relativePath: string): string {
