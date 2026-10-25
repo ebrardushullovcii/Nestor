@@ -197,6 +197,80 @@ describe("independent workspace queries", () => {
       }).rows[0]?.id,
     ).toBe(jobs[0]!.id);
   });
+  test("unchanged index inputs skip index triggers and feed writes", async () => {
+    const { writer, reader, filePath } = await fixture();
+    const job = assessedJob({
+      id: "guarded",
+      planAssessments: { p: assessedJob().matchAssessment },
+    });
+    await writer.commitSavedJobDelta({ upserts: [job] });
+    const raw = new DatabaseSync(filePath);
+    cleanups.push(() => raw.close());
+    raw.exec("INSERT INTO plan_job_memberships VALUES ('p','guarded',0)");
+    const revision = () =>
+      raw
+        .prepare("SELECT COALESCE(MAX(revision),0) AS n FROM workspace_changes")
+        .get()!.n;
+    const before = revision();
+    raw.exec(`CREATE TEMP TRIGGER reject_index_insert BEFORE INSERT ON main.workspace_job_index BEGIN SELECT RAISE(FAIL,'index insert attempted'); END;
+      CREATE TEMP TRIGGER reject_index_update BEFORE UPDATE ON main.workspace_job_index BEGIN SELECT RAISE(FAIL,'index update attempted'); END;`);
+    raw.exec(
+      "UPDATE saved_jobs SET value=value,last_seen_at=last_seen_at WHERE id='guarded'; UPDATE job_plan_assessments SET value=value WHERE job_id='guarded'",
+    );
+    expect(revision()).toBe(before);
+    raw.exec(
+      "UPDATE saved_jobs SET value=json_set(value,'$.summary','Changed evidence only') WHERE id='guarded'",
+    );
+    expect(Number(revision())).toBeGreaterThan(Number(before));
+    expect(
+      raw
+        .prepare(
+          "SELECT status FROM workspace_job_index WHERE id='guarded' AND plan_id=''",
+        )
+        .get()!.status,
+    ).toBe(job.status);
+    const indexBefore = raw
+      .prepare(
+        "SELECT * FROM workspace_job_index WHERE id='guarded' ORDER BY plan_id",
+      )
+      .all();
+    ensureWorkspaceReadIndex(raw);
+    expect(
+      raw
+        .prepare(
+          "SELECT * FROM workspace_job_index WHERE id='guarded' ORDER BY plan_id",
+        )
+        .all(),
+    ).toEqual(indexBefore);
+    const schema = raw.prepare("PRAGMA schema_version").get()!.schema_version;
+    ensureWorkspaceReadIndex(raw);
+    expect(raw.prepare("PRAGMA schema_version").get()!.schema_version).toBe(
+      schema,
+    );
+    raw.exec(
+      "DROP TRIGGER reject_index_insert; DROP TRIGGER reject_index_update",
+    );
+    raw.exec(
+      "UPDATE saved_jobs SET value=json_set(value,'$.status','drafting') WHERE id='guarded'",
+    );
+    expect(
+      reader
+        .queryJobList({ list: "all" })
+        .rows.find((row) => row.id === "guarded")?.status,
+    ).toBe("drafting");
+    const next = "2026-10-25T00:00:00.000Z";
+    raw
+      .prepare("UPDATE saved_jobs SET last_seen_at=? WHERE id='guarded'")
+      .run(next);
+    expect(
+      raw
+        .prepare(
+          "SELECT last_seen_at FROM workspace_job_index WHERE id='guarded' AND plan_id=''",
+        )
+        .get()!.last_seen_at,
+    ).toBe(next);
+  });
+
   test("plan ordering preserves indexed job facts; actual membership changes update them", async () => {
     const { writer, reader, filePath } = await fixture();
     await writer.commitSavedJobDelta({

@@ -16,6 +16,7 @@ import {
 } from "./saved-job-fingerprints";
 import { notifyWorkspaceCommit } from "../workspace-commits";
 import { writeSavedJobPlanAssessments } from "./saved-job-plan-assessments";
+import { refreshSavedJobReadIndex } from "./workspace-read-index";
 
 export const savedJobSalarySelectSql = `, (SELECT salary_prepared FROM job_listing_texts WHERE id = saved_jobs.description_id) AS body_salary_prepared,
   (SELECT salary_evidence FROM job_listing_texts WHERE id = saved_jobs.description_id) AS body_salary_range`;
@@ -211,6 +212,7 @@ export function writeSavedJobStorage(db: DatabaseSync, job: SavedJob): void {
         .all(job.id)
         .map((row) => [Number(row.position), row]),
     );
+    let provenanceChanged = false;
     provenance.forEach((sighting, position) => {
       const facts = sighting.listingFacts;
       const sourceDescriptionId = facts
@@ -226,22 +228,22 @@ export function writeSavedJobStorage(db: DatabaseSync, job: SavedJob): void {
         previous.description_id === sourceDescriptionId
       )
         return;
+      provenanceChanged = true;
       statement(
         db,
         `INSERT INTO job_provenance VALUES (?, ?, ?, ?) ON CONFLICT(job_id,position)
         DO UPDATE SET value=excluded.value, description_id=excluded.description_id`,
       ).run(job.id, position, serialized, sourceDescriptionId);
     });
-    if (existingSightings.size > provenance.length)
+    if (existingSightings.size > provenance.length) {
+      provenanceChanged = true;
       statement(
         db,
         "DELETE FROM job_provenance WHERE job_id=? AND position>=?",
       ).run(job.id, provenance.length);
+    }
     writeSavedJobFingerprints(db, job);
-    // The read model observes the completed relations in the same transaction.
-    statement(db, "UPDATE saved_jobs SET value = value WHERE id = ?").run(
-      job.id,
-    );
+    if (provenanceChanged) refreshSavedJobReadIndex(db, job.id);
     if (ownTransaction) {
       db.exec("COMMIT");
       notifyWorkspaceCommit(db);

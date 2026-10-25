@@ -64,6 +64,129 @@ function activity(runId: string, index: number) {
 }
 
 describe("normalized discovery storage", () => {
+  test("progress appends only new events and preserves rowids, exact order and checkpoints", async () => {
+    const temp = await createTempRepository("nestor-append-progress-");
+    const repo = await temp.createRepository();
+    const raw = new DatabaseSync(temp.filePath);
+    try {
+      const initial = {
+        ...run("append", 1),
+        activity: [activity("append", 0), activity("append", 1)],
+      };
+      await repo.commitDiscoveryStateUpdate((current) => ({
+        ...current,
+        runState: "running",
+        activeRun: initial,
+      }));
+      const rowids = () =>
+        Object.fromEntries(
+          [
+            "discovery_run_activity",
+            "discovery_run_targets",
+            "discovery_run_checkpoints",
+          ].flatMap((table) =>
+            raw
+              .prepare(`SELECT id,rowid FROM ${table} WHERE run_id='append'`)
+              .all()
+              .map((row) => [`${table}:${String(row.id)}`, row.rowid]),
+          ),
+        );
+      const before = rowids();
+      raw.exec(
+        "CREATE TABLE progress_writes (kind TEXT,table_name TEXT,id TEXT)",
+      );
+      for (const table of [
+        "discovery_run_activity",
+        "discovery_run_targets",
+        "discovery_run_checkpoints",
+      ])
+        for (const operation of ["insert", "update", "delete"])
+          raw.exec(
+            `CREATE TRIGGER audit_${table}_${operation} AFTER ${operation.toUpperCase()} ON ${table} BEGIN INSERT INTO progress_writes VALUES ('${operation}','${table}',${operation === "delete" ? "OLD" : "NEW"}.id); END`,
+          );
+      const appended = {
+        ...initial,
+        activity: [...initial.activity, activity("append", 2)],
+        targetExecutions: initial.targetExecutions.map((target) => ({
+          ...target,
+          jobsReviewed: 1,
+          agentCheckpoint: checkpoint(2),
+        })),
+      };
+      await repo.commitDiscoveryStateUpdate((current) => ({
+        ...current,
+        activeRun: appended,
+      }));
+      expect(
+        raw
+          .prepare("SELECT * FROM progress_writes ORDER BY table_name,kind")
+          .all(),
+      ).toEqual([
+        {
+          kind: "insert",
+          table_name: "discovery_run_activity",
+          id: "append_event_2",
+        },
+        {
+          kind: "update",
+          table_name: "discovery_run_checkpoints",
+          id: "synthetic_target",
+        },
+        {
+          kind: "update",
+          table_name: "discovery_run_targets",
+          id: "synthetic_target",
+        },
+      ]);
+      for (const [key, value] of Object.entries(before))
+        expect(rowids()[key]).toBe(value);
+      expect((await repo.getDiscoveryState()).activeRun).toEqual(appended);
+      raw.exec("DELETE FROM progress_writes");
+      await repo.commitDiscoveryStateUpdate((current) => ({
+        ...current,
+        activeRun: structuredClone(current.activeRun),
+      }));
+      expect(raw.prepare("SELECT * FROM progress_writes").all()).toEqual([]);
+      const reordered = {
+        ...appended,
+        activity: [
+          { ...appended.activity[2]!, message: "Edited progress" },
+          ...appended.activity.slice(0, 2),
+        ],
+      };
+      await repo.commitDiscoveryStateUpdate((current) => ({
+        ...current,
+        activeRun: reordered,
+      }));
+      expect((await repo.getDiscoveryState()).activeRun).toEqual(reordered);
+      for (const [key, value] of Object.entries(before))
+        expect(rowids()[key]).toBe(value);
+      raw.exec(
+        `CREATE TRIGGER fail_progress BEFORE INSERT ON discovery_run_checkpoints WHEN json_extract(NEW.value,'$.revision')=3 BEGIN SELECT RAISE(ABORT,'checkpoint failure'); END`,
+      );
+      await expect(
+        repo.commitDiscoveryStateUpdate((current) => ({
+          ...current,
+          activeRun: {
+            ...reordered,
+            activity: [...reordered.activity, activity("append", 3)],
+            targetExecutions: reordered.targetExecutions.map((target) => ({
+              ...target,
+              agentCheckpoint: checkpoint(3),
+            })),
+          },
+        })),
+      ).rejects.toThrow("checkpoint failure");
+      expect((await repo.getDiscoveryState()).activeRun).toEqual(reordered);
+      expect(raw.prepare("PRAGMA integrity_check").get()!.integrity_check).toBe(
+        "ok",
+      );
+    } finally {
+      raw.close();
+      await repo.close();
+      await temp.cleanup();
+    }
+  });
   test("a ledger batch reads only its changed ranks once and uses bounded inserts", async () => {
     const temp = await createTempRepository("nestor-ledger-batch-");
     try {
@@ -248,7 +371,7 @@ describe("normalized discovery storage", () => {
         expect(await repo.listSavedJobsByIds(["paired_job"])).toHaveLength(1);
 
         const failing = new DatabaseSync(temp.filePath);
-        failing.exec(`CREATE TRIGGER fail_synthetic_checkpoint AFTER INSERT ON discovery_run_checkpoints
+        failing.exec(`CREATE TRIGGER fail_synthetic_checkpoint AFTER UPDATE OF value ON discovery_run_checkpoints
           WHEN json_extract(NEW.value, '$.revision') = 2
           BEGIN SELECT RAISE(ABORT, 'synthetic checkpoint failure'); END`);
         failing.close();

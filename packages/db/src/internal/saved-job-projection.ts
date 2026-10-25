@@ -209,6 +209,7 @@ export function createSavedJobProjectionReader(
     for (const table of [
       "job_plan_assessments",
       "saved_job_discovery_fingerprints",
+      "job_provenance",
     ])
       for (const operation of ["insert", "update", "delete"] as const) {
         const ref = operation === "delete" ? "OLD" : "NEW";
