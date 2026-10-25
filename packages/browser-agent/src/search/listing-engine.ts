@@ -104,7 +104,7 @@ async function ask<Output, Input>(
     {
       ...(model.signal ? { signal: model.signal } : {}),
       reasoningTask,
-      maxOutputTokens,
+      maxOutputTokens: Math.max(8000, maxOutputTokens),
       includeUsage: true,
       jsonOutput: true,
       ...(jsonSchema ? { jsonSchema } : {}),
@@ -132,10 +132,15 @@ export function roleGoalsKey(goals: RoleScreenGoals): string {
 
 /** Wait for actual inventory semantics, including script-rendered plain lists. */
 export function listingInventoryReady(html: string, url: string): boolean {
+  const inventory = readInventoryHtml(html, url, { id: "ready", label: "" });
   return (
     blockedByCheck(html) ||
     listingSignInRequired(html) ||
-    readInventoryHtml(html, url, { id: "ready", label: "" }).cards.length > 0 ||
+    inventory.cards.length > 0 ||
+    inventory.portals.length > 0 ||
+    /<input\b[^>]*(?:type\s*=\s*["']search["']|(?:placeholder|aria-label)\s*=\s*["'][^"']*(?:jobs|keywords|roles))/iu.test(
+      html,
+    ) ||
     /\bno (?:current |open |available )?(?:jobs|positions|vacancies)\b/iu.test(
       listingPageText(html),
     )
@@ -296,6 +301,7 @@ export async function collectSource(
     cards: [...cards.values()],
     lane: input.lane ?? "http",
     requiresBrowser: !recognized || !complete,
+    ...(needsAccess ? { accessBlocked: true } : {}),
     pagesRead: visited.size,
     complete: complete && recognized,
     notes,
@@ -318,6 +324,7 @@ export async function screenCards(
   related: ListingCard[];
   seen: SeenListingCard[];
   skipped: number;
+  failed: { url: string; reason: string }[];
 }> {
   const key = roleGoalsKey(input.goals);
   const known = (await input.lookupSeenCards?.(input.cards, key)) ?? [];
@@ -342,30 +349,37 @@ export async function screenCards(
   const unrelated = new Set(
     allTitles.filter((title) => decisions.get(title) === false),
   );
+  const failedTitles = new Map<string, string>();
   await mapConcurrent(batches(titles, 250), 3, async (titles) => {
-    const answer = await ask(
-      input,
-      'Choose titles whose actual day-to-day profession matches the requested kinds of work. Return {"related":[integer title indices]}; explicitly include every plausible match. Understand titles in their own language. target_roles means the target work and synonyms, related_roles adds the explicitly requested related work, wide_net also adds genuinely transferable neighboring professions. A broad word such as data, analytics, research or engineer does not establish relatedness: data infrastructure/software engineering is not data analysis; managing an engineering organisation is not performing analysis; financial leadership is not an analyst role. Keep an analytics manager who still performs the requested analytical work, and Senior Data Analyst for Data Analyst: seniority alone is a fit gap. Do not reject on location, work mode, seniority, pay, hours, employment type or low expected fit. Preserve plausible role matches and explain their gaps later. Use representative evidence to disambiguate generic titles; keep genuinely ambiguous work, reject clearly different functions.',
-      {
-        goals: input.goals,
-        titles: titles.map((title, index) => [
-          index,
-          title,
-          fresh
-            .find((card) => titleKey(card.title) === title)
-            ?.text.slice(0, 700) ?? "",
-        ]),
-      },
-      z.object({ related: z.array(z.number().int().nonnegative()) }),
-      2000,
-      "listing_screen",
-    );
-    const selected = new Set(answer.related);
-    if ([...selected].some((index) => !titles[index]))
-      throw new Error("Role screen returned an unknown title.");
-    for (const [index, title] of titles.entries())
-      if (!selected.has(index)) unrelated.add(title);
-    for (const title of titles) decisions.set(title, !unrelated.has(title));
+    try {
+      const answer = await ask(
+        input,
+        'Choose titles whose actual day-to-day profession matches the requested kinds of work. Return {"related":[integer title indices]}; explicitly include every plausible match. Understand titles in their own language. target_roles means the target work and synonyms, related_roles adds the requested related work and genuinely overlapping functions (Fullstack includes Backend duties; Business Intelligence includes Data Analysis), wide_net also adds genuinely transferable neighboring professions. A broad word such as data, analytics, research or engineer does not establish relatedness: data infrastructure/software engineering is not data analysis; managing an engineering organisation is not performing analysis; financial leadership is not an analyst role. Keep an analytics manager who still performs the requested analytical work, and Senior Data Analyst for Data Analyst: seniority alone is a fit gap. Do not reject on location, work mode, seniority, pay, hours, employment type or low expected fit. Preserve plausible role matches and explain their gaps later. Use representative evidence to disambiguate generic titles; keep genuinely ambiguous work, reject clearly different functions.',
+        {
+          goals: input.goals,
+          titles: titles.map((title, index) => [
+            index,
+            title,
+            fresh
+              .find((card) => titleKey(card.title) === title)
+              ?.text.slice(0, 700) ?? "",
+          ]),
+        },
+        z.object({ related: z.array(z.number().int().nonnegative()) }),
+        2000,
+        "listing_screen",
+      );
+      const selected = new Set(answer.related);
+      if ([...selected].some((index) => !titles[index]))
+        throw new Error("Role screen returned an unknown title.");
+      for (const [index, title] of titles.entries())
+        if (!selected.has(index)) unrelated.add(title);
+      for (const title of titles) decisions.set(title, !unrelated.has(title));
+    } catch (error) {
+      input.signal?.throwIfAborted();
+      const reason = error instanceof Error ? error.message : String(error);
+      for (const title of titles) failedTitles.set(title, reason);
+    }
   });
   const seen = fresh
     .filter((card) => unrelated.has(titleKey(card.title)))
@@ -376,7 +390,17 @@ export async function screenCards(
       verdict: "unrelated" as const,
     }));
   return {
-    related: fresh.filter((card) => !unrelated.has(titleKey(card.title))),
+    related: fresh.filter(
+      (card) =>
+        !unrelated.has(titleKey(card.title)) &&
+        !failedTitles.has(titleKey(card.title)),
+    ),
+    failed: fresh
+      .filter((card) => failedTitles.has(titleKey(card.title)))
+      .map((card) => ({
+        url: card.url,
+        reason: failedTitles.get(titleKey(card.title))!,
+      })),
     seen,
     skipped: input.cards.length - fresh.length,
   };

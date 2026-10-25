@@ -7,6 +7,7 @@ import {
 } from "@nestor/contracts";
 import {
   collectSource,
+  listingInventoryReady,
   fitJobs,
   readListings,
   screenCards,
@@ -533,6 +534,12 @@ test.each(["http", "browser"] as const)(
 );
 
 test("follows an observed jobs portal without counting the surrounding navigation or product cards", async () => {
+  expect(
+    listingInventoryReady(
+      '<main><a href="https://portal.example/">View open roles</a></main>',
+      source.url,
+    ),
+  ).toBe(true);
   const readPage = vi.fn((url: string) =>
     Promise.resolve({
       finalUrl: url,
@@ -626,4 +633,31 @@ test("reads public embedded vacancy JSON and encoded provider descriptions witho
   );
   expect(client.chatWithTools).not.toHaveBeenCalled();
   expect(readPage).toHaveBeenCalledTimes(2);
+});
+
+test("a truncated screen batch is left retryable while other title batches complete", async () => {
+  const cards = Array.from({ length: 251 }, (_, n) =>
+    card(`Analyst specialty ${n}`),
+  );
+  let count = 0;
+  const result = await screenCards({
+    cards,
+    goals: {
+      targetRoles: ["Analyst"],
+      relatedRoles: [],
+      strategy: "target_roles",
+    },
+    client: {
+      chatWithTools: vi.fn(() =>
+        ++count === 1
+          ? Promise.reject(Error("incomplete response"))
+          : Promise.resolve({ content: '{"related":[0]}' }),
+      ),
+    },
+  });
+  expect(result.failed).toHaveLength(250);
+  expect(result.seen).toEqual([]);
+  expect(result.related.map((row) => row.title)).toEqual([
+    "Analyst specialty 250",
+  ]);
 });

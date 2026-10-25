@@ -56,6 +56,7 @@ export interface JobSearchEngine {
     related: ListingCard[];
     seen: SeenListingCard[];
     skipped: number;
+    failed?: { url: string; reason: string }[];
   }>;
   readListings(input: {
     lane?: "http" | "browser";

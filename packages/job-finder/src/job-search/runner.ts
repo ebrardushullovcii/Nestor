@@ -256,10 +256,16 @@ export function createJobSearchRunner(
         })
         .catch((error: unknown) => {
           if (!current(source)) return;
-          failedSource(
-            source,
-            `This site could not be read: ${errorMessage(error)}`,
-          );
+          if (source.accessBlocked)
+            needsAccess(
+              source,
+              "This site blocked access. Open it to finish sign-in or verification, then Retry.",
+            );
+          else
+            failedSource(
+              source,
+              `This site could not be read: ${errorMessage(error)}`,
+            );
           source.collected = true;
           source.processed = source.row.cards;
           markDone(source);
@@ -277,6 +283,7 @@ export function createJobSearchRunner(
       settled: markDone,
       count: (increments) => update(run, increments),
       needsAccess,
+      failed: failedSource,
       browser: browserTask,
     });
     const collect = async (
@@ -305,6 +312,9 @@ export function createJobSearchRunner(
       readSignal.throwIfAborted();
       await pipeline.accept(source, inventory.cards);
       readSignal.throwIfAborted();
+      source.accessBlocked = inventory.complete
+        ? false
+        : source.accessBlocked || Boolean(inventory.accessBlocked);
       source.notes = inventory.notes;
       source.row.lane = inventory.lane ?? lane;
       if (lane === "http" && inventory.requiresBrowser) {
@@ -326,7 +336,10 @@ export function createJobSearchRunner(
             ? "Some listings could not be read completely."
             : "No listings found; this site could not be read completely.",
         );
-      else if (source.row.state !== "needs_you") {
+      else if (
+        source.row.state !== "needs_you" &&
+        source.row.state !== "failed"
+      ) {
         const signedIn =
           access.pending(Number(source.target.id)) ||
           siteRows.get(Number(source.target.id))?.signInState === "signed_in";

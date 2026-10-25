@@ -59,6 +59,8 @@ export interface SourceInventory {
   complete: boolean;
   notes: string[];
   needsYou?: boolean;
+  /** An observed HTTP 401/403 or explicit sign-in wall; browser reading may still resolve it. */
+  accessBlocked?: boolean;
   /** The HTTP lane defers interaction to the separate browser queue. */
   requiresBrowser?: boolean;
 }
