@@ -1,5 +1,6 @@
 import { describeSavedFormAnswer } from "./questions";
 import {
+  UpsertSavedFormAnswerInputSchema,
   NEEDS_YOU_COMMANDS,
   type NeedsYouCommandName,
   type NeedsYouCommandInput,
@@ -33,6 +34,12 @@ export function createNeedsYouCommandRunner(
         prompt: input.prompt,
         scope: {},
       }),
+    get_form_answer_by_key: (input) =>
+      getStore().needsYou.getAnswerByKey(input),
+    upsert_form_answer: (input) =>
+      getStore().needsYou.remember(
+        UpsertSavedFormAnswerInputSchema.parse(input),
+      ),
     save_form_answer: (input) => getStore().needsYou.saveAnswer(input),
     forget_form_answers: (input) => getStore().needsYou.forgetAnswers(input),
     open_need: ({ id }) => browser.open(id),

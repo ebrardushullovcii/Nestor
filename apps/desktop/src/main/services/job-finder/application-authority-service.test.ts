@@ -1,10 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createInMemoryJobFinderRepository } from "@nestor/db";
+import {
+  createSavedAnswersStore,
+  readSavedApplicationAnswers,
+} from "@nestor/db/applications";
+import { openJobStore } from "@nestor/db/job-store";
 import {
   ApplyJobResultSchema,
   SubmissionIdempotencyRecordSchema,
   SubmissionOutcomeRecordSchema,
+  type CandidateAnswerKind,
   type ApplicationAuthorityEnvelopeMutationResult,
   type ApprovedApplicationAnswerSnapshot,
   type CreateApplicationAuthorityEnvelopeInput,
@@ -13,6 +19,35 @@ import {
 import { createEmptyJobFinderRepositoryState } from "../../adapters/job-finder-initial-state";
 import { createJobFinderApplicationAuthorityService } from "./application-authority-service";
 
+const memories: ReturnType<typeof openJobStore>[] = [];
+afterEach(() => {
+  for (const store of memories.splice(0)) store.close();
+});
+function makeService(
+  options: Parameters<typeof createJobFinderApplicationAuthorityService>[0],
+) {
+  const store = openJobStore(":memory:");
+  memories.push(store);
+  const answers = createSavedAnswersStore(store);
+  return Object.assign(
+    createJobFinderApplicationAuthorityService({
+      ...options,
+      readSavedAnswers: () => readSavedApplicationAnswers(store),
+    }),
+    {
+      saveAnswers(values: Partial<Record<CandidateAnswerKind, string>>) {
+        for (const [kind, answer] of Object.entries(values))
+          answers.upsert({
+            key: kind,
+            kind: kind as CandidateAnswerKind,
+            prompt: kind,
+            label: kind,
+            answer,
+          });
+      },
+    },
+  );
+}
 const NOW = "2026-08-27T10:00:00.000Z";
 const LATER = "2026-08-28T10:00:00.000Z";
 const SHA = "a".repeat(64);
@@ -46,7 +81,7 @@ describe("Job Finder application authority service", () => {
       createEmptyJobFinderRepositoryState(),
     );
     let nextId = 0;
-    const service = createJobFinderApplicationAuthorityService({
+    const service = makeService({
       repository,
       now: () => NOW,
       idFactory: () => String(++nextId),
@@ -90,7 +125,7 @@ describe("Job Finder application authority service", () => {
       const repository = createInMemoryJobFinderRepository(
         createEmptyJobFinderRepositoryState(),
       );
-      const service = createJobFinderApplicationAuthorityService({
+      const service = makeService({
         repository,
         now: () => NOW,
         idFactory: () => "empty",
@@ -140,7 +175,7 @@ describe("Job Finder application authority service", () => {
     const repository = createInMemoryJobFinderRepository(
       createEmptyJobFinderRepositoryState(),
     );
-    const service = createJobFinderApplicationAuthorityService({
+    const service = makeService({
       repository,
       now: () => NOW,
       idFactory: () => "test",
@@ -198,7 +233,7 @@ describe("Job Finder application authority service", () => {
     const repository = createInMemoryJobFinderRepository(
       createEmptyJobFinderRepositoryState(),
     );
-    const service = createJobFinderApplicationAuthorityService({
+    const service = makeService({
       repository,
       now: () => NOW,
       idFactory: () => "test",
@@ -234,7 +269,7 @@ describe("Job Finder application authority service", () => {
     const repository = createInMemoryJobFinderRepository(
       createEmptyJobFinderRepositoryState(),
     );
-    const service = createJobFinderApplicationAuthorityService({
+    const service = makeService({
       repository,
       now: () => NOW,
       idFactory: () => "autosave",
@@ -249,14 +284,9 @@ describe("Job Finder application authority service", () => {
       code: "approved_answers_required",
     });
 
-    const profile = await repository.getProfile();
-    await repository.saveProfile({
-      ...profile,
-      answerBank: {
-        ...profile.answerBank,
-        visaSponsorship: "No sponsorship required",
-        workAuthorization: "Authorized to work in the EU",
-      },
+    service.saveAnswers({
+      visa_sponsorship: "No sponsorship required",
+      work_authorization: "Authorized to work in the EU",
     });
     const readiness = await service.getReadiness();
     const approval = await service.approveCurrentAnswers({
@@ -299,13 +329,8 @@ describe("Job Finder application authority service", () => {
     );
     expect(updated.decisionPolicy?.revision).toBe(2);
 
-    const changedProfile = await repository.getProfile();
-    await repository.saveProfile({
-      ...changedProfile,
-      answerBank: {
-        ...changedProfile.answerBank,
-        workAuthorization: "Authorization changed after approval",
-      },
+    service.saveAnswers({
+      work_authorization: "Authorization changed after approval",
     });
     await expect(
       service.update({
@@ -320,20 +345,15 @@ describe("Job Finder application authority service", () => {
     const repository = createInMemoryJobFinderRepository(
       createEmptyJobFinderRepositoryState(),
     );
-    const service = createJobFinderApplicationAuthorityService({
+    const service = makeService({
       repository,
       now: () => NOW,
       idFactory: () => "sending",
     });
 
-    const profile = await repository.getProfile();
-    await repository.saveProfile({
-      ...profile,
-      answerBank: {
-        ...profile.answerBank,
-        visaSponsorship: "No sponsorship required",
-        workAuthorization: "Authorized to work in the EU",
-      },
+    service.saveAnswers({
+      visa_sponsorship: "No sponsorship required",
+      work_authorization: "Authorized to work in the EU",
     });
     const readiness = await service.getReadiness();
     const approval = await service.approveCurrentAnswers({
@@ -379,7 +399,7 @@ describe("Job Finder application authority service", () => {
     const repository = createInMemoryJobFinderRepository(
       createEmptyJobFinderRepositoryState(),
     );
-    const service = createJobFinderApplicationAuthorityService({
+    const service = makeService({
       repository,
       now: () => NOW,
       idFactory: () => "test",
@@ -410,20 +430,14 @@ describe("Job Finder application authority service", () => {
         return Promise.resolve({ status: "created" as const, snapshot });
       },
     });
-    const profile = await repository.getProfile();
-    await repository.saveProfile({
-      ...profile,
-      answerBank: {
-        ...profile.answerBank,
-        workAuthorization: "Authorized to work in the EU",
-      },
-    });
-    const service = createJobFinderApplicationAuthorityService({
+
+    const service = makeService({
       repository,
       now: () => NOW,
       idFactory: () => "answer",
     });
 
+    service.saveAnswers({ work_authorization: "Authorized to work in the EU" });
     const before = await service.getReadiness();
     expect(before.answerApprovalStatus).toBe("not_approved");
     expect(before.currentAnswers.entryCount).toBe(1);
@@ -459,7 +473,7 @@ describe("Job Finder application authority service", () => {
     Object.assign(repository, {
       getLatestApplicationAnswerSnapshot: () => Promise.resolve(null),
     });
-    const service = createJobFinderApplicationAuthorityService({
+    const service = makeService({
       repository,
       now: () => NOW,
     });
@@ -474,14 +488,9 @@ describe("Job Finder application authority service", () => {
       remediation: "profile",
     });
 
-    const profile = await repository.getProfile();
-    await repository.saveProfile({
-      ...profile,
-      answerBank: {
-        ...profile.answerBank,
-        workAuthorization: "Authorized to work in the EU",
-        visaSponsorship: "No sponsorship required",
-      },
+    service.saveAnswers({
+      work_authorization: "Authorized to work in the EU",
+      visa_sponsorship: "No sponsorship required",
     });
     const optional = await service.getReadiness();
     expect(optional.currentAnswers.kinds).toEqual([
@@ -595,7 +604,7 @@ describe("Job Finder application authority service", () => {
       );
     const ids = ["resolution", "evidence"];
     const releaseApplicationPage = vi.fn();
-    const service = createJobFinderApplicationAuthorityService({
+    const service = makeService({
       repository,
       now: () => LATER,
       idFactory: () => ids.shift() ?? "unexpected",

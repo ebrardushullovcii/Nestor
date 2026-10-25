@@ -100,8 +100,9 @@ export interface CoverLetterRequest {
 /** Application-relevant profile facts, without internal storage metadata. */
 export function buildApplicationProfileGrounding(
   profile: CandidateProfile,
+  reusableAnswers: ApplyAnswerSources["reusableAnswers"] = [],
 ): string {
-  return `Profile facts:\n${JSON.stringify(applicationFacts({ profile, resumeText: null, posting: { title: "", company: "", location: "", description: "" }, reusableAnswers: profile.answerBank.customAnswers, documents: [] }, { payDisclosed: false }), null, 2)}`;
+  return `Profile facts:\n${JSON.stringify(applicationFacts({ profile, resumeText: null, posting: { title: "", company: "", location: "", description: "" }, reusableAnswers, documents: [] }, { payDisclosed: false }), null, 2)}`;
 }
 
 /**
@@ -202,7 +203,7 @@ export function buildCoverLetterRequest(input: {
       : null,
     "",
     `Today: ${input.today ?? new Date().toISOString().slice(0, 10)}`,
-    buildApplicationProfileGrounding(sources.profile),
+    buildApplicationProfileGrounding(sources.profile, sources.reusableAnswers),
     sources.preferences
       ? `Saved work and location preferences:\n${JSON.stringify(sources.preferences)}`
       : null,

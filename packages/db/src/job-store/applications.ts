@@ -1,4 +1,5 @@
 import {
+  UpsertSavedFormAnswerInputSchema,
   ApplicationListQuerySchema,
   ApplicationApplyModeSchema,
   DEFAULT_APPLICATION_APPLY_MODE,
@@ -10,6 +11,11 @@ import {
   ApplyJobsInputSchema,
   JobSelectionSchema,
   type JobSelectionInput,
+  type CandidateAnswerKind,
+  type CandidateReusableAnswer,
+  type UpsertSavedFormAnswerInput,
+  type SavedFormAnswersQuery,
+  type SavedFormAnswerKey,
   type ApplicationListPage,
   type ApplicationListQuery,
   type ApplicationRow,
@@ -571,3 +577,53 @@ export function createApplicationStore(store: JobStore) {
 }
 
 export type ApplicationStore = ReturnType<typeof createApplicationStore>;
+
+/** The single reusable-answer bank, also used by Needs you. Writes release matching questions. */
+export function createSavedAnswersStore(store: JobStore) {
+  const memory = createNeedsYouStore(store, () =>
+    store.notify({
+      cause: "application",
+      stages: ["resume", "applied"],
+      ids: null,
+      searchId: null,
+    }),
+  );
+  return {
+    list: (input: SavedFormAnswersQuery = {}) => memory.listAnswers(input),
+    get: (input: SavedFormAnswerKey) => memory.getAnswerByKey(input),
+    upsert(input: UpsertSavedFormAnswerInput) {
+      return memory.remember(UpsertSavedFormAnswerInputSchema.parse(input));
+    },
+  };
+}
+export type SavedAnswersStore = ReturnType<typeof createSavedAnswersStore>;
+
+/** Trusted authority projection, never sent to a list screen or the model. */
+export function readSavedApplicationAnswers(
+  store: JobStore,
+  kinds?: readonly CandidateAnswerKind[],
+): CandidateReusableAnswer[] {
+  const rows = store
+    .sql(
+      `SELECT id,kind,label,prompt,answer,role_families_json,proof_entry_ids_json
+    FROM form_answers WHERE needs_confirmation=0 ${kinds ? "AND kind IN (SELECT value FROM json_each(?))" : ""} ORDER BY id`,
+    )
+    .all(...(kinds ? [JSON.stringify(kinds)] : [])) as Array<{
+    id: number;
+    kind: CandidateAnswerKind;
+    label: string;
+    prompt: string;
+    answer: string;
+    role_families_json: string;
+    proof_entry_ids_json: string;
+  }>;
+  return rows.map((row) => ({
+    id: `form_answer_${row.id}`,
+    kind: row.kind,
+    label: row.label || row.prompt,
+    question: row.prompt,
+    answer: row.answer,
+    roleFamilies: JSON.parse(row.role_families_json) as string[],
+    proofEntryIds: JSON.parse(row.proof_entry_ids_json) as string[],
+  }));
+}

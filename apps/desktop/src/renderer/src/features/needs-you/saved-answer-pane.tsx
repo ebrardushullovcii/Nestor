@@ -53,10 +53,17 @@ export function SavedAnswerPane(props: {
               .filter(Boolean)
               .join(" · ") || "Used wherever the same question appears."}
           </p>
+          {value.needsConfirmation ? (
+            <p className="text-sm">
+              Review this suggested answer before it is reused.
+            </p>
+          ) : null}
           {value.input === "file" ? (
             <>
               <h2>{value.prompt}</h2>
-              <p className="break-words text-sm">{value.answer}</p>
+              <p className="break-words text-sm">
+                {value.answer.replace(/ \(saved file .*\)\.$/u, "")}
+              </p>
             </>
           ) : (
             <AnswerField

@@ -51,7 +51,6 @@ const sources: ApplyAnswerSources = {
       { id: "draft-school", schoolName: "Unconfirmed school", isDraft: true },
     ],
     skills: ["Go", "TypeScript"],
-    answerBank: { salaryExpectations: "45000", workAuthorization: "Yes" },
     baseResume: {
       id: "resume",
       fileName: "synthetic.txt",
@@ -67,6 +66,15 @@ const sources: ApplyAnswerSources = {
   },
   documents: [],
   reusableAnswers: [
+    {
+      id: "pay",
+      kind: "salary_expectation",
+      label: "Expected pay",
+      question: "Expected salary",
+      answer: "45000",
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
     {
       id: "confirmed",
       kind: "other",
@@ -187,7 +195,7 @@ test("expected pay is never a direct fact for current-pay questions", () => {
       payDisclosed: true,
       control: { ...control, asksCurrentPay: true },
       value: "45000",
-      storedFactId: "profile.answerBank.salaryExpectations",
+      storedFactId: "answerLibrary.pay",
     }),
   ).toBeNull();
 });
@@ -208,7 +216,7 @@ test("residence cannot bypass the hiring-country check", () => {
 test.each([
   ["profile.yearsExperience", "3", control],
   ["answerLibrary.confirmed", "Yes", control],
-  ["profile.answerBank.salaryExpectations", "45000", control],
+  ["answerLibrary.pay", "45000", control],
 ])(
   "a short value from %s needs a check when it is not this question's own answer",
   (storedFactId, value, target) => {
@@ -238,9 +246,13 @@ test("a saved short answer skips the check on its own question, saved pay on a p
     storedFactFor({
       sources,
       payDisclosed: true,
-      control: { ...control, questionKind: "salary_expectation" },
+      control: {
+        ...control,
+        label: "Expected salary",
+        questionKind: "salary_expectation",
+      },
       value: "45000",
-      storedFactId: "profile.answerBank.salaryExpectations",
+      storedFactId: "answerLibrary.pay",
     })?.sourceId,
-  ).toBe("profile.answerBank.salaryExpectations");
+  ).toBe("answerLibrary.pay");
 });

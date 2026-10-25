@@ -1,7 +1,11 @@
 import { openJobStore } from "@nestor/db/job-store";
 import { createApplicationStore } from "@nestor/db/applications";
 import { createNeedsYouCommandRunner } from "../applications/needs-you-commands";
-import { JOB_COMMANDS, type JobCommandOutputs } from "@nestor/contracts";
+import {
+  JOB_COMMANDS,
+  SavedFormAnswersPageSchema,
+  type JobCommandOutputs,
+} from "@nestor/contracts";
 import { expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -36,18 +40,32 @@ it("creates and reads the real Needs you answer library through MCP", async () =
     const listed = await mcp.tools
       .find((tool) => tool.name === "list_form_answers")!
       .execute({}, ctx);
-    expect(listed.data).toMatchObject({
-      total: 2,
-      rows: expect.arrayContaining([
-        expect.objectContaining({
-          prompt: "Years of analysis experience",
-          preview: "5",
-        }),
-        expect.objectContaining({
-          prompt: "Years of coordination experience",
-          preview: "14",
-        }),
+    const saved = SavedFormAnswersPageSchema.parse(listed.data);
+    expect(saved.total).toBe(2);
+    expect(saved.rows.map((row) => [row.prompt, row.preview])).toEqual(
+      expect.arrayContaining([
+        ["Years of analysis experience", "5"],
+        ["Years of coordination experience", "14"],
       ]),
+    );
+    await mcp.tools
+      .find((tool) => tool.name === "upsert_form_answer")!
+      .execute(
+        {
+          key: "notice_period",
+          kind: "notice_period",
+          prompt: "My notice period",
+          answer: "Two weeks",
+        },
+        ctx,
+      );
+    const byKey = await mcp.tools
+      .find((tool) => tool.name === "get_form_answer_by_key")!
+      .execute({ key: "notice_period" }, ctx);
+    expect(byKey.data).toMatchObject({
+      key: "notice_period",
+      kind: "notice_period",
+      answer: "Two weeks",
     });
     expect(
       applications.needsYou.answersForQuestions(

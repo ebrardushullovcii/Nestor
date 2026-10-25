@@ -53,6 +53,7 @@ import type {
   ApplyExecutionResult,
   ApplicationReviewCard,
   CandidateProfile,
+  CandidateReusableAnswer,
   JobFinderSettings,
   JobSearchPreferences,
   SavedJob,
@@ -561,10 +562,16 @@ export async function runAgentApplicationPreparation(
         if (executionInput.recheckIntermediateMutationAuthority) {
           const page = await input.session.readPage();
           const origin = page.url ? originOf(page.url) : null;
-          if (!origin || !await executionInput.recheckIntermediateMutationAuthority(origin))
-            throw new Error("The application's permission to save fields changed.");
+          if (
+            !origin ||
+            !(await executionInput.recheckIntermediateMutationAuthority(origin))
+          )
+            throw new Error(
+              "The application's permission to save fields changed.",
+            );
           await input.session.installPrepareOnlyGuard({
-            intermediateMutationsAuthorized: executionInput.intermediateMutationsAuthorized === true,
+            intermediateMutationsAuthorized:
+              executionInput.intermediateMutationsAuthorized === true,
             allowedOrigins,
           });
         }
@@ -594,7 +601,7 @@ export async function runAgentApplicationPreparation(
         description: executionInput.job.description,
       },
       ...(approvedLetterText != null ? { approvedLetterText } : {}),
-      reusableAnswers: executionInput.profile.answerBank.customAnswers,
+      reusableAnswers: [],
       documents: toApplyDocuments(executionInput),
     },
     application: {
@@ -943,6 +950,7 @@ export function buildApplyLetterDependencies(input: {
   };
   job: SavedJob;
   profile: CandidateProfile;
+  reusableAnswers?: CandidateReusableAnswer[];
   settings: JobFinderSettings;
   searchPreferences?: JobSearchPreferences | undefined;
 }): Omit<ApplicationLetterDependencies, "application" | "signal"> | undefined {
@@ -1008,7 +1016,7 @@ export function buildApplyLetterDependencies(input: {
                     resumeText: null,
                     preferences: input.searchPreferences,
                     posting: input.job,
-                    reusableAnswers: input.profile.answerBank.customAnswers,
+                    reusableAnswers: input.reusableAnswers ?? [],
                     documents: [],
                   },
                   { payDisclosed: false },
@@ -1046,7 +1054,7 @@ export function buildApplyLetterDependencies(input: {
               input.profile.baseResume.textContent?.trim().slice(0, 8_000) ??
               null,
             posting: input.job,
-            reusableAnswers: input.profile.answerBank.customAnswers,
+            reusableAnswers: input.reusableAnswers ?? [],
             documents: [],
           },
           payDisclosed: false,

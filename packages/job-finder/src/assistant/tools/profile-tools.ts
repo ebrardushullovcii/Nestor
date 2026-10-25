@@ -288,7 +288,7 @@ function setupReadiness(snapshot: JobFinderWorkspaceSnapshot) {
   const missingWorkEligibilityAnswers = [
     ...(!snapshot.profile.workEligibility.authorizedWorkCountries.some(
       (country) => country.trim().length > 0,
-    ) && !snapshot.profile.answerBank.workAuthorization?.trim()
+    )
       ? [
           {
             field: "authorizedWorkCountries",
@@ -297,8 +297,7 @@ function setupReadiness(snapshot: JobFinderWorkspaceSnapshot) {
           },
         ]
       : []),
-    ...(snapshot.profile.workEligibility.requiresVisaSponsorship === null &&
-    !snapshot.profile.answerBank.visaSponsorship?.trim()
+    ...(snapshot.profile.workEligibility.requiresVisaSponsorship === null
       ? [
           {
             field: "requiresVisaSponsorship",

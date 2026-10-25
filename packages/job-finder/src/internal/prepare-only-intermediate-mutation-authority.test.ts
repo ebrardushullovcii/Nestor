@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
+  type CandidateReusableAnswer,
   ApplicationAuthorityDecisionPolicySchema,
   ApplicationAuthorityEnvelopeSchema,
   ApprovedApplicationAnswerSnapshotSchema,
@@ -22,9 +23,23 @@ const RESUME_SHA = "a".repeat(64);
 async function createAuthorizedFixture() {
   const seed = createSeed();
   const repository = createInMemoryJobFinderRepository(seed);
+  const answers: CandidateReusableAnswer[] = [
+    "work_authorization",
+    "visa_sponsorship",
+  ].map((kind) => ({
+    id: kind,
+    kind: kind as CandidateReusableAnswer["kind"],
+    label: kind,
+    question: kind,
+    answer: "Confirmed",
+    roleFamilies: [],
+    proofEntryIds: [],
+  }));
+  const readSavedAnswers = () => answers;
   const profileState = await repository.getProfileWithRevision();
   const derived = deriveApprovedApplicationAnswerSnapshotContent(
     profileState.profile,
+    answers,
   );
   if (derived.content === null) {
     throw new Error("Expected reusable answers in the test profile.");
@@ -102,18 +117,20 @@ async function createAuthorizedFixture() {
     envelope,
     expectedRevision: null,
   });
-  return { envelope, job, repository };
+  return { envelope, job, repository, answers, readSavedAnswers };
 }
 
 describe("prepare-only intermediate mutation authority", () => {
   it("authorizes only the exact current job, origin, resume, and approved answers", async () => {
-    const { envelope, job, repository } = await createAuthorizedFixture();
+    const { envelope, job, repository, readSavedAnswers } =
+      await createAuthorizedFixture();
     await expect(
       resolvePrepareOnlyIntermediateMutationAuthority({
         job,
         now: NOW,
         observedOrigin: envelope.allowedOrigins[0]!,
         repository,
+        readSavedAnswers,
         resumeSha256: RESUME_SHA,
       }),
     ).resolves.toMatchObject({
@@ -129,6 +146,7 @@ describe("prepare-only intermediate mutation authority", () => {
         now: NOW,
         observedOrigin: "https://outside.example.com",
         repository,
+        readSavedAnswers,
         resumeSha256: RESUME_SHA,
       }),
     ).resolves.toEqual({
@@ -141,26 +159,22 @@ describe("prepare-only intermediate mutation authority", () => {
         job,
         now: NOW,
         repository,
+        readSavedAnswers,
         resumeSha256: "b".repeat(64),
       }),
     ).resolves.toMatchObject({ authorized: false, reason: "resume_mismatch" });
   });
 
   it("fails closed after answer drift or expiry", async () => {
-    const { job, repository } = await createAuthorizedFixture();
-    const profile = await repository.getProfile();
-    await repository.saveProfile({
-      ...profile,
-      answerBank: {
-        ...profile.answerBank,
-        workAuthorization: "Changed after approval",
-      },
-    });
+    const { job, repository, answers, readSavedAnswers } =
+      await createAuthorizedFixture();
+    answers[0]!.answer = "Changed after approval";
     await expect(
       resolvePrepareOnlyIntermediateMutationAuthority({
         job,
         now: NOW,
         repository,
+        readSavedAnswers,
         resumeSha256: RESUME_SHA,
       }),
     ).resolves.toMatchObject({
@@ -174,6 +188,7 @@ describe("prepare-only intermediate mutation authority", () => {
         job: fresh.job,
         now: EXPIRES_AT,
         repository: fresh.repository,
+        readSavedAnswers: fresh.readSavedAnswers,
         resumeSha256: RESUME_SHA,
       }),
     ).resolves.toMatchObject({

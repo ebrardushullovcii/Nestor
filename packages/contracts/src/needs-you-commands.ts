@@ -15,6 +15,8 @@ import {
   SaveFormAnswerInputSchema,
   ForgetFormAnswersInputSchema,
   CreateFormAnswerInputSchema,
+  SavedFormAnswerKeySchema,
+  UpsertSavedFormAnswerInputSchema,
 } from "./applications";
 
 export const NEEDS_YOU_COMMANDS = {
@@ -80,6 +82,20 @@ export const NEEDS_YOU_COMMANDS = {
       "One remembered form answer, including its full text and scope.",
     input: ApplicationTargetSchema,
     output: SavedFormAnswerSchema.nullable(),
+  },
+  get_form_answer_by_key: {
+    effect: "read",
+    description:
+      "Read a saved answer by its stable key and optional country/site scope.",
+    input: SavedFormAnswerKeySchema,
+    output: SavedFormAnswerSchema.nullable(),
+  },
+  upsert_form_answer: {
+    effect: "local_write",
+    description:
+      "Save the person's reusable answer by stable key, including its kind, proof references and optional scope. All answer text lives in Needs you.",
+    input: UpsertSavedFormAnswerInputSchema,
+    output: SavedFormAnswerSchema,
   },
   save_form_answer: {
     effect: "local_write",

@@ -22,13 +22,17 @@ import {
   type ApplicationResumeArtifact,
   type ApplicationReviewCard,
   type CandidateProfile,
+  type CandidateAnswerKind,
   type JobFinderSettings,
   type JobSearchPreferences,
   type JobDetail,
   type NeedsYouKind,
   type ApplicationAutomationMode,
 } from "@nestor/contracts";
-import type { ApplicationStore } from "@nestor/db/applications";
+import {
+  readSavedApplicationAnswers,
+  type ApplicationStore,
+} from "@nestor/db/applications";
 import { createResumeStore, type JobStore } from "@nestor/db/job-store";
 import type { JobFinderAiClient } from "@nestor/ai-providers";
 
@@ -173,6 +177,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       : "confirm_before_submit";
   }
 
+  const factsDigest = (profile: CandidateProfile) =>
+    createHash("sha256")
+      .update(
+        JSON.stringify({ profile, answers: readSavedApplicationAnswers(jobs) }),
+      )
+      .digest("hex");
+
   async function run(row: ApplicationRow, signal: AbortSignal): Promise<void> {
     const job = jobs.getJob(row.jobId);
     const approved = resumes.get(row.jobId);
@@ -188,10 +199,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       settings,
       searchPreferences,
     } = await deps.readInputs();
-    const profile = {
-      ...savedProfile,
-      answerBank: { ...savedProfile.answerBank, customAnswers: [] },
-    };
+    const profile = savedProfile;
     const filePath = approved.pdfPath ?? profile.baseResume.storagePath;
     if (!filePath)
       throw new Error(
@@ -214,9 +222,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     signal.throwIfAborted();
     if (!current(row)) return;
     const previous = applications.getWork(row.id);
-    const profileDigest = createHash("sha256")
-      .update(JSON.stringify(savedProfile))
-      .digest("hex");
+    const profileDigest = factsDigest(savedProfile);
     if (
       !applications.setResumeArtifact(
         row.id,
@@ -344,9 +350,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           ) === JSON.stringify(behavior.preApprovedDeclarations) &&
           (latest.settings.salaryDisclosure ?? "pause_for_user") ===
             (settings.salaryDisclosure ?? "pause_for_user") &&
-          createHash("sha256")
-            .update(JSON.stringify(latest.profile))
-            .digest("hex") === profileDigest
+          factsDigest(latest.profile) === profileDigest
         );
       },
       applyAllowedOrigins: [...allowedOrigins],
@@ -394,6 +398,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             profile,
             settings,
             searchPreferences,
+            reusableAnswers: readSavedApplicationAnswers(jobs, [
+              "self_intro",
+              "career_transition",
+              "availability",
+              "notice_period",
+              "travel",
+            ]),
           }),
           readReusableAnswers: (questions) => {
             const byKey = new Map(
@@ -409,6 +420,19 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                   questions.map((question) => ({
                     ...describeFormQuestion(question, job),
                     prompt: question.prompt,
+                    kind: [
+                      "work_authorization",
+                      "visa_sponsorship",
+                      "relocation",
+                      "travel",
+                      "notice_period",
+                      "availability",
+                      "salary_expectation",
+                      "self_intro",
+                      "career_transition",
+                    ].includes(question.kind)
+                      ? (question.kind as CandidateAnswerKind)
+                      : "other",
                   })),
                   origin,
                 )
@@ -574,13 +598,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             !current(row) ||
             (!personClicked &&
               (await modeFor(row, settings)) !== "autonomous_submit") ||
-            createHash("sha256")
-              .update(JSON.stringify(profile))
-              .digest("hex") !== profileDigest
+            factsDigest(profile) !== profileDigest
           ) {
             await leaveForPerson(
               row,
-              "The Apply setting or Profile changed. Review the filled form before sending it.",
+              "The Apply setting, Profile or saved answers changed. Review the filled form before sending it.",
             );
             return;
           }
@@ -639,9 +661,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                       artifact.filePath &&
                     (personClicked ||
                       (await modeFor(row, latest)) === "autonomous_submit") &&
-                    createHash("sha256")
-                      .update(JSON.stringify(latestProfile))
-                      .digest("hex") === profileDigest &&
+                    factsDigest(latestProfile) === profileDigest &&
                     (await input.veto(facts))
                   );
                 },

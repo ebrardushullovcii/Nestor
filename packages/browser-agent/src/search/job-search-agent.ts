@@ -136,10 +136,12 @@ export function buildExtractionSelectionContext(
     reason: string;
   }>,
 ): string {
-  if (config.inventoryOnly) return JSON.stringify({
-    purpose: "Collect all genuine vacancy cards. Do not judge fit, score, seniority, place, hours or preferences. Full listing reads and role screening happen after this inventory.",
-    sourceInstructions: config.promptContext.siteInstructions ?? [],
-  });
+  if (config.inventoryOnly)
+    return JSON.stringify({
+      purpose:
+        "Collect all genuine vacancy cards. Do not judge fit, score, seniority, place, hours or preferences. Full listing reads and role screening happen after this inventory.",
+      sourceInstructions: config.promptContext.siteInstructions ?? [],
+    });
   const profile = config.userProfile;
   return JSON.stringify({
     person: {
@@ -148,9 +150,6 @@ export function buildExtractionSelectionContext(
       currentCountry: profile.currentCountry,
       yearsExperience: profile.yearsExperience,
       workEligibility: profile.workEligibility,
-      workAuthorization: profile.answerBank.workAuthorization,
-      visaSponsorship: profile.answerBank.visaSponsorship,
-      availability: profile.answerBank.availability,
     },
     targetRoles: config.searchPreferences.targetRoles,
     locations: config.searchPreferences.locations,
@@ -741,8 +740,8 @@ export async function runJobSearchAgent(
         description: config.inventoryOnly
           ? "Collect every genuine vacancy card on this page, including off-screen items. Return its observed listing URL and facts. Do not assess fit, read details or reject cards for preferences; the next engine steps screen and judge them."
           : isSourceCheck
-          ? "Read every job posting on the current page and save the suitable ones. Supply rejected listing URLs with a reason category and a plain reason for every listing you ruled out; those decisions are recorded, not saved as matches. Tells you what was saved, rejected and already known."
-          : "Read every job posting on the current page, including listings below the part on screen, and save the suitable ones. Supply rejected listing URLs with a reason category and a plain reason for every listing you ruled out; those decisions are recorded, not saved as matches. The page reader also checks each listing against the person's goals and records the ones that do not fit. Tells you what was saved, rejected and already known.",
+            ? "Read every job posting on the current page and save the suitable ones. Supply rejected listing URLs with a reason category and a plain reason for every listing you ruled out; those decisions are recorded, not saved as matches. Tells you what was saved, rejected and already known."
+            : "Read every job posting on the current page, including listings below the part on screen, and save the suitable ones. Supply rejected listing URLs with a reason category and a plain reason for every listing you ruled out; those decisions are recorded, not saved as matches. The page reader also checks each listing against the person's goals and records the ones that do not fit. Tells you what was saved, rejected and already known.",
         parameters: {
           type: "object",
           properties: {

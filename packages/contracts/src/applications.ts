@@ -1,5 +1,6 @@
 import { SourceAccessReferenceSchema } from "./source-access";
 import { z } from "zod";
+import { CandidateAnswerKindSchema } from "./profile";
 
 import { IsoDateTimeSchema } from "./base";
 import { JobIdSchema, JobSelectionSchema } from "./jobs";
@@ -255,6 +256,10 @@ export const NeedsYouDetailsSchema = z.object({
 });
 export type NeedsYouDetails = z.infer<typeof NeedsYouDetailsSchema>;
 export const SavedFormAnswerSummarySchema = z.object({
+  key: z.string().min(1),
+  kind: CandidateAnswerKindSchema,
+  label: z.string(),
+  needsConfirmation: z.boolean(),
   id: z.number().int().positive(),
   prompt: z.string(),
   preview: z.string(),
@@ -268,6 +273,8 @@ export type SavedFormAnswerSummary = z.infer<
 export const SavedFormAnswerSchema = SavedFormAnswerSummarySchema.extend({
   answer: z.string(),
   options: z.array(z.string()),
+  roleFamilies: z.array(z.string()),
+  proofEntryIds: z.array(z.string()),
 });
 export type SavedFormAnswer = z.infer<typeof SavedFormAnswerSchema>;
 export const SavedFormAnswersQuerySchema = z
@@ -306,7 +313,14 @@ export const RememberFormAnswerInputSchema = NeedsYouTaskSchema.pick({
   input: true,
   options: true,
 })
-  .extend({ answer: z.string().trim().min(1).max(20000) })
+  .extend({
+    answer: z.string().trim().min(1).max(20000),
+    kind: CandidateAnswerKindSchema.default("other"),
+    label: z.string().trim().max(2000).default(""),
+    roleFamilies: z.array(z.string().trim().min(1)).max(100).default([]),
+    proofEntryIds: z.array(z.string().trim().min(1)).max(100).default([]),
+    needsConfirmation: z.boolean().default(false),
+  })
   .strict();
 export type RememberFormAnswerInput = z.input<
   typeof RememberFormAnswerInputSchema
@@ -315,6 +329,7 @@ export interface FormAnswerLookup {
   key: string;
   prompt: string;
   reusePrompt: boolean;
+  kind?: z.infer<typeof CandidateAnswerKindSchema>;
 }
 export interface FormAnswerMatch {
   id: string;
@@ -322,6 +337,9 @@ export interface FormAnswerMatch {
   prompt: string;
   answer: string;
   local: boolean;
+  kind?: z.infer<typeof CandidateAnswerKindSchema>;
+  roleFamilies?: string[];
+  proofEntryIds?: string[];
 }
 export function normalizeFormQuestionPrompt(value: string): string {
   return value
@@ -343,4 +361,22 @@ export const ForgetFormAnswersInputSchema = z.union([
 ]);
 export type ForgetFormAnswersInput = z.infer<
   typeof ForgetFormAnswersInputSchema
+>;
+
+export const SavedFormAnswerKeySchema = z
+  .object({
+    key: z.string().trim().min(1).max(500),
+    scope: FormAnswerScopeSchema.default({}),
+  })
+  .strict();
+export type SavedFormAnswerKey = z.input<typeof SavedFormAnswerKeySchema>;
+
+export const UpsertSavedFormAnswerInputSchema =
+  RememberFormAnswerInputSchema.extend({
+    scope: FormAnswerScopeSchema.default({}),
+    input: NeedsYouTaskSchema.shape.input.default("text"),
+    options: z.array(z.string()).default([]),
+  }).strict();
+export type UpsertSavedFormAnswerInput = z.input<
+  typeof UpsertSavedFormAnswerInputSchema
 >;

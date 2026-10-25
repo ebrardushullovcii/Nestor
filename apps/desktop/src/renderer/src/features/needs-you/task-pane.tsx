@@ -213,7 +213,9 @@ export function TaskPane(props: {
                     Choose a file
                   </Button>
                   {draft.answer ? (
-                    <p className="break-words text-sm">{draft.answer}</p>
+                    <p className="break-words text-sm">
+                      {draft.answer.replace(/ \(saved file .*\)\.$/u, "")}
+                    </p>
                   ) : null}
                 </div>
               ) : (

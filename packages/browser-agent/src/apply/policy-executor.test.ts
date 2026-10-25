@@ -1241,10 +1241,18 @@ describe("apply policy executor", () => {
       ],
     });
     const { config, hands } = configFor(page);
-    config.sources.profile = CandidateProfileSchema.parse({
-      ...config.sources.profile,
-      answerBank: { salaryExpectations: "90000" },
-    });
+    config.sources.reusableAnswers = [
+      ...config.sources.reusableAnswers,
+      {
+        id: "pay",
+        kind: "salary_expectation",
+        label: "Expected pay",
+        question: "Expected salary",
+        answer: "90000",
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
     const chooseOption = vi.spyOn(hands, "chooseOption");
 
     const outcome = await executeApplyProposal(

@@ -30,11 +30,6 @@ export function applicationFacts(
   options: { payDisclosed: boolean },
 ) {
   const profile = sources.profile;
-  const answerBank = {
-    ...profile.answerBank,
-    customAnswers: undefined,
-    ...(!options.payDisclosed ? { salaryExpectations: null } : {}),
-  };
   return {
     name: {
       full: profile.fullName,
@@ -75,7 +70,6 @@ export function applicationFacts(
             "Limited permissions establish present authorization only within their country and stated conditions. requiresFutureSponsorship describes future work, not a blanket answer for this application. Compare the job type, hours and dates; leave unresolved authorization and sponsorship questions for the person. Reusable answers cannot override permit conditions.",
         }
       : {}),
-    answers: answerBank,
     savedAnswers: sources.reusableAnswers
       .filter(
         (saved) =>
@@ -108,7 +102,6 @@ export function plainAnswerCheckFacts(
   const eligibility = facts.workEligibility;
   const yesNo = (value: boolean | null) =>
     value === null ? "Not known" : value ? "Yes" : "No";
-  const answers = facts.answers;
   return {
     ...facts,
     workEligibility: {
@@ -133,17 +126,6 @@ export function plainAnswerCheckFacts(
       "requiresFutureSponsorship",
       "Will need sponsorship later",
     ),
-    answers: {
-      "Work authorization answer": answers.workAuthorization,
-      "Visa sponsorship answer": answers.visaSponsorship,
-      "Relocation answer": answers.relocation,
-      "Travel answer": answers.travel,
-      "Notice period answer": answers.noticePeriod,
-      "Availability answer": answers.availability,
-      Introduction: answers.selfIntroduction,
-      "Career change answer": answers.careerTransition,
-      "Expected pay answer": answers.salaryExpectations,
-    },
   };
 }
 
@@ -264,27 +246,6 @@ export function storedFacts(
   add(profile.personalWebsiteUrl, "profile.personalWebsiteUrl", "your website");
   for (const link of profile.links) {
     add(link.url, `profile.links.${link.id}`, "a link on your profile");
-  }
-  const bank = profile.answerBank;
-  const bankEntries: Array<[string | null, string, string]> = [
-    [
-      bank.workAuthorization,
-      "workAuthorization",
-      "your work authorization answer",
-    ],
-    [bank.visaSponsorship, "visaSponsorship", "your sponsorship answer"],
-    [bank.relocation, "relocation", "your relocation answer"],
-    [bank.travel, "travel", "your travel answer"],
-    [bank.noticePeriod, "noticePeriod", "your notice period"],
-    [bank.availability, "availability", "when you can start"],
-    [bank.selfIntroduction, "selfIntroduction", "your introduction"],
-    [bank.careerTransition, "careerTransition", "your career change answer"],
-    [bank.salaryExpectations, "salaryExpectations", "your saved pay answer"],
-  ];
-  for (const [value, key, label] of bankEntries) {
-    if (key === "workAuthorization" || key === "visaSponsorship") continue;
-    if (key === "salaryExpectations" && !options.payDisclosed) continue;
-    add(value, `profile.answerBank.${key}`, label);
   }
   for (const saved of sources.reusableAnswers.filter(
     (entry) =>
@@ -411,11 +372,7 @@ function shortFactFitsControl(
 ): boolean {
   // Total years of experience is not the years asked about a given skill.
   if (sourceId === "profile.yearsExperience") return false;
-  if (sourceId === "profile.answerBank.salaryExpectations") {
-    return control.questionKind === "salary_expectation";
-  }
-  // Saved answers belong to their own question.
-  if (sourceId.startsWith("profile.answerBank.")) return false;
+  // Saved short answers belong to their own question.
   if (sourceId.startsWith("answerLibrary.")) {
     const saved = savedAnswerForQuestion(control, sources.reusableAnswers);
     return saved !== null && sourceId === `answerLibrary.${saved.id}`;

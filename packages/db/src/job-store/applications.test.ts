@@ -9,7 +9,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createApplicationStore } from "./applications";
+import {
+  createApplicationStore,
+  createSavedAnswersStore,
+  readSavedApplicationAnswers,
+} from "./applications";
 import { openJobStore, type JobStore } from "./job-store";
 
 const stores: JobStore[] = [];
@@ -605,4 +609,67 @@ describe("applications on the job store", () => {
       ),
     ).toEqual([]);
   });
+});
+
+it("shares stable-key answers, kinds and proof references with Needs you and ignores unconfirmed suggestions", () => {
+  const { jobs, applications } = open();
+  const answers = createSavedAnswersStore(jobs);
+  const first = answers.upsert({
+    key: "analysis-years",
+    prompt: "Years of analysis experience",
+    answer: "5",
+    input: "number",
+    roleFamilies: ["Analysis"],
+    proofEntryIds: ["proof_1"],
+  });
+  answers.upsert({
+    key: "notice_period",
+    kind: "notice_period",
+    prompt: "My notice period",
+    answer: "Two weeks",
+  });
+  answers.upsert({
+    key: "suggestion",
+    prompt: "Unconfirmed",
+    answer: "Not mine yet",
+    needsConfirmation: true,
+  });
+  expect(answers.get({ key: "analysis-years" })).toMatchObject({
+    id: first.id,
+    answer: "5",
+    input: "number",
+    roleFamilies: ["Analysis"],
+    proofEntryIds: ["proof_1"],
+  });
+  expect(answers.list({ limit: 2 }).rows).toHaveLength(2);
+  const matches = applications.needsYou.answersForQuestions(
+    123,
+    [
+      {
+        key: "new-question",
+        prompt: "When can you start after giving notice?",
+        reusePrompt: true,
+        kind: "notice_period",
+      },
+      {
+        key: "numeric",
+        prompt: "Years of analysis experience",
+        reusePrompt: true,
+      },
+    ],
+    "https://replica.test",
+  );
+  expect(matches.map((value) => value.answer)).toEqual(["Two weeks", "5"]);
+  expect(
+    readSavedApplicationAnswers(jobs).map((value) => value.answer),
+  ).toEqual(["5", "Two weeks"]);
+  expect(
+    answers.upsert({
+      key: "analysis-years",
+      prompt: "Years of analysis experience",
+      answer: "6",
+      input: "number",
+    }).id,
+  ).toBe(first.id);
+  expect(applications.needsYou.savedAnswer(first.id)?.answer).toBe("6");
 });

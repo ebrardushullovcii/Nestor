@@ -4,6 +4,7 @@ import type {
   ApplicationAttemptQuestion,
   RequestNeedsYouInput,
   CandidateReusableAnswer,
+  CandidateAnswerKind,
   RememberFormAnswerInput,
 } from "@nestor/contracts";
 
@@ -97,6 +98,9 @@ export function toKnownFormAnswer(
     prompt: string;
     answer: string;
     local: boolean;
+    kind?: CandidateAnswerKind;
+    roleFamilies?: string[];
+    proofEntryIds?: string[];
   },
   question: FormQuestion,
   location: string,
@@ -120,9 +124,9 @@ export function toKnownFormAnswer(
     label: input.prompt,
     question: input.prompt,
     answer: input.answer,
-    kind,
-    roleFamilies: [],
-    proofEntryIds: [],
+    kind: input.kind && input.kind !== "other" ? input.kind : kind,
+    roleFamilies: input.roleFamilies ?? [],
+    proofEntryIds: input.proofEntryIds ?? [],
     ...(input.local ||
     question.kind === "cover_letter" ||
     geographic.has(question.kind)

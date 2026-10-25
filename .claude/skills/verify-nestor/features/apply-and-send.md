@@ -31,6 +31,17 @@ Use live AI, synthetic profile/resume data and this instance's replica URLs. See
 ## Gotchas
 
 - The browser peek covers the app. Escape closes it; an unfocused instance may park pages in a hidden browser window, so use shot --target browser.
-- A restart loses prepared browser pages. Finish or stop ready forms before restarting; new work and instructions remain in storage.
+- A restart closes prepared browser pages. Ready rows remain ready and Open restores the form without sending it. An armed send interrupted without confirmation stays uncertain and cannot be retried automatically.
 - Queued, ready and submitted are different states. A tracker status or a tool-list assertion is not proof of an application send.
 - Never send to a non-loopback site. The verify-nestor send guard and submissions.jsonl prove where writes went.
+
+## Needs you and saved answers
+
+Sidebar › Needs you uses the same paged list/detail layout and keyboard selection as the other job lists. Questions are oldest first. New arrivals and background refreshes must not replace an active editor or move a draft to another task. Drafts survive navigation and restart. Yes/No answers are buttons.
+
+- Answer one task with Save this answer for next time selected. Every application waiting on that same question should continue, and a later application should reuse it. Country-dependent answers retain their scope.
+- Saved answers › Add answer is the only home for reusable answer text. Save Years of analysis experience = 5 and Years of coordination experience = 14, then apply to the replica /clientnest/jobs/33 through Find jobs and Shortlisted. Verify both actual form fields, and that neither numeric question appears in Needs you. Repeat with a new attempt.
+- Edit and forget saved answers here. Profile retains structured eligibility and contact preferences; it has no reusable-answer editor. Applications shows a read-only review of the answers prepared for sending.
+- A source sign-in item shows the site's label and URL. Open the site in the app browser, finish the step, then Retry. It remains until search can read that site, independently of any application.
+
+Proof: screenshots before/after, the job store's needs_you, needs_you_drafts, form_answers and applications rows, and the actual replica form fields. Check the sidebar Assistant's typed Needs-you commands against the same rows. Text supplied by the person is required before chat saves a reusable answer.

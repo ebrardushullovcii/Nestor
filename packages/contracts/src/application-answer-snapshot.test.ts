@@ -102,24 +102,25 @@ it("unconfirmed old agent answers never enter the approved answer snapshot", () 
       storagePath: "/synthetic",
       textContent: "Synthetic",
     },
-    answerBank: {
-      customAnswers: [
-        {
-          id: "old",
-          label: "Experience",
-          question: "Years?",
-          answer: "0",
-          kind: "other",
-          needsConfirmation: true,
-        },
-      ],
-    },
   });
+  const answers = [
+    {
+      id: "saved-1",
+      kind: "other" as const,
+      label: "Experience",
+      question: "Years?",
+      answer: "0",
+      needsConfirmation: true,
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
   expect(
-    deriveApprovedApplicationAnswerSnapshotContent(profile).entries,
+    deriveApprovedApplicationAnswerSnapshotContent(profile, answers).entries,
   ).toEqual([]);
-  profile.answerBank.customAnswers[0]!.needsConfirmation = false;
+  answers[0]!.needsConfirmation = false;
   expect(
-    deriveApprovedApplicationAnswerSnapshotContent(profile).entries[0]?.answer,
+    deriveApprovedApplicationAnswerSnapshotContent(profile, answers).entries[0]
+      ?.answer,
   ).toBe("0");
 });

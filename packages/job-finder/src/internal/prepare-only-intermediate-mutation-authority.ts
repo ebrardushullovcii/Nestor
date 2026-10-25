@@ -6,6 +6,7 @@ import {
   isApprovedApplicationAnswerSnapshot,
   serializeApprovedApplicationAnswerSnapshotForDigest,
   type SavedJob,
+  type CandidateReusableAnswer,
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
 
@@ -71,6 +72,7 @@ export async function resolvePrepareOnlyIntermediateMutationAuthority(input: {
   observedOrigin?: string;
   repository: JobFinderRepository;
   resumeSha256: string | null | undefined;
+  readSavedAnswers?: () => readonly CandidateReusableAnswer[];
 }): Promise<PrepareOnlyIntermediateMutationAuthorityDecision> {
   const origin = destinationOrigin(input.job);
   if (origin === null) {
@@ -124,6 +126,7 @@ export async function resolvePrepareOnlyIntermediateMutationAuthority(input: {
     );
   const current = deriveApprovedApplicationAnswerSnapshotContent(
     profileState.profile,
+    input.readSavedAnswers?.() ?? [],
   );
   if (
     approvedSnapshot === null ||

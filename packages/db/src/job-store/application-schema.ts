@@ -144,11 +144,17 @@ CREATE TABLE IF NOT EXISTS form_answers (
   prompt TEXT NOT NULL,
   prompt_key TEXT NOT NULL DEFAULT '',
   answer TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'other',
+  label TEXT NOT NULL DEFAULT '',
+  role_families_json TEXT NOT NULL DEFAULT '[]',
+  proof_entry_ids_json TEXT NOT NULL DEFAULT '[]',
+  needs_confirmation INTEGER NOT NULL DEFAULT 0,
   input TEXT NOT NULL,
   options_json TEXT NOT NULL,
   updated_at INTEGER NOT NULL,
   UNIQUE (answer_key, country, site_origin)
 );
+CREATE INDEX IF NOT EXISTS form_answers_by_kind ON form_answers(kind,country,site_origin,updated_at DESC);
 CREATE INDEX IF NOT EXISTS form_answers_by_prompt ON form_answers(prompt_key,country,site_origin,updated_at DESC);
 CREATE TRIGGER IF NOT EXISTS form_answers_count_insert AFTER INSERT ON form_answers BEGIN
   UPDATE needs_you_counts SET n = n + 1 WHERE kind = 'saved';

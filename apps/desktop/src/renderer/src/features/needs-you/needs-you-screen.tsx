@@ -298,9 +298,15 @@ export function NeedsYouScreen() {
                     : [row.scope.country, row.scope.siteOrigin]
                         .filter(Boolean)
                         .join(" · ") ||
-                      ("kind" in row ? "Application" : "Reusable answer")
+                      ("preview" in row ? "Reusable answer" : "Application")
                 }
-                status={"kind" in row ? KIND[row.kind] : row.preview}
+                status={
+                  "preview" in row
+                    ? row.needsConfirmation
+                      ? "Review saved answer"
+                      : row.preview
+                    : KIND[row.kind]
+                }
                 onActivate={activate}
                 onToggle={toggle}
               />

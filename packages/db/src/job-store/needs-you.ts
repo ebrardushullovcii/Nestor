@@ -1,4 +1,7 @@
 import {
+  SavedFormAnswerKeySchema,
+  type SavedFormAnswerKey,
+  type CandidateAnswerKind,
   normalizeFormQuestionPrompt,
   RememberFormAnswerInputSchema,
   type RememberFormAnswerInput,
@@ -123,7 +126,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
   ) => {
     const scope = FormAnswerScopeSchema.parse(inputScope);
     const row = sql(
-      `SELECT answer, input, options_json FROM form_answers WHERE answer_key = ? AND country = ? AND site_origin = ?`,
+      `SELECT answer, input, options_json FROM form_answers WHERE answer_key = ? AND country = ? AND site_origin = ? AND needs_confirmation=0`,
     ).get(key, scope.country, scope.siteOrigin) as
       | { answer: string; input: string; options_json: string }
       | undefined;
@@ -176,6 +179,11 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           site_origin: string;
           prompt: string;
           answer: string;
+          kind: CandidateAnswerKind;
+          label: string;
+          needs_confirmation: number;
+          role_families_json: string;
+          proof_entry_ids_json: string;
           input: Task["input"];
           options_json: string;
           updated_at: number;
@@ -184,6 +192,12 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
     return row
       ? {
           id: row.id,
+          key: row.answer_key,
+          kind: row.kind,
+          label: row.label || row.prompt,
+          needsConfirmation: row.needs_confirmation === 1,
+          roleFamilies: JSON.parse(row.role_families_json) as string[],
+          proofEntryIds: JSON.parse(row.proof_entry_ids_json) as string[],
           prompt: row.prompt,
           answer: row.answer,
           preview: row.answer.slice(0, 140),
@@ -197,10 +211,14 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
 
   function writeAnswer(input: RememberFormAnswerInput): number {
     const value = RememberFormAnswerInputSchema.parse(input);
+    value.answer = validateAnswer(
+      { input: value.input, options_json: JSON.stringify(value.options) },
+      value.answer,
+    );
     const result =
-      sql(`INSERT INTO form_answers(answer_key,country,site_origin,prompt,prompt_key,answer,input,options_json,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(answer_key,country,site_origin) DO UPDATE SET
-      prompt=excluded.prompt,prompt_key=excluded.prompt_key,answer=excluded.answer,input=excluded.input,options_json=excluded.options_json,updated_at=excluded.updated_at RETURNING id`).get(
+      sql(`INSERT INTO form_answers(answer_key,country,site_origin,prompt,prompt_key,answer,input,options_json,updated_at,kind,label,role_families_json,proof_entry_ids_json,needs_confirmation)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(answer_key,country,site_origin) DO UPDATE SET
+      prompt=excluded.prompt,prompt_key=excluded.prompt_key,answer=excluded.answer,input=excluded.input,options_json=excluded.options_json,updated_at=excluded.updated_at,kind=excluded.kind,label=excluded.label,role_families_json=excluded.role_families_json,proof_entry_ids_json=excluded.proof_entry_ids_json,needs_confirmation=excluded.needs_confirmation RETURNING id`).get(
         value.key,
         value.scope.country,
         value.scope.siteOrigin,
@@ -210,6 +228,11 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         value.input,
         JSON.stringify(value.options),
         Date.now(),
+        value.kind,
+        value.label || value.prompt,
+        JSON.stringify(value.roleFamilies),
+        JSON.stringify(value.proofEntryIds),
+        value.needsConfirmation ? 1 : 0,
       ) as { id: number };
     return result.id;
   }
@@ -239,13 +262,14 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       return store.transaction(() => {
         const value = RememberFormAnswerInputSchema.parse(input);
         const id = writeAnswer(value);
-        resolveMatching(
-          value.key,
-          normalizeFormQuestionPrompt(value.prompt),
-          value.scope.country,
-          value.scope.siteOrigin,
-          value.answer,
-        );
+        if (!value.needsConfirmation)
+          resolveMatching(
+            value.key,
+            normalizeFormQuestionPrompt(value.prompt),
+            value.scope.country,
+            value.scope.siteOrigin,
+            value.answer,
+          );
         changed();
         return savedAnswer(id)!;
       });
@@ -302,6 +326,13 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       });
     },
     savedAnswer,
+    getAnswerByKey(input: SavedFormAnswerKey): SavedFormAnswer | null {
+      const { key, scope } = SavedFormAnswerKeySchema.parse(input);
+      const row = sql(
+        "SELECT id FROM form_answers WHERE answer_key=? AND country=? AND site_origin=?",
+      ).get(key, scope.country, scope.siteOrigin) as { id: number } | undefined;
+      return row ? savedAnswer(row.id) : null;
+    },
     listAnswers(input: SavedFormAnswersQuery = {}): SavedFormAnswersPage {
       const query = SavedFormAnswersQuerySchema.parse(input);
       const countsNow = counts();
@@ -313,7 +344,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         : "1";
       const params: SQLInputValue[] = match && query.text ? [match] : [];
       const records =
-        sql(`SELECT id,prompt,substr(answer,1,140) AS preview,country,site_origin,input,updated_at
+        sql(`SELECT id,answer_key,kind,label,needs_confirmation,prompt,substr(answer,1,140) AS preview,country,site_origin,input,updated_at
         FROM form_answers WHERE ${where} AND (? = 0 OR id < ?) ORDER BY id DESC LIMIT ?`).all(
           ...params,
           query.after,
@@ -321,6 +352,10 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           query.limit + 1,
         ) as Array<{
           id: number;
+          answer_key: string;
+          kind: CandidateAnswerKind;
+          label: string;
+          needs_confirmation: number;
           prompt: string;
           preview: string;
           country: string;
@@ -337,6 +372,10 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         : countsNow.saved;
       const rows = records.slice(0, query.limit).map((row) => ({
         id: row.id,
+        key: row.answer_key,
+        kind: row.kind,
+        label: row.label || row.prompt,
+        needsConfirmation: row.needs_confirmation === 1,
         prompt: row.prompt,
         preview: row.preview,
         scope: { country: row.country, siteOrigin: row.site_origin },
@@ -369,7 +408,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         if (!previous) return false;
         const answer = validateAnswer(previous, value.answer);
         sql(
-          "UPDATE form_answers SET answer = ?, updated_at = ? WHERE id = ?",
+          "UPDATE form_answers SET answer = ?, needs_confirmation = 0, updated_at = ? WHERE id = ?",
         ).run(answer, Date.now(), value.id);
         resolveMatching(
           previous.answer_key,
@@ -432,13 +471,32 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
               local: true,
             },
           ];
-        const saved =
-          sql(`SELECT id,prompt,answer FROM form_answers WHERE ${question.reusePrompt ? "prompt_key" : "answer_key"}=? AND country='' AND site_origin IN ('',?)
+        let saved =
+          sql(`SELECT id,prompt,answer,kind,role_families_json,proof_entry_ids_json FROM form_answers WHERE ${question.reusePrompt ? "prompt_key" : "answer_key"}=? AND needs_confirmation=0 AND country='' AND site_origin IN ('',?)
           ORDER BY (site_origin=?) DESC,updated_at DESC,id DESC LIMIT 1`).get(
             key,
             origin,
             origin,
-          ) as { id: number; prompt: string; answer: string } | undefined;
+          ) as
+            | {
+                id: number;
+                prompt: string;
+                answer: string;
+                kind: CandidateAnswerKind;
+                role_families_json: string;
+                proof_entry_ids_json: string;
+              }
+            | undefined;
+        if (!saved && question.kind && question.kind !== "other") {
+          saved =
+            sql(`SELECT id,prompt,answer,kind,role_families_json,proof_entry_ids_json FROM form_answers
+            WHERE kind=? AND country='' AND site_origin IN ('',?) AND needs_confirmation=0
+            ORDER BY (site_origin=?) DESC,updated_at DESC,id DESC LIMIT 1`).get(
+              question.kind,
+              origin,
+              origin,
+            ) as typeof saved;
+        }
         return saved
           ? [
               {
@@ -447,6 +505,11 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
                 prompt: saved.prompt,
                 answer: saved.answer,
                 local: false,
+                kind: saved.kind,
+                roleFamilies: JSON.parse(saved.role_families_json) as string[],
+                proofEntryIds: JSON.parse(
+                  saved.proof_entry_ids_json,
+                ) as string[],
               },
             ]
           : [];
@@ -492,7 +555,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           }
           const saved = value.reusePrompt
             ? (sql(
-                "SELECT answer,input,options_json FROM form_answers WHERE prompt_key=? AND country=? AND site_origin=? ORDER BY updated_at DESC,id DESC LIMIT 1",
+                "SELECT answer,input,options_json FROM form_answers WHERE prompt_key=? AND country=? AND site_origin=? AND needs_confirmation=0 ORDER BY updated_at DESC,id DESC LIMIT 1",
               ).get(
                 normalizeFormQuestionPrompt(value.prompt),
                 value.scope.country,

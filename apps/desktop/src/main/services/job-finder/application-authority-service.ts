@@ -20,6 +20,7 @@ import {
   SubmissionOutcomeRecordSchema,
   serializeApprovedApplicationAnswerSnapshotForDigest,
   serializeApplicationAuthorityDecisionPolicyForDigest,
+  type CandidateReusableAnswer,
   type ApplicationAttestationKind,
   type ApplicationSalaryDisclosureRule,
   type ApplicationAuthorityReadiness,
@@ -39,6 +40,8 @@ import {
   type UpdateApplicationAuthorityEnvelopeInput,
 } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
+import { readSavedApplicationAnswers } from "@nestor/db/applications";
+import { getJobStore } from "../job-store";
 
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { getJobFinderRepositoryForWorkspaceService } from "./create-workspace-service";
@@ -95,6 +98,7 @@ export interface JobFinderApplicationAuthorityService {
 }
 
 export interface CreateJobFinderApplicationAuthorityServiceOptions {
+  readSavedAnswers?: () => readonly CandidateReusableAnswer[];
   repository?: JobFinderRepository;
   resolveRepository?: () => Promise<JobFinderRepository>;
   now?: () => string;
@@ -110,6 +114,7 @@ const ACTIVE_AUTHORITY_MESSAGE =
 function buildAnswerSummary(
   profile: Parameters<typeof deriveApprovedApplicationAnswerSnapshotContent>[0],
   profileRevision: number,
+  answers: readonly CandidateReusableAnswer[],
 ): {
   current: ReturnType<typeof CurrentApplicationAnswerSummarySchema.parse>;
   content: ReturnType<
@@ -117,7 +122,7 @@ function buildAnswerSummary(
   >["content"];
 } {
   const { content, kinds, missingRequiredKinds } =
-    deriveApprovedApplicationAnswerSnapshotContent(profile);
+    deriveApprovedApplicationAnswerSnapshotContent(profile, answers);
   const digest =
     content !== null
       ? createHash("sha256")
@@ -171,6 +176,7 @@ function summarizeApprovedSnapshot(
  */
 async function buildDecisionPolicy(input: {
   repository: JobFinderRepository;
+  answers: readonly CandidateReusableAnswer[];
   mode: CreateApplicationAuthorityEnvelopeInput["mode"];
   intermediateMutationsAuthorized: boolean;
   preApprovedAttestationKinds: readonly ApplicationAttestationKind[];
@@ -192,6 +198,7 @@ async function buildDecisionPolicy(input: {
   const { current } = buildAnswerSummary(
     profileState.profile,
     profileState.revision,
+    input.answers,
   );
   // Missing work-authorisation or sponsorship answers do not gate sending:
   // the run hands any such question back at the form (ADR 0021), and a gate
@@ -305,6 +312,7 @@ export function createJobFinderApplicationAuthorityService(
               "The Job Finder workspace repository is unavailable.",
             ),
           ));
+  const readSavedAnswers = options.readSavedAnswers ?? (() => []);
   const now = options.now ?? (() => new Date().toISOString());
   const idFactory = options.idFactory ?? randomUUID;
 
@@ -332,7 +340,11 @@ export function createJobFinderApplicationAuthorityService(
         .listApplicationAuthorityEnvelopes({ status: "active" })
         .then((envelopes) => envelopes[0] ?? null),
     ]);
-    const { current } = buildAnswerSummary(state.profile, state.revision);
+    const { current } = buildAnswerSummary(
+      state.profile,
+      state.revision,
+      readSavedAnswers(),
+    );
     const approvedSummary = summarizeApprovedSnapshot(approvedSnapshot);
     const answerApprovalStatus =
       current.entryCount === 0
@@ -408,7 +420,11 @@ export function createJobFinderApplicationAuthorityService(
             readiness: await deriveReadiness(repository),
           });
         }
-        const { content } = buildAnswerSummary(state.profile, state.revision);
+        const { content } = buildAnswerSummary(
+          state.profile,
+          state.revision,
+          readSavedAnswers(),
+        );
         if (content === null) {
           return ApproveCurrentApplicationAnswersResultSchema.parse({
             status: "blocked",
@@ -499,6 +515,7 @@ export function createJobFinderApplicationAuthorityService(
         }
 
         const decisionPolicy = await buildDecisionPolicy({
+          answers: readSavedAnswers(),
           repository,
           mode: parsedInput.mode,
           intermediateMutationsAuthorized:
@@ -558,6 +575,7 @@ export function createJobFinderApplicationAuthorityService(
         }
 
         const decisionPolicy = await buildDecisionPolicy({
+          answers: readSavedAnswers(),
           repository,
           mode: parsedInput.mode,
           intermediateMutationsAuthorized:
@@ -615,6 +633,7 @@ export function createJobFinderApplicationAuthorityService(
           return parseMutationResult({ status: "stale", current });
         }
         const decisionPolicy = await buildDecisionPolicy({
+          answers: readSavedAnswers(),
           repository,
           mode: parsedInput.mode,
           intermediateMutationsAuthorized:
@@ -791,6 +810,7 @@ let defaultService: JobFinderApplicationAuthorityService | null = null;
 
 export function getJobFinderApplicationAuthorityService(): JobFinderApplicationAuthorityService {
   defaultService ??= createJobFinderApplicationAuthorityService({
+    readSavedAnswers: () => readSavedApplicationAnswers(getJobStore()),
     releaseApplicationPage: (resultId) =>
       getEmbeddedBrowser().releaseOwnedTabs(resultId, { finished: true }),
     resolveRepository: async () => {
