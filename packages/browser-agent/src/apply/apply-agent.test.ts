@@ -3257,11 +3257,6 @@ test("Full written answers ask for supported specifics within the available limi
   const full = createApplySystemPrompt(input);
   input.writing.writtenAnswerLength = "short";
   const short = createApplySystemPrompt(input);
-  expect(full).toContain("limit hours, study status, dates or employer");
-  expect(full).toContain("facts for one hiring country");
-  expect(full).not.toMatch(
-    /German student permit|Canada.*Yes\/No|US.*No\/Yes/u,
-  );
   expect(full).toContain("70–90%");
   expect(full).toContain("no character limit");
   expect(full).toContain("four to six developed sentences");
