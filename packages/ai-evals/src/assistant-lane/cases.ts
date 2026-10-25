@@ -481,7 +481,7 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "profile.files_delete": "Delete my old cover letter file.",
   "discovery.judge_unjudged": "Judge fit for the jobs that have not been judged.",
   "campaigns.rules": "Which rules are saved for my current search plan?",
-  "apply.queue": "Pause my Apply queue.",
+  "apply.work": "Show my queued and ready applications.",
   "apply.move_back": "Move my unsent Northwind application back to Shortlisted.",
   "apply.reopen": "Is the Northwind application page still open? Reopen it if it is closed.",
   "profile.legacy_copilot":

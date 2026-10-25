@@ -814,9 +814,10 @@ export async function createJobFinderWorkspaceServiceAsync(
       },
       // Handing back a tab the person stepped into carries on the
       // applications that stepping in stopped, with no Try again to find.
-      handback: async (owners) => {
+      handback: (owners) => {
         applicationService.continueBindings(owners);
         publishJobFinderWorkspaceUpdate();
+        return Promise.resolve();
       },
     });
     disposeAutomaticSourceAccessResume = installAutomaticSourceAccessResume({
