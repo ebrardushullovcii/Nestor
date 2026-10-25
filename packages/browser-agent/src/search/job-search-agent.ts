@@ -17,7 +17,6 @@ import {
   type BrowserAgentRunCheckpoint,
   type DiscoveryAccessBlockerReason,
   type JobPosting,
-  type ReadDiscoveryPostingPage,
   type SourceDebugPhaseCompletionMode,
 } from "@nestor/contracts";
 import type { APIResponse, Page } from "playwright";
@@ -60,7 +59,6 @@ import {
   onlyNewJobs,
   postingUrlKey,
 } from "./known-listings";
-import { readPostingDetail } from "./read-posting-detail";
 
 /**
  * The agent that searches one site for jobs, and the agent that checks a
@@ -74,7 +72,6 @@ import { readPostingDetail } from "./read-posting-detail";
  */
 
 export interface JobSearchAgentInput {
-  readPostingPage?: ReadDiscoveryPostingPage;
   resultCache?: SearchResultCache;
   hands: ApplyPageHands;
   /** The live page, for posting links handed to the extractor. Optional in tests. */
@@ -618,57 +615,7 @@ export async function runJobSearchAgent(
     });
   };
 
-  const detailReads = new Map<string, Promise<JobPosting>>();
-  let detailReadThrough = 0;
-  const completeNewListings = async (): Promise<void> => {
-    const readPage = input.readPostingPage;
-    if (!readPage || isSourceCheck || config.inventoryOnly) return;
-    const first = detailReadThrough;
-    const completed = await mapWithLimit(
-      collected.slice(first),
-      4,
-      async (job) => {
-        if (job.searchRejection) return job;
-        const key = jobKey(job);
-        let read = detailReads.get(key);
-        if (!read) {
-          emit("read_listing", `Reading the full listing for ${job.title}.`);
-          read = readPostingDetail({
-            posting: job,
-            readPage,
-            extractor: input.jobExtractor,
-            ...(input.signal ? { signal: input.signal } : {}),
-          });
-          detailReads.set(key, read);
-        }
-        return read;
-      },
-    );
-    completed.forEach((result, index) => {
-      if (result.status === "fulfilled") {
-        collected[first + index] = result.value;
-        if (
-          result.value.listingDetailFetch?.outcome === "fetch_failed" &&
-          !unreadableListings.some(
-            (item) => item.url === result.value.canonicalUrl,
-          )
-        ) {
-          unreadableListings.push({
-            title: result.value.title,
-            url: result.value.canonicalUrl,
-            category: "unreadable",
-            reason:
-              result.value.listingDetailFetch.detail ??
-              "The full listing could not be read.",
-          });
-        }
-      }
-    });
-    detailReadThrough += completed.length;
-    input.signal?.throwIfAborted();
-  };
   const checkpoint = async (): Promise<void> => {
-    await completeNewListings();
     if (!config.onCheckpoint) return;
     checkpointRevision += 1;
     const snapshot: BrowserAgentRunCheckpoint = {
@@ -725,9 +672,7 @@ export async function runJobSearchAgent(
         : null,
       isSourceCheck
         ? `${savedCount()} sampled so far. Samples prove how the site works; they are not saved as results.`
-        : config.retainAllFound
-          ? `${savedCount()} saved so far.`
-          : `${savedCount()} saved so far of the ${config.targetJobCount} asked for.`,
+        : `${savedCount()} saved so far.`,
     ];
     return lines.filter((line): line is string => line !== null).join("\n");
   };
@@ -739,9 +684,7 @@ export async function runJobSearchAgent(
         name: "extract_jobs",
         description: config.inventoryOnly
           ? "Collect every genuine vacancy card on this page, including off-screen items. Return its observed listing URL and facts. Do not assess fit, read details or reject cards for preferences; the next engine steps screen and judge them."
-          : isSourceCheck
-            ? "Read every job posting on the current page and save the suitable ones. Supply rejected listing URLs with a reason category and a plain reason for every listing you ruled out; those decisions are recorded, not saved as matches. Tells you what was saved, rejected and already known."
-            : "Read every job posting on the current page, including listings below the part on screen, and save the suitable ones. Supply rejected listing URLs with a reason category and a plain reason for every listing you ruled out; those decisions are recorded, not saved as matches. The page reader also checks each listing against the person's goals and records the ones that do not fit. Tells you what was saved, rejected and already known.",
+          : "Read every job posting on the current page and save the suitable ones. Supply rejected listing URLs with a reason category and a plain reason for every listing you ruled out; those decisions are recorded, not saved as matches. Tells you what was saved, rejected and already known.",
         parameters: {
           type: "object",
           properties: {
@@ -1578,7 +1521,6 @@ export async function runJobSearchAgent(
     loop.reason = `Stopped: no new page content or listings in the last ${loop.steps - lastProgressStep} steps.`;
   }
   emit("finish", loop.reason);
-  await completeNewListings();
   const result = buildResult(loop);
   const completeIndex =
     initialIndex &&

@@ -3594,19 +3594,6 @@ export function createBrowserAgentRuntime(
 
         const result = await runJobSearchAgent({
           resultCache: searchResultCache,
-          readPostingPage: async (url, readOptions) => {
-            readOptions.signal?.throwIfAborted();
-            if (readOptions.rendered)
-              return readRenderedPageHtml(await getContext(), url, readOptions);
-            const response = await page!.request.get(url, {timeout:15_000});
-            try {
-              if (!response.ok()) throw new Error(`Listing read returned HTTP ${response.status()}.`);
-              readOptions.signal?.throwIfAborted();
-              return {html:await response.text(),finalUrl:response.url()};
-            } finally {
-              await response.dispose();
-            }
-          },
           hands: createApplyPageHands(createPlaywrightApplyPageMechanics(page)),
           page,
           config: agentConfig,
