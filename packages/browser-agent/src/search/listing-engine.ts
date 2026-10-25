@@ -87,6 +87,7 @@ async function ask<Output, Input>(
   schema: z.ZodType<Output, z.ZodTypeDef, Input>,
   maxOutputTokens: number,
   reasoningTask: BrowserAgentReasoningTask,
+  jsonSchema?: { name: string; schema: Record<string, unknown> },
 ): Promise<Output> {
   const reply = await model.client.chatWithTools(
     [
@@ -103,6 +104,7 @@ async function ask<Output, Input>(
       maxOutputTokens: Math.max(8000, maxOutputTokens),
       includeUsage: true,
       jsonOutput: true,
+      ...(jsonSchema ? { jsonSchema } : {}),
     },
   );
   if (reply.usage) model.onUsage?.(reply.usage);
@@ -579,15 +581,51 @@ export async function readListings(
 
 const explanation = z.tuple([z.string(), z.string()]);
 const fitSchema = z.object({
-  id: z.number().int().positive(),
   s: z.number().int().min(0).max(100),
   why: z.string(),
-  for: z.array(z.string()).max(4).default([]),
-  against: z.array(z.string()).max(4).default([]),
   r: explanation,
   p: explanation,
   c: explanation,
 });
+
+function fitResponseSchema(ids: readonly number[]) {
+  const pair = {
+    type: "array",
+    items: { type: "string" },
+    minItems: 2,
+    maxItems: 2,
+  };
+  const verdict = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      s: { type: "integer", minimum: 0, maximum: 100 },
+      why: { type: "string" },
+      r: pair,
+      p: pair,
+      c: pair,
+    },
+    required: ["s", "why", "r", "p", "c"],
+  };
+  return {
+    name: "job_fits",
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["fits"],
+      properties: {
+        fits: {
+          type: "object",
+          additionalProperties: false,
+          properties: Object.fromEntries(
+            ids.map((id) => [String(id), verdict]),
+          ),
+          required: ids.map(String),
+        },
+      },
+    },
+  };
+}
 
 /** Caller passes merged rows with no fit. One complete judgment, reused by shortlist and resume writing. */
 export async function fitJobs(
@@ -621,7 +659,7 @@ export async function fitJobs(
       const judge = async (batch: JobDetail[]) => {
         const answer = await ask(
           input,
-          `Judge each job once from the full listing and candidate evidence. Use human judgment, transferable skills and stated constraints. Seniority stretch is different from unrelated work. Unknown information is uncertainty, not a fabricated disqualification. Remote regions restrict where the person must physically work; nationality or an office elsewhere does not satisfy that restriction. Worldwide includes the person. A known inability to work from the required place is an explicit blocker, even with strong skills. Respect part-time/student hours and work permission; distinguish present student work from future full-time sponsorship. Structured profile edits take priority over the imported resume. Scores: ${JOB_FIT_BANDS.strong} to 100 strong realistic choice, ${JOB_FIT_BANDS.good} to ${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch} to ${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0 to ${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Choose from actual evidence, not a fixed formula or default. Use compact JSON: {"fits":[{"id":integer,"s":score,"why":"one short overall sentence","r":["strong|related|stretch|unrelated|unknown","brief role explanation"],"p":["aligned|mixed|conflict|unknown","brief preferences explanation"],"c":["strong|partial|unknown","specific candidate evidence for the requirements"]}]}. Optional "for" and "against" arrays may add up to 4 specific strengths or gaps ONLY when they add information absent from the explanations. Include every id exactly once, including low scores. Keep each explanation under 12 words. Do not repeat sentences.`,
+          `Judge each job once from the full listing and candidate evidence. Use human judgment, transferable skills and stated constraints. Seniority stretch is different from unrelated work. Unknown information is uncertainty, not a fabricated disqualification. Remote regions restrict where the person must physically work; nationality or an office elsewhere does not satisfy that restriction. Worldwide includes the person. A known inability to work from the required place is an explicit blocker, even with strong skills. Respect part-time/student hours and work permission; distinguish present student work from future full-time sponsorship. Structured profile edits take priority over the imported resume. Scores: ${JOB_FIT_BANDS.strong} to 100 strong realistic choice, ${JOB_FIT_BANDS.good} to ${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch} to ${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0 to ${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Choose from actual evidence, not a fixed formula or default. Use compact JSON with one key per job id: {"fits":{"123":{"s":score,"why":"one short overall sentence","r":["strong|related|stretch|unrelated|unknown","brief role explanation"],"p":["aligned|mixed|conflict|unknown","brief preferences explanation"],"c":["strong|partial|unknown","specific candidate evidence for the requirements"]}}}. Include every id exactly once, including low scores. Keep each explanation under 12 words. Do not repeat sentences.`,
           {
             person,
             goals: input.goals,
@@ -638,25 +676,23 @@ export async function fitJobs(
               fullText: job.description,
             })),
           },
-          z.object({ fits: z.array(fitSchema) }),
+          z.object({ fits: z.record(fitSchema) }),
           Math.max(8000, batch.length * 350),
           "fit_batch",
-        );
-        const ids = new Set(batch.map((job) => job.id));
-        if (
-          new Set(answer.fits.map((fit) => fit.id)).size !==
-            answer.fits.length ||
-          answer.fits.some((fit) => !ids.has(fit.id))
-        )
-          throw new Error(
-            "Fit response contained duplicate or unexpected jobs.",
-          );
-        const fits = answer.fits.map((fit) => ({
-          id: fit.id,
+          fitResponseSchema(batch.map((job) => job.id)),
+        ).catch(() => {
+          input.signal?.throwIfAborted();
+          return null;
+        });
+        if (!answer) return batch;
+        const ids = new Set(batch.map((job) => String(job.id)));
+        if (Object.keys(answer.fits).some((id) => !ids.has(id))) return batch;
+        const fits = Object.entries(answer.fits).map(([id, fit]) => ({
+          id: Number(id),
           score: fit.s,
           summary: fit.why,
-          reasons: fit.for,
-          gaps: fit.against,
+          reasons: [],
+          gaps: [],
           role: { assessment: fit.r[0], explanation: fit.r[1] },
           preferences: { assessment: fit.p[0], explanation: fit.p[1] },
           coverage: { assessment: fit.c[0], explanation: fit.c[1] },
@@ -670,13 +706,7 @@ export async function fitJobs(
       const missing = await judge(batch);
       // Preserve valid judgments. An omitted job has no fit to reuse; retry only that job,
       // in smaller groups, once. The runner leaves any remaining omissions unscored.
-      await mapConcurrent(batches(missing, 8), 1, async (remaining) => {
-        try {
-          await judge(remaining);
-        } catch {
-          input.signal?.throwIfAborted();
-        }
-      });
+      await mapConcurrent(batches(missing, 8), 1, judge);
     },
   );
   return output;

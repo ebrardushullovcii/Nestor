@@ -320,29 +320,27 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
   const verdict = {
     score: 28,
     summary: "Related work with a substantial seniority gap.",
-    reasons: ["Uses analytics skills."],
-    gaps: ["Needs senior ownership experience."],
+    reasons: [],
+    gaps: [],
     role: {
       assessment: "stretch",
       explanation: "Same profession, more responsibility.",
     },
     preferences: { assessment: "aligned", explanation: "Part-time in Berlin." },
     coverage: {
-      assessment: "full",
-      explanation: "Read the complete published listing.",
+      assessment: "partial",
+      explanation:
+        "Analytics skills established; senior ownership not evidenced.",
     },
   };
   const client = {
     chatWithTools: vi.fn(() =>
       Promise.resolve({
         content: JSON.stringify({
-          fits: [
-            {
-              id: 1,
+          fits: {
+            "1": {
               s: verdict.score,
               why: verdict.summary,
-              for: verdict.reasons,
-              against: verdict.gaps,
               r: [verdict.role.assessment, verdict.role.explanation],
               p: [
                 verdict.preferences.assessment,
@@ -350,7 +348,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
               ],
               c: [verdict.coverage.assessment, verdict.coverage.explanation],
             },
-          ],
+          },
         }),
       }),
     ),
@@ -391,7 +389,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
         requests.push(data.listings.map((item) => item.id));
         return Promise.resolve({
           content: JSON.stringify({
-            fits: [{ ...fit, id: requests.length === 1 ? 1 : 2 }],
+            fits: { [requests.length === 1 ? "1" : "2"]: fit },
           }),
         });
       },

@@ -26,6 +26,7 @@ export interface LLMClient {
       reasoningTask?: BrowserAgentReasoningTask
       includeUsage?: boolean
       jsonOutput?: boolean
+      jsonSchema?: { name: string; schema: Record<string, unknown> }
     }
   ) => Promise<{
     content?: string
