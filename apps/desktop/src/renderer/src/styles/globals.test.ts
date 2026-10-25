@@ -1032,24 +1032,6 @@ describe("cascade layer discipline", () => {
       );
     }
   });
-
-  it("keeps the page-title utilities free of important modifiers", () => {
-    const resumeWorkspaceHeaderSource = readFileSync(
-      new URL(
-        "../features/job-finder/screens/review-queue/resume-workspace-header.tsx",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-
-    expect(resumeWorkspaceHeaderSource).toContain(
-      "text-(length:--text-page-title-compact)",
-    );
-    expect(
-      resumeWorkspaceHeaderSource,
-      "the studio title must not need an important modifier to beat the base layer",
-    ).not.toContain("text-(length:--text-page-title-compact)!");
-  });
 });
 
 /**
@@ -1701,7 +1683,6 @@ describe("non-text boundary and state contrast (r15)", () => {
       ).toBeGreaterThanOrEqual(3);
     }
   });
-
 
   it("keeps the boundary ladder monotonic: panel < field < control", () => {
     // Raising these tokens must not collapse the documented hierarchy or

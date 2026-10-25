@@ -11,7 +11,6 @@ import type { RecentChange } from "../../lib/recent-changes";
 import { RecentChangesSection } from "./recent-changes-section";
 import { isImeComposingEvent } from "../../lib/job-finder-shortcuts";
 import { useJobFinderOverlayOwnership } from "../../lib/job-finder-overlay-ownership";
-import type { TailoredDraftPreparationViewState } from "../../screens/review-queue/review-queue-status";
 import {
   buildJobFinderTaskCenterModel,
   describeTaskCenterCounts,
@@ -25,17 +24,12 @@ interface JobFinderTaskCenterProps {
   isResumeImportPending: boolean;
   liveDiscoveryEvents?: readonly DiscoveryActivityEvent[] | undefined;
   resumeImportProgress?: ResumeImportProgressEvent | null | undefined;
-  tailoredDraftPreparation?:
-    | TailoredDraftPreparationViewState
-    | null
-    | undefined;
   onCancelApplyRun?:
     | ((runId: string) => boolean | void | Promise<boolean | void>)
     | undefined;
   onCancelDiscovery?:
     | ((runId: string) => boolean | void | Promise<boolean | void>)
     | undefined;
-  onStopTailoredDraftPreparation?: (() => void) | undefined;
   onNavigate?: ((path: string) => void | Promise<void>) | undefined;
   onPrepareRemainingJobs?:
     | ((jobIds: readonly string[]) => void | Promise<unknown>)
@@ -120,14 +114,12 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
         isResumeImportPending: props.isResumeImportPending,
         liveDiscoveryEvents: props.liveDiscoveryEvents,
         resumeImportProgress: props.resumeImportProgress,
-        tailoredDraftPreparation: props.tailoredDraftPreparation,
       }),
     [
       props.isDiscoveryPending,
       props.isResumeImportPending,
       props.liveDiscoveryEvents,
       props.resumeImportProgress,
-      props.tailoredDraftPreparation,
       props.workspace,
     ],
   );
@@ -210,13 +202,9 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
           ? props.onCancelDiscovery
             ? () => props.onCancelDiscovery?.(item.id)
             : undefined
-          : item.cancelKind === "tailored_drafts"
-            ? props.onStopTailoredDraftPreparation
-              ? () => props.onStopTailoredDraftPreparation?.()
-              : undefined
-            : props.onCancelApplyRun
-              ? () => props.onCancelApplyRun?.(item.id)
-              : undefined;
+          : props.onCancelApplyRun
+            ? () => props.onCancelApplyRun?.(item.id)
+            : undefined;
       const result = cancelOperation ? await cancelOperation() : false;
       if (result !== false) {
         return;
@@ -483,11 +471,9 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
                           type="button"
                           variant="outline"
                         >
-                          {item.cancelKind === "tailored_drafts"
-                            ? "Stop"
-                            : cancellationRequested
-                              ? "Cancellation requested"
-                              : "Cancel task"}
+                          {cancellationRequested
+                            ? "Cancellation requested"
+                            : "Cancel task"}
                         </Button>
                       ) : null}
                     </div>

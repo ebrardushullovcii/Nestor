@@ -29,7 +29,7 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0023](0023-agent-owned-runs.md)                                     | accepted; card scans removed by 0041                                                                                                                         | The model owns search, source-check, and apply runs; code is safety only                        |
 | [0024](0024-job-finder-browser-harness-and-three-apply-modes.md)     | accepted; per-batch mode and breadth superseded by 0025 and 0026, setup eligibility by 0029, takeover by 0034, Send-press wording for assistant work by 0039 | Browser harness, broad search requests, and three apply modes                                   |
 | [0025](0025-one-ai-behavior-panel.md)                                | accepted                                                                                                                                                     | One Settings section holds every choice about how the AI behaves                                |
-| [0026](0026-shortlisted-three-steps-per-job.md)                      | accepted; Lines to confirm removed by 0051, level picking by PRODUCT.md | Shortlisted shows one next step per job |
+| [0026](0026-shortlisted-three-steps-per-job.md)                      | superseded 2026-10-25 by Shortlisted on the job store | Shortlisted shows one next step per job |
 | [0027](0027-applications-finish-continue-and-bulk-apply.md)          | accepted                                                                                                                                                     | Declarations never stop a run; continued runs keep the page and mode; Apply to all is one press |
 | [0028](0028-home-three-questions.md)                                 | accepted; Home layout superseded by PRODUCT.md | Home answers three questions with one next step; Documents becomes Profile › Files |
 | [0029](0029-setup-asks-work-eligibility.md)                          | accepted                                                                                                                                                     | Guided setup asks where you can work and whether you need sponsorship                           |
@@ -38,7 +38,7 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0032](0032-search-settings-change-what-a-search-keeps.md)           | accepted                                                                                                                                                     | Search settings change what a search keeps, not only the agent's instructions                   |
 | [0033](0033-person-finishes-on-the-kept-page.md)                     | accepted                                                                                                                                                     | The person finishes on the kept page; hand-offs carry on by themselves                          |
 | [0034](0034-stepping-in-hands-over-one-tab.md)                       | accepted; lent tabs for the assistant by 0038                                                                                                                | Stepping into the browser hands over one tab; handing it back carries on                        |
-| [0035](0035-selected-resume-batches.md) | accepted; ten-job cap removed by 0043; restart recovery added by 0045 | Temporary job selection and two concurrent resume generations per batch |
+| [0035](0035-selected-resume-batches.md) | superseded 2026-10-25: resumes write on shortlist, no batches | Temporary job selection and two concurrent resume generations per batch |
 | [0036](0036-parallel-application-preparation.md) | accepted | Owned application tabs, bounded parallel preparation, and serialized sending |
 | [0037](0037-one-assistant-in-a-side-chat.md) | accepted | One app-wide assistant in a side chat replaces the Profile and Resume chats |
 | [0038](0038-the-assistant-works-in-the-tab-you-lend-it.md) | accepted | The assistant works only in the browser tab lent to it; a click takes it back |
@@ -48,10 +48,10 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0042](0042-toasts-for-news-boxes-for-action.md) | accepted; action toasts lengthened by 0043; amended by 0044 | Toasts for news; tinted boxes only when the person must act; status in the control that owns it |
 | [0043](0043-bulk-work-queues-the-whole-selection.md) | accepted | Bulk work queues the whole selection or says what remains; toasts with Undo stay about twenty seconds |
 | [0044](0044-page-conditions-on-the-header-status-line.md) | accepted | Page-level conditions owned elsewhere are toned items on a one-row header's status line, not boxes |
-| [0045](0045-resume-batches-continue-after-restart.md) | accepted | Resume batches save their queue; after a restart the person can Continue batch, with a time-left estimate |
+| [0045](0045-resume-batches-continue-after-restart.md) | superseded 2026-10-25: resumes write on shortlist, no batches | Resume batches save their queue; after a restart the person can Continue batch, with a time-left estimate |
 | [0046](0046-normalized-discovery-storage.md) | accepted | Discovery history and checkpoints are indexed rows; ordinary commits write changed records |
 | [0047](0047-live-assistant-session-storage.md) | accepted | Live Assistant stores complete session bodies separately and sends archive summaries in live updates |
-| [0048](0048-shortlisted-resume-pipeline.md) | accepted | Shortlisted uses 50 AI writers, two local processors and bounded admission with thin completion receipts |
+| [0048](0048-shortlisted-resume-pipeline.md) | superseded 2026-10-25 by `packages/job-finder/src/resumes` (six writers) | Shortlisted uses 50 AI writers, two local processors and bounded admission with thin completion receipts |
 | [0049](0049-resume-writing-in-one-call.md) | accepted; amended by 0051 | A resume is written in one model call, checked, and repaired only when flagged; refused listing reads pause the batch |
 | [0050](0050-one-selection-model-for-job-lists.md) | accepted | Find jobs and Shortlisted share checkboxes, a page select-all, ranges and one action bar; list screens share one column split |
 | [0051](0051-the-app-fixes-what-it-can-and-does-not-ask.md) | accepted | The app fixes what it can and does not ask the person to manage its rules; the resume writer decides what each resume shows |
@@ -59,7 +59,7 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0053](0053-the-window-opens-on-the-last-clean-view.md) | accepted; amended by 0057 | A clean quit saves the window's view; the next start shows it at once and converges by delta, and skips the integrity check on an untouched file |
 | [0054](0054-a-build-skips-validating-rows-it-already-validated.md) | accepted; amended by 0057 | Saved jobs and resume drafts a build validated unchanged are marked; the same build's next start reads them without the schema |
 | [0055](0055-reclaim-verified-prepared-forms.md) | accepted | Idle tabs freeze; the oldest prepared forms give way only after an exact guarded refill is verified |
-| [0056](0056-resume-autosave-history-groups.md) | accepted | Consecutive Resume Studio autosaves share a history step |
+| [0056](0056-resume-autosave-history-groups.md) | superseded 2026-10-25: the editor autosaves without history groups | Consecutive Resume Studio autosaves share a history step |
 | [0057](0057-saved-job-details-stay-in-sqlite.md) | accepted | Saved listing details stay in SQLite behind bounded caches; compatible clean views survive updates while unopened saved jobs validate in background slices |
 | [0058](0058-one-apply-press-queues-the-whole-choice.md) | accepted | One Apply press over selected, page or all ready jobs is a saved queue of ten-job runs; it carries on after a restart |
 | [0059](0059-profile-approval-state.md) | accepted | Profile saves reuse resume bodies and commit approval changes |
@@ -78,7 +78,7 @@ ADRs capture durable decisions and rejected alternatives. Use them to avoid reop
 | [0072](0072-background-database-backups-and-export-retention.md) | accepted | Background database backups and generated export retention |
 | [0074](0074-one-index-before-inventory-reads.md) | accepted | One stored index owns inventory reads; measured duplicate startup facts did not deliver earlier counts or pages |
 | [0075](0075-find-jobs-reads-its-page-from-queries.md) | accepted | Find jobs reads its page, facets and order from queries and follows the change feed; during a search the snapshot syncs only where a screen still needs it |
-| [0076](0076-write-resumes-when-a-job-is-shortlisted.md) | accepted | A shortlisted job's resume starts writing at once through the batch path (switch in Settings, default on); move back, Undo or hide withdraw it; pause holds it; it carries on after a restart |
+| [0076](0076-write-resumes-when-a-job-is-shortlisted.md) | superseded 2026-10-25 by Shortlisted on the job store | A shortlisted job's resume starts writing at once through the batch path (switch in Settings, default on); move back, Undo or hide withdraw it; pause holds it; it carries on after a restart |
 | [0077](0077-home-opens-on-a-first-view-before-the-full-snapshot.md) | accepted | Home opens on a first view (everything but the Find jobs lists, nothing written) before the full snapshot; early presses wait for the full one |
 | [0078](0078-ledger-observations-and-wal-growth.md) | accepted | Ledger observations use small columns; checkpoints follow WAL growth rather than retained file size |
 

@@ -25,8 +25,7 @@ export const JOB_ROUTE = (jobId: string) =>
   `/job-finder/discovery?jobId=${encodeURIComponent(jobId)}`;
 export const SHORTLIST_ROUTE = (jobId: string) =>
   `/job-finder/review-queue?jobId=${encodeURIComponent(jobId)}`;
-export const RESUME_ROUTE = (jobId: string) =>
-  `/job-finder/review-queue/${encodeURIComponent(jobId)}/resume`;
+export const RESUME_ROUTE = SHORTLIST_ROUTE;
 export const APPLICATION_ROUTE = (recordId: string) =>
   `/job-finder/applications?applicationRecordId=${encodeURIComponent(recordId)}`;
 
@@ -65,7 +64,9 @@ export function compactJob(job: SavedJob | DiscoveryJobView) {
     location: job.location,
     workMode: job.workMode,
     status: assistantJobStatus(job.status),
-    inShortlist: ["drafting", "ready_for_review", "approved"].includes(job.status),
+    inShortlist: ["drafting", "ready_for_review", "approved"].includes(
+      job.status,
+    ),
     fit: fitLabel(job),
     recommendation: job.matchAssessment.recommendation,
     postedAt: job.postedAt,

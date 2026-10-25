@@ -47,11 +47,6 @@ function readSource(relativePath: string): string {
  * when that zone lands.
  */
 const PENDING_ADOPTION: ReadonlyArray<{ owner: string; path: string }> = [
-  // PKG-08 — Shortlisted and Resume Studio zone.
-  {
-    owner: "PKG-08",
-    path: "features/job-finder/screens/review-queue/resume-studio-preview-pane.tsx",
-  },
   // PKG-09 — Applications zone.
   {
     owner: "PKG-09",
@@ -76,8 +71,6 @@ const SCANNED_FILES = [
   "features/job-finder/components/profile/resume-import-progress.tsx",
   "features/job-finder/components/job-finder-save-status.tsx",
   "features/job-finder/components/startup-database-recovery-notice.tsx",
-  "features/job-finder/screens/review-queue/resume-studio-preview-pane.tsx",
-  "features/job-finder/screens/review-queue/review-queue-preview-panel.tsx",
   "features/job-finder/screens/applications/applications-detail-panel-recovery-actions-section.tsx",
   "features/job-finder/screens/discovery/discovery-detail-panel.tsx",
   "features/job-finder/screens/settings/settings-support-controls.tsx",
@@ -288,8 +281,8 @@ describe("lazy-route fallback", () => {
       },
       {
         path: "/job-finder/review-queue",
-        source:
-          "features/job-finder/screens/review-queue/review-queue-screen.tsx",
+        // Shortlisted lays out through the shared list and details layout.
+        source: "features/job-lists/list-pane.tsx",
       },
       {
         path: "/job-finder/applications",
@@ -311,10 +304,6 @@ describe("lazy-route fallback", () => {
     expect(getRouteSkeletonPanes("/job-finder/profile")).toBe(1);
     expect(getRouteSkeletonPanes("/job-finder/home")).toBe(1);
     expect(getRouteSkeletonPanes("/job-finder/settings")).toBe(1);
-    // The Studio lives under the review-queue prefix and is also two-pane.
-    expect(getRouteSkeletonPanes("/job-finder/review-queue/job-1/resume")).toBe(
-      2,
-    );
   });
 
   it("resolves the Suspense fallback to a RouteSkeleton, not the centred card", () => {

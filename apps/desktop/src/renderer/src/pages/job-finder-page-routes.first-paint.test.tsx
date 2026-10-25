@@ -16,7 +16,6 @@ import {
   JobFinderDiscoveryRoute,
   JobFinderHomeRoute,
   JobFinderProfileRoute,
-  JobFinderReviewQueueRoute,
 } from "./job-finder-page-routes";
 
 // What the window read from the database at launch; empty unless a test sets
@@ -536,11 +535,6 @@ describe("canonical route first paint", () => {
 
   it.each([
     [
-      "/job-finder/review-queue",
-      "Shortlisted",
-      <JobFinderReviewQueueRoute key="q" />,
-    ],
-    [
       "/job-finder/applications",
       "Applications",
       <JobFinderApplicationsRoute key="a" />,
@@ -581,35 +575,4 @@ describe("canonical route first paint", () => {
       expect(screen.getByText("Loading your workspace")).toBeTruthy();
     },
   );
-
-  it("opens a shortlisted job's full details as a link to that job (STAB-004)", async () => {
-    const context = createContext();
-    renderCanonicalRoute(
-      "/job-finder/review-queue",
-      <JobFinderReviewQueueRoute />,
-      context,
-    );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Open full job details" }),
-    );
-    // Find jobs lists only jobs still waiting on a decision; without the
-    // link a shortlisted job left it empty.
-    expect(context.onNavigateSafely).toHaveBeenCalledWith(
-      "/job-finder/discovery?jobId=job_a",
-    );
-  });
-
-  it("mounts the real Shortlisted heading immediately with no placeholder, suspense fallback, or deferred surface timer", () => {
-    const { setTimeoutSpy } = renderCanonicalRoute(
-      "/job-finder/review-queue",
-      <JobFinderReviewQueueRoute />,
-    );
-
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Shortlisted" }),
-    ).toBeTruthy();
-    expect(screen.queryByText("Loading screen")).toBeNull();
-    expect(screen.queryByText("Opening your saved shortlist.")).toBeNull();
-    expect(surfaceTimerCalls(setTimeoutSpy.mock.calls)).toEqual([]);
-  });
 });

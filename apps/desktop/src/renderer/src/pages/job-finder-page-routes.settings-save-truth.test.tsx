@@ -79,10 +79,6 @@ vi.mock(
   "@renderer/features/job-finder/screens/discovery/discovery-screen",
   () => ({ DiscoveryScreen: () => null }),
 );
-vi.mock(
-  "@renderer/features/job-finder/screens/review-queue/review-queue-screen",
-  () => ({ ReviewQueueScreen: () => null }),
-);
 vi.mock("@renderer/features/job-finder/screens/profile-screen", () => ({
   ProfileScreen: () => null,
 }));

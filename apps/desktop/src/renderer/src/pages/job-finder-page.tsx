@@ -1,3 +1,4 @@
+import { useToReviewCount } from "@renderer/features/shortlisted/use-to-review-count";
 import { AssistantProvider } from "../features/job-finder/assistant/assistant-provider";
 import {
   COMPACT_NAV_PILL_ACTIVE_CLASS,
@@ -102,8 +103,6 @@ export {
   JobFinderProfileRoute,
   JobFinderProfileSetupRoute,
   JobFinderRouteErrorBoundary,
-  JobFinderResumeWorkspaceRoute,
-  JobFinderReviewQueueRoute,
   JobFinderSettingsRoute,
 } from "./job-finder-page-routes";
 export type { JobFinderPageContext } from "./job-finder-page-context";
@@ -1171,6 +1170,7 @@ export function JobFinderPage() {
   // not follow the person to the next one. It lives here, above the shell's
   // route container, which remounts its content for every screen.
   useDismissToastsOnScreenChange(location.pathname);
+  const toReviewCount = useToReviewCount();
   const shellMarkedRef = useRef(false);
   const {
     appearanceTheme,
@@ -1255,10 +1255,6 @@ export function JobFinderPage() {
     (change: RecentChange) =>
       latestShellState.current.context?.onUndoRecentChange(change) ??
       Promise.resolve(false),
-    [],
-  );
-  const onStopTailoredDraftPreparation = useCallback(
-    () => latestShellState.current.context?.onStopTailoredDraftPreparation(),
     [],
   );
 
@@ -1357,11 +1353,10 @@ export function JobFinderPage() {
             onPrepareRemainingJobs={onPrepareRemainingJobs}
             onUndoRecentChange={onUndoRecentChange}
             onRetrySave={retryLastSave}
-            onStopTailoredDraftPreparation={onStopTailoredDraftPreparation}
             platform={platform}
             resumeImportProgress={context.resumeImportProgress}
             saveState={saveState}
-            tailoredDraftPreparation={context.tailoredDraftPreparation}
+            toReviewCount={toReviewCount}
             workspace={workspace}
           >
             {jobFinderPageOutlet}

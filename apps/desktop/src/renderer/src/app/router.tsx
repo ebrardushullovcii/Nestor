@@ -1,5 +1,6 @@
 import { Navigate, createHashRouter } from "react-router-dom";
 import { lazy, Suspense, type ReactNode } from "react";
+import { ShortlistedScreen } from "../features/shortlisted/shortlisted-screen";
 import {
   JobFinderActionsRoute,
   JobFinderApplicationsRoute,
@@ -8,8 +9,6 @@ import {
   JobFinderProfileRoute,
   JobFinderProfileSetupRoute,
   JobFinderRouteErrorBoundary,
-  JobFinderResumeWorkspaceRoute,
-  JobFinderReviewQueueRoute,
   JobFinderSettingsRoute,
 } from "../pages/job-finder-page";
 import {
@@ -101,12 +100,7 @@ export const appRouter = createHashRouter([
       {
         path: "review-queue",
         errorElement: <JobFinderRouteErrorBoundary scope="route" />,
-        element: <JobFinderReviewQueueRoute />,
-      },
-      {
-        path: "review-queue/:jobId/resume",
-        errorElement: <JobFinderRouteErrorBoundary scope="route" />,
-        element: <JobFinderResumeWorkspaceRoute />,
+        element: <ShortlistedScreen />,
       },
       {
         path: "actions",

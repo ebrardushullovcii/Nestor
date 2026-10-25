@@ -21,9 +21,6 @@ import type {
   JobFinderOpenBrowserSessionInput,
   JobFinderPreparedApplicationPageInput,
   JobFinderSearchRequest,
-  JobFinderResumePreview,
-  JobFinderResumeWorkspace,
-  JobFinderSetResumeClaimConfirmationInput,
   JobFinderRendererWorkspaceSnapshot,
   JobSearchPreferences,
   ProfileCopilotContext,
@@ -32,8 +29,6 @@ import type {
   ProjectGroupedManualAnswerCommand,
   RemoveEmployerExclusionInput,
   ResumeImportProgressEvent,
-  ResumeApplicationMode,
-  TailoringMode,
   ResumeTimelineRepairAction,
   SaveApplicationAnswerCommandInput,
   SaveCampaignRuleInput,
@@ -43,9 +38,6 @@ import type {
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
   UpdateAiBehaviorInput,
-  ResumeAssistantMessage,
-  ResumeDraft,
-  ResumeDraftPatch,
   SourceDebugRunDetails,
   UserActionCommandInput,
 } from "@nestor/contracts";
@@ -56,8 +48,6 @@ import type {
   JobFinderQueuedJobOutcome,
 } from "@renderer/features/job-finder/lib/job-finder-types";
 import type { DiscoveryRunFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
-import type { TailoredDraftPreparationViewState } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
-import type { ResumeWorkHistoryDecisionRequest } from "@renderer/features/job-finder/screens/review-queue/resume-workspace-work-history-decisions";
 import type { JobFinderSaveState } from "./job-finder-save-state";
 import type { ApplyQueueControlAction } from "@renderer/features/job-finder/lib/apply-queue-view";
 import type { RecentChange } from "@renderer/features/job-finder/lib/recent-changes";
@@ -86,9 +76,6 @@ export interface JobFinderPageContext {
   isPending: (scope: PendingActionScope) => boolean;
   resumeOperationStarts?: Readonly<Record<string, number>>;
   isAnyPending: (scopes: readonly PendingActionScope[]) => boolean;
-  onPrepareTailoredDrafts: (jobIds?: readonly string[]) => void;
-  onStopTailoredDraftPreparation: () => void;
-  tailoredDraftPreparation: TailoredDraftPreparationViewState;
   profileCopilotBusy: boolean;
   resumeImportProgress: ResumeImportProgressEvent | null;
   saveState: JobFinderSaveState;
@@ -108,12 +95,9 @@ export interface JobFinderPageContext {
     applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
     options?: { stayOnCurrentPage?: boolean },
   ) => Promise<JobFinderAutoApplyQueueStartOutcome>;
-  /** The person's "Approve N resumes" press on Shortlisted. */
-  onApproveResumes: (jobIds: readonly string[]) => Promise<boolean>;
   /** Pause, Continue, Stop or Dismiss the Apply queue (ADR 0058). */
   onControlApplyQueue: (action: ApplyQueueControlAction) => void;
   onStartApplyCopilot: (input: JobFinderApplicationStartTarget) => void;
-  onReviewResumePdf: (jobId: string) => void;
   /** Sends one finished application after the person presses Send. */
   onSubmitPreparedApplication: (jobId: string) => Promise<void>;
   /**
@@ -147,14 +131,6 @@ export interface JobFinderPageContext {
   onRemoveEmployerExclusion: (input: RemoveEmployerExclusionInput) => void;
   /** `quiet`: no success message; the triage bar's Undo asked for it. */
   onRestoreDismissedJob: (jobId: string, options?: { quiet?: boolean }) => void;
-  onEditResumeWorkspace: (jobId: string) => void;
-  onGenerateResume: (
-    jobId: string,
-    options?: { selectAfter?: boolean },
-  ) => Promise<boolean>;
-  onRemoveReviewJob: (jobId: string) => void;
-  /** Approved -> To review on purpose; Undo approves the same PDF again. */
-  onMoveResumesBackToReview: (jobIds: readonly string[]) => Promise<boolean>;
   /** Takes waiting jobs out of the Apply queue before a run takes them. */
   onTakeOutOfApplyQueue: (jobIds: readonly string[]) => Promise<boolean>;
   /**
@@ -171,43 +147,8 @@ export interface JobFinderPageContext {
     jobIds: readonly string[],
     options?: { quiet?: boolean },
   ) => Promise<void>;
-  onApproveCurrentResume: (jobId: string) => void;
-  /**
-   * Approves the resume in the background and opens the next one to review
-   * (or Shortlisted when none is left). `exportId` approves a PDF already
-   * built from the saved draft instead of building one.
-   */
-  onApproveResumeAndContinue: (
-    jobId: string,
-    nextJobId: string | null,
-    exportId?: string,
-  ) => void;
-  /** Approves a Light or Tailored draft and starts the application in one press. */
-  onApproveResumeAndApply: (jobId: string) => void;
-  onApproveResume: (jobId: string, exportId: string) => void;
-  onClearResumeApproval: (jobId: string) => void;
-  onSetWorkHistoryReviewAcknowledgment: (
-    jobId: string,
-    decision: ResumeWorkHistoryDecisionRequest,
-  ) => void;
-  /**
-   * Typed passthrough to the fenced shell command; the Resume workspace owns
-   * pending state and feedback for this action.
-   */
-  onSetResumeClaimConfirmation: (
-    input: JobFinderSetResumeClaimConfirmationInput,
-  ) => Promise<JobFinderRendererWorkspaceSnapshot>;
-  onExportResumePdf: (jobId: string) => void;
-  /** Records that the imported resume is this person's own document. */
-  onClaimResumeIdentity: () => void;
-  /** Replaces the editable profile name with the imported resume's name. */
-  onKeepResumeIdentity: () => void;
   /** Shows a file the app wrote in the OS file manager. Nothing is opened. */
   onRevealSavedFile: (path: string) => void;
-  onPreviewResumeDraft: (
-    draft: ResumeDraft,
-    requestId?: string,
-  ) => Promise<JobFinderResumePreview>;
   onGetApplyRunDetails: (
     input: JobFinderApplyRunDetailsQuery,
   ) => Promise<ApplyRunDetails>;
@@ -291,11 +232,6 @@ export interface JobFinderPageContext {
     jobIds: readonly string[],
   ) => Promise<JobFinderQueuedJobOutcome>;
   onDismissJobs?: (jobIds: readonly string[]) => Promise<void>;
-  onSetJobResumeApplicationMode: (
-    jobId: string,
-    resumeApplicationMode: ResumeApplicationMode,
-    resumeTailoringMode?: TailoringMode | null,
-  ) => void;
   onRejectProfileCopilotPatchGroup: (patchGroupId: string) => void;
   onResetWorkspace: () => void | Promise<boolean | void>;
   onResetBrowser: () => Promise<boolean>;
@@ -307,34 +243,6 @@ export interface JobFinderPageContext {
    */
   onCancelDiscovery?: (runId: string) => Promise<boolean>;
   onRunDiscoveryForTarget?: (targetId: string) => void;
-  onRefreshResumeWorkspace: (jobId: string) => void;
-  onResumeWorkspaceDirtyChange: (dirty: boolean) => void;
-  /**
-   * Reports each user-authored Resume Studio draft edit — including edits
-   * made while the workspace was already dirty, when no dirty transition
-   * fires — so the shell's exact-request save retry stays truthful.
-   */
-  onResumeWorkspaceDraftEdited: () => void;
-  onRegenerateResumeDraft: (jobId: string) => void;
-  onRegenerateResumeSection: (jobId: string, sectionId: string) => void;
-  onRestoreResumeDraftRevision: (jobId: string, revisionId: string) => void;
-  onUndoResumeAssistantEdit: (jobId: string, revisionId: string) => void;
-  onWriteEditableResumeForOriginalJob: (
-    jobId: string,
-    pendingRequest: string | null,
-  ) => void;
-  onSaveResumeDraft: (draft: ResumeDraft) => void;
-  /** Saves Resume Studio edits by itself; resolves with what happened. */
-  onAutosaveResumeDraft: (
-    draft: ResumeDraft,
-    onSaved: (updatedAt: string) => void,
-    autosaveSessionId?: string,
-  ) => Promise<{ saved: true } | { saved: false; message: string }>;
-  onSaveResumeDraftAndThen: (
-    draft: ResumeDraft,
-    next: () => void | Promise<void>,
-    successMessage?: string | null,
-  ) => void;
   onSaveSetupStep: (
     profile: CandidateProfile,
     searchPreferences: JobSearchPreferences,
@@ -345,21 +253,10 @@ export interface JobFinderPageContext {
       stayOnCurrentStep?: boolean;
     },
   ) => void;
-  onApplyResumePatch: (
-    patch: ResumeDraftPatch,
-    revisionReason?: string | null,
-  ) => void;
   onSendProfileCopilotMessage: (
     content: string,
     context?: ProfileCopilotContext,
   ) => void | Promise<boolean>;
-  onSendResumeAssistantMessage: (jobId: string, content: string) => void;
-  onResolveResumeAssistantProposal: (
-    jobId: string,
-    proposalId: string,
-    action: "accept" | "reject",
-    patchIds: readonly string[],
-  ) => void;
   onUndoProfileRevision: (revisionId: string) => void;
   onRunSourceDebug: (
     targetId: string,
@@ -439,8 +336,5 @@ export interface JobFinderPageContext {
   selectedTailoredAsset:
     | JobFinderRendererWorkspaceSnapshot["tailoredAssets"][number]
     | null;
-  resumeAssistantMessages: readonly ResumeAssistantMessage[];
-  resumeAssistantPending: boolean;
-  resumeWorkspace: JobFinderResumeWorkspace | null;
   workspace: JobFinderRendererWorkspaceSnapshot;
 }

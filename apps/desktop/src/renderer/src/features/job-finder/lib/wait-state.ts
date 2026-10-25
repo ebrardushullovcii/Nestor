@@ -2,13 +2,8 @@
  * The shared wait contract for every Job Finder surface.
  *
  * `docs/PRODUCT.md` "Honest loading": every wait shows elapsed and expected
- * time or a real progress signal, never a fabricated percentage. The reference
- * implementation of that trio used to live inside
- * `screens/review-queue/review-queue-progress.ts`, so only the two review-queue
- * waits had it and five others had one leg or none — a ~22s Copilot round-trip
- * showed three dots and no clock. The helpers now live here, one import away
- * from any screen, and `review-queue-progress.ts` re-exports them so its own
- * callers are unchanged.
+ * time or a real progress signal, never a fabricated percentage. The helpers
+ * live here, one import away from any screen.
  */
 
 /**

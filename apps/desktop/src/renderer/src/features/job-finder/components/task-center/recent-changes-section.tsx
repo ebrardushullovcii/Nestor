@@ -8,8 +8,8 @@ import {
   useRecentChanges,
   type RecentChange,
 } from "../../lib/recent-changes";
-import { collectPreparedApplicationJobIds } from "../../screens/review-queue/review-queue-status";
-import { formatRelativeTimestamp } from "../../screens/review-queue/resume-workspace-time";
+import { collectPreparedApplicationJobIds } from "../../lib/review-queue-status";
+import { formatRelativeTimestamp } from "../../lib/relative-time";
 import { readFullWorkspaceIfBehind } from "../../lib/workspace-view-refresh";
 
 /**

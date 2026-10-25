@@ -5,7 +5,6 @@ import {
   type DiscoveryActivityEvent,
   type JobFinderAgentDiscoveryResult,
   type JobFinderRendererWorkspaceSnapshot,
-  type ResumeAssistantMessage,
 } from "@nestor/contracts";
 import type {
   ActionState,
@@ -81,11 +80,10 @@ function createDiscoveryFeedbackHarness(input: {
     }
   };
 
-  const { runAction, runResumeWorkspaceAction, withPendingScope } =
-    createActionRunners({
-      setActionState: applyActionState,
-      setPendingActionState: vi.fn(),
-    });
+  const { runAction, withPendingScope } = createActionRunners({
+    setActionState: applyActionState,
+    setPendingActionState: vi.fn(),
+  });
   const setSelectedReviewJobId = vi.fn();
   const pageActions = createPrimaryPageActions({
     actions: {
@@ -97,7 +95,6 @@ function createDiscoveryFeedbackHarness(input: {
     } as unknown as JobFinderShellActions,
     runAction: input.runActionOverride ?? runAction,
     refreshResumeWorkspace: vi.fn().mockResolvedValue(true),
-    runResumeWorkspaceAction,
     setActionState: applyActionState,
     setDiscoveryRunFeedback,
     setLiveDiscoveryEvents: (
@@ -599,139 +596,5 @@ describe("onQueueJob request-local shortlist outcome", () => {
     });
 
     expect(harness.actionState.message).toBe("offline");
-  });
-});
-
-describe("onRegenerateResumeSection proposal-only truth", () => {
-  function createAssistantMessage(input: {
-    createdAt: string;
-    id: string;
-    proposalStatus: ResumeAssistantMessage["proposalStatus"];
-  }): ResumeAssistantMessage {
-    return {
-      id: input.id,
-      jobId: "job_ready",
-      role: "assistant",
-      content: "assistant reply",
-      patches: [],
-      proposalStatus: input.proposalStatus,
-      baseDraftUpdatedAt: null,
-      resolvedPatchIds: [],
-      resolvedAt: null,
-      proposalError: null,
-      createdAt: input.createdAt,
-    };
-  }
-
-  function createRegenerationHarness(input: {
-    regenerateResumeSection: JobFinderShellActions["regenerateResumeSection"];
-    getResumeAssistantMessages: JobFinderShellActions["getResumeAssistantMessages"];
-  }) {
-    return createDiscoveryFeedbackHarness({
-      runAgentDiscovery: vi.fn<JobFinderShellActions["runAgentDiscovery"]>(),
-      actions: {
-        getResumeAssistantMessages: input.getResumeAssistantMessages,
-        regenerateResumeSection: input.regenerateResumeSection,
-      },
-    });
-  }
-
-  it("reports a pending proposal without claiming the section changed", async () => {
-    const regenerateResumeSection = vi
-      .fn<JobFinderShellActions["regenerateResumeSection"]>()
-      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
-    const getResumeAssistantMessages = vi
-      .fn<JobFinderShellActions["getResumeAssistantMessages"]>()
-      .mockResolvedValue([
-        createAssistantMessage({
-          createdAt: "2026-08-24T10:00:00.000Z",
-          id: "message_old",
-          proposalStatus: "none",
-        }),
-        createAssistantMessage({
-          createdAt: "2026-08-24T10:01:00.000Z",
-          id: "message_pending",
-          proposalStatus: "pending",
-        }),
-      ]);
-    const harness = createRegenerationHarness({
-      getResumeAssistantMessages,
-      regenerateResumeSection,
-    });
-
-    harness.pageActions.onRegenerateResumeSection(
-      "job_ready",
-      "section_summary",
-    );
-
-    await vi.waitFor(() => {
-      expect(harness.actionState.message).toBe(
-        "Rewrite proposed for review. Nothing changed yet.",
-      );
-    });
-    expect(regenerateResumeSection).toHaveBeenCalledWith(
-      "job_ready",
-      "section_summary",
-    );
-    expect(getResumeAssistantMessages).toHaveBeenCalledWith("job_ready");
-    expect(harness.actionState.message).not.toBe("Section refreshed.");
-  });
-
-  it("reports when no changes were proposed instead of claiming a refresh", async () => {
-    const regenerateResumeSection = vi
-      .fn<JobFinderShellActions["regenerateResumeSection"]>()
-      .mockResolvedValue({} as JobFinderRendererWorkspaceSnapshot);
-    const getResumeAssistantMessages = vi
-      .fn<JobFinderShellActions["getResumeAssistantMessages"]>()
-      .mockResolvedValue([
-        createAssistantMessage({
-          createdAt: "2026-08-24T10:01:00.000Z",
-          id: "message_no_change",
-          proposalStatus: "none",
-        }),
-      ]);
-    const harness = createRegenerationHarness({
-      getResumeAssistantMessages,
-      regenerateResumeSection,
-    });
-
-    harness.pageActions.onRegenerateResumeSection(
-      "job_ready",
-      "section_summary",
-    );
-
-    await vi.waitFor(() => {
-      expect(harness.actionState.message).toBe(
-        "No changes were proposed for this section.",
-      );
-    });
-    expect(harness.actionState.message).not.toBe("Section refreshed.");
-  });
-
-  it("keeps the existing regeneration action errors untouched", async () => {
-    const regenerateResumeSection = vi
-      .fn<JobFinderShellActions["regenerateResumeSection"]>()
-      .mockRejectedValue(
-        new Error("Unlock the 'Summary' section before regenerating it."),
-      );
-    const getResumeAssistantMessages =
-      vi.fn<JobFinderShellActions["getResumeAssistantMessages"]>();
-    const harness = createRegenerationHarness({
-      getResumeAssistantMessages,
-      regenerateResumeSection,
-    });
-
-    harness.pageActions.onRegenerateResumeSection(
-      "job_ready",
-      "section_locked",
-    );
-
-    await vi.waitFor(() => {
-      expect(harness.actionState.message).toBe(
-        "Unlock the 'Summary' section before regenerating it.",
-      );
-    });
-    // The outcome read never runs for a rejected action.
-    expect(getResumeAssistantMessages).not.toHaveBeenCalled();
   });
 });

@@ -4,13 +4,14 @@ import {
   isAiServiceBusy,
 } from "@nestor/ai-providers";
 import {
+  isResumeTemplateApplyEligible,
   JobListQuerySchema,
+  type ResumeCommandOutputs,
   type JobDetail,
   type JobListQueryInput,
   type ResumeDraft,
   type ResumeLevel,
   type ShortlistedPage,
-  type StoredResume,
 } from "@nestor/contracts";
 import { createAdaptiveConcurrencyLimiter } from "@nestor/core";
 import {
@@ -25,6 +26,7 @@ import {
   readListingDetail,
   type ListingHtmlFetcher,
 } from "../internal/listing-detail-enrichment";
+import { normalizeResumeDraftEntryOrdering } from "../internal/resume-entry-ordering";
 import { buildResumeRenderDocument } from "../internal/resume-workspace-helpers";
 import type { JobFinderDocumentManager } from "../internal/workspace-service-contracts";
 import {
@@ -51,10 +53,7 @@ export interface ResumeServiceDeps extends ResumeWriterDeps {
   fetchListingHtml?: ListingHtmlFetcher;
 }
 
-export interface ResumeView {
-  job: JobDetail;
-  resume: StoredResume | null;
-}
+export type ResumeView = ResumeCommandOutputs["get_resume"];
 
 export type ResumeService = ReturnType<typeof createResumeService>;
 
@@ -256,11 +255,23 @@ export function createResumeService(deps: ResumeServiceDeps) {
     },
 
     get(jobId: number): ResumeView {
-      return { job: requireJob(jobId), resume: resumes.get(jobId) };
+      return {
+        job: requireJob(jobId),
+        resume: resumes.get(jobId),
+        templates: deps.documentManager
+          .listResumeTemplates()
+          .filter(isResumeTemplateApplyEligible)
+          .map(({ id, label }) => ({ id, label })),
+      };
     },
 
     saveDraft(jobId: number, draft: ResumeDraft, expectedUpdatedAt: string) {
-      return resumes.saveDraft(jobId, draft, expectedUpdatedAt);
+      // The editor's Reset order asks for date order; saving applies it.
+      return resumes.saveDraft(
+        jobId,
+        normalizeResumeDraftEntryOrdering(draft),
+        expectedUpdatedAt,
+      );
     },
 
     setLevel,

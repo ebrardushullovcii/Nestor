@@ -52,7 +52,6 @@ import {
 import { cn } from "@renderer/lib/cn";
 import type { JobFinderScreen } from "../lib/job-finder-types";
 import type { JobFinderSaveState } from "@renderer/pages/job-finder-save-state";
-import type { TailoredDraftPreparationViewState } from "../screens/review-queue/review-queue-status";
 import { JobFinderSaveStatus } from "./job-finder-save-status";
 import {
   JOB_FINDER_GLOBAL_SEARCH_LABEL,
@@ -65,7 +64,6 @@ import {
   countApplicationRecords,
   countDiscoveryVisibleJobs,
   countNeedsYou,
-  countShortlistedJobs,
   countUnreadCampaignNotifications,
   countUserCreatedSearchPlans,
   selectCampaignJobIds,
@@ -116,20 +114,15 @@ interface JobFinderShellProps {
   ) => void | Promise<unknown>;
   onUndoRecentChange?: (change: RecentChange) => Promise<boolean>;
   onRetrySave?: () => void;
-  onStopTailoredDraftPreparation?: () => void;
   platform: "darwin" | "linux" | "win32";
   resumeImportProgress?: ResumeImportProgressEvent | null;
   saveState?: JobFinderSaveState;
-  tailoredDraftPreparation?: TailoredDraftPreparationViewState | null;
+  /** Shortlisted jobs whose resume waits to be read, from the job store. */
+  toReviewCount?: number | null;
   workspace: JobFinderRendererWorkspaceSnapshot;
 }
 
-const screenRouteMap: Record<
-  Exclude<
-    JobFinderScreen,
-    "profile">,
-  string
-> = {
+const screenRouteMap: Record<Exclude<JobFinderScreen, "profile">, string> = {
   home: "/job-finder/home",
   discovery: "/job-finder/discovery",
   "review-queue": "/job-finder/review-queue",
@@ -519,11 +512,10 @@ export function JobFinderShell({
   onPrepareRemainingJobs,
   onUndoRecentChange,
   onRetrySave,
-  onStopTailoredDraftPreparation,
   platform,
   resumeImportProgress = null,
   saveState,
-  tailoredDraftPreparation = null,
+  toReviewCount = null,
   workspace,
 }: JobFinderShellProps) {
   const isMac = platform === "darwin";
@@ -680,10 +672,7 @@ export function JobFinderShell({
       {
         id: "review-queue",
         label: "Shortlisted",
-        count: toDestinationBadgeCount(
-          openingCounts?.shortlisted ??
-            countShortlistedJobs(workspace, campaignJobIds),
-        ),
+        count: toDestinationBadgeCount(toReviewCount ?? 0),
         countKind: "inventory",
         icon: ClipboardCheck,
       },
@@ -720,7 +709,7 @@ export function JobFinderShell({
         icon: Settings,
       },
     ];
-  }, [launchCounts, searchCounts, workspace]);
+  }, [launchCounts, searchCounts, toReviewCount, workspace]);
 
   const actionScreen = screenDefinitions.find(
     (screen) => screen.id === "actions",
@@ -1785,9 +1774,7 @@ export function JobFinderShell({
               }}
               onPrepareRemainingJobs={onPrepareRemainingJobs}
               onUndoRecentChange={onUndoRecentChange}
-              onStopTailoredDraftPreparation={onStopTailoredDraftPreparation}
               resumeImportProgress={resumeImportProgress}
-              tailoredDraftPreparation={tailoredDraftPreparation}
               workspace={workspace}
             />
             <AssistantToggle platform={platform} />

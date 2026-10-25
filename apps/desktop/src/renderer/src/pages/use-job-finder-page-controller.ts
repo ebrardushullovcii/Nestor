@@ -1,7 +1,6 @@
 import { takePrefetchedResumeWorkspace } from "@renderer/features/job-finder/lib/resume-workspace-prefetch";
 import { useToast } from "@renderer/components/ui/toast";
 import { isActionNews, isActionSuccessToast } from "./action-news-toast";
-import { stopAssistantUiResumeBatch } from "./use-job-finder-page-controller-actions";
 import { useResumeOperationStarts } from "./use-resume-operation-starts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
@@ -23,7 +22,6 @@ import type {
   JobFinderShellActions,
 } from "@renderer/features/job-finder/lib/job-finder-types";
 import type { DiscoveryRunFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
-import type { TailoredDraftPreparationViewState } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
 import { useBlocker, useLocation, useNavigate } from "react-router-dom";
 import {
   clearPendingActionScopes,
@@ -69,8 +67,9 @@ import {
 } from "./job-finder-page-selection";
 
 const EMPTY_RESUME_ASSISTANT_MESSAGES: readonly ResumeAssistantMessage[] = [];
-const EMPTY_REVIEW_QUEUE: Readonly<JobFinderRendererWorkspaceSnapshot["reviewQueue"]> =
-  [];
+const EMPTY_REVIEW_QUEUE: Readonly<
+  JobFinderRendererWorkspaceSnapshot["reviewQueue"]
+> = [];
 
 export type ApplyCopilotVisualCheckpointRequest = {
   jobId: string;
@@ -89,18 +88,6 @@ export type ApplyCopilotVisualCheckpointRequest = {
   ) => string | null | void | Promise<string | null | void>;
   onCancel?: () => void;
 };
-
-function createIdleTailoredDraftPreparationState(): TailoredDraftPreparationViewState {
-  return {
-    attemptedCount: 0,
-    completedCount: 0,
-    currentIndex: null,
-    eligibleRemainingCount: 0,
-    failedCount: 0,
-    status: "idle",
-    totalCount: 0,
-  };
-}
 
 export type JobFinderNavigationGuardInput = {
   profileSurfaceDirty: boolean;
@@ -502,27 +489,10 @@ export function useJobFinderPageController() {
   ] = useState<ApplyCopilotVisualCheckpointRequest | null>(null);
   const profileCopilotRequestTokenRef = useRef(0);
   const [resumeWorkspaceDirty, setResumeWorkspaceDirty] = useState(false);
-  const [tailoredDraftPreparation, setTailoredDraftPreparation] =
-    useState<TailoredDraftPreparationViewState>(
-      createIdleTailoredDraftPreparationState,
-    );
-  useEffect(
-    () =>
-      window.nestor.assistant?.onResumeBatchStop?.((batchId) => {
-        if (!stopAssistantUiResumeBatch(batchId)) return;
-        setTailoredDraftPreparation((current) =>
-          current.status === "running"
-            ? { ...current, stopRequested: true }
-            : current,
-        );
-      }),
-    [],
-  );
-  const tailoredDraftPreparationRunRef = useRef(false);
-  const tailoredDraftPreparationStopRequestedRef = useRef(false);
-  const tailoredDraftPreparationDisposedRef = useRef(false);
   const sourceDebugRunIdRef = useRef(0);
-  const latestWorkspaceRef = useRef<JobFinderRendererWorkspaceSnapshot | null>(null);
+  const latestWorkspaceRef = useRef<JobFinderRendererWorkspaceSnapshot | null>(
+    null,
+  );
   const activeResumeWorkspaceJobId = getActiveResumeWorkspaceJobId(
     location.pathname,
   );
@@ -1162,7 +1132,9 @@ export function useJobFinderPageController() {
     // The review pass reads the next resume ahead; showing it at once keeps
     // "Approve and next" from flashing a loading card. The read below still
     // runs and replaces it.
-    const prefetched = takePrefetchedResumeWorkspace(activeResumeWorkspaceJobId);
+    const prefetched = takePrefetchedResumeWorkspace(
+      activeResumeWorkspaceJobId,
+    );
     if (prefetched) {
       applyResumeWorkspaceSnapshot(prefetched);
       setResumeAssistantMessages(prefetched.assistantMessages);
@@ -1230,19 +1202,6 @@ export function useJobFinderPageController() {
     navigate,
     setSelectedReviewJobId,
   ]);
-
-  // One unmount-only lifecycle effect owns the tailored-draft disposal
-  // signal. Sibling route changes keep this controller mounted above the
-  // outlet, so only true teardown may ask a parked sequential batch to stop
-  // after its current item. Resetting on mount keeps React StrictMode's
-  // simulated unmount/remount from permanently poisoning a live controller.
-  useEffect(() => {
-    tailoredDraftPreparationDisposedRef.current = false;
-
-    return () => {
-      tailoredDraftPreparationDisposedRef.current = true;
-    };
-  }, []);
 
   // Route-change protection is owned by the useBlocker guard above, so shell
   // navigation only needs to navigate; the blocker asks the single composed
@@ -1415,12 +1374,7 @@ export function useJobFinderPageController() {
       setSelectedApplicationRecordId,
       setSelectedDiscoveryJobId,
       setSelectedReviewJobId,
-      setTailoredDraftPreparation,
       sourceDebugRunIdRef,
-      tailoredDraftPreparation,
-      tailoredDraftPreparationRunRef,
-      tailoredDraftPreparationStopRequestedRef,
-      tailoredDraftPreparationDisposedRef,
       workspace: workspaceWithOptimisticProfileCopilot ?? workspace,
     });
   }, [
@@ -1461,7 +1415,6 @@ export function useJobFinderPageController() {
     selectedReviewItem,
     selectedReviewJob,
     selectedTailoredAsset,
-    tailoredDraftPreparation,
     noteProfileSurfaceDraftEdited,
     noteResumeWorkspaceDraftEdited,
     noteSettingsDraftEdited,

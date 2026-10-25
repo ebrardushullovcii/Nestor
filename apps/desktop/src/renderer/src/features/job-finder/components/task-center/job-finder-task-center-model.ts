@@ -7,8 +7,7 @@ import type {
   ResumeImportRun,
   SourceDebugRunRecord,
 } from "@nestor/contracts";
-import {
-  classifyPausedApplyRun } from "../../lib/apply-run-pause-state";
+import { classifyPausedApplyRun } from "../../lib/apply-run-pause-state";
 import {
   formatDiscoveryRunCountLabel,
   formatDiscoveryRunReportLabel,
@@ -18,7 +17,6 @@ import {
 } from "../../lib/discovery-run-count-label";
 import { applyRunJobNeedsPreparation } from "../../screens/applications/applications-detail-panel-helpers";
 import { WAITING_FOR_BROWSER_TAB_SUMMARY } from "../../screens/applications/applications-recovery-state";
-import type { TailoredDraftPreparationViewState } from "../../screens/review-queue/review-queue-status";
 import {
   DISCOVERY_RUN_STATE_LABELS,
   DISCOVERY_STOP_UNACKNOWLEDGED_LABEL,
@@ -33,8 +31,7 @@ export type JobFinderTaskKind =
   | "source_check"
   | "resume_import"
   | "apply"
-  | "safeguards"
-  | "tailored_drafts";
+  | "safeguards";
 export type JobFinderTaskStatus =
   | "active"
   | "stopping"
@@ -54,7 +51,7 @@ export interface JobFinderTaskCenterItem {
   countLabel: string;
   historyEstimateLabel: string | null;
   canCancel: boolean;
-  cancelKind: "discovery" | "apply" | "tailored_drafts" | null;
+  cancelKind: "discovery" | "apply" | null;
   resumeRoute: string | null;
   resumeActionLabel: string | null;
   applyRecoveryJobIds?: readonly string[];
@@ -76,10 +73,6 @@ export interface BuildJobFinderTaskCenterModelInput {
   isResumeImportPending: boolean;
   liveDiscoveryEvents?: readonly DiscoveryActivityEvent[] | undefined;
   resumeImportProgress?: ResumeImportProgressEvent | null | undefined;
-  tailoredDraftPreparation?:
-    | TailoredDraftPreparationViewState
-    | null
-    | undefined;
   /** Injected by tests so the bounded Stop window is deterministic. */
   now?: number | undefined;
 }
@@ -951,43 +944,6 @@ function buildApplyRunTask(
   };
 }
 
-/**
- * Tailored-draft batch progress is renderer-session state, not durable
- * history: the task is visible only while a batch is actually running so the
- * center never implies that an interrupted run survived a restart.
- */
-function buildTailoredDraftsTask(
-  input: BuildJobFinderTaskCenterModelInput,
-): JobFinderTaskCenterItem | null {
-  const preparation = input.tailoredDraftPreparation;
-  if (!preparation || preparation.status !== "running") {
-    return null;
-  }
-
-  const completedCount = Math.max(0, preparation.completedCount);
-  const totalCount = Math.max(0, preparation.totalCount);
-  const failedCount = Math.max(0, preparation.failedCount);
-
-  return {
-    id: "tailored-drafts-current",
-    kind: "tailored_drafts",
-    title: "Tailored drafts",
-    status: "active",
-    stageLabel: preparation.stopRequested
-      ? "Stopping · finishing the resumes already started"
-      : "Preparing shortlisted resumes",
-    sourceLabel: "Shortlisted jobs",
-    countLabel: `${completedCount} of ${totalCount} ${preparation.cancelledCount ? `finished · ${preparation.cancelledCount} removed` : "prepared"}${
-      failedCount > 0 ? ` · ${failedCount} failed` : ""
-    }`,
-    historyEstimateLabel: null,
-    canCancel: !preparation.stopRequested,
-    cancelKind: "tailored_drafts",
-    resumeRoute: "/job-finder/review-queue",
-    resumeActionLabel: "Open Shortlisted",
-  };
-}
-
 const FINISHED_TASK_SHOWN_FOR_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -1019,7 +975,6 @@ export function buildJobFinderTaskCenterModel(
     buildSourceCheckTask(input),
     buildResumeTask(input),
     ...buildApplyTasks(input),
-    buildTailoredDraftsTask(input),
   ].filter((item): item is JobFinderTaskCenterItem => item !== null);
 
   return {
