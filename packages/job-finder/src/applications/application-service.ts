@@ -109,6 +109,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   const resumes = createResumeStore(jobs);
   const active = new Map<number, AbortController>();
   const waiting = new Map<number, number>();
+  const opening = new Map<number, Promise<boolean>>();
   const capacity = applicationPreparationConcurrency(
     String(deps.concurrency ?? 4),
   );
@@ -167,10 +168,17 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     settings: JobFinderSettings,
   ): Promise<ApplicationAutomationMode | null> {
     const instruction = applications.instructionFor(row.id);
-    if (instruction)
-      return (
-        deps.instructionMode?.({ ...instruction, jobId: row.jobId }) ?? null
-      );
+    if (instruction) {
+      const requested = await deps.instructionMode?.({
+        ...instruction,
+        jobId: row.jobId,
+      });
+      if (!requested) return null;
+      return requested === "autonomous_submit" &&
+        row.mode !== "autonomous_submit"
+        ? "confirm_before_submit"
+        : requested;
+    }
     return row.mode === "autonomous_submit" &&
       settings.applicationAutomationMode === "autonomous_submit"
       ? "autonomous_submit"
@@ -274,7 +282,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           identity.resultId,
           target,
         );
-      if (previous?.accessRecheck) startingUrl = target;
+      if (transferred && previous?.accessRecheck) startingUrl = target;
     }
     const origin = new URL(target).origin;
     const allowedOrigins = new Set([
@@ -1029,23 +1037,55 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       }
       wake();
     },
-    async open(id: number): Promise<boolean> {
-      const row = applications.getApplication(id);
-      const work = applications.getWork(id);
-      if (!row || !work || !["ready", "needs_you"].includes(row.state))
-        return false;
-      const key = applicationIdentity(id, work.attempt).resultId;
-      const focused = await browser.focusApplicationPageBinding?.(
-        "target_site",
-        key,
-      );
-      if (focused) {
-        await browser.handApplicationPageToPerson?.("target_site", key);
-        waiting.set(id, work.attempt);
-      }
-      return focused ?? false;
+    open(id: number): Promise<boolean> {
+      const pending = opening.get(id);
+      if (pending) return pending;
+      const operation = open(id).finally(() => opening.delete(id));
+      opening.set(id, operation);
+      return operation;
     },
   };
+
+  async function open(id: number): Promise<boolean> {
+    const row = applications.getApplication(id);
+    const work = applications.getWork(id);
+    if (!row || !work || !["ready", "needs_you"].includes(row.state))
+      return false;
+    const key = applicationIdentity(id, work.attempt).resultId;
+    let focused = await browser.focusApplicationPageBinding?.(
+      "target_site",
+      key,
+    );
+    if (
+      !focused &&
+      row.state === "needs_you" &&
+      applications.needsYou.accessForApplication(id).length
+    ) {
+      const job = jobs.getJob(row.jobId);
+      if (!job || !browser.reloadApplicationPageBinding) return false;
+      // Re-enter with GET, not a saved credential/MFA POST or a stale wizard URL.
+      await browser.reloadApplicationPageBinding(
+        "target_site",
+        key,
+        job.applyUrl ?? job.url,
+      );
+      focused = await browser.focusApplicationPageBinding?.("target_site", key);
+    }
+    if (!current(row)) {
+      await closePage(id, work.attempt);
+      return false;
+    }
+    if (focused) {
+      await browser.handApplicationPageToPerson?.("target_site", key);
+      waiting.set(id, work.attempt);
+      return true;
+    }
+    if (row.state !== "ready") return false;
+    await closePage(id, work.attempt).catch(onError);
+    const queued = applications.reprepareForReview(id, row.attempt);
+    if (queued) wake();
+    return queued;
+  }
 }
 
 export type ApplicationService = ReturnType<typeof createApplicationService>;

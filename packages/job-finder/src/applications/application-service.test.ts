@@ -157,6 +157,7 @@ async function setup(count: number, concurrency?: number) {
   };
   const browser = {
     executeApplicationFlow: execute,
+    focusApplicationPageBinding: vi.fn(() => Promise.resolve(false)),
     readApplicationPageBinding: vi.fn<
       (source: string, key: string) => Promise<RawApplyPage | null>
     >(() => Promise.resolve(null)),
@@ -178,7 +179,7 @@ async function setup(count: number, concurrency?: number) {
     ),
     listSubmissionOutcomeRecords: vi.fn(() => Promise.resolve([])),
   } as unknown as ApplicationServiceDeps["authorityRepository"];
-  const service = createApplicationService({
+  const deps: ApplicationServiceDeps = {
     jobs,
     applications,
     browser: browser as unknown as BrowserSessionRuntime,
@@ -196,7 +197,8 @@ async function setup(count: number, concurrency?: number) {
     authorizeSending,
     ...(concurrency === undefined ? {} : { concurrency }),
     onError,
-  });
+  };
+  const service = createApplicationService(deps);
   cleanups.push(async () => {
     service.stop();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -216,8 +218,144 @@ async function setup(count: number, concurrency?: number) {
     authorizeSending,
     onError,
     personPage,
+    deps,
   };
 }
+
+it("opens a restored Ready form without preparing or authorizing a send again", async () => {
+  const f = await setup(1);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  f.service.stop();
+  const restarted = createApplicationService(f.deps);
+  cleanups.unshift(() => restarted.stop());
+  await restarted.start();
+  f.browser.focusApplicationPageBinding.mockResolvedValue(true);
+  const row = f.applications.listApplications().rows[0]!;
+  expect(await restarted.open(row.id)).toBe(true);
+  expect(f.applications.getApplication(row.id)?.state).toBe("ready");
+  expect(f.execute).toHaveBeenCalledTimes(1);
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+});
+
+it("refills a lost Ready form through the bounded queue and never revives its send instruction", async () => {
+  const f = await setup(1);
+  f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
+  f.seed.settings.applicationAutomationMode = "autonomous_submit";
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit", {
+    conversationId: "send-before-restart",
+    mode: "autonomous_submit",
+  });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  f.service.stop();
+  f.authorizeSending.mockClear();
+  const restarted = createApplicationService(f.deps);
+  cleanups.unshift(() => restarted.stop());
+  await restarted.start();
+  const row = f.applications.listApplications().rows[0]!;
+  expect(
+    await Promise.all([restarted.open(row.id), restarted.open(row.id)]),
+  ).toEqual([true, true]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(f.applications.getApplication(row.id)).toMatchObject({
+    state: "running",
+    mode: "confirm_before_submit",
+    attempt: 2,
+  });
+  expect(f.execute.mock.calls[1]![1]).toMatchObject({
+    submitAuthorized: false,
+    applyAutomationMode: "confirm_before_submit",
+  });
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
+  );
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+});
+
+it("reopens the original account entry after restart and keeps one shared task until both forms continue", async () => {
+  const f = await setup(2);
+  preparation.blocker = {
+    code: "site_login_required",
+    requiresPerson: true,
+    summary: "Sign in",
+    detail: "Sign in",
+    nextActionLabel: "Open browser",
+  };
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  f.releases.splice(0).forEach((release) => release());
+  await vi.waitFor(() =>
+    expect(
+      f.applications.listApplications({ state: "needs_you" }).rows,
+    ).toHaveLength(2),
+  );
+  f.service.stop();
+  const restarted = createApplicationService(f.deps);
+  cleanups.unshift(() => restarted.stop());
+  await restarted.start();
+  const task = f.applications.needsYou.list().rows[0]!;
+  const row = f.applications.needsYou.details(task.id)!.applications[0]!;
+  f.browser.reloadApplicationPageBinding.mockImplementation(() => {
+    f.browser.focusApplicationPageBinding.mockResolvedValue(true);
+    return Promise.resolve();
+  });
+  expect(await restarted.open(row.id)).toBe(true);
+  expect(
+    f.browser.reloadApplicationPageBinding,
+  ).toHaveBeenCalledExactlyOnceWith(
+    "target_site",
+    `application_${row.id}_attempt_1`,
+    f.jobs.getJob(row.jobId)!.url,
+  );
+  expect(f.execute).toHaveBeenCalledTimes(2);
+  expect(f.applications.needsYou.list().total).toBe(1);
+  expect(f.applications.needsYou.details(task.id)!.applications).toHaveLength(
+    2,
+  );
+  preparation.blocker = null;
+  f.browser.readApplicationPageBinding.mockResolvedValue({
+    ...f.personPage,
+    bodyText: "Application",
+    links: [
+      {
+        index: 0,
+        label: "Continue application",
+        href: "https://replica.test/application",
+        visible: true,
+        target: "",
+        topOffset: 0,
+      },
+    ],
+  });
+  f.browser.transferApplicationPageBinding.mockResolvedValue(false);
+  await restarted.checkAccess(task.id);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(4));
+  expect(
+    f.execute.mock.calls
+      .slice(2)
+      .every(([, input]) => input.startingUrl === undefined),
+  ).toBe(true);
+  f.releases.splice(0).forEach((release) => release());
+  await vi.waitFor(() =>
+    expect(
+      f.applications.listApplications({ state: "ready" }).rows,
+    ).toHaveLength(2),
+  );
+  expect(f.applications.needsYou.list().total).toBe(0);
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+});
 
 it("defaults to four preparations and leaves additional applications queued", async () => {
   const f = await setup(5);

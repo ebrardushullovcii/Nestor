@@ -375,6 +375,23 @@ export function createApplicationStore(store: JobStore) {
       });
     },
 
+    /** Open lost its page: refill for review, never revive permission to send. */
+    reprepareForReview(id: number, attempt: number): boolean {
+      return store.transaction(() => {
+        const row =
+          sql(`UPDATE applications SET state='queued', mode='confirm_before_submit',
+          queued_at=?, updated_at=?, error='Restoring the form for your review.'
+          WHERE id=? AND attempt=? AND state='ready' AND submitted_at IS NULL RETURNING job_id`).get(
+            Date.now(),
+            Date.now(),
+            id,
+            attempt,
+          ) as { job_id: number } | undefined;
+        if (row) changed([row.job_id]);
+        return !!row;
+      });
+    },
+
     /** The state is written before the existing guarded send can be armed. */
     beginSubmission(id: number, attempt: number): boolean {
       return store.transaction(() => {

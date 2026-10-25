@@ -344,7 +344,8 @@ export interface BrowserSessionRuntime {
    * Reload the exact retained application page once: the person signed in
    * to the same site in another tab, and this page still shows the sign-in
    * it loaded before that. A known application URL can re-enter the flow
-   * when a sign-in form stays visible after the session changes.
+   * when a sign-in form stays visible after the session changes. With an
+   * explicit application URL, a lost binding is recreated with a guarded GET.
    */
   reloadApplicationPageBinding?(
     source: JobSource,

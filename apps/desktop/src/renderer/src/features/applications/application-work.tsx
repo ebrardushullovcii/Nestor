@@ -77,12 +77,21 @@ function ApplyActions(props: { details: ApplicationDetails }) {
         kind === "open"
           ? await window.nestor.jobFinder.openApplication(target)
           : await window.nestor.jobFinder.stopApplication(target);
+      const restoring =
+        kind === "open" &&
+        done &&
+        ["queued", "running"].includes(
+          (await window.nestor.jobFinder.getApplicationDetails(target))
+            ?.application.state ?? "",
+        );
       showToast(
         done
           ? {
               title:
                 kind === "open"
-                  ? "Opened the application page"
+                  ? restoring
+                    ? "Restoring the form for your review. Apply won't send it."
+                    : "Opened the application page"
                   : "Stopped. Apply won't send it.",
             }
           : {
