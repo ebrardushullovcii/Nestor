@@ -1,6 +1,6 @@
 # Documentation
 
-Read only what the task needs. Code shows current behavior; ADRs record deliberate decisions. Investigate a mismatch before treating either the implementation or the decision as wrong.
+Read only what the task needs. Code shows current behavior; ADRs record deliberate decisions.
 
 | Need                                         | Read                                                                                |
 | -------------------------------------------- | ----------------------------------------------------------------------------------- |
