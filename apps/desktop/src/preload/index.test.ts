@@ -38,10 +38,6 @@ import "./index";
 type ExposedJobFinderApi = {
   applyJobs: Window["nestor"]["jobFinder"]["applyJobs"];
   listApplications: Window["nestor"]["jobFinder"]["listApplications"];
-  reopenApplicationPage: (
-    input: { resultId: string },
-    onProgress?: (progress: unknown) => void,
-  ) => Promise<unknown>;
   generateResumeForBatch: (
     input: ResumeBatchGenerationInput,
   ) => Promise<ResumeBatchGenerationResult>;
@@ -57,16 +53,8 @@ type ExposedJobFinderApi = {
   createApplicationAuthorityEnvelope: (input: unknown) => Promise<unknown>;
   importResume: (onProgress?: (event: unknown) => void) => Promise<unknown>;
   cancelImportResume: () => void;
-  getApplyRunDetails: (input: unknown) => Promise<unknown>;
-  exportApplicationPacket: (input: unknown) => Promise<unknown>;
   startApplyCopilotRun: (input: unknown) => Promise<unknown>;
-  startAutoApplyRun: (input: unknown) => Promise<unknown>;
-  cancelApplyRun: (input: unknown) => Promise<unknown>;
   resolveApplyConsentRequest: (input: unknown) => Promise<unknown>;
-  focusPreparedApplicationPage: (input: unknown) => Promise<unknown>;
-  projectGroupedManualAnswer: (command: unknown) => Promise<unknown>;
-  applyGroupedManualAnswer: (input: unknown) => Promise<unknown>;
-  snoozeGroupedDecision: (input: unknown) => Promise<unknown>;
   setResumeClaimConfirmation: (input: unknown) => Promise<unknown>;
   getStartupResetRecovery: () => Promise<unknown>;
   getStartupDatabaseRecovery: () => Promise<unknown>;
@@ -82,98 +70,6 @@ const exposedJobFinder = (() => {
   }
   return exposed.jobFinder;
 })();
-
-describe("preload jobFinder grouped manual-answer boundary", () => {
-  beforeEach(() => {
-    mockInvoke.mockClear();
-  });
-
-  it("exposes projectGroupedManualAnswer over the typed channel", async () => {
-    const snapshot = { generatedAt: "2026-08-15T10:00:00.000Z" };
-    mockInvoke
-      .mockResolvedValueOnce({ ready: true })
-      .mockResolvedValueOnce(snapshot);
-    const command = {
-      groupKey: "group_1",
-      requestId: "request_a",
-      expectedRequestRevision: 1,
-      answer: { type: "text", value: "5 years" },
-      saveScope: "reusable_profile",
-    };
-
-    const result = await exposedJobFinder.projectGroupedManualAnswer(command);
-
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "job-finder:project-grouped-manual-answer",
-      command,
-    );
-    expect(result).toEqual(snapshot);
-  });
-
-  it("exposes applyGroupedManualAnswer over the typed channel", async () => {
-    const snapshot = { generatedAt: "2026-08-15T10:01:00.000Z" };
-    mockInvoke.mockResolvedValueOnce(snapshot);
-    const input = {
-      decisionId: "group_1:abc123",
-      requestIds: ["request_a", "request_b"],
-      expectedRequestRevisions: { request_a: 1, request_b: 1 },
-      answer: { type: "text", value: "5 years" },
-    };
-
-    const result = await exposedJobFinder.applyGroupedManualAnswer(input);
-
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "job-finder:apply-grouped-manual-answer",
-      input,
-    );
-    expect(result).toEqual(snapshot);
-  });
-
-  it("exposes snoozeGroupedDecision over the typed channel", async () => {
-    const snapshot = { generatedAt: "2026-08-15T10:02:00.000Z" };
-    mockInvoke.mockResolvedValueOnce(snapshot);
-    const input = {
-      decisionId: "group_1:abc123",
-      expectedRevision: 1,
-      until: "2026-08-17T10:00:00.000Z",
-      reason: "Ask the recruiter",
-    };
-
-    const result = await exposedJobFinder.snoozeGroupedDecision(input);
-
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "job-finder:snooze-grouped-decision",
-      input,
-    );
-    expect(result).toEqual(snapshot);
-  });
-
-});
-
-describe("preload prepared application page boundary", () => {
-  beforeEach(() => {
-    mockInvoke.mockClear();
-  });
-
-  it("forwards the exact result lineage over its typed channel", async () => {
-    const snapshot = { generatedAt: "2026-09-21T22:00:00.000Z" };
-    mockInvoke.mockResolvedValueOnce(snapshot);
-    const input = {
-      runId: "run-1",
-      jobId: "job-1",
-      resultId: "result-1",
-      applicationRecordId: "application-1",
-    };
-
-    await expect(
-      exposedJobFinder.focusPreparedApplicationPage(input),
-    ).resolves.toEqual(snapshot);
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "job-finder:focus-prepared-application-page",
-      input,
-    );
-  });
-});
 
 describe("preload jobFinder resume import boundary", () => {
   beforeEach(() => {
@@ -207,7 +103,7 @@ describe("preload jobFinder resume import boundary", () => {
     // The failed request must not strand the module-level lock for the next
     // import attempt.
     const snapshot = { generatedAt: "2026-08-30T10:00:00.000Z" };
-    mockInvoke.mockResolvedValueOnce(snapshot);
+    mockInvoke.mockResolvedValue(snapshot);
     await expect(exposedJobFinder.importResume()).resolves.toEqual(snapshot);
   });
 
@@ -466,41 +362,6 @@ describe("preload bulk shortlist boundary", () => {
     }
   });
 });
-
-it("reopen validates progress for the requested result and removes its listener after failure", async () => {
-  mockInvoke.mockReset();
-  mockIpcRendererOn.mockClear();
-  let reject!: (error: Error) => void;
-  mockInvoke.mockReturnValueOnce(
-    new Promise((_resolve, fail) => {
-      reject = fail;
-    }),
-  );
-  const progress = vi.fn();
-  const pending = exposedJobFinder.reopenApplicationPage(
-    { resultId: "result" },
-    progress,
-  );
-  const [channel, handler] = mockIpcRendererOn.mock.calls[0]! as [
-    string,
-    (_event: unknown, payload: unknown) => void,
-  ];
-  handler({}, { resultId: "result", phase: "refilling" });
-  handler({}, { resultId: "other", phase: "ready" });
-  handler({}, { resultId: "result", phase: "submitted" });
-  expect(progress).toHaveBeenCalledExactlyOnceWith({
-    resultId: "result",
-    phase: "refilling",
-  });
-  reject(new Error("offline"));
-  await expect(pending).rejects.toThrow("offline");
-  expect(mockIpcRendererOff).toHaveBeenCalledWith(channel, handler);
-  expect(mockInvoke).toHaveBeenCalledExactlyOnceWith(
-    "job-finder:reopen-application-page",
-    expect.objectContaining({ resultId: "result" }),
-  );
-});
-
 
 it("exposes the store Apply selection and paged applications without a workspace response", async () => {
   mockInvoke.mockReset();

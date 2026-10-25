@@ -183,7 +183,6 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
           >
             {openError}
           </p>
-        ) : null}
       </section>
     </details>
   );

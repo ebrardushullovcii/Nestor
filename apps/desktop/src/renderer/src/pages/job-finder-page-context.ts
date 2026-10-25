@@ -1,41 +1,25 @@
 import type {
-  ApplicationCrmBulkStageMutationInput,
-  ApplicationCrmExportFormat,
-  ApplicationCrmMutationInput,
   AppearanceTheme,
-  ApplyGroupedManualAnswerInput,
-  ApplyRunDetails,
-  ClearApplicationAnswerCommandInput,
   CandidateProfile,
   EditableSourceInstructionArtifact,
-  JobFinderApplyRunActionInput,
-  JobFinderApplyRunDetailsQuery,
-  JobFinderApplicationStartTarget,
   JobFinderOpenBrowserSessionInput,
-  JobFinderPreparedApplicationPageInput,
   JobFinderSearchRequest,
   JobFinderRendererWorkspaceSnapshot,
   JobSearchPreferences,
   ProfileCopilotContext,
   ProfileSetupReviewActionOptions,
   ProfileSetupStep,
-  ProjectGroupedManualAnswerCommand,
   ResumeImportProgressEvent,
   ResumeTimelineRepairAction,
-  SaveApplicationAnswerCommandInput,
   SetJobFinderActivityControlInput,
-  SnoozeGroupedDecisionInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
   UpdateAiBehaviorInput,
   SourceDebugRunDetails,
-  UserActionCommandInput,
 } from "@nestor/contracts";
 import type { PendingActionScope } from "./job-finder-pending-actions";
 import type { ActionState } from "@renderer/features/job-finder/lib/job-finder-types";
 import type { JobFinderSaveState } from "./job-finder-save-state";
-import type { ApplyQueueControlAction } from "@renderer/features/job-finder/lib/apply-queue-view";
-import type { RecentChange } from "@renderer/features/job-finder/lib/recent-changes";
 
 /**
  * Opt-in error propagation for one call, not a mode change for the action.
@@ -64,20 +48,6 @@ export interface JobFinderPageContext {
   resumeImportProgress: ResumeImportProgressEvent | null;
   saveState: JobFinderSaveState;
   onAnalyzeProfileFromResume: () => void;
-  onApplyGroupedManualAnswer: (input: ApplyGroupedManualAnswerInput) => void;
-  onApproveApplyRun: (input: JobFinderApplyRunActionInput) => void;
-  onCancelApplyRun: (input: JobFinderApplyRunActionInput) => Promise<boolean>;
-  onRevokeApplyRunApproval: (input: JobFinderApplyRunActionInput) => void;
-  onStartAutoApply: (input: JobFinderApplicationStartTarget) => void;
-  /** Pause, Continue, Stop or Dismiss the Apply queue (ADR 0058). */
-  onControlApplyQueue: (action: ApplyQueueControlAction) => void;
-  /** Sends one finished application after the person presses Send. */
-  onSubmitPreparedApplication: (jobId: string) => Promise<void>;
-  /**
-   * Send for me: presses Send on each filled-in form, one after another,
-   * including forms filled in before Send for me was chosen.
-   */
-  onSendPreparedApplications: (jobIds: readonly string[]) => Promise<void>;
   onApplyProfileCopilotPatchGroup: (patchGroupId: string) => void;
   onApplyProfileSetupReviewAction: (
     reviewItemId: string,
@@ -90,50 +60,13 @@ export interface JobFinderPageContext {
     action: ResumeTimelineRepairAction,
   ) => Promise<void>;
   onCheckBrowserSession: () => void;
-  /** Takes waiting jobs out of the Apply queue before a run takes them. */
-  onTakeOutOfApplyQueue: (jobIds: readonly string[]) => Promise<boolean>;
-  /**
-   * Applications -> Shortlisted for an application nothing was sent for:
-   * its form closes, nothing is sent, history stays. Undo lists it again.
-   */
-  onReturnApplicationToShortlist: (record: {
-    id: string;
-    jobId: string;
-  }) => Promise<boolean>;
   /** Puts a recorded move back (toast Undo, Activity's Recent changes). */
-  onUndoRecentChange: (change: RecentChange) => Promise<boolean>;
   onRemoveReviewJobs?: (
     jobIds: readonly string[],
     options?: { quiet?: boolean },
   ) => Promise<void>;
   /** Shows a file the app wrote in the OS file manager. Nothing is opened. */
   onRevealSavedFile: (path: string) => void;
-  onGetApplyRunDetails: (
-    input: JobFinderApplyRunDetailsQuery,
-  ) => Promise<ApplyRunDetails>;
-  onSaveApplicationAnswer: (
-    command: SaveApplicationAnswerCommandInput,
-  ) => Promise<ApplyRunDetails>;
-  onClearApplicationAnswer: (
-    command: ClearApplicationAnswerCommandInput,
-  ) => Promise<ApplyRunDetails>;
-  onExportApplicationPacket: (
-    input: JobFinderApplyRunDetailsQuery,
-  ) => Promise<void>;
-  onResolveSubmissionOutcome: (
-    uncertainOutcomeId: string,
-    resolution: "submitted" | "not_submitted",
-  ) => Promise<void>;
-  onExportApplicationCrm: (
-    format: ApplicationCrmExportFormat,
-    recordId: string,
-  ) => Promise<void>;
-  onMutateApplicationCrm: (
-    command: ApplicationCrmMutationInput,
-  ) => Promise<void>;
-  onMutateApplicationCrmBulkStage: (
-    command: ApplicationCrmBulkStageMutationInput,
-  ) => Promise<void>;
   onGetSourceDebugRunDetails: (runId: string) => Promise<SourceDebugRunDetails>;
   /** `retryInterrupted` imports again the file a stopped import saved. */
   onImportResume: (options?: { retryInterrupted?: boolean }) => void;
@@ -150,25 +83,8 @@ export interface JobFinderPageContext {
     input?: JobFinderOpenBrowserSessionInput,
     options?: JobFinderActionFailureReporting,
   ) => Promise<boolean>;
-  onFocusPreparedApplicationPage: (
-    input: JobFinderPreparedApplicationPageInput,
-    options?: JobFinderActionFailureReporting,
-  ) => Promise<boolean>;
   onOpenProfile: () => void;
   onNavigateSafely: (path: string) => void;
-  /**
-   * Sends one Needs-you command and resolves with whether it succeeded, for
-   * the same reason as {@link JobFinderPageContext.onOpenBrowserSession}.
-   * The failure is still reported once as a route banner by the action runner;
-   * the boolean is what lets a surface say in place that nothing opened.
-   */
-  onPerformUserAction: (
-    command: UserActionCommandInput,
-    options?: JobFinderActionFailureReporting,
-  ) => Promise<boolean>;
-  onProjectGroupedManualAnswer: (
-    command: ProjectGroupedManualAnswerCommand,
-  ) => void;
   onProfileSurfaceDirtyChange: (dirty: boolean) => void;
   /**
    * Reports each user-authored Profile or setup draft edit — including edits
@@ -228,20 +144,12 @@ export interface JobFinderPageContext {
     targetId: string,
     artifact: EditableSourceInstructionArtifact,
   ) => void;
-  onSelectApplicationRecord: (recordId: string) => void;
   onSelectDiscoveryJob: (jobId: string) => void;
   onSelectReviewItem: (jobId: string) => void;
   onSetActivityControl: (
     input: SetJobFinderActivityControlInput,
   ) => Promise<boolean>;
-  onSnoozeGroupedDecision: (input: SnoozeGroupedDecisionInput) => void;
   onVerifySourceInstructions: (targetId: string, instructionId: string) => void;
-  selectedApplicationAttempt:
-    | JobFinderRendererWorkspaceSnapshot["applicationAttempts"][number]
-    | null;
-  selectedApplicationRecord:
-    | JobFinderRendererWorkspaceSnapshot["applicationRecords"][number]
-    | null;
   selectedDiscoveryJob:
     | JobFinderRendererWorkspaceSnapshot["discoveryJobs"][number]
     | null;

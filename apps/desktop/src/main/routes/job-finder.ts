@@ -5,14 +5,6 @@ import {
   executeJobFinderAction,
   type JobFinderActionId,
 } from "@nestor/job-finder";
-import {
-  ApplicationPageStatesInputSchema,
-  ApplicationPageStatesSchema,
-  ReopenApplicationPageInputSchema,
-  ApplicationPageStateSchema,
-  ApplicationPageReopenProgressSchema,
-} from "@nestor/contracts";
-import { getApplicationPageAccessForWorkspaceService } from "../services/job-finder/create-workspace-service";
 import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
 import { resetJobFinderBrowser } from "../services/job-finder/reset-workspace";
 import { writeFile } from "node:fs/promises";
@@ -26,24 +18,12 @@ import type {
   SaveDialogOptions,
 } from "electron";
 import {
-  ApplicationCrmExportInputSchema,
   ApplicationCrmFileExportResultSchema,
-  ApplicationCrmSettingsSchema,
-  ApplicationPacketSchema,
-  ApplyGroupedManualAnswerInputSchema,
-  ApplyRunDetailsSchema,
   DesktopTestOkResponseSchema,
-  JobFinderApplicationPacketExportResultSchema,
-  JobFinderApplyRunActionInputSchema,
-  JobFinderApplyRunDetailsQuerySchema,
-  JobFinderApplicationStartTargetSchema,
   JobFinderRepositoryStateSchema,
   JobFinderStartupDatabaseRecoveryFactSchema,
   JobFinderStartupResetRecoveryFactSchema,
   ResumeImportBenchmarkRequestSchema,
-  JobFinderJobActionInputSchema,
-  JobFinderSendPreparedApplicationsInputSchema,
-  JobFinderPreparedApplicationPageInputSchema,
   RevealSavedFileInputSchema,
   RevealSavedFileResultSchema,
   JobFinderOpenBrowserSessionInputSchema,
@@ -52,7 +32,6 @@ import {
   JobFinderSourceDebugActionInputSchema,
   JobFinderSourceInstructionActionInputSchema,
   SaveJobFinderWorkspaceInputSchema,
-  ProjectGroupedManualAnswerCommandSchema,
   SourceDebugProgressEventSchema,
   JobFinderWorkspaceEntityMutationInputSchema,
   JobFinderWorkspaceSnapshotSchema,
@@ -67,9 +46,6 @@ import {
   CancelResumeImportRequestSchema,
   ResumeImportProgressEventSchema,
   ResumeImportRunSchema,
-  SaveApplicationAnswerCommandSchema,
-  SaveUserActionAnswerDraftInputSchema,
-  UserActionCommandSchema,
   WriteClipboardTextInputSchema,
   WriteClipboardTextResultSchema,
 } from "@nestor/contracts";
@@ -93,8 +69,6 @@ import { usesWorkspaceQueryUpdates } from "../services/job-finder/query-update-m
 import {
   notifyJobFinderWorkspaceListeners,
   publishJobFinderWorkspaceUpdate,
-  scheduleAnswerDraftWorkspaceUpdate,
-  withJobFinderWorkspaceUpdates,
 } from "../services/job-finder/workspace-updates";
 import { runBoundedNewSourceReadabilityCheck } from "../services/job-finder/new-source-readability-check";
 import {
@@ -507,26 +481,6 @@ function parseSourceReadabilityTimeout(payload: unknown): number | null {
     : null;
 }
 
-function sanitizeFileNameSegment(value: string): string {
-  return value
-    .replace(/[<>:"/\\|?*]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function buildApplicationPacketExportDefaultPath(
-  jobTitle: string,
-  company: string,
-): string {
-  const titleSegment = sanitizeFileNameSegment(jobTitle) || "Job";
-  const companySegment = sanitizeFileNameSegment(company);
-  const fileName = companySegment
-    ? `Application packet - ${titleSegment} - ${companySegment}.json`
-    : `Application packet - ${titleSegment}.json`;
-
-  return path.join(app.getPath("documents"), fileName);
-}
-
 /**
  * Mutation responses carry the exact workspace snapshot the service just
  * produced. `getWorkspaceSnapshot` already schema-parses that value inside
@@ -725,29 +679,11 @@ export function registerJobFinderRouteHandlers(
     "accept-source-instruction-draft",
     "queue-job-for-review",
     "remove-job-from-review",
-    "clear-application-answer",
-    "snooze-grouped-decision",
-    "return-application-to-shortlist",
-    "undo-return-application-to-shortlist",
   ] as const) {
     ipcMain.handle(`job-finder:${name}`, (event, payload: unknown) =>
       runRegisteredAction(name, event, payload),
     );
   }
-
-  // The current Needs you editor still reads question revisions here until
-  // its store cutover. The Assistant's retired form-read tool is not exposed.
-  ipcMain.handle(
-    "job-finder:get-apply-run-details",
-    async (_event, payload: unknown) => {
-      const input = JobFinderApplyRunDetailsQuerySchema.parse(payload);
-      return (await getJobFinderWorkspaceService()).getApplyRunDetails(
-        input.runId,
-        input.jobId,
-        input.applicationRecordId,
-      );
-    },
-  );
 
   ipcMain.handle(
     "job-finder:sync-workspace",
@@ -1294,33 +1230,6 @@ export function registerJobFinderRouteHandlers(
   );
 
   ipcMain.handle(
-    "job-finder:save-user-action-answer-draft",
-    async (_event, payload: unknown) => {
-      const service = await getJobFinderWorkspaceService();
-      await service.saveUserActionAnswerDraft(
-        SaveUserActionAnswerDraftInputSchema.parse(payload),
-      );
-      scheduleAnswerDraftWorkspaceUpdate();
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:perform-user-action",
-    async (event, payload: unknown) => {
-      const command = UserActionCommandSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      // An answer or a "done" moves the step to checking at once, but the
-      // check can wait behind another job on the same site. Push the
-      // workspace meanwhile, so the card says it is checking instead of
-      // showing the question again until the check ends.
-      const snapshot = await withJobFinderWorkspaceUpdates(event.sender, () =>
-        jobFinderWorkspaceService.performUserAction(command),
-      );
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
     "job-finder:run-source-debug",
     async (event, payload: unknown) => {
       const { targetId } = JobFinderSourceDebugActionInputSchema.parse(payload);
@@ -1401,170 +1310,6 @@ export function registerJobFinderRouteHandlers(
     },
   );
 
-  ipcMain.handle(
-    "job-finder:save-application-answer",
-    async (_event, payload: unknown) => {
-      const command = SaveApplicationAnswerCommandSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      return ApplyRunDetailsSchema.parse(
-        await jobFinderWorkspaceService.saveApplicationAnswer(command),
-      );
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:project-grouped-manual-answer",
-    async (event, payload: unknown) => {
-      const command = ProjectGroupedManualAnswerCommandSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const snapshot =
-        await jobFinderWorkspaceService.projectGroupedManualAnswer(command);
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:apply-grouped-manual-answer",
-    async (event, payload: unknown) => {
-      const input = ApplyGroupedManualAnswerInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const snapshot = await withJobFinderWorkspaceUpdates(event.sender, () =>
-        jobFinderWorkspaceService.applyGroupedManualAnswer(input),
-      );
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:export-application-packet",
-    async (event, payload: unknown) => {
-      const { runId, jobId, applicationRecordId } =
-        JobFinderApplyRunDetailsQuerySchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const packet = ApplicationPacketSchema.parse(
-        await jobFinderWorkspaceService.buildApplicationPacket(
-          runId,
-          jobId,
-          applicationRecordId,
-        ),
-      );
-
-      if (isDesktopTestApiEnabled()) {
-        return JobFinderApplicationPacketExportResultSchema.parse({
-          status: "cancelled",
-        });
-      }
-
-      const browserWindow = BrowserWindow.fromWebContents(event.sender);
-      const saveDialogOptions: SaveDialogOptions = {
-        defaultPath: buildApplicationPacketExportDefaultPath(
-          packet.job.title,
-          packet.job.company,
-        ),
-        filters: [{ name: "JSON", extensions: ["json"] }],
-        properties: ["createDirectory", "showOverwriteConfirmation"],
-        title: "Export application packet",
-      };
-      const saveResult = browserWindow
-        ? await dialog.showSaveDialog(browserWindow, saveDialogOptions)
-        : await dialog.showSaveDialog(saveDialogOptions);
-
-      if (saveResult.canceled || !saveResult.filePath) {
-        return JobFinderApplicationPacketExportResultSchema.parse({
-          status: "cancelled",
-        });
-      }
-
-      const outputPath = saveResult.filePath.toLowerCase().endsWith(".json")
-        ? saveResult.filePath
-        : `${saveResult.filePath}.json`;
-      await writeFile(
-        outputPath,
-        `${JSON.stringify(packet, null, 2)}\n`,
-        "utf8",
-      );
-
-      return JobFinderApplicationPacketExportResultSchema.parse({
-        status: "saved",
-      });
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:run-application-no-response-automation",
-    async (event, payload: unknown) => {
-      const settings = ApplicationCrmSettingsSchema.optional().parse(
-        payload ?? undefined,
-      );
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const snapshot =
-        await jobFinderWorkspaceService.runApplicationNoResponseAutomation(
-          settings,
-        );
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:export-application-crm",
-    async (event, payload: unknown) => {
-      const input = ApplicationCrmExportInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const exportResult =
-        await jobFinderWorkspaceService.exportApplicationCrm(input);
-
-      if (isDesktopTestApiEnabled()) {
-        return ApplicationCrmFileExportResultSchema.parse({
-          status: "cancelled",
-          exportedCount: exportResult.exportedCount,
-          filePath: null,
-        });
-      }
-
-      const browserWindow = BrowserWindow.fromWebContents(event.sender);
-      const saveDialogOptions: SaveDialogOptions = {
-        defaultPath: path.join(app.getPath("documents"), exportResult.fileName),
-        filters: [
-          {
-            name: exportResult.format === "json" ? "JSON" : "CSV",
-            extensions: [exportResult.format],
-          },
-        ],
-        properties: ["createDirectory", "showOverwriteConfirmation"],
-        title: "Export application CRM",
-      };
-      const saveResult = browserWindow
-        ? await dialog.showSaveDialog(browserWindow, saveDialogOptions)
-        : await dialog.showSaveDialog(saveDialogOptions);
-
-      if (saveResult.canceled || !saveResult.filePath) {
-        return ApplicationCrmFileExportResultSchema.parse({
-          status: "cancelled",
-          exportedCount: exportResult.exportedCount,
-          filePath: null,
-        });
-      }
-
-      const outputPath = saveResult.filePath
-        .toLowerCase()
-        .endsWith(`.${exportResult.format}`)
-        ? saveResult.filePath
-        : `${saveResult.filePath}.${exportResult.format}`;
-      await writeFile(outputPath, exportResult.content, {
-        encoding: "utf8",
-        mode: 0o600,
-      });
-
-      return ApplicationCrmFileExportResultSchema.parse({
-        status: "saved",
-        exportedCount: exportResult.exportedCount,
-        filePath: outputPath,
-      });
-    },
-  );
   ipcMain.handle("job-finder:export-diagnostics", async (event) => {
     const service = await getJobFinderWorkspaceService();
     const diagnostic = await buildDiagnosticsFileExport(service);
@@ -1622,205 +1367,6 @@ export function registerJobFinderRouteHandlers(
       const { text } = WriteClipboardTextInputSchema.parse(payload);
       void clipboard.writeText(text);
       return WriteClipboardTextResultSchema.parse({ written: true });
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:start-auto-apply-run",
-    async (event, payload: unknown) => {
-      const { jobId, applicationRecordId, startNewApplication } =
-        JobFinderApplicationStartTargetSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      await syncApplicationAuthorityForSavedMode(jobFinderWorkspaceService, [
-        jobId,
-      ]);
-      const snapshot = await withJobFinderWorkspaceUpdates(event.sender, () =>
-        jobFinderWorkspaceService.startAutoApplyRun(
-          jobId,
-          startNewApplication ? null : applicationRecordId,
-        ),
-      );
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:approve-apply-run",
-    async (event, payload: unknown) => {
-      const { runId, jobId, applicationRecordId } =
-        JobFinderApplyRunActionInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      await jobFinderWorkspaceService.getApplyRunDetails(
-        runId,
-        jobId,
-        applicationRecordId,
-      );
-      const snapshot = await jobFinderWorkspaceService.approveApplyRun(runId);
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:cancel-apply-run",
-    async (event, payload: unknown) => {
-      const { runId, jobId, applicationRecordId } =
-        JobFinderApplyRunActionInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      await jobFinderWorkspaceService.getApplyRunDetails(
-        runId,
-        jobId,
-        applicationRecordId,
-      );
-      const snapshot = await jobFinderWorkspaceService.cancelApplyRun(runId);
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:revoke-apply-run-approval",
-    async (event, payload: unknown) => {
-      const { runId, jobId, applicationRecordId } =
-        JobFinderApplyRunActionInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      await jobFinderWorkspaceService.getApplyRunDetails(
-        runId,
-        jobId,
-        applicationRecordId,
-      );
-      const snapshot =
-        await jobFinderWorkspaceService.revokeApplyRunApproval(runId);
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:get-application-page-states",
-    async (_event, payload: unknown) => {
-      const input = ApplicationPageStatesInputSchema.parse(payload);
-      const service = await getJobFinderWorkspaceService();
-      return ApplicationPageStatesSchema.parse(
-        await getApplicationPageAccessForWorkspaceService(service).getStates(
-          input.resultIds,
-        ),
-      );
-    },
-  );
-  ipcMain.handle(
-    "job-finder:reopen-application-page",
-    async (event, payload: unknown) => {
-      const requestId = parseOptionalRequestId(payload);
-      // requestId is transport metadata, not part of the product command.
-      const input = ReopenApplicationPageInputSchema.parse(
-        payload && typeof payload === "object" && "resultId" in payload
-          ? { resultId: payload.resultId }
-          : payload,
-      );
-      const service = await getJobFinderWorkspaceService();
-      return ApplicationPageStateSchema.parse(
-        await getApplicationPageAccessForWorkspaceService(service).reopen(
-          input.resultId,
-          (progress) => {
-            if (requestId && !event.sender.isDestroyed())
-              event.sender.send(
-                `job-finder:application-page-reopen-progress:${requestId}`,
-                ApplicationPageReopenProgressSchema.parse(progress),
-              );
-          },
-        ),
-      );
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:focus-prepared-application-page",
-    async (event, payload: unknown) => {
-      const input = JobFinderPreparedApplicationPageInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const snapshot =
-        await jobFinderWorkspaceService.focusPreparedApplicationPage(input);
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:send-prepared-applications",
-    async (event, payload: unknown) => {
-      const { jobIds: requestedJobIds } =
-        JobFinderSendPreparedApplicationsInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      // Only forms still waiting to be sent. A second press (or a stale
-      // screen) used to "send" applications that had already gone out.
-      const jobIds = await listJobsStillReadyToSend(
-        jobFinderWorkspaceService,
-        requestedJobIds,
-      );
-      if (jobIds.length === 0) {
-        throw new Error(
-          requestedJobIds.length === 1
-            ? "Nothing left to send: this application was already sent or is no longer filled in."
-            : "Nothing left to send: these applications were already sent or are no longer filled in.",
-        );
-      }
-      await scopeSendPermissionToPreparedJobs(
-        jobFinderWorkspaceService,
-        jobIds,
-      );
-      // Each kept page is sent in turn. One that cannot be sent (its page
-      // closed, the site refused) is recorded on that job alone; the rest
-      // still go out.
-      let snapshot: Awaited<
-        ReturnType<typeof jobFinderWorkspaceService.submitPreparedApplication>
-      > | null = null;
-      let firstError: unknown = null;
-      for (const jobId of jobIds) {
-        try {
-          snapshot =
-            await jobFinderWorkspaceService.submitPreparedApplication(jobId);
-        } catch (error) {
-          firstError ??= error;
-        }
-      }
-      if (!snapshot) {
-        throw firstError instanceof Error
-          ? firstError
-          : new Error("None of these applications could be sent.");
-      }
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:submit-prepared-application",
-    async (event, payload: unknown) => {
-      const { jobId } = JobFinderJobActionInputSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      await scopeSendPermissionToPreparedJobs(jobFinderWorkspaceService, [
-        jobId,
-      ]);
-      const snapshot =
-        await jobFinderWorkspaceService.submitPreparedApplication(jobId);
-
-      return workspaceMutationResponse(event.sender, snapshot);
-    },
-  );
-
-  ipcMain.handle(
-    "job-finder:approve-apply",
-    async (event, payload: unknown) => {
-      const { jobId, applicationRecordId, startNewApplication } =
-        JobFinderApplicationStartTargetSchema.parse(payload);
-      const jobFinderWorkspaceService = await getJobFinderWorkspaceService();
-      const snapshot = await jobFinderWorkspaceService.approveApply(
-        jobId,
-        startNewApplication ? null : applicationRecordId,
-      );
-
-      return workspaceMutationResponse(event.sender, snapshot);
     },
   );
 

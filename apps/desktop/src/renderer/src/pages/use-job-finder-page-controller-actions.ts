@@ -2,7 +2,6 @@ import {
   clearProfileSetupJustFinished,
   markProfileSetupJustFinished,
 } from "./profile-setup-finished";
-import { APPLICATION_WORK_PAUSED_REASON } from "@renderer/features/job-finder/lib/application-work-paused";
 import { requestFirstSearch } from "@renderer/features/find-jobs/first-search";
 import type { JobSearchSettingsInput } from "@nestor/contracts";
 import {
@@ -19,10 +18,7 @@ import type {
   AppearanceTheme,
   CandidateProfile,
   JobFinderSearchRequest,
-  JobFinderApplyRunActionInput,
-  JobFinderApplicationStartTarget,
   JobFinderOpenBrowserSessionInput,
-  JobFinderPreparedApplicationPageInput,
   JobFinderRendererWorkspaceSnapshot,
   ProfileCopilotMessage,
   JobSearchPreferences,
@@ -35,7 +31,6 @@ import type {
   UpdateWorkspaceBehaviorInput,
   UpdateAiBehaviorInput,
 } from "@nestor/contracts";
-import { collectPreparedApplicationJobIds } from "@renderer/features/job-finder/lib/review-queue-status";
 import { isFinishBlockingReviewItem } from "@renderer/features/job-finder/components/profile/setup/profile-setup-screen-helpers";
 import type {
   ActionState,
@@ -49,19 +44,6 @@ import {
 } from "./job-finder-pending-actions";
 import { getProfileCopilotContextKey } from "@renderer/features/job-finder/lib/profile-copilot-context";
 import { getJobFinderErrorMessage } from "@renderer/features/job-finder/lib/job-finder-error-message";
-import { buildJobFinderContextRoute } from "../features/job-finder/lib/job-finder-context-navigation";
-import {
-  listApplyQueueWaitingJobIds,
-  type ApplyQueueControlAction,
-} from "../features/job-finder/lib/apply-queue-view";
-import {
-  getRecentChangeUndo,
-  listRecentChanges,
-  markRecentChangeUndone,
-  recordRecentChange,
-  type RecentChange,
-  type RecentChangeInput,
-} from "@renderer/features/job-finder/lib/recent-changes";
 import { buildSourceDebugOutcomeMessage } from "./job-finder-page-route-utils";
 import {
   createSaveDedupeKey,
@@ -740,90 +722,6 @@ export function createPrimaryPageActions(
       resolveStatusOwner(null, ownerStartRoute),
     );
 
-  // Pre-action backstop for the fixed local-day preparation safeguard. The
-  // start surfaces disable their own controls when nothing remains, but any
-  // caller that still reaches a start handler must see the refusal as a
-  // visible actionable status instead of a dialog flowing into a no-op.
-  // Every application start asks this first. The pause is the person's
-  // brake (the service refuses the same starts), then the spent day.
-  const getApplicationStartRefusalMessage = (): string | null => {
-    if (workspace?.activityControl?.paused) {
-      return APPLICATION_WORK_PAUSED_REASON;
-    }
-    return null;
-  };
-  const describeJobForChange = (jobId: string): string => {
-    const current = latestWorkspaceRef.current ?? workspace;
-    const job =
-      current.reviewQueue.find((item) => item.jobId === jobId) ??
-      current.discoveryJobs.find((entry) => entry.id === jobId) ??
-      current.applicationRecords.find((record) => record.jobId === jobId);
-    return job ? `${job.title} at ${job.company}` : "a job";
-  };
-  /**
-   * Records a move for Recent changes; the label names its first job. The
-   * move itself already happened, so a record that cannot be written only
-   * costs its Undo and never turns the move into a failure.
-   */
-  const recordMove = (
-    input: Omit<RecentChangeInput, "label">,
-  ): RecentChange | null => {
-    let label = "a job";
-    try {
-      label = describeJobForChange(input.jobIds[0] ?? "");
-    } catch {
-      // A workspace still loading names no job; the move keeps its Undo.
-    }
-    try {
-      return recordRecentChange({ ...input, label });
-    } catch {
-      return null;
-    }
-  };
-  // One way back for every move, shared by each toast's Undo and Activity's
-  // Recent changes. A job that moved on since keeps its newer state; the
-  // reason says where it went instead.
-  const undoRecentChange = (change: RecentChange): Promise<boolean> => {
-    const current = latestWorkspaceRef.current ?? workspace;
-    const undo = getRecentChangeUndo(
-      change,
-      {
-        applicationJobIds: collectPreparedApplicationJobIds(
-          current.applicationRecords,
-        ),
-      },
-      listRecentChanges(),
-    );
-    if (!undo.possible) {
-      applyRouteScopedMessage({ message: undo.reason, tone: "failure" });
-      return Promise.resolve(false);
-    }
-    const ids = undo.jobIds;
-    const settle = (
-      action: () => Promise<unknown>,
-      message: string,
-      scope: PendingActionScope,
-    ) =>
-      runAction(action, () => markRecentChangeUndone(change), message, {
-        scope,
-      });
-    switch (change.kind) {
-      case "moved_to_shortlisted":
-        return settle(
-          async () => {
-            for (const id of ids)
-              await actions.undoReturnApplicationToShortlist(id);
-          },
-          ids.length === 1
-            ? "Back in Applications. Its form was closed; Apply again fills it in."
-            : `${ids.length} applications are back in Applications.`,
-          jobFinderPendingActions.apply(),
-        );
-      case "taken_out_of_queue":
-        return Promise.resolve(false);
-    }
-  };
-
   // Searches run in the background on the job store; Find jobs shows them.
   const startJobSearch = (settings: JobSearchSettingsInput) =>
     void runAction(
@@ -831,48 +729,6 @@ export function createPrimaryPageActions(
       () => navigate("/job-finder/discovery"),
       "Search started. Jobs show up in Find jobs as they are found.",
     );
-
-  const startAutoFlow = (
-    runner: () => Promise<unknown>,
-    successMessage: string,
-    scope: PendingActionScope,
-    /**
-     * The job the run is for. When present the person is taken to that
-     * job's application on Applications as soon as the run starts, so they
-     * watch it fill in instead of waiting on Shortlisted for minutes with a
-     * button that says "Filling in the form…" and nothing else moving.
-     */
-    destination?: { jobId: string },
-  ) => {
-    const action = runAction(
-      runner,
-      () => {
-        if (destination) {
-          return;
-        }
-        if (jobFinderStatusRoute !== "/job-finder/applications") {
-          navigate("/job-finder/applications");
-        }
-      },
-      successMessage,
-      // Preparation can run for minutes and can hang on a job site; the
-      // Applications screen and the Tasks panel show its real state, so
-      // the buttons must not stay disabled for the whole call.
-      {
-        scope,
-        releasePendingAfterMs: COMMAND_PENDING_RELEASE_MS,
-        ...(destination ? { statusOwnerPath: "/job-finder/applications" } : {}),
-      },
-    );
-    if (destination) {
-      navigate(
-        buildJobFinderContextRoute("/job-finder/applications", {
-          jobId: destination.jobId,
-        }),
-      );
-    }
-    void action;
-  };
 
   return {
     onAnalyzeProfileFromResume: () => {
@@ -915,142 +771,6 @@ export function createPrimaryPageActions(
             : "Current value cleared and the review item was resolved.",
         { scope: jobFinderPendingActions.profileReviewItem(reviewItemId) },
       ),
-    onApproveApplyRun: (input: JobFinderApplyRunActionInput) =>
-      void runAction(
-        () => actions.approveApplyRun(input),
-        () => undefined,
-        "Application run approved. It follows the apply mode chosen for this run.",
-        {
-          scope: jobFinderPendingActions.applyRun(input.runId),
-          releasePendingAfterMs: COMMAND_PENDING_RELEASE_MS,
-          pendingTimeoutMessage:
-            "This took too long to confirm. Check its status before trying again.",
-        },
-      ),
-    onCancelApplyRun: (input: JobFinderApplyRunActionInput) =>
-      runAction(
-        () => actions.cancelApplyRun(input),
-        () => undefined,
-        "Application preparation run cancelled.",
-        {
-          scope: jobFinderPendingActions.applyRun(input.runId),
-          releasePendingAfterMs: COMMAND_PENDING_RELEASE_MS,
-          pendingTimeoutMessage:
-            "This took too long to confirm. Check its status before trying again.",
-        },
-      ),
-    onRevokeApplyRunApproval: (input: JobFinderApplyRunActionInput) =>
-      void runAction(
-        () => actions.revokeApplyRunApproval(input),
-        () => undefined,
-        "Application run approval revoked.",
-        { scope: jobFinderPendingActions.applyRun(input.runId) },
-      ),
-    onReturnApplicationToShortlist: (record: { id: string; jobId: string }) => {
-      let change: RecentChange | null = null;
-      return runAction(
-        () =>
-          actions.returnApplicationToShortlist({
-            applicationRecordId: record.id,
-          }),
-        () => {
-          change = recordMove({
-            kind: "moved_to_shortlisted",
-            jobIds: [record.jobId],
-          });
-        },
-        "Moved back to Shortlisted. Nothing was sent.",
-        {
-          scope: jobFinderPendingActions.apply(),
-          undo: () => {
-            if (change) void undoRecentChange(change);
-          },
-        },
-      );
-    },
-    onTakeOutOfApplyQueue: (jobIds: readonly string[]) => {
-      const ids = [...new Set(jobIds)];
-      return runAction(
-        () => actions.removeFromApplyQueue({ jobIds: ids }),
-        (snapshot) => {
-          const waiting = new Set(
-            listApplyQueueWaitingJobIds(snapshot.applyQueue),
-          );
-          const taken = ids.filter((id) => !waiting.has(id));
-          if (taken.length > 0)
-            recordMove({ kind: "taken_out_of_queue", jobIds: taken });
-        },
-        (snapshot) => {
-          const waiting = new Set(
-            listApplyQueueWaitingJobIds(snapshot.applyQueue),
-          );
-          const left = ids.filter((id) => waiting.has(id)).length;
-          const taken = ids.length - left;
-          if (taken === 0)
-            return "It had already started, so it stays in the run.";
-          return `${taken === 1 ? "1 job" : `${taken} jobs`} taken out of the apply queue. Nothing was started for ${taken === 1 ? "it" : "them"}.`;
-        },
-        { scope: jobFinderPendingActions.apply() },
-      );
-    },
-    onControlApplyQueue: (action: ApplyQueueControlAction) =>
-      void runAction(
-        () => actions.controlApplyQueue({ action }),
-        () => undefined,
-        null,
-        { scope: jobFinderPendingActions.apply() },
-      ),
-    onStartAutoApply: (input: JobFinderApplicationStartTarget) => {
-      const capacityRefusal = getApplicationStartRefusalMessage();
-      if (capacityRefusal) {
-        applyRouteScopedMessage({ message: capacityRefusal, tone: "failure" });
-        return;
-      }
-
-      startAutoFlow(
-        () => actions.startAutoApplyRun(input),
-        "Application staged. Press Apply now in Applications to start it.",
-        jobFinderPendingActions.apply(),
-      );
-    },
-    onSubmitPreparedApplication: async (jobId: string): Promise<void> => {
-      let toastTone: "success" | "warning" = "warning";
-      await runAction(
-        () => actions.submitPreparedApplication({ jobId }),
-        () => undefined,
-        (snapshot) => {
-          toastTone = preparedApplicationsToastTone(snapshot, [jobId]);
-          return describePreparedApplicationSubmitResult(snapshot, jobId);
-        },
-        {
-          scope: jobFinderPendingActions.apply(),
-          toastTone: () => toastTone,
-          releasePendingAfterMs: COMMAND_PENDING_RELEASE_MS,
-          pendingTimeoutMessage:
-            "This took too long to confirm. Check its status before trying again.",
-        },
-      );
-    },
-    onSendPreparedApplications: async (
-      jobIds: readonly string[],
-    ): Promise<void> => {
-      let toastTone: "success" | "warning" = "warning";
-      await runAction(
-        // One permission covers the whole press; main then sends each kept
-        // page in turn. A page that is gone is recorded on that job alone
-        // and the rest still go out.
-        () => actions.sendPreparedApplications({ jobIds: [...jobIds] }),
-        () => undefined,
-        (snapshot) => {
-          toastTone = preparedApplicationsToastTone(snapshot, jobIds);
-          return describePreparedApplicationsSendResult(snapshot, jobIds);
-        },
-        {
-          scope: jobFinderPendingActions.apply(),
-          toastTone: () => toastTone,
-        },
-      );
-    },
     onCheckBrowserSession: () =>
       void runAction(
         actions.checkBrowserSession,
@@ -1058,7 +778,6 @@ export function createPrimaryPageActions(
         "Browser status refreshed.",
         { scope: jobFinderPendingActions.browserSession() },
       ),
-    onUndoRecentChange: undoRecentChange,
     onImportResume: (options?: { retryInterrupted?: boolean }) => {
       if (!canImportResume) {
         applyRouteScopedMessage({ message: importResumeGuardMessage });
@@ -1141,30 +860,6 @@ export function createPrimaryPageActions(
           ...(options?.rethrowError ? { rethrowError: true } : {}),
         },
       ),
-    onFocusPreparedApplicationPage: (
-      input: JobFinderPreparedApplicationPageInput,
-      options?: JobFinderActionFailureReporting,
-    ) => {
-      let focused = false;
-      return runAction(
-        () => actions.focusPreparedApplicationPage(input),
-        (snapshot) => {
-          focused = snapshot.applyJobResults.some(
-            (result) =>
-              result.id === input.resultId &&
-              result.runId === input.runId &&
-              result.jobId === input.jobId &&
-              result.applicationRecordId === input.applicationRecordId &&
-              result.state === "awaiting_review",
-          );
-        },
-        null,
-        {
-          scope: jobFinderPendingActions.apply(),
-          ...(options?.rethrowError ? { rethrowError: true } : {}),
-        },
-      ).then((completed) => completed && focused);
-    },
     onOpenProfile: () => {
       navigate("/job-finder/profile", {
         state: { forceFullProfile: true },

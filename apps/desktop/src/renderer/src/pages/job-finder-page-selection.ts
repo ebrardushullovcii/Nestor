@@ -2,12 +2,6 @@ import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 
 type DiscoveryJobs = Readonly<JobFinderRendererWorkspaceSnapshot["discoveryJobs"]>;
 type ReviewQueue = Readonly<JobFinderRendererWorkspaceSnapshot["reviewQueue"]>;
-type ApplicationRecords = Readonly<
-  JobFinderRendererWorkspaceSnapshot["applicationRecords"]
->;
-type ApplicationAttempts = Readonly<
-  JobFinderRendererWorkspaceSnapshot["applicationAttempts"]
->;
 type TailoredAssets = Readonly<JobFinderRendererWorkspaceSnapshot["tailoredAssets"]>;
 
 // Workspace deltas retain unchanged collection references. Key by those
@@ -26,14 +20,6 @@ const reviewIndexes = new WeakMap<
     itemsByJobId: ReadonlyMap<string, ReviewQueue[number]>;
     validIds: ReadonlySet<string>;
   }
->();
-const applicationRecordIndexes = new WeakMap<
-  ApplicationRecords,
-  ReadonlyMap<string, ApplicationRecords[number]>
->();
-const applicationAttemptIndexes = new WeakMap<
-  ApplicationAttempts,
-  ReadonlyMap<string, ApplicationAttempts[number]>
 >();
 const tailoredAssetIndexes = new WeakMap<
   TailoredAssets,
@@ -65,42 +51,7 @@ export function getReviewSelectionIndex(items: ReviewQueue) {
   return index;
 }
 
-export function getApplicationRecordIndex(records: ApplicationRecords) {
-  const cached = applicationRecordIndexes.get(records);
-  if (cached) return cached;
 
-  const recordsById = new Map<string, ApplicationRecords[number]>();
-  for (const record of records) {
-    if (!recordsById.has(record.id)) recordsById.set(record.id, record);
-  }
-  applicationRecordIndexes.set(records, recordsById);
-  return recordsById;
-}
-
-export function getLatestApplicationAttemptIndex(
-  attempts: ApplicationAttempts,
-) {
-  const cached = applicationAttemptIndexes.get(attempts);
-  if (cached) return cached;
-
-  const latestByRecordId = new Map<string, ApplicationAttempts[number]>();
-  const updatedAtByRecordId = new Map<string, number>();
-  for (const attempt of attempts) {
-    if (attempt.applicationRecordId === null) continue;
-    const updatedAt = Date.parse(attempt.updatedAt);
-    const previous =
-      updatedAtByRecordId.get(attempt.applicationRecordId) ??
-      Number.NEGATIVE_INFINITY;
-    // Equal timestamps keep the first attempt, and invalid timestamps are
-    // ignored, just like the previous selected-record scan.
-    if (updatedAt > previous) {
-      latestByRecordId.set(attempt.applicationRecordId, attempt);
-      updatedAtByRecordId.set(attempt.applicationRecordId, updatedAt);
-    }
-  }
-  applicationAttemptIndexes.set(attempts, latestByRecordId);
-  return latestByRecordId;
-}
 
 export function getTailoredAssetIndex(assets: TailoredAssets) {
   const cached = tailoredAssetIndexes.get(assets);

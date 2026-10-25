@@ -1583,9 +1583,6 @@ describe("createPrimaryPageActions", () => {
     const updateApplicationDefaults = vi
       .fn<JobFinderShellActions["updateApplicationDefaults"]>()
       .mockResolvedValue(snapshot);
-    const updateTrackerCrm = vi
-      .fn<JobFinderShellActions["updateTrackerCrm"]>()
-      .mockResolvedValue(snapshot);
     const runSaveAction = vi.fn(
       async (input: { action: () => Promise<unknown> }) => {
         await input.action();
@@ -1597,7 +1594,6 @@ describe("createPrimaryPageActions", () => {
       actions: {
         saveSettings,
         updateApplicationDefaults,
-        updateTrackerCrm,
       } as unknown as JobFinderShellActions,
       runSaveAction,
       workspace: {} as JobFinderRendererWorkspaceSnapshot,
@@ -1614,7 +1610,6 @@ describe("createPrimaryPageActions", () => {
       resumeTemplateId: "modern_split",
     });
     expect(saveSettings).not.toHaveBeenCalled();
-    expect(updateTrackerCrm).not.toHaveBeenCalled();
   });
 
   it("routes appearance and workspace-behavior saves through their scoped methods", async () => {
