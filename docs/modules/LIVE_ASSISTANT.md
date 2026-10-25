@@ -1,5 +1,7 @@
 # Live Assistant
 
+Parked: no new work until the owner picks it up again.
+
 ## Purpose
 
 Owns target-context setup, rehearsal, live-session state, transcript-first cue context, visual cue augmentation, overlay view models, retention, post-session review, export, annotations, and hard-delete behavior.

@@ -16,7 +16,7 @@ A person's click in the embedded browser used to stop every run in it: three sou
 - A tab parked for the person (a source sign-in or check) keeps its own banner and stays away from automation; helping there never stops other work, however many clicks it takes. The sign-in watcher reads that exact tab, not any tab on the same site, and is not gated on the banner.
 - A tab the person opens themselves is theirs: no run reuses, navigates or closes it.
 - Input the agent sends through the automation connection is never mistaken for the person's, even with the pointer moving over the view.
-- An application the person stepped into is recorded as "You took over this application.", not as a failure on the site, so it does not count toward the failure-rate safeguard.
+- An application the person stepped into is recorded as "You took over this application.", not as a failure on the site.
 
 ## Consequences
 

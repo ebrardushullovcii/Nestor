@@ -9,8 +9,8 @@ Home's counts paint from the database within about 1.5 s of launch
 for the full workspace snapshot. On the 12,000-job copy a clean start built
 that snapshot in main for about 7 s (most of it every saved job, the Find jobs
 lists made from them and their transfer), so Home was complete only after
-about 11 s. Home itself needs the shortlisted jobs, applications, documents,
-safeguards and search runs: a few hundred rows. Of the Find jobs lists it uses
+about 11 s. Home itself needs the shortlisted jobs, applications, documents
+and search runs: a few hundred rows. Of the Find jobs lists it uses
 two numbers, which the queries already give exactly.
 
 ## Decision
@@ -40,5 +40,5 @@ two numbers, which the queries already give exactly.
 Home no longer waits for the Find jobs lists. The full snapshot still loads
 behind it and replaces the first view with the same numbers and the same Next
 step, so nothing moves or changes when it lands. Anything that reads Find jobs
-rows from the workspace (Ctrl+K, Companies, the Hidden list) still waits for
+rows from the workspace (Ctrl+K, the Hidden list) still waits for
 it.

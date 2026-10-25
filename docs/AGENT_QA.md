@@ -103,8 +103,7 @@ or a local model-server stub. There is no custom scenario language or assertion 
 ## Test the right thing
 
 - **Setup and backend:** use existing test APIs and contract schemas for synthetic
-  seeds. Assert the hydrated workspace before testing. Demo campaign adoption can
-  repopulate memberships; demo application runs can span campaigns. Match seeded
+  seeds. Assert the hydrated workspace before testing. Match seeded
   titles, companies and locations to the selected local site's actual listing.
 - **User flows:** press real controls for Apply, search and save. Raw preload calls
   can skip consumption of returned snapshots and produce false stale-UI findings.

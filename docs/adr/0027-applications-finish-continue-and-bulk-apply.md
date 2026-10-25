@@ -36,7 +36,7 @@ The Applications rows also used an older vocabulary ("Needs recovery", "Waiting 
 ## Consequences
 
 - Removed from the person's path: the second click on a staged batch, the mid-form stop on a declaration, the reopened listing after a browser step.
-- The saved authority envelope (ADR 0012) still bounds sending, origins and the daily cap. The declarations setting only adds to the envelope's own list; it never widens submission.
+- The saved authority envelope (ADR 0012) still bounds sending, origins and declarations. The declarations setting only adds to the envelope's own list; it never widens submission.
 - Runs that meet a declaration the person has not allowed finish the form and end as Needs you with that question, in both modes, exactly as ADR 0022 described.
 
 Rejected alternatives: pre-approving every declaration kind by default (background-check consent and self-identification are material attestations about the person, ADR 0012); a first-run "Before you apply" step (one more screen before the first application, for a choice that fits the existing panel).

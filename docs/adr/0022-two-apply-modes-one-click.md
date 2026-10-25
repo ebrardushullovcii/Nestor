@@ -11,7 +11,7 @@ Applying had become a place of its own: prepare, approve, revoke, batch, auto-pr
 There are exactly two modes, chosen once in Settings by a single switch, "Let Job Finder send applications for me":
 
 - Off (default), "Fill it in, I send it": Job Finder opens the application, fills everything it can, attaches the resume, and stops with the browser open on the finished form. The person reads it and clicks the site's own Apply button. Nothing is sent by Job Finder.
-- On, "Apply for me": Job Finder fills everything and sends the application inside the saved authority envelope, then verifies the outcome from the employer's page. The envelope is created and updated by the switch itself, never edited by hand: scope all shortlisted jobs, the existing daily cap, the facts and declarations the person confirmed in the one-time facts step below.
+- On, "Apply for me": Job Finder fills everything and sends the application inside the saved authority envelope, then verifies the outcome from the employer's page. The envelope is created and updated by the switch itself, never edited by hand: scope all shortlisted jobs, the facts and declarations the person confirmed in the one-time facts step below.
 
 One control per job, in Shortlisted and in Applications: "Fill it in" or "Apply", plus "Apply to all shortlisted" (or "Fill in all"). That is the one or two clicks.
 
@@ -22,5 +22,5 @@ Every application shows one of five states, one sentence, at most one button: Fi
 ## Consequences
 
 - Removed from the product surface: separate prepare/approve/revoke controls, batch preparation panels, "Prepare remaining", answer-memory and grouped-answer screens, the Needs you question form, confirm-before-submit as a distinct mode, manual envelope editing.
-- Kept underneath: ADR 0012 envelope and preflight, ADR 0021 loop, safeguards and daily cap, Needs you for sign-in, account and security walls only.
+- Kept underneath: ADR 0012 envelope and preflight, ADR 0021 loop, Needs you for sign-in, account and security walls only.
 - The Tasks card shows applications only as the five states above.

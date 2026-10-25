@@ -29,7 +29,7 @@ shortlist or hide also re-derived the whole list. The query read model
   stays in its place until another job opens.
 - Main announces only a search's first event to windows. While a search runs,
   the workspace snapshot syncs only where a screen still shows the search from
-  it (Home for jobs, at most every 1.5 s; Find jobs, Search plans and Profile
+  it (Home for jobs, at most every 1.5 s; Find jobs and Profile
   for progress, at most every 4 s) and for other work (resumes, applications).
   Elsewhere the sidebar badges come from `getListCounts`.
 

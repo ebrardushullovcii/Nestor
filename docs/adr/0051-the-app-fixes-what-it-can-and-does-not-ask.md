@@ -22,7 +22,7 @@ The owner's rule: the checks are for the system, not chores for the person. If t
 
 - A clean resume costs one writer call, an over-long one too (its shortening is local renders). The writer's notes about running out of tries are gone.
 - Claim confirmations and the approve-as-accurate command remain for the rare unbacked generated line that reaches the person, for example after accepting an Assistant proposal the check flagged.
-- The person stays the one who sends: final submission, credentials, CAPTCHA, MFA and the application safeguards are unchanged (ADR 0012, ADR 0024, ADR 0039).
+- The person stays the one who sends: final submission, credentials, CAPTCHA and MFA are unchanged (ADR 0012, ADR 0024, ADR 0039).
 - New warnings, badges, confirmations and gates must pass the same test: can the system fix it? Then fix it. Otherwise drop it or make it a dismissible notice.
 
 ## Related Decisions

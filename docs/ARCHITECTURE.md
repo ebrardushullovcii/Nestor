@@ -46,7 +46,7 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
   for me or on the person's Send press under Ask before sending (ADR 0024,
   ADR 0027). Browser packages own generic observation and execution hands;
   `job-finder` owns authority envelopes, preflight, idempotency, revocation,
-  lineage, capacity, and tri-state outcome truth. Models and heuristics may
+  lineage, and tri-state outcome truth. Models and heuristics may
   propose typed actions but cannot grant authority or prove external outcomes.
 - approved application answers: Profile owns mutable reusable answer content;
   Electron main is the only approval boundary. Main canonicalizes the current
@@ -55,7 +55,7 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
   snapshot revision and digest. Renderer readiness receives counts, kinds,
   status, and lifecycle identity but never raw answer text or a caller-supplied
   digest. An approved snapshot does not grant, arm, or execute anything.
-- product actions: schema-validated local tools call a narrow injected subset of the `job-finder` workspace service. They never expose raw IPC, browser primitives, arbitrary navigation, or filesystem access; the retired Profile Copilot's proposal-only calls persist reviewable patch groups without applying them
+- product actions: schema-validated local tools call a narrow injected subset of the `job-finder` workspace service. They never expose raw IPC, browser primitives, arbitrary navigation, or filesystem access
 - assistant (ADR 0037-0039): renderer sidebar -> typed preload `assistant` bridge -> `job-finder:assistant:*` IPC -> the main-process session host in `packages/job-finder/src/assistant`. The host runs `runConversationTurn` from `packages/agent-runtime` (product-neutral: steering at tool boundaries, per-tool deadlines, generation fencing, streaming) with Job Finder tools that call the workspace service and desktop ports (searches, application runs, sends, files, the lent browser tab). Conversations, events, operations, change receipts, grants, plans, result sets and checkpoints persist in `assistant.sqlite` through `packages/db`'s assistant repository. Renderer screens publish context references (route, focus, list ids, editor snapshots) and never call tools. Model routes and streaming come from `packages/ai-providers` (`NESTOR_AI_ASSISTANT_*`).
 - source-debug: `job-finder` orchestrates phases and artifacts, `browser-agent` returns structured attempts, `db` persists runs and evidence
 - browser visual evidence: `browser-runtime` owns screenshot capture and cleanup; `browser-agent` owns generic trigger policy and interpretation; `job-finder` persists only schema-validated summaries
@@ -81,30 +81,13 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
   SQLite value. Discovery keeps its small active state in a singleton and its
   runs, activity, checkpoints, ledger, and pending jobs in rows; ordinary
   discovery commits write changed rows atomically with saved-job deltas.
-- Employer-application capacity uses an immutable SQLite-backed start mark on
-  the exact apply result before browser/session work. In-flight reservations
-  are serialized in memory within the desktop singleton process; persisted
-  marks provide restart durability, while legacy uncertainty remains explicit
-  rather than being converted into fabricated start facts.
 
-### Campaign and CRM ownership
+### Application tracking
 
-- `packages/contracts` owns campaign, dashboard, activity-control, CRM, custom-stage, reminder, interview, timeline, and export shapes, plus campaign-rule and funnel projections, schedule state/pause windows/run facts, campaign digests, in-app campaign notifications, and the job-finder intelligence state (outcome events and analytics, resume strategies and per-job selections, company entities and merge review, and safeguard records).
-- `packages/db` persists campaign collections beside the existing workspace state. SQLite migration 10 backfills one default campaign for an existing workspace without rewriting its jobs or applications. CRM data remains an optional schema-defaulted part of each application record, so old records still load.
-- `packages/job-finder` owns campaign selection, discovery/job membership, dashboard projection, preparation limits and stop rules, global activity gates, serialized CRM updates, no-response automation, duplicate hints, and export content, plus campaign-rule evaluation and truthful funnel projection, schedule/digest/notification derivation, outcome recording and analytics, collision-safe outcome identity resolution, resume-strategy recommendation and per-job selection, company reconciliation and merge review, and safeguard gate operations. Its automatic safeguard path derives idempotent technical discovery/source-debug evidence and leaves explicit user-owned blockers out of the technical sample; grouped-answer contradiction evidence is persisted as an advisory local fact.
-- `packages/job-finder` also owns the derived `companyJobs` projection over the complete company-linked saved-job collection and the atomic exact-employer exclusion mutation. The projection is not limited to the active discovery list. A job belongs to a company only through its exact normalized canonical name or a user-approved merge alias; legacy aliases and domains are non-authoritative. Domains remain corroborating, conflicting, or research evidence and do not create ownership or domain-wide exclusion policy. Reconciliation does not destructively migrate SavedJob domains.
-- Company salary/offer mutations cross a repository commit boundary that reads
-  transaction-current intelligence, the exact SavedJob, and the exact optional
-  ApplicationRecord under one write transaction. `packages/job-finder`
-  validates current ownership and lineage there, uses monotonic timestamps, and
-  commits all or nothing.
-- Electron main owns typed IPC, local save dialogs, and the desktop campaign scheduler service (interval-driven due-run evaluation with power suspend/resume). Preload exposes only schema-checked campaign, activity, CRM, rule/funnel, schedule/digest/notification, outcome/strategy/company/safeguard actions. The renderer never writes the database or filesystem directly.
-- Active-campaign list scoping is a renderer projection over authoritative campaign job IDs. Workspace-wide search deliberately keeps all local entities and changes the active campaign before navigating to an item from another campaign.
-- Manual CRM stages do not change apply-run authority, browser outcomes,
+- Manual tracker stages never change apply-run authority, browser outcomes,
   external-write evidence, or submission receipts. Final submission is
   governed only by the typed authority envelope from ADR 0012, which the saved
   apply mode creates and updates (ADR 0024).
-- Outcome recording resolves the campaign and application identity for the exact job. Omitted identities are accepted only when the job has one unambiguous campaign or application record; multiple matches require an explicit identifier and conflicting identifiers are rejected before the event is written. Outcome events remain user-controlled local facts and never create apply or submission evidence.
 
 ## Resume Safety
 
@@ -112,7 +95,6 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
 - browser apply runtimes receive one typed application-resume artifact whose source is either `tailored_export` or `original_upload`; orchestration must not fabricate a tailored export for an original file
 - stale drafts cannot be used as approved exports
 - every canonical experience remains represented in the editor even when excluded from recruiter-facing output
-- named resume strategies resolve a base resume document plus headline, skills, coverage, tailoring-strength, and evidence-boundary policies into generation context. This context is advisory input to résumé generation; strategy selection never approves, readies, or unstales an artifact.
 - `submitAuthorized` is true only under an `autonomous_submit` envelope or the
   person's Send press under `confirm_before_submit`, after preflight;
   `prepare_only` never sends, and legacy flags do not acquire that meaning
@@ -144,7 +126,7 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
 
 ## Interview Capture Protection
 
-Live Assistant defaults to the ordinary visible main window. Advanced overlay windows and global/tray controls initialize only when `NESTOR_INTERVIEW_ADVANCED_SURFACES=1`. When enabled, overlay capture exclusion remains adapter-owned capability state: Electron `BrowserWindow.setContentProtection(true)` is a request, while real platform-specific verification and any future authorized stronger capture-exclusion path must stay behind `packages/os-integration`.
+Live Assistant (parked) defaults to the ordinary visible main window. Advanced overlay windows and global/tray controls initialize only when `NESTOR_INTERVIEW_ADVANCED_SURFACES=1`. When enabled, overlay capture exclusion remains adapter-owned capability state: Electron `BrowserWindow.setContentProtection(true)` is a request, while real platform-specific verification and any future authorized stronger capture-exclusion path must stay behind `packages/os-integration`.
 
 See [ADR 0003](adr/0003-live-assistant-live-session-architecture.md) and [ADR 0008](adr/0008-visible-first-live-assistant.md).
 
