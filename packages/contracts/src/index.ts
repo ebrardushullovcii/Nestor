@@ -28,6 +28,7 @@ export * from "./source-debug";
 export * from "./discovery";
 export * from "./jobs";
 export * from "./applications";
+export * from "./job-commands";
 export * from "./discovery-cpu";
 export * from "./discovery-feedback-batch";
 export * from "./starter-job-sources";

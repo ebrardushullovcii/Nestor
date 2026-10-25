@@ -81,6 +81,34 @@ describe("job store", () => {
     expect(merged?.searchId).toBe("s1");
   });
 
+  it("saves a job the search did not keep as hidden, with its reason, and knows its link", () => {
+    const store = open();
+    const result = store.saveFoundJobs({
+      searchId: "s1",
+      jobs: [found(1), found(2, { hiddenReason: "Asks for a pilot licence" })],
+    });
+    expect(result.added).toHaveLength(1);
+    expect(result.hidden).toHaveLength(1);
+    const hidden = store.listJobs({ stage: "hidden" }).rows[0];
+    expect(hidden?.stageNote).toBe("Asks for a pilot licence");
+    expect(store.stageForListing("https://board.example.test/jobs/2/")).toBe(
+      "hidden",
+    );
+    expect(store.stageForListing("https://board.example.test/jobs/9")).toBe(
+      null,
+    );
+    // Showing it again clears the reason; Undo brings it back.
+    const shown = store.moveJobs({
+      selection: { ids: result.hidden },
+      to: "found",
+    });
+    expect(store.getJob(result.hidden[0]!)?.stageNote).toBe(null);
+    store.undoMove(shown.moveId!);
+    expect(store.getJob(result.hidden[0]!)?.stageNote).toBe(
+      "Asks for a pilot licence",
+    );
+  });
+
   it("keeps two openings with the same title on one site apart", () => {
     const store = open();
     const result = store.saveFoundJobs({
@@ -168,16 +196,38 @@ describe("job store", () => {
     expect(new Set(seen).size).toBe(25);
     expect(seen[0]).toBe(added[9]);
 
-    const strong = store.listJobs({ stage: "found", minFit: 55 });
+    // A fit floor keeps jobs not scored yet, below the scored ones.
+    const strong = store.listJobs({ stage: "found", minFit: 55, limit: 6 });
     expect(strong.rows.map((row) => row.fitScore)).toEqual([
-      59, 58, 57, 56, 55,
+      59,
+      58,
+      57,
+      56,
+      55,
+      null,
     ]);
-    expect(strong.total).toBe(5);
+    expect(strong.total).toBe(20);
 
     const remote = store.listJobs({ stage: "found", workModes: ["remote"] });
     expect(remote.total).toBe(13);
     const text = store.listJobs({ stage: "found", text: "engineer 12" });
     expect(text.rows.map((row) => row.title)).toEqual(["Frontend Engineer 12"]);
+  });
+
+  it("counts a whole stage exactly and caps only filtered counts", () => {
+    const store = open();
+    store.saveFoundJobs({
+      searchId: null,
+      jobs: Array.from({ length: 1005 }, (_, i) => found(i + 1)),
+    });
+    expect(store.listJobs({ stage: "found" })).toMatchObject({
+      total: 1005,
+      totalCapped: false,
+    });
+    expect(store.listJobs({ stage: "found", text: "frontend" })).toMatchObject({
+      total: 1000,
+      totalCapped: true,
+    });
   });
 
   it("tells listeners which stages changed", () => {
@@ -190,6 +240,40 @@ describe("job store", () => {
       ["found", ["found"]],
       ["move", ["found", "hidden"]],
     ]);
+  });
+
+  it("keeps a search's counts and marks one cut off by a restart as stopped", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "job-store-"));
+    const file = path.join(dir, "jobs.sqlite");
+    try {
+      const store = openJobStore(file);
+      const search = store.searches.start(
+        {
+          depth: "quick",
+          sourceIds: "all",
+          picky: "balanced",
+          postedWithin: "month",
+          note: "",
+        },
+        3,
+      );
+      store.searches.count(search.id, { found: 5, added: 4, merged: 1 });
+      store.searches.count(search.id, { sourcesDone: 1, added: 2 });
+      expect(store.searches.latest()).toMatchObject({
+        state: "running",
+        sourcesTotal: 3,
+        sourcesDone: 1,
+        found: 5,
+        added: 6,
+        merged: 1,
+      });
+      store.close();
+      const reopened = openJobStore(file);
+      expect(reopened.searches.get(search.id)?.state).toBe("stopped");
+      reopened.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("starts a file from another store version over", () => {

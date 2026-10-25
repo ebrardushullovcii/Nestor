@@ -7,6 +7,7 @@
     "./discovery-cpu": "./src/discovery-cpu.ts",
     "./resume-computation": "./src/resume-computation.ts",
     ".": "./src/index.ts",
+    "./job-commands": "./src/job-commands.ts",
     "./assistant-attention": "./src/assistant/attention.ts",
     "./discovery-ordering": "./src/discovery-ordering.ts",
     "./discovery-result-bands": "./src/discovery-result-bands.ts",

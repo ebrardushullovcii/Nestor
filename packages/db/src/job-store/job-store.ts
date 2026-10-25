@@ -17,7 +17,7 @@ import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { writeFoundJobs } from "./found-jobs";
+import { readListingStage, writeFoundJobs } from "./found-jobs";
 import { getJob, listJobs, readStageCounts } from "./job-list";
 import {
   CHANGE_ID_LIMIT,
@@ -27,6 +27,7 @@ import {
   type MoveOutcome,
 } from "./job-moves";
 import { JOB_STORE_SCHEMA, JOB_STORE_VERSION } from "./schema";
+import { createSearches, type JobSearches } from "./searches";
 import { createStatements, type Statements } from "./statements";
 
 export interface JobStore {
@@ -47,9 +48,14 @@ export interface JobStore {
     jobs: readonly FoundJob[];
   }): SaveFoundJobsResult;
   setFit(updates: readonly JobFitUpdate[]): void;
+  /** Saved jobs still waiting for a fit score, newest first. */
+  unscoredJobIds(limit: number): number[];
+  readonly searches: JobSearches;
 
   listJobs(query: JobListQueryInput): JobListPage;
   getJob(id: number): JobDetail | null;
+  /** The stage of a saved job with this listing link, so a search can skip it. */
+  stageForListing(url: string): JobStage | null;
   stageCounts(): JobStageCounts;
 
   /** Triage: moves jobs between found, hidden and shortlisted, with Undo. */
@@ -179,9 +185,9 @@ export function openJobStore(filePath: string): JobStore {
     notify,
 
     saveFoundJobs({ searchId, jobs }) {
-      if (jobs.length === 0) return { added: [], merged: [] };
+      if (jobs.length === 0) return { added: [], hidden: [], merged: [] };
       return transaction(() => {
-        const { added, merged, mergedStages } = writeFoundJobs(
+        const { added, hidden, merged, mergedStages } = writeFoundJobs(
           sql,
           searchId,
           jobs,
@@ -189,14 +195,15 @@ export function openJobStore(filePath: string): JobStore {
         );
         const stages = new Set(mergedStages);
         if (added.length > 0) stages.add("found");
-        const ids = [...added, ...merged];
+        if (hidden.length > 0) stages.add("hidden");
+        const ids = [...added, ...hidden, ...merged];
         notify({
           cause: "found",
           stages: [...stages],
           ids: ids.length > CHANGE_ID_LIMIT ? null : ids,
           searchId,
         });
-        return { added, merged };
+        return { added, hidden, merged };
       });
     },
 
@@ -233,8 +240,18 @@ export function openJobStore(filePath: string): JobStore {
       });
     },
 
+    unscoredJobIds: (limit) =>
+      (
+        sql(
+          `SELECT id FROM jobs WHERE stage IN ('found', 'shortlisted') AND fit_score = -1
+           ORDER BY found_at DESC LIMIT ?`,
+        ).all(limit) as { id: number }[]
+      ).map((row) => row.id),
+    searches: createSearches(sql),
+
     listJobs: (query) => listJobs(sql, JobListQuerySchema.parse(query)),
     getJob: (id) => getJob(sql, id),
+    stageForListing: (url) => readListingStage(sql, url),
     stageCounts: () => readStageCounts(sql),
 
     moveJobs({ selection, to }) {
@@ -265,3 +282,4 @@ export function openJobStore(filePath: string): JobStore {
     },
   };
 }
+export type { JobSearches } from "./searches";

@@ -62,7 +62,8 @@ export function toFilterSql(filter: JobFilter): FilterSql {
     params.push(filter.searchId);
   }
   if (filter.minFit !== null) {
-    clauses.push("j.fit_score >= ?");
+    // Jobs not scored yet stay visible, so they show up the moment they are found.
+    clauses.push("(j.fit_score >= ? OR j.fit_score = -1)");
     params.push(filter.minFit);
   }
   if (filter.workModes.length > 0) {
@@ -91,7 +92,7 @@ const SORT_COLUMNS: Record<JobSort, readonly string[]> = {
   recent: ["stage_at", "id"],
 };
 
-const ROW_COLUMNS = `j.id, j.stage, j.stage_at, j.title, j.company, j.location,
+const ROW_COLUMNS = `j.id, j.stage, j.stage_at, j.stage_note, j.title, j.company, j.location,
   j.work_modes, j.salary_text, j.fit_score, j.fit_summary, j.posted_at,
   j.found_at, j.found_by, j.source_label, j.source_count`;
 
@@ -99,6 +100,7 @@ type RowRecord = {
   id: number;
   stage: JobStage;
   stage_at: number;
+  stage_note: string | null;
   title: string;
   company: string;
   location: string;
@@ -118,6 +120,7 @@ function toRow(record: RowRecord): JobRow {
     id: record.id,
     stage: record.stage,
     stageChangedAt: toIso(record.stage_at),
+    stageNote: record.stage_note,
     title: record.title,
     company: record.company,
     location: record.location,
@@ -198,8 +201,8 @@ export function listJobs(sql: Statements, query: JobListQuery): JobListPage {
       hasMore && last
         ? JSON.stringify(columns.map((c) => last[c as keyof RowRecord]))
         : null,
-    total: Math.min(total, JOB_TOTAL_CAP),
-    totalCapped: total > JOB_TOTAL_CAP,
+    total: filter.stageOnly ? total : Math.min(total, JOB_TOTAL_CAP),
+    totalCapped: !filter.stageOnly && total > JOB_TOTAL_CAP,
     counts,
   };
 }
