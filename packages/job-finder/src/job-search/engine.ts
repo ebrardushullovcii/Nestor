@@ -20,6 +20,7 @@ import {
   type JobFitUpdate,
   type JobSearchSettings,
   type ListingCard,
+  type ModelTokenUsage,
   type ReadListingResult,
   type SeenListingCard,
   type SourceInventory,
@@ -81,6 +82,8 @@ export function createListingSearchEngine(deps: {
   if (!deps.aiClient.chatWithTools)
     throw new Error("Search needs an available AI model.");
   const client = { chatWithTools: deps.aiClient.chatWithTools };
+  const onUsage = (usage: ModelTokenUsage, stage: string) =>
+    console.info("[Job search AI]", JSON.stringify({ stage, ...usage }));
   const browser = createHostQueue({ limit: 2, perHost: 1 });
   const decisions = new Map<string, Map<string, boolean>>();
   const readPage = createHttpPageReader({
@@ -241,6 +244,7 @@ export function createListingSearchEngine(deps: {
       return screenCards({
         decisions: cache,
         client,
+        onUsage,
         cards: input.cards,
         signal: input.signal,
         goals,
@@ -249,10 +253,12 @@ export function createListingSearchEngine(deps: {
           Promise.resolve(input.seenCards(cards, key)),
       });
     },
-    readListings: (input) => readListings({ client, ...input, readPage }),
+    readListings: (input) =>
+      readListings({ client, onUsage, ...input, readPage }),
     fitJobs: (input) =>
       fitJobs({
         client,
+        onUsage,
         ...input,
         profile: input.context.profile,
         goals: toJobSearchGoals(input.context.searchPreferences),

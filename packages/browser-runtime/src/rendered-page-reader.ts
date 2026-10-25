@@ -28,9 +28,10 @@ export async function readRenderedPageHtml(
     options.signal?.throwIfAborted();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20_000 });
     // Let script-loaded content finish. Busy sites still get a bounded read.
-    await page
-      .waitForLoadState("networkidle", { timeout: 8_000 })
-      .catch(() => undefined);
+    if (!options.ready)
+      await page
+        .waitForLoadState("networkidle", { timeout: 8_000 })
+        .catch(() => undefined);
     options.signal?.throwIfAborted();
     let html = await page.content();
     const deadline = Date.now() + 12_000;

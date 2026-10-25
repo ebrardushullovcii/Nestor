@@ -304,3 +304,27 @@ test.each(["chat_completions", "responses"] as const)(
     ).toBeUndefined();
   },
 );
+
+test("uses the final assistant message instead of joining separate JSON drafts", async () => {
+  const result = await parseResponsePayload(
+    new Response(
+      JSON.stringify({
+        output: [
+          {
+            type: "message",
+            phase: "commentary",
+            content: [{ type: "output_text", text: '{"draft":true}' }],
+          },
+          {
+            type: "message",
+            phase: "final_answer",
+            content: [{ type: "output_text", text: '{"keep":{"0":1}}' }],
+          },
+        ],
+        output_text: '{"draft":true}\n{"keep":{"0":1}}',
+      }),
+    ),
+    "responses",
+  );
+  expect(result.choices?.[0]?.message?.content).toBe('{"keep":{"0":1}}');
+});

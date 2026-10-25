@@ -857,6 +857,11 @@ export function createOpenAiCompatibleJobFinderAiClient(
             apiMode,
             model: validatedOptions.model,
             reasoningEffort: reasoningEffortFor(options?.reasoningTask),
+            ...(options?.reasoningTask === "listing_screen" &&
+            validatedOptions.model === "mimo-v2.6-flash" &&
+            isOpenCodeBaseUrl(validatedOptions.baseUrl)
+              ? { temperature: 0 }
+              : {}),
             ...(options?.jsonOutput ? { jsonOutput: true } : {}),
             ...(options?.jsonSchema &&
             isStableFitRoute({ ...validatedOptions, apiMode })
@@ -1278,6 +1283,26 @@ export function createJobFinderAiClientFromEnvironment(
     resumeExtractionTimeoutMs: parsedResumeExtractionTimeoutMs,
     ...parsedResilience,
   });
+  // Profession classification does not need a reasoning transcript. MiMo Flash
+  // accepts none on Go without a reduced-allowance multiplier.
+  const screeningClient = isStableFitRoute(primaryRoute)
+    ? createOpenAiCompatibleJobFinderAiClient({
+        apiKey,
+        baseUrl: primaryRoute.baseUrl,
+        model: "mimo-v2.6-flash",
+        apiMode: "chat_completions",
+        reasoningEffort: "none",
+        taskReasoningEfforts: {
+          listing_screen:
+            parseModelReasoningEffort(
+              env.NESTOR_AI_LISTING_SCREEN_REASONING_EFFORT,
+            ) ?? "none",
+        },
+        label: "Job title screening",
+        requestTimeoutMs: parsedRequestTimeoutMs,
+        ...parsedResilience,
+      })
+    : primaryClient;
   // Aggressive resume tailoring uses its own model route rather than the
   // primary provider. DeepSeek V4.1 Flash is text-only, so it uses Chat
   // Completions; reasoning effort is read from its own env var so it is
@@ -1691,7 +1716,11 @@ export function createJobFinderAiClientFromEnvironment(
     },
     async chatWithTools(messages, tools, options?: ChatWithToolsOptions) {
       try {
-        return await primaryClient.chatWithTools(messages, tools, options);
+        return await (
+          options?.reasoningTask === "listing_screen"
+            ? screeningClient
+            : primaryClient
+        ).chatWithTools(messages, tools, options);
       } catch (error) {
         logFallbackError("chatWithTools", error);
         throw error;

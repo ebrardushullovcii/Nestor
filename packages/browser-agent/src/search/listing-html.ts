@@ -480,6 +480,43 @@ export function readInventoryHtml(
       const href = link(node, url);
       return href && href !== url ? [href] : [];
     });
+  if (!cards.size) {
+    for (const heading of nodes.filter(
+      (node) =>
+        /^h[1-6]$/u.test(node.tagName) &&
+        !excluded(node) &&
+        /^(?:openings|jobs|positions|vacancies|opportunities)(?: by| in| across)\b/iu.test(
+          text(node),
+        ),
+    )) {
+      const parent = heading.parentNode;
+      if (!parent || !("childNodes" in parent)) continue;
+      const siblings = parent.childNodes;
+      for (const sibling of siblings.slice(siblings.indexOf(heading) + 1)) {
+        if (!element(sibling)) continue;
+        if (!["ul", "ol"].includes(sibling.tagName)) break;
+        const anchors = descendants(sibling).filter(
+          (node) => node.tagName === "a" && !excluded(node),
+        );
+        // Counts distinguish opening directories from ordinary editorial lists.
+        if (
+          anchors.length < 2 ||
+          !anchors.every((node) => /\d+\)?\s*$/u.test(text(node)))
+        )
+          break;
+        for (const anchor of anchors) {
+          const href = link(anchor, url);
+          if (
+            href &&
+            href !== url &&
+            new URL(href).origin === new URL(url).origin
+          )
+            portals.push(href);
+        }
+        break;
+      }
+    }
+  }
   return {
     cards: [...cards.values()],
     next: [...next],
