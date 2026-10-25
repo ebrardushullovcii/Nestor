@@ -271,7 +271,7 @@ export function ProfileScreen(props: {
           filled(profile.experiences),
         total: Math.max(
           1,
-          (summary.counts.experiences +
+          ((summary.counts.experiences ?? 0) +
             current.length -
             profile.experiences.length) *
             3,

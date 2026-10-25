@@ -48,28 +48,27 @@ export function useStoredProfile() {
       off();
     };
   }, [refresh]);
-  const save = useCallback(async (input: CommitProfileEditsInput) => {
-    setSaving(true);
-    try {
-      const next = await window.nestor.jobs.run("commit_profile_edits", input);
-      if (live.current) {
-        setOverview(next.profile);
-        setGoals(next.goals);
-        setError(null);
+  const save = useCallback(
+    async (input: CommitProfileEditsInput) => {
+      setSaving(true);
+      try {
+        await window.nestor.jobs.run("commit_profile_edits", input);
+        await refresh();
+        return true;
+      } catch (reason: unknown) {
+        if (live.current)
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Could not save your profile.",
+          );
+        return false;
+      } finally {
+        if (live.current) setSaving(false);
       }
-      return true;
-    } catch (reason: unknown) {
-      if (live.current)
-        setError(
-          reason instanceof Error
-            ? reason.message
-            : "Could not save your profile.",
-        );
-      return false;
-    } finally {
-      if (live.current) setSaving(false);
-    }
-  }, []);
+    },
+    [refresh],
+  );
   return { overview, goals, error, saving, save, refresh };
 }
 const EMPTY: ProfileRecordPage = { rows: [], total: 0, nextCursor: null };

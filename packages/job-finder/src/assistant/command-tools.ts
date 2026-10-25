@@ -22,7 +22,14 @@ export function assistantCommandTools<
     input: z.input<C[K]["input"]>,
   ) => O[K] | Promise<O[K]>,
   options: {
-    group: AssistantToolGroup;
+    group:
+      | AssistantToolGroup
+      | ((name: keyof C & string) => AssistantToolGroup);
+    beforeRun?: (
+      name: keyof C & string,
+      input: unknown,
+      context: AssistantToolContext,
+    ) => void;
     replaces?: Partial<Record<keyof C, readonly string[]>>;
     before?: {
       [K in keyof C]?: (
@@ -49,7 +56,10 @@ export function assistantCommandTools<
     return {
       name,
       ...(options.replaces?.[name] ? { replaces: options.replaces[name] } : {}),
-      group: options.group,
+      group:
+        typeof options.group === "function"
+          ? options.group(name)
+          : options.group,
       description: command.description,
       input: command.input,
       parameters: {
@@ -66,6 +76,7 @@ export function assistantCommandTools<
           parsed as z.output<C[K]["input"]>,
           context,
         );
+        options.beforeRun?.(name, parsed, context);
         const result = await run(name, parsed as z.input<C[K]["input"]>);
         return (
           options.results?.[name]?.(

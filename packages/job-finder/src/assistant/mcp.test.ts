@@ -8,6 +8,8 @@ import { createNeedsYouCommandRunner } from "../applications/needs-you-commands"
 import {
   JOB_COMMANDS,
   AssistantChangeReceiptSchema,
+  PROFILE_COMMANDS,
+  type ProfileCommandOutputs,
   SavedFormAnswersPageSchema,
   type JobCommandOutputs,
 } from "@nestor/contracts";
@@ -16,6 +18,7 @@ import { z } from "zod";
 
 import { createJobCommandRunner } from "../job-commands";
 import { assistantCommandTools } from "./command-tools";
+import { guardProfileCommand } from "./profile-command-guard";
 import { connectAssistantMcp } from "./mcp";
 import { buildAssistantToolCatalog } from "./tools";
 import { toConversationTool, type AssistantToolContext } from "./tool-kit";
@@ -457,5 +460,61 @@ it("preserves command fields named status and complete through the chat wrapper 
     });
   } finally {
     await mcp.close();
+  }
+});
+
+it("runs Profile and Settings field commands over MCP and protects unsaved Profile fields", async () => {
+  const store = openJobStore(":memory:");
+  const run = createJobCommandRunner({ store });
+  const definitions = assistantCommandTools<
+    typeof PROFILE_COMMANDS,
+    ProfileCommandOutputs
+  >(PROFILE_COMMANDS, run, {
+    group: (name) =>
+      name === "get_settings" || name === "patch_settings"
+        ? "settings"
+        : "profile",
+    beforeRun: guardProfileCommand,
+  });
+  const ctx = context();
+  Object.defineProperty(ctx.session, "context", {
+    value: {
+      editor: {
+        editor: "profile",
+        dirtyFields: ["headline"],
+        unsavedValues: { headline: "Typing" },
+      },
+    },
+  });
+  const mcp = await connectAssistantMcp(definitions, ctx);
+  const call = (name: string, input: unknown) =>
+    mcp.tools.find((tool) => tool.name === name)!.execute(input, ctx);
+  try {
+    await expect(
+      call("patch_profile", { fields: { headline: "Overwrite typing" } }),
+    ).rejects.toThrow(/unsaved edits/u);
+    await call("patch_profile", {
+      fields: { email: "synthetic@example.test" },
+    });
+    expect((await run("get_profile", {})).fields.email).toBe(
+      "synthetic@example.test",
+    );
+    await call("patch_profile_goals", {
+      lists: { targetRoles: ["UX Researcher"] },
+    });
+    await call("patch_settings", { fields: { appearanceTheme: "dark" } });
+    expect((await run("get_profile_goals", {})).targetRoles).toEqual([
+      "UX Researcher",
+    ]);
+    expect((await run("get_settings", {})).appearanceTheme).toBe("dark");
+    expect((await run("get_profile", {})).fields.headline).not.toBe(
+      "Overwrite typing",
+    );
+    expect(
+      definitions.find((tool) => tool.name === "patch_settings")?.group,
+    ).toBe("settings");
+  } finally {
+    await mcp.close();
+    store.close();
   }
 });

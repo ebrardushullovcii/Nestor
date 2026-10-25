@@ -64,6 +64,12 @@ const COMMON_TOOLS = [
 const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
   home: ["get_workspace_summary", "list_needs_you", "list_tracker_agenda"],
   profile: [
+    "get_profile",
+    "list_profile_records",
+    "get_profile_record",
+    "patch_profile",
+    "get_profile_goals",
+    "patch_profile_goals",
     "edit_profile",
     "finish_profile_setup",
     "list_documents",
@@ -146,6 +152,8 @@ const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
     "forget_form_answers",
   ],
   settings: [
+    "get_settings",
+    "patch_settings",
     "read_settings",
     "update_apply_settings",
     "update_ai_behavior",

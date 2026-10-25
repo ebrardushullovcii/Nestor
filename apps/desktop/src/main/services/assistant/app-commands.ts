@@ -1,5 +1,6 @@
 import {
   JOB_COMMANDS,
+  PROFILE_COMMANDS,
   RESUME_COMMANDS,
   TRACKER_COMMANDS,
   TRACKER_STATUS_LABEL,
@@ -15,6 +16,7 @@ import {
   resumeCommandReceipts,
   resumeResultData,
   needsYouCommandTools,
+  guardProfileCommand,
   type AssistantToolContext,
 } from "@nestor/job-finder";
 
@@ -161,7 +163,25 @@ export function assistantAppCommands() {
       JOB_COMMANDS,
       runJobCommand,
       {
-        group: "jobs",
+        group: (name) =>
+          name === "get_settings" || name === "patch_settings"
+            ? "settings"
+            : name in PROFILE_COMMANDS
+              ? "profile"
+              : "jobs",
+        beforeRun: guardProfileCommand,
+        replaces: {
+          list_jobs: ["query_jobs", "show_jobs", "compare_jobs"],
+          move_jobs: [
+            "shortlist_jobs",
+            "shortlist_result_set",
+            "remove_from_shortlist",
+            "dismiss_jobs",
+            "restore_jobs",
+          ],
+          start_search: ["search_for_jobs"],
+          stop_search: ["cancel_search"],
+        },
         results: {
           list_sites: (page) => ({
             summary: `${page.total} job sites match; ${page.enabledTotal} turned on in total.`,

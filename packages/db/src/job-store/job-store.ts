@@ -202,7 +202,11 @@ export function openJobStore(filePath: string): JobStore {
   let pending: JobChange[] = [];
 
   const notify = (change: JobChange) => {
-    if (change.stages.length === 0 && change.cause !== "sites") return;
+    if (
+      change.stages.length === 0 &&
+      !["sites", "profile", "settings"].includes(change.cause)
+    )
+      return;
     if (depth > 0) {
       pending.push(change);
       return;

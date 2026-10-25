@@ -514,7 +514,6 @@ export function JobFinderSettingsRoute() {
       )}
       onResetWorkspace={context.onResetWorkspace}
       onSettingsDraftEdited={context.onSettingsDraftEdited}
-
     />
   );
 }

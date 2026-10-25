@@ -38,6 +38,7 @@ export {
 } from "./action-registry";
 export { diffValues, undoChangeEntries } from "./change-diff";
 export { assistantCommandTools } from "./command-tools";
+export { guardProfileCommand } from "./profile-command-guard";
 export { AssistantToolError } from "./tool-kit";
 export {
   guardResumeEditor,

@@ -23,25 +23,27 @@ export function settingPatch(
   input: unknown,
   previous?: JobFinderSettings | null,
 ): PatchSettingsInput {
-  const changed = ([key, value]: [string, unknown]) =>
+  const changed = ([key, value]: readonly [string, unknown]) =>
     value !== undefined &&
     (!previous ||
       JSON.stringify(value) !== JSON.stringify(leaf(previous, key)));
+  const fields = SettingsFieldsSchema.parse(
+    Object.fromEntries(
+      Object.keys(SettingsFieldsSchema.shape)
+        .map((key) => [key, leaf(input, key)] as const)
+        .filter(changed),
+    ),
+  );
+  const lists = SettingsListsSchema.parse(
+    Object.fromEntries(
+      Object.keys(SettingsListsSchema.shape)
+        .map((key) => [key, leaf(input, key)] as const)
+        .filter(changed),
+    ),
+  );
   return {
-    fields: SettingsFieldsSchema.parse(
-      Object.fromEntries(
-        Object.keys(SettingsFieldsSchema.shape)
-          .map((key) => [key, leaf(input, key)])
-          .filter(changed),
-      ),
-    ),
-    lists: SettingsListsSchema.parse(
-      Object.fromEntries(
-        Object.keys(SettingsListsSchema.shape)
-          .map((key) => [key, leaf(input, key)])
-          .filter(changed),
-      ),
-    ),
+    ...(Object.keys(fields).length ? { fields } : {}),
+    ...(Object.keys(lists).length ? { lists } : {}),
   };
 }
 export function useStoredSettings() {
@@ -89,16 +91,11 @@ export function useStoredSettings() {
         ),
       );
       try {
-        const next = await window.nestor.jobs.run("patch_settings", {
+        await window.nestor.jobs.run("patch_settings", {
           ...input,
           expected,
         });
-        if (mounted.current) {
-          sequence.current++;
-          current.current = next;
-          setSettings(next);
-          setError(null);
-        }
+        await refresh();
         return true;
       } catch (reason: unknown) {
         if (mounted.current)
@@ -110,30 +107,28 @@ export function useStoredSettings() {
         return false;
       }
     },
-    [],
+    [refresh],
   );
-  const updateResumeApproach = useCallback(async (approach: ResumeApproach) => {
-    try {
-      const next = await window.nestor.jobs.run("set_resume_approach", {
-        approach,
-      });
-      if (mounted.current) {
-        sequence.current++;
-        current.current = next.settings;
-        setSettings(next.settings);
-        setError(null);
+  const updateResumeApproach = useCallback(
+    async (approach: ResumeApproach) => {
+      try {
+        await window.nestor.jobs.run("set_resume_approach", {
+          approach,
+        });
+        await refresh();
+        return true;
+      } catch (reason: unknown) {
+        if (mounted.current)
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Could not save the resume level.",
+          );
+        return false;
       }
-      return true;
-    } catch (reason: unknown) {
-      if (mounted.current)
-        setError(
-          reason instanceof Error
-            ? reason.message
-            : "Could not save the resume level.",
-        );
-      return false;
-    }
-  }, []);
+    },
+    [refresh],
+  );
   const updateAiBehavior = useCallback(
     async (input: UpdateAiBehaviorInput) => {
       if (input.resumeApproach) {

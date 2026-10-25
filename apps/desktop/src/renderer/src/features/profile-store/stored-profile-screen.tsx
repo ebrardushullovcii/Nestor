@@ -194,7 +194,7 @@ export function StoredProfileScreen(props: ProfilePorts) {
       {pages
         .filter(
           ({ page }) =>
-            store.overview!.counts[page.collection] > 25 ||
+            (store.overview!.counts[page.collection] ?? 0) > 25 ||
             page.text ||
             page.index > 0 ||
             page.error,
