@@ -80,8 +80,25 @@ describe("Home summary", () => {
     expect(home.recent).toMatchObject({ applied: 1, replied: 1 });
     expect(home.tracker).toMatchObject({ applying: 1, applied: 2, replied: 1 });
     expect(home.readyToApply).toBe(1);
+    expect(home.applyWorking).toBe(1);
     expect(home.jobs.found).toBe(1);
     expect(home.foundToday).toBe(1);
+  });
+
+  it("counts only unfinished applications as Apply's work", () => {
+    const now = Date.now();
+    const { store } = workspace(now);
+    const home = createHomeStore(store);
+    expect(home.summary({ utcOffsetMinutes: 0 }, now).applyWorking).toBe(1);
+    // Stopped and failed work is over, though the job is still being applied to.
+    store
+      .sql(`UPDATE applications SET state = 'stopped' WHERE state = 'queued'`)
+      .run();
+    expect(home.summary({ utcOffsetMinutes: 0 }, now).applyWorking).toBe(0);
+    store
+      .sql(`UPDATE applications SET state = 'failed' WHERE state = 'stopped'`)
+      .run();
+    expect(home.summary({ utcOffsetMinutes: 0 }, now).applyWorking).toBe(0);
   });
 
   it("lists interviews first, then due and upcoming reminders, soonest first", () => {
