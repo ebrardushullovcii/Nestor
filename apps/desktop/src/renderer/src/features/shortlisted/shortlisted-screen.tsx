@@ -9,6 +9,7 @@ import { useToast } from "@renderer/components/ui/toast";
 import { LockedScreenLayout } from "@renderer/features/job-finder/components/locked-screen-layout";
 import { PageHeader } from "@renderer/features/job-finder/components/page-header";
 import { StatusBadge } from "@renderer/features/job-finder/components/status-badge";
+import { useAssistantContextSource } from "@renderer/features/job-finder/assistant/assistant-provider";
 import {
   countSelected,
   isSelected,
@@ -88,6 +89,22 @@ export function ShortlistedScreen() {
 
   const latest = useRef({ list, activeId, view, selection, tab, text });
   latest.current = { list, activeId, view, selection, tab, text };
+  useAssistantContextSource("shortlisted", () => {
+    const { list, activeId, view, selection, tab, text } = latest.current;
+    return {
+      screen: "review_queue",
+      focus: activeId === null ? null : { kind: "job", id: String(activeId), label: view.job?.title ?? null },
+      list: {
+        listKind: "shortlist",
+        selectedIds: list.rows.filter((row) => isSelected(selection, row.id)).map((row) => String(row.id)),
+        displayedIds: list.rows.map((row) => String(row.id)),
+        filteredIds: [],
+        totalFilteredCount: list.total,
+        filterSummary: JSON.stringify({ stage: tab, text, allSelected: selection.all, except: selection.all ? [...selection.ids] : [] }),
+        campaignId: null,
+      },
+    };
+  });
 
   /** The ticked jobs, or the open one when none are ticked. */
   const target = useCallback((): JobSelectionInput | null => {

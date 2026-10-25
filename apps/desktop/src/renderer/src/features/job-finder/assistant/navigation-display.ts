@@ -77,6 +77,12 @@ export async function waitForDisplayedDestination(
               "main h1, main h2, [role=main] h1, [role=main] h2",
             ),
           );
+    const jobId = expected.searchParams.get("jobId");
+    const jobDisplayed = !jobId || (expected.pathname === "/job-finder/review-queue"
+      ? [...document.querySelectorAll("main [data-job-detail-id]")].some((element) => element.getAttribute("data-job-detail-id") === jobId)
+      : [...document.querySelectorAll("main [data-job-result-id], main [data-list-row-id]")].some((element) =>
+          (element.getAttribute("data-job-result-id") ?? element.getAttribute("data-list-row-id")) === jobId &&
+          Boolean(element.matches('[data-selected="true"], [aria-current="true"]') || element.querySelector('[data-selected="true"], [aria-current="true"]'))));
     display = {
       displayedRoute: `${actual.pathname}${actual.search}`,
       section,
@@ -90,6 +96,7 @@ export async function waitForDisplayedDestination(
     if (
       matches &&
       contentMounted &&
+      jobDisplayed &&
       overlay === "none" &&
       (!expectedSection || section === expectedSection)
     )

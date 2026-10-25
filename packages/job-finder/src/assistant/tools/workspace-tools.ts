@@ -760,7 +760,7 @@ export const openInAppTool = defineTool({
       input.screen !==
         (input.applicationRecordId
           ? "applications"
-          : input.resume
+          : input.resume || input.screen === "shortlisted"
             ? "shortlisted"
             : "find_jobs")
     ) {
@@ -777,7 +777,7 @@ export const openInAppTool = defineTool({
     const route = input.applicationRecordId
       ? `/job-finder/applications?${input.screen === "tracker" ? "view=tracker&" : ""}applicationRecordId=${encodeURIComponent(input.applicationRecordId)}`
       : input.jobId
-        ? input.resume
+        ? input.resume || input.screen === "shortlisted"
           ? `/job-finder/review-queue?jobId=${encodeURIComponent(input.jobId)}`
           : `/job-finder/discovery?jobId=${encodeURIComponent(input.jobId)}`
         : input.screen === "profile" && input.section

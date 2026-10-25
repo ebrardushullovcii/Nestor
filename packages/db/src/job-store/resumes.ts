@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   ResumeDraftSchema,
   type JobListingFacts,
@@ -24,6 +25,7 @@ type ResumeRow = {
 };
 
 type PreviousResume = {
+  changeId: string;
   level: ResumeLevel;
   draft: ResumeDraft | null;
   approvedAt: number | null;
@@ -48,6 +50,7 @@ function toStoredResume(row: ResumeRow): StoredResume {
       : null,
     updatedAt: new Date(row.updated_at).toISOString(),
     previousLevel: previous?.level ?? null,
+    levelChangeId: previous?.changeId ?? null,
     pdfPath: row.pdf_path,
   };
 }
@@ -87,7 +90,7 @@ export interface ResumeStore {
   ): StoredResume;
   /** Writes the resume again at `level`; Undo puts the old one back. */
   setLevel(jobId: number, level: ResumeLevel): StoredResume;
-  undoLevel(jobId: number): StoredResume;
+  undoLevel(jobId: number, changeId?: string): StoredResume;
   /** The posting text a listing read found for a job that had only its card. */
   saveListing(jobId: number, description: string, facts: JobListingFacts): void;
   /** Approves it and hands the job to Apply in one write. */
@@ -221,7 +224,7 @@ export function createResumeStore(store: JobStore): ResumeStore {
         const now = Math.max(Date.now(), row.updated_at + 1);
         const stages = unapprove(jobId, now);
         sql(
-          `UPDATE resumes SET draft_json = ?, updated_at = ?, approved_at = NULL, pdf_path = NULL
+          `UPDATE resumes SET draft_json = ?, updated_at = ?, approved_at = NULL, pdf_path = NULL, previous_json = NULL
            WHERE job_id = ?`,
         ).run(JSON.stringify(draft), now, jobId);
         changed(jobId, stages);
@@ -236,6 +239,7 @@ export function createResumeStore(store: JobStore): ResumeStore {
         const stages = unapprove(jobId, now);
         const previous: PreviousResume | null = row
           ? {
+              changeId: randomUUID(),
               level: row.level,
               draft: row.draft_json
                 ? (JSON.parse(row.draft_json) as ResumeDraft)
@@ -256,9 +260,11 @@ export function createResumeStore(store: JobStore): ResumeStore {
       });
     },
 
-    undoLevel(jobId) {
+    undoLevel(jobId, changeId) {
       return store.transaction(() => {
         const row = require(jobId);
+        if (changeId && (!row.previous_json || (JSON.parse(row.previous_json) as PreviousResume).changeId !== changeId))
+          throw new ResumeChangedError("This resume changed since that level change. Later edits were kept.");
         if (!row.previous_json) return toStoredResume(row);
         const previous = JSON.parse(row.previous_json) as PreviousResume;
         const now = Date.now();

@@ -44,7 +44,7 @@ export const RESUME_COMMANDS = {
   undo_resume_level: {
     description:
       "Puts back the resume, level and approval a level change replaced.",
-    input: z.object({ jobId: JobIdSchema }).strict(),
+    input: z.object({ jobId: JobIdSchema, changeId: z.string().min(1).max(100).optional() }).strict(),
   },
   rewrite_resume: {
     description:

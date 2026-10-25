@@ -6,6 +6,14 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+it("waits for the requested job's actual details, even after the route changes", async () => {
+  const route = "/job-finder/review-queue?jobId=7";
+  document.body.innerHTML = '<main><h1>Shortlisted</h1><section data-job-detail-id="3"></section></main>';
+  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "blocked" });
+  document.querySelector("section")!.setAttribute("data-job-detail-id", "7");
+  expect(await waitForDisplayedDestination(route, () => route, 0)).toMatchObject({ status: "displayed" });
+});
+
 it("acknowledges Tracker only when its mounted heading matches the requested route", async () => {
   document.body.innerHTML = "<main><h1>Resume studio</h1></main>";
   expect(

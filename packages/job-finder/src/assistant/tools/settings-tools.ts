@@ -17,6 +17,7 @@ import {
   WrittenAnswerLengthSchema,
 } from "@nestor/contracts";
 import { z } from "zod";
+import { defaultResumeLevelLabel } from "../prompt";
 import { diffValues } from "../change-diff";
 import type { AssistantToolContext } from "../tool-kit";
 import { argText, AssistantToolError, defineTool, json } from "../tool-kit";
@@ -91,7 +92,7 @@ export const readSettingsTool = defineTool({
   name: "read_settings",
   group: "settings",
   description:
-    "Reads Settings: apply mode, resume level, template and font, cover letters, AI behavior and the resume templates available.",
+    "Reads Settings: apply mode, template and font, cover letters, AI behavior and available resume templates. The default resume level belongs to Profile > Preferences.",
   parameters: json.object({}),
   input: z.object({}).passthrough(),
   label: () => "Reading your settings",
@@ -99,15 +100,10 @@ export const readSettingsTool = defineTool({
   async execute(_input, { service }) {
     const snapshot = await service.getWorkspaceSnapshot();
     return {
-      summary: `Apply mode ${snapshot.settings.applicationAutomationMode ?? "confirm_before_submit"}, resume level ${snapshot.settings.resumeApplicationMode === "original_resume" ? "original" : snapshot.searchPreferences.tailoringMode}.`,
+      summary: `Apply mode ${snapshot.settings.applicationAutomationMode ?? "confirm_before_submit"}. Profile > Preferences resume level: ${defaultResumeLevelLabel(snapshot)}.`,
       data: {
-        applyMode:
-          snapshot.settings.applicationAutomationMode ??
-          "confirm_before_submit",
-        resumeLevel:
-          snapshot.settings.resumeApplicationMode === "original_resume"
-            ? "original_resume"
-            : snapshot.searchPreferences.tailoringMode,
+        applyMode: snapshot.settings.applicationAutomationMode ?? "confirm_before_submit",
+        resumeLevel: defaultResumeLevelLabel(snapshot),
         resumeTemplateId: snapshot.settings.resumeTemplateId,
         fontPreset: snapshot.settings.fontPreset,
         coverLetter: snapshot.settings.coverLetter,
@@ -366,7 +362,7 @@ export const setDefaultResumeLevelTool = defineTool({
   name: "set_default_resume_level",
   group: "settings",
   description:
-    "Sets Settings > AI behavior > Default resume approach for newly shortlisted jobs. Existing jobs keep their overrides. Use for default requests; set_resume_level changes only named jobs.",
+    "Sets Profile > Preferences > Resume level for newly shortlisted jobs: Original, Light, Tailored, Aggressive. Existing jobs keep their levels. Use for default requests; set_resume_level changes only named jobs. This setting is not in Settings.",
   parameters: json.object(
     { level: json.enumOf(["original", "light", "tailored", "aggressive"]) },
     ["level"],
@@ -403,7 +399,7 @@ export const setDefaultResumeLevelTool = defineTool({
       );
     return {
       ...result,
-      summary: `The saved default resume approach is ${actual}. Existing job choices are preserved.`,
+      summary: `The saved default resume level in Profile > Preferences is ${actual[0]!.toUpperCase()}${actual.slice(1)}. Existing job choices are preserved.`,
       data: {
         ...(result.data as Record<string, unknown>),
         defaultResumeLevel: actual,

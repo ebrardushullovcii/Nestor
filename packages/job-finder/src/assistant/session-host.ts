@@ -1,4 +1,5 @@
 import { executeRegisteredAssistantAction } from "./tools/registered-action-tools";
+import { connectAssistantMcp } from "./mcp";
 import { estimateResumeBatchMinutesLeft } from "@nestor/contracts";
 import { verifyPersonAnswerAuthority } from "./person-answer-authority";
 import { readAssistantWorkState } from "./work-state";
@@ -57,10 +58,6 @@ import {
   AssistantContextOverflowError,
 } from "./context-assembly";
 import { createHandleStore } from "./handle-store";
-import {
-  createLegacyMigrationCheckpoint,
-  migrateLegacyChats,
-} from "./legacy-migration";
 import type { AssistantBrowserLease, AssistantHostPorts } from "./ports";
 import { ASSISTANT_SYSTEM_PROMPT, buildContextBlock } from "./prompt";
 import { readRunStatus } from "./run-watch";
@@ -283,10 +280,6 @@ export class AssistantSessionHost {
   /** Notes for the model's next turn about questions settled elsewhere. */
   private readonly answeredElsewhere = new Map<string, string[]>();
   private closed = false;
-  private legacyMigrationPromise: Promise<{
-    conversations: number;
-    messages: number;
-  }> | null = null;
   private readonly now: () => string;
   private readonly createId: (prefix: string) => string;
 
@@ -749,6 +742,7 @@ export class AssistantSessionHost {
     const loadedGroups = new Set<AssistantToolGroup>();
     const loadedToolNames = new Set<string>();
     const catalogOptions = {
+      commands: this.ports.commands ?? [],
       mode: catalogMode,
       browserAvailable: Boolean(this.ports.browser),
       screen: live.sourceMessage?.context?.screen ?? null,
@@ -763,7 +757,10 @@ export class AssistantSessionHost {
       ...catalogOptions,
       loadedGroups: assistantToolGroupValues,
     });
-    const tools = allTools.map((definition) =>
+    const mcp = await connectAssistantMcp(allTools, {
+      service: this.service, ports: this.ports, session,
+    });
+    const tools = mcp.tools.map((definition) =>
       this.withOperationRecord(
         toConversationTool(
           definition,
@@ -885,6 +882,8 @@ export class AssistantSessionHost {
         ],
       });
       return;
+    } finally {
+      await mcp.close();
     }
     this.stopStallWatch(live);
     await this.repository.appendTranscript(
@@ -2924,110 +2923,27 @@ export class AssistantSessionHost {
     if (this.watches.size > 0) this.ensureWatchTimer();
   }
 
-  async migrateLegacyHistory(): Promise<{
-    conversations: number;
-    messages: number;
-  }> {
-    if (this.closed) return { conversations: 0, messages: 0 };
-    if (this.legacyMigrationPromise) return this.legacyMigrationPromise;
-    const migration = this.migrateLegacyHistoryWhileOpen();
-    this.legacyMigrationPromise = migration;
-    try {
-      return await migration;
-    } finally {
-      if (this.legacyMigrationPromise === migration)
-        this.legacyMigrationPromise = null;
-    }
-  }
-
-  private async migrateLegacyHistoryWhileOpen(): Promise<{
-    conversations: number;
-    messages: number;
-  }> {
-    const [snapshot, resumeMessages] = await Promise.all([
-      this.readWorkspaceSnapshot(),
-      this.service.getResumeAssistantHistory(),
-    ]);
-    if (this.closed) return { conversations: 0, messages: 0 };
-    const checkpoint = createLegacyMigrationCheckpoint(() => this.closed);
-    const resumeMessagesByJob = new Map<
-      string,
-      {
-        jobTitle: string;
-        messages: Awaited<
-          ReturnType<JobFinderWorkspaceService["getResumeAssistantHistory"]>
-        >[number][];
-      }
-    >();
-    const jobsById = new Map(
-      snapshot.reviewQueue.map((job) => [job.jobId, job]),
-    );
-    // The UI getter ensures a draft and loads its full assets. Migration is
-    // read-only: scan persisted messages once, preserving their stored order
-    // and keeping chat history even if its old draft is no longer present.
-    for (const message of resumeMessages) {
-      const entry = resumeMessagesByJob.get(message.jobId);
-      if (entry) {
-        entry.messages.push(message);
-      } else {
-        const job = jobsById.get(message.jobId);
-        resumeMessagesByJob.set(message.jobId, {
-          jobTitle: job ? `${job.title} at ${job.company}` : message.jobId,
-          messages: [message],
-        });
-      }
-    }
-    const result = await migrateLegacyChats({
-      repository: this.repository,
-      profileMessages: snapshot.profileCopilotMessages,
-      resumeMessagesByJob,
-      now: this.now(),
-      checkpoint,
-    });
-    // A sidebar that loaded its list before migration finished learns about
-    // the archives now, without a reload.
-    if (!this.closed && result.conversations > 0) {
-      for (const conversation of await this.repository.listConversations()) {
-        if (conversation.status !== "archived") continue;
-        if (!(await checkpoint())) break;
-        await this.emit(conversation.id, null, {
-          type: "conversation_updated",
-          conversation,
-        });
-      }
-    }
-    return result;
-  }
-
   async shutdown(): Promise<void> {
     this.closed = true;
-    try {
-      for (const watch of this.watches.values()) {
-        if (watch.run.kind === "resume_generation")
-          cancelBackgroundBatch(watch.run.id);
-      }
-      if (this.watchTimer) clearInterval(this.watchTimer);
-      this.watchTimer = null;
-      for (const [conversationId, live] of this.live) {
-        live.controller.abort(
-          new DOMException("The app is closing.", "AbortError"),
-        );
-        this.stopStallWatch(live);
-        await this.releaseLease(live, "app closing");
-        await this.repository.upsertTurn({
-          ...live.turn,
-          status: "interrupted",
-          endedAt: this.now(),
-          error: "The app closed while this was running.",
-        });
-        this.live.delete(conversationId);
-      }
-    } finally {
-      // Migration is stopped at a checkpoint and finishes any partial chat's
-      // counters before the desktop is allowed to close or reset its store.
-      await this.legacyMigrationPromise?.catch((error: unknown) => {
-        this.log("Legacy chat migration stopped with an error", error);
+    for (const watch of this.watches.values()) {
+      if (watch.run.kind === "resume_generation")
+        cancelBackgroundBatch(watch.run.id);
+    }
+    if (this.watchTimer) clearInterval(this.watchTimer);
+    this.watchTimer = null;
+    for (const [conversationId, live] of this.live) {
+      live.controller.abort(
+        new DOMException("The app is closing.", "AbortError"),
+      );
+      this.stopStallWatch(live);
+      await this.releaseLease(live, "app closing");
+      await this.repository.upsertTurn({
+        ...live.turn,
+        status: "interrupted",
+        endedAt: this.now(),
+        error: "The app closed while this was running.",
       });
+      this.live.delete(conversationId);
     }
   }
 

@@ -86,7 +86,10 @@ export function ResumePane(props: {
         label: "Undo",
         onClick: () =>
           void run(() =>
-            window.nestor.resumes.run("undo_resume_level", { jobId: job.id }),
+            window.nestor.resumes.run("undo_resume_level", {
+              jobId: job.id,
+              ...(changed.levelChangeId ? { changeId: changed.levelChangeId } : {}),
+            }),
           ).then((undone) => {
             if (undone) view.refresh();
           }),
@@ -111,6 +114,7 @@ export function ResumePane(props: {
   return (
     <section
       aria-label={`Resume for ${job.title}`}
+      data-job-detail-id={job.id}
       className="flex min-h-0 min-w-0 flex-col gap-3"
       id={LIST_DETAIL_REGION_ID}
     >

@@ -237,6 +237,7 @@ export const assistantChangeTargetValues = [
   "settings",
   "resume_draft",
   "job_triage",
+  "app_command",
 ] as const;
 export const AssistantChangeTargetSchema = z.enum(assistantChangeTargetValues);
 export type AssistantChangeTarget = z.infer<typeof AssistantChangeTargetSchema>;

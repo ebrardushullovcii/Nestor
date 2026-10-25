@@ -276,9 +276,10 @@ export function createResumeService(deps: ResumeServiceDeps) {
 
     setLevel,
 
-    undoLevel(jobId: number) {
+    undoLevel(jobId: number, changeId?: string) {
+      const restored = resumes.undoLevel(jobId, changeId);
       running.get(jobId)?.abort();
-      return resumes.undoLevel(jobId);
+      return restored;
     },
 
     /** Writes a failed or finished resume again at its own level. */

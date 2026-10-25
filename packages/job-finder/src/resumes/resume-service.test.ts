@@ -78,6 +78,32 @@ function setup(overrides: Partial<ResumeServiceDeps> = {}) {
 const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 
 describe("resumes on the store", () => {
+  it("keeps each level Undo bound to its own change after writing finishes", async () => {
+    const { store, service, id } = setup();
+    store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    const original = service.get(id).resume!.level;
+    const first = service.setLevel(id, "aggressive");
+    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    expect(service.undoLevel(id, first.levelChangeId!)).toMatchObject({ level: original });
+    const second = service.setLevel(id, "light");
+    service.setLevel(id, "aggressive");
+    expect(() => service.undoLevel(id, second.levelChangeId!)).toThrow("changed since");
+    expect(service.get(id).resume?.level).toBe("aggressive");
+  });
+
+  it("keeps a later editor save when an older level change is undone", async () => {
+    const { store, service, id } = setup();
+    store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    const changed = service.setLevel(id, "light");
+    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    const current = service.get(id).resume!;
+    const saved = service.saveDraft(id, current.draft!, current.updatedAt);
+    expect(() => service.undoLevel(id, changed.levelChangeId!)).toThrow("changed since");
+    expect(service.get(id).resume).toEqual(saved);
+  });
+
   it("writes a resume the moment a job is shortlisted, and approving it hands the job to Apply", async () => {
     const { store, service, id } = setup();
     expect(service.get(id).resume).toBeNull();

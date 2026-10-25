@@ -6,6 +6,7 @@ import type {
   JobFinderJobDetail,
   JobFinderSearchRequest,
 } from "@nestor/contracts";
+import type { AssistantToolDefinition } from "./tool-kit";
 
 /**
  * What the assistant needs from the host that is not a workspace-service
@@ -15,6 +16,8 @@ import type {
  * IPC routes call, so the assistant and the buttons take one path.
  */
 export interface AssistantHostPorts {
+  /** Store commands registered by the host, shared with the screens. */
+  commands?: readonly AssistantToolDefinition[];
   readJobDetail?(
     jobId: string,
     planId: string | null,

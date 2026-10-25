@@ -19,7 +19,7 @@ import {
 } from "@nestor/contracts";
 import { z } from "zod";
 import { assertPersonAnswerAuthority } from "../person-answer-authority";
-import { plainFieldName } from "../prompt";
+import { defaultResumeLevelLabel, plainFieldName } from "../prompt";
 import { profileProposalPreview } from "../proposal-preview";
 import {
   AssistantToolError,
@@ -606,10 +606,7 @@ export const readProfileTool = defineTool({
       data.background = background(profile);
     if (input.section === "preferences" || input.section === "all") {
       data.preferences = preferences(searchPreferences);
-      data.resumeApproach =
-        snapshot.settings.resumeApplicationMode === "original_resume"
-          ? "original_resume"
-          : searchPreferences.tailoringMode;
+      data.resumeApproach = defaultResumeLevelLabel(snapshot);
     }
     const editor = session.context?.editor;
     if (editor?.editor === "profile" && editor.dirtyFields.length > 0) {
@@ -1101,7 +1098,25 @@ export async function undoReceipt(
       .map((entry) => ({ ...entry, path: entry.path.slice(1) }));
   let undone: string[] = [];
   let conflicts: string[] = [];
-  if (receipt.target === "job_triage") {
+  if (receipt.target === "app_command") {
+    for (const entry of receipt.entries) {
+      const command = context.ports.commands?.find((tool) => tool.name === entry.path[0]);
+      if (!command) throw new AssistantToolError("not_found", "That command is unavailable.");
+      session.assertCurrent();
+      try {
+        const result = await command.execute(command.input.parse(entry.after), context);
+        if (command.name === "undo_move") {
+          const moved = z.object({ moved: z.number() }).parse(result.data).moved;
+          if (moved > 0) undone.push(entry.label ?? "Job stage");
+          if (moved < Number(entry.before)) conflicts.push("Jobs changed since this move");
+        } else undone.push(entry.label ?? "Resume level");
+      } catch (error) {
+        if (error instanceof Error && /changed since/iu.test(error.message))
+          conflicts.push(entry.label ?? "Resume level");
+        else throw error;
+      }
+    }
+  } else if (receipt.target === "job_triage") {
     const { undoTriageChange } = await import("../triage-changes");
     const result = await undoTriageChange(context, receipt);
     undone = result.undoneLabels;

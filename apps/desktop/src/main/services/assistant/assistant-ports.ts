@@ -38,6 +38,7 @@ import {
 import { createAssistantBrowserPort } from "./assistant-browser-port";
 import { waitForAssistantResumeImport } from "./resume-import-completion";
 import { writeExportFile } from "./tracker-export-file";
+import { assistantAppCommands } from "./app-commands";
 import { readUiResumeBatch, stopUiResumeBatch } from "./ui-resume-batch";
 
 /**
@@ -220,6 +221,7 @@ export function createAssistantHostPorts(input: {
 }): AssistantHostPorts {
   const library = getCandidateAssetLibrary();
   const ports: AssistantHostPorts = {
+    commands: assistantAppCommands(),
     async readJobDetail(jobId, planId) {
       const { readJobFinderJobDetail } =
         await import("../job-finder/read-job-detail");

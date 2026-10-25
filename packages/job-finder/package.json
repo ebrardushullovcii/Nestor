@@ -27,14 +27,15 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@nestor/agent-runtime": "workspace:*",
     "@nestor/ai-providers": "workspace:*",
     "@nestor/browser-agent": "workspace:*",
     "@nestor/browser-runtime": "workspace:*",
     "@nestor/contracts": "workspace:*",
-    "@nestor/job-list-policy": "workspace:*",
     "@nestor/core": "workspace:*",
     "@nestor/db": "workspace:*",
+    "@nestor/job-list-policy": "workspace:*",
     "@nestor/knowledge-base": "workspace:*",
     "zod": "^3.24.2",
     "zod-to-json-schema": "3.24.6"

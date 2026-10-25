@@ -54,6 +54,8 @@ export interface StoredResume extends ResumeStatus {
   updatedAt: string;
   /** The level the last level change replaced; Undo puts it back. */
   previousLevel: ResumeLevel | null;
+  /** Identifies the exact level change its Undo belongs to. */
+  levelChangeId: string | null;
   /** The approved PDF Apply attaches. */
   pdfPath: string | null;
 }
