@@ -35,7 +35,7 @@ describe("job finder field chrome", () => {
     const sources = collectProductionSources(featureRoot);
 
     // The walk must really scan the feature tree instead of passing vacuously.
-    expect(sources.has("screens/applications/applications-screen.tsx")).toBe(true);
+    expect(sources.has("screens/profile-screen.tsx")).toBe(true);
 
     const offenders = [...sources.entries()]
       .filter(([, source]) => source.includes("border-input"))

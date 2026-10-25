@@ -11,7 +11,6 @@ import { createDiscoveryRunInterruptedFeedback } from "@renderer/features/job-fi
 import type * as LaunchReadsModule from "@renderer/features/job-finder/lib/launch-reads";
 import type { JobFinderPageContext } from "./job-finder-page-context";
 import {
-  JobFinderApplicationsRoute,
   JobFinderHomeRoute,
   JobFinderProfileRoute,
 } from "./job-finder-page-routes";
@@ -449,60 +448,4 @@ describe("canonical route first paint", () => {
     expect(screen.queryByText("Loading screen")).toBeNull();
     expect(surfaceTimerCalls(setTimeoutSpy.mock.calls)).toEqual([]);
   });
-
-  it("mounts the real Applications heading immediately without a suspense fallback or deferred surface timer", () => {
-    const { setTimeoutSpy } = renderCanonicalRoute(
-      "/job-finder/applications",
-      <JobFinderApplicationsRoute />,
-    );
-
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Applications" }),
-    ).toBeTruthy();
-    expect(screen.queryByText("Loading screen")).toBeNull();
-    expect(surfaceTimerCalls(setTimeoutSpy.mock.calls)).toEqual([]);
-  });
-
-  it.each([
-    [
-      "/job-finder/applications",
-      "Applications",
-      <JobFinderApplicationsRoute key="a" />,
-    ],
-  ] as const)(
-    "opens %s from Home's first view while every job is still loading",
-    (path, heading, element) => {
-      // A long conversion holds the full load for a minute; these screens
-      // read only the jobs past Find jobs, which the first view has.
-      const firstView = createContext();
-      firstView.workspace = {
-        ...firstView.workspace,
-        hydration: {
-          phase: "bootstrap",
-          deferredCollections: ["discovery_jobs"],
-        },
-      };
-      renderCanonicalRoute(path, element, firstView);
-      expect(
-        screen.getByRole("heading", { level: 1, name: heading }),
-      ).toBeTruthy();
-      expect(screen.queryByText("Loading your workspace")).toBeNull();
-      cleanup();
-
-      const bootstrap = createContext();
-      bootstrap.workspace = {
-        ...bootstrap.workspace,
-        hydration: {
-          phase: "bootstrap",
-          deferredCollections: [
-            "discovery_jobs",
-            "review_queue",
-            "applications",
-          ],
-        },
-      };
-      renderCanonicalRoute(path, element, bootstrap);
-      expect(screen.getByText("Loading your workspace")).toBeTruthy();
-    },
-  );
 });

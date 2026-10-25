@@ -40,8 +40,7 @@ beforeAll(() => {
 });
 
 const WORKSPACE_BEHAVIOR_LABEL = "Browser & saved jobs";
-const APPLICATION_AUTHORITY_LABEL =
-  "Applying";
+const APPLICATION_AUTHORITY_LABEL = "Applying";
 
 const browserSession = {
   source: "target_site",
@@ -112,7 +111,6 @@ function renderScreen(settings: JobFinderSettings, callbacks: Callbacks) {
         onUpdateApplicationDefaults={(input) =>
           callbacks.onUpdateApplicationDefaults(input)
         }
-        onUpdateTrackerCrm={(crm) => callbacks.onUpdateTrackerCrm(crm)}
         onUpdateWorkspaceBehavior={(input) =>
           callbacks.onUpdateWorkspaceBehavior(input)
         }
@@ -129,51 +127,6 @@ describe("Settings section nav is real navigation", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
-  });
-
-  it("marks exactly one current section and moves the marker on activation", () => {
-    renderScreen(parseSettings(), createCallbacks());
-
-    const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    const links = within(nav).getAllByRole("link");
-
-    const currentLinks = () =>
-      links.filter((link) => link.getAttribute("aria-current") === "location");
-
-    // A nav with no current item is a list, not navigation.
-    expect(currentLinks()).toHaveLength(1);
-    expect(currentLinks()[0]?.textContent).toBe("App & device");
-
-    fireEvent.click(within(nav).getByRole("link", { name: "Tracker" }));
-
-    expect(currentLinks()).toHaveLength(1);
-    expect(currentLinks()[0]?.textContent).toBe("Tracker");
-  });
-
-  it("underlines the current item like the Profile tabs, and gives only the danger zone a destructive tint", () => {
-    renderScreen(parseSettings(), createCallbacks());
-
-    const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    const current = within(nav).getByRole("link", { name: "App & device" });
-    const inactive = within(nav).getByRole("link", { name: "Tracker" });
-    const dangerZone = within(nav).getByRole("link", {
-      name: "Delete everything",
-    });
-
-    // Colour alone never carries the current item: it also gets the 2px
-    // underline the line tabs use.
-    expect(current.className).toContain("after:bg-primary");
-    expect(current.className).toContain("after:opacity-100");
-    expect(inactive.className).not.toContain("after:bg-primary");
-
-    expect(dangerZone.className).toContain("text-(--destructive)");
-    expect(inactive.className).not.toContain("text-(--destructive)");
-
-    // The underline is an overlay, so the current item cannot nudge its
-    // neighbours when the marker appears.
-    for (const link of within(nav).getAllByRole("link")) {
-      expect(link.className).toContain("after:absolute");
-    }
   });
 
   it("names the sections in plain language and keeps account access person-owned", () => {
@@ -321,86 +274,6 @@ describe("Settings save ownership", () => {
     expect(
       within(workspace).getByText("Browser & saved jobs saved."),
     ).toBeTruthy();
-  });
-
-  it("links the Tracker section into the same save ownership as every other section", async () => {
-    const callbacks = createCallbacks();
-    renderScreen(parseSettings(), callbacks);
-
-    // Tracker was the fourth save on this page and used to publish nothing,
-    // so the page-level bar could not name it and a Tracker edit could be
-    // scrolled away from with no outstanding-change signal anywhere.
-    const tracker = screen.getByRole("region", { name: "Tracker" });
-    fireEvent.click(
-      within(tracker).getByRole("checkbox", {
-        name: /Mark applications for follow-up/,
-      }),
-    );
-
-    const bar = unsavedBar();
-    expect(bar?.getAttribute("data-settings-save-state")).toBe("dirty");
-    expect(bar?.getAttribute("data-settings-unsaved-count")).toBe("1");
-    expect(bar?.textContent).toContain("Unsaved changes in Tracker.");
-
-    fireEvent.click(
-      within(bar as HTMLElement).getByRole("button", {
-        name: "Save tracker settings",
-      }),
-    );
-
-    await waitFor(() =>
-      expect(callbacks.onUpdateTrackerCrm).toHaveBeenCalledTimes(1),
-    );
-    expect(callbacks.onUpdateWorkspaceBehavior).not.toHaveBeenCalled();
-    expect(callbacks.onUpdateAppearanceTheme).not.toHaveBeenCalled();
-
-    await waitFor(() => expect(unsavedBar()).toBeNull());
-    expect(within(tracker).getByText("Tracker settings saved.")).toBeTruthy();
-  });
-
-  it("names every dirty section and offers no save when more than one is outstanding", async () => {
-    const callbacks = createCallbacks();
-    callbacks.onUpdateAiBehavior.mockResolvedValueOnce(false);
-    renderScreen(parseSettings(), callbacks);
-
-    // AI behavior saves on click; a failed save leaves it outstanding.
-    const ai = screen.getByRole("region", { name: "AI behavior" });
-    const replies = within(ai).getByRole("radiogroup", {
-      name: "How the profile assistant replies",
-    });
-    const unchecked = within(replies)
-      .getAllByRole("radio")
-      .find((radio) => radio.getAttribute("aria-checked") !== "true");
-    fireEvent.click(unchecked!);
-    await waitFor(() =>
-      expect(
-        within(ai).getByRole("button", { name: "Retry AI behavior" }),
-      ).toBeTruthy(),
-    );
-
-    const tracker = screen.getByRole("region", { name: "Tracker" });
-    fireEvent.click(
-      within(tracker).getByRole("checkbox", {
-        name: /Mark applications for follow-up/,
-      }),
-    );
-
-    const bar = unsavedBar() as HTMLElement;
-    expect(bar.getAttribute("data-settings-unsaved-count")).toBe("2");
-    expect(bar.textContent).toContain("Unsaved changes in 2 sections");
-    expect(bar.textContent).toContain("AI behavior");
-    expect(bar.textContent).toContain("Tracker");
-
-    // One button cannot honestly say what it would write, so the bar only
-    // navigates while two sections are outstanding.
-    const barButtons = within(bar).getAllByRole("button");
-    expect(barButtons.map((button) => button.textContent)).toEqual([
-      "Go to AI behavior",
-      "Go to Tracker",
-    ]);
-    fireEvent.click(barButtons[0]!);
-    expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
-    expect(callbacks.onUpdateTrackerCrm).not.toHaveBeenCalled();
   });
 
   it("keeps the bar up while a failed section is still unsaved", async () => {

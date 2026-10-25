@@ -62,9 +62,8 @@ export const DISCOVERY_STOP_UNACKNOWLEDGED_LABEL =
  * - nothing here implies Job Finder submits an application. It opens the
  *   employer's form and fills what it can; the person reviews and sends it.
  *
- * `applications-filters.ts` and `job-finder-browser-handoff-copy.ts` are the
- * two modules this one generalises — the same pattern, applied to the enums
- * that reach a screen.
+ * `job-finder-browser-handoff-copy.ts` is the module this one generalises — the
+ * same pattern, applied to the enums that reach a screen.
  *
  * Deliberately not covered here, because their render sites belong to zone
  * packages that own the surrounding copy and will add their table beside their

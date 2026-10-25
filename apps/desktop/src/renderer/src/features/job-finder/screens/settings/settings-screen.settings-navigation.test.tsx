@@ -101,12 +101,6 @@ vi.mock("./settings-workspace-controls", () => ({
     </section>
   ),
 }));
-vi.mock("../applications/applications-crm-settings", () => ({
-  ApplicationsCrmSettingsEditor: () => (
-    <section data-testid="panel-tracker">Tracker editor panel</section>
-  ),
-}));
-
 const sectionLabels = [
   "App & device",
   // Every choice about how the AI behaves, in one place.
@@ -116,7 +110,6 @@ const sectionLabels = [
   // prepare-only boundary and every permission it describes are unchanged.
   "Applying",
   "Browser & saved jobs",
-  "Tracker",
   "Diagnostics",
   "Delete everything",
 ] as const;
@@ -141,7 +134,6 @@ const baseProps = {
   onUpdateAiBehavior: vi.fn(),
   onUpdateAppearanceTheme: vi.fn(),
   onUpdateApplicationDefaults: vi.fn(),
-  onUpdateTrackerCrm: vi.fn(() => Promise.resolve()),
   onUpdateWorkspaceBehavior: vi.fn(),
   searchPreferences: { tailoringMode: "balanced" as const },
   settings: baseSettings,
@@ -153,7 +145,7 @@ describe("SettingsScreen information architecture", () => {
     vi.clearAllMocks();
   });
 
-  it("exposes exactly eight sticky section anchors whose labels match named landmarks", () => {
+  it("exposes exactly seven sticky section anchors whose labels match named landmarks", () => {
     render(
       <MemoryRouter>
         <SettingsScreen {...baseProps} />
@@ -178,7 +170,7 @@ describe("SettingsScreen information architecture", () => {
       );
     }
 
-    expect(within(nav).queryAllByRole("link")).toHaveLength(8);
+    expect(within(nav).queryAllByRole("link")).toHaveLength(7);
   });
 
   it("keeps keyboard-reachable nav targets with visible focus and scroll offset", () => {
@@ -420,11 +412,6 @@ describe("SettingsScreen information architecture", () => {
     ).toBe(true);
     expect(
       document
-        .getElementById("settings-tracker")
-        ?.contains(screen.getByTestId("panel-tracker")),
-    ).toBe(true);
-    expect(
-      document
         .getElementById("settings-diagnostics")
         ?.contains(screen.getByTestId("panel-diagnostics-runtime")),
     ).toBe(true);
@@ -444,7 +431,6 @@ describe("SettingsScreen information architecture", () => {
       "panel-application-defaults",
       "panel-application-authority",
       "panel-workspace-behavior",
-      "panel-tracker",
       "panel-diagnostics-runtime",
       "panel-diagnostics-support",
       "panel-danger-zone",
@@ -586,7 +572,7 @@ describe("SettingsScreen section anchor navigation", () => {
       name: "Settings sections",
     });
     const links = within(nav).getAllByRole("link");
-    expect(links).toHaveLength(8);
+    expect(links).toHaveLength(7);
 
     for (const label of sectionLabels) {
       const link = within(nav).getByRole("link", { name: label });
@@ -644,9 +630,10 @@ describe("SettingsScreen section anchor navigation", () => {
       const nav = screen.getByRole("navigation", {
         name: "Settings sections",
       });
-      const link = within(nav).getByRole("link", { name: "Tracker" });
-      const { focus, scrollIntoView } =
-        stubSectionScrollAndFocus("settings-tracker");
+      const link = within(nav).getByRole("link", { name: "Diagnostics" });
+      const { focus, scrollIntoView } = stubSectionScrollAndFocus(
+        "settings-diagnostics",
+      );
 
       const nativeActivationWasAllowed = fireEvent.click(link, init);
       await flushJsdomNavigationTimers();

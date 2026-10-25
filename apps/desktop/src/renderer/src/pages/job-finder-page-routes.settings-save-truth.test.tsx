@@ -2,7 +2,6 @@
 
 import type {
   AppearanceTheme,
-  ApplicationCrmSettings,
   BrowserSessionState,
   JobFinderSettings,
   UpdateApplicationDefaultsInput,
@@ -36,9 +35,6 @@ type SaveHandlerProps = {
   onUpdateApplicationDefaults?:
     | ((input: UpdateApplicationDefaultsInput) => unknown)
     | undefined;
-  onUpdateTrackerCrm?:
-    | ((settings: ApplicationCrmSettings) => unknown)
-    | undefined;
   onUpdateWorkspaceBehavior?:
     | ((input: UpdateWorkspaceBehaviorInput) => unknown)
     | undefined;
@@ -58,9 +54,6 @@ vi.mock("@renderer/features/job-finder/screens/settings-screen", () => ({
       onUpdateApplicationDefaults: props.onUpdateApplicationDefaults as
         | SaveHandlerProps["onUpdateApplicationDefaults"]
         | undefined,
-      onUpdateTrackerCrm: props.onUpdateTrackerCrm as
-        | SaveHandlerProps["onUpdateTrackerCrm"]
-        | undefined,
       onUpdateWorkspaceBehavior: props.onUpdateWorkspaceBehavior as
         | SaveHandlerProps["onUpdateWorkspaceBehavior"]
         | undefined,
@@ -71,10 +64,6 @@ vi.mock("@renderer/features/job-finder/screens/settings-screen", () => ({
 
 // Prune sibling screen subtrees that the shared routes module imports but
 // this Settings-boundary test never mounts.
-vi.mock(
-  "@renderer/features/job-finder/screens/applications/applications-screen",
-  () => ({ ApplicationsScreen: () => null }),
-);
 vi.mock("@renderer/features/job-finder/screens/profile-screen", () => ({
   ProfileScreen: () => null,
 }));
@@ -133,9 +122,6 @@ describe("JobFinderSettingsRoute scoped save wiring", () => {
     const onUpdateApplicationDefaults = vi.fn<
       (input: UpdateApplicationDefaultsInput) => unknown
     >(() => Promise.resolve(false));
-    const onUpdateTrackerCrm = vi.fn<
-      (settings: ApplicationCrmSettings) => unknown
-    >(() => Promise.resolve(false));
     const onUpdateWorkspaceBehavior = vi.fn<
       (input: UpdateWorkspaceBehaviorInput) => unknown
     >(() => Promise.resolve(false));
@@ -149,7 +135,6 @@ describe("JobFinderSettingsRoute scoped save wiring", () => {
       onResetWorkspace: vi.fn(),
       onUpdateAppearanceTheme,
       onUpdateApplicationDefaults,
-      onUpdateTrackerCrm,
       onUpdateWorkspaceBehavior,
     } as unknown as JobFinderPageContext;
 
@@ -173,16 +158,6 @@ describe("JobFinderSettingsRoute scoped save wiring", () => {
     expect(onUpdateApplicationDefaults).toHaveBeenCalledWith(defaultsInput);
     expect(defaultsOutcome).toBeInstanceOf(Promise);
     await expect(defaultsOutcome).resolves.toBe(false);
-
-    const trackerInput = {
-      noResponseAutomation: { enabled: true, afterDays: 7 },
-      customStages: [],
-    } satisfies ApplicationCrmSettings;
-    const trackerOutcome =
-      capturedSaveHandlers.onUpdateTrackerCrm?.(trackerInput);
-    expect(onUpdateTrackerCrm).toHaveBeenCalledWith(trackerInput);
-    expect(trackerOutcome).toBeInstanceOf(Promise);
-    await expect(trackerOutcome).resolves.toBe(false);
 
     const behaviorInput = {
       keepSessionAlive: true,

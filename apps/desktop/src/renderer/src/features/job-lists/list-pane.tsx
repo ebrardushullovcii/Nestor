@@ -12,7 +12,10 @@ import {
   jobFinderListRowTitleClassName,
   jobFinderListRowTitleLineClassName,
 } from "@renderer/features/job-finder/components/list-row";
-import { LIST_DETAIL_COLUMNS_CLASS } from "@renderer/features/job-finder/components/list-detail-columns";
+import {
+  LIST_DETAIL_COLUMNS_CLASS,
+  TABLE_DETAIL_COLUMNS_CLASS,
+} from "@renderer/features/job-finder/components/list-detail-columns";
 import { cn } from "@renderer/lib/cn";
 
 import { isSelected, type ListSelection } from "./list-selection";
@@ -22,17 +25,19 @@ export const LIST_DETAIL_REGION_ID = "list-detail";
 
 /**
  * The one list and details layout: the list on the left, the selected row's
- * details on the right, stacked below 1280px. Every list screen uses it.
+ * details on the right, stacked below 1280px. Every list screen uses it;
+ * `table` gives the list most of the width.
  */
 export function ListDetailLayout(props: {
   list: ReactNode;
   detail: ReactNode;
+  table?: boolean;
 }) {
   return (
     <div
       className={cn(
         "grid min-h-0 flex-1 gap-4 xl:grid-rows-[minmax(0,1fr)]",
-        LIST_DETAIL_COLUMNS_CLASS,
+        props.table ? TABLE_DETAIL_COLUMNS_CLASS : LIST_DETAIL_COLUMNS_CLASS,
       )}
     >
       {props.list}

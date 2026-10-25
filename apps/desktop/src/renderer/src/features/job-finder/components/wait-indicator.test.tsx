@@ -47,11 +47,6 @@ function readSource(relativePath: string): string {
  * when that zone lands.
  */
 const PENDING_ADOPTION: ReadonlyArray<{ owner: string; path: string }> = [
-  // PKG-09 — Applications zone.
-  {
-    owner: "PKG-09",
-    path: "features/job-finder/screens/applications/applications-detail-panel-recovery-actions-section.tsx",
-  },
   // Phase B — shared chrome: the save toast's sub-second spinner and the
   // resume-import stage bar (the one legitimately determinate signal, which
   // still owns its own spinner alongside).
@@ -71,7 +66,6 @@ const SCANNED_FILES = [
   "features/job-finder/components/profile/resume-import-progress.tsx",
   "features/job-finder/components/job-finder-save-status.tsx",
   "features/job-finder/components/startup-database-recovery-notice.tsx",
-  "features/job-finder/screens/applications/applications-detail-panel-recovery-actions-section.tsx",
   "features/job-finder/screens/settings/settings-support-controls.tsx",
   "pages/job-finder-page.tsx",
 ];
@@ -281,8 +275,8 @@ describe("lazy-route fallback", () => {
       },
       {
         path: "/job-finder/applications",
-        source:
-          "features/job-finder/screens/applications/applications-screen.tsx",
+        // Applications lays out through the shared list and details layout.
+        source: "features/job-lists/list-pane.tsx",
       },
     ];
 

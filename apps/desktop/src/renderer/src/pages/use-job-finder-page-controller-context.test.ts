@@ -19,8 +19,6 @@ import { buildJobFinderPageContext } from "./use-job-finder-page-controller-cont
 import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import type { DiscoveryRunFeedback } from "@renderer/features/job-finder/screens/discovery/discovery-run-feedback";
 import { createJobFinderSaveCoordinator } from "./job-finder-save-state";
-import { runJobFinderApplicationBrowserHandoff } from "./job-finder-page-routes";
-import { formatJobFinderBrowserHandoffFailedStatus } from "@renderer/features/job-finder/lib/job-finder-browser-handoff-copy";
 
 type BatchGenerate = Window["nestor"]["jobFinder"]["generateResumeForBatch"];
 type BatchProgressListener = (progress: ResumeBatchGenerationProgress) => void;
@@ -282,49 +280,6 @@ describe("buildJobFinderPageContext campaign schedule and notifications", () => 
   });
 });
 
-describe("buildJobFinderPageContext scoped settings saves", () => {
-  it("saves application tracker settings through updateTrackerCrm without a whole-settings merge", async () => {
-    const snapshot = {} as JobFinderRendererWorkspaceSnapshot;
-    const saveSettings = vi.fn<JobFinderShellActions["saveSettings"]>();
-    const updateTrackerCrm = vi
-      .fn<JobFinderShellActions["updateTrackerCrm"]>()
-      .mockResolvedValue(snapshot);
-    const { context } = buildContext({
-      actions: { saveSettings, updateTrackerCrm },
-    });
-
-    const completed = await context.onUpdateTrackerCrm({
-      noResponseAutomation: { enabled: true, afterDays: 7 },
-      customStages: [],
-    });
-
-    expect(completed).toBe(true);
-    expect(updateTrackerCrm).toHaveBeenCalledOnce();
-    expect(updateTrackerCrm).toHaveBeenCalledWith({
-      noResponseAutomation: { enabled: true, afterDays: 7 },
-      customStages: [],
-    });
-    expect(saveSettings).not.toHaveBeenCalled();
-  });
-
-  it("marks tracker settings saves as failed when the scoped method fails", async () => {
-    const failingUpdate = vi
-      .fn<JobFinderShellActions["updateTrackerCrm"]>()
-      .mockRejectedValue(new Error("commit refused"));
-    const { context, getActionState } = buildContext({
-      actions: { updateTrackerCrm: failingUpdate },
-    });
-
-    const completed = await context.onUpdateTrackerCrm({
-      noResponseAutomation: { enabled: false, afterDays: 30 },
-      customStages: [],
-    });
-
-    expect(completed).toBe(false);
-    expect(getActionState().message).toBe("commit refused");
-  });
-});
-
 describe("Applications browser hand-off failure reporting", () => {
   /**
    * The hand-off status is composed from what the REAL action wrapper hands
@@ -334,14 +289,6 @@ describe("Applications browser hand-off failure reporting", () => {
    * before the fix as well: the whole defect was that the wrapper reports its
    * failure as a bare `false` and the cause never reached the sentence.
    */
-  const target = {
-    jobId: "job_a",
-    resultId: "result_a",
-    runId: "run_a",
-    applicationRecordId: "record_a",
-    destinationUrl: "https://jobs.example.com/apply/1",
-  };
-
   function pendingRequests() {
     return [
       {
@@ -357,75 +304,6 @@ describe("Applications browser hand-off failure reporting", () => {
       },
     ] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"];
   }
-
-  it("carries the real cause into the failed status when the open-page command rejects", async () => {
-    const performUserAction = vi
-      .fn<JobFinderShellActions["performUserAction"]>()
-      .mockRejectedValue(new Error("The browser runtime is disabled"));
-    const { context } = buildContext({ actions: { performUserAction } });
-
-    const outcome = await runJobFinderApplicationBrowserHandoff({
-      onOpenBrowserSession: () =>
-        context.onOpenBrowserSession(undefined, { rethrowError: true }),
-      onPerformUserAction: (command) =>
-        context.onPerformUserAction(command, { rethrowError: true }),
-      requests: pendingRequests(),
-      target,
-    });
-
-    expect(outcome).toEqual({
-      kind: "failed",
-      reason: "The browser runtime is disabled",
-    });
-    expect(performUserAction).toHaveBeenCalledTimes(1);
-
-    const status = formatJobFinderBrowserHandoffFailedStatus(
-      outcome.kind === "failed" ? outcome.reason : null,
-    );
-
-    expect(status).toBe(
-      "The Job Finder browser did not open, so nothing was opened for this " +
-        "application and nothing was sent to the employer. The browser runtime " +
-        "is disabled. Try again, or open this step from Needs you.",
-    );
-  });
-
-  it("reports a closed prepared page after the refreshed workspace exposes Try again", async () => {
-    const performUserAction = vi
-      .fn<JobFinderShellActions["performUserAction"]>()
-      .mockResolvedValue({
-        userActionRequests: [],
-        applicationRecords: [
-          {
-            id: "record_a",
-            lastAttemptState: "failed",
-            lastActionLabel: "The prepared application page is no longer open.",
-          },
-        ],
-      } as unknown as JobFinderRendererWorkspaceSnapshot);
-    const { context } = buildContext({
-      actions: { performUserAction },
-      workspace: {
-        activeCampaignId: "campaign_active",
-        userActionRequests: pendingRequests(),
-      } as JobFinderRendererWorkspaceSnapshot,
-    });
-
-    const outcome = await runJobFinderApplicationBrowserHandoff({
-      onOpenBrowserSession: () =>
-        context.onOpenBrowserSession(undefined, { rethrowError: true }),
-      onPerformUserAction: (command) =>
-        context.onPerformUserAction(command, { rethrowError: true }),
-      requests: pendingRequests(),
-      target,
-    });
-
-    expect(outcome).toEqual({
-      kind: "failed",
-      reason:
-        "That prepared application page is no longer open. Choose Prepare again in Applications to rebuild it.",
-    });
-  });
 
   it("shows the application page expanded after opening it, not minimized", async () => {
     const command = vi.fn().mockResolvedValue(undefined);
@@ -531,33 +409,6 @@ describe("Applications browser hand-off failure reporting", () => {
     } finally {
       vi.unstubAllGlobals();
     }
-  });
-
-  it("carries the real cause when only the window could be opened", async () => {
-    const openBrowserSession = vi
-      .fn<JobFinderShellActions["openBrowserSession"]>()
-      .mockRejectedValue(new Error("No browser session could be started"));
-    const { context } = buildContext({ actions: { openBrowserSession } });
-
-    const outcome = await runJobFinderApplicationBrowserHandoff({
-      onOpenBrowserSession: () =>
-        context.onOpenBrowserSession(undefined, { rethrowError: true }),
-      onPerformUserAction: (command) =>
-        context.onPerformUserAction(command, { rethrowError: true }),
-      requests:
-        [] as unknown as JobFinderRendererWorkspaceSnapshot["userActionRequests"],
-      target,
-    });
-
-    expect(outcome).toEqual({
-      kind: "failed",
-      reason: "No browser session could be started",
-    });
-    expect(
-      formatJobFinderBrowserHandoffFailedStatus(
-        outcome.kind === "failed" ? outcome.reason : null,
-      ),
-    ).toContain("No browser session could be started.");
   });
 
   it("still reports the failure once at the route and leaves other callers resolving false", async () => {

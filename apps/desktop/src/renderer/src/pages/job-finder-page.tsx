@@ -93,7 +93,6 @@ import {
 
 export {
   JobFinderActionsRoute,
-  JobFinderApplicationsRoute,
   JobFinderCampaignsRoute,
   JobFinderHomeRoute,
   JobFinderProfileRoute,
