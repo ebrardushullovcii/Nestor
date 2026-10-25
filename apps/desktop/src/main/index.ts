@@ -22,6 +22,10 @@ import { closeJobStore } from "./services/job-store";
 import { registerJobRoutes } from "./services/job-commands";
 import { registerResumeRoutes } from "./routes/resumes";
 import { registerHomeRoutes } from "./routes/home";
+import { LAUNCH_CONTEXT_CHANNEL } from "@nestor/contracts";
+import { readLaunchContext } from "@nestor/db/launch-context";
+import { getJobFinderWorkspaceFilePath } from "./services/job-finder/paths";
+import { prepareWorkspaceStartupContextReads } from "./setup/workspace-database-startup";
 import { registerTrackerRoutes } from "./routes/tracker";
 import { stopRegisteredServices } from "./services/service-stoppers";
 import type * as InterviewOverlayApi from "./setup/interview-overlay-windows";
@@ -246,6 +250,11 @@ if (hasSingleInstanceLock) {
   registerNeedsYouRoutes(ipcMain);
   registerTrackerRoutes(ipcMain);
   registerHomeRoutes(ipcMain);
+  // The first frame's settings and setup state, read once migrations allow.
+  ipcMain.handle(LAUNCH_CONTEXT_CHANNEL, async () => {
+    await prepareWorkspaceStartupContextReads().catch(() => undefined);
+    return readLaunchContext(getJobFinderWorkspaceFilePath());
+  });
 }
 
 recordStartupDiagnostic("main module loaded");

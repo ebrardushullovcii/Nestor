@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./job-store": "./src/job-store/job-store.ts",
     "./applications": "./src/job-store/applications.ts",
-    "./workspace-commits": "./src/workspace-commits.ts"
+    "./workspace-commits": "./src/workspace-commits.ts",
+    "./launch-context": "./src/launch-context.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

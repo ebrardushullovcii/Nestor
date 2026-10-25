@@ -49,14 +49,21 @@ export function createWorkspaceQueryBridge(): WorkspaceQueryApi {
     port.start();
     for (const request of pending.values()) port.postMessage(request.packet);
   });
-  // Connect while the renderer bundle loads, before any screen asks for data.
-  ipcRenderer.send("workspace-query:connect");
+  // The reader process starts on the first read or subscription, so a window
+  // that never opens the old workspace never starts it.
+  let connected = false;
+  const connect = () => {
+    if (connected) return;
+    connected = true;
+    ipcRenderer.send("workspace-query:connect");
+  };
   const read = <T>(
     method: WorkspaceReadRequest["method"],
     input: unknown,
   ): Promise<T> => {
     if (failed)
       return Promise.reject(new Error("Workspace read is unavailable."));
+    connect();
     const id = ++sequence;
     // Main/reader validates the complete request at the trust boundary.
     const packet = {
@@ -78,7 +85,6 @@ export function createWorkspaceQueryBridge(): WorkspaceQueryApi {
         method: "setQueryUpdates",
         input: { active },
       }) as Promise<void>,
-    getStartupContext: () => read("getStartupContext", {}),
     queryJobList: (input) => read("queryJobList", input),
     getJobDetail: (jobId, planId = null) =>
       read("getJobDetail", { jobId, planId }),
@@ -87,6 +93,7 @@ export function createWorkspaceQueryBridge(): WorkspaceQueryApi {
     queryCompanies: (input = {}) => read("queryCompanies", input),
     getChanges: (after, limit = 500) => read("getChanges", { after, limit }),
     onChanges(listener) {
+      connect();
       listeners.add(listener);
       return () => {
         listeners.delete(listener);

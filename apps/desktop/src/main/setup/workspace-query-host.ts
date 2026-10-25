@@ -17,7 +17,6 @@ import { getJobFinderWorkspaceFilePath } from "../services/job-finder/paths";
 import { setWorkspaceQueryUpdateMode } from "../services/job-finder/query-update-mode";
 import {
   prepareWorkspaceScreenReads,
-  prepareWorkspaceStartupContextReads,
   waitForWorkspaceDatabaseMigrations,
 } from "./workspace-database-startup";
 
@@ -25,7 +24,6 @@ import {
 export function createWorkspaceQueryHost() {
   const windows = new Set<BrowserWindow>();
   const filePath = getJobFinderWorkspaceFilePath();
-  const contextReady = prepareWorkspaceStartupContextReads();
   const queriesReady = prepareWorkspaceScreenReads();
   let child: UtilityProcess | undefined;
   let closed = false;
@@ -33,36 +31,46 @@ export function createWorkspaceQueryHost() {
   let stopped: (() => void) | undefined;
   const send = (process: UtilityProcess, message: WorkspaceReaderControl) =>
     process.postMessage(message);
-  const available = app.whenReady().then(() => {
-    if (closed) return;
-    child = utilityProcess.fork(
-      fileURLToPath(new URL("./workspace-query-reader.cjs", import.meta.url)),
-      [],
-      {
-        execArgv: [],
-        serviceName: "Workspace screen reads",
-        stdio: "pipe",
-      },
-    );
-    const process = child;
-    process.stderr?.on("data", (chunk: Buffer) =>
-      console.warn("Workspace reader:", chunk.toString()),
-    );
-    return new Promise<UtilityProcess>((resolve, reject) => {
-      let spawned = false;
-      process.once("exit", () => {
-        child = undefined;
-        stopped?.();
-        if (!spawned) reject(new Error("Workspace reader could not start."));
-        unavailable();
-      });
-      process.once("spawn", () => {
-        spawned = true;
-        if (!closed) send(process, { type: "initialize", filePath });
-        resolve(process);
+  // The reader process starts when a window first connects (a screen that
+  // still reads the old workspace), not with the app.
+  let available: Promise<UtilityProcess | undefined> | undefined;
+  const start = () => {
+    if (available) return available;
+    available = fork();
+    void release(queriesReady, "queries-ready").catch(unavailable);
+    return available;
+  };
+  const fork = () =>
+    app.whenReady().then(() => {
+      if (closed) return;
+      child = utilityProcess.fork(
+        fileURLToPath(new URL("./workspace-query-reader.cjs", import.meta.url)),
+        [],
+        {
+          execArgv: [],
+          serviceName: "Workspace screen reads",
+          stdio: "pipe",
+        },
+      );
+      const process = child;
+      process.stderr?.on("data", (chunk: Buffer) =>
+        console.warn("Workspace reader:", chunk.toString()),
+      );
+      return new Promise<UtilityProcess>((resolve, reject) => {
+        let spawned = false;
+        process.once("exit", () => {
+          child = undefined;
+          stopped?.();
+          if (!spawned) reject(new Error("Workspace reader could not start."));
+          unavailable();
+        });
+        process.once("spawn", () => {
+          spawned = true;
+          if (!closed) send(process, { type: "initialize", filePath });
+          resolve(process);
+        });
       });
     });
-  });
   let recovery: Promise<void> | undefined;
   function recover() {
     recovery ??= (async () => {
@@ -77,7 +85,7 @@ export function createWorkspaceQueryHost() {
   }
   async function release(
     prepared: Promise<void>,
-    type: "context-ready" | "queries-ready",
+    type: "queries-ready",
   ) {
     try {
       await prepared;
@@ -91,8 +99,6 @@ export function createWorkspaceQueryHost() {
     const process = await available;
     if (process && !closed) send(process, { type });
   }
-  void release(contextReady, "context-ready").catch(unavailable);
-  void release(queriesReady, "queries-ready").catch(unavailable);
   function unavailable() {
     if (closed) return;
     for (const window of windows)
@@ -100,6 +106,7 @@ export function createWorkspaceQueryHost() {
         window.webContents.send("workspace-query:unavailable");
   }
   function changed() {
+    if (!available) return;
     void available
       .then((process) => {
         if (process && !closed) send(process, { type: "changed" });
@@ -123,7 +130,7 @@ export function createWorkspaceQueryHost() {
   });
   ipcMain.on("workspace-query:connect", (event) => {
     if (closed || !authorized(event)) return;
-    void available
+    void start()
       .then((process) => {
         if (
           !process ||
@@ -150,7 +157,7 @@ export function createWorkspaceQueryHost() {
       stopped = resolve;
     });
     void available
-      .then((process) => {
+      ?.then((process) => {
         if (process && child === process) send(process, { type: "close" });
       })
       .catch(() => stopped?.());

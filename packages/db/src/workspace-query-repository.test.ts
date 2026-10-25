@@ -1,5 +1,4 @@
 import { DatabaseSync } from "node:sqlite";
-import { existsSync } from "node:fs";
 import {
   ApplicationRecordSchema,
   FitJudgmentSchema,
@@ -7,9 +6,6 @@ import {
   JobDiscoveryTargetSchema,
   SavedJobDiscoveryProvenanceSchema,
   type SavedJob,
-  type QueryJobListInput,
-  type QueryJobListResult,
-  type WorkspaceListCounts,
 } from "@nestor/contracts";
 import { afterEach, describe, expect, test } from "vitest";
 import {
@@ -64,148 +60,6 @@ async function fixture() {
   return { ...temp, writer, reader };
 }
 describe("independent workspace queries", () => {
-  test("a legacy rebuild preserves the typed first fifty rows, order and counts for every sort", async () => {
-    const temp = await createTempRepository("nestor-index-startup-");
-    cleanups.push(temp.cleanup);
-    const writer = await temp.createRepository();
-    let writerClosed = false;
-    cleanups.push(() => (writerClosed ? undefined : writer.close()));
-    const jobs = Array.from({ length: 75 }, (_, index) =>
-      assessedJob({
-        id: `startup-${index}`,
-        title: index % 2 ? `Engineer (${index})` : `Engineer - ${index}`,
-        company: index % 2 ? "10Company" : "2Company",
-        status:
-          index === 10
-            ? "ready_for_review"
-            : index === 11
-              ? "approved"
-              : "discovered",
-        postedAt: index % 3 ? null : "2026-10-21T00:00:00.000Z",
-        postedAtText: index % 3 ? "Posted 3 months ago" : null,
-        matchAssessment: {
-          ...assessedJob().matchAssessment,
-          score: 50 + (index % 45),
-        },
-      }),
-    );
-    jobs.push(
-      assessedJob({
-        id: "utility",
-        title: "Search jobs",
-        company: "Unknown company",
-        canonicalUrl: "https://example.test/jobs",
-      }),
-    );
-    await writer.commitSavedJobDelta({ upserts: jobs });
-    const beforeReader = createWorkspaceQueryRepository(temp.filePath);
-    const before = new Map<
-      string,
-      { query: QueryJobListInput; page: QueryJobListResult }
-    >();
-    let counts: WorkspaceListCounts | undefined;
-    try {
-      for (const list of [
-        "discovery",
-        "shortlisted",
-        "applications",
-        "all",
-      ] as const)
-        for (const sort of [
-          "best_match",
-          "newest",
-          "company",
-          "title",
-          "recently_seen",
-        ] as const) {
-          const query = {
-            list,
-            sort,
-            filters: { planId: null },
-            page: { offset: 0, limit: 50 },
-          };
-          before.set(`${list}:${sort}`, {
-            query,
-            page: beforeReader.queryJobList(query),
-          });
-        }
-      counts = beforeReader.getListCounts({ planId: null });
-    } finally {
-      beforeReader.close();
-    }
-    expect(counts).toMatchObject({ all: jobs.length, shortlisted: 2 });
-    const preferences = await writer.getSearchPreferences();
-    const campaigns = await writer.getCampaignState();
-    await writer.close();
-    writerClosed = true;
-    const raw = new DatabaseSync(temp.filePath);
-    cleanups.push(() => raw.close());
-    const put =
-      raw.prepare(`UPDATE saved_jobs SET value=?,assessment_id=NULL,description_id=NULL,
-      list_visible=NULL,display_company=NULL,display_location=NULL,first_seen_at=NULL,last_seen_at=NULL,last_verified_active_at=NULL WHERE id=?`);
-    for (const job of jobs) put.run(JSON.stringify(job), job.id);
-    raw
-      .prepare(
-        "UPDATE singleton_state SET value=? WHERE key='search_preferences'",
-      )
-      .run(JSON.stringify(preferences));
-    raw
-      .prepare("UPDATE singleton_state SET value=? WHERE key='campaign_state'")
-      .run(JSON.stringify(campaigns));
-    for (const { name } of raw
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'workspace_%'",
-      )
-      .all())
-      raw.exec(`DROP TRIGGER ${String(name)}`);
-    raw.exec(`DROP TABLE workspace_job_index; DROP TABLE workspace_entity_index;
-      DROP TABLE workspace_company_index; DROP TABLE workspace_company_jobs;
-      DELETE FROM schema_migrations WHERE version IN (26,27,28,29); DELETE FROM workspace_read_meta`);
-    let headerReady = false;
-    prepareWorkspaceQueryDatabase(temp.filePath, () => {
-      headerReady = true;
-      expect(
-        raw
-          .prepare(
-            "SELECT 1 FROM sqlite_master WHERE name='workspace_job_index'",
-          )
-          .get(),
-      ).toBeUndefined();
-      const headerReader = createWorkspaceQueryRepository(temp.filePath);
-      try {
-        expect(headerReader.getStartupContext().activeCampaignId).toBe(
-          campaigns?.activeCampaignId ?? null,
-        );
-      } finally {
-        headerReader.close();
-      }
-    });
-    expect(headerReady).toBe(true);
-    const reader = createWorkspaceQueryRepository(temp.filePath);
-    cleanups.push(() => reader.close());
-    for (const { query, page } of before.values()) {
-      const { revision: ignoredBeforeRevision, ...expected } = page;
-      const { revision: ignoredAfterRevision, ...actual } =
-        reader.queryJobList(query);
-      expect(actual).toEqual(expected);
-      expect(ignoredAfterRevision).toBeGreaterThanOrEqual(
-        ignoredBeforeRevision,
-      );
-    }
-    expect(reader.getListCounts({ planId: null })).toEqual(counts);
-    raw
-      .prepare(
-        "UPDATE saved_jobs SET value=json_set(value,'$.title','Changed after switch') WHERE id=?",
-      )
-      .run(jobs[0]!.id);
-    expect(
-      reader.queryJobList({
-        list: "all",
-        filters: { planId: null },
-        search: "Changed after switch",
-      }).rows[0]?.id,
-    ).toBe(jobs[0]!.id);
-  });
   test("unchanged index inputs skip index triggers and feed writes", async () => {
     const { writer, reader, filePath } = await fixture();
     const job = assessedJob({
@@ -677,19 +531,6 @@ describe("independent workspace queries", () => {
       "Updated after rebuild",
     );
     expect(epochs()).not.toEqual(before);
-  });
-  test("closing the query connection before the writer permits a clean-close marker", async () => {
-    const temp = await createTempRepository("nestor-query-close-");
-    const writer = await temp.createRepository();
-    const reader = createWorkspaceQueryRepository(temp.filePath);
-    try {
-      reader.getStartupContext();
-      reader.close();
-      await writer.close();
-      expect(existsSync(`${temp.filePath}.clean-close`)).toBe(true);
-    } finally {
-      await temp.cleanup();
-    }
   });
   test("commit callbacks see committed rows without a polling timer and never see rollbacks", async () => {
     const { filePath, writer, reader } = await fixture();

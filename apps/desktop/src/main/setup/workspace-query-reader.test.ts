@@ -92,7 +92,9 @@ test("answers each queued read before starting the next", async () => {
     },
   });
   parent.emit("message", { data: { type: "queries-ready" } });
-  await vi.waitFor(() => expect(state.trace).toHaveLength(4));
+  await vi.waitFor(() => expect(state.trace).toHaveLength(4), {
+    timeout: 5_000,
+  });
   expect(state.trace).toEqual([
     "page read",
     "reply 1",

@@ -367,12 +367,14 @@ export function JobFinderHomeRoute() {
   // launch read until a screen that needs that workspace has loaded it.
   const context = useOutletContext<JobFinderPageContext | null>();
   const launched = useLaunchReads().context;
+  // Null setup state means no workspace yet: a first launch, so setup opens.
+  const setupKnown = Boolean(context) || launched !== null;
   const setupState =
-    context?.workspace.profileSetupState ?? launched?.profileSetupState;
+    context?.workspace.profileSetupState ?? launched?.profileSetupState ?? null;
   // A workspace that has not started setup opens guided setup directly; Home
   // is one screen of hallway before it. The redirect is spent immediately so
   // the sidebar's Home destination still works.
-  if (setupState && shouldAutoOpenGuidedSetup(setupState)) {
+  if (setupKnown && shouldAutoOpenGuidedSetup(setupState)) {
     markGuidedSetupAutoOpenSpent();
     return <Navigate replace to="/job-finder/profile/setup" />;
   }

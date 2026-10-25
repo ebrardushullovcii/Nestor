@@ -504,6 +504,7 @@ export function useJobFinderWorkspace(enabled = true): JobFinderWorkspaceState {
   // Jobs the change feed named since the last view refresh.
   const changedJobIdsRef = useRef(new Set<string>());
   useEffect(() => {
+    if (!enabled) return undefined;
     const queries = window.nestor.jobFinder.queries;
     if (typeof queries?.onChanges !== "function") return undefined;
     return queries.onChanges((batch) => {
@@ -514,7 +515,7 @@ export function useJobFinderWorkspace(enabled = true): JobFinderWorkspaceState {
         )
           changedJobIdsRef.current.add(change.id);
     });
-  }, []);
+  }, [enabled]);
 
   // A loaded window takes a workspace update without the full sync: it reads
   // Home's first view again (everything but the Find jobs lists) and patches

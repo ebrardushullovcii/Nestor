@@ -158,7 +158,9 @@ import type {
   WriteClipboardTextResult,
   SaveUserActionAnswerDraftInput,
   UserActionCommandInput,
+  LaunchContext,
 } from "@nestor/contracts";
+import { LAUNCH_CONTEXT_CHANNEL } from "@nestor/contracts";
 import { SYSTEM_THEME_CHANGE_EVENT } from "../shared/system-theme";
 import {
   ApplicationAuthorityEnvelopeMutationResultSchema,
@@ -366,6 +368,8 @@ const desktopApi = {
   home: createHomeBridge(nativeIpcRenderer),
   ping: () => ipcRenderer.invoke("system:ping") as Promise<DesktopPlatformPing>,
   firstScreenShown: () => ipcRenderer.send("system:first-screen-shown"),
+  launchContext: () =>
+    ipcRenderer.invoke(LAUNCH_CONTEXT_CHANNEL) as Promise<LaunchContext>,
   window: {
     close: () => ipcRenderer.invoke("window:close") as Promise<{ ok: true }>,
     showContextMenu: (input: DesktopContextMenuInput) =>

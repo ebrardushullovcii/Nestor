@@ -533,7 +533,7 @@ export function JobFinderPage() {
     <ThemeProvider
       preference={
         appearanceTheme ||
-        startupContext?.settings.appearanceTheme ||
+        startupContext?.settings?.appearanceTheme ||
         "system"
       }
     >

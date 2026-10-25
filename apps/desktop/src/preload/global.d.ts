@@ -67,6 +67,7 @@ import type {
   DesktopContextMenuInput,
   DesktopContextMenuResult,
   DesktopPlatformPing,
+  LaunchContext,
   DesktopWindowCloseGuardState,
   DesktopWindowCloseRequest,
   DesktopWindowCloseResolution,
@@ -172,6 +173,8 @@ declare global {
       ping: () => Promise<DesktopPlatformPing>;
       /** The first screen is usable; main starts its background services. */
       firstScreenShown: () => void;
+      /** Settings and setup state for the first frame. */
+      launchContext: () => Promise<LaunchContext>;
       window: {
         close: () => Promise<{ ok: true }>;
         showContextMenu: (
