@@ -1,32 +1,20 @@
 import { useId } from "react";
-import { SupportingFactsField } from "./supporting-facts-field";
-import { candidateAnswerKindValues } from "@nestor/contracts";
-import type {
-  Control,
-  UseFieldArrayReturn,
-  UseFormReturn,
-} from "react-hook-form";
+import type { Control, UseFormReturn } from "react-hook-form";
 import { Controller } from "react-hook-form";
 import { Button } from "@renderer/components/ui/button";
+import { ProfileOptionalSection } from "./profile-optional-section";
 import { FieldLabel } from "@renderer/components/ui/field";
-import { EmptyState } from "../empty-state";
 import { FormSelect } from "../form-select";
 import type { BooleanSelectValue } from "../../lib/job-finder-types";
 import type { ProfileEditorValues } from "../../lib/profile-editor";
-import { formatStatusLabel } from "../../lib/job-finder-utils";
 import {
   ProfileInput,
   ProfileTextarea,
   profileSelectTriggerClassName,
 } from "./profile-form-primitives";
 import { PROFILE_WORK_CONSTRAINT_COPY } from "./profile-work-constraints-copy";
-import { ProfileOptionalSection } from "./profile-optional-section";
-import type { ProfileFieldArrayKeyName } from "./profile-field-array-types";
-import { ProfileRecordCard } from "./profile-record-card";
 import { ProfileSectionHeader } from "./profile-section-header";
-import { PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES } from "./profile-deep-link-focus";
 import { PreferredApplicationLinksField } from "./preferred-application-links-field";
-import { useProfileAppendedRecordOpenSignal } from "./use-profile-appended-record-open-signal";
 
 const booleanSelectOptions = [
   { label: "Not set", value: "" },
@@ -85,24 +73,14 @@ function BooleanSelectField(props: {
 
 export function ProfilePreferencesEligibilitySection(props: {
   busy: boolean;
-  customAnswerArray: UseFieldArrayReturn<
-    ProfileEditorValues,
-    "answerBank.customAnswers",
-    ProfileFieldArrayKeyName
-  >;
   profileForm: UseFormReturn<ProfileEditorValues>;
 }) {
   const {
     control: profileControl,
-    getValues,
     register,
     watch,
+    getValues,
   } = props.profileForm;
-  const {
-    forgetAppendedRecord,
-    getAppendedRecordOpenSignal,
-    markAppendedRecord,
-  } = useProfileAppendedRecordOpenSignal();
   const authorizedWorkCountriesId =
     "profile-setup-field-eligibility-authorized-work-countries";
   const preferredRelocationRegionsId =
@@ -117,39 +95,6 @@ export function ProfilePreferencesEligibilitySection(props: {
     "profile-setup-field-application-identity-preferred-phone";
   const preferredApplicationLinksId =
     "profile-setup-field-application-identity-preferred-links";
-  const workAuthorizationAnswerId = useId();
-  const visaSponsorshipAnswerId =
-    "profile-setup-field-answer-bank-visa-sponsorship";
-  const relocationAnswerId = "profile-setup-field-answer-bank-relocation";
-  const travelAnswerId = useId();
-  const noticePeriodAnswerId = useId();
-  const availabilityAnswerId = "profile-setup-field-answer-bank-availability";
-  const salaryExpectationAnswerId = "profile-expected-salary-answer";
-  const salaryExpectationAnswerHelpId = `${salaryExpectationAnswerId}-help`;
-  const selfIntroductionAnswerId =
-    "profile-setup-field-answer-bank-self-introduction";
-  const careerTransitionAnswerId =
-    "profile-setup-field-answer-bank-career-transition";
-
-  function handleAddCustomAnswer() {
-    const recordId = `answer_${crypto.randomUUID().slice(0, 8)}`;
-    props.customAnswerArray.append({
-      id: recordId,
-      label: "",
-      question: "",
-      answer: "",
-      kind: "other",
-      roleFamilies: "",
-      proofEntryIds: "",
-    });
-    markAppendedRecord(recordId);
-  }
-
-  function handleRemoveCustomAnswer(index: number) {
-    forgetAppendedRecord(props.customAnswerArray.fields[index]?.id ?? "");
-    props.customAnswerArray.remove(index);
-  }
-
   return (
     <section className="grid content-start gap-(--gap-card)">
       <ProfileSectionHeader
@@ -417,306 +362,6 @@ export function ProfilePreferencesEligibilitySection(props: {
           />
         </div>
       </article>
-
-      <article className="surface-card-tint grid gap-4 rounded-(--radius-panel) border border-(--surface-panel-border) p-4">
-        <h3 className="font-semibold text-(--text-headline)">
-          Reusable screener answers
-        </h3>
-        <div className="grid gap-(--gap-content) md:grid-cols-2 md:items-start">
-          <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-            <FieldLabel htmlFor={workAuthorizationAnswerId}>
-              Work authorization answer
-            </FieldLabel>
-            <ProfileTextarea
-              className="min-h-(--textarea-compact) max-h-(--textarea-compact)"
-              id={workAuthorizationAnswerId}
-              rows={4}
-              {...register("answerBank.workAuthorization")}
-            />
-          </div>
-          <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-            <FieldLabel htmlFor={visaSponsorshipAnswerId}>
-              Visa sponsorship answer
-            </FieldLabel>
-            <ProfileTextarea
-              className="min-h-(--textarea-compact) max-h-(--textarea-compact)"
-              id={visaSponsorshipAnswerId}
-              rows={4}
-              {...register("answerBank.visaSponsorship")}
-            />
-          </div>
-          <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-            <FieldLabel htmlFor={relocationAnswerId}>
-              Relocation answer
-            </FieldLabel>
-            <ProfileTextarea
-              className="min-h-(--textarea-compact) max-h-(--textarea-compact)"
-              id={relocationAnswerId}
-              rows={4}
-              {...register("answerBank.relocation")}
-            />
-          </div>
-          <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-            <FieldLabel htmlFor={travelAnswerId}>Travel answer</FieldLabel>
-            <ProfileTextarea
-              className="min-h-(--textarea-compact) max-h-(--textarea-compact)"
-              id={travelAnswerId}
-              rows={4}
-              {...register("answerBank.travel")}
-            />
-          </div>
-          <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-            <FieldLabel htmlFor={noticePeriodAnswerId}>
-              Notice period answer
-            </FieldLabel>
-            <ProfileTextarea
-              className="min-h-(--textarea-compact) max-h-(--textarea-compact)"
-              id={noticePeriodAnswerId}
-              rows={4}
-              {...register("answerBank.noticePeriod")}
-            />
-          </div>
-          <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-            <FieldLabel htmlFor={availabilityAnswerId}>
-              Availability answer
-            </FieldLabel>
-            <ProfileTextarea
-              className="min-h-(--textarea-compact) max-h-(--textarea-compact)"
-              id={availabilityAnswerId}
-              rows={4}
-              {...register("answerBank.availability")}
-            />
-          </div>
-          <div
-            className={`grid min-w-0 content-start gap-(--gap-field) h-full ${PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES.base} ${PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES.fixedHeader} ${PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES.internalScroller}`}
-            id="profile-expected-salary-answer-field"
-          >
-            <FieldLabel htmlFor={salaryExpectationAnswerId}>
-              Expected salary answer (applications)
-            </FieldLabel>
-            <ProfileTextarea
-              aria-describedby={salaryExpectationAnswerHelpId}
-              className="min-h-(--textarea-compact) max-h-(--textarea-compact)"
-              id={salaryExpectationAnswerId}
-              rows={4}
-              {...register("answerBank.salaryExpectations")}
-            />
-            <p
-              className="text-xs leading-relaxed text-foreground-muted"
-              id={salaryExpectationAnswerHelpId}
-            >
-              Reused when an application asks what you expect. It may be higher
-              than your minimum job-search floor; the app still pauses for
-              review before using it.
-            </p>
-          </div>
-          <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-            <FieldLabel htmlFor={selfIntroductionAnswerId}>
-              Short self-introduction
-            </FieldLabel>
-            <ProfileTextarea
-              className="min-h-(--textarea-compact) max-h-(--textarea-compact)"
-              id={selfIntroductionAnswerId}
-              rows={4}
-              {...register("answerBank.selfIntroduction")}
-            />
-          </div>
-          <div className="grid min-w-0 content-start gap-(--gap-field) h-full md:col-span-2">
-            <FieldLabel htmlFor={careerTransitionAnswerId}>
-              Career transition explanation
-            </FieldLabel>
-            <ProfileTextarea
-              className="min-h-(--textarea-compact) max-h-(--textarea-compact)"
-              id={careerTransitionAnswerId}
-              rows={4}
-              {...register("answerBank.careerTransition")}
-            />
-          </div>
-        </div>
-      </article>
-
-      <ProfileOptionalSection
-        defaultOpen={props.customAnswerArray.fields.length > 0}
-        description="Save a few custom answers here when recurring applications ask the same question in slightly different words."
-        title="Custom answer library"
-      >
-        <div className="grid gap-4">
-          <div className="flex justify-end">
-            <Button
-              disabled={props.busy}
-              onClick={handleAddCustomAnswer}
-              type="button"
-              variant="secondary"
-            >
-              Add custom answer
-            </Button>
-          </div>
-
-          {props.customAnswerArray.fields.length > 0 ? (
-            props.customAnswerArray.fields.map((entry, index) => {
-              function buildAnswerFieldId(field: string) {
-                return `answer-record-${entry.id}-${field}`;
-              }
-
-              return (
-                <ProfileRecordCard
-                  id={`answer-record-${entry.id}`}
-                  statusLabel={
-                    watch(`answerBank.customAnswers.${index}.needsConfirmation`)
-                      ? "Needs your confirmation"
-                      : undefined
-                  }
-                  key={entry.fieldKey}
-                  defaultOpen={index === 0}
-                  forceOpenSignal={getAppendedRecordOpenSignal(entry.id)}
-                  summary={
-                    watch(
-                      `answerBank.customAnswers.${index}.applicationScope.location`,
-                    )
-                      ? `Application location: ${watch(`answerBank.customAnswers.${index}.applicationScope.location`)}`
-                      : watch(`answerBank.customAnswers.${index}.label`) ||
-                        watch(`answerBank.customAnswers.${index}.question`) ||
-                        ""
-                  }
-                  title={
-                    watch(`answerBank.customAnswers.${index}.label`)?.trim() ||
-                    `Custom answer ${index + 1}`
-                  }
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <p className="text-(length:--text-field-label) font-medium uppercase tracking-[0.16em] text-foreground-muted">
-                      Answer details
-                    </p>
-                    <Button
-                      disabled={props.busy}
-                      onClick={() => handleRemoveCustomAnswer(index)}
-                      size="compact"
-                      type="button"
-                      variant="ghost"
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                  {watch(
-                    `answerBank.customAnswers.${index}.needsConfirmation`,
-                  ) ? (
-                    <div className="grid gap-2" role="alert">
-                      <p className="text-sm text-(--warning-text)">
-                        Job Finder chose this earlier. Review and confirm it
-                        before it can be reused as your answer.
-                      </p>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() =>
-                          props.profileForm.setValue(
-                            `answerBank.customAnswers.${index}.needsConfirmation`,
-                            false,
-                            { shouldDirty: true },
-                          )
-                        }
-                      >
-                        Confirm this is my answer
-                      </Button>
-                    </div>
-                  ) : null}
-                  <div className="grid gap-(--gap-content) md:grid-cols-2 md:items-start">
-                    <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-                      <FieldLabel htmlFor={buildAnswerFieldId("label")}>
-                        Label
-                      </FieldLabel>
-                      <ProfileInput
-                        id={buildAnswerFieldId("label")}
-                        {...register(`answerBank.customAnswers.${index}.label`)}
-                      />
-                    </div>
-                    <Controller
-                      control={profileControl}
-                      name={`answerBank.customAnswers.${index}.kind`}
-                      render={({ field }) => (
-                        <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-                          <FieldLabel htmlFor={buildAnswerFieldId("kind")}>
-                            Kind
-                          </FieldLabel>
-                          <FormSelect
-                            onValueChange={field.onChange}
-                            options={candidateAnswerKindValues.map((kind) => ({
-                              label: formatStatusLabel(kind),
-                              value: kind,
-                            }))}
-                            placeholder="Select kind"
-                            triggerClassName={profileSelectTriggerClassName}
-                            triggerId={buildAnswerFieldId("kind")}
-                            value={field.value}
-                          />
-                        </div>
-                      )}
-                    />
-                    <div className="grid min-w-0 content-start gap-(--gap-field) h-full md:col-span-2">
-                      <FieldLabel htmlFor={buildAnswerFieldId("question")}>
-                        Question
-                      </FieldLabel>
-                      <ProfileTextarea
-                        id={buildAnswerFieldId("question")}
-                        className="min-h-(--textarea-compact) max-h-(--textarea-compact)"
-                        rows={4}
-                        {...register(
-                          `answerBank.customAnswers.${index}.question`,
-                        )}
-                      />
-                    </div>
-                    <div className="grid min-w-0 content-start gap-(--gap-field) h-full md:col-span-2">
-                      <FieldLabel htmlFor={buildAnswerFieldId("answer")}>
-                        Answer
-                      </FieldLabel>
-                      <ProfileTextarea
-                        id={buildAnswerFieldId("answer")}
-                        className="min-h-(--textarea-compact) max-h-(--textarea-compact)"
-                        rows={4}
-                        {...register(
-                          `answerBank.customAnswers.${index}.answer`,
-                        )}
-                      />
-                    </div>
-                    <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-                      <FieldLabel htmlFor={buildAnswerFieldId("role-families")}>
-                        Relevant role families
-                      </FieldLabel>
-                      <ProfileTextarea
-                        id={buildAnswerFieldId("role-families")}
-                        className="min-h-(--textarea-compact) max-h-(--textarea-compact)"
-                        placeholder="Comma-separated role families, e.g. frontend, fullstack"
-                        rows={4}
-                        {...register(
-                          `answerBank.customAnswers.${index}.roleFamilies`,
-                        )}
-                      />
-                    </div>
-                    <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-                      <Controller
-                        control={profileControl}
-                        name={`answerBank.customAnswers.${index}.proofEntryIds`}
-                        render={({ field }) => (
-                          <SupportingFactsField
-                            facts={watch("proofBank")}
-                            onChange={field.onChange}
-                            value={field.value}
-                          />
-                        )}
-                      />
-                    </div>
-                  </div>
-                </ProfileRecordCard>
-              );
-            })
-          ) : (
-            <EmptyState
-              description="No reusable custom answers yet. Add one when you notice the same screener wording repeating across applications."
-              title="No custom answers saved"
-            />
-          )}
-        </div>
-      </ProfileOptionalSection>
     </section>
   );
 }

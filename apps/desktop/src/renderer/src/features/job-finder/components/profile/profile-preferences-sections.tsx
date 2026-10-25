@@ -20,73 +20,7 @@ import {
   ProfileListEditor,
 } from "./profile-list-editor";
 import { PROFILE_WORK_CONSTRAINT_COPY } from "./profile-work-constraints-copy";
-import {
-  PROFILE_SECTION_SCROLL_AREA_ID,
-  computeProfileDeepLinkScrollTop,
-  resolveProfileDeepLinkClearancePx,
-  resolveProfileScrollChromeMode,
-} from "./profile-deep-link-focus";
 import { ProfileSectionHeader } from "./profile-section-header";
-
-const EXPECTED_SALARY_ANSWER_FIELD_ID = "profile-expected-salary-answer";
-const EXPECTED_SALARY_ANSWER_FIELD_WRAPPER_ID =
-  "profile-expected-salary-answer-field";
-
-function setElementScrollTop(element: HTMLElement, top: number) {
-  if (typeof element.scrollTo === "function") {
-    element.scrollTo({ behavior: "auto", left: 0, top });
-    return;
-  }
-
-  element.scrollTop = top;
-}
-
-function revealExpectedSalaryAnswerField(documentRef: Document = document) {
-  const answerFieldWrapper = documentRef.getElementById(
-    EXPECTED_SALARY_ANSWER_FIELD_WRAPPER_ID,
-  );
-  const answerField = documentRef.getElementById(
-    EXPECTED_SALARY_ANSWER_FIELD_ID,
-  );
-
-  if (
-    !(answerFieldWrapper instanceof HTMLElement) ||
-    !(answerField instanceof HTMLElement)
-  ) {
-    return;
-  }
-
-  const view = documentRef.defaultView;
-
-  if (
-    !view ||
-    resolveProfileScrollChromeMode(view.innerWidth) !== "internal-scroller"
-  ) {
-    answerFieldWrapper.scrollIntoView({ behavior: "auto", block: "center" });
-    answerField.focus({ preventScroll: true });
-    return;
-  }
-
-  const sectionScroller = documentRef.getElementById(
-    PROFILE_SECTION_SCROLL_AREA_ID,
-  );
-
-  if (!(sectionScroller instanceof HTMLElement)) {
-    return;
-  }
-
-  setElementScrollTop(
-    sectionScroller,
-    computeProfileDeepLinkScrollTop({
-      anchorViewportTopPx: sectionScroller.getBoundingClientRect().top,
-      clearanceBelowAnchorPx:
-        resolveProfileDeepLinkClearancePx("internal-scroller"),
-      scrollerScrollTopPx: sectionScroller.scrollTop,
-      targetViewportTopPx: answerFieldWrapper.getBoundingClientRect().top,
-    }),
-  );
-  answerField.focus({ preventScroll: true });
-}
 
 export function ProfilePreferencesTargetingSection(props: {
   preferencesForm: UseFormReturn<SearchPreferencesEditorValues>;
@@ -311,30 +245,8 @@ export function ProfilePreferencesTargetingSection(props: {
           </h3>
           <p className="text-sm leading-relaxed text-foreground-muted">
             These values guide job matching. The minimum is your consideration
-            floor, not the salary answer sent with an application. Save that
-            separately under{" "}
-            <a
-              className="font-medium text-foreground underline decoration-foreground/35 underline-offset-4 hover:decoration-foreground"
-              href="#profile-expected-salary-answer-field"
-              onClick={(event) => {
-                const isUnmodifiedPrimaryActivation =
-                  event.button === 0 &&
-                  !event.altKey &&
-                  !event.ctrlKey &&
-                  !event.metaKey &&
-                  !event.shiftKey;
-
-                if (!isUnmodifiedPrimaryActivation) {
-                  return;
-                }
-
-                event.preventDefault();
-                revealExpectedSalaryAnswerField();
-              }}
-            >
-              Reusable screener answers
-            </a>
-            .
+            floor, not the salary answer sent with an application. Answer that
+            in Needs you when a form asks for it.
           </p>
         </div>
         <div className="grid gap-(--gap-content) md:grid-cols-2 md:items-start">

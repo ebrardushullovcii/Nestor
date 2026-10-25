@@ -1,13 +1,10 @@
-import { assertPersonAnswerAuthority } from "../person-answer-authority";
 import {
-  ApplicationAnswerValueSchema,
   AssistantGrantActionSchema,
   JobSelectionSchema,
   NonEmptyStringSchema,
   type AssistantInstructionGrant,
 } from "@nestor/contracts";
 import { z } from "zod";
-import type { JobFinderWorkspaceService } from "../../internal/workspace-service-contracts";
 import { checkGrantTargets, narrowGrant } from "../grants";
 import { AssistantToolError, defineTool, json } from "../tool-kit";
 import { plural } from "./format";
@@ -239,94 +236,8 @@ export const listInstructionsTool = defineTool({
   },
 });
 
-async function latestRunFor(service: JobFinderWorkspaceService, jobId: string) {
-  const snapshot = await service.getWorkspaceSnapshot();
-  const result = snapshot.applyJobResults
-    .filter((entry) => entry.jobId === jobId)
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
-  const record =
-    snapshot.applicationRecords.find((entry) => entry.jobId === jobId) ?? null;
-  return { snapshot, result: result ?? null, record };
-}
-
-export const answerApplicationQuestionTool = defineTool({
-  name: "answer_application_question",
-  group: "applications",
-  description:
-    "Saves the person's answer to one question an application asked (from get_application), for this application or also for later ones (saveForLater). Use their words; never make up personal facts. When the question is also a Needs you step (list_needs_you), answer it with resolve_needs_you instead: that is what continues the paused application.",
-  parameters: json.object(
-    {
-      jobId: json.string(),
-      questionId: json.string(),
-      answer: json.looseObject(
-        "{type:'text',value} | {type:'single_choice',value} | {type:'multi_choice',values} | {type:'boolean',value} | {type:'date',value}",
-      ),
-      saveForLater: json.boolean(),
-    },
-    ["jobId", "questionId", "answer"],
-  ),
-  input: z.object({
-    jobId: Id,
-    questionId: Id,
-    answer: ApplicationAnswerValueSchema,
-    saveForLater: z.boolean().default(false),
-  }),
-  label: () => "Saving your answer",
-  effect: "local_write",
-  async execute(input, { service, session, ports }) {
-    const { result, record } = await latestRunFor(service, input.jobId);
-    if (!result)
-      throw new AssistantToolError(
-        "not_found",
-        "This job has no application run.",
-      );
-    const details = await service.getApplyRunDetails(
-      result.runId,
-      input.jobId,
-      record?.id ?? null,
-    );
-    const current = details.answerRecords
-      .filter((answer) => answer.questionId === input.questionId)
-      .sort((left, right) => right.revision - left.revision)[0];
-    const question = details.questionRecords.find(
-      (entry) => entry.id === input.questionId,
-    );
-    if (!question)
-      throw new AssistantToolError(
-        "not_found",
-        "That application question is no longer available.",
-      );
-    const answer =
-      input.answer.type === "multi_choice"
-        ? input.answer.values.join(", ")
-        : input.answer.type === "asset_ref"
-          ? input.answer.assetId
-          : String(input.answer.value);
-    await assertPersonAnswerAuthority(session, {
-      answers: [{ question: question.prompt, answer }],
-      saveForFuture: input.saveForLater,
-    });
-    session.assertCurrent();
-    await service.saveApplicationAnswer({
-      commandId: session.createId("assistant_answer"),
-      runId: result.runId,
-      jobId: input.jobId,
-      resultId: result.id,
-      questionId: input.questionId,
-      expectedAnswerRevision: current?.revision ?? 0,
-      value: input.answer,
-      saveScope: input.saveForLater ? "reusable_profile" : "application_once",
-      submitAuthorized: false,
-      accountCreationAuthorized: false,
-    });
-    ports.publishWorkspaceUpdate();
-    return { summary: "Answer saved." };
-  },
-});
-
 export const applicationTools = [
   recordInstructionTool,
   updateInstructionTool,
   listInstructionsTool,
-  answerApplicationQuestionTool,
 ];

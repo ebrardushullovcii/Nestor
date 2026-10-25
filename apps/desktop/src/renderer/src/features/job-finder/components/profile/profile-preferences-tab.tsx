@@ -1,4 +1,4 @@
-import type { UseFieldArrayReturn, UseFormReturn } from "react-hook-form";
+import type { UseFormReturn } from "react-hook-form";
 import type { ResumeApplicationMode, ResumeApproach } from "@nestor/contracts";
 import type {
   ProfileEditorValues,
@@ -7,15 +7,9 @@ import type {
 import { ProfilePreferencesEligibilitySection } from "./profile-preferences-eligibility-section";
 import { ProfilePreferencesTargetingSection } from "./profile-preferences-sections";
 import { ProfileResumeLevelSection } from "./profile-resume-level-section";
-import type { ProfileFieldArrayKeyName } from "./profile-field-array-types";
 
 interface ProfilePreferencesTabProps {
   busy: boolean;
-  customAnswerArray: UseFieldArrayReturn<
-    ProfileEditorValues,
-    "answerBank.customAnswers",
-    ProfileFieldArrayKeyName
-  >;
   onResumeApproachChange?: (
     approach: ResumeApproach,
   ) => Promise<boolean | void> | void;
@@ -26,7 +20,6 @@ interface ProfilePreferencesTabProps {
 
 export function ProfilePreferencesTab({
   busy,
-  customAnswerArray,
   onResumeApproachChange,
   preferencesForm,
   profileForm,
@@ -36,7 +29,6 @@ export function ProfilePreferencesTab({
     <div className="grid gap-6">
       <ProfilePreferencesEligibilitySection
         busy={busy}
-        customAnswerArray={customAnswerArray}
         profileForm={profileForm}
       />
       <ProfilePreferencesTargetingSection preferencesForm={preferencesForm} />

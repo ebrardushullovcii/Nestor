@@ -1,35 +1,19 @@
-import {
-  createElement,
-  lazy,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import { projectPlanSafeguardPauses } from "@nestor/job-finder/plan-safeguard-pauses";
+import { createElement, lazy, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { jobFinderPendingActions } from "./job-finder-pending-actions";
-import { readFullWorkspaceIfBehind } from "@renderer/features/job-finder/lib/workspace-view-refresh";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
 import { JobFinderRouteErrorBoundary } from "./job-finder-route-error-boundary";
 import { getDefaultProfileRoute } from "@renderer/features/job-finder/lib/job-finder-utils";
-import {
-  Navigate,
-  useSearchParams,
-  useLocation,
-  useOutletContext,
-} from "react-router-dom";
+import { Navigate, useLocation, useOutletContext } from "react-router-dom";
 import { isProfileSetupJustFinished } from "./use-job-finder-page-controller-actions";
 import {
   markGuidedSetupAutoOpenSpent,
   shouldAutoOpenGuidedSetup,
 } from "@renderer/features/job-finder/components/profile/setup/guided-setup-auto-open";
 import type { JobFinderPageContext } from "./job-finder-page-context";
-import type {
-  JobFinderRendererWorkspaceSnapshot,
-} from "@nestor/contracts";
+import type { JobFinderRendererWorkspaceSnapshot } from "@nestor/contracts";
 import { ProfileScreen } from "@renderer/features/job-finder/screens/profile-screen";
-import { readJobFinderNavigationContext } from "@renderer/features/job-finder/lib/job-finder-context-navigation";
 import { HomeScreen } from "@renderer/features/home/home-screen";
 
 // The canonical workflow surfaces (Profile, Find jobs, Shortlisted,
@@ -79,11 +63,6 @@ const loadProfileSetupScreen = createSharedRouteLoader(async () => ({
     await import("@renderer/features/job-finder/components/profile/setup/profile-setup-screen")
   ).ProfileSetupScreen,
 }));
-const loadActionsScreen = createSharedRouteLoader(async () => ({
-  default: (
-    await import("@renderer/features/job-finder/screens/actions-screen")
-  ).ActionsScreen,
-}));
 const loadSettingsScreen = createSharedRouteLoader(async () => ({
   default: (
     await import("@renderer/features/job-finder/screens/settings-screen")
@@ -94,11 +73,7 @@ const loadSettingsScreen = createSharedRouteLoader(async () => ({
 // click on any of them renders at once instead of waiting on its chunk.
 if (import.meta.env.MODE !== "test" && typeof window !== "undefined") {
   const preloadScreens = () => {
-    for (const load of [
-      loadSettingsScreen,
-      loadActionsScreen,
-      loadProfileSetupScreen,
-    ])
+    for (const load of [loadSettingsScreen, loadProfileSetupScreen])
       void load().catch(() => undefined);
   };
   if (typeof window.requestIdleCallback === "function")
@@ -107,7 +82,6 @@ if (import.meta.env.MODE !== "test" && typeof window !== "undefined") {
 }
 
 const ProfileSetupScreen = lazyScreen(loadProfileSetupScreen);
-const ActionsScreen = lazyScreen(loadActionsScreen);
 const SettingsScreen = lazyScreen(loadSettingsScreen);
 
 function useJobFinderPageContext() {
@@ -556,107 +530,6 @@ export function JobFinderProfileSetupRoute() {
         : {})}
       searchPreferences={context.workspace.searchPreferences}
     />
-  );
-}
-
-export function selectJobFinderActionsScope(context: JobFinderPageContext) {
-  return {
-    groupedDecisions: context.workspace.intelligence.groupedDecisions,
-    isGroupedApplyPending: (decisionId: string) =>
-      context.isPending(
-        jobFinderPendingActions.groupedManualAnswerApply(decisionId),
-      ),
-    isGroupedProjectPending: (groupKey: string) =>
-      context.isPending(
-        jobFinderPendingActions.groupedManualAnswerProject(groupKey),
-      ),
-    isGroupedSnoozePending: (decisionId: string) =>
-      context.isPending(
-        jobFinderPendingActions.groupedDecisionSnooze(decisionId),
-      ),
-    onApplyGroupedManualAnswer: context.onApplyGroupedManualAnswer,
-    onProjectGroupedManualAnswer: context.onProjectGroupedManualAnswer,
-    onSnoozeGroupedDecision: context.onSnoozeGroupedDecision,
-  };
-}
-
-export function JobFinderActionsRoute() {
-  const context = useJobFinderPageContext();
-  // Lists every job: one full read if the lists fell behind.
-  useEffect(readFullWorkspaceIfBehind, []);
-  const [searchParams] = useSearchParams();
-  const scope = useMemo(
-    () => selectJobFinderActionsScope(context),
-    // Only the fields selectJobFinderActionsScope reads: the outlet context
-    // object identity changes on every parent render, so depending on it
-    // would defeat the memo.
-    [
-      context.workspace.intelligence.groupedDecisions,
-      context.isPending,
-      context.onApplyGroupedManualAnswer,
-      context.onProjectGroupedManualAnswer,
-      context.onSnoozeGroupedDecision,
-    ],
-  );
-
-  return (
-    <JobFinderHydrationGate
-      collections={["discovery_jobs", "applications", "intelligence"]}
-      workspace={context.workspace}
-    >
-      <ActionsScreen
-        applyMode={
-          context.workspace.settings?.applicationAutomationMode ===
-          "autonomous_submit"
-            ? "apply_for_me"
-            : "fill_only"
-        }
-        selectedApplicationRecordId={
-          readJobFinderNavigationContext(searchParams).applicationRecordId
-        }
-        selectedRequestId={searchParams.get("requestId")}
-        selectedDecisionId={searchParams.get("decisionId")}
-        safeguardPauses={projectPlanSafeguardPauses(
-          context.workspace.intelligence?.safeguards,
-          context.workspace.campaigns,
-        )}
-        applicationAttempts={context.workspace.applicationAttempts}
-        applicationRecords={context.workspace.applicationRecords}
-        applyJobResults={context.workspace.applyJobResults}
-        discoveryJobs={context.workspace.discoveryJobs}
-        groupedDecisions={scope.groupedDecisions}
-        isGroupedApplyPending={scope.isGroupedApplyPending}
-        isGroupedProjectPending={scope.isGroupedProjectPending}
-        isGroupedSnoozePending={scope.isGroupedSnoozePending}
-        isPending={(requestId) =>
-          context.isPending(jobFinderPendingActions.userAction(requestId))
-        }
-        onApplyGroupedManualAnswer={scope.onApplyGroupedManualAnswer}
-        onGetApplyRunDetails={context.onGetApplyRunDetails}
-        onCommand={async (command) => {
-          await context.onPerformUserAction(command, {
-            rethrowError: command.action === "submit_manual_answer",
-          });
-        }}
-        onNavigate={context.onNavigateSafely}
-        onProjectGroupedManualAnswer={scope.onProjectGroupedManualAnswer}
-        onSnoozeGroupedDecision={scope.onSnoozeGroupedDecision}
-        onStartOver={async (request, cancel) => {
-          // A lost check: close it, then prepare the same application again.
-          if (request.scope.type !== "application") return;
-          const cancelled = await context.onPerformUserAction(cancel);
-          if (!cancelled) return;
-          context.onStartApplyCopilot({
-            jobId: request.scope.jobId,
-            ...(request.scope.applicationRecordId
-              ? { applicationRecordId: request.scope.applicationRecordId }
-              : {}),
-          });
-        }}
-        profile={context.workspace.profile}
-        requests={context.workspace.userActionRequests ?? []}
-      />
-    </JobFinderHydrationGate>
   );
 }
 

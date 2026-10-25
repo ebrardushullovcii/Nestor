@@ -918,10 +918,21 @@ describe("written answer fact check recovery", () => {
     expect(client.chatWithTools).toHaveBeenCalledTimes(1);
   });
 
-  test("gives the independent choice check the saved profile prose as applicant context", async () => {
+  test("gives the independent choice check saved Needs-you answers as applicant context", async () => {
     const request = input();
-    request.sources.profile.answerBank.visaSponsorship =
+    const savedAnswer =
       "I will need employer sponsorship after my student permit ends.";
+    request.sources.reusableAnswers = [
+      {
+        id: "sponsorship",
+        kind: "visa_sponsorship",
+        label: "Sponsorship",
+        question: "Do you need visa sponsorship?",
+        answer: savedAnswer,
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
     const client: LLMClient = {
       chatWithTools: vi.fn().mockResolvedValue({
         toolCalls: [
@@ -941,10 +952,7 @@ describe("written answer fact check recovery", () => {
     const facts: unknown = JSON.parse(content ?? "{}");
     expect(facts).toMatchObject({
       applicant: {
-        answers: {
-          "Visa sponsorship answer":
-            request.sources.profile.answerBank.visaSponsorship,
-        },
+        savedAnswers: [{ id: "sponsorship", answer: savedAnswer }],
       },
     });
   });

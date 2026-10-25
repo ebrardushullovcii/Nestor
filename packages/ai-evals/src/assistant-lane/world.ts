@@ -1,3 +1,7 @@
+import { openJobStore } from "@nestor/db/job-store";
+import { createApplicationStore } from "@nestor/db/applications";
+import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
+import { needsYouCommandTools } from "@nestor/job-finder";
 import {
   createDeterministicJobFinderAiClient,
   resolveAssistantModelRouteFromEnvironment,
@@ -283,12 +287,21 @@ export function createAssistantLaneWorld(
     applications: [],
     sends: [],
   };
+  const jobs = openJobStore(":memory:");
+  const applications = createApplicationStore(jobs);
+  const needsYou = createNeedsYouCommandRunner(() => applications, {
+    open: () => Promise.resolve(false),
+    check: () => Promise.resolve(false),
+  });
   const events: AssistantEvent[] = [];
   const resolution = resolveLaneModel(model);
   const host = new AssistantSessionHost({
     repository: createAssistantRepository({ filePath: ":memory:" }),
     service,
-    ports: recordingPorts(recorder),
+    ports: {
+      ...recordingPorts(recorder),
+      commands: needsYouCommandTools(needsYou),
+    },
     resolveModel: () => resolution,
     publish: (event) => events.push(event),
     stallAfterMs: 60_000,
@@ -300,7 +313,13 @@ export function createAssistantLaneWorld(
     events,
     jobs: LANE_JOBS,
     snapshot: () => service.getWorkspaceSnapshot(),
-    shutdown: () => host.shutdown(),
+    shutdown: async () => {
+      try {
+        await host.shutdown();
+      } finally {
+        jobs.close();
+      }
+    },
   };
 }
 

@@ -4,9 +4,8 @@ import { IsoDateTimeSchema, NonEmptyStringSchema } from "./base";
 import { Sha256HexSchema } from "./application-authority";
 import {
   CandidateAnswerKindSchema,
-  type CandidateAnswerBank,
+  type CandidateReusableAnswer,
   type CandidateAnswerKind,
-  type CandidateProfile,
 } from "./profile";
 
 export const approvedApplicationAnswerSnapshotVersion = 1 as const;
@@ -14,7 +13,7 @@ export const approvedApplicationAnswerSnapshotMaxEntries = 200;
 
 /**
  * One immutable, user-reviewed reusable answer. Main derives these entries from
- * the persisted CandidateProfile; renderer input can never supply answer text
+ * the Needs-you saved-answer store; renderer input can never supply answer text
  * or identity metadata to the approval boundary.
  */
 export const ApprovedApplicationAnswerSnapshotEntrySchema = z
@@ -79,78 +78,6 @@ export type ApprovedApplicationAnswerSnapshotContent = z.infer<
   typeof ApprovedApplicationAnswerSnapshotContentSchema
 >;
 
-const reusableAnswerFields: ReadonlyArray<{
-  key: keyof CandidateAnswerBank;
-  id: string;
-  kind: CandidateAnswerKind;
-  label: string;
-  question: string;
-}> = [
-  {
-    key: "workAuthorization",
-    id: "answer_bank.work_authorization",
-    kind: "work_authorization",
-    label: "Work authorization",
-    question: "What is your work authorization?",
-  },
-  {
-    key: "visaSponsorship",
-    id: "answer_bank.visa_sponsorship",
-    kind: "visa_sponsorship",
-    label: "Visa sponsorship",
-    question: "Do you require visa sponsorship?",
-  },
-  {
-    key: "relocation",
-    id: "answer_bank.relocation",
-    kind: "relocation",
-    label: "Relocation",
-    question: "Are you willing to relocate?",
-  },
-  {
-    key: "travel",
-    id: "answer_bank.travel",
-    kind: "travel",
-    label: "Travel",
-    question: "Are you willing to travel?",
-  },
-  {
-    key: "noticePeriod",
-    id: "answer_bank.notice_period",
-    kind: "notice_period",
-    label: "Notice period",
-    question: "What is your notice period?",
-  },
-  {
-    key: "availability",
-    id: "answer_bank.availability",
-    kind: "availability",
-    label: "Availability",
-    question: "When are you available to start?",
-  },
-  {
-    key: "salaryExpectations",
-    id: "answer_bank.salary_expectations",
-    kind: "salary_expectation",
-    label: "Salary expectations",
-    question: "What are your salary expectations?",
-  },
-  {
-    key: "selfIntroduction",
-    id: "answer_bank.self_introduction",
-    kind: "self_intro",
-    label: "Self-introduction",
-    question: "Please introduce yourself.",
-  },
-  {
-    key: "careerTransition",
-    id: "answer_bank.career_transition",
-    kind: "career_transition",
-    label: "Career transition",
-    question: "Please explain your career transition.",
-  },
-];
-
 export const requiredApprovedApplicationAnswerKinds = [
   "work_authorization",
   "visa_sponsorship",
@@ -162,32 +89,16 @@ export const requiredApprovedApplicationAnswerKinds = [
  * saved policy and its last-instant use gate from hashing different content.
  */
 export function deriveApprovedApplicationAnswerSnapshotContent(
-  profile: CandidateProfile,
+  profile: { id: string },
+  savedAnswers: readonly CandidateReusableAnswer[] = [],
 ): {
   content: ApprovedApplicationAnswerSnapshotContent | null;
   entries: ApprovedApplicationAnswerSnapshotEntry[];
   kinds: CandidateAnswerKind[];
   missingRequiredKinds: CandidateAnswerKind[];
 } {
-  const entries: ApprovedApplicationAnswerSnapshotEntry[] =
-    reusableAnswerFields.flatMap((field) => {
-      const value = profile.answerBank[field.key];
-      return typeof value === "string" && value.trim().length > 0
-        ? [
-            {
-              id: field.id,
-              kind: field.kind,
-              label: field.label,
-              question: field.question,
-              answer: value.trim(),
-              roleFamilies: [],
-              proofEntryIds: [],
-            },
-          ]
-        : [];
-    });
-
-  for (const custom of profile.answerBank.customAnswers) {
+  const entries: ApprovedApplicationAnswerSnapshotEntry[] = [];
+  for (const custom of savedAnswers) {
     const answer = custom.answer.trim();
     const question = custom.question.trim();
     if (custom.needsConfirmation || !answer || !question) {

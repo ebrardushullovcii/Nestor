@@ -11,9 +11,11 @@ import {
 } from "@nestor/contracts";
 import {
   assistantCommandTools,
+  needsYouCommandTools,
   type AssistantToolContext,
 } from "@nestor/job-finder";
 
+import { runNeedsYouCommand } from "../../routes/needs-you";
 import { runJobCommand } from "../job-commands";
 import { runResumeCommand } from "../../routes/resumes";
 import { runTrackerCommand } from "../../routes/tracker";
@@ -81,6 +83,7 @@ async function siteChange<T extends SiteChange>(
 export function assistantAppCommands() {
   return [
     ...assistantApplicationCommands(),
+    ...needsYouCommandTools(runNeedsYouCommand),
     ...assistantCommandTools<typeof TRACKER_COMMANDS, TrackerCommandOutputs>(
       TRACKER_COMMANDS,
       runTrackerCommand,

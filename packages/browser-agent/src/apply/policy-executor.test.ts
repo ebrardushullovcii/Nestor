@@ -1241,10 +1241,18 @@ describe("apply policy executor", () => {
       ],
     });
     const { config, hands } = configFor(page);
-    config.sources.profile = CandidateProfileSchema.parse({
-      ...config.sources.profile,
-      answerBank: { salaryExpectations: "90000" },
-    });
+    config.sources.reusableAnswers = [
+      ...config.sources.reusableAnswers,
+      {
+        id: "pay",
+        kind: "salary_expectation",
+        label: "Expected pay",
+        question: "Expected salary",
+        answer: "90000",
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
     const chooseOption = vi.spyOn(hands, "chooseOption");
 
     const outcome = await executeApplyProposal(
@@ -3191,8 +3199,17 @@ describe("one-use answers and compatible originals", () => {
     const { config } = configFor(source, {
       authority: { salaryDisclosure: "answer_from_profile" },
     });
-    config.sources.profile.answerBank.salaryExpectations =
-      "EUR 60,000 gross per year";
+    config.sources.reusableAnswers = [
+      {
+        id: "pay",
+        kind: "salary_expectation",
+        label: "Expected compensation",
+        question: "Expected compensation",
+        answer: "EUR 60,000 gross per year",
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
     const classifyQuestions = () =>
       Promise.resolve(
         new Map([
@@ -3522,7 +3539,17 @@ test("private current salary is not filled or suggested from expected pay", asyn
     ],
   });
   const { config, hands } = configFor(page);
-  config.sources.profile.answerBank.salaryExpectations = "EUR 60000";
+  config.sources.reusableAnswers = [
+    {
+      id: "pay",
+      kind: "salary_expectation",
+      label: "Expected pay",
+      question: "Expected pay",
+      answer: "EUR 60000",
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
   const fill = vi.spyOn(hands, "fillText");
   const check = vi.fn(() =>
     Promise.resolve({ supported: true, reason: "checked" }),

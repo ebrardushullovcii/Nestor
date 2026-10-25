@@ -540,7 +540,10 @@ async function decideAnswer(input: {
     return { kind: "use", answer: saved };
   }
   if (control.questionKind === "salary_expectation" && !payDisclosed) {
-    const savedPay = config.sources.profile.answerBank.salaryExpectations;
+    const savedPay = config.sources.reusableAnswers.find(
+      (answer) =>
+        answer.kind === "salary_expectation" && !answer.needsConfirmation,
+    );
     return {
       kind: "leave",
       reason: PAY_KEPT_PRIVATE_REASON,
@@ -548,10 +551,10 @@ async function decideAnswer(input: {
         saved ??
         (savedPay && !control.asksCurrentPay
           ? {
-              value: savedPay,
+              value: savedPay.answer,
               kind: "salary_expectation",
-              sourceKind: "profile",
-              sourceId: "profile.answerBank.salaryExpectations",
+              sourceKind: "answer_library",
+              sourceId: `answerLibrary.${savedPay.id}`,
               provenanceLabel: "your saved pay answer",
               groundedIn: ["your saved pay answer"],
             }

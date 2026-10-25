@@ -1,4 +1,3 @@
-import type { JobFinderWorkspaceSnapshot } from "@nestor/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import { createWorkspaceServiceHarness } from "../../workspace-service.test-support";
@@ -13,7 +12,6 @@ import type { AssistantTurnSession } from "../tool-kit";
 import { listDocumentsTool } from "./profile-tools";
 import { searchForJobsTool } from "./jobs-tools";
 import { setResumeTemplateTool } from "./resume-tools";
-import { resolveNeedsYouTool } from "./workspace-tools";
 
 const session = {
   assertCurrent: () => undefined,
@@ -83,54 +81,6 @@ describe("a template change on an approved resume (R3)", () => {
     );
     expect(outcome.summary).toContain("cleared the resume's approval");
     expect(outcome.data).toMatchObject({ approvalCleared: true });
-  });
-});
-
-describe("answers the person gives through Needs you (R7)", () => {
-  it("keeps a lasting answer for later applications when asked to", async () => {
-    const performUserAction = vi.fn().mockResolvedValue(undefined);
-    const request = {
-      id: "step_1",
-      revision: 1,
-      state: "pending",
-      title: "Answer the required question",
-      scope: {
-        type: "application",
-        jobId: "job_1",
-        runId: "run_1",
-        resultId: "result_1",
-        applicationRecordId: "application_job_1",
-      },
-    };
-    const snapshot = {
-      applyRuns: [],
-      applyJobResults: [],
-      userActionRequests: [request],
-    } as unknown as JobFinderWorkspaceSnapshot;
-    await resolveNeedsYouTool.execute(
-      resolveNeedsYouTool.input.parse({
-        requestId: "step_1",
-        action: "answer",
-        answer: "Yes",
-        saveForLater: true,
-      }),
-      {
-        service: {
-          getWorkspaceSnapshot: () => Promise.resolve(snapshot),
-          performUserAction,
-          getApplyRunDetails: () => Promise.resolve({ questionRecords: [] }),
-        } as never,
-        session,
-        ports: {} as AssistantHostPorts,
-      },
-    );
-    expect(performUserAction).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "submit_manual_answer",
-        answer: "Yes",
-        saveForFuture: true,
-      }),
-    );
   });
 });
 

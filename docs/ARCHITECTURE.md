@@ -45,18 +45,18 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
   and source-debug use `runAgentLoop` with general page tools, `extract_jobs`,
   `saved_jobs` and `finish` (ADR 0023); fallback collects cards without a fit gate.
 - applications: the apply agent fills the form and sends it only under Send
-  for me or on the person's Send press under Ask before sending (ADR 0024,
+  for me or on the person's own click in the filled form (ADR 0024,
   ADR 0027). Browser packages own generic observation and execution hands;
   `job-finder` owns authority envelopes, preflight, idempotency, revocation,
   lineage, and tri-state outcome truth. Models and heuristics may
   propose typed actions but cannot grant authority or prove external outcomes.
-- approved application answers: Profile owns mutable reusable answer content;
-  Electron main is the only approval boundary. Main canonicalizes the current
-  non-empty answer bank, computes its content digest, and appends an immutable
-  snapshot through `packages/db`. Authority/preflight records bind only the
-  snapshot revision and digest. Renderer readiness receives counts, kinds,
-  status, and lifecycle identity but never raw answer text or a caller-supplied
-  digest. An approved snapshot does not grant, arm, or execute anything.
+- form answers: Needs you owns open questions, drafts and remembered answers
+  in the indexed application store. A question has one task per key and scope;
+  one answer releases every application waiting on it. Profile holds resume
+  facts and structured eligibility, and has no form-answer editor. The screen
+  and Assistant share typed Needs you commands. Answering a question does not
+  grant sending authority: the apply engine still enforces authority envelopes,
+  preflight, revocation and idempotency before any send.
 - product actions: schema-validated local tools call a narrow injected subset of the `job-finder` workspace service. They never expose raw IPC, browser primitives, arbitrary navigation, or filesystem access
 - assistant (ADR 0037-0039): renderer sidebar -> typed preload `assistant` bridge -> `job-finder:assistant:*` IPC -> the main-process session host in `packages/job-finder/src/assistant`. The host runs `runConversationTurn` from `packages/agent-runtime` (product-neutral: steering at tool boundaries, per-tool deadlines, generation fencing, streaming) with Job Finder tools that call the workspace service and desktop ports (searches, application runs, sends, files, the lent browser tab). Conversations, events, operations, change receipts, grants, plans, result sets and checkpoints persist in `assistant.sqlite` through `packages/db`'s assistant repository. Renderer screens publish context references (route, focus, list ids, editor snapshots) and never call tools. Model routes and streaming come from `packages/ai-providers` (`NESTOR_AI_ASSISTANT_*`).
 - job sites: `job_sites` in the indexed job store owns enabled state, label, URL, provider/lane, health, last-searched and sign-in state. Typed site commands serve fixed-size pages to Profile, setup and the Find jobs picker; row-level edits never save Profile. The runner reads enabled site rows, and source-debug writes its guidance metadata to one site row.

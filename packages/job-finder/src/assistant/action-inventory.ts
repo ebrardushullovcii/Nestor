@@ -420,16 +420,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     channels: ["job-finder:send-prepared-applications"],
     coverage: tools("record_instruction", "send_application"),
   },
-  {
-    id: "apply.answer",
-    screen: "Needs you",
-    action: "Answer a question (pending the Needs you store cutover)",
-    channels: [
-      "job-finder:save-application-answer",
-      "job-finder:clear-application-answer",
-    ],
-    coverage: tools("answer_application_question", "resolve_needs_you"),
-  },
+
   {
     id: "apply.authority",
     screen: "Settings / Applications",
@@ -475,23 +466,25 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
   {
     id: "needs_you.act",
     screen: "Needs you",
-    action: "Answer, open the page, mark done, skip",
-    channels: ["job-finder:perform-user-action"],
-    coverage: tools("resolve_needs_you"),
-  },
-  {
-    id: "needs_you.grouped",
-    screen: "Needs you",
-    action: "Answer a grouped question once for many",
-    channels: [
-      "job-finder:project-grouped-manual-answer",
-      "job-finder:apply-grouped-manual-answer",
-      "job-finder:snooze-grouped-decision",
-    ],
-    coverage: tools("resolve_needs_you"),
+    action: "Answer once, open the page and check completed browser steps",
+    channels: ["needs-you:run"],
+    coverage: tools("answer_need", "open_need", "check_need"),
   },
 
   // Store commands are shared with Applications; their runtime tests exercise them over MCP.
+  {
+    id: "needs_you.answers",
+    screen: "Needs you",
+    action: "Add, read, edit and forget saved form answers",
+    channels: ["needs-you:run"],
+    coverage: tools(
+      "create_form_answer",
+      "list_form_answers",
+      "get_form_answer",
+      "save_form_answer",
+      "forget_form_answers",
+    ),
+  },
   {
     id: "tracking.commands",
     screen: "Applications",

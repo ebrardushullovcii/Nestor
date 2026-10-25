@@ -123,7 +123,7 @@ function createCountedWorkspace(): JobFinderRendererWorkspaceSnapshot {
 function renderShell(workspace: JobFinderRendererWorkspaceSnapshot) {
   return render(
     <MemoryRouter initialEntries={["/job-finder/home"]}>
-      <JobFinderShell platform="win32" workspace={workspace}>
+      <JobFinderShell needsYouCount={1} platform="win32" workspace={workspace}>
         <div>Current screen</div>
       </JobFinderShell>
     </MemoryRouter>,

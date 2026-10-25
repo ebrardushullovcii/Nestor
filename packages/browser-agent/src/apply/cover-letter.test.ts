@@ -245,7 +245,18 @@ test("letter request supplies current date and role dates, and asks for posting-
 test("letter input makes accepted contacts and role constraints authoritative", () => {
   const input = sources("Full-time contract work in Boston.");
   input.profile.email = "accepted@example.test";
-  input.profile.answerBank.availability = "20–30 hours, London only";
+  input.reusableAnswers = [
+    ...input.reusableAnswers,
+    {
+      id: "availability",
+      kind: "availability",
+      label: "Availability",
+      question: "Availability",
+      answer: "20–30 hours, London only",
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
   input.profile.narrative.nextChapterSummary = "A senior in-house role";
   input.resumeText =
     "Robin Ashford. Old contact rejected@example.test. Built internal tools.";

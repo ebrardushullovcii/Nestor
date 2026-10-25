@@ -145,12 +145,8 @@ export function buildProfileScreenViewModel(
         id: "preferences",
         label: "Preferences",
         description:
-          "Set screening answers and preferences for future searches and applications.",
+          "Set eligibility and preferences for future searches and applications.",
         progress: sectionProgress.preferences,
-        needsConfirmationCount:
-          input.answerBankValues?.customAnswers.filter(
-            (answer) => answer.needsConfirmation,
-          ).length ?? 0,
       },
       {
         id: "sources",

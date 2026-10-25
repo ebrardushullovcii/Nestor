@@ -1,3 +1,4 @@
+import { registerNeedsYouRoutes } from "./routes/needs-you";
 import { app, BrowserWindow, Menu, ipcMain } from "electron";
 import { appendFileSync, existsSync, statSync, truncateSync } from "node:fs";
 import path from "node:path";
@@ -240,6 +241,7 @@ if (hasSingleInstanceLock) {
     console.error("[Desktop] The Job Finder store failed to open.", error);
   }
   registerResumeRoutes(ipcMain);
+  registerNeedsYouRoutes(ipcMain);
   registerTrackerRoutes(ipcMain);
   registerHomeRoutes(ipcMain);
 }

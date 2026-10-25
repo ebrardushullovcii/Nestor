@@ -237,38 +237,14 @@ export const JOB_FINDER_ACTIONS = {
     (i, c) => c.service.exportResumePdf(i.jobId),
     { name: "export_resume", custom: true },
   ),
-  "save-application-answer": action(
-    C.SaveApplicationAnswerCommandSchema,
+  "clear-application-answer": action(
+    C.ClearApplicationAnswerCommandSchema,
     "applications",
-    "local",
-    "Save an application answer the person supplied.",
-    (i, c) => c.service.saveApplicationAnswer(i),
-    { name: "answer_application_question", custom: true },
+    "confirm",
+    "Clear a saved application answer.",
+    (i, c) => c.service.clearApplicationAnswer(i),
   ),
-  "perform-user-action": action(
-    C.UserActionCommandSchema,
-    "applications",
-    "application",
-    "Answer or resolve a Needs you step.",
-    (i, c) => c.service.performUserAction(i),
-    { name: "resolve_needs_you", custom: true },
-  ),
-  "project-grouped-manual-answer": action(
-    C.ProjectGroupedManualAnswerCommandSchema,
-    "applications",
-    "local",
-    "Preview reuse of a saved answer.",
-    (i, c) => c.service.projectGroupedManualAnswer(i),
-    { name: "resolve_needs_you", custom: true },
-  ),
-  "apply-grouped-manual-answer": action(
-    C.ApplyGroupedManualAnswerInputSchema,
-    "applications",
-    "application",
-    "Apply a person-approved answer to the selected questions.",
-    (i, c) => c.service.applyGroupedManualAnswer(i),
-    { name: "resolve_needs_you", custom: true },
-  ),
+
   "reset-workspace": desktopAction(
     "reset-workspace",
     empty,
@@ -725,13 +701,6 @@ export const JOB_FINDER_ACTIONS = {
     "Edit one resume section, entry or bullet.",
     (i, c) => c.service.applyResumePatch(i.patch, i.revisionReason),
     { name: "edit_resume", custom: true },
-  ),
-  "clear-application-answer": action(
-    C.ClearApplicationAnswerCommandSchema,
-    "applications",
-    "confirm",
-    "Clear a saved application answer.",
-    (i, c) => c.service.clearApplicationAnswer(i),
   ),
   "snooze-grouped-decision": action(
     C.SnoozeGroupedDecisionInputSchema,

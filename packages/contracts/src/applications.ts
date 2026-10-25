@@ -1,5 +1,6 @@
 import { SourceAccessReferenceSchema } from "./source-access";
 import { z } from "zod";
+import { CandidateAnswerKindSchema } from "./profile";
 
 import { IsoDateTimeSchema } from "./base";
 import { JobIdSchema, JobSelectionSchema } from "./jobs";
@@ -143,9 +144,20 @@ export const NeedsYouTaskSchema = z.object({
 });
 export type NeedsYouTask = z.infer<typeof NeedsYouTaskSchema>;
 
+export const NeedsYouCountsSchema = z.object({
+  question: z.number().int().nonnegative(),
+  sign_in: z.number().int().nonnegative(),
+  captcha: z.number().int().nonnegative(),
+  mfa: z.number().int().nonnegative(),
+  saved: z.number().int().nonnegative(),
+});
+export type NeedsYouCounts = z.infer<typeof NeedsYouCountsSchema>;
 export const NeedsYouPageSchema = z.object({
   rows: z.array(NeedsYouTaskSchema),
   nextCursor: z.number().int().positive().nullable(),
+  total: z.number().int().nonnegative(),
+  totalCapped: z.boolean(),
+  counts: NeedsYouCountsSchema,
 });
 export type NeedsYouPage = z.infer<typeof NeedsYouPageSchema>;
 
@@ -158,6 +170,8 @@ export const RequestNeedsYouInputSchema = NeedsYouTaskSchema.omit({
     applicationId: ApplicationIdSchema,
     attempt: z.number().int().positive(),
     fieldKey: z.string().min(1).max(500),
+    /** Reuse the same fact across input formats; country-dependent questions stay exact. */
+    reusePrompt: z.boolean().default(false),
   })
   .strict();
 export type RequestNeedsYouInput = z.input<typeof RequestNeedsYouInputSchema>;
@@ -170,6 +184,8 @@ export type RequestNeedsYouResult = z.infer<typeof RequestNeedsYouResultSchema>;
 
 export const NeedsYouListQuerySchema = z
   .object({
+    kind: NeedsYouKindSchema.nullable().default(null),
+    text: z.string().trim().max(200).default(""),
     after: z.number().int().nonnegative().default(0),
     limit: z.number().int().min(1).max(200).default(50),
   })
@@ -203,4 +219,164 @@ export const ApplicationStoreDemoResultSchema = z.object({
 });
 export type ApplicationStoreDemoResult = z.infer<
   typeof ApplicationStoreDemoResultSchema
+>;
+
+export const NeedsYouDraftSchema = z.object({
+  answer: z.string().max(20000),
+  remember: z.boolean(),
+  revision: z.number().int().nonnegative(),
+});
+export type NeedsYouDraft = z.infer<typeof NeedsYouDraftSchema>;
+export const SaveNeedsYouDraftInputSchema = NeedsYouDraftSchema.extend({
+  id: z.number().int().positive(),
+}).strict();
+export type SaveNeedsYouDraftInput = z.infer<
+  typeof SaveNeedsYouDraftInputSchema
+>;
+export const SaveNeedsYouDraftResultSchema = z.object({
+  saved: z.boolean(),
+  revision: z.number().int().nonnegative(),
+});
+export type SaveNeedsYouDraftResult = z.infer<
+  typeof SaveNeedsYouDraftResultSchema
+>;
+export const NeedsYouDetailsSchema = z.object({
+  task: NeedsYouTaskSchema,
+  applications: z.array(
+    ApplicationRowSchema.pick({
+      id: true,
+      jobId: true,
+      title: true,
+      company: true,
+      location: true,
+      state: true,
+    }),
+  ),
+  draft: NeedsYouDraftSchema.nullable(),
+});
+export type NeedsYouDetails = z.infer<typeof NeedsYouDetailsSchema>;
+export const SavedFormAnswerSummarySchema = z.object({
+  key: z.string().min(1),
+  kind: CandidateAnswerKindSchema,
+  label: z.string(),
+  needsConfirmation: z.boolean(),
+  id: z.number().int().positive(),
+  prompt: z.string(),
+  preview: z.string(),
+  scope: FormAnswerScopeSchema,
+  input: NeedsYouTaskSchema.shape.input,
+  updatedAt: IsoDateTimeSchema,
+});
+export type SavedFormAnswerSummary = z.infer<
+  typeof SavedFormAnswerSummarySchema
+>;
+export const SavedFormAnswerSchema = SavedFormAnswerSummarySchema.extend({
+  answer: z.string(),
+  options: z.array(z.string()),
+  roleFamilies: z.array(z.string()),
+  proofEntryIds: z.array(z.string()),
+});
+export type SavedFormAnswer = z.infer<typeof SavedFormAnswerSchema>;
+export const SavedFormAnswersQuerySchema = z
+  .object({
+    after: z.number().int().nonnegative().default(0),
+    text: z.string().trim().max(200).default(""),
+    limit: z.number().int().min(1).max(200).default(50),
+  })
+  .strict();
+export type SavedFormAnswersQuery = z.input<typeof SavedFormAnswersQuerySchema>;
+export const SavedFormAnswersPageSchema = z.object({
+  rows: z.array(SavedFormAnswerSummarySchema),
+  nextCursor: z.number().int().positive().nullable(),
+  total: z.number().int().nonnegative(),
+  totalCapped: z.boolean(),
+});
+export type SavedFormAnswersPage = z.infer<typeof SavedFormAnswersPageSchema>;
+export const SaveFormAnswerInputSchema = z
+  .object({
+    id: z.number().int().positive(),
+    answer: z.string().trim().min(1).max(20000),
+  })
+  .strict();
+export type SaveFormAnswerInput = z.infer<typeof SaveFormAnswerInputSchema>;
+export const CreateFormAnswerInputSchema = z
+  .object({
+    prompt: z.string().trim().min(1).max(2000),
+    answer: z.string().trim().min(1).max(20000),
+  })
+  .strict();
+export type CreateFormAnswerInput = z.infer<typeof CreateFormAnswerInputSchema>;
+export const RememberFormAnswerInputSchema = NeedsYouTaskSchema.pick({
+  key: true,
+  scope: true,
+  prompt: true,
+  input: true,
+  options: true,
+})
+  .extend({
+    answer: z.string().trim().min(1).max(20000),
+    kind: CandidateAnswerKindSchema.default("other"),
+    label: z.string().trim().max(2000).default(""),
+    roleFamilies: z.array(z.string().trim().min(1)).max(100).default([]),
+    proofEntryIds: z.array(z.string().trim().min(1)).max(100).default([]),
+    needsConfirmation: z.boolean().default(false),
+  })
+  .strict();
+export type RememberFormAnswerInput = z.input<
+  typeof RememberFormAnswerInputSchema
+>;
+export interface FormAnswerLookup {
+  key: string;
+  prompt: string;
+  reusePrompt: boolean;
+  kind?: z.infer<typeof CandidateAnswerKindSchema>;
+}
+export interface FormAnswerMatch {
+  id: string;
+  key: string;
+  prompt: string;
+  answer: string;
+  local: boolean;
+  kind?: z.infer<typeof CandidateAnswerKindSchema>;
+  roleFamilies?: string[];
+  proofEntryIds?: string[];
+}
+export function normalizeFormQuestionPrompt(value: string): string {
+  return value
+    .toLocaleLowerCase("en")
+    .replace(/^application\s*[—–-]\s*/u, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+export const ForgetFormAnswersInputSchema = z.union([
+  z
+    .object({ ids: z.array(z.number().int().positive()).min(1).max(2000) })
+    .strict(),
+  z
+    .object({
+      filter: z.object({ text: z.string().trim().max(200) }).strict(),
+      except: z.array(z.number().int().positive()).max(2000),
+    })
+    .strict(),
+]);
+export type ForgetFormAnswersInput = z.infer<
+  typeof ForgetFormAnswersInputSchema
+>;
+
+export const SavedFormAnswerKeySchema = z
+  .object({
+    key: z.string().trim().min(1).max(500),
+    scope: FormAnswerScopeSchema.default({}),
+  })
+  .strict();
+export type SavedFormAnswerKey = z.input<typeof SavedFormAnswerKeySchema>;
+
+export const UpsertSavedFormAnswerInputSchema =
+  RememberFormAnswerInputSchema.extend({
+    scope: FormAnswerScopeSchema.default({}),
+    input: NeedsYouTaskSchema.shape.input.default("text"),
+    options: z.array(z.string()).default([]),
+  }).strict();
+export type UpsertSavedFormAnswerInput = z.input<
+  typeof UpsertSavedFormAnswerInputSchema
 >;

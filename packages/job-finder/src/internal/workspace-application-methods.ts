@@ -2059,6 +2059,9 @@ export function createWorkspaceApplicationMethods(
       job: input.job,
       now: new Date().toISOString(),
       repository: ctx.repository,
+      ...(ctx.readSavedAnswers
+        ? { readSavedAnswers: ctx.readSavedAnswers }
+        : {}),
       resumeSha256: input.resumeArtifact.sha256,
     });
     if (!initial.authorized) {
@@ -2083,6 +2086,9 @@ export function createWorkspaceApplicationMethods(
           now: new Date().toISOString(),
           observedOrigin,
           repository: ctx.repository,
+          ...(ctx.readSavedAnswers
+            ? { readSavedAnswers: ctx.readSavedAnswers }
+            : {}),
           resumeSha256: input.resumeArtifact.sha256,
         });
         return (
@@ -8730,7 +8736,8 @@ export function createWorkspaceApplicationMethods(
       const createdAt = new Date().toISOString();
       const effectiveApplicationAutomationMode =
         applicationAutomationMode ??
-        scopedSettings.applicationAutomationMode ?? "confirm_before_submit";
+        scopedSettings.applicationAutomationMode ??
+        "confirm_before_submit";
       const capturedCampaignId = await ctx.getActiveCampaignId();
       const runId = createUniqueId("apply_run");
       const approvalId = createUniqueId("apply_submit_approval");

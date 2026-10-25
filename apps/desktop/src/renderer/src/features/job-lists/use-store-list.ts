@@ -58,12 +58,17 @@ export function useStoreList<
   refreshOn?: (change: JobChange) => boolean;
   /** Counts before the first page arrives; job stage counts by default. */
   emptyCounts?: Counts;
+  /** Keep the visible rows still while a person edits a detail form. */
+  pauseUpdates?: boolean;
 }) {
   const { key } = options;
   const loadRef = useRef(options.load);
   loadRef.current = options.load;
   const refreshOnRef = useRef(options.refreshOn);
   refreshOnRef.current = options.refreshOn;
+  const paused = useRef(options.pauseUpdates ?? false);
+  paused.current = options.pauseUpdates ?? false;
+  const pendingRefresh = useRef(false);
 
   const [state, setState] = useState<StoreListState<Row, Counts>>({
     rows: [],
@@ -94,6 +99,10 @@ export function useStoreList<
   );
 
   const refresh = useCallback(async () => {
+    if (paused.current) {
+      pendingRefresh.current = true;
+      return;
+    }
     const current = generation.current;
     const limit = Math.min(
       REFRESH_MAX,
@@ -101,13 +110,21 @@ export function useStoreList<
     );
     try {
       const page = await loadRef.current({ cursor: null, limit });
-      if (current === generation.current) apply(page, page.rows);
+      if (paused.current) pendingRefresh.current = true;
+      else if (current === generation.current) apply(page, page.rows);
     } catch (error) {
       if (current === generation.current)
         setState((s) => ({ ...s, loading: false, error: describe(error) }));
     }
     // `key` restarts the list; the loader itself is read from a ref.
   }, [apply, key]);
+
+  useEffect(() => {
+    if (!options.pauseUpdates && pendingRefresh.current) {
+      pendingRefresh.current = false;
+      void refresh();
+    }
+  }, [options.pauseUpdates, refresh]);
 
   useEffect(() => {
     generation.current += 1;
@@ -138,6 +155,7 @@ export function useStoreList<
   }, [refresh]);
 
   const loadMore = useCallback(async () => {
+    if (paused.current) return;
     const { nextCursor } = stateRef.current;
     if (!nextCursor || loadingMore.current) return;
     loadingMore.current = true;
@@ -148,6 +166,10 @@ export function useStoreList<
         limit: LIST_PAGE_SIZE,
       });
       if (current !== generation.current) return;
+      if (paused.current) {
+        pendingRefresh.current = true;
+        return;
+      }
       const seen = new Set(stateRef.current.rows.map((row) => row.id));
       apply(page, [
         ...stateRef.current.rows,

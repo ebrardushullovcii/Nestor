@@ -111,7 +111,6 @@ export function ProfileActiveSectionContent({
         busy={isProfileMutationPending}
         preferencesForm={preferencesForm}
         profileForm={profileForm}
-        customAnswerArray={backgroundArrays.customAnswerArray}
         {...(onResumeApproachChange
           ? { onResumeApproachChange, resumeApplicationMode }
           : {})}

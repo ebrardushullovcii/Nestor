@@ -1,5 +1,6 @@
 import { createResumesBridge } from "./resumes";
 import { createHomeBridge } from "./home";
+import { createNeedsYouBridge } from "./needs-you";
 import { createTrackerBridge } from "./tracker";
 import {
   ApplicationListPageSchema,
@@ -427,6 +428,7 @@ const desktopApi = {
   assistant: assistantBridge,
   jobs: jobsBridge,
   resumes: createResumesBridge(nativeIpcRenderer),
+  needsYou: createNeedsYouBridge(nativeIpcRenderer),
   tracker: createTrackerBridge(nativeIpcRenderer),
   home: createHomeBridge(nativeIpcRenderer),
   ping: () => ipcRenderer.invoke("system:ping") as Promise<DesktopPlatformPing>,
@@ -1581,7 +1583,10 @@ const desktopApi = {
     ...(testApiEnabled
       ? {
           test: {
-            loadApplicationsStoreDemo: (input: { sourceUrl: string; trackApplications?: boolean }) =>
+            loadApplicationsStoreDemo: (input: {
+              sourceUrl: string;
+              trackApplications?: boolean;
+            }) =>
               ipcRenderer
                 .invoke(
                   "job-finder:test-load-applications-store-demo",

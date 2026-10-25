@@ -94,7 +94,17 @@ test.each([true, false])(
     seed.profile.applicationIdentity.preferredEmail = "accepted@example.test";
     seed.profile.baseResume.textContent =
       "Discarded contact rejected@example.test";
-    seed.profile.answerBank.availability = "20–30 hours, London only";
+    const reusableAnswers = [
+      {
+        id: "availability",
+        kind: "availability" as const,
+        label: "Availability",
+        question: "When are you available?",
+        answer: "20–30 hours, London only",
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
     const calls: Array<
       Parameters<
         NonNullable<
@@ -139,6 +149,7 @@ test.each([true, false])(
       documentManager: {},
       job: seed.savedJobs[0]!,
       profile: seed.profile,
+      reusableAnswers,
       settings: seed.settings,
       searchPreferences: {
         ...seed.searchPreferences,
@@ -167,7 +178,7 @@ test.each([true, false])(
       applicant: {
         email: string;
         preferences: { employmentTypes: string[]; locations: string[] };
-        answers: Record<string, string>;
+        savedAnswers: Array<{ id: string; answer: string }>;
       };
     };
     expect(checked.applicant.email).toBe("accepted@example.test");
@@ -175,8 +186,13 @@ test.each([true, false])(
       "Part-time",
     ]);
     expect(checked.applicant.preferences.locations).toEqual(["London"]);
-    expect(checked.applicant.answers["Availability answer"]).toBe(
-      "20–30 hours, London only",
+    expect(checked.applicant.savedAnswers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "availability",
+          answer: "20–30 hours, London only",
+        }),
+      ]),
     );
     expect(String(calls[1]![0][0]!.content)).toContain(
       "Current saved profile contact details take precedence",
@@ -189,7 +205,6 @@ test.each([true, false])(
 
 test("writer input uses application facts, excludes pay answers and trims the resume", async () => {
   const seed = createSeed();
-  seed.profile.answerBank.salaryExpectations = "PRIVATE_PAY_SENTINEL";
   seed.profile.baseResume.textContent =
     "A".repeat(8_000) + "RESUME_TAIL_SENTINEL";
   const calls: string[] = [];
@@ -222,6 +237,17 @@ test("writer input uses application facts, excludes pay answers and trims the re
     documentManager: {},
     job: seed.savedJobs[0]!,
     profile: seed.profile,
+    reusableAnswers: [
+      {
+        id: "pay",
+        kind: "salary_expectation",
+        label: "Expected pay",
+        question: "Expected pay",
+        answer: "PRIVATE_PAY_SENTINEL",
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ],
     settings: seed.settings,
   })!;
   await dependencies.writeLetter({

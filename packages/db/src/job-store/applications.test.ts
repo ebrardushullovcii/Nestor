@@ -9,7 +9,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createApplicationStore } from "./applications";
+import {
+  createApplicationStore,
+  createSavedAnswersStore,
+  readSavedApplicationAnswers,
+} from "./applications";
 import { openJobStore, type JobStore } from "./job-store";
 
 const stores: JobStore[] = [];
@@ -157,7 +161,13 @@ describe("applications on the job store", () => {
       applications.needsYou
         .answersForQuestions(
           second.id,
-          ["sponsorship"],
+          [
+            {
+              key: "sponsorship",
+              prompt: "Will you need visa sponsorship?",
+              reusePrompt: false,
+            },
+          ],
           "https://jobs.example.test",
         )
         .map((answer) => answer.answer),
@@ -165,7 +175,13 @@ describe("applications on the job store", () => {
     expect(
       applications.needsYou.answersForQuestions(
         second.id,
-        ["different-question"],
+        [
+          {
+            key: "different-question",
+            prompt: "Different",
+            reusePrompt: false,
+          },
+        ],
         "https://jobs.example.test",
       ),
     ).toEqual([]);
@@ -413,4 +429,247 @@ describe("applications on the job store", () => {
     expect(reopened.applications.needsYou.list().rows).toHaveLength(1);
     expect(reopened.jobs.stageCounts().resume).toBe(1);
   });
+  it("keeps task drafts on their exact IDs and rejects out-of-order saves", () => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+    const first = applications.claimNext()!;
+    const second = applications.claimNext()!;
+    const original = applications.needsYou.request(
+      question(first.id, first.attempt),
+    );
+    const later = applications.needsYou.request(
+      question(second.id, second.attempt, {
+        key: "notice",
+        fieldKey: "notice",
+        prompt: "What is your notice period?",
+        input: "text",
+      }),
+    );
+    if (original.status !== "needs_you" || later.status !== "needs_you")
+      throw new Error("Missing task");
+    const memory = applications.needsYou;
+    expect(
+      memory.saveDraft({
+        id: original.task.id,
+        answer: "No",
+        remember: true,
+        revision: 0,
+      }),
+    ).toEqual({ saved: true, revision: 1 });
+    expect(
+      memory.saveDraft({
+        id: original.task.id,
+        answer: "Yes",
+        remember: false,
+        revision: 0,
+      }),
+    ).toEqual({ saved: false, revision: 1 });
+    expect(memory.details(original.task.id)?.draft).toEqual({
+      answer: "No",
+      remember: true,
+      revision: 1,
+    });
+    expect(memory.details(later.task.id)?.draft).toBeNull();
+    expect(memory.list({ limit: 1 }).rows.map((task) => task.id)).toEqual([
+      original.task.id,
+    ]);
+    expect(
+      memory
+        .list({ after: original.task.id, limit: 1 })
+        .rows.map((task) => task.id),
+    ).toEqual([later.task.id]);
+    expect(memory.list({ text: "notice" }).rows.map((task) => task.id)).toEqual(
+      [later.task.id],
+    );
+    expect(memory.counts().question).toBe(2);
+    memory.answer({ id: original.task.id, answer: "No", remember: true });
+    expect(memory.details(original.task.id)).toBeNull();
+    expect(
+      memory.saveDraft({
+        id: original.task.id,
+        answer: "Yes",
+        remember: true,
+        revision: 1,
+      }).saved,
+    ).toBe(false);
+    expect(memory.counts()).toEqual({
+      question: 1,
+      sign_in: 0,
+      captcha: 0,
+      mfa: 0,
+      saved: 1,
+    });
+  });
+
+  it("pages, edits and forgets saved answers without changing a previous answer or another scope", () => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+    const first = applications.claimNext()!;
+    const second = applications.claimNext()!;
+    const memory = applications.needsYou;
+    for (const [application, country] of [
+      [first, "US"],
+      [second, "DE"],
+    ] as const) {
+      const request = memory.request(
+        question(application.id, application.attempt, { scope: { country } }),
+      );
+      if (request.status !== "needs_you") throw new Error("Missing task");
+      memory.answer({ id: request.task.id, answer: "No", remember: true });
+    }
+    const page = memory.listAnswers({ limit: 1 });
+    expect(page.total).toBe(2);
+    expect(page.nextCursor).toBe(page.rows[0]!.id);
+    const us = memory.savedAnswer(
+      memory.listAnswers({}).rows.find((row) => row.scope.country === "US")!.id,
+    )!;
+    expect(us.scope.country).toBe("US");
+    expect(() => memory.saveAnswer({ id: us.id, answer: "Maybe" })).toThrow(
+      "valid answer",
+    );
+    expect(memory.saveAnswer({ id: us.id, answer: "Yes" })).toBe(true);
+    expect(memory.findAnswer("sponsorship", { country: "US" })).toBe("Yes");
+    expect(memory.findAnswer("sponsorship", { country: "DE" })).toBe("No");
+    expect(
+      memory.listAnswers({ text: "Yes" }).rows.map((row) => row.id),
+    ).toEqual([us.id]);
+    expect(
+      memory.forgetAnswers({
+        filter: { text: "sponsorship" },
+        except: [us.id],
+      }),
+    ).toBe(1);
+    expect(memory.counts().saved).toBe(1);
+    expect(memory.listAnswers({ after: us.id }).rows).toEqual([]);
+    expect(memory.forgetAnswers({ ids: [us.id] })).toBe(1);
+    expect(memory.counts().saved).toBe(0);
+    expect(memory.listAnswers({ text: "Yes" }).total).toBe(0);
+  });
+
+  it("one saved fact releases text and numeric versions, while country-dependent questions keep their scope", () => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 3) } });
+    const first = applications.claimNext()!,
+      second = applications.claimNext()!,
+      third = applications.claimNext()!;
+    const memory = applications.needsYou;
+    for (const [row, input, key] of [
+      [first, "number", "numeric"],
+      [second, "text", "textual"],
+    ] as const)
+      memory.request(
+        question(row.id, row.attempt, {
+          key,
+          fieldKey: key,
+          scope: {},
+          prompt: "Years of analysis experience",
+          input,
+          reusePrompt: true,
+        }),
+      );
+    const geographic = memory.request(
+      question(third.id, third.attempt, {
+        key: "sponsorship-for-specific-country",
+        scope: {},
+        reusePrompt: false,
+      }),
+    );
+    memory.remember({
+      key: "saved-analysis",
+      scope: {},
+      prompt: "Years of analysis experience",
+      answer: "5",
+      input: "number",
+      options: [],
+    });
+    expect(applications.getApplication(first.id)?.state).toBe("queued");
+    expect(applications.getApplication(second.id)?.state).toBe("queued");
+    expect(memory.counts().question).toBe(1);
+    memory.remember({
+      key: "saved-sponsorship",
+      scope: {},
+      prompt: "Will you need visa sponsorship?",
+      answer: "No",
+      input: "boolean",
+      options: [],
+    });
+    expect(applications.getApplication(third.id)?.state).toBe("needs_you");
+    expect(geographic.status).toBe("needs_you");
+    expect(
+      memory.answersForQuestions(
+        third.id,
+        [
+          {
+            key: "sponsorship-for-specific-country",
+            prompt: "Will you need visa sponsorship?",
+            reusePrompt: false,
+          },
+        ],
+        "https://jobs.example.test",
+      ),
+    ).toEqual([]);
+  });
+});
+
+it("shares stable-key answers, kinds and proof references with Needs you and ignores unconfirmed suggestions", () => {
+  const { jobs, applications } = open();
+  const answers = createSavedAnswersStore(jobs);
+  const first = answers.upsert({
+    key: "analysis-years",
+    prompt: "Years of analysis experience",
+    answer: "5",
+    input: "number",
+    roleFamilies: ["Analysis"],
+    proofEntryIds: ["proof_1"],
+  });
+  answers.upsert({
+    key: "notice_period",
+    kind: "notice_period",
+    prompt: "My notice period",
+    answer: "Two weeks",
+  });
+  answers.upsert({
+    key: "suggestion",
+    prompt: "Unconfirmed",
+    answer: "Not mine yet",
+    needsConfirmation: true,
+  });
+  expect(answers.get({ key: "analysis-years" })).toMatchObject({
+    id: first.id,
+    answer: "5",
+    input: "number",
+    roleFamilies: ["Analysis"],
+    proofEntryIds: ["proof_1"],
+  });
+  expect(answers.list({ limit: 2 }).rows).toHaveLength(2);
+  const matches = applications.needsYou.answersForQuestions(
+    123,
+    [
+      {
+        key: "new-question",
+        prompt: "When can you start after giving notice?",
+        reusePrompt: true,
+        kind: "notice_period",
+      },
+      {
+        key: "numeric",
+        prompt: "Years of analysis experience",
+        reusePrompt: true,
+      },
+    ],
+    "https://replica.test",
+  );
+  expect(matches.map((value) => value.answer)).toEqual(["Two weeks", "5"]);
+  expect(
+    readSavedApplicationAnswers(jobs).map((value) => value.answer),
+  ).toEqual(["5", "Two weeks"]);
+  expect(
+    answers.upsert({
+      key: "analysis-years",
+      prompt: "Years of analysis experience",
+      answer: "6",
+      input: "number",
+    }).id,
+  ).toBe(first.id);
+  expect(applications.needsYou.savedAnswer(first.id)?.answer).toBe("6");
 });

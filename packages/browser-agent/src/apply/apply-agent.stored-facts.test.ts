@@ -67,7 +67,6 @@ async function ledgerleafRun(conditionalContact = false) {
       "technical leadership",
       "Mentoring",
     ],
-    answerBank: { salaryExpectations: "120000", noticePeriod: "Immediate" },
     experiences: [
       {
         id: "current-role",
@@ -261,6 +260,24 @@ async function ledgerleafRun(conditionalContact = false) {
       },
       reusableAnswers: [
         {
+          id: "pay",
+          kind: "salary_expectation",
+          label: "Expected pay",
+          question: "Annual salary expectation",
+          answer: "120000",
+          roleFamilies: [],
+          proofEntryIds: [],
+        },
+        {
+          id: "notice",
+          kind: "notice_period",
+          label: "Notice",
+          question: "Notice period",
+          answer: "Immediate",
+          roleFamilies: [],
+          proofEntryIds: [],
+        },
+        {
           id: "analysis",
           kind: "other",
           label: "Analysis years",
@@ -428,7 +445,7 @@ async function ledgerleafRun(conditionalContact = false) {
                 tool: "type",
                 ref: "c0",
                 text: "120000",
-                storedFactId: "profile.answerBank.salaryExpectations",
+                storedFactId: "answerLibrary.pay",
               },
               { tool: "select", ref: "c1", option: "USD" },
               { tool: "select", ref: "c2", option: "Immediate" },
