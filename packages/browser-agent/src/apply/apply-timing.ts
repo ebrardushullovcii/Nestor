@@ -11,6 +11,14 @@ export function createApplyTiming(now: () => Date) {
     modelTurns: 0,
     auxiliaryModelMs: 0,
     auxiliaryModelCalls: 0,
+    tokenUsage: {
+      reportedCalls: 0,
+      unreportedCalls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningTokens: 0,
+    },
     questionReadingCalls: 0,
     questionReadingMs: 0,
     answerCheckCalls: 0,
@@ -157,8 +165,25 @@ export function createApplyTiming(now: () => Date) {
             uploadsAttached: 0,
           });
         } else timing.auxiliaryModelCalls += 1;
+        const usage = timing.tokenUsage!;
+        usage.unreportedCalls += 1;
         try {
-          return await client.chatWithTools(messages, tools, options);
+          const response = await client.chatWithTools(messages, tools, {
+            ...options,
+            includeUsage: true,
+          });
+          if (response.usage) {
+            usage.unreportedCalls -= 1;
+            usage.reportedCalls += 1;
+            for (const key of [
+              "inputTokens",
+              "outputTokens",
+              "cachedInputTokens",
+              "reasoningTokens",
+            ] as const)
+              usage[key] += response.usage[key];
+          }
+          return response;
         } finally {
           const duration = Math.max(0, now().getTime() - start);
           activeModels.delete(key);
@@ -181,6 +206,7 @@ export function createApplyTiming(now: () => Date) {
           );
       return {
         ...timing,
+        tokenUsage: { ...timing.tokenUsage! },
         totalMs: Math.max(0, current - startedAt),
         modelMs:
           timing.modelMs +

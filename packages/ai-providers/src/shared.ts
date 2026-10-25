@@ -1,4 +1,5 @@
 import {
+  type ModelTokenUsage,
   AssetGenerationReasonSchema,
   ResumeLanguageTranslationSchema,
   JobRequirementAssessmentSchema,
@@ -751,12 +752,7 @@ export interface ExtractResumeImportStageTransportInput extends ExtractResumeImp
 
 export type { ModelContinuation } from "@nestor/contracts";
 
-export interface ModelTurnUsage {
-  inputTokens: number;
-  outputTokens: number;
-  cachedInputTokens: number;
-  reasoningTokens: number;
-}
+export type ModelTurnUsage = ModelTokenUsage;
 
 export type AgentMessage =
   | { role: "system"; content: string }
@@ -811,6 +807,7 @@ export interface JobFinderAiClient {
 }
 
 export interface ChatWithToolsOptions {
+  includeUsage?: boolean;
   signal?: AbortSignal;
   parallelToolCalls?: boolean;
   maxOutputTokens?: number;

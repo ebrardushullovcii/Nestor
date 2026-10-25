@@ -1,7 +1,11 @@
 import { parseToolArguments } from "@nestor/agent-runtime";
 import type { AgentLoopToolDefinition } from "@nestor/agent-runtime";
 import type { LLMClient } from "../agent/contracts";
-import { applicationFacts, plainAnswerCheckFacts } from "./application-facts";
+import {
+  applicationFacts,
+  plainAnswerCheckFacts,
+  serializeApplicationData,
+} from "./application-facts";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 
 export interface WrittenAnswerCheck {
@@ -90,7 +94,7 @@ export async function checkWrittenApplicationAnswers(input: {
     },
     {
       role: "user",
-      content: JSON.stringify({
+      content: serializeApplicationData({
         applicant: plainAnswerCheckFacts(
           applicationFacts(input.sources, {
             payDisclosed: input.payDisclosed,

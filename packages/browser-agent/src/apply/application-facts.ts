@@ -7,6 +7,17 @@ import type {
   ApplyFormControl,
 } from "./types";
 
+/** Empty strings and lists carry no evidence; preserve explicit unknown, No and zero. */
+export function serializeApplicationData(
+  value: Record<string, unknown> | readonly unknown[],
+): string {
+  return JSON.stringify(value, (_key, entry: unknown) =>
+    entry === "" || (Array.isArray(entry) && entry.length === 0)
+      ? undefined
+      : entry,
+  );
+}
+
 /**
  * The person's facts for one application, as the model reads them (ADR 0041).
  *

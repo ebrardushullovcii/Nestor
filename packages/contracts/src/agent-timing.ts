@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+export const ModelTokenUsageSchema = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  cachedInputTokens: z.number().int().nonnegative(),
+  reasoningTokens: z.number().int().nonnegative(),
+});
+export type ModelTokenUsage = z.infer<typeof ModelTokenUsageSchema>;
+
 /** Durations overlap: tool time includes checks; auxiliary model calls may run during tools. */
 const ApplyAgentTimingRecordSchema = z.object({
   totalMs: z.number().finite().nonnegative(),
@@ -7,6 +15,10 @@ const ApplyAgentTimingRecordSchema = z.object({
   modelTurns: z.number().int().nonnegative(),
   auxiliaryModelMs: z.number().finite().nonnegative(),
   auxiliaryModelCalls: z.number().int().nonnegative(),
+  tokenUsage: ModelTokenUsageSchema.extend({
+    reportedCalls: z.number().int().nonnegative(),
+    unreportedCalls: z.number().int().nonnegative(),
+  }).optional(),
   questionReadingCalls: z.number().int().nonnegative().optional(),
   questionReadingMs: z.number().finite().nonnegative().optional(),
   answerCheckCalls: z.number().int().nonnegative().optional(),

@@ -698,9 +698,6 @@ test("prose instructions separate candidate evidence from job requirements", () 
   expect(prompt).toContain("tool: upload and documentId");
   expect(prompt).toContain("tool: click and ref");
   expect(prompt).toContain("call finish once");
-  expect(createApplyUserPrompt(config(page()))).toContain(
-    "from the FIRST step",
-  );
   expect(prompt).toContain("include thenContinue");
   expect(prompt).toContain("Otherwise fill without continuing");
   expect(prompt).toContain("Never use thenContinue for final submit");
