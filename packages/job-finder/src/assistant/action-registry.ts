@@ -420,7 +420,7 @@ export const JOB_FINDER_ACTIONS = {
     C.JobFinderReadActionStateInputSchema,
     "workspace",
     "read",
-    "Read companies with notes and revisions, outcomes, resume approaches, search rules, notifications, the Apply queue or tracker settings.",
+    "Read search rules, notifications, the Apply queue or tracker settings.",
     async (i, c) => {
       const snapshot = await (c.service.getWorkspaceProjection?.() ??
         c.service.getWorkspaceSnapshot());
@@ -428,13 +428,7 @@ export const JOB_FINDER_ACTIONS = {
       if (i.scope === "tracker_settings")
         return snapshot.settings.applicationCrm;
       const values: readonly unknown[] =
-        i.scope === "companies"
-          ? snapshot.intelligence.companies
-          : i.scope === "outcomes"
-            ? (snapshot.intelligence.outcomeAnalytics?.buckets ?? [])
-            : i.scope === "resume_approaches"
-              ? snapshot.intelligence.resumeStrategies
-              : i.scope === "notifications"
+        i.scope === "notifications"
                 ? snapshot.campaignNotifications
                 : snapshot.campaigns
                     .filter((plan) => !i.id || plan.id === i.id)
@@ -709,7 +703,7 @@ export const JOB_FINDER_ACTIONS = {
     C.UpdateApplicationDefaultsInputSchema,
     "settings",
     "confirm",
-    "Change apply mode, daily limit and resume defaults.",
+    "Change apply mode and resume defaults.",
     (i, c) => c.service.updateApplicationDefaults(i),
     { name: "update_apply_settings", custom: true },
   ),
@@ -949,106 +943,6 @@ export const JOB_FINDER_ACTIONS = {
     "Include a previously excluded employer.",
     (i, c) => c.service.removeEmployerExclusion(i),
     { name: "include_employer", custom: true },
-  ),
-  "mutate-rapid-review": action(
-    C.RapidReviewMutationInputSchema,
-    "jobs",
-    "local",
-    "Keep, skip or undo in quick review.",
-    (i, c) => c.service.mutateRapidReview(i),
-  ),
-  "record-outcome": action(
-    C.RecordOutcomeInputSchema,
-    "tracking",
-    "local",
-    "Record an application outcome.",
-    (i, c) => c.service.recordOutcome(i),
-    { name: "record_outcome", custom: true },
-  ),
-  "refresh-company-intelligence": action(
-    empty,
-    "tracking",
-    "local",
-    "Refresh companies, openings and application history.",
-    (_i, c) => c.service.refreshCompanyIntelligence(),
-  ),
-  "set-company-preference": action(
-    C.SetCompanyPreferenceInputSchema,
-    "settings",
-    "local",
-    "Follow, prefer, exclude or reset a company.",
-    (i, c) => c.service.setCompanyPreference(i),
-    { name: "set_company_preference" },
-  ),
-  "review-company-merge": action(
-    C.ReviewCompanyMergeInputSchema,
-    "tracking",
-    "confirm",
-    "Accept or reject a suggested company merge.",
-    (i, c) => c.service.reviewCompanyMerge(i),
-  ),
-  "mutate-company-intelligence": action(
-    C.CompanyIntelligenceMutationInputSchema,
-    "tracking",
-    "local",
-    "Edit company notes, contacts and research.",
-    (i, c) => c.service.mutateCompanyIntelligence(i),
-  ),
-  "set-outcome-suggestion-enabled": action(
-    C.SetOutcomeSuggestionEnabledInputSchema,
-    "tracking",
-    "local",
-    "Enable or disable an outcome suggestion.",
-    (i, c) => c.service.setOutcomeSuggestionEnabled(i),
-  ),
-  "mutate-safeguards": action(
-    C.SafeguardMutationInputSchema,
-    "settings",
-    "confirm",
-    "Review a safeguard decision without granting sending authority.",
-    (i, c) => c.service.mutateSafeguards(i),
-  ),
-  "get-safeguards": action(
-    empty,
-    "settings",
-    "read",
-    "Read current safeguards and paused work.",
-    (_i, c) => c.service.getSafeguardsOverview(),
-  ),
-  "save-resume-strategy": action(
-    C.SaveResumeStrategyInputSchema,
-    "resume",
-    "local",
-    "Create or edit a named resume approach.",
-    (i, c) => c.service.saveResumeStrategy(i),
-  ),
-  "disable-resume-strategy": action(
-    C.JobFinderStrategyActionInputSchema,
-    "resume",
-    "confirm",
-    "Disable a named resume approach.",
-    (i, c) => c.service.disableResumeStrategy(i.strategyId),
-  ),
-  "select-resume-strategy": action(
-    C.SelectResumeStrategyInputSchema,
-    "resume",
-    "local",
-    "Select a resume approach for a job.",
-    (i, c) => c.service.selectResumeStrategy(i),
-  ),
-  "recommend-resume-strategy": action(
-    C.RecommendResumeStrategyInputSchema,
-    "resume",
-    "read",
-    "Recommend a resume approach for a job.",
-    (i, c) => c.service.recommendResumeStrategy(i),
-  ),
-  "set-campaign-resume-strategy-default": action(
-    C.SetCampaignResumeStrategyDefaultInputSchema,
-    "resume",
-    "local",
-    "Set a search plan's default resume approach.",
-    (i, c) => c.service.setCampaignResumeStrategyDefault(i),
   ),
   "get-resume-workspace": action(
     C.JobFinderResumeWorkspaceQuerySchema,

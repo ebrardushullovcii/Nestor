@@ -1,8 +1,4 @@
-import {
-  ApplyJobResultSchema,
-  SavedJobSchema,
-  JobFinderIntelligenceStateSchema,
-} from "@nestor/contracts";
+import { JobFinderIntelligenceStateSchema } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 
 import type * as HandoffModule from "./apply-submission-handoff";
@@ -18,8 +14,6 @@ vi.mock("./apply-submission-handoff", async (importOriginal) => ({
 
 const { sendPreparedApplicationIfAllowed } =
   await import("./apply-submission-run-step");
-const { createSeed } = await import("../workspace-service.test-support");
-const { createInMemoryJobFinderRepository } = await import("@nestor/db");
 
 function sendInput(
   releaseApplicationPageBinding: ReturnType<typeof vi.fn>,
@@ -279,127 +273,6 @@ describe("sending a prepared application", () => {
     );
     expect(submitPreparedApplication).not.toHaveBeenCalled();
   });
-});
-
-test("single-job and chat send handoffs stop on the same-company decision before any submit", async () => {
-  const seed = createSeed();
-  const at = new Date().toISOString();
-  const base = seed.savedJobs[0]!;
-  const jobs = ["job_1", "job_peer"].map((id, i) =>
-    SavedJobSchema.parse({
-      ...base,
-      id,
-      title: "Engineer",
-      company: "Synthetic",
-      location: i ? "Manchester" : "London",
-    }),
-  );
-  seed.savedJobs = jobs;
-  seed.applyJobResults = [
-    ApplyJobResultSchema.parse({
-      id: "peer_result",
-      runId: "peer_run",
-      jobId: "job_peer",
-      applicationRecordId: "peer_record",
-      state: "awaiting_review",
-      summary: "Prepared",
-      detail: "Nothing sent",
-      startedAt: at,
-      updatedAt: at,
-    }),
-  ];
-  const repository = createInMemoryJobFinderRepository(seed);
-  for (const mode of ["autonomous_submit", "confirm_before_submit"]) {
-    const input = sendInput(vi.fn(), mode, mode === "confirm_before_submit");
-    const original = input.ctx.repository;
-    input.ctx.repository = {
-      ...repository,
-      getSettings: original.getSettings.bind(original),
-      listApplicationAuthorityEnvelopes:
-        original.listApplicationAuthorityEnvelopes.bind(original),
-    };
-    submitPreparedApplication.mockClear();
-    const result = await sendPreparedApplicationIfAllowed(input);
-    expect(result).toMatchObject({
-      sent: false,
-      nextActionLabel: "Review Safeguards",
-    });
-    expect(result?.detail).toContain("London");
-    expect(result?.detail).toContain("Manchester");
-    expect(submitPreparedApplication).not.toHaveBeenCalled();
-  }
-});
-
-test("checks a pair decision again at the final-action veto after revocation", async () => {
-  const { checkSameCompanySends } = await import("./same-company-sends");
-  const seed = createSeed();
-  const at = new Date().toISOString();
-  seed.savedJobs = ["job_1", "job_peer"].map((id) =>
-    SavedJobSchema.parse({ ...seed.savedJobs[0]!, id, company: "Synthetic" }),
-  );
-  seed.applyJobResults = [
-    ApplyJobResultSchema.parse({
-      id: "peer",
-      runId: "peer_run",
-      jobId: "job_peer",
-      applicationRecordId: "peer_record",
-      state: "awaiting_review",
-      summary: "Prepared",
-      detail: "Waiting",
-      startedAt: at,
-      updatedAt: at,
-    }),
-  ];
-  const repository = createInMemoryJobFinderRepository(seed);
-  await checkSameCompanySends({ repository, jobIds: ["job_1"] });
-  const state = await repository.getIntelligenceState();
-  const group = state.safeguards.simultaneousApplicationConflicts[0]!;
-  group.allowedPairs = [
-    { jobIds: ["job_1", "job_peer"], decidedAt: at, revokedAt: null },
-  ];
-  await repository.saveIntelligenceState(state);
-  const input = sendInput(vi.fn());
-  const original = input.ctx.repository;
-  input.ctx.repository = {
-    ...repository,
-    getSettings: original.getSettings.bind(original),
-    listApplicationAuthorityEnvelopes:
-      original.listApplicationAuthorityEnvelopes.bind(original),
-  };
-  const execute = vi.fn<
-    NonNullable<typeof input.ctx.browserRuntime.executeExactlyOneFinalAction>
-  >(
-    async (_source, action) =>
-      ({
-        allowed: await action.veto({} as Parameters<typeof action.veto>[0]),
-      }) as never,
-  );
-  input.ctx.browserRuntime.executeExactlyOneFinalAction = execute;
-  submitPreparedApplication.mockImplementationOnce(async (value) => {
-    group.allowedPairs![0]!.revokedAt = new Date().toISOString();
-    await repository.saveIntelligenceState(state);
-    const prepared = value as {
-      browserRuntime: NonNullable<typeof input.ctx.browserRuntime>;
-    };
-    const checked = await prepared.browserRuntime.executeExactlyOneFinalAction!(
-      input.source,
-      {
-        expectedObservation: {
-          id: "fixture",
-          revision: 1,
-          digest: "a".repeat(64),
-        },
-        expectedControl: { ref: "send", signature: "b".repeat(64) },
-        expectedPageOrigin: "https://example.test",
-        allowedOrigins: ["https://example.test"],
-        veto: () => true,
-      },
-    );
-    expect(checked).toEqual({ allowed: false });
-    return { status: "not_submitted" };
-  });
-  await sendPreparedApplicationIfAllowed(input);
-  expect(execute).toHaveBeenCalledOnce();
 });
 
 test("refuses to send when a newer approved letter differs from the prepared form", async () => {

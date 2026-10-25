@@ -29,12 +29,7 @@ export function screenForPathname(pathname: string): AssistantScreen {
     applications: "applications",
     actions: "actions",
     campaigns: "campaigns",
-    companies: "companies",
     settings: "settings",
-    analytics: "analytics",
-    safeguards: "safeguards",
-    "resume-strategies": "resume_strategies",
-    "rapid-review": "rapid_review",
   };
   return screens[segment] ?? "other";
 }
@@ -60,10 +55,6 @@ export function focusFromLocation(
     return { kind: "application", id: applicationRecordId, label: null };
   const jobId = params.get("jobId");
   if (jobId) return { kind: "job", id: jobId, label: null };
-  const company = /\/job-finder\/companies\/([^/]+)$/u.exec(pathname);
-  if (company?.[1]) {
-    return { kind: "company", id: decodeURIComponent(company[1]), label: null };
-  }
   return null;
 }
 

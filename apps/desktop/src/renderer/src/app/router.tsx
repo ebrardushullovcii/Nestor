@@ -2,25 +2,19 @@ import { Navigate, createHashRouter } from "react-router-dom";
 import { lazy, Suspense, type ReactNode } from "react";
 import {
   JobFinderActionsRoute,
-  JobFinderAnalyticsRoute,
   JobFinderApplicationsRoute,
-  JobFinderCompaniesRoute,
-  JobFinderCompanyDetailRoute,
   JobFinderDiscoveryRoute,
   JobFinderPage,
   JobFinderProfileRoute,
   JobFinderProfileSetupRoute,
-  JobFinderResumeStrategiesRoute,
   JobFinderRouteErrorBoundary,
   JobFinderResumeWorkspaceRoute,
   JobFinderReviewQueueRoute,
-  JobFinderSafeguardsRoute,
   JobFinderSettingsRoute,
 } from "../pages/job-finder-page";
 import {
   JobFinderCampaignsRoute,
   JobFinderHomeRoute,
-  JobFinderRapidReviewRoute,
 } from "../pages/job-finder-page-routes";
 
 const loadLiveAssistantRoutes = () =>
@@ -105,11 +99,6 @@ export const appRouter = createHashRouter([
         element: <JobFinderDiscoveryRoute />,
       },
       {
-        path: "rapid-review",
-        errorElement: <JobFinderRouteErrorBoundary scope="route" />,
-        element: <JobFinderRapidReviewRoute />,
-      },
-      {
         path: "review-queue",
         errorElement: <JobFinderRouteErrorBoundary scope="route" />,
         element: <JobFinderReviewQueueRoute />,
@@ -123,11 +112,6 @@ export const appRouter = createHashRouter([
         path: "actions",
         errorElement: <JobFinderRouteErrorBoundary scope="route" />,
         element: <JobFinderActionsRoute />,
-      },
-      {
-        path: "analytics",
-        errorElement: <JobFinderRouteErrorBoundary scope="route" />,
-        element: <JobFinderAnalyticsRoute />,
       },
       {
         path: "applications",
@@ -144,26 +128,6 @@ export const appRouter = createHashRouter([
         path: "settings",
         errorElement: <JobFinderRouteErrorBoundary scope="route" />,
         element: <JobFinderSettingsRoute />,
-      },
-      {
-        path: "resume-strategies",
-        errorElement: <JobFinderRouteErrorBoundary scope="route" />,
-        element: <JobFinderResumeStrategiesRoute />,
-      },
-      {
-        path: "safeguards",
-        errorElement: <JobFinderRouteErrorBoundary scope="route" />,
-        element: <JobFinderSafeguardsRoute />,
-      },
-      {
-        path: "companies",
-        errorElement: <JobFinderRouteErrorBoundary scope="route" />,
-        element: <JobFinderCompaniesRoute />,
-      },
-      {
-        path: "companies/:companyId",
-        errorElement: <JobFinderRouteErrorBoundary scope="route" />,
-        element: <JobFinderCompanyDetailRoute />,
       },
     ],
   },

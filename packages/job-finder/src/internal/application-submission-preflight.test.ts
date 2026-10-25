@@ -49,7 +49,7 @@ const BASE_INPUT: Omit<CreateSubmissionPreflightInput, "repository"> = {
   resumeBytes: RESUME_BYTES,
   answers: { revision: 2, digest: ANSWER_DIGEST },
   finalControl: { signature: CONTROL_DIGEST, ref: "final-control-0" },
-  capacity: { remainingRunCapacity: 2, remainingDailyCapacity: 7 },
+  capacity: { remainingRunCapacity: 2 },
   createdAt: NOW,
 };
 
@@ -146,7 +146,6 @@ describe("application submission preflight coordinator", () => {
       authorityRevision: 3,
       resumeSha256: RESUME_SHA256,
       remainingRunCapacityBefore: 2,
-      remainingDailyCapacityBefore: 7,
     });
     expect(SubmissionPreflightRecordSchema.safeParse(record).success).toBe(
       true,
@@ -205,14 +204,14 @@ describe("application submission preflight coordinator", () => {
     expect(() =>
       buildSubmissionPreflightRecord(
         createInput({
-          capacity: { remainingRunCapacity: -1, remainingDailyCapacity: 1 },
+          capacity: { remainingRunCapacity: -1 },
         }),
       ),
     ).toThrow();
     expect(() =>
       buildSubmissionPreflightRecord(
         createInput({
-          capacity: { remainingRunCapacity: 1.5, remainingDailyCapacity: 1 },
+          capacity: { remainingRunCapacity: 1.5 },
         }),
       ),
     ).toThrow();

@@ -112,7 +112,6 @@ describe("aggressive resume review routing", () => {
           : job,
       );
       let capturedSearchPreference: string | null = null;
-      let capturedStrategyStrength: string | null = null;
       const baseAiClient = createAiClient();
       const { workspaceService } = createWorkspaceServiceHarness({
         seed,
@@ -120,8 +119,6 @@ describe("aggressive resume review routing", () => {
           ...baseAiClient,
           createResumeDraft(input) {
             capturedSearchPreference = input.searchPreferences.tailoringMode;
-            capturedStrategyStrength =
-              input.strategy?.tailoringStrength ?? null;
             return baseAiClient.createResumeDraft(input);
           },
         },
@@ -131,12 +128,11 @@ describe("aggressive resume review routing", () => {
       const workspace = await workspaceService.getResumeWorkspace("job_ready");
 
       expect(capturedSearchPreference).toBe(jobLevel);
-      expect(capturedStrategyStrength).toBeNull();
       expect(workspace.effectiveTailoringStrength).toBe(jobLevel);
     },
   );
 
-  test("review uses the global aggressive default when no strategy sets a strength", async () => {
+  test("review uses the global aggressive default when no job level is selected", async () => {
     const seed = createSeed();
     seed.searchPreferences = {
       ...seed.searchPreferences,
@@ -161,133 +157,12 @@ describe("aggressive resume review routing", () => {
     await workspaceService.generateResume("job_ready");
     const workspace = await workspaceService.getResumeWorkspace("job_ready");
     expect(workspace.effectiveTailoringStrength).toBe("aggressive");
-    expect(workspace.strategyContext?.tailoringStrength ?? null).toBeNull();
 
     await workspaceService.sendResumeAssistantMessage(
       "job_ready",
       "Tighten the summary.",
     );
     expect(capturedTailoringStrength).toBe("aggressive");
-  });
-
-  test("a conservative strategy wins over the global aggressive default for review", async () => {
-    const seed = createSeed();
-    seed.searchPreferences = {
-      ...seed.searchPreferences,
-      tailoringMode: "aggressive",
-    };
-    let capturedTailoringStrength: string | null | undefined;
-    const baseAiClient = createAiClient();
-    const { workspaceService } = createWorkspaceServiceHarness({
-      seed,
-      aiClient: {
-        ...baseAiClient,
-        reviseResumeDraft(input) {
-          capturedTailoringStrength = input.tailoringStrength ?? null;
-          return Promise.resolve({
-            content: "No edits.",
-            patches: [],
-          });
-        },
-      },
-    });
-
-    await workspaceService.getWorkspaceSnapshot();
-    const created = await workspaceService.saveResumeStrategy({
-      id: null,
-      name: "Keep every fact",
-      roleFamily: "Product Designer",
-      baseResumeDocumentId: "resume_1",
-      templateId: "modern_split",
-      headlinePolicy: "role_family_template",
-      skillsPolicy: "role_family_expanded",
-      coveragePolicy: "role_family_recommended",
-      tailoringStrength: "conservative",
-      evidenceBoundaries: {
-        allowExactClaims: true,
-        allowParaphrasedClaims: false,
-        maxEvidenceRefsPerBullet: 3,
-        requireVerifierPass: true,
-      },
-      enabled: true,
-    });
-    const strategyId = created.intelligence.resumeStrategies[0]!.id;
-    await workspaceService.selectResumeStrategy({
-      jobId: "job_ready",
-      campaignId: "campaign_default",
-      strategyId,
-      source: "manual",
-      reason: "User chose the conservative approach for this posting.",
-    });
-
-    await workspaceService.generateResume("job_ready");
-    const workspace = await workspaceService.getResumeWorkspace("job_ready");
-    expect(workspace.effectiveTailoringStrength).toBe("conservative");
-    expect(workspace.strategyContext?.tailoringStrength).toBe("conservative");
-
-    await workspaceService.sendResumeAssistantMessage(
-      "job_ready",
-      "Tighten the summary.",
-    );
-    expect(capturedTailoringStrength).toBe("conservative");
-  });
-
-  test("an aggressive per-job level wins over a selected conservative strategy during generation", async () => {
-    const seed = createSeed();
-    seed.savedJobs = seed.savedJobs.map((job) =>
-      job.id === "job_ready"
-        ? { ...job, resumeTailoringMode: "aggressive" }
-        : job,
-    );
-    let capturedSearchPreference: string | null = null;
-    let capturedStrategyStrength: string | null = null;
-    const baseAiClient = createAiClient();
-    const { workspaceService } = createWorkspaceServiceHarness({
-      seed,
-      aiClient: {
-        ...baseAiClient,
-        createResumeDraft(input) {
-          capturedSearchPreference = input.searchPreferences.tailoringMode;
-          capturedStrategyStrength = input.strategy?.tailoringStrength ?? null;
-          return baseAiClient.createResumeDraft(input);
-        },
-      },
-    });
-
-    await workspaceService.getWorkspaceSnapshot();
-    const created = await workspaceService.saveResumeStrategy({
-      id: null,
-      name: "Keep every fact",
-      roleFamily: "Product Designer",
-      baseResumeDocumentId: "resume_1",
-      templateId: "modern_split",
-      headlinePolicy: "role_family_template",
-      skillsPolicy: "role_family_expanded",
-      coveragePolicy: "role_family_recommended",
-      tailoringStrength: "conservative",
-      evidenceBoundaries: {
-        allowExactClaims: true,
-        allowParaphrasedClaims: false,
-        maxEvidenceRefsPerBullet: 3,
-        requireVerifierPass: true,
-      },
-      enabled: true,
-    });
-    await workspaceService.selectResumeStrategy({
-      jobId: "job_ready",
-      campaignId: "campaign_default",
-      strategyId: created.intelligence.resumeStrategies[0]!.id,
-      source: "manual",
-      reason: "User chose a saved strategy before selecting the job level.",
-    });
-
-    await workspaceService.generateResume("job_ready");
-    const workspace = await workspaceService.getResumeWorkspace("job_ready");
-
-    expect(capturedSearchPreference).toBe("aggressive");
-    expect(capturedStrategyStrength).toBe("aggressive");
-    expect(workspace.strategyContext?.tailoringStrength).toBe("conservative");
-    expect(workspace.effectiveTailoringStrength).toBe("aggressive");
   });
 
   test("a kept resume gets the checker's fixes for lines it rejected", async () => {

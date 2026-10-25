@@ -55,13 +55,6 @@ const PENDING_ADOPTION: ReadonlyArray<{
     rule: "viewport-max-height",
   },
   {
-    owner: "phase-B",
-    path: "features/job-finder/screens/rapid-review/rapid-review-screen.tsx",
-    reason:
-      "A sticky layout column rather than a floating surface, but it still hand-derives a viewport height and should read one token.",
-    rule: "viewport-max-height",
-  },
-  {
     owner: "PKG-07",
     path: "features/job-finder/screens/discovery/discovery-activity-panel.tsx",
     reason:

@@ -3,11 +3,7 @@ import { z } from "zod";
 import { NonEmptyStringSchema } from "./base";
 import { JobDiscoveryTargetSchema } from "./discovery";
 
-export const JobFinderEmptyActionInputSchema = z.object({}).strict();
-export const JobFinderStrategyActionInputSchema = z
-  .object({
-    strategyId: NonEmptyStringSchema,
-  })
+export const JobFinderEmptyActionInputSchema = z.object({})
   .strict();
 export const JobFinderThemeActionInputSchema = z
   .object({
@@ -41,9 +37,6 @@ export const JobFinderRemoveSourceInputSchema = z
 export const JobFinderReadActionStateInputSchema = z
   .object({
     scope: z.enum([
-      "companies",
-      "outcomes",
-      "resume_approaches",
       "search_rules",
       "notifications",
       "apply_queue",

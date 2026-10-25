@@ -34,9 +34,9 @@ import {
   applyResultNeedsResumeAttachment,
   getCustomerFacingApplyText,
 } from "./applications-detail-panel-helpers";
-import type { ApplicationQueueHold } from "./application-queue-hold";
 
-type ApplyResult = JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null;
+type ApplyResult =
+  | JobFinderRendererWorkspaceSnapshot["applyJobResults"][number] | null;
 
 /**
  * One state, one sentence, one action.
@@ -70,7 +70,6 @@ export type ApplicationRecoveryPrimaryAction =
   | "close_finished_tabs"
   | "none"
   | "open_browser"
-  | "open_safeguards"
   | "open_listing"
   | "answer_in_needs_you"
   | "allow_site_saves"
@@ -186,7 +185,9 @@ export type PlannedApplyStanding =
 
 export function buildApplyRunContextReader(workspace: {
   applyRuns?: JobFinderRendererWorkspaceSnapshot["applyRuns"] | null;
-  applyJobResults?: JobFinderRendererWorkspaceSnapshot["applyJobResults"] | null;
+  applyJobResults?:
+    | JobFinderRendererWorkspaceSnapshot["applyJobResults"]
+    | null;
   activityControl?: Pick<
     JobFinderRendererWorkspaceSnapshot["activityControl"],
     "paused" | "pauseBehavior"
@@ -433,9 +434,9 @@ export function applyResultStoppedStructurally(result: ApplyResult): boolean {
  * the browser" tells the reader to wait for something that will never happen.
  */
 type ApplicationRecoveryInput = {
+  queueHold?: { reason: string } | null;
   /** The mode saved in Settings, which a retry runs in and is named for. */
   applyMode?: ApplyMode;
-  canOpenSafeguards: boolean;
   /** The page the run finished on, used to recognise a login page by its URL. */
   destinationUrl?: string | null;
   isApplyPending: boolean;
@@ -459,8 +460,6 @@ type ApplicationRecoveryInput = {
   run?: ApplyRunContext | null;
   /** Whether the filled-in form is open, can be reopened, or is gone. */
   applicationPageState?: ApplicationPageState | null;
-  /** The Apply queue set this job aside before it started (STAB-005). */
-  queueHold?: ApplicationQueueHold | null;
   /** The employer, for a held job's sentence. */
   company?: string;
   visibleApplyResult: ApplyResult;
@@ -492,7 +491,6 @@ function resolveRecoveryForRun(
 ): ApplicationRecoveryPresentation {
   const sends = input.applyMode === "apply_for_me";
   const {
-    canOpenSafeguards,
     destinationUrl = null,
     isApplyPending,
     pausedQuestion = null,
@@ -516,26 +514,14 @@ function resolveRecoveryForRun(
       primaryActionLabel: "Prepare again",
     };
   }
-  // Set aside by the queue before any attempt: it never started, so it is
-  // neither being prepared nor stopped part way.
-  if (!visibleApplyResult && input.queueHold) {
-    const company = input.company ?? "this employer";
-    return input.queueHold.waitingForChoice
-      ? {
-          state: "retry",
-          statusLine: `Not started: waiting for your choice on ${company}`,
-          reasonSentence: `${input.queueHold.reason} Nothing was filled in or sent.`,
-          primaryAction: canOpenSafeguards ? "open_safeguards" : "none",
-          primaryActionLabel: canOpenSafeguards ? "Open Safeguards" : null,
-        }
-      : {
-          state: "retry",
-          statusLine: "Not started",
-          reasonSentence: `You chose to send both applications at ${company}. Nothing was filled in for this one yet.`,
-          primaryAction: "try_again",
-          primaryActionLabel: TRY_AGAIN_ACTION,
-        };
-  }
+  if (!visibleApplyResult && input.queueHold)
+    return {
+      state: "retry",
+      statusLine: "Not started",
+      reasonSentence: input.queueHold.reason,
+      primaryAction: "try_again",
+      primaryActionLabel: TRY_AGAIN_ACTION,
+    };
   const isServiceWorkerBlocked =
     applyResultIsServiceWorkerBlocked(visibleApplyResult);
   // A pause with questions on file is a question step, not a browser
@@ -684,10 +670,8 @@ function resolveRecoveryForRun(
       reasonSentence:
         reasonSentence ??
         `The site stopped ${JOB_FINDER_BROWSER_NAME} before anything was filled.`,
-      primaryAction: canOpenSafeguards ? "open_safeguards" : "open_browser",
-      primaryActionLabel: canOpenSafeguards
-        ? `Open Safeguards to reset ${JOB_FINDER_BROWSER_NAME}`
-        : OPEN_JOB_FINDER_BROWSER_ACTION,
+      primaryAction: "open_browser",
+      primaryActionLabel: OPEN_JOB_FINDER_BROWSER_ACTION,
     };
   }
 

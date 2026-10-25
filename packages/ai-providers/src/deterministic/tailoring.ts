@@ -5,7 +5,6 @@ import type {
 } from "@nestor/contracts";
 import type {
   CreateResumeDraftInput,
-  ResumeGenerationStrategyPolicy,
   ResumeAssistantReply,
   ReviseResumeDraftInput,
   TailorResumeInput,
@@ -27,7 +26,6 @@ import {
   filterCandidateFacingResumeKeywords,
   filterGroundedVisibleSkills,
 } from "./resume-skill-grounding";
-import { inferSkills } from "./resume-parser-skills";
 import { deriveResumeCoveragePlan } from "./resume-coverage";
 import type { ResumeCoverageClassification } from "../shared";
 
@@ -590,100 +588,15 @@ function createPatchId(prefix: string): string {
   return `${prefix}_${typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`}`;
 }
 
-function strategyHeadline(
-  input: Pick<TailorResumeInput, "profile" | "job"> & {
-    strategy?: ResumeGenerationStrategyPolicy | null;
-  },
-): string | null {
-  switch (input.strategy?.headlinePolicy) {
-    case "fixed":
-      return input.profile.headline;
-    case "role_family_template":
-      return input.strategy.roleFamily;
-    case "per_job_tailored":
-      return input.job.title || input.profile.headline;
-    default:
-      return input.profile.headline;
-  }
-}
-
-function shouldExportStrategyCoverage(
-  classification: ResumeCoverageClassification,
-  strategy?: ResumeGenerationStrategyPolicy | null,
-): boolean {
-  if (!strategy) {
-    return shouldExportCoverageClassification(classification);
-  }
-
-  switch (strategy.coveragePolicy) {
-    case "base_omissions":
-      return classification === "detailed";
-    case "role_family_recommended":
-      return classification === "detailed" || classification === "compact";
-    case "full_tailoring":
-      return classification !== "omitted";
-  }
-}
-
-function strategySkillCandidates(input: {
+function resumeSkillCandidates(input: {
   profile: CandidateProfile;
   job: JobPosting;
-  strategy?: ResumeGenerationStrategyPolicy | null;
 }): string[] {
-  switch (input.strategy?.skillsPolicy) {
-    case "base_only":
-      return [...input.profile.skills, ...input.profile.skillGroups.coreSkills];
-    case "role_family_expanded":
-      return [
-        ...input.profile.skills,
-        ...input.profile.skillGroups.coreSkills,
-        ...input.profile.skillGroups.tools,
-        ...input.profile.skillGroups.languagesAndFrameworks,
-        ...input.profile.skillGroups.highlightedSkills,
-      ];
-    case "per_job_tailored":
-      return [
-        ...input.job.keySkills,
-        ...input.profile.skills,
-        ...input.profile.skillGroups.coreSkills,
-        ...input.profile.skillGroups.tools,
-        ...input.profile.skillGroups.languagesAndFrameworks,
-        ...input.profile.skillGroups.highlightedSkills,
-        ...input.profile.projects.flatMap((project) => project.skills),
-      ];
-    default:
-      return [
+  return [
         ...input.job.keySkills,
         ...input.profile.skills,
         ...input.profile.skillGroups.coreSkills,
       ];
-  }
-}
-
-function baseResumeSkills(input: { resumeText: string | null }): string[] {
-  return input.resumeText?.trim() ? inferSkills(input.resumeText, []) : [];
-}
-
-function filterStrategyVisibleSkills(
-  input: { profile: TailorResumeInput["profile"]; resumeText: string | null },
-  skills: readonly string[],
-  limit: number,
-): string[] {
-  const profileSkills = filterGroundedVisibleSkills(
-    input.profile,
-    skills,
-    limit,
-  );
-  const baseSkills = baseResumeSkills(input);
-  const normalizedRequested = new Set(
-    skills.map((skill) => skill.trim().toLowerCase()).filter(Boolean),
-  );
-  return uniqueStrings([
-    ...baseSkills.filter((skill) =>
-      normalizedRequested.has(skill.trim().toLowerCase()),
-    ),
-    ...profileSkills,
-  ]).slice(0, limit);
 }
 
 export function buildDeterministicResumeText(
@@ -791,8 +704,7 @@ export function buildDeterministicResumeText(
             formatHeading(
               [
                 entry.school,
-                [entry.degree, entry.fieldOfStudy].filter(Boolean).join(", ") ||
-                  null,
+                [entry.degree, entry.fieldOfStudy].filter(Boolean).join(", "),
               ],
               formatHeading([entry.location], entry.dateRange),
             ),
@@ -821,84 +733,46 @@ export function buildDeterministicResumeText(
 }
 
 export function buildDeterministicTailoredResume(
-  input: TailorResumeInput & {
-    strategy?: ResumeGenerationStrategyPolicy | null;
-  },
+  input: TailorResumeInput & {},
 ) {
-  const effectiveSearchPreferences = input.strategy
-    ? {
-        ...input.searchPreferences,
-        tailoringMode: input.strategy.tailoringStrength,
-      }
-    : input.searchPreferences;
+  const effectiveSearchPreferences = input.searchPreferences;
   // Job-named skills claim the visible slots first so a grounded, relevant
   // skill such as Docker or xUnit is not pushed out by profile ordering.
   const orderedSkillCandidates = orderSkillsByJobRelevance(
-    strategySkillCandidates(input),
+    resumeSkillCandidates(input),
     input.job,
   );
-  const coreSkills = input.strategy
-    ? filterStrategyVisibleSkills(
-        input,
-        orderedSkillCandidates,
-        VISIBLE_CORE_SKILL_LIMIT,
-      )
-    : filterGroundedVisibleSkills(
-        input.profile,
-        orderedSkillCandidates,
-        VISIBLE_CORE_SKILL_LIMIT,
-      );
-  const targetedKeywords = filterCandidateFacingResumeKeywords(
-    input.strategy
-      ? input.strategy.skillsPolicy === "per_job_tailored"
-        ? filterStrategyVisibleSkills(input, input.job.keySkills, 6)
-        : input.strategy.skillsPolicy === "role_family_expanded"
-          ? filterStrategyVisibleSkills(
-              input,
-              [
-                ...input.profile.skillGroups.coreSkills,
-                ...input.profile.skillGroups.tools,
-                ...input.profile.skillGroups.languagesAndFrameworks,
-              ],
-              6,
-            )
-          : []
-      : uniqueStrings(input.job.keySkills).slice(0, 6),
+  const coreSkills = filterGroundedVisibleSkills(
+    input.profile,
+    orderedSkillCandidates,
+    VISIBLE_CORE_SKILL_LIMIT,
   );
-  const additionalSkillCandidates =
-    input.strategy?.skillsPolicy === "base_only"
-      ? []
-      : [
-          ...input.profile.skillGroups.tools,
-          ...input.profile.skillGroups.languagesAndFrameworks,
-          ...input.profile.skillGroups.highlightedSkills,
-          ...input.profile.projects.flatMap((project) => project.skills),
-          ...(input.strategy?.skillsPolicy === "per_job_tailored"
-            ? input.job.keySkills
-            : []),
-        ];
+  const targetedKeywords = filterCandidateFacingResumeKeywords(
+    uniqueStrings(input.job.keySkills).slice(0, 6),
+  );
+  const additionalSkillCandidates = [
+    ...input.profile.skillGroups.tools,
+    ...input.profile.skillGroups.languagesAndFrameworks,
+    ...input.profile.skillGroups.highlightedSkills,
+    ...input.profile.projects.flatMap((project) => project.skills),
+    ...[],
+  ];
   const orderedAdditionalSkillCandidates = orderSkillsByJobRelevance(
     additionalSkillCandidates,
     input.job,
   );
-  const additionalSkills = input.strategy
-    ? filterStrategyVisibleSkills(
-        input,
-        orderedAdditionalSkillCandidates,
-        VISIBLE_ADDITIONAL_SKILL_LIMIT,
-      )
-    : filterGroundedVisibleSkills(
-        input.profile,
-        orderedAdditionalSkillCandidates,
-        VISIBLE_ADDITIONAL_SKILL_LIMIT + VISIBLE_CORE_SKILL_LIMIT,
-      )
-        .filter(
-          (skill) =>
-            !coreSkills.some(
-              (coreSkill) => coreSkill.toLowerCase() === skill.toLowerCase(),
-            ),
-        )
-        .slice(0, VISIBLE_ADDITIONAL_SKILL_LIMIT);
+  const additionalSkills = filterGroundedVisibleSkills(
+    input.profile,
+    orderedAdditionalSkillCandidates,
+    VISIBLE_ADDITIONAL_SKILL_LIMIT + VISIBLE_CORE_SKILL_LIMIT,
+  )
+    .filter(
+      (skill) =>
+        !coreSkills.some(
+          (coreSkill) => coreSkill.toLowerCase() === skill.toLowerCase(),
+        ),
+    )
+    .slice(0, VISIBLE_ADDITIONAL_SKILL_LIMIT);
   const languages = uniqueStrings(
     input.profile.spokenLanguages
       .map((entry) =>
@@ -940,7 +814,7 @@ export function buildDeterministicTailoredResume(
       const coverage = coverageByRecordId.get(storedExperience.id);
       if (
         !coverage ||
-        !shouldExportStrategyCoverage(coverage.classification, input.strategy)
+        !shouldExportCoverageClassification(coverage.classification)
       ) {
         return [];
       }
@@ -1047,7 +921,7 @@ export function buildDeterministicTailoredResume(
     certificationEntries,
     additionalSkills,
     languages,
-    strategyHeadline(input),
+    input.profile.headline,
   );
 
   return TailoredResumeDraftSchema.parse({
@@ -1067,15 +941,7 @@ export function buildDeterministicTailoredResume(
     compatibilityScore: clampScore(
       78 + Math.min(input.job.keySkills.length * 3, 18),
     ),
-    notes: [
-      "Used the built-in deterministic resume tailorer.",
-      ...(input.strategy
-        ? [
-            `Applied resume strategy "${input.strategy.strategyName}" (${input.strategy.effectiveSource}: ${input.strategy.effectiveReason}).`,
-            `Strategy policies: ${input.strategy.headlinePolicy} headline, ${input.strategy.skillsPolicy} skills, ${input.strategy.coveragePolicy} coverage, ${input.strategy.tailoringStrength} tailoring.`,
-          ]
-        : []),
-    ],
+    notes: ["Used the built-in deterministic resume tailorer.", ...[]],
   });
 }
 
@@ -1185,24 +1051,20 @@ export function buildDeterministicStructuredResumeDraft(
   ]).slice(0, 6);
   const summary = baseDraft.summary;
   const experienceHighlights: string[] = [];
-  const coreSkills = input.strategy
-    ? baseDraft.coreSkills
-    : filterGroundedVisibleSkills(
-        input.profile,
-        orderSkillsByJobRelevance(
-          [...(evidence?.skills ?? []), ...baseDraft.coreSkills],
-          input.job,
-        ),
-        VISIBLE_CORE_SKILL_LIMIT,
-      );
+  const coreSkills = filterGroundedVisibleSkills(
+    input.profile,
+    orderSkillsByJobRelevance(
+      [...(evidence?.skills ?? []), ...baseDraft.coreSkills],
+      input.job,
+    ),
+    VISIBLE_CORE_SKILL_LIMIT,
+  );
   const targetedKeywords = filterCandidateFacingResumeKeywords(
-    input.strategy
-      ? baseDraft.targetedKeywords
-      : uniqueStrings([
-          ...(evidence?.keywords ?? []),
-          ...researchTerms,
-          ...baseDraft.targetedKeywords,
-        ]).slice(0, 8),
+    uniqueStrings([
+      ...(evidence?.keywords ?? []),
+      ...researchTerms,
+      ...baseDraft.targetedKeywords,
+    ]).slice(0, 8),
   );
   const notes = uniqueStrings([
     ...baseDraft.notes,

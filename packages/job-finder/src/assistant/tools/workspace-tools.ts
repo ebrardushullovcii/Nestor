@@ -116,7 +116,6 @@ export const getWorkspaceSummaryTool = defineTool({
           : null,
         applyMode:
           snapshot.settings.applicationAutomationMode ?? "prepare_only",
-        dailyLimit: snapshot.settings.maxApplicationsPerLocalDay ?? 20,
         activityPaused: snapshot.activityControl.paused ?? false,
       },
     };
@@ -409,7 +408,7 @@ export const searchWorkspaceTool = defineTool({
   name: "search_workspace",
   group: "workspace",
   description:
-    "Finds jobs, applications, companies and job sources whose names match the words given. Use it to resolve 'the Acme job' or 'my Stripe application' to ids.",
+    "Finds jobs, applications and job sources whose names match the words given. Use it to resolve 'the Acme job' or 'my Stripe application' to ids.",
   parameters: json.object({ query: json.string() }, ["query"]),
   input: z.object({ query: z.string().trim().min(1).max(200) }),
   label: (input) => `Searching your workspace for "${argText(input.query)}"`,
@@ -432,14 +431,6 @@ export const searchWorkspaceTool = defineTool({
       .filter((record) => matches(`${record.title} ${record.company}`))
       .slice(0, 15)
       .map(compactApplication);
-    const companies = (snapshot.intelligence.companies ?? [])
-      .filter((company) => matches(company.canonicalName))
-      .slice(0, 10)
-      .map((company) => ({
-        id: company.id,
-        name: company.canonicalName,
-        preference: company.preference,
-      }));
     const sources = snapshot.searchPreferences.discovery.targets
       .filter((target) => matches(`${target.label} ${target.startingUrl}`))
       .slice(0, 10)
@@ -449,14 +440,13 @@ export const searchWorkspaceTool = defineTool({
         url: target.startingUrl,
         enabled: target.enabled,
       }));
-    const total =
-      jobs.length + applications.length + companies.length + sources.length;
+    const total = jobs.length + applications.length + sources.length;
     return {
       summary:
         total === 0
           ? `Nothing in the workspace matches "${input.query}".`
-          : `Found ${plural(jobs.length, "job")}, ${plural(applications.length, "application")}, ${plural(companies.length, "company", "companies")} and ${plural(sources.length, "source")}.`,
-      data: { jobs, applications, companies, sources },
+          : `Found ${plural(jobs.length, "job")}, ${plural(applications.length, "application")} and ${plural(sources.length, "source")}.`,
+      data: { jobs, applications, sources },
     };
   },
 });
@@ -731,7 +721,6 @@ const APP_ROUTES = {
   tracker: "/job-finder/applications?view=tracker",
   needs_you: "/job-finder/actions",
   settings: "/job-finder/settings",
-  companies: "/job-finder/companies",
   search_plans: "/job-finder/campaigns",
 } as const;
 

@@ -29,10 +29,7 @@ import {
   ApplyJobResultSchema,
   ApplicationCrmSettingsSchema,
   ApplicationRecordSchema,
-  JobFinderIntelligenceSafeguardsSchema,
 } from "@nestor/contracts";
-import { countActiveSafeguardBlockers } from "../../lib/safeguards-blocker-count";
-import { formatDailyPreparationCapacityReachedText } from "../../lib/job-finder-daily-capacity";
 import { ApplicationsScreen } from "./applications-screen";
 import type { ApplicationsDetailPanel } from "./applications-detail-panel";
 import { ApplicationsDetailPanelAttemptSection } from "./applications-detail-panel-attempt-section";
@@ -183,7 +180,6 @@ describe("ApplicationsScreen", () => {
             selectedRecord: record,
             includeTrackerControls: false,
           })}
-          dailyPreparationCapacity={null}
           applyRuns={[run]}
           applyJobResults={[result]}
           onGetApplyRunDetails={vi
@@ -260,7 +256,6 @@ describe("ApplicationsScreen", () => {
       <MemoryRouter>
         <ApplicationsScreen
           {...base}
-          dailyPreparationCapacity={null}
           selectedApplyRunId={run.id}
           onSubmitPreparedApplication={vi.fn(async () => {})}
           applyRuns={[run]}
@@ -353,7 +348,6 @@ describe("ApplicationsScreen", () => {
       <MemoryRouter>
         <ApplicationsScreen
           {...base}
-          dailyPreparationCapacity={null}
           applyRuns={[run]}
           applyJobResults={results}
         />
@@ -373,7 +367,6 @@ describe("ApplicationsScreen", () => {
       <MemoryRouter>
         <ApplicationsScreen
           {...base}
-          dailyPreparationCapacity={null}
           applicationRecords={tracked}
           applyRuns={[run]}
           applyJobResults={results}
@@ -515,7 +508,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [record],
             selectedRecord: record,
@@ -594,7 +586,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [
               createTrackedApplication({
@@ -691,7 +682,6 @@ describe("ApplicationsScreen", () => {
             onSelectRecord: vi.fn(),
           })}
           applyJobResults={[result]}
-          dailyPreparationCapacity={null}
           onFinishInBrowser={vi.fn()}
           onGetApplyRunDetails={vi.fn(
             () => new Promise<ApplyRunDetails>(() => {}),
@@ -755,7 +745,6 @@ describe("ApplicationsScreen", () => {
             }),
           )}
           onStartAutoApplyQueue={onStartAutoApplyQueue}
-          dailyPreparationCapacity={null}
           onGetApplyRunDetails={vi.fn(
             () => new Promise<ApplyRunDetails>(() => {}),
           )}
@@ -854,7 +843,6 @@ describe("ApplicationsScreen", () => {
               failedResult(second, 1),
               ...(includeCancelled ? [cancelledResult] : []),
             ]}
-            dailyPreparationCapacity={null}
             onGetApplyRunDetails={vi.fn(
               () => new Promise<ApplyRunDetails>(() => {}),
             )}
@@ -934,7 +922,6 @@ describe("ApplicationsScreen", () => {
             selectedRecord: a,
             onSelectRecord: vi.fn(),
           })}
-          dailyPreparationCapacity={null}
           onGetApplyRunDetails={vi.fn(() =>
             Promise.reject(new Error("No review details in this fixture")),
           )}
@@ -999,7 +986,6 @@ describe("ApplicationsScreen", () => {
               selectedRecord: record,
               onSelectRecord: vi.fn(),
             })}
-            dailyPreparationCapacity={null}
             applyJobResults={[result]}
             onGetApplyRunDetails={vi.fn(() =>
               Promise.reject(new Error("No retained details")),
@@ -1035,7 +1021,7 @@ describe("ApplicationsScreen", () => {
     });
     const view = render(
       <MemoryRouter>
-        <ApplicationsScreen {...props} dailyPreparationCapacity={null} />
+        <ApplicationsScreen {...props} />
       </MemoryRouter>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Open tracker" }));
@@ -1047,7 +1033,6 @@ describe("ApplicationsScreen", () => {
         <ApplicationsScreen
           {...props}
           applicationRecords={[{ ...b, lastAttemptState: "paused" }, a]}
-          dailyPreparationCapacity={null}
         />
       </MemoryRouter>,
     );
@@ -1067,7 +1052,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           applicationAttempts={[]}
           applicationRecords={[]}
           applyRuns={[]}
@@ -1135,7 +1119,6 @@ describe("ApplicationsScreen", () => {
     const view = render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           applicationAttempts={[]}
           applicationRecords={[]}
           applyRuns={[]}
@@ -1156,8 +1139,6 @@ describe("ApplicationsScreen", () => {
             Promise.reject(new Error("unused in this scenario")),
           )}
           onRevokeApplyRunApproval={vi.fn()}
-          onOpenSafeguards={vi.fn()}
-          safeguardsBlockerCount={2}
           onSelectRecord={vi.fn()}
           onStartApplyCopilot={vi.fn()}
           onStartAutoApplyQueue={vi.fn()}
@@ -1173,14 +1154,10 @@ describe("ApplicationsScreen", () => {
     const dividers = view.container.querySelectorAll(
       "[data-page-header-divider]",
     );
-    // Holds are a red-dot item on the status line, not a box.
-    const safeguards = screen.getByText(
-      "2 safeguard holds are pausing some work",
-    );
-    expect(safeguards.closest("[data-page-header-status]")).toBeTruthy();
+    // No safeguard holds are announced here any more.
     expect(
-      safeguards.closest("[data-page-status-item]")?.getAttribute("data-tone"),
-    ).toBe("critical");
+      screen.queryByText(/safeguard holds? (is|are) pausing/),
+    ).toBeNull();
     expect(
       screen.queryByRole("region", { name: "Active safeguards" }),
     ).toBeNull();
@@ -1233,7 +1210,6 @@ describe("ApplicationsScreen", () => {
         failedJobs: 1,
       };
       const buildProps = (state: ApplyRunSummary["state"]) => ({
-        dailyPreparationCapacity: null,
         applicationAttempts: [],
         applicationRecords: [],
         applyRuns: [{ ...finishedRun, state }],
@@ -1410,28 +1386,10 @@ describe("ApplicationsScreen", () => {
 
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
 
-    const safeguards = JobFinderIntelligenceSafeguardsSchema.parse({
-      contradictoryAnswerDetections: [
-        {
-          id: "detection_1",
-          questionA: "How many years?",
-          questionB: "Experience years?",
-          answerA: "5",
-          answerB: "2",
-          contradictionScore: 0.9,
-          status: "detected",
-          detectedAt: "2026-08-15T10:00:00.000Z",
-          resolvedAt: null,
-          explanation: "Answers conflict.",
-          recoveryGuidance: "Ask the user to confirm the correct answer.",
-        },
-      ],
-    });
 
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           applicationAttempts={[]}
           applicationRecords={[]}
           applyRuns={[]}
@@ -1452,7 +1410,6 @@ describe("ApplicationsScreen", () => {
             Promise.reject(new Error("unused")),
           )}
           onRevokeApplyRunApproval={vi.fn()}
-          safeguardsBlockerCount={countActiveSafeguardBlockers(safeguards)}
           onSelectRecord={vi.fn()}
           onStartApplyCopilot={vi.fn()}
           onStartAutoApplyQueue={vi.fn()}
@@ -1640,7 +1597,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           applicationAttempts={[]}
           applicationRecords={[selectedRecord, otherRecordForSameJob]}
           applyRuns={applyRuns}
@@ -1867,7 +1823,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           applicationAttempts={[]}
           applicationRecords={[selectedRecord, otherRecordForSameJob]}
           applyRuns={applyRuns}
@@ -2009,7 +1964,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           applicationAttempts={[legacyAttempt]}
           applicationRecords={[legacyRecord]}
           applyRuns={[legacyRun]}
@@ -2140,7 +2094,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           applicationAttempts={[]}
           applicationRecords={[firstRecord, secondRecord]}
           applyRuns={[sharedRun]}
@@ -2359,7 +2312,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           applicationAttempts={[]}
           applicationRecords={[selectedRecord]}
           applyRuns={[applyRun]}
@@ -2465,46 +2417,6 @@ describe("ApplicationsScreen", () => {
     expect(screen.getByText("Total: 8s")).toBeTruthy();
   });
 
-  it("links to Outcomes from the header once an application was sent", () => {
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
-    stubCandidateAssetsBridge();
-    const sent = {
-      ...createTrackedApplication({}),
-      status: "submitted" as const,
-    };
-    const onOpenOutcomes = vi.fn();
-    const { rerender } = render(
-      <MemoryRouter>
-        <ApplicationsScreen
-          dailyPreparationCapacity={null}
-          onOpenOutcomes={onOpenOutcomes}
-          {...buildCrmScreenProps({
-            applicationRecords: [sent],
-            onSelectRecord: vi.fn(),
-            selectedRecord: sent,
-          })}
-        />
-      </MemoryRouter>,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "See outcomes" }));
-    expect(onOpenOutcomes).toHaveBeenCalledTimes(1);
-
-    const notSent = { ...sent, status: "approved" as const };
-    rerender(
-      <MemoryRouter>
-        <ApplicationsScreen
-          dailyPreparationCapacity={null}
-          onOpenOutcomes={onOpenOutcomes}
-          {...buildCrmScreenProps({
-            applicationRecords: [notSent],
-            onSelectRecord: vi.fn(),
-            selectedRecord: notSent,
-          })}
-        />
-      </MemoryRouter>,
-    );
-    expect(screen.queryByRole("button", { name: "See outcomes" })).toBeNull();
-  });
 
   it("hides CRM tracking controls while search hides the selected application and restores them when the search clears", async () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
@@ -2521,7 +2433,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [acme, beta],
             onSelectRecord,
@@ -2575,7 +2486,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [tracked],
             onSelectRecord,
@@ -2627,7 +2537,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: records,
             onSelectRecord,
@@ -2661,7 +2570,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           onWorkspaceViewChange={onWorkspaceViewChange}
           {...buildCrmScreenProps({
             applicationRecords: [tracked],
@@ -2709,7 +2617,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           workspaceView="crm"
           {...buildCrmScreenProps({
             applicationRecords: [],
@@ -2735,7 +2642,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [tracked],
             includeTrackerControls: false,
@@ -2763,7 +2669,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [tracked],
             onSelectRecord,
@@ -2794,7 +2699,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [tracked],
             onSelectRecord: vi.fn(),
@@ -2855,7 +2759,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [tracked],
             onSelectRecord,
@@ -2891,7 +2794,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [tracked],
             onSelectRecord: vi.fn(),
@@ -2990,7 +2892,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [submitted, selected],
             onSelectRecord,
@@ -3019,7 +2920,6 @@ describe("ApplicationsScreen", () => {
       <MemoryRouter>
         <ApplicationsScreen
           actionMessage="The requested Job Finder action failed."
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [],
             onSelectRecord: vi.fn(),
@@ -3041,7 +2941,6 @@ describe("ApplicationsScreen", () => {
       <MemoryRouter>
         <ApplicationsScreen
           actionMessage="No jobs selected for auto-apply queue."
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [],
             onSelectRecord: vi.fn(),
@@ -3053,39 +2952,6 @@ describe("ApplicationsScreen", () => {
     expect(
       screen.getByTestId("applications-route-action-status").textContent,
     ).toBe("No jobs selected for auto-apply queue.");
-  });
-
-  it("never duplicates the static daily-capacity reached alert at the route level", () => {
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
-    stubCandidateAssetsBridge();
-    const exhaustedCapacity = {
-      limit: 20,
-      used: 20,
-      legacyUncertain: 0,
-      remaining: 0,
-      localDate: "2026-08-25",
-      resetsAt: "2026-08-26T04:00:00.000Z",
-    };
-
-    render(
-      <MemoryRouter>
-        <ApplicationsScreen
-          actionMessage={formatDailyPreparationCapacityReachedText(
-            exhaustedCapacity,
-          )}
-          dailyPreparationCapacity={exhaustedCapacity}
-          {...buildCrmScreenProps({
-            applicationRecords: [],
-            onSelectRecord: vi.fn(),
-            selectedRecord: null,
-          })}
-        />
-      </MemoryRouter>,
-    );
-
-    // The Recovery section's dedicated alert owns this exact sentence; the
-    // route surface suppresses only that duplicate.
-    expect(screen.queryByTestId("applications-route-action-status")).toBeNull();
   });
   it("shows a rejected submit's exact message, correction action and one Not sent badge", async () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
@@ -3151,7 +3017,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [record],
             onSelectRecord: vi.fn(),
@@ -3200,7 +3065,6 @@ describe("ApplicationsScreen", () => {
     render(
       <MemoryRouter>
         <ApplicationsScreen
-          dailyPreparationCapacity={null}
           {...buildCrmScreenProps({
             applicationRecords: [record],
             onSelectRecord: vi.fn(),

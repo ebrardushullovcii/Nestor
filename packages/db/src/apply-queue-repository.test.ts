@@ -11,13 +11,12 @@ import { createSeed } from "./test-fixtures";
 const queue: ApplyQueue = {
   id: "queue_1",
   mode: "autonomous_submit",
-  state: "waiting_for_tomorrow",
+  state: "paused",
   jobIds: ["job_1", "job_2", "job_3"],
   startedJobIds: ["job_1"],
   skipped: [{ jobId: "job_2", reason: "Its resume waits for your review." }],
   activeRunId: null,
   pausedReason: null,
-  resumesAt: "2026-10-23T22:00:00.000Z",
   createdAt: "2026-10-23T12:00:00.000Z",
   updatedAt: "2026-10-23T12:30:00.000Z",
 };

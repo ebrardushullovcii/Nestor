@@ -10,7 +10,6 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { recordApplicationsSentByPerson } from "./internal/application-sent-by-person";
 import { judgeUnjudgedPlanJobs } from "./internal/backlog-fit-judgment";
-import { refreshAutomaticApplicationFailurePauses } from "./internal/automatic-safeguards";
 import type { JobFinderRepository } from "@nestor/db";
 import type {
   JobFinderDiscoveryCommandReply,
@@ -79,7 +78,6 @@ import {
 import { createWorkspaceApplicationAnswerMethods } from "./internal/workspace-application-answer-methods";
 import { createWorkspaceGroupedAnswerMethods } from "./internal/workspace-grouped-answer-methods";
 import { createWorkspaceCrmMethods } from "./internal/workspace-crm-methods";
-import { createWorkspaceIntelligenceMethods } from "./internal/workspace-intelligence-methods";
 import { createWorkspaceSafeguardMethods } from "./internal/workspace-safeguard-methods";
 import {
   createWorkspaceUserActionMethods,
@@ -99,9 +97,7 @@ import {
 } from "./internal/campaign-dashboard";
 import { ensureCampaignState } from "./internal/campaign-dashboard";
 import {
-  deriveGlobalDailyApplicationPreparationCapacity,
   localDateKey,
-  MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
   MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN,
 } from "./internal/application-preparation-capacity";
 
@@ -208,13 +204,8 @@ export type {
   ResumeRenderSection,
   ResumeRenderSectionEntry,
 } from "./internal/resume-workspace-structure";
-import { readSavedJob } from "./internal/read-saved-job";
 
-export {
-  MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
-  MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN,
-  deriveGlobalDailyApplicationPreparationCapacity,
-} from "./internal/application-preparation-capacity";
+export { MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN } from "./internal/application-preparation-capacity";
 
 type PreparationCapacityState = {
   tokens: Set<ApplicationPreparationCapacityToken>;
@@ -462,8 +453,6 @@ export function createJobFinderWorkspaceService(
     activeApplyRunPromises,
     applyRunTransitionTails,
     markApplicationPreparationStarted,
-    requireApplicationSafeguardClearance: () =>
-      Promise.reject(new Error("Application safeguard gate not initialized.")),
     withApplicationCrmTransition<T>(operation: () => Promise<T>): Promise<T> {
       const result = applicationCrmTransitionTail.then(operation, operation);
       applicationCrmTransitionTail = result.then(
@@ -990,71 +979,9 @@ export function createJobFinderWorkspaceService(
     ctx: context,
     getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
   });
-  const intelligenceMethods = createWorkspaceIntelligenceMethods({
-    ctx: context,
-    getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
-    callbacks: {
-      shortlist: applicationMethods.queueJobForReview,
-      reject: (jobId) =>
-        applicationMethods.dismissDiscoveryJob({
-          jobId,
-          reasons: ["other"],
-          action: "hide_job",
-        }),
-      restore: async (jobId) => {
-        const job = await readSavedJob(repository, jobId);
-        if (job?.status === "archived") {
-          await applicationMethods.restoreDismissedDiscoveryJob(jobId);
-        } else if (job && job.status !== "discovered") {
-          await applicationMethods.removeJobFromReview(jobId);
-        }
-      },
-    },
-  });
   const safeguardMethods = createWorkspaceSafeguardMethods({
     ctx: context,
-    getWorkspaceSnapshot: () => getWorkspaceSnapshot(true),
   });
-  context.requireApplicationSafeguardClearance = async (jobIds, savedJobs) => {
-    await refreshAutomaticApplicationFailurePauses({
-      ctx: context,
-      now: new Date().toISOString(),
-    });
-    const blockers =
-      await safeguardMethods.evaluateApplicationPreparationBlockers(
-        jobIds,
-        savedJobs,
-      );
-    // The failure-rate pause asks the person to look at the failed attempts
-    // and retry them. Their Try again for exactly those jobs is that retry,
-    // so the pause must not refuse it (it pointed back at Applications in a
-    // loop); new jobs still wait until the pause lifts or is dismissed.
-    const retriesFailedJobsOnly = await startRetriesOnlyFailedJobs(jobIds);
-    safeguardMethods.requireNoBlockers(
-      retriesFailedJobsOnly
-        ? blockers.filter(
-            (blocker) => blocker.kind !== "abnormal_failure_pause",
-          )
-        : blockers,
-    );
-  };
-  async function startRetriesOnlyFailedJobs(
-    jobIds: readonly string[],
-  ): Promise<boolean> {
-    if (jobIds.length === 0) return false;
-    const results = await context.repository.listApplyJobResults();
-    // The retry's own queued placeholder is not an attempt yet; read the
-    // last attempt that actually ran.
-    return jobIds.every((jobId) => {
-      const latest = results
-        .filter(
-          (result) => result.jobId === jobId && result.state !== "planned",
-        )
-        .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
-        .at(0);
-      return latest?.state === "failed";
-    });
-  }
 
   const sourceDebugMethods = createWorkspaceSourceDebugMethods(context);
   context.runSourceDebugWorkflow = sourceDebugMethods.runSourceDebugWorkflow;
@@ -1066,7 +993,7 @@ export function createJobFinderWorkspaceService(
       await requireDiscoverySafeguardClearance();
       return discoveryMethods.runCampaignDiscovery(campaignContext, onActivity);
     },
-    afterCampaignRun: () => intelligenceMethods.refreshCompanyIntelligence(),
+    afterCampaignRun: () => getWorkspaceSnapshot(true),
   });
 
   function runCampaignScopedDiscovery(
@@ -1140,14 +1067,12 @@ export function createJobFinderWorkspaceService(
     });
     await yieldToEventLoop();
     if (options.commandOnly) {
-      await intelligenceMethods.refreshCompanyIntelligenceState();
       return result;
     }
     if (options.nestedUserActionRecovery) {
-      await intelligenceMethods.refreshCompanyIntelligenceState();
       return context.readWorkspaceSnapshot();
     }
-    return intelligenceMethods.refreshCompanyIntelligence();
+    return getWorkspaceSnapshot(true);
   }
 
   context.continueDiscoveryForSource = async (targetId, discoveryRunId) => {
@@ -1271,57 +1196,9 @@ export function createJobFinderWorkspaceService(
     }
   }
 
-  /**
-   * Global daily preparation capacity counts every campaign-attributed and
-   * legacy run, but only jobs that left `planned`. Each exact run/job lineage
-   * is counted once. Run creation is the durable timestamp shared by current
-   * and legacy lineages, and its local calendar day defines the safety window.
-   */
-  async function requireGlobalDailyPreparationCapacity(
-    prospectiveJobIds: readonly string[],
-    reservedJobs: number,
-    reservedJobIds: readonly string[] = [],
-  ): Promise<void> {
-    const uniqueProspectiveJobIds = uniqueStrings(prospectiveJobIds);
-    if (uniqueProspectiveJobIds.length === 0) {
-      return;
-    }
-    const [applyRuns, applyJobResults, applicationRecords, settings] =
-      await Promise.all([
-        repository.listApplyRuns(),
-        repository.listApplyJobResults(),
-        repository.listApplicationRecords(),
-        repository.getSettings(),
-      ]);
-    const dailyLimit =
-      settings.maxApplicationsPerLocalDay ??
-      MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY;
-    const capacity = deriveGlobalDailyApplicationPreparationCapacity({
-      applyRuns,
-      applyJobResults,
-      applicationRecords,
-      limit: dailyLimit,
-      // Reserved jobs are already charged through `reservedJobs` below.
-      reservedJobIds: [...reservedJobIds, ...uniqueProspectiveJobIds],
-    });
-    if (
-      capacity.used +
-        capacity.legacyUncertain +
-        reservedJobs +
-        uniqueProspectiveJobIds.length >
-      dailyLimit
-    ) {
-      throw new Error(
-        `You can start up to ${dailyLimit} ${dailyLimit === 1 ? "preparation" : "preparations"} per day. Today: ${capacity.used} started${capacity.legacyUncertain ? `, ${capacity.legacyUncertain} older attempts also count` : ""}${reservedJobs ? `, ${reservedJobs} reserved` : ""}. Retries and failed attempts count; continuing an open form does not. Change the limit in Settings → Applying.`,
-      );
-    }
-  }
-
   async function requireEmployerApplicationCapacity(
     jobIds: readonly string[],
     run: ApplyRun | null = null,
-    reservedJobs = 0,
-    reservedJobIds: readonly string[] = [],
   ): Promise<void> {
     const scopedJobIds = run?.jobIds ?? jobIds;
     if (
@@ -1335,20 +1212,6 @@ export function createJobFinderWorkspaceService(
     if (campaign) {
       assertCampaignPreparationScope(campaign, scopedJobIds);
     }
-    await requireGlobalDailyPreparationCapacity(
-      jobIds,
-      reservedJobs,
-      reservedJobIds,
-    );
-  }
-
-  async function requireApplicationSafeguardClearance(
-    jobIds: readonly string[],
-  ): Promise<void> {
-    if (!context.requireApplicationSafeguardClearance) {
-      throw new Error("Application safeguard gate not initialized.");
-    }
-    await context.requireApplicationSafeguardClearance(jobIds);
   }
 
   /**
@@ -1360,17 +1223,9 @@ export function createJobFinderWorkspaceService(
   async function requireApplicationPreparationGuards(
     jobIds: readonly string[],
     run: ApplyRun | null = null,
-    reservedJobs = 0,
-    reservedJobIds: readonly string[] = [],
   ): Promise<void> {
     await requireApplicationActivityNotPaused();
-    await requireEmployerApplicationCapacity(
-      jobIds,
-      run,
-      reservedJobs,
-      reservedJobIds,
-    );
-    await requireApplicationSafeguardClearance(jobIds);
+    await requireEmployerApplicationCapacity(jobIds, run);
   }
 
   async function withApplicationPreparationReservation<T>(
@@ -1390,22 +1245,7 @@ export function createJobFinderWorkspaceService(
       async (capacityState) => {
         const scope = await resolveScope();
         const localDate = localDateKey(new Date());
-        const todaysTokens = [...capacityState.tokens].filter(
-          (candidate) => candidate.localDate === localDate,
-        );
-        const reservedJobs = todaysTokens.reduce(
-          (total, candidate) => total + candidate.remainingJobs,
-          0,
-        );
-        const reservedJobIds = todaysTokens.flatMap((candidate) => [
-          ...candidate.jobIds,
-        ]);
-        await requireApplicationPreparationGuards(
-          scope.jobIds,
-          scope.run,
-          reservedJobs,
-          reservedJobIds,
-        );
+        await requireApplicationPreparationGuards(scope.jobIds, scope.run);
         const created = {
           localDate,
           remainingJobs: uniqueStrings(scope.jobIds).length,
@@ -1429,7 +1269,7 @@ export function createJobFinderWorkspaceService(
     input: { resultId: string; runId: string; jobId: string },
     token?: ApplicationPreparationCapacityToken,
   ): Promise<ApplyJobResult> {
-    return withPreparationCapacityTransition(repository, async (state) => {
+    return withPreparationCapacityTransition(repository, async () => {
       const current = (
         await repository.listApplyJobResults({
           runId: input.runId,
@@ -1446,20 +1286,6 @@ export function createJobFinderWorkspaceService(
       const now = new Date();
       const startedAt = now.toISOString();
       const startedLocalDate = localDateKey(now);
-      const tokensToday = [...state.tokens].filter(
-        (candidate) => candidate.localDate === startedLocalDate,
-      );
-      const reservedToday = tokensToday.reduce(
-        (total, candidate) => total + candidate.remainingJobs,
-        0,
-      );
-      if (!token || token.localDate !== startedLocalDate) {
-        await requireGlobalDailyPreparationCapacity(
-          [input.jobId],
-          reservedToday,
-          tokensToday.flatMap((candidate) => [...candidate.jobIds]),
-        );
-      }
       if (token) {
         if (token.remainingJobs <= 0) {
           throw new Error(
@@ -1813,7 +1639,6 @@ export function createJobFinderWorkspaceService(
       trackWorkspaceOperation("scheduled discovery", () =>
         campaignMethods.processDueScheduledCampaigns(now, onActivity),
       ),
-    ...intelligenceMethods,
     setActivityControl,
     getWorkspaceSnapshot: () =>
       workspaceResetInProgress
@@ -1851,12 +1676,6 @@ export function createJobFinderWorkspaceService(
     },
     getWorkspaceBootstrap,
     getWorkspaceHomeSnapshot,
-    mutateSafeguards: safeguardMethods.mutateSafeguards,
-    getSafeguardsOverview: safeguardMethods.getSafeguardsOverview,
-    evaluateApplicationSafeguardBlockers:
-      safeguardMethods.evaluateApplicationPreparationBlockers,
-    evaluateDiscoverySafeguardBlockers:
-      safeguardMethods.evaluateGlobalDiscoveryBlockers,
     ...discoveryMethods,
     runDiscovery: (targetId) =>
       trackWorkspaceOperation("discovery", async () => {

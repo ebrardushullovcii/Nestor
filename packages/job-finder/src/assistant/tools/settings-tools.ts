@@ -30,7 +30,6 @@ import {
 
 const SETTINGS_LABELS: Record<string, string> = {
   applicationAutomationMode: "Apply mode",
-  maxApplicationsPerLocalDay: "Daily application limit",
   resumeTemplateId: "Resume template",
   fontPreset: "Font",
   resumeApplicationMode: "Resume level",
@@ -97,7 +96,7 @@ export const readSettingsTool = defineTool({
   name: "read_settings",
   group: "settings",
   description:
-    "Reads Settings: apply mode and daily limit, resume level, template and font, cover letters, AI behavior, search plans and the resume templates available.",
+    "Reads Settings: apply mode, resume level, template and font, cover letters, AI behavior, search plans and the resume templates available.",
   parameters: json.object({}),
   input: z.object({}).passthrough(),
   label: () => "Reading your settings",
@@ -109,7 +108,6 @@ export const readSettingsTool = defineTool({
       data: {
         applyMode:
           snapshot.settings.applicationAutomationMode ?? "prepare_only",
-        dailyLimit: snapshot.settings.maxApplicationsPerLocalDay ?? 20,
         resumeLevel:
           snapshot.settings.resumeApplicationMode === "original_resume"
             ? "original_resume"
@@ -147,12 +145,11 @@ export const updateApplySettingsTool = defineTool({
   name: "update_apply_settings",
   group: "settings",
   description:
-    "Changes how applying works by default: apply mode (prepare_only, confirm_before_submit, autonomous_submit), daily limit, resume template, font, cover letter preference, or the default resume level (original_resume or tailored_per_job). Saved with Undo. Only when the person asks to change the default: to send applications they told you to send, use send_applications and leave this alone.",
+    "Changes how applying works by default: apply mode (prepare_only, confirm_before_submit, autonomous_submit), resume template, font, cover letter preference, or the default resume level (original_resume or tailored_per_job). Saved with Undo. Only when the person asks to change the default: to send applications they told you to send, use send_applications and leave this alone.",
   parameters: json.object({
     applicationAutomationMode: json.enumOf(
       ApplicationAutomationModeSchema.options,
     ),
-    maxApplicationsPerLocalDay: json.number(),
     resumeTemplateId: json.string(),
     fontPreset: json.string(),
     resumeApplicationMode: json.enumOf(["tailored_per_job", "original_resume"]),
@@ -377,10 +374,6 @@ export const pauseActivityTool = defineTool({
     };
   },
 });
-
-
-
-
 
 export const setDefaultResumeLevelTool = defineTool({
   name: "set_default_resume_level",

@@ -16,8 +16,8 @@ const APPLY_MODE_SAVED: Record<ApplicationAutomationMode, string> = {
  * What the save toast says for one application-defaults save, named after
  * what the person actually changed.
  *
- * Three Settings sections share this save: the Applying mode and daily
- * limit, the resume look, and (before ADR 0025) the resume level. The toast
+ * Settings sections share this save: the Applying mode, the resume look,
+ * and (before ADR 0025) the resume level. The toast
  * only knew the last one, so picking Send for me announced "Newly shortlisted
  * jobs will start with a tailored resume", which was about something else and
  * false for a person on Original.
@@ -26,23 +26,12 @@ export function describeApplicationDefaultsSave(
   input: UpdateApplicationDefaultsInput,
 ): { label: string; savedMessage: string; failedFallback: string } {
   if (
-    input.applicationAutomationMode !== undefined ||
-    input.maxApplicationsPerLocalDay !== undefined
-  ) {
-    const mode = input.applicationAutomationMode
-      ? APPLY_MODE_SAVED[input.applicationAutomationMode]
-      : "Applying saved.";
-    const cap =
-      input.maxApplicationsPerLocalDay !== undefined
-        ? ` At most ${input.maxApplicationsPerLocalDay} a day.`
-        : "";
+    input.applicationAutomationMode !== undefined)
     return {
       label: "Applying",
-      savedMessage: `${mode}${cap}`,
-      failedFallback:
-        "How Job Finder applies was not saved. Retry before leaving this page.",
+      savedMessage: APPLY_MODE_SAVED[input.applicationAutomationMode],
+      failedFallback: "Applying settings were not saved. Try again.",
     };
-  }
 
   if (input.resumeApplicationMode !== undefined) {
     return {

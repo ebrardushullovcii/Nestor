@@ -15,7 +15,6 @@ import type {
   ApplicationRecord,
   ApplyRunDetails,
   ClearApplicationAnswerCommandInput,
-  GlobalDailyApplicationPreparationCapacity,
   JobFinderRendererWorkspaceSnapshot,
   SaveApplicationAnswerCommandInput,
   JobFinderApplyConsentActionInput,
@@ -140,7 +139,6 @@ interface ApplicationsDetailPanelProps {
   applicationAttempts?: readonly ApplicationAttemptListRow[];
   applicationRecords: readonly ApplicationRecord[];
   applyJobResults: JobFinderRendererWorkspaceSnapshot["applyJobResults"];
-  dailyPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
   discoveryJobs: JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
   applyRunHistory: Array<{
     result: JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
@@ -158,7 +156,6 @@ interface ApplicationsDetailPanelProps {
   isApplyRunPending: (runId: string) => boolean;
   onApproveApplyRun: (input: JobFinderApplyRunActionInput) => void;
   onCancelApplyRun: (input: JobFinderApplyRunActionInput) => void;
-  onOpenCompany?: (companyId: string) => void;
   onExportApplicationPacket: (
     input: JobFinderApplyRunDetailsQuery,
   ) => Promise<void>;
@@ -186,7 +183,6 @@ interface ApplicationsDetailPanelProps {
   onStartAutoApplyQueue: (jobIds: string[]) => void;
   /** The mode chosen in Settings; decides what a finished fill means. */
   applyMode?: ApplyMode;
-  onOpenSafeguards?: () => void;
   onOpenNeedsYou?: () => void;
   /** Open requests, so the question step can be answered on this panel. */
   userActionRequests?: readonly UserActionRequest[];
@@ -209,7 +205,6 @@ interface ApplicationsDetailPanelProps {
   selectedApplyRunId: string | null;
   selectedAttempt: ApplicationAttemptListRow | null;
   selectedRecord: ApplicationRecord | null;
-  selectedRecordCompanyId?: string | null;
 }
 
 export function ApplicationsDetailPanel({
@@ -227,7 +222,6 @@ export function ApplicationsDetailPanel({
   applicationAttempts = [],
   applicationRecords,
   applyJobResults,
-  dailyPreparationCapacity,
   discoveryJobs,
   applyRunHistory,
   effectiveSelectedApplyResult,
@@ -238,7 +232,6 @@ export function ApplicationsDetailPanel({
   isApplyRequestPending,
   isApplyRunPending,
   onApproveApplyRun,
-  onOpenCompany,
   onExportApplicationPacket,
   onResolveSubmissionOutcome,
   onSaveApplicationAnswer,
@@ -248,7 +241,6 @@ export function ApplicationsDetailPanel({
   onStartApplyCopilot,
   onReviewResumePdf,
   onStartAutoApplyQueue,
-  onOpenSafeguards,
   onOpenNeedsYou,
   userActionRequests,
   answerDraft,
@@ -266,7 +258,6 @@ export function ApplicationsDetailPanel({
   selectedApplyRunId,
   selectedAttempt,
   selectedRecord,
-  selectedRecordCompanyId,
   onSubmitPreparedApplication,
   onPrepareApplicationAgain,
 }: ApplicationsDetailPanelProps) {
@@ -498,7 +489,6 @@ export function ApplicationsDetailPanel({
       {...(applyMode ? { applyMode } : {})}
       canRestageAutoRun={canRestageAutoRun}
       canRestageQueueRun={canRestageQueueRun}
-      dailyPreparationCapacity={dailyPreparationCapacity}
       excludedQueueRecoveryEntries={excludedQueueRecoveryEntries}
       isApplyPending={isApplyPending}
       applicationWorkPaused={applicationWorkPaused}
@@ -516,7 +506,6 @@ export function ApplicationsDetailPanel({
             },
           }
         : {})}
-      {...(onOpenSafeguards ? { onOpenSafeguards } : {})}
       {...(onOpenNeedsYou ? { onOpenNeedsYou } : {})}
       answerStep={answerStep}
       {...(onAllowSiteSaves ? { onAllowSiteSaves } : {})}
@@ -575,44 +564,7 @@ export function ApplicationsDetailPanel({
     "not_submitted";
   const convenienceLinks = selectedRecord ? (
     <>
-      {selectedRecordCompanyId &&
-      onOpenCompany &&
-      selectedRecordEmployerDisplay ? (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          {/* Reference links, not actions: text links read as "also
-              available" rather than as one more thing to do. */}
-          <Button
-            aria-label={`View ${selectedRecordEmployerDisplay} in Companies`}
-            className="h-auto px-0 text-sm font-medium normal-case tracking-normal"
-            onClick={() => onOpenCompany(selectedRecordCompanyId)}
-            size="compact"
-            type="button"
-            variant="link"
-          >
-            {/* The employer is named just above; a long name ran past the
-                panel edge here. */}
-            View in Companies
-          </Button>
-          {canPrepareInterview ? (
-            <Button
-              asChild
-              className="h-auto px-0 text-sm font-medium normal-case tracking-normal"
-              size="compact"
-              variant="link"
-            >
-              <a
-                href={`#${buildLiveAssistantApplicationHref({
-                  record: selectedRecord,
-                  relatedJob: selectedRecordJob,
-                })}`}
-              >
-                <Mic aria-hidden="true" className="size-4" focusable="false" />
-                Prepare interview
-              </a>
-            </Button>
-          ) : null}
-        </div>
-      ) : canPrepareInterview ? (
+      {canPrepareInterview ? (
         <Button
           asChild
           className="h-10 justify-start px-3.5 text-sm font-medium normal-case tracking-normal"

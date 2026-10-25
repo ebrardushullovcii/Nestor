@@ -14,7 +14,6 @@ function createWorkspace(input: {
   discoveryJobs?: readonly Record<string, unknown>[];
   companyJobs?: readonly Record<string, unknown>[];
   applicationRecords?: readonly Record<string, unknown>[];
-  dailyCapacity?: Record<string, unknown> | null;
 }): JobFinderRendererWorkspaceSnapshot {
   return {
     generatedAt: input.generatedAt,
@@ -39,9 +38,7 @@ function createWorkspace(input: {
     selectedReviewJobId: null,
     selectedApplyRunId: null,
     selectedApplicationRecordId: null,
-    dashboard: {
-      globalDailyApplicationPreparationCapacity: input.dailyCapacity ?? null,
-    },
+    dashboard: {},
   } as unknown as JobFinderRendererWorkspaceSnapshot;
 }
 
@@ -496,40 +493,6 @@ describe("Job Finder workspace delta tracker", () => {
     });
   });
 
-  it("carries the authoritative daily preparation capacity in the dashboard delta", () => {
-    const tracker = createJobFinderWorkspaceDeltaTracker();
-    const initial = createWorkspace({
-      generatedAt: "2026-08-09T10:00:00.000Z",
-      jobIds: [],
-      selectedJobId: null,
-      dailyCapacity: null,
-    });
-    const capacity = {
-      limit: 20,
-      used: 7,
-      legacyUncertain: 0,
-      remaining: 13,
-      localDate: "2026-08-09",
-      resetsAt: "2026-08-10T00:00:00.000Z",
-    };
-    const current = createWorkspace({
-      generatedAt: "2026-08-09T10:01:00.000Z",
-      jobIds: [],
-      selectedJobId: null,
-      dailyCapacity: capacity,
-    });
-
-    tracker.synchronize(null, initial);
-
-    expect(tracker.synchronize(1, current)).toMatchObject({
-      kind: "delta",
-      delta: {
-        dashboard: {
-          globalDailyApplicationPreparationCapacity: capacity,
-        },
-      },
-    });
-  });
 
   it("bounds 5,000-job delta construction and stale snapshot fallback", () => {
     const tracker = createJobFinderWorkspaceDeltaTracker();

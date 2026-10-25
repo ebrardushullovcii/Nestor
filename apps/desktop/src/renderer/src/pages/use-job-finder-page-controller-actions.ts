@@ -37,17 +37,12 @@ import type {
   ProfileSetupReviewActionOptions,
   ProfileSetupState,
   ProfileSetupStep,
-  RecommendResumeStrategyInput,
   RemoveEmployerExclusionInput,
   ResumeAssistantMessage,
   ResumeApplicationMode,
   TailoringMode,
   ResumeDraft,
   ResumeDraftPatch,
-  ResumeStrategyRecommendation,
-  SaveResumeStrategyInput,
-  SelectResumeStrategyInput,
-  SetCampaignResumeStrategyDefaultInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
   UpdateAiBehaviorInput,
@@ -65,10 +60,6 @@ import {
   type ResumeRunStage,
   type TailoredDraftPreparationViewState,
 } from "@renderer/features/job-finder/screens/review-queue/review-queue-status";
-import {
-  formatDailyPreparationCapacityReachedText,
-  isDailyPreparationCapacityExhausted,
-} from "@renderer/features/job-finder/lib/job-finder-daily-capacity";
 import { isFinishBlockingReviewItem } from "@renderer/features/job-finder/components/profile/setup/profile-setup-screen-helpers";
 import type {
   ActionState,
@@ -644,22 +635,12 @@ export function describeApplyQueueStart(
   }
   if (options?.onlyWhenHeldBack) return heldBackSentence.trim() || null;
   const going = jobIds.length - heldBack.length;
-  if (queue.state === "waiting_for_tomorrow") {
-    return `Today's limit is reached, so ${going === 1 ? "this one starts" : `these ${going} start`} after midnight by themselves.${heldBackSentence}`;
-  }
-  // A run of ten takes only what today's limit allows; the rest wait for
-  // midnight. The toast said "2 applications started" over 1 started.
-  const startedNow = queue.startedJobIds.filter((id) => chosen.has(id)).length;
-  const waiting = going - startedNow;
-  if (going <= 10 && startedNow > 0 && waiting > 0) {
-    return `${startedNow === 1 ? "1 application started" : `${startedNow} applications started`}. Today's limit is reached, so ${waiting === 1 ? "1 more starts" : `${waiting} more start`} after midnight by themselves.${heldBackSentence}`;
-  }
   const started =
     going <= 10
       ? going === 1
         ? "Application started. Watch it in Applications."
         : `${going} applications started. Watch them in Applications.`
-      : `${going} applications queued: ten at a time, inside your daily limit, with no more presses. Progress is on Home and Applications.`;
+      : `${going} applications queued: ten at a time, with no more presses. Progress is on Home and Applications.`;
   return `${started}${heldBackSentence}`;
 }
 
@@ -1127,12 +1108,7 @@ export function createPrimaryPageActions(
     if (workspace?.activityControl?.paused) {
       return APPLICATION_WORK_PAUSED_REASON;
     }
-    const capacity =
-      workspace?.dashboard?.globalDailyApplicationPreparationCapacity ?? null;
-    if (!capacity || !isDailyPreparationCapacityExhausted(capacity)) {
-      return null;
-    }
-    return formatDailyPreparationCapacityReachedText(capacity);
+    return null;
   };
 
   const jobsAre = (count: number) =>
@@ -2024,8 +2000,8 @@ export function createPrimaryPageActions(
       applicationAutomationMode?: JobFinderApplyQueueActionInput["applicationAutomationMode"],
       options?: { stayOnCurrentPage?: boolean },
     ): Promise<JobFinderAutoApplyQueueStartOutcome> => {
-      // No daily-limit refusal here: the Apply queue waits for tomorrow and
-      // says so on Home and Applications (ADR 0058).
+      // The Apply queue runs ten at a time and reports on Home and
+      // Applications (ADR 0058).
       if (jobIds.length === 0) {
         const message = "No jobs selected for auto-apply queue.";
         applyRouteScopedMessage({ message });
@@ -4034,69 +4010,6 @@ export function createPrimaryPageActions(
         () => undefined,
         "Last assistant change was undone.",
         { scope: jobFinderPendingActions.profileMutation() },
-      ),
-    onSaveResumeStrategy: (input: SaveResumeStrategyInput) =>
-      runAction(
-        () => actions.saveResumeStrategy(input),
-        () => undefined,
-        input.id
-          ? "Resume approach updated. It shapes the next tailored draft; drafts that already exist stay as they are until you re-tailor them. Reusing it never approves a resume."
-          : "Resume approach created. It shapes future tailored drafts and never approves a resume.",
-        { scope: jobFinderPendingActions.resumeStrategySave() },
-      ),
-    onDisableResumeStrategy: (strategyId: string) =>
-      void runAction(
-        () => actions.disableResumeStrategy(strategyId),
-        () => undefined,
-        "Resume strategy disabled. It will no longer be recommended or selectable.",
-        { scope: jobFinderPendingActions.resumeStrategyDisable(strategyId) },
-      ),
-    onSelectResumeStrategy: (input: SelectResumeStrategyInput) =>
-      void runAction(
-        () => actions.selectResumeStrategy(input),
-        () => undefined,
-        "Strategy chosen for this job. The job's resume still needs its own review and approval before it can be used.",
-        { scope: jobFinderPendingActions.resumeStrategySelect(input.jobId) },
-      ),
-    onRecommendResumeStrategy: async (
-      input: RecommendResumeStrategyInput,
-    ): Promise<ResumeStrategyRecommendation | null> => {
-      const ownerStartRoute = jobFinderStatusRoute;
-      const scope = jobFinderPendingActions.resumeStrategyRecommend(
-        input.jobId,
-      );
-
-      try {
-        return await withPendingScope(scope, () =>
-          actions.recommendResumeStrategy(input),
-        );
-      } catch (error) {
-        applyRouteScopedMessage(
-          {
-            message: getJobFinderErrorMessage(
-              error,
-              "The strategy recommendation could not be loaded.",
-            ),
-          },
-          ownerStartRoute,
-        );
-        return null;
-      }
-    },
-    onSetCampaignResumeStrategyDefault: (
-      input: SetCampaignResumeStrategyDefaultInput,
-    ) =>
-      void runAction(
-        () => actions.setCampaignResumeStrategyDefault(input),
-        () => undefined,
-        input.strategyId === null
-          ? "Campaign default resume strategy cleared."
-          : "Campaign default resume strategy assigned. It only affects future recommendations.",
-        {
-          scope: jobFinderPendingActions.resumeStrategyCampaignDefault(
-            input.campaignId,
-          ),
-        },
       ),
     onSendResumeAssistantMessage: (jobId: string, content: string) =>
       void (async () => {

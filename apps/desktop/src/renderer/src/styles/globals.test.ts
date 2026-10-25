@@ -50,13 +50,6 @@ const collectionSearchToolbarSource = readFileSync(
   ),
   "utf8",
 );
-const safeguardsBoundarySource = readFileSync(
-  new URL(
-    "../features/job-finder/screens/safeguards/safeguards-application-boundary.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
 
 function readToken(scope: string, token: string): string {
   const value = scope.match(
@@ -1709,43 +1702,6 @@ describe("non-text boundary and state contrast (r15)", () => {
     }
   });
 
-  it("paints the Safeguards boundary card on the card surface, not the page canvas", () => {
-    // `bg-background/40` over the page canvas resolves to the canvas colour,
-    // so the card that states the prepare-only safety contract had a 1.00:1
-    // fill delta and only a hairline for a container.
-    expect(safeguardsBoundarySource).toMatch(
-      /border border-\(--surface-panel-border\) bg-card/,
-    );
-    expect(
-      safeguardsBoundarySource,
-      "the boundary card must not be painted the page canvas colour",
-    ).not.toContain("bg-background/40");
-
-    for (const [themeName, theme, canvas] of [
-      ["dark", DARK_THEME, DK.background],
-      ["light", LIGHT_THEME, "#e6e8eb"],
-    ] as const) {
-      const border = readToken(theme, "--surface-panel-border");
-      const card = readToken(theme, "--card");
-
-      expect(card, `${themeName} card fill equals the page canvas`).not.toBe(
-        canvas,
-      );
-      // The finding was the fill, not the edge: the card is now a real
-      // surface against the canvas. Its edge is inert chrome like every
-      // other panel edge, so it carries the band floor, not a 3:1 floor.
-      expect(
-        contrastRatio(border, canvas),
-        `${themeName} boundary-card edge against the page canvas`,
-      ).toBeGreaterThanOrEqual(
-        themeName === "dark" ? PANEL_BOUNDARY_FLOOR_DARK : PANEL_BOUNDARY_FLOOR,
-      );
-      expect(
-        contrastRatio(card, canvas),
-        `${themeName} boundary-card fill against the page canvas`,
-      ).toBeGreaterThan(1.1);
-    }
-  });
 
   it("keeps the boundary ladder monotonic: panel < field < control", () => {
     // Raising these tokens must not collapse the documented hierarchy or

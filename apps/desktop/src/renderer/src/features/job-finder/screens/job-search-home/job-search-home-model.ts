@@ -14,10 +14,6 @@ import {
   PREPARED_PAGE_CLOSED_SUMMARY,
 } from "@nestor/contracts";
 import { deriveSourceHealthSignals } from "@nestor/job-finder/source-health";
-import {
-  AUTOMATIC_APPLICATION_FAILURE_PAUSE_ID,
-  projectPlanSafeguardPauses,
-} from "@nestor/job-finder/plan-safeguard-pauses";
 import type {
   JobFinderTaskCenterItem,
   JobFinderTaskCenterModel,
@@ -27,11 +23,9 @@ import {
   countDiscoveryVisibleJobs,
   countDiscoveryWeakerJobs,
   countNeedsYou,
-  countSafeguardBlockers,
   countShortlistedJobs,
   selectCampaignJobIds,
 } from "../../lib/destination-counts";
-import { listApplyRunsStoppedBySafeguard } from "../../lib/apply-run-pause-state";
 import {
   getDiscoveryRunCountEvidence,
   getDiscoveryRunReportCounts,
@@ -55,7 +49,6 @@ import {
   isAppSideDiscoveryFailure,
 } from "../discovery/discovery-run-feedback";
 import {
-  APPLICATION_PREPARATION_BATCH_LIMIT,
   collectInProgressApplicationJobIds,
   collectPreparedApplicationJobIds,
   countResumeLinesToDecide,
@@ -110,13 +103,11 @@ export interface HomeButton {
 interface HomeNextStep {
   /** Why this is the next step, as a stable id the tests can assert on. */
   id:
-    | "safeguards"
     | "paused"
     | "setup"
     | "sources"
     | "needs_you"
     | "send"
-    | "daily_limit"
     | "retry"
     | "check_closed"
     | "review_resumes"
@@ -801,20 +792,16 @@ function toHomeQueueButton(
   if (!button) return null;
   return {
     label: button.label,
-    action:
-      button.action === "raise_limit"
-        ? { kind: "navigate", route: applyingSettingsRoute }
-        : { kind: "apply_queue", action: button.action },
+    action: { kind: "apply_queue", action: button.action },
   };
 }
 
 /** The Apply queue, first in Happening now, with its two controls. */
 function buildApplyQueueNowItem(
   queue: JobFinderRendererWorkspaceSnapshot["applyQueue"],
-  dailyLimit: number | null,
   results: JobFinderRendererWorkspaceSnapshot["applyJobResults"],
 ): HomeNowItem | null {
-  const view = describeApplyQueue(queue, { dailyLimit, results });
+  const view = describeApplyQueue(queue, { results });
   if (!view) return null;
   return {
     id: "apply-queue",
@@ -1044,8 +1031,6 @@ export function buildJobSearchHomeModel(
   );
   const queueNow = buildApplyQueueNowItem(
     workspace.applyQueue,
-    workspace.dashboard?.globalDailyApplicationPreparationCapacity?.limit ??
-      null,
     workspace.applyJobResults,
   );
   const nowItems = [
@@ -1138,20 +1123,15 @@ export function buildJobSearchHomeModel(
     ),
     input.applicationPageStates,
   );
-  const dailyPreparationRemaining = Math.max(
-    0,
-    workspace.dashboard?.globalDailyApplicationPreparationCapacity?.remaining ??
-      Number.POSITIVE_INFINITY,
-  );
-  // One press queues every job: the Apply queue keeps to ten at a time and
-  // to the daily limit by itself (ADR 0058).
+  // One press queues every job: the Apply queue keeps to ten at a time
+  // by itself (ADR 0058).
   const pressLimit = Number.POSITIVE_INFINITY;
   const queuedJobIds = new Set(
     listApplyQueueWaitingJobIds(workspace.applyQueue),
   );
   // A job its batch never reached goes first when a press covers only some:
   // it has no failed attempt behind it, and it was the one left stranded.
-  const retryJobIdsWithinDailyLimit = [
+  const retryJobIdsForPress = [
     ...applications.retryJobIds.filter((jobId) =>
       applications.notStartedJobIds.includes(jobId),
     ),
@@ -1161,7 +1141,7 @@ export function buildJobSearchHomeModel(
   ]
     .filter((jobId) => !queuedJobIds.has(jobId))
     .slice(0, pressLimit);
-  const readyJobIdsWithinDailyLimit = shortlist.readyJobIds
+  const readyJobIdsForPress = shortlist.readyJobIds
     .filter((jobId) => !queuedJobIds.has(jobId))
     .slice(0, pressLimit);
   /** Why a press covers fewer jobs than are waiting, or null when it covers all. */
@@ -1172,27 +1152,9 @@ export function buildJobSearchHomeModel(
   ): string | null => {
     if (n >= total) return null;
     const others = total - n;
-    return dailyPreparationRemaining <
-      Math.min(total, APPLICATION_PREPARATION_BATCH_LIMIT)
-      ? `Today's limit allows ${plural(n, "application")} now. The others stay in ${stay} for later.`
-      : `Job Finder works through ${APPLICATION_PREPARATION_BATCH_LIMIT} at a time. The other ${others} ${others === 1 ? "stays" : "stay"} in ${stay} for the next press.`;
+    return `The other ${others} ${others === 1 ? "stays" : "stay"} in ${stay} for later.`;
   };
   const needsYouCount = countNeedsYou(workspace);
-  const safeguardPauses = projectPlanSafeguardPauses(
-    workspace.intelligence?.safeguards,
-    workspace.campaigns,
-  );
-  // The same population the sidebar's Safeguards badge counts: a prepared
-  // batch waiting for its sample review, a company cap, a conflict. A sample
-  // review gates further application preparation, not read-only discovery.
-  const safeguardBlockerCount = countSafeguardBlockers(workspace);
-  // A batch a safety limit stopped is a safeguard only until its remaining
-  // jobs start again. With no limit left to settle, "Open Safeguards" only
-  // sent the person on to Applications' "Prepare remaining jobs"; Home offers
-  // that retry itself.
-  const onlyStoppedBatchesHeld =
-    safeguardBlockerCount > 0 &&
-    listApplyRunsStoppedBySafeguard(workspace).length === safeguardBlockerCount;
 
   const runCounts = formatRunCounts(newestRun);
   const runFinished = newestRun?.state === "completed";
@@ -1302,18 +1264,6 @@ export function buildJobSearchHomeModel(
     label: "Change how it applies",
     action: { kind: "navigate", route: applyingSettingsRoute },
   };
-  const dailyLimitNext: HomeNextStep = {
-    id: "daily_limit",
-    title: "Today's preparation limit is reached",
-    detail:
-      "Application preparation can continue after the daily limit resets, or you can change the limit in Applying settings.",
-    primary: {
-      label: "Open Applying settings",
-      action: { kind: "navigate", route: applyingSettingsRoute },
-    },
-    secondary: [searchAgain],
-  };
-  const firstPause = safeguardPauses[0];
 
   // The in-place steps, built once so a blocker card above them can still
   // offer the next one as a second button. "Send 1 application" used to hide
@@ -1321,9 +1271,9 @@ export function buildJobSearchHomeModel(
   const retryNext: HomeNextStep | null =
     applications.retryJobIds.length > 0 && !applyRunning
       ? (() => {
-          const n = retryJobIdsWithinDailyLimit.length;
+          const n = retryJobIdsForPress.length;
           const total = applications.retryJobIds.length;
-          if (n === 0) return dailyLimitNext;
+          if (n === 0) return null;
           const partial = describePartialPress(n, total, "Applications");
           return {
             id: "retry",
@@ -1331,7 +1281,7 @@ export function buildJobSearchHomeModel(
             detail: [
               partial ??
                 describeRetryReason(
-                  retryJobIdsWithinDailyLimit,
+                  retryJobIdsForPress,
                   applications.closedFilledFormJobIds,
                   applications.takenOverJobIds,
                   applications.notStartedJobIds,
@@ -1352,7 +1302,7 @@ export function buildJobSearchHomeModel(
                     : `${retryWord(input.applicationAutomationMode)} for all ${n}`,
               action: {
                 kind: "apply_all",
-                jobIds: retryJobIdsWithinDailyLimit,
+                jobIds: retryJobIdsForPress,
               },
             },
             secondary: [
@@ -1367,9 +1317,9 @@ export function buildJobSearchHomeModel(
   const applyNext: HomeNextStep | null =
     shortlist.readyToApply > 0 && !applyRunning
       ? (() => {
-          const n = readyJobIdsWithinDailyLimit.length;
+          const n = readyJobIdsForPress.length;
           const total = shortlist.readyToApply;
-          if (n === 0) return dailyLimitNext;
+          if (n === 0) return null;
           const partial = describePartialPress(n, total, "Shortlisted");
           return {
             id: "apply",
@@ -1387,7 +1337,7 @@ export function buildJobSearchHomeModel(
                     : `Apply to all ${n}`,
               action: {
                 kind: "apply_all",
-                jobIds: readyJobIdsWithinDailyLimit,
+                jobIds: readyJobIdsForPress,
               },
             },
             secondary: [
@@ -1463,7 +1413,7 @@ export function buildJobSearchHomeModel(
     retryNext,
     resumesWriting ? null : applyNext,
     createNext,
-  ].find((candidate) => candidate !== null && candidate.id !== "daily_limit");
+  ].find((candidate) => candidate !== null);
   // As a second button on another card the title is not there to say how
   // many, so the label carries the count ("Try again" alone beside "Send 5
   // applications" did not say it meant 1 of the 3 that failed).
@@ -1480,12 +1430,7 @@ export function buildJobSearchHomeModel(
           input.applicationAutomationMode,
         ),
       }
-    : retryNext?.id === "daily_limit" || applyNext?.id === "daily_limit"
-      ? {
-          label: "Change today's limit",
-          action: { kind: "navigate", route: applyingSettingsRoute },
-        }
-      : undefined;
+    : undefined;
 
   // Why the newest search failed, when every source it tried failed for a
   // reason searching again cannot fix (an address that leads to a missing
@@ -1559,66 +1504,11 @@ export function buildJobSearchHomeModel(
             ]
           : [],
     };
-  } else if (firstPause) {
-    next = {
-      id: "safeguards",
-      title: firstPause.id.startsWith(
-        `${AUTOMATIC_APPLICATION_FAILURE_PAUSE_ID}:`,
-      )
-        ? "A safeguard paused application work"
-        : "A safeguard paused your search plan",
-      detail: firstPause.explanation,
-      primary: {
-        label: "Open Safeguards",
-        action: { kind: "navigate", route: firstPause.route },
-      },
-      secondary: [],
-    };
-  } else if (
-    onlyStoppedBatchesHeld &&
-    retryNext?.id === "retry" &&
-    needsYouCount === 0
-  ) {
-    next = {
-      ...retryNext,
-      detail: retryNext.detail.startsWith("The batch stopped before")
-        ? retryNext.detail.replace(
-            "The batch stopped before",
-            "A safety limit stopped the batch before",
-          )
-        : `A safety limit stopped your last batch. ${retryNext.detail}`,
-      secondary: [
-        ...retryNext.secondary,
-        {
-          label: "Open Safeguards",
-          action: { kind: "navigate", route: "/job-finder/safeguards" },
-        },
-      ],
-    };
-  } else if (safeguardBlockerCount > 0) {
-    next = {
-      id: "safeguards",
-      title:
-        safeguardBlockerCount === 1
-          ? "A safeguard is waiting on you"
-          : `${safeguardBlockerCount} safeguards are waiting on you`,
-      detail:
-        "Job Finder held some application work back until you decide. Safeguards says why and what carries it on; searches carry on meanwhile.",
-      primary: {
-        label: "Open Safeguards",
-        action: { kind: "navigate", route: "/job-finder/safeguards" },
-      },
-      // The stopped batch's remaining jobs stay one press away.
-      secondary:
-        onlyStoppedBatchesHeld && retryNext?.id === "retry"
-          ? [retryNext.primary]
-          : [],
-    };
   } else if (setupIncomplete) {
     next = setupFresh
       ? {
-          id: "setup",
-          title: "Set up your profile",
+      id: "setup",
+      title: "Set up your profile",
           detail:
             "Import your resume and tell Job Finder what you're looking for. Takes about five minutes.",
           primary: {
@@ -1626,8 +1516,7 @@ export function buildJobSearchHomeModel(
             action: { kind: "navigate", route: profileSetupRoute },
           },
           secondary: [],
-        }
-      : {
+        }: {
           id: "setup",
           title: "Finish setting up",
           detail: firstSetupBlocker

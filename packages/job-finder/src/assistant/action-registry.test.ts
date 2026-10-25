@@ -82,13 +82,6 @@ describe("registered user actions", () => {
       "verifySourceInstructions",
       ["t", "i"],
     ],
-    ["refresh-company-intelligence", {}, "refreshCompanyIntelligence", []],
-    [
-      "set-company-preference",
-      { companyId: "c", preference: "follow" },
-      "setCompanyPreference",
-      [{ companyId: "c", preference: "follow" }],
-    ],
     [
       "delete-campaign",
       { campaignId: "c" },
@@ -106,12 +99,6 @@ describe("registered user actions", () => {
       { campaignId: "c", ruleId: "r", enabled: false },
       "toggleCampaignRule",
       [{ campaignId: "c", ruleId: "r", enabled: false }],
-    ],
-    [
-      "disable-resume-strategy",
-      { strategyId: "s" },
-      "disableResumeStrategy",
-      ["s"],
     ],
     [
       "regenerate-resume-section",

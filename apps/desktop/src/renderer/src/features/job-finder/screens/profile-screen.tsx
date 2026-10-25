@@ -12,6 +12,8 @@ import type {
   ProfileSetupStep,
   ResumeImportFieldCandidateSummary,
   ResumeImportProgressEvent,
+  ResumeApplicationMode,
+  ResumeApproach,
   ResumeImportRun,
   ResumeTimelineRepairAction,
   SourceDebugRunDetails,
@@ -162,6 +164,11 @@ export function ProfileScreen(props: {
   activeDiscoveryRun?: DiscoveryRunRecord | null;
   discoveryRuns?: readonly DiscoveryRunRecord[];
   recentSourceDebugRuns: readonly SourceDebugRunRecord[];
+  /** The resume level preference lives in Profile (Preferences tab). */
+  resumeApplicationMode?: ResumeApplicationMode | null | undefined;
+  onUpdateResumeApproach?: (
+    approach: ResumeApproach,
+  ) => Promise<boolean | void> | void;
   searchPreferences: JobSearchPreferences;
   sourceAccessPrompts: JobFinderRendererWorkspaceSnapshot["sourceAccessPrompts"];
   sourceInstructionArtifacts: readonly SourceInstructionArtifact[];
@@ -191,6 +198,8 @@ export function ProfileScreen(props: {
     activeDiscoveryRun = null,
     discoveryRuns = [],
     recentSourceDebugRuns,
+    resumeApplicationMode,
+    onUpdateResumeApproach,
     searchPreferences,
     sourceAccessPrompts,
     sourceInstructionArtifacts,
@@ -908,6 +917,12 @@ export function ProfileScreen(props: {
                     onVerifySourceInstructions={onVerifySourceInstructions}
                     preferencesForm={preferencesForm}
                     profileForm={profileForm}
+                    {...(onUpdateResumeApproach
+                      ? {
+                          onResumeApproachChange: onUpdateResumeApproach,
+                          resumeApplicationMode,
+                        }
+                      : {})}
                     recentSourceDebugRuns={recentSourceDebugRuns}
                     sourceAccessPrompts={sourceAccessPrompts}
                     sourceInstructionArtifacts={sourceInstructionArtifacts}

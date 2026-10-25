@@ -571,7 +571,6 @@ export function createJobFinderApplicationAuthorityService(
           mode: parsedInput.mode,
           scope: parsedInput.scope,
           maxApplicationsPerRun: parsedInput.maxApplicationsPerRun,
-          maxApplicationsPerLocalDay: parsedInput.maxApplicationsPerLocalDay,
           intermediateMutationsAuthorized:
             parsedInput.intermediateMutationsAuthorized,
           accountCreationAuthorized: false,
@@ -628,7 +627,6 @@ export function createJobFinderApplicationAuthorityService(
           mode: parsedInput.mode,
           scope: parsedInput.scope,
           maxApplicationsPerRun: parsedInput.maxApplicationsPerRun,
-          maxApplicationsPerLocalDay: parsedInput.maxApplicationsPerLocalDay,
           intermediateMutationsAuthorized:
             parsedInput.intermediateMutationsAuthorized,
           accountCreationAuthorized: false,

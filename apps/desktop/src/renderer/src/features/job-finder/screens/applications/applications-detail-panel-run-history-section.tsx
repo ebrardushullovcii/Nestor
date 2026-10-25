@@ -80,7 +80,6 @@ function RunHistoryEntry(props: {
       <p className="min-w-0 break-words [overflow-wrap:anywhere] text-(length:--text-small) leading-5 text-foreground-soft">
         {
           resolveApplicationRecoveryPresentation({
-            canOpenSafeguards: false,
             isApplyPending: false,
             run: run
               ? { state: run.state, activityPaused: false, started: true }

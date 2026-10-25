@@ -63,7 +63,8 @@ it.each([false, true])(
   },
 );
 
-type ApplyResult = JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
+type ApplyResult =
+  JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
 
 function buildResult(overrides: Partial<ApplyResult>): ApplyResult {
   return {
@@ -103,7 +104,6 @@ function renderSection(
     <ApplicationsDetailPanelRecoveryActionsSection
       canRestageAutoRun
       canRestageQueueRun={false}
-      dailyPreparationCapacity={null}
       excludedQueueRecoveryEntries={[]}
       isApplyPending={false}
       onStartApplyCopilot={vi.fn()}
@@ -174,7 +174,6 @@ describe("ApplicationsDetailPanelRecoveryActionsSection", () => {
       expectedLabel: string | null;
       result: ApplyResult | null;
       isApplyPending?: boolean;
-      onOpenSafeguards?: () => void;
     }> = [
       {
         name: "preparing",
@@ -192,8 +191,7 @@ describe("ApplicationsDetailPanelRecoveryActionsSection", () => {
       },
       {
         name: "site blocked",
-        expectedLabel: "Open Safeguards to reset the Job Finder browser",
-        onOpenSafeguards: vi.fn(),
+        expectedLabel: "Open the Job Finder browser",
         result: buildResult({
           blockerSummary: "The page service worker blocked the run.",
         }),
@@ -228,9 +226,6 @@ describe("ApplicationsDetailPanelRecoveryActionsSection", () => {
       const { container, unmount } = renderSection({
         isApplyPending: testCase.isApplyPending ?? false,
         visibleApplyResult: testCase.result,
-        ...(testCase.onOpenSafeguards
-          ? { onOpenSafeguards: testCase.onOpenSafeguards }
-          : {}),
       });
 
       const primaries = primaryButtonLabels(container);
@@ -588,7 +583,6 @@ it("drops the browser-finish instruction as soon as the same application is subm
   const baseProps = {
     canRestageAutoRun: false,
     canRestageQueueRun: false,
-    dailyPreparationCapacity: null,
     excludedQueueRecoveryEntries: [],
     isApplyPending: false,
     onStartApplyCopilot: vi.fn(),

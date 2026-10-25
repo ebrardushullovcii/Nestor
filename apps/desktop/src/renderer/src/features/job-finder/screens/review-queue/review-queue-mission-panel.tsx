@@ -11,7 +11,6 @@ import type {
   JobFinderApplicationStartTarget,
   JobFinderRendererWorkspaceSnapshot,
   BrowserSessionState,
-  GlobalDailyApplicationPreparationCapacity,
   ResumeApplicationMode,
   TailoringMode,
   ResumeSourceDocument,
@@ -22,7 +21,6 @@ import type {
 import { Button, ProgressBar } from "@renderer/components/ui";
 import { cn } from "@renderer/lib/cn";
 import { openUrlInJobFinderBrowser } from "../../components/open-outside-links";
-import { formatDailyPreparationCapacitySummaryText } from "../../lib/job-finder-daily-capacity";
 import {
   formatResumeOperationElapsed,
   RESUME_DRAFT_EXPECTED_WAIT_LABEL,
@@ -41,9 +39,6 @@ import {
   type ResumeRunStage,
 } from "./review-queue-status";
 
-const dailyCapacityLimitDescriptionId =
-  "employer-application-daily-capacity-limit";
-
 interface ReviewQueueMissionPanelProps {
   actionMessage: string | null;
   applicationAutomationMode?: ApplicationAutomationMode;
@@ -51,7 +46,6 @@ interface ReviewQueueMissionPanelProps {
   browserSession: BrowserSessionState;
   /** Seconds the current resume run has been going. */
   pendingElapsedSeconds: number;
-  globalDailyApplicationPreparationCapacity?: GlobalDailyApplicationPreparationCapacity | null;
   isApplyPending: boolean;
   /** All work is paused: Apply waits for Continue, as the list's buttons do. */
   applicationWorkPaused?: boolean;
@@ -66,12 +60,8 @@ interface ReviewQueueMissionPanelProps {
   onOpenJobDetails: (jobId: string) => void;
   onOpenApplication?: (recordId: string) => void;
   onOpenProfile: () => void;
-  /** Takes the person to Safeguards when one is holding preparation back. */
-  onOpenSafeguards?: () => void;
   /** Live apply results, so the start control follows the run record. */
   applyJobResults?: JobFinderRendererWorkspaceSnapshot["applyJobResults"];
-  /** A safeguard holding preparation back, in plain words. */
-  safeguardBlocker?: string | null;
   onClaimResumeIdentity?: () => void;
   onKeepResumeIdentity?: () => void;
   onRemoveReviewJob: (jobId: string) => void;
@@ -158,7 +148,6 @@ export function ReviewQueueMissionPanel({
   applicationRecords,
   browserSession,
   pendingElapsedSeconds,
-  globalDailyApplicationPreparationCapacity = null,
   isApplyPending,
   applicationWorkPaused = false,
   isJobPending,
@@ -171,9 +160,7 @@ export function ReviewQueueMissionPanel({
   onOpenJobDetails,
   onOpenApplication = () => undefined,
   onOpenProfile,
-  onOpenSafeguards,
   applyJobResults = [],
-  safeguardBlocker = null,
   onRemoveReviewJob,
   onMoveResumesBackToReview,
   onTakeOutOfApplyQueue,
@@ -198,7 +185,6 @@ export function ReviewQueueMissionPanel({
     isApplyPending,
     isJobPending,
     isSelectedJobPendingTooLong,
-    safeguardBlocker,
     selectedApplyResult:
       applyJobResults.find(
         (result) =>
@@ -266,9 +252,6 @@ export function ReviewQueueMissionPanel({
       case "open_resume_workspace":
         onEditResumeWorkspace(selectedItem.jobId);
         return;
-      case "open_safeguards":
-        onOpenSafeguards?.();
-        return;
     }
   };
 
@@ -291,11 +274,6 @@ export function ReviewQueueMissionPanel({
     !needsTailoredResume &&
     primaryApplicationAction.kind !== "approve_resume" &&
     primaryApplicationAction.recovery?.kind !== "open_resume_workspace";
-  const dailyCapacityExhausted =
-    globalDailyApplicationPreparationCapacity?.remaining === 0;
-  const dailyCapacityDescription = formatDailyPreparationCapacitySummaryText(
-    globalDailyApplicationPreparationCapacity,
-  );
   const showsApplyOutcome =
     primaryApplicationAction.kind === "start_apply" ||
     primaryApplicationAction.kind === "approve_and_apply";
@@ -567,8 +545,7 @@ export function ReviewQueueMissionPanel({
             className="text-(length:--text-small) leading-6 text-foreground-soft"
             data-testid="shortlisted-state-line"
           >
-            Waiting in the apply queue. It starts by itself within your daily
-            limit.
+            Waiting in the apply queue. It starts by itself when its turn comes.
           </p>
         ) : aiUnavailableLine || readinessDescription ? (
           <p
@@ -672,8 +649,6 @@ export function ReviewQueueMissionPanel({
               variant="primary"
               disabled={
                 !primaryApplicationAction.enabled ||
-                (primaryApplicationAction.kind === "start_apply" &&
-                  dailyCapacityExhausted) ||
                 (showsApplyOutcome && applicationWorkPaused)
               }
               title={
@@ -682,11 +657,6 @@ export function ReviewQueueMissionPanel({
                   : undefined
               }
               onClick={() => {
-                if (primaryApplicationAction.kind === "open_safeguards") {
-                  onOpenSafeguards?.();
-                  return;
-                }
-
                 if (primaryApplicationAction.kind === "generate_resume") {
                   void onGenerateResume(selectedItem.jobId);
                   return;
@@ -835,19 +805,7 @@ export function ReviewQueueMissionPanel({
         ) : null}
         {/* Quiet capacity fact below the actions, and only where it can
             change a decision. */}
-        {!existingApplication &&
-        dailyCapacityDescription &&
-        (primaryApplicationAction.kind === "start_apply" ||
-          dailyCapacityExhausted) ? (
-          <p
-            className="min-w-0 break-words text-(length:--text-tiny) leading-5 text-foreground-muted"
-            data-testid="daily-application-preparation-capacity"
-            id={dailyCapacityLimitDescriptionId}
-            role="note"
-          >
-            {dailyCapacityDescription}
-          </p>
-        ) : null}
+
         {/* The box above already says it; the same news twice read as
             two problems. */}
         {actionMessage &&

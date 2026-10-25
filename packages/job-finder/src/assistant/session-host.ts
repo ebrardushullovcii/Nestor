@@ -232,7 +232,10 @@ function titleFrom(text: string): string {
 }
 
 export class AssistantSessionHost {
-  private readonly resolvingProposals = new Map<string, Promise<AssistantMessage>>();
+  private readonly resolvingProposals = new Map<
+    string,
+    Promise<AssistantMessage>
+  >();
   private readonly navigationRequests = new Map<
     string,
     {
@@ -656,7 +659,10 @@ export class AssistantSessionHost {
       else if (run.kind === "apply_batch" || run.kind === "apply_run") {
         await this.service.cancelApplyRun(run.id);
       } else if (run.kind === "apply_queue") {
-        await this.ports.executeAction?.("control-apply-queue", { action: "stop", queueId: run.id });
+        await this.ports.executeAction?.("control-apply-queue", {
+          action: "stop",
+          queueId: run.id,
+        });
       } else if (run.kind === "source_check") {
         await this.service.cancelSourceDebug(run.id);
       } else if (run.kind === "resume_generation")
@@ -746,7 +752,9 @@ export class AssistantSessionHost {
       mode: catalogMode,
       browserAvailable: Boolean(this.ports.browser),
       screen: live.sourceMessage?.context?.screen ?? null,
-      onLoadToolNames: (names: readonly string[]) => { for (const name of names) loadedToolNames.add(name); },
+      onLoadToolNames: (names: readonly string[]) => {
+        for (const name of names) loadedToolNames.add(name);
+      },
       onLoadGroups: (groups: readonly AssistantToolGroup[]) => {
         for (const group of groups) loadedGroups.add(group);
       },
@@ -1369,7 +1377,9 @@ export class AssistantSessionHost {
             resultSummary:
               outcome.kind === "ok"
                 ? outcome.content.split("\n")[0]!.slice(0, 2_000)
-                : outcome.kind === "finish" ? outcome.finish.reason : null,
+                : outcome.kind === "finish"
+                  ? outcome.finish.reason
+                  : null,
             endedAt: this.now(),
           });
           return outcome;
@@ -2335,17 +2345,23 @@ export class AssistantSessionHost {
   // Proposals and undo
   // ---------------------------------------------------------------------------
 
-  resolveProposal(input: AssistantResolveProposalInput): Promise<AssistantMessage> {
+  resolveProposal(
+    input: AssistantResolveProposalInput,
+  ): Promise<AssistantMessage> {
     const key = `${input.conversationId}:${input.proposalId}`;
     const existing = this.resolvingProposals.get(key);
     if (existing) return existing;
     const work = this.resolveProposalOnce(input);
     this.resolvingProposals.set(key, work);
-    void work.finally(() => this.resolvingProposals.delete(key)).catch(() => undefined);
+    void work
+      .finally(() => this.resolvingProposals.delete(key))
+      .catch(() => undefined);
     return work;
   }
 
-  private async resolveProposalOnce(input: AssistantResolveProposalInput): Promise<AssistantMessage> {
+  private async resolveProposalOnce(
+    input: AssistantResolveProposalInput,
+  ): Promise<AssistantMessage> {
     let afterConfirmation: (() => Promise<unknown>) | null = null;
     const message = await this.repository.getMessage(input.messageId);
     if (!message || message.conversationId !== input.conversationId) {
@@ -2411,11 +2427,21 @@ export class AssistantSessionHost {
       if (proposal.kind === "job_finder_action") {
         if (proposal.status !== "pending") return message;
         for (const item of chosen) {
-          const work = () => executeRegisteredAssistantAction(item.payload, {
-            service: this.service, ports: this.ports, session,
-          }, true);
+          const work = () =>
+            executeRegisteredAssistantAction(
+              item.payload,
+              {
+                service: this.service,
+                ports: this.ports,
+                session,
+              },
+              true,
+            );
           const payload = item.payload as { actionId?: string };
-          if (payload.actionId === "reset-workspace" || payload.actionId === "confirm-personal-workspace-restore") {
+          if (
+            payload.actionId === "reset-workspace" ||
+            payload.actionId === "confirm-personal-workspace-restore"
+          ) {
             afterConfirmation = work;
           } else {
             const result = await work();
@@ -2503,15 +2529,26 @@ export class AssistantSessionHost {
     // Reset and restore replace this conversation; finish its confirmation first.
     if (afterConfirmation) {
       try {
-        const result = await afterConfirmation() as { status?: string; summary?: string };
+        const result = (await afterConfirmation()) as {
+          status?: string;
+          summary?: string;
+        };
         if (result.status === "refused") throw new Error(result.summary);
       } catch (error) {
         // A failed replacement keeps the original conversation and its retry card.
         if (await this.repository.getMessage(message.id)) {
           const proposal = await this.repository.getProposal(part.proposalId);
-          if (proposal) await this.repository.upsertProposal({ ...proposal, status: "pending", resolvedAt: null });
+          if (proposal)
+            await this.repository.upsertProposal({
+              ...proposal,
+              status: "pending",
+              resolvedAt: null,
+            });
           await this.repository.upsertMessage(message);
-          await this.emit(input.conversationId, null, { type: "message_updated", message });
+          await this.emit(input.conversationId, null, {
+            type: "message_updated",
+            message,
+          });
         }
         throw error;
       }
@@ -2728,15 +2765,6 @@ export class AssistantSessionHost {
         id: draft.jobId,
         label: `Resume for ${job.title} at ${job.company}`.slice(0, 300),
         detail: draft.status,
-      });
-    }
-    for (const company of snapshot.intelligence.companies ?? []) {
-      if (!hit(company.canonicalName)) continue;
-      candidates.push({
-        kind: "company",
-        id: company.id,
-        label: company.canonicalName.slice(0, 300),
-        detail: null,
       });
     }
     try {

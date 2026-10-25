@@ -351,13 +351,13 @@ describe("ReviewQueueListPanel", () => {
 
   it("says under Apply to all which saved mode the batch runs in", () => {
     renderPanel({
-      applyAllOutcome: describeApplyAllOutcome("autonomous_submit", 20),
+      applyAllOutcome: describeApplyAllOutcome("autonomous_submit"),
       onApplyToJobs: vi.fn(),
       queue: [createReadyItem("job_a"), createReadyItem("job_b")],
     });
 
     expect(screen.getByTestId("apply-all-outcome").textContent).toBe(
-      "Sends each application for you and stops only for one that needs you. Ten at a time, up to 20 a day, with no more presses.",
+      "Sends each application for you and stops only for one that needs you. Ten at a time, with no more presses.",
     );
   });
 
@@ -455,24 +455,6 @@ describe("ReviewQueueListPanel", () => {
     expect(message).toContain("Wrote 2 resumes; 1 failed.");
     expect(message).not.toContain("Nothing was sent.");
     expect(message).not.toMatch(/approved|queued|submitted/i);
-  });
-
-  it("replaces Apply to all with Open Safeguards while a safeguard holds, without internal codes", () => {
-    const onOpenSafeguards = vi.fn();
-    renderPanel({
-      onApplyToJobs: vi.fn(),
-      onOpenSafeguards,
-      queue: [createReadyItem("job_a"), createReadyItem("job_b")],
-      safeguardBlocker:
-        "Automatic runs are paused (abnormal_failure_pause: automatic_discovery_failures:campaign_default).",
-    });
-
-    expect(screen.queryByRole("button", { name: /Apply to all/ })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Open Safeguards" }));
-    expect(onOpenSafeguards).toHaveBeenCalledOnce();
-    expect(screen.getByTestId("apply-all-blocker").textContent).toBe(
-      "Automatic runs are paused.",
-    );
   });
 
   it("shows state-aware resume captions instead of always promising a future draft", () => {

@@ -1,7 +1,4 @@
-import { APPLICATION_BOUNDARY_SENTENCE } from "../safeguards/safeguards-application-boundary";
 import { useEffect, useId, useState } from "react";
-import { Field, FieldLabel } from "@renderer/components/ui/field";
-import { Input } from "@renderer/components/ui/input";
 import {
   APPLY_MODE_OPTIONS,
   ChoiceCards,
@@ -11,12 +8,6 @@ import type {
   ApplicationSalaryDisclosureRule,
   ApplicationAutomationMode,
 } from "@nestor/contracts";
-import { useRegisterSettingsDirtySection } from "./settings-dirty-sections";
-import {
-  hasOutstandingSectionChanges,
-  useSettingsSectionSave,
-} from "./settings-section-save";
-import { SettingsSectionSaveControl } from "./settings-section-save-control";
 
 /**
  * What every Apply and Apply to all does from now on, said once the choice
@@ -55,19 +46,14 @@ type ModeSaveState = {
  * The mode is one switch (ADR 0022): pressing a card saves it. It used to
  * wait for a separate Save button further down, and a person who picked
  * "Send for me" and went back to Home lost the choice without a word; the
- * next Apply to all then ran in the old mode. The daily limit is typed, so
- * it keeps its own Save and joins the page's unsaved-changes bar.
+ * next Apply to all then ran in the old mode.
  */
 export function SettingsApplyModeSection(props: {
   headingId?: string;
   /** The saved mode; the switch is off until the person turns it on. */
   mode: ApplicationAutomationMode;
-  /** The existing daily cap on applications, kept from ADR 0012. */
-  maxApplicationsPerLocalDay: number;
   onSave: (input: {
-    mode: ApplicationAutomationMode;
-    maxApplicationsPerLocalDay: number;
-  }) => void | Promise<void>;
+    mode: ApplicationAutomationMode }) => void | Promise<void>;
   salaryDisclosure?: ApplicationSalaryDisclosureRule;
   onSaveSalaryDisclosure?: (
     value: ApplicationSalaryDisclosureRule,
@@ -100,44 +86,18 @@ export function SettingsApplyModeSection(props: {
       })
       .finally(() => setPaySaving(false));
   };
-  const dailyCapId = useId();
-  const dailyCapErrorId = useId();
   const [selectedMode, setSelectedMode] = useState(mode);
   const [modeSave, setModeSave] = useState<ModeSaveState>({
     status: "idle",
     message: null,
   });
-  const [dailyCap, setDailyCap] = useState(
-    String(props.maxApplicationsPerLocalDay),
-  );
-  const {
-    resetSectionSave: resetCapSave,
-    runSectionSave: runCapSave,
-    saveState: capSaveState,
-  } = useSettingsSectionSave();
+  const modeSaving = modeSave.status === "saving";
 
   useEffect(() => {
     setSelectedMode(mode);
   }, [mode]);
-  useEffect(() => {
-    setDailyCap(String(props.maxApplicationsPerLocalDay));
-  }, [props.maxApplicationsPerLocalDay]);
-
-  const parsedCap = Number(dailyCap);
-  const capIsValid =
-    /^\d+$/.test(dailyCap) && Number.isSafeInteger(parsedCap) && parsedCap > 0;
-  const capIsDirty = capIsValid
-    ? parsedCap !== props.maxApplicationsPerLocalDay
-    : dailyCap !== String(props.maxApplicationsPerLocalDay);
-  const capSaving = capSaveState.status === "saving";
-  const capIsOutstanding = hasOutstandingSectionChanges(
-    capIsDirty,
-    capSaveState,
-  );
-  const modeSaving = modeSave.status === "saving";
-
   const chooseMode = (value: ApplicationAutomationMode) => {
-    if (isSaving || modeSaving || capSaving) return;
+    if (isSaving || modeSaving) return;
     if (value === mode && modeSave.status !== "failed") {
       setSelectedMode(value);
       return;
@@ -148,8 +108,6 @@ export function SettingsApplyModeSection(props: {
     void startSave(() =>
       onSave({
         mode: value,
-        // The saved limit, never a half-typed one: only the mode was chosen.
-        maxApplicationsPerLocalDay: props.maxApplicationsPerLocalDay,
       }),
     ).then(
       () => {
@@ -166,38 +124,6 @@ export function SettingsApplyModeSection(props: {
     );
   };
 
-  const saveDailyCap = () => {
-    if (!capIsOutstanding || !capIsValid || isSaving || capSaving || modeSaving) {
-      return;
-    }
-    // The mode the person last picked, so a limit saved moments after a
-    // mode change can never put the old mode back.
-    const maxApplicationsPerLocalDay = parsedCap;
-    void runCapSave({
-      execute: () =>
-        startSave(() =>
-          onSave({ mode: selectedMode, maxApplicationsPerLocalDay }),
-        ),
-      failedMessage: "The daily limit did not save. Try again.",
-      savedMessage: `Saved. Apply stops after ${maxApplicationsPerLocalDay} ${maxApplicationsPerLocalDay === 1 ? "application" : "applications"} a day.`,
-    });
-  };
-
-  // One save for the typed limit, in the section header like every other
-  // Settings section; the page's unsaved-changes bar names it when the
-  // person scrolls away. A second "Save daily limit" under the field used to
-  // sit right above the bar's own button with the same name.
-  useRegisterSettingsDirtySection({
-    anchorId: "settings-application-authority",
-    isDirty: capIsOutstanding,
-    isSaveDisabled: !capIsValid || isSaving || modeSaving,
-    isSaving: capSaving,
-    label: "Applying",
-    onSave: saveDailyCap,
-    order: 2.5,
-    saveLabel: "Save daily limit",
-  });
-
   return (
     <section className="surface-panel-shell grid min-w-0 content-start gap-4 rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-4">
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
@@ -213,18 +139,11 @@ export function SettingsApplyModeSection(props: {
             Apply and Apply to all uses it until you change it here.
           </p>
         </div>
-        <SettingsSectionSaveControl
-          hasUnsavedChanges={capIsDirty}
-          isSaveDisabled={!capIsValid || isSaving || modeSaving}
-          onSave={saveDailyCap}
-          saveState={capSaveState}
-          subject="daily limit"
-        />
       </div>
 
       <ChoiceCards
         aria-label="Default application mode"
-        disabled={isSaving || modeSaving || capSaving}
+        disabled={isSaving || modeSaving}
         onChange={chooseMode}
         options={APPLY_MODE_OPTIONS}
         value={selectedMode}
@@ -244,7 +163,10 @@ export function SettingsApplyModeSection(props: {
       ) : null}
 
       <p className="text-sm leading-5 text-foreground-soft">
-        {APPLICATION_BOUNDARY_SENTENCE}
+        Job Finder fills applications and sends them only with your permission.
+        It never asks for a password. If you provide sign-in details and
+        authorize their use, it may use them for that task without saving them.
+        You control account creation; CAPTCHA and MFA stay with you.
       </p>
 
       <div className="grid gap-2 border-t border-(--surface-panel-border) pt-4">
@@ -277,40 +199,6 @@ export function SettingsApplyModeSection(props: {
           </p>
         ) : null}
       </div>
-
-      <p className="text-sm text-foreground-soft">
-        Each preparation that starts uses one slot, including failed attempts
-        and retries. If the employer page never opens, no slot is used. Filling
-        answers in an existing prepared form uses no new slot. Confirmed sends
-        are counted separately.
-      </p>
-      <Field>
-        <FieldLabel htmlFor={dailyCapId}>
-          Most preparations in one day
-        </FieldLabel>
-        <Input
-          aria-describedby={!capIsValid ? dailyCapErrorId : undefined}
-          aria-invalid={!capIsValid}
-          disabled={isSaving || capSaving || modeSaving}
-          id={dailyCapId}
-          min="1"
-          step="1"
-          onChange={(event) => {
-            setDailyCap(event.target.value);
-            resetCapSave();
-          }}
-          type="number"
-          value={dailyCap}
-        />
-        {!capIsValid ? (
-          <p
-            className="text-sm leading-5 text-foreground-soft"
-            id={dailyCapErrorId}
-          >
-            Enter a whole number of 1 or more.
-          </p>
-        ) : null}
-      </Field>
     </section>
   );
-}
+    }

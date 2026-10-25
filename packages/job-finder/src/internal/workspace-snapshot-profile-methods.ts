@@ -1,5 +1,4 @@
 import { withResumeBatchLiveness } from "./resume-batch-checkpoint";
-import { groupCompanyConflicts } from "./same-company-sends";
 import { readPlanAssessment } from "./plan-assessment";
 import { readSalaryDisclosurePreference } from "./salary-disclosure-preference";
 import { hasVerifiedApplicationSubmission } from "./workspace-apply-run-support";
@@ -137,10 +136,6 @@ import {
 } from "./listing-activity";
 import { createSyncedJobIdentityIndex } from "./discovery-run-indexes";
 import { warmDiscoveryLedgerIndex } from "./workspace-discovery-ledger";
-import {
-  deriveGlobalDailyApplicationPreparationCapacity,
-  MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
-} from "./application-preparation-capacity";
 import { memoizeSortedBySameElements } from "./same-elements-memo";
 import { settleStoredResumeDrafts } from "./resume-settle-stored-drafts";
 import { rebindLegacyFitVerdicts } from "./legacy-fit-fingerprints";
@@ -1687,33 +1682,7 @@ export function createWorkspaceSnapshotProfileMethods(
         );
       });
 
-    // Grouping needs every job; the full snapshot does it.
-    let intelligence = homeTier
-      ? rawIntelligence
-      : groupCompanyConflicts(
-          rawIntelligence,
-          applicationRecords,
-          rawSavedJobs,
-        );
-    if (
-      intelligence !== rawIntelligence &&
-      JSON.stringify(intelligence) !== JSON.stringify(rawIntelligence)
-    ) {
-      intelligence = await ctx.withIntelligenceTransition(async () => {
-        const current = await ctx.repository.getIntelligenceState();
-        const grouped = groupCompanyConflicts(
-          current,
-          applicationRecords,
-          rawSavedJobs,
-        );
-        if (
-          grouped !== current &&
-          JSON.stringify(grouped) !== JSON.stringify(current)
-        )
-          await ctx.repository.saveIntelligenceState(grouped);
-        return grouped;
-      });
-    }
+    const intelligence = rawIntelligence;
 
     const availableResumeTemplates = ctx.documentManager.listResumeTemplates();
     const normalizedSettings = normalizeJobFinderSettings(
@@ -2112,18 +2081,6 @@ export function createWorkspaceSnapshotProfileMethods(
       searchPreferences: setupContext.searchPreferences,
       sourceAccessPrompts,
     });
-    dashboard.globalDailyApplicationPreparationCapacity =
-      deriveGlobalDailyApplicationPreparationCapacity({
-        applyRuns,
-        applyJobResults,
-        limit:
-          settings.maxApplicationsPerLocalDay ??
-          MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
-        // An application prepared outside an apply run leaves only its
-        // record, and the day's counter has to see it.
-        applicationRecords: orderedApplicationRecords,
-        now: new Date(generatedAt),
-      });
 
     const listableIntelligence = {
       ...withResumeBatchLiveness(ctx.repository, intelligence),
@@ -3075,7 +3032,6 @@ export function createWorkspaceSnapshotProfileMethods(
           fontPreset: parsedInput.fontPreset,
           coverLetter: parsedInput.coverLetter,
           applicationAutomationMode: parsedInput.applicationAutomationMode,
-          maxApplicationsPerLocalDay: parsedInput.maxApplicationsPerLocalDay,
           salaryDisclosure: parsedInput.salaryDisclosure,
         }),
       );

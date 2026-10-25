@@ -1,19 +1,13 @@
-import { groupCompanyConflicts } from "./same-company-sends";
-import { createHash } from "node:crypto";
-
 import {
   ApplyJobResultSchema,
   ApplyRunSchema,
-  ApplicationRecordSchema,
   DiscoveryRunRecordSchema,
   JobFinderIntelligenceStateSchema,
   SourceDebugRunRecordSchema,
   SourceDebugWorkerAttemptSchema,
   type ApplyJobResult,
   type ApplyRun,
-  type ApplicationRecord,
   type DiscoveryRunRecord,
-  type JobFinderIntelligenceState,
   type JobSearchCampaign,
   type SavedJob,
   type SourceDebugRunRecord,
@@ -26,20 +20,12 @@ import {
   type CampaignWorkFailureEvidence,
 } from "./campaign-digest-notifications";
 import {
-  applyCompanyApplicationEvidence,
   recordAbnormalFailureEvidence,
   recordListingSignal,
-  recordSimultaneousApplicationConflict,
-  type CompanyApplicationEvidence,
   type FailureAttemptEvidence,
   type ListingSignalInput,
 } from "./safeguard-operations";
 import type { WorkspaceServiceContext } from "./workspace-service-context";
-import {
-  PERSON_TOOK_OVER_SUMMARY,
-  PREPARED_PAGE_CLOSED_SUMMARY,
-  SITE_UNREACHABLE_SUMMARY,
-} from "./workspace-application-user-action";
 
 /** The replay window used for automatically-derived source/discovery pauses. */
 export const AUTOMATIC_FAILURE_WINDOW_DAYS = 7;
@@ -48,15 +34,12 @@ export const AUTOMATIC_FAILURE_WINDOW_DAYS = 7;
 import {
   AUTOMATIC_DISCOVERY_FAILURE_PAUSE_ID,
   AUTOMATIC_SOURCE_DEBUG_FAILURE_PAUSE_ID,
-  AUTOMATIC_APPLICATION_FAILURE_PAUSE_ID,
 } from "../plan-safeguard-pauses";
 export {
   AUTOMATIC_DISCOVERY_FAILURE_PAUSE_ID,
   AUTOMATIC_SOURCE_DEBUG_FAILURE_PAUSE_ID,
   AUTOMATIC_APPLICATION_FAILURE_PAUSE_ID,
 } from "../plan-safeguard-pauses";
-/** Fallback conflict window for runs not attached to a campaign. */
-export const AUTOMATIC_SIMULTANEOUS_APPLICATION_WINDOW_DAYS = 1;
 
 const USER_OWNED_BLOCKER_PATTERN =
   /\b(?:log\s*in|login|sign\s*in|signup|sign\s*up|consent|captcha|re[- ]?captcha|mfa|two[- ]factor|manual(?:ly)?|human(?:\s+verification)?|credential|password|account\s+creation|create\s+an?\s+account|email\s+verification)\b/i;
@@ -597,101 +580,6 @@ function applicationResultIsUserOwnedBlocker(result: ApplyJobResult): boolean {
   );
 }
 
-/** How a result cut short by the app closing starts its detail. */
-const APP_CLOSED_DETAIL_PREFIX = "The app closed ";
-/** A check taken over after a restart whose prepared page was gone. */
-const RETRY_STOPPED_SAFELY_SUMMARY = "Application retry stopped safely";
-
-/** Returns true only for a submitted result with a matching final-submit receipt. */
-export function isVerifiedApplicationSubmission(
-  result: ApplyJobResult,
-  run?: ApplyRun | null,
-): boolean {
-  const receipt = result.privacyReceipt;
-  return (
-    result.state === "submitted" &&
-    receipt !== null &&
-    receipt.finalSubmitOccurred === true &&
-    receipt.lineage.runId === result.runId &&
-    receipt.lineage.jobId === result.jobId &&
-    receipt.lineage.resultId === result.id &&
-    (run === undefined || run === null || run.id === result.runId)
-  );
-}
-
-/** Derives technical application failure samples from terminal result evidence. */
-export function deriveApplicationFailureEvidence(input: {
-  runs?: readonly unknown[];
-  results: readonly unknown[];
-  campaignId?: string | null;
-}): FailureAttemptEvidence[] {
-  const runsById = new Map<string, ApplyRun>();
-  for (const rawRun of input.runs ?? []) {
-    const run = parseApplyRun(rawRun);
-    if (run) runsById.set(run.id, run);
-  }
-
-  // A job that was sent later is not a failure any more: the failure-rate
-  // pause measured on its earlier attempt lifts once the retries went out.
-  const lastSentAt = new Map<string, string>();
-  for (const rawResult of input.results) {
-    const result = parseApplyJobResult(rawResult);
-    if (!result || result.state !== "submitted") continue;
-    const at = result.completedAt ?? result.updatedAt;
-    const previous = lastSentAt.get(result.jobId);
-    if (!previous || previous < at) lastSentAt.set(result.jobId, at);
-  }
-  const evidence: FailureAttemptEvidence[] = [];
-  for (const rawResult of input.results) {
-    const result = parseApplyJobResult(rawResult);
-    if (!result || result.completedAt === null) continue;
-    // A failure rate needs the attempts that worked in its sample too;
-    // counting only failures made every sample 100% failed, so a handful of
-    // failures in the window paused applying however many had been sent.
-    const succeeded =
-      result.state === "submitted" ||
-      (result.state === "awaiting_review" && !result.blockerReason);
-    if (!succeeded && result.state !== "failed" && result.state !== "blocked") {
-      continue;
-    }
-    if (!succeeded && applicationResultIsUserOwnedBlocker(result)) continue;
-    // A filled form whose page closed on restart did not fail on the site.
-    if (result.blockerSummary === PREPARED_PAGE_CLOSED_SUMMARY) continue;
-    // Nor did an application the person stepped into.
-    if (result.summary === PERSON_TOOK_OVER_SUMMARY) continue;
-    // Nor a send the site refused before anything reached it.
-    if (result.blockerSummary === SITE_UNREACHABLE_SUMMARY) continue;
-    // Nor work the app closing cut short (its pages close with it): a person
-    // restarting mid-batch paused all application work as "too many failed".
-    if (
-      result.detail.startsWith(APP_CLOSED_DETAIL_PREFIX) ||
-      result.summary === RETRY_STOPPED_SAFELY_SUMMARY
-    )
-      continue;
-    if (!succeeded) {
-      const sentAt = lastSentAt.get(result.jobId);
-      if (sentAt && sentAt >= (result.completedAt ?? result.updatedAt))
-        continue;
-    }
-
-    const run = runsById.get(result.runId);
-    if (
-      input.campaignId !== undefined &&
-      input.campaignId !== null &&
-      run?.campaignId !== input.campaignId
-    ) {
-      continue;
-    }
-    if (run?.state === "cancelled") continue;
-    evidence.push({
-      attemptId: `apply:${result.id}`,
-      failed: !succeeded,
-      occurredAt: result.completedAt ?? result.updatedAt,
-    });
-  }
-  return evidence;
-}
-
 /**
  * Returns only explicit provider/browser listing evidence from terminal
  * application results. A result's job id must match the evidence job id; a
@@ -722,205 +610,6 @@ export function deriveApplicationListingSignals(
   }
 
   return signals;
-}
-
-type VerifiedApplicationRecordEvidence = {
-  applicationRecordId: string;
-  companyKey: string;
-  companyName: string;
-  appliedAt: string;
-};
-
-type AutomaticConflictInput = {
-  conflictId: string;
-  applicationRecordId: string;
-  conflictingApplicationRecordId: string;
-  explanation: string;
-  recoveryGuidance: string;
-};
-
-function normalizeCompanyName(value: string): string {
-  return value
-    .trim()
-    .toLocaleLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim();
-}
-
-function resolveAutomaticCompanyKey(input: {
-  record: ApplicationRecord;
-  companies: JobFinderIntelligenceState["companies"];
-}): string | null {
-  const normalized = normalizeCompanyName(input.record.company);
-  if (normalized.length === 0) return null;
-
-  // An explicit entity wins only when exactly one entity owns this name. If
-  // two entities claim the same normalized name, do not silently merge them.
-  const entityMatches = input.companies.filter(
-    (company) =>
-      normalizeCompanyName(company.canonicalName) === normalized ||
-      company.aliases.some(
-        (alias) => normalizeCompanyName(alias.alias) === normalized,
-      ),
-  );
-  if (entityMatches.length > 1) return null;
-  if (entityMatches.length === 1) {
-    return `entity:${entityMatches[0]!.id}`;
-  }
-
-  // No entity was persisted, so retain the exact normalized name as an
-  // unowned key. This never joins it to a different explicit company entity.
-  return `name:${normalized}`;
-}
-
-function deriveVerifiedApplicationRecordEvidence(input: {
-  runs: readonly ApplyRun[];
-  results: readonly ApplyJobResult[];
-  records: readonly ApplicationRecord[];
-  companies: JobFinderIntelligenceState["companies"];
-}): VerifiedApplicationRecordEvidence[] {
-  const runsById = new Map(input.runs.map((run) => [run.id, run]));
-  const recordsByJob = new Map<string, ApplicationRecord[]>();
-  for (const rawRecord of input.records) {
-    const parsed = ApplicationRecordSchema.safeParse(rawRecord);
-    if (!parsed.success) continue;
-    const entries = recordsByJob.get(parsed.data.jobId) ?? [];
-    entries.push(parsed.data);
-    recordsByJob.set(parsed.data.jobId, entries);
-  }
-
-  // A result has no application-record id of its own. If a job has more than
-  // one durable record, skip it rather than guessing which record was used.
-  const byRecordId = new Map<string, VerifiedApplicationRecordEvidence>();
-  for (const result of input.results) {
-    const run = runsById.get(result.runId);
-    if (!isVerifiedApplicationSubmission(result, run)) continue;
-    const records = recordsByJob.get(result.jobId) ?? [];
-    if (records.length !== 1) continue;
-    const record = records[0]!;
-    const companyKey = resolveAutomaticCompanyKey({
-      record,
-      companies: input.companies,
-    });
-    if (!companyKey) continue;
-    const appliedAt = result.privacyReceipt?.generatedAt ?? result.updatedAt;
-    const existing = byRecordId.get(record.id);
-    if (
-      !existing ||
-      Date.parse(appliedAt) > Date.parse(existing.appliedAt) ||
-      (Date.parse(appliedAt) === Date.parse(existing.appliedAt) &&
-        appliedAt.localeCompare(existing.appliedAt) > 0)
-    ) {
-      byRecordId.set(record.id, {
-        applicationRecordId: record.id,
-        companyKey,
-        companyName: record.company,
-        appliedAt,
-      });
-    }
-  }
-
-  return [...byRecordId.values()];
-}
-
-/**
- * Finds stable unordered pairs of distinct durable application records for
- * one conservative company key inside the active time window.
- */
-export function deriveSimultaneousApplicationConflicts(input: {
-  runs: readonly unknown[];
-  results: readonly unknown[];
-  records: readonly unknown[];
-  companies: JobFinderIntelligenceState["companies"];
-  now: string;
-  windowDays: number;
-}): AutomaticConflictInput[] {
-  const nowMillis = Date.parse(input.now);
-  if (
-    !Number.isFinite(nowMillis) ||
-    !Number.isInteger(input.windowDays) ||
-    input.windowDays < 1 ||
-    input.windowDays > 365
-  ) {
-    return [];
-  }
-
-  const runs = input.runs
-    .map(parseApplyRun)
-    .filter((run): run is ApplyRun => run !== null);
-  const results = input.results
-    .map(parseApplyJobResult)
-    .filter((result): result is ApplyJobResult => result !== null);
-  const records = input.records
-    .map((record) => ApplicationRecordSchema.safeParse(record))
-    .filter(
-      (result): result is { success: true; data: ApplicationRecord } =>
-        result.success,
-    )
-    .map((result) => result.data);
-  const evidence = deriveVerifiedApplicationRecordEvidence({
-    runs,
-    results,
-    records,
-    companies: input.companies,
-  }).filter((entry) => {
-    const appliedMillis = Date.parse(entry.appliedAt);
-    return (
-      Number.isFinite(appliedMillis) &&
-      appliedMillis <= nowMillis &&
-      appliedMillis >= nowMillis - input.windowDays * 86_400_000
-    );
-  });
-
-  const byCompany = new Map<string, VerifiedApplicationRecordEvidence[]>();
-  for (const entry of evidence) {
-    const entries = byCompany.get(entry.companyKey) ?? [];
-    entries.push(entry);
-    byCompany.set(entry.companyKey, entries);
-  }
-
-  const conflicts: AutomaticConflictInput[] = [];
-  for (const entries of byCompany.values()) {
-    const ordered = [...entries].sort(
-      (left, right) =>
-        left.appliedAt.localeCompare(right.appliedAt) ||
-        left.applicationRecordId.localeCompare(right.applicationRecordId),
-    );
-    if (ordered.length < 2) continue;
-    const first = ordered[0]!;
-    const second = ordered[1]!;
-    const digest = createHash("sha256")
-      .update(`${first.companyKey}\0${first.appliedAt}\0${input.windowDays}`)
-      .digest("hex");
-    conflicts.push({
-      conflictId: `automatic_simultaneous_application:${digest}`,
-      applicationRecordId: first.applicationRecordId,
-      conflictingApplicationRecordId: second.applicationRecordId,
-      explanation: `More than one verified application was sent to ${first.companyName} in the last ${input.windowDays} days. Those sends have already happened; future application work for this company needs your decision.`,
-      recoveryGuidance:
-        "Review the applications for this company, then resolve or dismiss this hold before starting more. Sent applications are not paused.",
-    });
-  }
-  return conflicts;
-}
-
-function resolveCompanyId(input: {
-  companyName: string;
-  jobId: string;
-  companies: JobFinderIntelligenceState["companies"];
-}): string | null {
-  const normalized = normalizeCompanyName(input.companyName);
-  if (normalized.length === 0) return null;
-
-  const matches = input.companies.filter(
-    (company) =>
-      company.jobIds.includes(input.jobId) ||
-      normalizeCompanyName(company.canonicalName) === normalized ||
-      company.aliases.some(
-        (alias) => normalizeCompanyName(alias.alias) === normalized,
-      ),
-  );
-  return matches.length === 1 ? (matches[0]?.id ?? null) : null;
 }
 
 /**
@@ -989,87 +678,6 @@ function runNotificationWork(
   };
 }
 
-async function persistApplicationCompanyCaps(input: {
-  ctx: WorkspaceServiceContext;
-  results: readonly ApplyJobResult[];
-  now: string;
-  fallbackJob?: SavedJob | null | undefined;
-}): Promise<void> {
-  const verifiedResults = input.results.filter((result) =>
-    isVerifiedApplicationSubmission(result),
-  );
-  if (verifiedResults.length === 0) return;
-
-  await input.ctx.withIntelligenceTransition(async () => {
-    const [state, savedJobs, records] = await Promise.all([
-      input.ctx.repository.getIntelligenceState(),
-      // Read-only lookups; the cached display rows spare a full parse.
-      input.ctx.repository.readSavedJobsProjection(),
-      input.ctx.repository.listApplicationRecords(),
-    ]);
-    const jobsById = new Map(savedJobs.map((job) => [job.id, job]));
-    if (input.fallbackJob)
-      jobsById.set(input.fallbackJob.id, input.fallbackJob);
-
-    const evidenceByCompany = new Map<string, CompanyApplicationEvidence[]>();
-    for (const result of verifiedResults) {
-      const job = jobsById.get(result.jobId);
-      const matchingRecords = records.filter(
-        (entry) => entry.jobId === result.jobId,
-      );
-      // A result does not identify which application record was submitted.
-      // Never guess from recency when a job has multiple durable records.
-      if (matchingRecords.length !== 1) continue;
-      const record = matchingRecords[0]!;
-      const companyName = job?.company ?? record.company;
-      const companyId = resolveCompanyId({
-        companyName,
-        jobId: result.jobId,
-        companies: state.companies,
-      });
-      if (!companyId) continue;
-      const entries = evidenceByCompany.get(companyId) ?? [];
-      entries.push({
-        applicationRecordId: record.id,
-        companyId,
-        appliedAt: result.privacyReceipt?.generatedAt ?? result.updatedAt,
-      });
-      evidenceByCompany.set(companyId, entries);
-    }
-
-    let nextSafeguards = state.safeguards;
-    for (const cap of state.safeguards.companyApplicationCaps) {
-      const evidence = evidenceByCompany.get(cap.companyId);
-      if (!evidence || evidence.length === 0) continue;
-      const refreshed = applyCompanyApplicationEvidence({
-        safeguards: nextSafeguards,
-        evidence,
-        now: input.now,
-        createCapId: () => cap.id,
-        config: {
-          companyId: cap.companyId,
-          maxApplicationsPerWindow: cap.maxApplicationsPerWindow,
-          windowDays: cap.windowDays,
-          windowStartedAt: cap.windowStartedAt,
-          explanation: cap.explanation,
-          recoveryGuidance: cap.recoveryGuidance,
-        },
-      });
-      if (refreshed.ok) nextSafeguards = refreshed.safeguards;
-    }
-    if (JSON.stringify(nextSafeguards) === JSON.stringify(state.safeguards)) {
-      return;
-    }
-    await input.ctx.repository.saveIntelligenceState(
-      JobFinderIntelligenceStateSchema.parse({
-        ...state,
-        safeguards: nextSafeguards,
-        updatedAt: input.now,
-      }),
-    );
-  });
-}
-
 async function persistAutomaticListingSignals(input: {
   ctx: WorkspaceServiceContext;
   results: readonly unknown[];
@@ -1105,98 +713,6 @@ async function persistAutomaticListingSignals(input: {
   });
 }
 
-async function persistAutomaticSimultaneousConflicts(input: {
-  ctx: WorkspaceServiceContext;
-  runs: readonly unknown[];
-  results: readonly unknown[];
-  now: string;
-  windowDays: number;
-}): Promise<void> {
-  const [state, records] = await Promise.all([
-    input.ctx.repository.getIntelligenceState(),
-    input.ctx.repository.listApplicationRecords(),
-  ]);
-  const conflicts = deriveSimultaneousApplicationConflicts({
-    runs: input.runs,
-    results: input.results,
-    records,
-    companies: state.companies,
-    now: input.now,
-    windowDays: input.windowDays,
-  });
-  if (conflicts.length === 0) return;
-
-  await input.ctx.withIntelligenceTransition(async () => {
-    const current = await input.ctx.repository.getIntelligenceState();
-    let nextSafeguards = current.safeguards;
-    for (const conflict of conflicts) {
-      const result = recordSimultaneousApplicationConflict({
-        safeguards: nextSafeguards,
-        conflict,
-        now: input.now,
-      });
-      if (result.ok) {
-        nextSafeguards = result.safeguards;
-      }
-    }
-    nextSafeguards = groupCompanyConflicts(
-      { ...current, safeguards: nextSafeguards },
-      records,
-      await input.ctx.repository.readSavedJobsProjection(),
-    ).safeguards;
-    if (JSON.stringify(nextSafeguards) === JSON.stringify(current.safeguards)) {
-      return;
-    }
-    await input.ctx.repository.saveIntelligenceState(
-      JobFinderIntelligenceStateSchema.parse({
-        ...current,
-        safeguards: nextSafeguards,
-        updatedAt: input.now,
-      }),
-    );
-  });
-}
-
-/**
- * Re-measures every standing application failure pause from the evidence on
- * record. A pause is otherwise only re-measured when a run ends, and a pause
- * stops runs from starting, so one measured on stale evidence could never
- * lift by itself.
- */
-export async function refreshAutomaticApplicationFailurePauses(input: {
-  ctx: WorkspaceServiceContext;
-  now: string;
-}): Promise<void> {
-  const [intelligence, campaignState, runs, results] = await Promise.all([
-    input.ctx.repository.getIntelligenceState(),
-    input.ctx.repository.getCampaignState(),
-    input.ctx.repository.listApplyRuns(),
-    input.ctx.repository.listApplyJobResults(),
-  ]);
-  for (const campaign of campaignState?.campaigns ?? []) {
-    const pauseId = `${AUTOMATIC_APPLICATION_FAILURE_PAUSE_ID}:${campaign.id}`;
-    if (
-      !intelligence.safeguards.abnormalFailurePauses.some(
-        (pause) => pause.id === pauseId,
-      )
-    ) {
-      continue;
-    }
-    await persistAutomaticFailurePause({
-      ctx: input.ctx,
-      campaign,
-      pauseId,
-      evidence: deriveApplicationFailureEvidence({
-        runs,
-        results,
-        campaignId: campaign.id,
-      }),
-      workKind: "application",
-      now: input.now,
-    });
-  }
-}
-
 /** Applies cap/failure evidence and campaign notifications after terminal apply persistence. */
 export async function persistAutomaticApplicationSafeguards(input: {
   ctx: WorkspaceServiceContext;
@@ -1227,47 +743,10 @@ export async function persistAutomaticApplicationSafeguards(input: {
   }
 
   const campaignId = run.campaignId;
-  const campaignState = await input.ctx.repository.getCampaignState();
-  const campaign = campaignId
-    ? (campaignState?.campaigns.find((entry) => entry.id === campaignId) ??
-      null)
-    : null;
-  if (campaign) {
-    const evidence = deriveApplicationFailureEvidence({
-      runs: typedRuns,
-      results: typedResults,
-      campaignId: campaign.id,
-    });
-    await persistAutomaticFailurePause({
-      ctx: input.ctx,
-      campaign,
-      pauseId: `${AUTOMATIC_APPLICATION_FAILURE_PAUSE_ID}:${campaign.id}`,
-      evidence,
-      workKind: "application",
-      now: input.now,
-    });
-  }
-
-  await persistApplicationCompanyCaps({
-    ctx: input.ctx,
-    results: typedResults,
-    now: input.now,
-    fallbackJob: input.job,
-  });
-
   await persistAutomaticListingSignals({
     ctx: input.ctx,
     results: typedResults,
     now: input.now,
-  });
-  await persistAutomaticSimultaneousConflicts({
-    ctx: input.ctx,
-    runs: typedRuns,
-    results: typedResults,
-    now: input.now,
-    windowDays:
-      campaign?.applicationPolicy.simultaneousApplicationWindowDays ??
-      AUTOMATIC_SIMULTANEOUS_APPLICATION_WINDOW_DAYS,
   });
 
   if (!campaignId || typeof input.ctx.withCampaignTransition !== "function") {

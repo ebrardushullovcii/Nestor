@@ -829,7 +829,6 @@ describe("ApplicationsDetailPanel container contract", () => {
 
     const { container } = render(
       <ApplicationsDetailPanel
-        dailyPreparationCapacity={null}
         activeFilter="all"
         applyRunDetails={null}
         applyRunDetailsTarget={null}
@@ -849,7 +848,6 @@ describe("ApplicationsDetailPanel container contract", () => {
         isApplyRunPending={() => false}
         onApproveApplyRun={vi.fn()}
         onCancelApplyRun={vi.fn()}
-        onOpenCompany={vi.fn()}
         onExportApplicationPacket={vi.fn(() => Promise.resolve())}
         onSaveApplicationAnswer={vi.fn(() => Promise.resolve())}
         onClearApplicationAnswer={vi.fn(() => Promise.resolve())}
@@ -861,7 +859,6 @@ describe("ApplicationsDetailPanel container contract", () => {
         selectedApplyRunId="run_latest01"
         selectedAttempt={null}
         selectedRecord={baseRecord}
-        selectedRecordCompanyId="company_1"
       />,
     );
 

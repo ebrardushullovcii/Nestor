@@ -542,7 +542,7 @@ describe("tool-using AI capabilities", () => {
         candidateProfile: request.profile,
         selectedBaseResumeText: request.resumeText,
         searchPreferences: request.searchPreferences,
-        generationStrategy: request.strategy ?? null,
+        generationStrategy: null,
         settings: request.settings,
         workingProposal: {},
       },

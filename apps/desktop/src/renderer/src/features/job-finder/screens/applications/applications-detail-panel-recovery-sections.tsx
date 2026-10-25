@@ -1,6 +1,5 @@
 import type {
   ApplicationPageState,
-  GlobalDailyApplicationPreparationCapacity,
   JobFinderExactApplicationTarget,
   JobFinderRendererWorkspaceSnapshot,
 } from "@nestor/contracts";
@@ -30,14 +29,12 @@ export function ApplicationsDetailPanelRecoverySections(props: {
   applyMode?: ApplyMode;
   canRestageAutoRun: boolean;
   canRestageQueueRun: boolean;
-  dailyPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
   excludedQueueRecoveryEntries: QueueEntry[];
   isApplyPending: boolean;
   applicationWorkPaused?: boolean;
   onStartApplyCopilot: (input: JobFinderExactApplicationTarget) => void;
   onReviewResumePdf?: (jobId: string) => void;
   onStartAutoApplyQueue: (jobIds: string[]) => void;
-  onOpenSafeguards?: () => void;
   onOpenNeedsYou?: () => void;
   answerStep?: ApplicationAnswerStep | null;
   onAllowSiteSaves?: (host: string | null) => void;
@@ -74,14 +71,12 @@ export function ApplicationsDetailPanelRecoverySections(props: {
   const {
     canRestageAutoRun,
     canRestageQueueRun,
-    dailyPreparationCapacity,
     excludedQueueRecoveryEntries,
     isApplyPending,
     applicationWorkPaused = false,
     onStartApplyCopilot,
     onReviewResumePdf,
     onStartAutoApplyQueue,
-    onOpenSafeguards,
     onOpenNeedsYou,
     answerStep = null,
     onAllowSiteSaves,
@@ -114,14 +109,12 @@ export function ApplicationsDetailPanelRecoverySections(props: {
       {...(props.applyMode ? { applyMode: props.applyMode } : {})}
       canRestageAutoRun={canRestageAutoRun}
       canRestageQueueRun={canRestageQueueRun}
-      dailyPreparationCapacity={dailyPreparationCapacity}
       excludedQueueRecoveryEntries={excludedQueueRecoveryEntries}
       isApplyPending={isApplyPending}
       applicationWorkPaused={applicationWorkPaused}
       onStartApplyCopilot={onStartApplyCopilot}
       {...(onReviewResumePdf ? { onReviewResumePdf } : {})}
       onStartAutoApplyQueue={onStartAutoApplyQueue}
-      {...(onOpenSafeguards ? { onOpenSafeguards } : {})}
       {...(onOpenNeedsYou ? { onOpenNeedsYou } : {})}
       answerStep={answerStep}
       {...(onAllowSiteSaves ? { onAllowSiteSaves } : {})}

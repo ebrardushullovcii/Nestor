@@ -5,7 +5,6 @@ import type {
   JobFinderRendererWorkspaceSnapshot,
   ResumeImportRun,
 } from "@nestor/contracts";
-import { JobFinderIntelligenceStateSchema } from "@nestor/contracts";
 import { describe, expect, it, test } from "vitest";
 import {
   buildJobFinderTaskCenterModel,
@@ -188,44 +187,6 @@ describe("buildJobFinderTaskCenterModel", () => {
       isResumeImportPending: false,
     });
     expect(findTask(model, "apply").sourceLabel).toBe("Cedar · Frontend");
-  });
-
-  test("does not claim an application-only safeguard also pauses discovery", () => {
-    const model = buildJobFinderTaskCenterModel({
-      workspace: createWorkspace({
-        intelligence: JobFinderIntelligenceStateSchema.parse({
-          safeguards: {
-            companyApplicationCaps: [],
-            simultaneousApplicationConflicts: [],
-            listingSignals: [],
-            abnormalFailurePauses: [
-              {
-                id: "pause_1",
-                windowStartedAt: "2026-08-15T10:00:00.000Z",
-                failuresInWindow: 4,
-                sampleSize: 5,
-                failureRatePercent: 80,
-                failureRateThresholdPercent: 40,
-                minimumSample: 5,
-                paused: true,
-                explanation: "Elevated application failure rate.",
-                recoveryGuidance: "Inspect the latest failure evidence.",
-              },
-            ],
-            preparedBatchSampleReviews: [],
-            contradictoryAnswerDetections: [],
-            safeguardDismissals: [],
-            updatedAt: "2026-08-15T10:00:00.000Z",
-          },
-        }),
-      }),
-      isDiscoveryPending: false,
-      isResumeImportPending: false,
-    });
-
-    expect(findTask(model, "safeguards").sourceLabel).toBe(
-      "Affected work is waiting; some safeguards pause application preparation only, while others also pause job discovery.",
-    );
   });
 
   test("does not show the previous search's sources and counts during a new live run", () => {
@@ -808,46 +769,6 @@ describe("buildJobFinderTaskCenterModel", () => {
     expect(task.historyEstimateLabel).toBeNull();
   });
 
-  test("offers the named recovery action after a safety limit stops the run", () => {
-    const model = buildJobFinderTaskCenterModel({
-      workspace: createWorkspace({
-        applyRuns: [
-          createApplyRun({
-            state: "paused_for_user_review",
-            totalJobs: 10,
-            pendingJobs: 10,
-          }),
-        ],
-        applyJobResults: [
-          {
-            id: "result_blocked",
-            runId: "apply_current",
-            jobId: "job_1",
-            applicationRecordId: "application_1",
-            state: "blocked",
-            blockerReason: "required_human_input",
-            updatedAt: "2026-07-31T10:00:06.000Z",
-          },
-        ] as JobFinderRendererWorkspaceSnapshot["applyJobResults"],
-      }),
-      isDiscoveryPending: false,
-      isResumeImportPending: false,
-    });
-    const task = findTask(model, "apply");
-
-    expect(task.status).toBe("paused");
-    expect(task.stageLabel).toBe("Paused by a safety limit");
-    expect(task.countLabel).toBe(
-      "0 applications · 0 of 10 application tasks finished · It will not carry on by itself",
-    );
-    expect(task.resumeActionLabel).toBe("Prepare remaining jobs");
-    expect(task.resumeRoute).toBe("/job-finder/applications");
-    expect(task.applyRecoveryJobIds).toEqual(["job_1"]);
-    // No sample review waits for this run, so there is no sample to review.
-    expect(task.reviewActionLabel).toBe("Open Safeguards");
-    expect(task.reviewRoute).toBe("/job-finder/safeguards");
-  });
-
   test("offers the same recovery action after a failed batch left blocked jobs", () => {
     const model = buildJobFinderTaskCenterModel({
       workspace: createWorkspace({
@@ -988,49 +909,6 @@ describe("buildJobFinderTaskCenterModel", () => {
     });
     expect(findTask(model, "apply").stageLabel).toBe("Finished");
     expect(model.pausedCount).toBe(0);
-  });
-
-  test("a safety pause with a pending sample review offers the sample", () => {
-    const run = createApplyRun({
-      state: "paused_for_user_review",
-      jobIds: ["job_1", "job_2"],
-      totalJobs: 2,
-      pendingJobs: 1,
-    });
-    const model = buildJobFinderTaskCenterModel({
-      workspace: createWorkspace({
-        applyRuns: [run],
-        intelligence: JobFinderIntelligenceStateSchema.parse({
-          safeguards: {
-            companyApplicationCaps: [],
-            simultaneousApplicationConflicts: [],
-            listingSignals: [],
-            abnormalFailurePauses: [],
-            preparedBatchSampleReviews: [
-              {
-                id: "review_1",
-                batchId: run.id,
-                preparedCount: 1,
-                sampleCount: 1,
-                reviewedCount: 0,
-                sampledItemIds: [],
-                reviewCompleted: false,
-                explanation: "Review one prepared application.",
-                recoveryGuidance: "Open the sample and mark it reviewed.",
-              },
-            ],
-            contradictoryAnswerDetections: [],
-            safeguardDismissals: [],
-            updatedAt: "2026-07-31T10:00:06.000Z",
-          },
-        }),
-      }),
-      isDiscoveryPending: false,
-      isResumeImportPending: false,
-    });
-    const task = findTask(model, "apply");
-    expect(task.stageLabel).toBe("Paused by a safety limit");
-    expect(task.reviewActionLabel).toBe("Review prepared sample");
   });
 
   test("an outcome to verify does not hide a batch running meanwhile", () => {

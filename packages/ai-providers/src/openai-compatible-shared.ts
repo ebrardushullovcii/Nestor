@@ -825,39 +825,18 @@ export function completeTailoredResumeDraft(
   // limit them to the skills it chose. Whether the person's evidence backs a
   // skill the profile does not show is the fact check's call: in aggressive
   // tailoring such a skill becomes a line to confirm.
-  const strategyCoreSkills = fallbackInput.strategy
-    ? coreSkills.filter((skill) =>
-        fallback.coreSkills.some(
-          (allowedSkill) => allowedSkill.toLowerCase() === skill.toLowerCase(),
-        ),
-      )
-    : coreSkills;
+  const strategyCoreSkills = coreSkills;
   const finalCoreSkills = uniqueStrings(strategyCoreSkills)
     .filter(isCompetency)
     .slice(0, VISIBLE_CORE_SKILL_LIMIT);
-  const additionalCandidates = fallbackInput.strategy
-    ? sanitizedAdditionalSkills.filter((skill) =>
-        fallback.additionalSkills.some(
-          (allowedSkill) => allowedSkill.toLowerCase() === skill.toLowerCase(),
-        ),
-      )
-    : sanitizedAdditionalSkills.length > 0
+  const additionalCandidates =
+    sanitizedAdditionalSkills.length > 0
       ? sanitizedAdditionalSkills
       : fallback.additionalSkills;
-  const targetedKeywords = fallbackInput.strategy
-    ? selectCanonicalStringList(
-        sanitizedTargetedKeywords.filter((keyword) =>
-          fallback.targetedKeywords.some(
-            (allowedKeyword) =>
-              allowedKeyword.toLowerCase() === keyword.toLowerCase(),
-          ),
-        ),
-        fallback.targetedKeywords,
-      )
-    : selectCanonicalStringList(
-        sanitizedTargetedKeywords,
-        fallback.targetedKeywords,
-      );
+  const targetedKeywords = selectCanonicalStringList(
+    sanitizedTargetedKeywords,
+    fallback.targetedKeywords,
+  );
   const groundedAdditionalSkills = uniqueStrings(additionalCandidates)
     .filter(
       (skill) =>

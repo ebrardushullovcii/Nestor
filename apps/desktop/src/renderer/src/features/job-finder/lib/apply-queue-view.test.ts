@@ -12,7 +12,6 @@ const base: ApplyQueue = {
   skipped: [{ jobId: "b", reason: "Its resume waits for your review." }],
   activeRunId: "run_1",
   pausedReason: null,
-  resumesAt: null,
   createdAt: "2026-10-23T10:00:00.000Z",
   updatedAt: "2026-10-23T10:00:00.000Z",
 };

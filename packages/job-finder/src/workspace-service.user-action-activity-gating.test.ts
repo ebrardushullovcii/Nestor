@@ -4,11 +4,9 @@ import {
 } from "@nestor/db";
 import {
   ApplicationAttemptBlockerSchema,
-  ApplicationReplayCheckpointSchema,
   ApplyExecutionResultSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
-  UserActionRequestSchema,
 } from "@nestor/contracts";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -472,9 +470,6 @@ describe("resolved user action resumption activity gating", () => {
     expect(executeApplicationFlow).toHaveBeenCalledTimes(2);
     expect(resumed.userActionRequests[0]?.state).toBe("resolved");
     expect(
-      resumed.dashboard.globalDailyApplicationPreparationCapacity,
-    ).toMatchObject({ used: 20, remaining: 0 });
-    expect(
       resumed.applyJobResults.find((result) => result.id === scope.resultId)
         ?.applicationPreparationStartedAt,
     ).toBeTruthy();
@@ -484,114 +479,6 @@ describe("resolved user action resumption activity gating", () => {
     ).toBe("2026-08-23");
   });
 
-  test("rejects a fresh unmarked resumption lineage at full capacity without a recovery browser call", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 7, 23, 12));
-    const { workspaceService, repository, executeApplicationFlow, request } =
-      await startLoginBlockedResumptionHarness();
-    const scope = request.scope;
-    if (scope.type !== "application") {
-      throw new Error("Expected application scope.");
-    }
-    const originalResult = (
-      await repository.listApplyJobResults({
-        runId: scope.runId,
-        jobId: scope.jobId,
-      })
-    ).find((result) => result.id === scope.resultId);
-    if (!originalResult) throw new Error("Expected the blocked apply result.");
-    const originalRun = (await repository.listApplyRuns()).find(
-      (run) => run.id === scope.runId,
-    );
-    const originalCheckpoint = (
-      await repository.listApplicationReplayCheckpoints({
-        runId: scope.runId,
-        jobId: scope.jobId,
-      })
-    ).find((checkpoint) => checkpoint.id === scope.replayCheckpointId);
-    if (!originalRun || !originalCheckpoint) {
-      throw new Error("Expected the blocked apply lineage.");
-    }
-    const freshRunId = "apply_run_fresh_unmarked_resumption";
-    const freshResultId = "apply_result_fresh_unmarked_resumption";
-    const freshCheckpointId = "apply_checkpoint_fresh_unmarked_resumption";
-    await repository.upsertApplyRun(
-      ApplyRunSchema.parse({ ...originalRun, id: freshRunId }),
-    );
-    await repository.upsertApplyJobResult(
-      ApplyJobResultSchema.parse({
-        ...originalResult,
-        id: freshResultId,
-        runId: freshRunId,
-        latestCheckpointId: freshCheckpointId,
-        applicationPreparationStartedAt: null,
-        applicationPreparationStartedLocalDate: null,
-      }),
-    );
-    await repository.upsertApplicationReplayCheckpoint(
-      ApplicationReplayCheckpointSchema.parse({
-        ...originalCheckpoint,
-        id: freshCheckpointId,
-        runId: freshRunId,
-        resultId: freshResultId,
-      }),
-    );
-    const now = new Date().toISOString();
-    const freshRequest = UserActionRequestSchema.parse({
-      ...request,
-      id: "ua_fresh_unmarked_resumption",
-      dedupeKey: "application_login:ua_fresh_unmarked_resumption",
-      revision: 1,
-      state: "pending",
-      scope: {
-        ...scope,
-        runId: freshRunId,
-        resultId: freshResultId,
-        replayCheckpointId: freshCheckpointId,
-      },
-      updatedAt: now,
-      resolvedAt: null,
-    });
-    await repository.createUserActionRequest(freshRequest);
-    await addBegunPreparationLineages(repository, 19, now);
-
-    const resumed = await workspaceService.performUserAction({
-      commandId: "confirm_fresh_unmarked_resumption",
-      requestId: freshRequest.id,
-      expectedRevision: freshRequest.revision,
-      action: "confirm_done",
-    });
-
-    expect(executeApplicationFlow).toHaveBeenCalledTimes(1);
-    expect(
-      resumed.dashboard.globalDailyApplicationPreparationCapacity,
-    ).toMatchObject({ used: 20, remaining: 0 });
-    expect(
-      resumed.applyJobResults.find((result) => result.id === scope.resultId)
-        ?.applicationPreparationStartedAt,
-    ).toBeTruthy();
-    expect(
-      resumed.applyJobResults.find((result) => result.id === scope.resultId)
-        ?.applicationPreparationStartedLocalDate,
-    ).toBe("2026-08-23");
-    expect(
-      resumed.applyJobResults.find((result) => result.id === freshResultId),
-    ).toMatchObject({
-      applicationPreparationStartedAt: null,
-      applicationPreparationStartedLocalDate: null,
-    });
-    const failedAttempt = (await repository.listApplicationAttempts()).find(
-      (attempt) => attempt.userActionResumption?.requestId === freshRequest.id,
-    );
-    expect(failedAttempt?.state).toBe("failed");
-    expect(failedAttempt?.detail).toContain(
-      "You can start up to 20 preparations per day. Today: 20 started.",
-    );
-    expect(failedAttempt?.detail).toContain(
-      "Retries and failed attempts count",
-    );
-    expect(failedAttempt?.detail).toContain("Settings → Applying");
-  });
 
   test("processes twenty resumed actions without exceeding the defined concurrency", async () => {
     const ACTION_COUNT = 20;

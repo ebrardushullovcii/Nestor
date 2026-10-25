@@ -48,9 +48,6 @@ describe("Home's first view (ADR 0077)", () => {
     expect(home.tailoredAssets).toEqual(full.tailoredAssets);
     expect(home.recentDiscoveryRuns).toEqual(full.recentDiscoveryRuns);
     expect(home.activeCampaignId).toBe(full.activeCampaignId);
-    expect(home.dashboard.globalDailyApplicationPreparationCapacity).toEqual(
-      full.dashboard.globalDailyApplicationPreparationCapacity,
-    );
   });
 
   test("writes nothing back from its partial view of the jobs", async () => {

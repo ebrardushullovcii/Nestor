@@ -168,35 +168,6 @@ afterEach(() => {
 });
 
 describe("shell destination counts", () => {
-  it("derives every destination badge from an exported count owner", () => {
-    // RC-05: the shell used to derive each badge inline, so four of them
-    // counted a different population than the page they pointed at and
-    // nothing could hold the two together. Every count now comes from
-    // `lib/destination-counts.ts`, named for its population.
-    const definitionsBlock = SHELL_SOURCE.slice(
-      SHELL_SOURCE.indexOf("const screenDefinitions = useMemo"),
-      SHELL_SOURCE.indexOf("const actionScreen = screenDefinitions.find"),
-    );
-    expect(definitionsBlock.length).toBeGreaterThan(0);
-    expect(definitionsBlock).not.toMatch(/\.filter\([\s\S]*?\)\s*\.?\s*length/);
-    expect(definitionsBlock).not.toContain(".length >");
-
-    for (const owner of [
-      "countDiscoveryVisibleJobs",
-      "countShortlistedJobs",
-      "countApplicationRecords",
-      "countUserCreatedSearchPlans",
-      "countNeedsYou",
-      "countOutcomeEvents",
-      "countResumeApproaches",
-      "countCompaniesAwaitingMergeReview",
-      "countSafeguardBlockers",
-    ]) {
-      expect(definitionsBlock).toContain(`${owner}(`);
-    }
-    expect(SHELL_SOURCE).toContain('from "../lib/destination-counts"');
-  });
-
   it("renders a visibly distinct treatment for attention counts", () => {
     renderShell(createCountedWorkspace());
 

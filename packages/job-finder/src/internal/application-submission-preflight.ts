@@ -42,7 +42,6 @@ export interface SubmissionPreflightLineageFacts {
 /** Current finite capacity facts captured before an attempt. */
 export interface SubmissionPreflightCapacityFacts {
   readonly remainingRunCapacity: number;
-  readonly remainingDailyCapacity: number;
 }
 
 /**
@@ -161,7 +160,6 @@ export function buildSubmissionPreflightRecord(
     answers,
     finalControl,
     remainingRunCapacityBefore: input.capacity.remainingRunCapacity,
-    remainingDailyCapacityBefore: input.capacity.remainingDailyCapacity,
     createdAt: input.createdAt,
   });
 

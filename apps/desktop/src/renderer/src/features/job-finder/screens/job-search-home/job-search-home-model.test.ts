@@ -215,26 +215,6 @@ function withShortlist(
   } as JobFinderRendererWorkspaceSnapshot;
 }
 
-function withDailyPreparationRemaining(
-  base: JobFinderRendererWorkspaceSnapshot,
-  remaining: number,
-): JobFinderRendererWorkspaceSnapshot {
-  return {
-    ...base,
-    dashboard: {
-      ...base.dashboard,
-      globalDailyApplicationPreparationCapacity: {
-        limit: 20,
-        used: 20 - remaining,
-        legacyUncertain: 0,
-        remaining,
-        localDate: "2026-08-15",
-        resetsAt: "2026-08-16T00:00:00.000Z",
-      },
-    },
-  } as JobFinderRendererWorkspaceSnapshot;
-}
-
 function build(
   ws: JobFinderRendererWorkspaceSnapshot,
   overrides: Partial<BuildJobSearchHomeModelInput> = {},
@@ -959,7 +939,10 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     expect(model.next).toMatchObject({
       id: "create_resumes",
       title: "Create 4 resumes",
-      primary: { label: "Create 4 resumes", action: { kind: "create_resumes" } },
+      primary: {
+        label: "Create 4 resumes",
+        action: { kind: "create_resumes" },
+      },
     });
     expect(model.next.secondary[0]).toMatchObject({
       label: "Apply to 1 ready job",
@@ -980,7 +963,10 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       queueItem("job_2"),
     ]);
     const model = build(ws);
-    expect(model.next).toMatchObject({ id: "apply", title: "Apply to 2 ready jobs" });
+    expect(model.next).toMatchObject({
+      id: "apply",
+      title: "Apply to 2 ready jobs",
+    });
     expect(model.next.secondary[0]).toMatchObject({
       label: "Create the missing resume",
       action: { kind: "create_resumes" },
@@ -1079,9 +1065,9 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     });
     expect(model.stages?.[1]?.detail).toBe("1 in Applications");
     // Searching again stays one press for a returning person.
-    expect(model.next.secondary.map((button) => button.label).slice(0, 2)).toEqual([
-      "Search again",
-    ]);
+    expect(
+      model.next.secondary.map((button) => button.label).slice(0, 2),
+    ).toEqual(["Search again"]);
   });
 
   it("under Send for me, sends forms filled in earlier with one press", () => {
@@ -1420,14 +1406,11 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
           status: "needs_review",
         } as ReviewQueueItem["resumeReview"],
       });
-    const ws = withDailyPreparationRemaining(
-      withShortlist(withJobs(workspace(), 3), [
-        ready("job_0"),
-        ready("job_1"),
-        ready("job_2"),
-      ]),
-      2,
-    );
+    const ws = withShortlist(withJobs(workspace(), 3), [
+      ready("job_0"),
+      ready("job_1"),
+      ready("job_2"),
+    ]);
     const all = {
       id: "apply",
       title: "Apply to 3 ready jobs",
@@ -1437,53 +1420,6 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       },
     };
     expect(build(ws).next).toMatchObject(all);
-    // The queue waits for tomorrow by itself; the press is the same.
-    expect(build(withDailyPreparationRemaining(ws, 0)).next).toMatchObject(all);
-  });
-
-  it("retries every failed application with one press, at any daily limit", () => {
-    const ws = withJobs(workspace(), 4);
-    ws.applicationRecords = Array.from({ length: 4 }, (_unused, index) => ({
-      id: `record-${index}`,
-      jobId: `job_${index}`,
-      title: `Job ${index}`,
-      company: "Employer",
-      status: "ready_for_review",
-      lastAttemptState: "failed",
-      automationMode: "prepare_only",
-      questionSummary: { total: 0, answered: 0 },
-      lastActionLabel: "Application preparation stopped.",
-      lastUpdatedAt: "2026-08-15T11:00:00.000Z",
-    })) as JobFinderRendererWorkspaceSnapshot["applicationRecords"];
-    ws.applyJobResults = Array.from({ length: 4 }, (_unused, index) => ({
-      id: `result-${index}`,
-      runId: `apply-${index}`,
-      jobId: `job_${index}`,
-      applicationRecordId: `record-${index}`,
-      state: "failed",
-      blockerReason: "unexpected_navigation",
-      updatedAt: "2026-08-15T11:00:00.000Z",
-    })) as JobFinderRendererWorkspaceSnapshot["applyJobResults"];
-
-    const retryAll = {
-      id: "retry",
-      primary: {
-        label: "Try again for all 4",
-        action: {
-          kind: "apply_all",
-          jobIds: ["job_0", "job_1", "job_2", "job_3"],
-        },
-      },
-    };
-    const partial = build(withDailyPreparationRemaining(ws, 2));
-    expect(partial.next).toMatchObject(retryAll);
-    expect(partial.stages?.[2]).toMatchObject({
-      count: 4,
-      detail: "4 could not apply",
-    });
-    expect(build(withDailyPreparationRemaining(ws, 0)).next).toMatchObject(
-      retryAll,
-    );
   });
 
   it("puts Needs you ahead of everything else and counts it like the badge", () => {
@@ -1517,7 +1453,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
     });
   });
 
-  it("puts a safeguard pause ahead of Needs you", () => {
+  it("does not put a safeguard pause ahead of Needs you", () => {
     const ws = workspace();
     ws.intelligence.safeguards.abnormalFailurePauses = [
       AbnormalFailurePauseSchema.parse({
@@ -1533,9 +1469,7 @@ describe("buildJobSearchHomeModel · shortlist and applications", () => {
       }),
     ];
     const model = build(ws);
-    expect(model.next.id).toBe("safeguards");
-    expect(model.next.detail).toBe("Review failed searches.");
-    expect(model.next.primary.label).toBe("Open Safeguards");
+    expect(model.next.id).toBe("needs_you");
   });
 
   it("does not hold anything back for an old prepared-batch sample review", () => {
@@ -1676,28 +1610,24 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
     ws.applyQueue = {
       id: "queue_1",
       mode: "autonomous_submit",
-      state: "waiting_for_tomorrow",
+      state: "running",
       jobIds: ids,
       startedJobIds: ids.slice(0, 20),
       skipped: [],
-      activeRunId: null,
+      activeRunId: "run_1",
       pausedReason: null,
-      resumesAt: new Date(2026, 9, 24, 0, 0, 0).toISOString(),
       createdAt: "2026-10-23T10:00:00.000Z",
       updatedAt: "2026-10-23T12:00:00.000Z",
     };
-    const model = build(withDailyPreparationRemaining(ws, 0));
+    const model = build(ws);
     expect(model.now[0]).toMatchObject({
       id: "apply-queue",
       title: "Applying to 30 jobs",
-      detail: "Today's limit of 20 is reached · 10 continue after midnight",
-      active: false,
+      detail: "20 started · 10 to go · ten at a time",
+      active: true,
       open: {
-        label: "Raise the limit",
-        action: {
-          kind: "navigate",
-          route: "/job-finder/settings#settings-application-authority",
-        },
+        label: "Pause",
+        action: { kind: "apply_queue", action: "pause" },
       },
       stop: { label: "Stop", action: { kind: "apply_queue", action: "stop" } },
     });
@@ -1741,12 +1671,13 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
     failedApplications(ws, ["job_1", "job_2"]);
     const model = build(ws);
     expect(model.next.id).toBe("send");
-    expect(model.next.secondary.map((button) => button.label).slice(0, 2)).toEqual([
-      "Try again for all 2",
-      "Search again",
-    ]);
+    expect(
+      model.next.secondary.map((button) => button.label).slice(0, 2),
+    ).toEqual(["Try again for all 2", "Search again"]);
     // In Send for me those runs send, so the same press says Apply.
-    const sending = build(ws, { applicationAutomationMode: "autonomous_submit" });
+    const sending = build(ws, {
+      applicationAutomationMode: "autonomous_submit",
+    });
     expect(sending.next.secondary[0]?.label).toBe("Apply again for all 2");
     expect(model.next.secondary[0]?.action).toEqual({
       kind: "apply_all",
@@ -1775,9 +1706,9 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
     expect(model.next.id).toBe("needs_you");
     expect(model.next.detail).toContain("A job source wants you to sign in");
     expect(model.next.detail).not.toContain("An application is waiting");
-    expect(model.next.secondary.map((button) => button.label).slice(0, 2)).toEqual([
-      "Apply to all 2",
-    ]);
+    expect(
+      model.next.secondary.map((button) => button.label).slice(0, 2),
+    ).toEqual(["Apply to all 2"]);
   });
 
   it("sends a search whose only source leads to a missing page to Job sources", () => {
@@ -1925,28 +1856,6 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
     expect(model.stages?.[0]?.detail).toBe("+ 3 weaker");
   });
 
-  it("sends a non-review safeguard to the Safeguards list, not the Reviews tab", () => {
-    const ws = withJobs(workspace(), 2);
-    ws.intelligence.safeguards.companyApplicationCaps = [
-      {
-        id: "cap-1",
-        companyKey: "employer",
-        companyName: "Employer",
-        limit: 1,
-        count: 1,
-        limitReached: true,
-        heldJobIds: ["job_0"],
-        updatedAt: "2026-08-15T11:00:00.000Z",
-      },
-    ] as unknown as typeof ws.intelligence.safeguards.companyApplicationCaps;
-    const model = build(ws);
-    expect(model.next.id).toBe("safeguards");
-    expect(model.next.primary.action).toEqual({
-      kind: "navigate",
-      route: "/job-finder/safeguards",
-    });
-    expect(model.next.detail).not.toContain("sample");
-  });
 
   it("keeps waiting for a writing batch and offers the ready ones as a second press", () => {
     const ws = withShortlist(withJobs(workspace(), 3), [
@@ -2018,10 +1927,9 @@ describe("buildJobSearchHomeModel · round 2 matrix fixes", () => {
   });
 
   it("names the count on a partial retry offered beside another card", () => {
-    const ws = withDailyPreparationRemaining(
-      withShortlist(withJobs(workspace(), 4), [readyItem("job_0")]),
-      1,
-    );
+    const ws = withShortlist(withJobs(workspace(), 4), [
+      readyItem("job_0"),
+    ]);
     ws.applicationRecords = [
       {
         id: "record-job_0",
@@ -2131,24 +2039,22 @@ describe("buildJobSearchHomeModel · planned jobs of a stopped or paused batch",
     return ws;
   }
 
-  it("offers a job a safety limit left behind as one retry, never as Filling in", () => {
+  it("offers a job a stopped batch left behind as one retry, never as Filling in", () => {
     const model = build(withPlannedBatch("paused_for_user_review", false));
     const tile = model.stages?.find((stage) =>
       stage.detail?.includes("not started"),
     );
     expect(tile?.detail).toBe("1 applied · 1 not started");
     expect(tile?.detail).not.toContain("filling in");
-    // Nothing is left to settle in Safeguards, so Home offers the retry
-    // itself instead of "A safeguard is waiting on you".
     expect(model.next).toMatchObject({
       id: "retry",
       title: "Try again for 1 application",
       primary: { action: { kind: "apply_all", jobIds: ["job_1"] } },
     });
     expect(model.next.detail).toContain(
-      "A safety limit stopped the batch before Job Finder got to this one, so nothing was filled in or sent.",
+      "The batch stopped before Job Finder got to this one, so nothing was filled in or sent.",
     );
-    expect(model.next.secondary.map((button) => button.label)).toContain(
+    expect(model.next.secondary.map((button) => button.label)).not.toContain(
       "Open Safeguards",
     );
   });
@@ -2164,7 +2070,7 @@ describe("buildJobSearchHomeModel · planned jobs of a stopped or paused batch",
       state: "failed",
       blockerReason: "unexpected_navigation",
     } as JobFinderRendererWorkspaceSnapshot["applyJobResults"][number];
-    const model = build(withDailyPreparationRemaining(ws, 1));
+    const model = build(ws);
     expect(model.next).toMatchObject({ id: "retry" });
     expect(
       model.next.primary.action.kind === "apply_all" &&
@@ -2264,7 +2170,7 @@ describe("buildJobSearchHomeModel · tracker dates", () => {
     },
   );
 
-  it.each(["paused", "safeguards", "needs_you"])(
+  it.each(["paused", "needs_you"])(
     "keeps %s before a due reminder and names the reminder second",
     (mode) => {
       const state = withTrackedApplication(withJobs(workspace(), 1));
@@ -2274,21 +2180,6 @@ describe("buildJobSearchHomeModel · tracker dates", () => {
           reason: null,
           pausedAt: "2026-08-15T10:00:00Z",
         };
-      if (mode === "safeguards")
-        state.intelligence.safeguards.abnormalFailurePauses = [
-          AbnormalFailurePauseSchema.parse({
-            id: "pause",
-            windowStartedAt: "2026-08-01T10:00:00Z",
-            failuresInWindow: 4,
-            sampleSize: 5,
-            failureRatePercent: 80,
-            failureRateThresholdPercent: 50,
-            minimumSample: 5,
-            paused: true,
-            explanation: "Review failures",
-            recoveryGuidance: "Review this hold",
-          }),
-        ];
       if (mode === "needs_you")
         state.userActionRequests = [
           {
@@ -2379,7 +2270,10 @@ describe("buildJobSearchHomeModel · applications the person stopped or may have
 
   it("never offers to retry an application the person cancelled", () => {
     const model = build(
-      withResult({ state: "cancelled", summary: "Cancelled by you" }, "cancelled"),
+      withResult(
+        { state: "cancelled", summary: "Cancelled by you" },
+        "cancelled",
+      ),
     );
     expect(model.next.id).not.toBe("retry");
     expect(model.stages?.[2]?.detail).toBe("1 cancelled");
@@ -2401,7 +2295,6 @@ describe("buildJobSearchHomeModel · applications the person stopped or may have
     });
     expect(model.next.detail).toContain("Prepare again");
     expect(model.stages?.[2]?.detail).toBe("1 form closed");
-
   });
 
   it("leads with the resumes to review and keeps a closed form as a quiet line", () => {
@@ -2417,13 +2310,17 @@ describe("buildJobSearchHomeModel · applications the person stopped or may have
         assetStatus: "ready",
         resumeAssetId: "asset-1",
         resumeTailoringMode: "aggressive",
-        resumeReview: { status: "needs_review" } as ReviewQueueItem["resumeReview"],
+        resumeReview: {
+          status: "needs_review",
+        } as ReviewQueueItem["resumeReview"],
       }),
       queueItem("job_2", {
         assetStatus: "ready",
         resumeAssetId: "asset-2",
         resumeTailoringMode: "aggressive",
-        resumeReview: { status: "needs_review" } as ReviewQueueItem["resumeReview"],
+        resumeReview: {
+          status: "needs_review",
+        } as ReviewQueueItem["resumeReview"],
       }),
     ];
     for (const campaign of ws.campaigns) {

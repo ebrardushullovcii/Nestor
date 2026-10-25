@@ -6,7 +6,6 @@ import {
 } from "./index";
 import type { ProfileCopilotRelevantReviewItem } from "@nestor/contracts";
 import { ProfileCopilotUnfinishedError } from "./openai-compatible";
-import { ResumeGenerationStrategyPolicySchema } from "./shared";
 import {
   createEnvironment,
   createJobPosting,
@@ -1776,84 +1775,6 @@ describe("openai-compatible chat and draft behavior", () => {
     }
   });
 
-  test("a conservative strategy wins over the global aggressive default and does not add listing-only skills", async () => {
-    const restoreFetch = mockJsonFetch({
-      choices: [{ message: { content: JSON.stringify({}) } }],
-    });
-
-    try {
-      const client = createOpenAiCompatibleJobFinderAiClient({
-        apiKey: "test-key",
-        baseUrl: "https://example.com/v1",
-        model: "test-model",
-      });
-      const draftInput = {
-        profile: createProfile(),
-        settings: createSettings(),
-        job: {
-          ...createJobPosting(),
-          description:
-            "Build product interfaces for customer workflows with TypeScript.",
-          keySkills: ["TypeScript"],
-          minimumQualifications: [
-            "Hands-on experience with Terraform and CI/CD.",
-          ],
-        },
-        resumeText: "Resume text",
-        evidence: {
-          summary: [],
-          candidateSummary: [],
-          experience: [],
-          skills: ["TypeScript"],
-          keywords: [],
-        },
-        researchContext: {
-          companyNotes: [],
-          domainVocabulary: [],
-          priorityThemes: [],
-        },
-      };
-      const conservativeStrategy = ResumeGenerationStrategyPolicySchema.parse({
-        strategyId: "strategy_keep_facts",
-        strategyName: "Keep every fact",
-        roleFamily: "Frontend Engineering",
-        baseResumeDocumentId: "resume_1",
-        templateId: "classic_ats",
-        headlinePolicy: "per_job_tailored",
-        skillsPolicy: "role_family_expanded",
-        coveragePolicy: "full_tailoring",
-        tailoringStrength: "conservative",
-        evidenceBoundaries: {
-          allowExactClaims: true,
-          allowParaphrasedClaims: true,
-          maxEvidenceRefsPerBullet: 8,
-          requireVerifierPass: true,
-        },
-        effectiveSource: "selection",
-        effectiveReason: "The user selected this strategy for the posting.",
-        recommendationSource: "none",
-        recommendationReason: null,
-        selectionSource: "user",
-        selectionReason: "Keep every fact for this job.",
-      });
-
-      const result = await client.createResumeDraft({
-        ...draftInput,
-        searchPreferences: {
-          ...createPreferences(),
-          tailoringMode: "aggressive" as const,
-        },
-        strategy: conservativeStrategy,
-      });
-
-      expect(result.coreSkills).not.toEqual(
-        expect.arrayContaining(["Terraform"]),
-      );
-      expect(result.notes.join(" ")).not.toMatch(/job-listing skill/i);
-    } finally {
-      restoreFetch();
-    }
-  });
 });
 
 test("the provider forwards parallel tool proposals and returns both in order", async () => {

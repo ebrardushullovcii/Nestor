@@ -52,7 +52,6 @@ test("invalid legacy settings preserve valid preferences and the source JSON", a
         ...seed.settings,
         appearanceTheme: "dark",
         keepSessionAlive: !seed.settings.keepSessionAlive,
-        maxApplicationsPerLocalDay: "broken",
       },
     });
     await writeFile(legacyPath, legacy);
@@ -71,8 +70,10 @@ test("invalid legacy settings preserve valid preferences and the source JSON", a
 
 test.each([
   "not JSON",
-  JSON.stringify({ ...createSeed().settings, maxApplicationsPerLocalDay: 0 }),
-])(
+  JSON.stringify({
+    ...createSeed().settings,
+    resumeTemplateId: "not_a_template",
+  })])(
   "corrupt SQLite settings reject load and retain their original bytes (%s)",
   async (corrupt) => {
     const temp = await createTempRepository("nestor-settings-corrupt-");

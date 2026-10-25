@@ -500,7 +500,6 @@ describe("ReviewQueueMissionPanel", () => {
             lastUpdatedAt: "2026-09-22T10:00:00.000Z",
           }),
         ],
-        safeguardBlocker: "Automatic runs are paused.",
         onOpenApplication,
       });
 
@@ -542,22 +541,6 @@ describe("ReviewQueueMissionPanel", () => {
     expect(onOpenApplication).toHaveBeenCalledWith("newest");
     expect(props.onStartApplyCopilot).not.toHaveBeenCalled();
     expect(screen.queryByText(/Continue one, or start new/)).toBeNull();
-  });
-
-  it("replaces Apply with Open Safeguards while a safeguard holds", () => {
-    const onOpenSafeguards = vi.fn();
-    renderPanel({
-      onOpenSafeguards,
-      safeguardBlocker:
-        "Automatic runs are paused (abnormal_failure_pause: automatic_discovery_failures:campaign_default).",
-    });
-
-    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Open Safeguards" }));
-    expect(onOpenSafeguards).toHaveBeenCalledOnce();
-    expect(screen.getByTestId("shortlisted-state-line").textContent).toBe(
-      "Automatic runs are paused.",
-    );
   });
 
   it("keeps the button saying the form is being filled while the run record runs", () => {

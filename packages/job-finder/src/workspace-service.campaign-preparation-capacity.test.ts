@@ -1,21 +1,14 @@
 import {
-  AbnormalFailurePauseSchema,
   ApplicationConsentRequestSchema,
   ApplicationRecordSchema,
   ApplyJobResultSchema,
   ApplyRunSchema,
   ApplySubmitApprovalSchema,
-  JobFinderIntelligenceStateSchema,
   SavedJobSchema,
   type JobSearchCampaignLimits,
 } from "@nestor/contracts";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
-
-import {
-  MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY,
-  MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN,
-} from "./workspace-service";
 import {
   createBrowserRuntime,
   createSeed,
@@ -35,7 +28,6 @@ function localTimeIso(dayOffset = 0): string {
 }
 
 const TODAY_AT = localTimeIso();
-const YESTERDAY_AT = localTimeIso(-1);
 const TODAY_LOCAL_DATE = [
   FIXED_NOW.getFullYear(),
   String(FIXED_NOW.getMonth() + 1).padStart(2, "0"),
@@ -50,14 +42,6 @@ beforeAll(() => {
 afterAll(() => {
   vi.useRealTimers();
 });
-
-function createDeferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
-    resolve = next;
-  });
-  return { promise, resolve };
-}
 
 function createCapacitySeed() {
   const seed = createSeed();
@@ -278,26 +262,6 @@ function seedBegunPreparations(
 }
 
 describe("workspace campaign preparation capacity", () => {
-  test("uses fixed product safeguards instead of persisted campaign limits", async () => {
-    expect(MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN).toBe(10);
-    expect(MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY).toBe(20);
-
-    const harness = createWorkspaceServiceHarness({
-      seed: createCapacitySeed(),
-    });
-    await seedActiveCampaign(harness, {
-      limits: { preparationBatchSize: 1, dailyPreparationLimit: 1 },
-    });
-
-    const snapshot = await harness.workspaceService.startAutoApplyQueueRun([
-      "job_ready",
-      "job_generating",
-    ]);
-    expect(
-      snapshot.applyRuns.find((run) => run.state === "awaiting_submit_approval")
-        ?.jobIds,
-    ).toEqual(["job_ready", "job_generating"]);
-  });
 
   test("rejects more than ten unique jobs at staging and approval", async () => {
     const seed = createCapacitySeed();
@@ -331,39 +295,6 @@ describe("workspace campaign preparation capacity", () => {
     ).toEqual([jobIds[0]]);
   });
 
-  test("rejects the twenty-first begun preparation globally across campaign and legacy lineages", async () => {
-    const seed = createCapacitySeed();
-    seed.applyRuns = Array.from(
-      { length: MAX_BEGUN_EMPLOYER_APPLICATIONS_PER_LOCAL_DAY },
-      (_, index) =>
-        applyRunFixture({
-          id: `run_consumed_${index}`,
-          campaignId:
-            index % 3 === 0
-              ? null
-              : index % 2 === 0
-                ? "campaign_other"
-                : "campaign_default",
-          jobIds: ["job_ready"],
-          state: "completed",
-        }),
-    );
-    seed.applyJobResults = seed.applyRuns.map((run, index) =>
-      applyResultFixture({
-        id: `result_consumed_${index}`,
-        runId: run.id,
-        jobId: "job_ready",
-        state: index % 2 === 0 ? "awaiting_review" : "submitted",
-      }),
-    );
-    const harness = createWorkspaceServiceHarness({ seed });
-    await seedActiveCampaign(harness);
-
-    await expect(
-      harness.workspaceService.startAutoApplyRun("job_generating"),
-    ).rejects.toThrow("up to 20 preparations per day");
-  });
-
   test("refuses every application start while all work is paused and keeps the pause", async () => {
     const harness = createWorkspaceServiceHarness({
       seed: createCapacitySeed(),
@@ -380,46 +311,6 @@ describe("workspace campaign preparation capacity", () => {
     expect((await harness.repository.getActivityControl()).paused).toBe(true);
   });
 
-  test("enforces a configured daily application limit below the default", async () => {
-    const seed = createCapacitySeed();
-    seed.settings = {
-      ...seed.settings,
-      maxApplicationsPerLocalDay: 1,
-    };
-    seedBegunPreparations(seed, 1);
-    const harness = createWorkspaceServiceHarness({ seed });
-    await seedActiveCampaign(harness);
-
-    await expect(
-      harness.workspaceService.startAutoApplyRun("job_generating"),
-    ).rejects.toThrow("up to 1 preparation per day");
-  });
-
-  test.each([
-    "prepare_only",
-    "confirm_before_submit",
-    "autonomous_submit",
-  ] as const)(
-    "refuses a %s batch when today's application limit is spent",
-    async (applicationAutomationMode) => {
-      const seed = createCapacitySeed();
-      seed.settings = {
-        ...seed.settings,
-        maxApplicationsPerLocalDay: 1,
-      };
-      seedBegunPreparations(seed, 1);
-      const harness = createWorkspaceServiceHarness({ seed });
-      await seedActiveCampaign(harness);
-
-      await expect(
-        harness.workspaceService.startAutoApplyQueueRun(
-          ["job_ready"],
-          applicationAutomationMode,
-        ),
-      ).rejects.toThrow("up to 1 preparation per day");
-      expect(await harness.repository.listApplyRuns()).toHaveLength(1);
-    },
-  );
 
   test("does not count staged or cancelled-before-start work", async () => {
     const seed = createCapacitySeed();
@@ -446,235 +337,6 @@ describe("workspace campaign preparation capacity", () => {
       await harness.workspaceService.startAutoApplyRun("job_generating");
     expect(snapshot.applyRuns).toHaveLength(31);
   });
-
-  test("deduplicates exact run/job lineage but counts fresh runs separately", async () => {
-    const seed = createCapacitySeed();
-    seed.applyRuns = Array.from({ length: 19 }, (_, index) =>
-      applyRunFixture({
-        id: `run_lineage_${index}`,
-        campaignId: index % 2 === 0 ? null : "campaign_default",
-        jobIds: ["job_ready"],
-        state: "completed",
-      }),
-    );
-    seed.applyJobResults = [
-      ...seed.applyRuns.flatMap((run, index) => [
-        applyResultFixture({
-          id: `result_lineage_${index}_first`,
-          runId: run.id,
-          jobId: "job_ready",
-          state: "failed",
-        }),
-        applyResultFixture({
-          id: `result_lineage_${index}_retry_duplicate`,
-          runId: run.id,
-          jobId: "job_ready",
-          state: "filling",
-        }),
-      ]),
-      applyResultFixture({
-        id: "result_planned_same_run",
-        runId: "run_lineage_0",
-        jobId: "job_generating",
-        state: "planned",
-      }),
-    ];
-    const harness = createWorkspaceServiceHarness({ seed });
-    await seedActiveCampaign(harness);
-
-    const twentieth =
-      await harness.workspaceService.startAutoApplyRun("job_generating");
-    expect(
-      twentieth.applyRuns.some(
-        (run) =>
-          run.mode === "single_job_auto" && run.jobIds[0] === "job_generating",
-      ),
-    ).toBe(true);
-
-    const twentiethRun = twentieth.applyRuns.find(
-      (run) =>
-        run.mode === "single_job_auto" && run.jobIds[0] === "job_generating",
-    );
-    const twentiethResult = twentieth.applyJobResults.find(
-      (result) => result.runId === twentiethRun?.id,
-    );
-    if (!twentiethResult) throw new Error("Expected staged twentieth result.");
-    await harness.repository.markApplicationPreparationStarted({
-      resultId: twentiethResult.id,
-      runId: twentiethResult.runId,
-      jobId: twentiethResult.jobId,
-      startedAt: TODAY_AT,
-      startedLocalDate: [
-        new Date(TODAY_AT).getFullYear(),
-        String(new Date(TODAY_AT).getMonth() + 1).padStart(2, "0"),
-        String(new Date(TODAY_AT).getDate()).padStart(2, "0"),
-      ].join("-"),
-    });
-
-    await expect(
-      harness.workspaceService.startAutoApplyRun("job_ready"),
-    ).rejects.toThrow(/Retries and failed attempts count.*Settings/);
-  });
-
-  test("uses the local calendar day and frees capacity from yesterday", async () => {
-    const seed = createCapacitySeed();
-    seed.applyRuns = Array.from({ length: 20 }, (_, index) =>
-      applyRunFixture({
-        id: `run_yesterday_${index}`,
-        campaignId: null,
-        jobIds: ["job_ready"],
-        createdAt: YESTERDAY_AT,
-        state: "completed",
-      }),
-    );
-    seed.applyJobResults = seed.applyRuns.map((run, index) =>
-      applyResultFixture({
-        id: `result_yesterday_${index}`,
-        runId: run.id,
-        jobId: "job_ready",
-        state: "submitted",
-        createdAt: YESTERDAY_AT,
-      }),
-    );
-    const harness = createWorkspaceServiceHarness({ seed });
-    await seedActiveCampaign(harness);
-
-    await expect(
-      harness.workspaceService.startAutoApplyRun("job_generating"),
-    ).resolves.toBeTruthy();
-  });
-
-  test("staged approval rechecks remaining global daily capacity", async () => {
-    const seed = createCapacitySeed();
-    seed.applyRuns = Array.from({ length: 20 }, (_, index) =>
-      applyRunFixture({
-        id: `run_before_approval_${index}`,
-        campaignId: index % 2 === 0 ? null : "campaign_other",
-        jobIds: ["job_ready"],
-        state: "completed",
-      }),
-    );
-    seed.applyJobResults = seed.applyRuns.map((run, index) =>
-      applyResultFixture({
-        id: `result_before_approval_${index}`,
-        runId: run.id,
-        jobId: "job_ready",
-        state: "awaiting_review",
-      }),
-    );
-    seed.applyRuns.push(
-      applyRunFixture({
-        id: "run_staged_recheck",
-        campaignId: "campaign_default",
-        jobIds: ["job_generating"],
-        submitApprovalId: "approval_staged_recheck",
-      }),
-    );
-    seed.applyJobResults.push(
-      applyResultFixture({
-        id: "result_staged_recheck",
-        runId: "run_staged_recheck",
-        jobId: "job_generating",
-        state: "planned",
-      }),
-    );
-    seed.applySubmitApprovals = [
-      applyApprovalFixture({
-        id: "approval_staged_recheck",
-        runId: "run_staged_recheck",
-        jobIds: ["job_generating"],
-      }),
-    ];
-    const harness = createWorkspaceServiceHarness({ seed });
-    await seedActiveCampaign(harness);
-
-    await expect(
-      harness.workspaceService.approveApplyRun("run_staged_recheck"),
-    ).rejects.toThrow(/Retries and failed attempts count.*Settings/);
-    const approvals = await harness.repository.listApplySubmitApprovals();
-    expect(approvals[0]?.status).toBe("pending");
-  });
-
-  test.each(["approve", "decline"] as const)(
-    "rejects consent %s at full capacity before persistence or relaunch",
-    async (action) => {
-      const seed = createCapacitySeed();
-      seedBegunPreparations(seed, 19);
-      seed.applyRuns.push(
-        applyRunFixture({
-          id: "run_consent_at_capacity",
-          campaignId: "campaign_default",
-          jobIds: ["job_ready", "job_generating"],
-          state: "paused_for_consent",
-          submitApprovalId: "approval_consent_at_capacity",
-          pendingJobs: 2,
-        }),
-      );
-      seed.applyJobResults.push(
-        applyResultFixture({
-          id: "result_consent_marked",
-          runId: "run_consent_at_capacity",
-          jobId: "job_ready",
-          state: "blocked",
-          preparationStarted: true,
-          applicationRecordId: "application_job_ready",
-        }),
-        applyResultFixture({
-          id: "result_consent_unmarked",
-          runId: "run_consent_at_capacity",
-          jobId: "job_generating",
-          state: "planned",
-        }),
-      );
-      seed.applicationConsentRequests = [
-        consentRequestFixture({
-          id: "consent_at_capacity",
-          runId: "run_consent_at_capacity",
-          resultId: "result_consent_marked",
-          jobId: "job_ready",
-          applicationRecordId: "application_job_ready",
-        }),
-      ];
-      seed.applicationRecords = [
-        applicationRecordFixture({
-          id: "application_job_ready",
-          jobId: "job_ready",
-          title: "Senior Product Designer",
-        }),
-      ];
-      const baseRuntime = createBrowserRuntime();
-      const executeApplicationFlow = vi.fn(
-        (...args: Parameters<typeof baseRuntime.executeApplicationFlow>) =>
-          baseRuntime.executeApplicationFlow(...args),
-      );
-      const harness = createWorkspaceServiceHarness({
-        seed,
-        browserRuntime: { ...baseRuntime, executeApplicationFlow },
-      });
-      await seedActiveCampaign(harness);
-
-      await expect(
-        harness.workspaceService.resolveApplyConsentRequest(
-          "consent_at_capacity",
-          action,
-        ),
-      ).rejects.toThrow(/Retries and failed attempts count.*Settings/);
-
-      expect(executeApplicationFlow).not.toHaveBeenCalled();
-      expect(
-        (await harness.repository.listApplicationConsentRequests())[0],
-      ).toMatchObject({ status: "pending", decidedAt: null });
-      expect(
-        (await harness.repository.listApplyJobResults()).find(
-          (result) => result.id === "result_consent_unmarked",
-        ),
-      ).toMatchObject({
-        state: "planned",
-        applicationPreparationStartedAt: null,
-        applicationPreparationStartedLocalDate: null,
-      });
-    },
-  );
 
   test("lets consent approval continue one newly unmarked job at nineteen used slots", async () => {
     const seed = createCapacitySeed();
@@ -759,116 +421,8 @@ describe("workspace campaign preparation capacity", () => {
     expect(twentiethResult?.applicationPreparationStartedLocalDate).toBe(
       TODAY_LOCAL_DATE,
     );
-    expect(
-      snapshot.dashboard.globalDailyApplicationPreparationCapacity,
-    ).toMatchObject({ used: 20, remaining: 0 });
   });
 
-  test("serializes a parked legacy start against staged approval across campaigns", async () => {
-    const seed = createCapacitySeed();
-    seedBegunPreparations(seed, 19);
-    seed.applyRuns.push(
-      applyRunFixture({
-        id: "run_cross_campaign_race",
-        campaignId: "campaign_other",
-        jobIds: ["job_generating"],
-        submitApprovalId: "approval_cross_campaign_race",
-      }),
-    );
-    seed.applyJobResults.push(
-      applyResultFixture({
-        id: "result_cross_campaign_race",
-        runId: "run_cross_campaign_race",
-        jobId: "job_generating",
-        state: "planned",
-      }),
-    );
-    seed.applySubmitApprovals = [
-      applyApprovalFixture({
-        id: "approval_cross_campaign_race",
-        runId: "run_cross_campaign_race",
-        jobIds: ["job_generating"],
-      }),
-    ];
-
-    const browserGate = createDeferred<void>();
-    const baseRuntime = createBrowserRuntime();
-    const browserRuntime: BrowserSessionRuntime = {
-      ...baseRuntime,
-      executeApplicationFlow: async (source, input, options) => {
-        await browserGate.promise;
-        return baseRuntime.executeApplicationFlow(source, input, options);
-      },
-    };
-    const harness = createWorkspaceServiceHarness({ seed, browserRuntime });
-    const defaultCampaignId = await seedActiveCampaign(harness);
-    const state = await harness.repository.getCampaignState();
-    const defaultCampaign = state?.campaigns.find(
-      (campaign) => campaign.id === defaultCampaignId,
-    );
-    if (!state || !defaultCampaign)
-      throw new Error("Expected default campaign.");
-    await harness.repository.saveCampaignState({
-      ...state,
-      campaigns: [
-        defaultCampaign,
-        {
-          ...defaultCampaign,
-          id: "campaign_other",
-          name: "Other campaign",
-          jobIds: ["job_generating"],
-        },
-      ],
-    });
-
-    const legacyStart = harness.workspaceService.approveApply("job_ready");
-    await vi.waitFor(async () => {
-      const runs = await harness.repository.listApplyRuns();
-      expect(
-        runs.some(
-          (run) =>
-            run.mode === "copilot" &&
-            run.state === "running" &&
-            run.jobIds[0] === "job_ready",
-        ),
-      ).toBe(true);
-      const result = (await harness.repository.listApplyJobResults()).find(
-        (candidate) =>
-          candidate.runId ===
-          runs.find(
-            (run) => run.mode === "copilot" && run.jobIds[0] === "job_ready",
-          )?.id,
-      );
-      expect(result?.applicationPreparationStartedAt).toBeTruthy();
-      expect(result?.applicationPreparationStartedLocalDate).toMatch(
-        /^\d{4}-\d{2}-\d{2}$/,
-      );
-    });
-
-    const stagedApproval = harness.workspaceService.approveApplyRun(
-      "run_cross_campaign_race",
-    );
-    const concurrentOutcomes = Promise.allSettled([
-      legacyStart,
-      stagedApproval,
-    ]);
-    await expect(stagedApproval).rejects.toThrow(
-      "up to 20 preparations per day",
-    );
-    browserGate.resolve();
-    const outcomes = await concurrentOutcomes;
-    expect(outcomes.map((outcome) => outcome.status)).toEqual([
-      "fulfilled",
-      "rejected",
-    ]);
-
-    const approvals = await harness.repository.listApplySubmitApprovals();
-    expect(
-      approvals.find(
-        (approval) => approval.id === "approval_cross_campaign_race",
-      )?.status,
-    ).toBe("pending");
-  });
 
   test("releases a failed reservation before the next preparation start", async () => {
     const seed = createCapacitySeed();
@@ -916,74 +470,6 @@ describe("workspace campaign preparation capacity", () => {
     );
     expect(result?.applicationPreparationStartedAt).toBeNull();
     expect(result?.applicationPreparationStartedLocalDate).toBeNull();
-  });
-
-  test("keeps one exact daily charge when the browser rejects after the durable mark", async () => {
-    const baseRuntime = createBrowserRuntime();
-    const executeApplicationFlow = vi.fn(() =>
-      Promise.reject(new Error("browser launch rejected")),
-    );
-    const harness = createWorkspaceServiceHarness({
-      seed: createCapacitySeed(),
-      browserRuntime: { ...baseRuntime, executeApplicationFlow },
-    });
-    await seedActiveCampaign(harness);
-
-    await expect(
-      harness.workspaceService.approveApply("job_ready"),
-    ).rejects.toThrow("browser launch rejected");
-
-    const result = (await harness.repository.listApplyJobResults()).find(
-      (candidate) => candidate.jobId === "job_ready",
-    );
-    expect(result?.applicationPreparationStartedAt).toBeTruthy();
-    expect(result?.applicationPreparationStartedLocalDate).toBe(
-      TODAY_LOCAL_DATE,
-    );
-    const snapshot = await harness.workspaceService.getWorkspaceSnapshot();
-    expect(
-      snapshot.dashboard.globalDailyApplicationPreparationCapacity,
-    ).toMatchObject({ used: 1, remaining: 19 });
-  });
-
-  test("allows at most twenty concurrent durable browser launches", async () => {
-    const seed = createCapacitySeed();
-    const jobIds = addClonedJobs(seed, 21);
-    const browserGate = createDeferred<void>();
-    const baseRuntime = createBrowserRuntime();
-    const executeApplicationFlow = vi.fn(
-      async (
-        ...args: Parameters<
-          NonNullable<BrowserSessionRuntime["executeApplicationFlow"]>
-        >
-      ) => {
-        await browserGate.promise;
-        return baseRuntime.executeApplicationFlow(...args);
-      },
-    );
-    const harness = createWorkspaceServiceHarness({
-      seed,
-      browserRuntime: { ...baseRuntime, executeApplicationFlow },
-    });
-    await seedActiveCampaign(harness, { jobIds });
-
-    const launches = jobIds.map((jobId) =>
-      harness.workspaceService.approveApply(jobId),
-    );
-    const outcomesPromise = Promise.allSettled(launches);
-    await vi.waitFor(() =>
-      expect(executeApplicationFlow).toHaveBeenCalledTimes(20),
-    );
-    browserGate.resolve();
-    const outcomes = await outcomesPromise;
-
-    expect(
-      outcomes.filter((outcome) => outcome.status === "fulfilled"),
-    ).toHaveLength(20);
-    expect(
-      outcomes.filter((outcome) => outcome.status === "rejected"),
-    ).toHaveLength(1);
-    expect(executeApplicationFlow).toHaveBeenCalledTimes(20);
   });
 
   test("preserves campaign membership and captured-run lineage", async () => {
@@ -1049,31 +535,6 @@ describe("workspace campaign preparation capacity", () => {
     );
   });
 
-  test("legacy approveApply still enforces safeguards", async () => {
-    const seed = createCapacitySeed();
-    seed.intelligence = JobFinderIntelligenceStateSchema.parse({
-      safeguards: {
-        abnormalFailurePauses: [
-          AbnormalFailurePauseSchema.parse({
-            id: "pause_abnormal_failures",
-            windowStartedAt: TODAY_AT,
-            failuresInWindow: 5,
-            sampleSize: 5,
-            failureRatePercent: 100,
-            paused: true,
-            explanation: "Application preparation kept failing.",
-            recoveryGuidance: "Review the failures before continuing.",
-          }),
-        ],
-      },
-    });
-    const harness = createWorkspaceServiceHarness({ seed });
-    await seedActiveCampaign(harness);
-
-    await expect(
-      harness.workspaceService.approveApply("job_ready"),
-    ).rejects.toThrow(/Open Safeguards to resolve, dismiss, or retry/);
-  });
 
   test("guarded legacy and queued paths retain prepare-only authority", async () => {
     const baseRuntime = createBrowserRuntime();

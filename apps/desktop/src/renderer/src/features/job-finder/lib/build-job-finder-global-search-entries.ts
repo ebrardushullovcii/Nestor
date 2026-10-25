@@ -76,27 +76,6 @@ const SCREEN_ENTRIES: readonly JobFinderGlobalSearchEntry[] = [
     ["plans"],
   ),
   screen(
-    "companies",
-    "Companies",
-    "Employers in your jobs",
-    "/job-finder/companies",
-    ["employers"],
-  ),
-  screen(
-    "analytics",
-    "Outcomes",
-    "Replies and interviews",
-    "/job-finder/analytics",
-    ["stats"],
-  ),
-  screen(
-    "safeguards",
-    "Safeguards",
-    "Limits and checks",
-    "/job-finder/safeguards",
-    ["limits"],
-  ),
-  screen(
     "settings",
     "Settings",
     "Applying, AI, appearance",
@@ -108,7 +87,7 @@ const SCREEN_ENTRIES: readonly JobFinderGlobalSearchEntry[] = [
     "Applying settings",
     "Settings",
     `${JOB_FINDER_ROUTE_PATHS.settings}#settings-application-authority`,
-    ["send for me", "daily limit", "fill in"],
+    ["send for me", "fill in"],
   ),
 ];
 

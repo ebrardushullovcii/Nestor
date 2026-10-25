@@ -148,8 +148,6 @@ function matchesExactPreflight(
     ) &&
     expected.resumeSha256 === actual.resumeSha256 &&
     expected.remainingRunCapacityBefore === actual.remainingRunCapacityBefore &&
-    expected.remainingDailyCapacityBefore ===
-      actual.remainingDailyCapacityBefore &&
     expected.createdAt === actual.createdAt &&
     expected.formObservation.id === actual.formObservation.id &&
     expected.formObservation.revision === actual.formObservation.revision &&
@@ -257,12 +255,8 @@ function validateCurrentAuthorityPreflight(
 
   if (
     !Number.isSafeInteger(preflight.remainingRunCapacityBefore) ||
-    !Number.isSafeInteger(preflight.remainingDailyCapacityBefore) ||
     preflight.remainingRunCapacityBefore <= 0 ||
-    preflight.remainingDailyCapacityBefore <= 0 ||
-    preflight.remainingRunCapacityBefore > authority.maxApplicationsPerRun ||
-    preflight.remainingDailyCapacityBefore >
-      authority.maxApplicationsPerLocalDay
+    preflight.remainingRunCapacityBefore > authority.maxApplicationsPerRun
   ) {
     return "capacity_invalid";
   }

@@ -114,7 +114,6 @@ async function installExactPrepareOnlyAutosaveAuthority(input: {
     revision: 1,
     scope: { campaignId: null, jobIds: [input.jobId] },
     maxApplicationsPerRun: 1,
-    maxApplicationsPerLocalDay: 1,
     intermediateMutationsAuthorized: true,
     accountCreationAuthorized: false,
     allowedResumeSha256: [input.resumeSha256],

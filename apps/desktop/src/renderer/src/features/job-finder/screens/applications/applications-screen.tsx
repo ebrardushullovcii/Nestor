@@ -17,9 +17,7 @@ import type {
   ApplyRunDetails,
   ClearApplicationAnswerCommandInput,
   CompanyEntity,
-  GlobalDailyApplicationPreparationCapacity,
   JobFinderRendererWorkspaceSnapshot,
-  RecordOutcomeInput,
   SaveApplicationAnswerCommandInput,
   JobFinderApplyConsentActionInput,
   JobFinderApplyRunActionInput,
@@ -28,7 +26,6 @@ import type {
   UserActionCommandInput,
 } from "@nestor/contracts";
 import {
-  isListableCompanyName,
   isApplicationTrackedAsSentByPerson,
   PREPARED_PAGE_CLOSED_SUMMARY,
 } from "@nestor/contracts";
@@ -88,16 +85,6 @@ import { useAssistantContextSource } from "../../assistant/assistant-provider";
 import { buildListContext } from "../../assistant/assistant-context-capture";
 import { buildApplicationQueueHolds } from "./application-queue-hold";
 
-/** Statuses an application reaches once it was sent and can have an outcome. */
-const OUTCOME_STATUSES = new Set<string>([
-  "submitted",
-  "assessment",
-  "interview",
-  "rejected",
-  "offer",
-  "withdrawn",
-]);
-
 export function ApplicationsScreen(props: {
   homeTimeZone?: string;
   scopeControl?: ReactNode;
@@ -118,7 +105,6 @@ export function ApplicationsScreen(props: {
    */
   userActionRequests?: JobFinderRendererWorkspaceSnapshot["userActionRequests"];
   companies?: readonly CompanyEntity[];
-  dailyPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
   discoveryJobs: JobFinderRendererWorkspaceSnapshot["discoveryJobs"];
   isApplyPending: boolean;
   isApplyRequestPending: (requestId: string) => boolean;
@@ -159,13 +145,9 @@ export function ApplicationsScreen(props: {
   ) => void;
   /** The Apply queue (ADR 0058), shown above the list with its controls. */
   applyQueue?: JobFinderRendererWorkspaceSnapshot["applyQueue"];
-  /** Same-company conflicts, to tell a held job's open choice from a made one. */
-  sameCompanyConflicts?: JobFinderRendererWorkspaceSnapshot["intelligence"]["safeguards"]["simultaneousApplicationConflicts"];
   onControlApplyQueue?: (action: ApplyQueueControlAction) => void;
-  onRaiseDailyLimit?: () => void;
   onStartApplyCopilot: (input: JobFinderExactApplicationTarget) => void;
   onReviewResumePdf?: (jobId: string) => void;
-  onOpenCompany?: (companyId: string) => void;
   /**
    * The workspace's most recently updated run. Not used to pick a record's
    * attempt (see effectiveSelectedApplyRunId); kept for callers.
@@ -190,21 +172,6 @@ export function ApplicationsScreen(props: {
     format: ApplicationCrmExportFormat,
     recordId: string,
   ) => Promise<void>;
-  onRecordOutcome?: (input: RecordOutcomeInput) => Promise<void>;
-  isRecordOutcomePending?: (jobId: string) => boolean;
-  outcomeCampaignId?: string | null;
-  getOutcomeResumeStrategyId?: (jobId: string) => string | null;
-  /** Outcomes the person recorded for one application. */
-  getRecordedOutcomes?: (applicationRecordId: string) => readonly {
-    id: string;
-    outcome: string;
-    occurredAt: string;
-    note: string | null;
-  }[];
-  safeguardsBlockerCount?: number;
-  onOpenSafeguards?: () => void;
-  /** Opens Outcomes, which has no navigation entry of its own. */
-  onOpenOutcomes?: () => void;
   onOpenNeedsYou?: () => void;
   onPerformUserAction?: (
     command: UserActionCommandInput,
@@ -243,7 +210,6 @@ export function ApplicationsScreen(props: {
     applyRuns,
     applyJobResults,
     userActionRequests,
-    dailyPreparationCapacity,
     discoveryJobs,
     isApplyPending,
     isApplyRequestPending,
@@ -446,9 +412,8 @@ export function ApplicationsScreen(props: {
     () =>
       buildApplicationQueueHolds({
         applyQueue: props.applyQueue,
-        conflicts: props.sameCompanyConflicts ?? [],
       }),
-    [props.applyQueue, props.sameCompanyConflicts],
+    [props.applyQueue],
   );
   const retryableJobIds = useMemo(() => {
     const running = new Set(
@@ -904,7 +869,6 @@ export function ApplicationsScreen(props: {
   // messages from ever arriving here.
   const visibleActionMessage = resolveVisibleRouteActionMessage({
     actionMessage: props.actionMessage ?? null,
-    dailyPreparationCapacity,
     latestRunAttentionCount,
   });
   // Conditions owned elsewhere, the latest automatic run and the bulk retry
@@ -912,27 +876,10 @@ export function ApplicationsScreen(props: {
   // (ADR 0044). The tracker records stages by hand, which none of them stop.
   const applicationsStatusItems: PageStatusItem[] = [];
   if (workspaceView === "workflow") {
-    const holdCount = props.safeguardsBlockerCount ?? 0;
-    if (holdCount > 0) {
-      applicationsStatusItems.push({
-        id: "safeguard-holds",
-        tone: "critical",
-        text: `${holdCount} safeguard ${holdCount === 1 ? "hold is" : "holds are"} pausing some work`,
-        ...(props.onOpenSafeguards
-          ? {
-              action: {
-                kind: "link",
-                label: "Open Safeguards",
-                onClick: props.onOpenSafeguards,
-              },
-            }
-          : {}),
-      });
-    }
     const retryCount = retryableJobIds.length;
     if (applicationRecords.length > 0 && retryCount > 1) {
-      // One press queues them all; the Apply queue goes ten at a time and
-      // waits for tomorrow at the daily limit (ADR 0058).
+      // One press queues them all; the Apply queue goes ten at a time
+      // (ADR 0058).
       applicationsStatusItems.push({
         id: "bulk-retry",
         tone: "warning",
@@ -1028,21 +975,7 @@ export function ApplicationsScreen(props: {
                 <>
                   {/* Outcomes has no navigation entry; it is reached from
                       here once something has been sent and can have one. */}
-                  {props.onOpenOutcomes &&
-                  applicationRecords.some((record) =>
-                    OUTCOME_STATUSES.has(record.status),
-                  ) ? (
-                    <Button
-                      className="border-(--control-border)"
-                      data-testid="applications-open-outcomes"
-                      onClick={props.onOpenOutcomes}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      See outcomes
-                    </Button>
-                  ) : null}
+                  {null}
                   <Button
                     className="border-(--control-border)"
                     data-testid="applications-open-tracker"
@@ -1066,9 +999,7 @@ export function ApplicationsScreen(props: {
           />
           {workspaceView === "workflow" && props.onControlApplyQueue ? (
             <ApplyQueueStrip
-              dailyLimit={dailyPreparationCapacity?.limit ?? null}
               onControl={props.onControlApplyQueue}
-              onRaiseLimit={() => props.onRaiseDailyLimit?.()}
               pending={isApplyPending}
               queue={props.applyQueue}
               results={applyJobResults}
@@ -1224,26 +1155,9 @@ export function ApplicationsScreen(props: {
                 {...(props.homeTimeZone
                   ? { homeTimeZone: props.homeTimeZone }
                   : {})}
-                isRecordOutcomePending={
-                  props.isRecordOutcomePending?.(
-                    effectiveSelectedRecord.jobId,
-                  ) ?? false
-                }
                 key={effectiveSelectedRecord.id}
                 onExport={props.onExportApplicationCrm}
                 onMutate={props.onMutateApplicationCrm}
-                {...(props.onRecordOutcome
-                  ? { onRecordOutcome: props.onRecordOutcome }
-                  : {})}
-                outcomeResumeStrategyId={
-                  props.getOutcomeResumeStrategyId?.(
-                    effectiveSelectedRecord.jobId,
-                  ) ?? null
-                }
-                recordedOutcomes={
-                  props.getRecordedOutcomes?.(effectiveSelectedRecord.id) ?? []
-                }
-                outcomeCampaignId={props.outcomeCampaignId ?? null}
                 record={
                   crmApplicationRecords.find(
                     (record) => record.id === effectiveSelectedRecord.id,
@@ -1336,7 +1250,6 @@ export function ApplicationsScreen(props: {
             applyRunDetailsStatus={applyRunDetailsStatus}
             applicationRecords={applicationRecords}
             applyJobResults={applyJobResults}
-            dailyPreparationCapacity={dailyPreparationCapacity}
             discoveryJobs={discoveryJobs}
             applyRunHistory={applyRunHistory}
             effectiveSelectedApplyResult={effectiveSelectedApplyResult}
@@ -1348,20 +1261,6 @@ export function ApplicationsScreen(props: {
             isApplyRunPending={isApplyRunPending}
             onApproveApplyRun={onApproveApplyRun}
             onCancelApplyRun={onCancelApplyRun}
-            {...(props.onOpenCompany
-              ? { onOpenCompany: props.onOpenCompany }
-              : {})}
-            selectedRecordCompanyId={
-              effectiveSelectedRecord
-                ? ((props.companies ?? []).find(
-                    (company) =>
-                      isListableCompanyName(company.canonicalName) &&
-                      company.applicationRecordIds.includes(
-                        effectiveSelectedRecord.id,
-                      ),
-                  )?.id ?? null)
-                : null
-            }
             onExportApplicationPacket={onExportApplicationPacket}
             {...(onResolveSubmissionOutcome
               ? { onResolveSubmissionOutcome }
@@ -1403,9 +1302,6 @@ export function ApplicationsScreen(props: {
               : {})}
             {...(props.onAllowSiteSaves
               ? { onAllowSiteSaves: props.onAllowSiteSaves }
-              : {})}
-            {...(props.onOpenSafeguards
-              ? { onOpenSafeguards: props.onOpenSafeguards }
               : {})}
             canConfirmFinishedInBrowser={
               props.canConfirmFinishedInBrowser ?? false

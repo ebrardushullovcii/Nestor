@@ -46,7 +46,6 @@ function buildResult(overrides: Partial<ApplyResult>): ApplyResult {
 
 function resolve(result: ApplyResult | null, isApplyPending = false) {
   return resolveApplicationRecoveryPresentation({
-    canOpenSafeguards: true,
     isApplyPending,
     visibleApplyResult: result,
   });
@@ -84,7 +83,6 @@ describe("resolveApplicationRecoveryPresentation", () => {
       });
       expect(
         resolveApplicationRecoveryPresentation({
-          canOpenSafeguards: false,
           isApplyPending: false,
           pausedQuestionCount: 4,
           visibleApplyResult: result,
@@ -299,7 +297,6 @@ describe("resolveApplicationRecoveryPresentation", () => {
 
   it("takes the Built In sign-in stop from the run's own detail, not the generic summary", () => {
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: true,
       destinationUrl: "https://www.builtinchicago.org/auth/login",
       isApplyPending: false,
       visibleApplyResult: buildResult({
@@ -341,7 +338,6 @@ describe("resolveApplicationRecoveryPresentation", () => {
 
   it("reads a login page from the final URL even with no blocker code", () => {
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: true,
       destinationUrl: "https://jobs.example.com/sso/signin?next=/apply",
       isApplyPending: false,
       visibleApplyResult: buildResult({
@@ -356,7 +352,6 @@ describe("resolveApplicationRecoveryPresentation", () => {
 
   it("treats an account wall like a sign-in wall with its own sentence", () => {
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: true,
       destinationUrl: "https://jobs.example.com/apply",
       isApplyPending: false,
       visibleApplyResult: buildResult({
@@ -380,7 +375,6 @@ describe("resolveApplicationRecoveryPresentation", () => {
 
   it("keeps every stop reason free of the banned operations copy", () => {
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: true,
       isApplyPending: false,
       visibleApplyResult: buildResult({
         state: "blocked",
@@ -399,7 +393,6 @@ describe("resolveApplicationRecoveryPresentation", () => {
 
   it("shows the form's question and sends the person to Needs you", () => {
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: true,
       isApplyPending: false,
       visibleApplyResult: buildResult({
         state: "blocked",
@@ -419,7 +412,6 @@ describe("resolveApplicationRecoveryPresentation", () => {
 
   it("offers a plain retry when an older run stopped because the site saves as you type", () => {
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: true,
       destinationUrl: "https://www.boards.example.com/apply/123",
       isApplyPending: false,
       visibleApplyResult: buildResult({
@@ -443,12 +435,11 @@ describe("resolveApplicationRecoveryPresentation", () => {
       "Phone — Mobile number",
     );
     expect(
-      formatQuestionPrompt("Step 2 of 5: Contact details — Phone *"),
-    ).toBe("Step 2 of 5: Contact details — Phone");
+      formatQuestionPrompt("Step 2 of 5: Contact details — Phone *")).toBe("Step 2 of 5: Contact details — Phone",
+    );
     expect(formatQuestionPrompt("Notice period:")).toBe("Notice period");
 
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: true,
       isApplyPending: false,
       visibleApplyResult: buildResult({
         state: "blocked",
@@ -462,7 +453,6 @@ describe("resolveApplicationRecoveryPresentation", () => {
 
   it("counts the questions when the form is waiting on more than one", () => {
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: true,
       isApplyPending: false,
       pausedQuestionCount: 3,
       visibleApplyResult: buildResult({
@@ -478,7 +468,6 @@ describe("resolveApplicationRecoveryPresentation", () => {
 
   it("offers a same-record retry after the current resume-review blocker clears", () => {
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: true,
       isApplyPending: false,
       recordLatestBlockerCode: null,
       visibleApplyResult: buildResult({
@@ -495,7 +484,6 @@ describe("resolveApplicationRecoveryPresentation", () => {
 
   it("keeps the saved outcome until this application's retry actually starts", () => {
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: true,
       isApplyPending: true,
       now: Date.parse("2026-09-01T11:37:00.000Z"),
       visibleApplyResult: buildResult({ state: "blocked" }),
@@ -507,7 +495,6 @@ describe("resolveApplicationRecoveryPresentation", () => {
 
   it("keeps saying it is working for as long as the run record is running", () => {
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: true,
       // The local pending flag has long since expired.
       isApplyPending: false,
       now: Date.parse("2026-09-01T10:07:00.000Z"),
@@ -559,7 +546,6 @@ describe("a planned job's standing in its batch", () => {
   it("offers Try again for a job a safety limit left behind", () => {
     expect(
       resolveApplicationRecoveryPresentation({
-        canOpenSafeguards: true,
         isApplyPending: false,
         run: {
           state: "paused_for_user_review",
@@ -578,7 +564,6 @@ describe("a planned job's standing in its batch", () => {
   it("says Paused, with no action, while the person's pause holds it", () => {
     expect(
       resolveApplicationRecoveryPresentation({
-        canOpenSafeguards: true,
         isApplyPending: false,
         run: { state: "running", activityPaused: true, started: true },
         visibleApplyResult: planned,
@@ -592,7 +577,6 @@ describe("a planned job's standing in its batch", () => {
   it("waits its turn in a batch that is still going", () => {
     expect(
       resolveApplicationRecoveryPresentation({
-        canOpenSafeguards: true,
         isApplyPending: false,
         run: { state: "running", activityPaused: false, started: true },
         visibleApplyResult: planned,
@@ -607,7 +591,6 @@ describe("a planned job's standing in its batch", () => {
 describe("a job the person asked to skip", () => {
   it("reads as skipped with Prepare again, not as an unfinished application", () => {
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: false,
       isApplyPending: false,
       recordLastActionLabel: APPLICATION_SKIPPED_BY_PERSON_LABEL,
       visibleApplyResult: buildResult({ state: "failed" }),
@@ -623,7 +606,6 @@ describe("a retry in Send for me", () => {
   it("says Apply again, because the new run sends", () => {
     const sendForMe = resolveApplicationRecoveryPresentation({
       applyMode: "apply_for_me",
-      canOpenSafeguards: false,
       isApplyPending: false,
       visibleApplyResult: buildResult({
         state: "failed",
@@ -639,7 +621,6 @@ describe("a retry in Send for me", () => {
 
     const fillOnly = resolveApplicationRecoveryPresentation({
       applyMode: "fill_only",
-      canOpenSafeguards: false,
       isApplyPending: false,
       visibleApplyResult: buildResult({
         state: "failed",
@@ -653,7 +634,6 @@ describe("a retry in Send for me", () => {
   it("renames Try again too", () => {
     const presentation = resolveApplicationRecoveryPresentation({
       applyMode: "apply_for_me",
-      canOpenSafeguards: false,
       isApplyPending: false,
       visibleApplyResult: buildResult({
         state: "cancelled",
@@ -691,7 +671,6 @@ it.each(["planned", "awaiting_review", "failed"] as const)(
       completedAt: state === "planned" ? null : "2026-09-01T10:01:00.000Z",
     });
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: false,
       isApplyPending: true,
       visibleApplyResult: result,
       run: { state: "running", activityPaused: false, started: true },
@@ -771,7 +750,6 @@ it.each(["Waiting for a free browser tab", "Waiting its turn"])(
       applicationPreparationStartedAt: "2026-09-01T10:00:00.000Z",
     });
     const presentation = resolveApplicationRecoveryPresentation({
-      canOpenSafeguards: false,
       isApplyPending: true,
       visibleApplyResult: result,
       run: { state: "running", activityPaused: false, started: true },
@@ -823,7 +801,6 @@ it("shows a repeated stop sentence only once in Next step", () => {
 it("shows a saved person-send receipt and its reference without claiming automation sent it", () => {
   const presentation = resolveApplicationRecoveryPresentation({
     visibleApplyResult: null,
-    canOpenSafeguards: false,
     isApplyPending: false,
     personSendReceiptSummary: "The site confirmed receipt. Reference: SYN-25.",
   });
@@ -860,7 +837,6 @@ describe("a filled-in form whose tab closed", () => {
   it("offers one Open when the saved form can come back", () => {
     expect(
       resolveApplicationRecoveryPresentation({
-        canOpenSafeguards: false,
         isApplyPending: false,
         visibleApplyResult: ready,
         applicationPageState: {
@@ -880,7 +856,6 @@ describe("a filled-in form whose tab closed", () => {
     expect(
       resolveApplicationRecoveryPresentation({
         applyMode: "apply_for_me",
-        canOpenSafeguards: false,
         isApplyPending: false,
         visibleApplyResult: ready,
         applicationPageState: {

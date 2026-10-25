@@ -195,19 +195,6 @@ export interface CampaignPreferencesCommitNext<TResult> {
   intelligenceState?: JobFinderIntelligenceState;
 }
 
-export interface CompanyIntelligenceCommitExpected {
-  companyId: string;
-  expectedCompanyUpdatedAt: string;
-  jobId: string | null;
-  applicationRecordId: string | null;
-}
-
-export interface CompanyIntelligenceCommitCurrent {
-  intelligenceState: JobFinderIntelligenceState;
-  savedJob: SavedJob | null;
-  applicationRecord: ApplicationRecord | null;
-}
-
 export interface JobFinderRepository
   extends ApplicationAuthorityRepository, ApplicationAnswerSnapshotRepository {
   /** Optional for custom repositories; ordinary reads remain caller-owned. */
@@ -765,18 +752,6 @@ export interface JobFinderRepository
   /** Borrowed immutable display state. Canonical reads remain caller-owned. */
   readIntelligenceProjection?(): Promise<JobFinderIntelligenceState>;
   saveIntelligenceState(state: JobFinderIntelligenceState): Promise<void>;
-  /**
-   * Replaces intelligence state from a synchronous transform of the latest
-   * singleton and the exact currently persisted evidence references. The file
-   * implementation acquires its write lock before reading these values. A
-   * thrown updater or invalid output leaves intelligence unchanged.
-   */
-  commitCompanyIntelligenceUpdate(
-    expected: CompanyIntelligenceCommitExpected,
-    update: (
-      current: CompanyIntelligenceCommitCurrent,
-    ) => JobFinderIntelligenceState,
-  ): Promise<JobFinderIntelligenceState>;
   getActivityControl(): Promise<JobFinderActivityControl>;
   saveActivityControl(activityControl: JobFinderActivityControl): Promise<void>;
   /** The one saved Apply queue (Apply to selected, this page or all), or null. */

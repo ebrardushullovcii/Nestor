@@ -1,6 +1,5 @@
 import type {
   ApplicationCrmBulkStageMutationInput,
-  OutcomeEvent,
   ApplicationCrmCalendarEntry,
   ApplicationCrmData,
   ApplicationCrmDuplicateHint,
@@ -1297,7 +1296,6 @@ export function exportApplicationCrm(input: {
   exportedAt?: string;
   /** The person's named stages, so an export carries their words. */
   customStages?: readonly { id: string; label: string }[];
-  outcomes?: readonly OutcomeEvent[];
   results?: readonly ApplyJobResult[];
   runs?: readonly ApplyRunSummary[];
 }): ApplicationCrmExportResult {
@@ -1344,12 +1342,6 @@ export function exportApplicationCrm(input: {
               company: record.company,
               status: record.status,
               lastAttemptState: record.lastAttemptState,
-              outcomes: (input.outcomes ?? []).filter(
-                (outcome) =>
-                  outcome.applicationRecordId === record.id ||
-                  (!outcome.applicationRecordId &&
-                    outcome.jobId === record.jobId),
-              ),
               lastUpdatedAt: record.lastUpdatedAt,
               crm: {
                 ...crm,

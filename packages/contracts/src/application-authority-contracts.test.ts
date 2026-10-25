@@ -70,7 +70,6 @@ const validEnvelopeInput = {
     jobIds: [],
   },
   maxApplicationsPerRun: 10,
-  maxApplicationsPerLocalDay: 20,
   intermediateMutationsAuthorized: false,
   accountCreationAuthorized: false,
   allowedResumeSha256: [VALID_SHA],
@@ -117,7 +116,6 @@ const validPreflightInput = {
     ref: "final-control-submit-button",
   },
   remainingRunCapacityBefore: 9,
-  remainingDailyCapacityBefore: 18,
   createdAt: CREATED_AT,
 };
 
@@ -605,11 +603,6 @@ describe("application authority envelope contracts", () => {
   test.each([
     { field: "maxApplicationsPerRun", value: 0 },
     { field: "maxApplicationsPerRun", value: Number.MAX_SAFE_INTEGER + 1 },
-    { field: "maxApplicationsPerLocalDay", value: 0 },
-    {
-      field: "maxApplicationsPerLocalDay",
-      value: Number.MAX_SAFE_INTEGER + 1,
-    },
   ])("rejects out-of-bounds limit $field=$value", ({ field, value }) => {
     expect(
       ApplicationAuthorityEnvelopeSchema.safeParse({
@@ -624,7 +617,6 @@ describe("application authority envelope contracts", () => {
       ApplicationAuthorityEnvelopeSchema.safeParse({
         ...validEnvelopeInput,
         maxApplicationsPerRun: 250,
-        maxApplicationsPerLocalDay: 1000,
       }).success,
     ).toBe(true);
   });
@@ -810,7 +802,6 @@ describe("submission preflight contracts", () => {
     "answers",
     "finalControl",
     "remainingRunCapacityBefore",
-    "remainingDailyCapacityBefore",
     "createdAt",
   ])("cannot omit %s from the exact recheck binding", (key) => {
     const input: Record<string, unknown> = { ...validPreflightInput };

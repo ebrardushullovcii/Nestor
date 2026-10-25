@@ -1,5 +1,4 @@
 export * from "./workspace-service";
-export { SameCompanyApplicationConflictError } from "./application-run-refusal";
 export {
   recordApplicationAuthoritySuccessor,
   resolveApplicationAuthoritySuccessorId,
@@ -25,16 +24,6 @@ export {
   deriveResumeTimelineRepairProposals,
   persistResumeTimelineRepairAction,
 } from "./internal/resume-timeline-repair";
-
-export {
-  applyCompanyIntelligenceMutation,
-  projectCompanyApplicationHistory,
-  projectCompanyDuplicateJobs,
-  projectCompanyOpenings,
-  reconcileCompanies,
-  reviewCompanyMerge,
-  setCompanyPreference,
-} from "./internal/company-intelligence-operations";
 
 export {
   abnormalFailurePauseScope,

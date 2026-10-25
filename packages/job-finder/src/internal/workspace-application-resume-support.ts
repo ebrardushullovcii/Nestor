@@ -5,7 +5,6 @@ import {
   JobFinderResumeWorkspaceSchema,
   resolveEffectiveResumeTailoringStrength,
   type JobFinderResumeWorkspace,
-  type JobFinderResumeWorkspaceStrategyContext,
   type JobFinderResumePreview,
   type CandidateProfile,
   type ResumeDraft,
@@ -33,10 +32,6 @@ import { buildResumeDraftIdentity } from "./resume-workspace-structure";
 import { buildResumeCoverageComparison } from "./resume-workspace-helpers";
 import { hasResumeAffectingProfileChange } from "./resume-workspace-staleness";
 import { resolveJobResumeApplicationMode } from "./job-resume-application-mode";
-import {
-  buildResumeStrategyContext,
-  resolveCampaignDefaultResumeStrategyId,
-} from "./resume-strategy-application";
 import {
   normalizeJobFinderSettings,
   normalizeResumeDraftTemplate,
@@ -134,37 +129,11 @@ function canReuseResearch(input: {
   });
 }
 
-export async function resolveResumeStrategyContextForJob(
-  ctx: WorkspaceServiceContext,
-  jobId: string,
-): Promise<JobFinderResumeWorkspaceStrategyContext | null> {
-  const [intelligenceState, campaignState, savedJobs] = await Promise.all([
-    ctx.repository.getIntelligenceState(),
-    ctx.repository.getCampaignState(),
-    ctx.repository.listSavedJobsByIds([jobId]),
-  ]);
-  const job = savedJobs.find((entry) => entry.id === jobId);
-
-  if (!job) {
-    return null;
-  }
-
-  return buildResumeStrategyContext({
-    state: intelligenceState,
-    job,
-    campaignDefaultResumeStrategyId: resolveCampaignDefaultResumeStrategyId(
-      campaignState,
-      jobId,
-    ),
-  });
-}
-
 export async function resolveEffectiveResumeTailoringStrengthForJob(
   ctx: WorkspaceServiceContext,
   jobId: string,
 ): Promise<TailoringMode | null> {
-  const [strategyContext, searchPreferences, savedJobs] = await Promise.all([
-    resolveResumeStrategyContextForJob(ctx, jobId),
+  const [searchPreferences, savedJobs] = await Promise.all([
     ctx.repository.getSearchPreferences(),
     ctx.repository.listSavedJobsByIds([jobId]),
   ]);
@@ -176,7 +145,6 @@ export async function resolveEffectiveResumeTailoringStrengthForJob(
     return jobLevel;
   }
   return resolveEffectiveResumeTailoringStrength({
-    strategyTailoringStrength: strategyContext?.tailoringStrength ?? null,
     searchPreferencesTailoringMode: searchPreferences.tailoringMode,
   });
 }
@@ -499,13 +467,14 @@ export async function loadResumeWorkspaceState(
   const templates = ctx.documentManager.listResumeTemplates();
   const profilePromise = ctx.repository.getProfileWithRevision();
   if (yieldBetweenReads) await yieldToEventLoop();
-  const [profileState, rawSettings, savedJobs, tailoredAsset, draft] = await Promise.all([
-    profilePromise,
-    ctx.repository.getSettings(),
-    ctx.repository.listSavedJobsByIds([jobId]),
-    ctx.repository.getTailoredAssetByJobId(jobId),
-    ctx.repository.getResumeDraftByJobId(jobId),
-  ]);
+  const [profileState, rawSettings, savedJobs, tailoredAsset, draft] =
+    await Promise.all([
+      profilePromise,
+      ctx.repository.getSettings(),
+      ctx.repository.listSavedJobsByIds([jobId]),
+      ctx.repository.getTailoredAssetByJobId(jobId),
+      ctx.repository.getResumeDraftByJobId(jobId),
+    ]);
   if (yieldBetweenReads) await yieldToEventLoop();
   const settings = normalizeJobFinderSettings(rawSettings, templates);
   const job = savedJobs.find((entry) => entry.id === jobId);
@@ -542,16 +511,10 @@ export async function ensureResumeDraft(
       draft: normalizedDraft,
     };
   }
-
-  // A fresh draft may start from the strategy's template default, but the
-  // strategy never approves or readies anything: the seeded draft is created
-  // unapproved and the exact per-job approval/staleness checks stay
-  // authoritative.
-  const strategyContext = await resolveResumeStrategyContextForJob(ctx, jobId);
   const seededDraft = seedResumeDraft({
     profile: state.profile,
     job: state.job,
-    templateId: strategyContext?.templateId ?? state.settings.resumeTemplateId,
+    templateId: state.settings.resumeTemplateId,
     tailoredAsset: state.tailoredAsset,
   });
   const sanitizedDraft = await sanitizeAndCheckResumeDraft(ctx, {
@@ -1024,7 +987,6 @@ export async function buildResumeWorkspace(
     research,
     assistantMessages,
     revisions,
-    strategyContext,
     profilePreferences,
     campaignState,
   ] = await Promise.all([
@@ -1033,7 +995,6 @@ export async function buildResumeWorkspace(
     ctx.repository.listResumeResearchArtifacts(jobId),
     ctx.repository.listResumeAssistantMessages(jobId),
     ctx.repository.listResumeDraftRevisions(draft.id),
-    resolveResumeStrategyContextForJob(ctx, jobId),
     ctx.repository.getSearchPreferences(),
     ctx.repository.getCampaignState(),
   ]);
@@ -1121,11 +1082,9 @@ export async function buildResumeWorkspace(
         draft,
         validation: validations[0] ?? null,
       }),
-    strategyContext,
     effectiveTailoringStrength:
       job.resumeTailoringMode ??
       resolveEffectiveResumeTailoringStrength({
-        strategyTailoringStrength: strategyContext?.tailoringStrength ?? null,
         searchPreferencesTailoringMode: searchPreferences.tailoringMode,
       }),
   });

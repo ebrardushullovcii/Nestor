@@ -12,7 +12,6 @@ import {
   getApplySupportState,
   getPrimaryApplicationAction,
   shouldShowMissionActionMessage,
-  stripInternalCodeParenthetical,
 } from "./review-queue-mission-panel-helpers";
 import { AI_UNAVAILABLE_RESUME_RESULT_MESSAGE } from "./review-queue-status";
 
@@ -226,25 +225,6 @@ describe("getPrimaryApplicationAction", () => {
     });
   });
 
-  it("replaces Apply with Open Safeguards while a safeguard holds, without internal codes", () => {
-    const action = getPrimaryApplicationAction({
-      ...baseActionInput,
-      safeguardBlocker:
-        "Automatic runs are paused after repeated failures (abnormal_failure_pause: automatic_discovery_failures:campaign_default).",
-    });
-
-    expect(action).toMatchObject({
-      enabled: true,
-      kind: "open_safeguards",
-      label: "Open Safeguards",
-    });
-    expect(action.blocker).toBe(
-      "Automatic runs are paused after repeated failures.",
-    );
-    expect(
-      stripInternalCodeParenthetical("Paused (user requested pause)"),
-    ).toBe("Paused (user requested pause)");
-  });
 
   it("keeps saying the run is in flight for as long as the run record runs", () => {
     expect(
@@ -480,20 +460,18 @@ describe("buildMissionPanelState", () => {
     expect(state.readinessDescription).not.toMatch(/failed|reload/i);
   });
 
-  it("says a safeguard is what is stopping the run", () => {
+  it("offers Apply for an approved job with no safeguard stop", () => {
     const state = buildMissionPanelState({
       browserSession: createBrowserSession("unknown"),
       isApplyPending: false,
       isJobPending: () => false,
-      safeguardBlocker:
-        "Automatic runs are paused (abnormal_failure_pause: x).",
       selectedAsset: createReadyAsset(),
       selectedItem: createApprovedItem(),
       selectedJob: createJob(),
     });
 
-    expect(state.primaryApplicationAction.kind).toBe("open_safeguards");
-    expect(state.readinessDescription).toBe("Automatic runs are paused.");
+    expect(state.primaryApplicationAction.kind).toBe("start_apply");
+    expect(state.readinessDescription).not.toBe("Automatic runs are paused.");
   });
 
   it("keeps the start control counting while the run record runs", () => {

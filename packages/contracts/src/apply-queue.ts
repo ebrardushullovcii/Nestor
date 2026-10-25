@@ -8,17 +8,15 @@ export const APPLY_QUEUE_MAX_JOBS = 2_000;
 
 /**
  * One Apply press over many jobs (Apply to selected, this page, or all ready).
- * The queue starts runs of at most ten back to back, waits out the daily
- * limit until local midnight, and is saved so it carries on after a restart.
+ * The queue starts runs of at most ten back to back and is saved so it
+ * carries on after a restart.
  *
  * - `running`: a run is under way or the next one is about to start.
- * - `waiting_for_tomorrow`: today's limit is used; it continues at `resumesAt`.
  * - `paused`: the person paused it, or a run could not start (`pausedReason`).
  * - `stopped` / `done`: finished; kept so the screens can say what happened.
  */
 export const ApplyQueueStateSchema = z.enum([
   "running",
-  "waiting_for_tomorrow",
   "paused",
   "stopped",
   "done",
@@ -53,7 +51,6 @@ export const ApplyQueueSchema = z
     skipped: z.array(ApplyQueueSkippedJobSchema).max(APPLY_QUEUE_MAX_JOBS),
     activeRunId: NonEmptyStringSchema.nullable(),
     pausedReason: z.string().trim().max(1_000).nullable(),
-    resumesAt: IsoDateTimeSchema.nullable(),
     createdAt: IsoDateTimeSchema,
     updatedAt: IsoDateTimeSchema,
   })

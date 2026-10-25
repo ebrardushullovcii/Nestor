@@ -14,7 +14,6 @@ describe("the one route status Applications presents", () => {
     expect(
       resolveVisibleRouteActionMessage({
         actionMessage: FAILURE_SENTENCES.invalid_details,
-        dailyPreparationCapacity: null,
         latestRunAttentionCount: 5,
       }),
     ).toBe(
@@ -26,7 +25,6 @@ describe("the one route status Applications presents", () => {
     expect(
       resolveVisibleRouteActionMessage({
         actionMessage: FAILURE_SENTENCES.invalid_details,
-        dailyPreparationCapacity: null,
         latestRunAttentionCount: 1,
       }),
     ).toBe("1 application needs you; open it to see what the site asked for.");
@@ -36,7 +34,6 @@ describe("the one route status Applications presents", () => {
     expect(
       resolveVisibleRouteActionMessage({
         actionMessage: FAILURE_SENTENCES.invalid_details,
-        dailyPreparationCapacity: null,
         latestRunAttentionCount: 0,
       }),
     ).toBe(FAILURE_SENTENCES.invalid_details);
@@ -46,7 +43,6 @@ describe("the one route status Applications presents", () => {
     expect(
       resolveVisibleRouteActionMessage({
         actionMessage: FAILURE_SENTENCES.offline,
-        dailyPreparationCapacity: null,
         latestRunAttentionCount: 5,
       }),
     ).toBe(FAILURE_SENTENCES.offline);

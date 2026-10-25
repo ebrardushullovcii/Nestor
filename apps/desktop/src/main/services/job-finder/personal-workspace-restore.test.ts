@@ -33,14 +33,13 @@ const at = "2026-10-05T10:00:00.000Z";
 const waitingQueue = ApplyQueueSchema.parse({
   id: "saved-queue",
   mode: "autonomous_submit",
-  state: "waiting_for_tomorrow",
+  state: "paused",
   jobIds: ["job"],
   assistantScopes: [{ conversationId: "chat", jobIds: ["job"] }],
   startedJobIds: [],
   skipped: [],
   activeRunId: null,
   pausedReason: null,
-  resumesAt: "2026-10-06T00:00:00.000Z",
   createdAt: at,
   updatedAt: at,
 });

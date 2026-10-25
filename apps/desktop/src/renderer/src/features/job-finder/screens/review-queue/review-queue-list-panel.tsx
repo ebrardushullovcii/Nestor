@@ -41,7 +41,6 @@ import {
 } from "../../components/list-selection";
 import { useAssistantContextSource } from "../../assistant/assistant-provider";
 import { buildListContext } from "../../assistant/assistant-context-capture";
-import { stripInternalCodeParenthetical } from "./review-queue-mission-panel-helpers";
 import {
   focusCollectionItem,
   getAdjacentCollectionItemId,
@@ -79,7 +78,7 @@ interface ReviewQueueListPanelProps {
   onPrepareTailoredDrafts?: (jobIds?: readonly string[]) => void;
   /**
    * Queues applications for the given ready jobs: all of them, the page or
-   * the ticked ones. The queue goes ten at a time inside the daily limit.
+   * the ticked ones. The queue goes ten at a time.
    */
   onApplyToJobs?: (jobIds: readonly string[]) => void;
   /** What Apply does in the mode saved in Settings, in one sentence. */
@@ -98,9 +97,6 @@ interface ReviewQueueListPanelProps {
   onMoveResumesBackToReview?: (jobIds: readonly string[]) => Promise<unknown>;
   /** Takes waiting jobs out of the Apply queue before a run takes them. */
   onTakeOutOfApplyQueue?: (jobIds: readonly string[]) => Promise<unknown>;
-  onOpenSafeguards?: () => void;
-  /** A safeguard holding every application start back, in plain words. */
-  safeguardBlocker?: string | null;
   /** All work is paused: Apply waits for Continue and says so. */
   applicationWorkPaused?: boolean;
   onSelectItem: (jobId: string) => void;
@@ -143,8 +139,6 @@ export function ReviewQueueListPanel({
   applyVerb = "Apply to",
   isApplyToAllPending = false,
   queuedJobIds,
-  onOpenSafeguards,
-  safeguardBlocker = null,
   applicationWorkPaused = false,
   onSelectItem,
   onShowItem = onSelectItem,
@@ -475,8 +469,8 @@ export function ReviewQueueListPanel({
       )
       .finally(() => setIsApprovingResumes(false));
   };
-  // One press queues every chosen job; the queue keeps to ten at a time and
-  // to the daily limit by itself (ADR 0058).
+  // One press queues every chosen job; the queue keeps to ten at a time
+  // by itself (ADR 0058).
   const readyToApplyCount = readyToApplyJobIds.length;
   const readyIdSet = new Set(readyToApplyJobIds);
   const pageReadyIds = pageJobIds.filter((id) => readyIdSet.has(id));
@@ -490,9 +484,6 @@ export function ReviewQueueListPanel({
       !unavailableApplicationJobIds.has(id) &&
       !queuedJobIds?.has(id),
   ).length;
-  const safeguardBlockerSentence = safeguardBlocker?.trim()
-    ? stripInternalCodeParenthetical(safeguardBlocker)
-    : null;
   const draftPreparationBlocker = useMemo(
     () =>
       describeTailoredDraftPreparationBlocker(
@@ -522,10 +513,7 @@ export function ReviewQueueListPanel({
   // The bulk buttons act on every shortlisted job. Say so only when some of
   // the jobs they would touch are not in the list on screen.
   const visibleJobIds = new Set(filteredJobIds);
-  const showsApplyAllButton =
-    readyToApplyCount > 0 &&
-    Boolean(onApplyToJobs) &&
-    !safeguardBlockerSentence;
+  const showsApplyAllButton = readyToApplyCount > 0 && Boolean(onApplyToJobs);
   const showsApplyPageButton =
     showsApplyAllButton &&
     pageReadyIds.length > 0 &&
@@ -602,7 +590,7 @@ export function ReviewQueueListPanel({
               },
             ]
           : []),
-        ...(ready.length > 0 && onApplyToJobs && !safeguardBlockerSentence
+        ...(ready.length > 0 && onApplyToJobs
           ? [
               {
                 id: "apply",
@@ -784,9 +772,7 @@ export function ReviewQueueListPanel({
                 : `Approve ${selectedApprovableIds.length} resumes`}
             </Button>
           ) : null}
-          {selectedReadyIds.length > 0 &&
-          onApplyToJobs &&
-          !safeguardBlockerSentence ? (
+          {selectedReadyIds.length > 0 && onApplyToJobs ? (
             <Button
               data-testid="apply-selected"
               disabled={isApplyToAllPending || applicationWorkPaused}
@@ -892,51 +878,39 @@ export function ReviewQueueListPanel({
             </Button>
           ) : null}
           {readyToApplyCount > 0 && onApplyToJobs ? (
-            safeguardBlockerSentence ? (
+            <>
               <Button
-                data-testid="apply-all-safeguards"
-                onClick={() => onOpenSafeguards?.()}
+                data-testid="apply-all-ready"
+                disabled={isApplyToAllPending || applicationWorkPaused}
+                title={
+                  applicationWorkPaused
+                    ? APPLICATION_WORK_PAUSED_REASON
+                    : undefined
+                }
+                onClick={() => onApplyToJobs(readyToApplyJobIds)}
+                pending={isApplyToAllPending}
                 size="toolbar"
                 type="button"
                 variant="secondary"
               >
-                Open Safeguards
+                {readyToApplyCount === 1
+                  ? `${applyVerb} the 1 ready job`
+                  : `${applyVerb} all ${readyToApplyCount} ready`}
               </Button>
-            ) : (
-              <>
+              {showsApplyPageButton ? (
                 <Button
-                  data-testid="apply-all-ready"
+                  data-testid="apply-page-ready"
                   disabled={isApplyToAllPending || applicationWorkPaused}
-                  title={
-                    applicationWorkPaused
-                      ? APPLICATION_WORK_PAUSED_REASON
-                      : undefined
-                  }
-                  onClick={() => onApplyToJobs(readyToApplyJobIds)}
-                  pending={isApplyToAllPending}
+                  onClick={() => onApplyToJobs(pageReadyIds)}
                   size="toolbar"
+                  title="The ready jobs on this page of the list."
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
                 >
-                  {readyToApplyCount === 1
-                    ? `${applyVerb} the 1 ready job`
-                    : `${applyVerb} all ${readyToApplyCount} ready`}
+                  {`${applyVerb} these ${pageReadyIds.length}`}
                 </Button>
-                {showsApplyPageButton ? (
-                  <Button
-                    data-testid="apply-page-ready"
-                    disabled={isApplyToAllPending || applicationWorkPaused}
-                    onClick={() => onApplyToJobs(pageReadyIds)}
-                    size="toolbar"
-                    title="The ready jobs on this page of the list."
-                    type="button"
-                    variant="ghost"
-                  >
-                    {`${applyVerb} these ${pageReadyIds.length}`}
-                  </Button>
-                ) : null}
-              </>
-            )
+              ) : null}
+            </>
           ) : null}
         </>
       )}
@@ -982,7 +956,6 @@ export function ReviewQueueListPanel({
           mode stays in view beside it rather than in a tooltip. */}
       {!isDraftPreparationRunning &&
       !isSelecting &&
-      !safeguardBlockerSentence &&
       readyToApplyCount > 0 &&
       onApplyToJobs &&
       applyAllOutcome ? (
@@ -993,14 +966,6 @@ export function ReviewQueueListPanel({
           {applicationWorkPaused
             ? APPLICATION_WORK_PAUSED_REASON
             : applyAllOutcome}
-        </p>
-      ) : null}
-      {!isSelecting && safeguardBlockerSentence && readyToApplyCount > 0 ? (
-        <p
-          className="m-0 text-xs text-foreground-muted"
-          data-testid="apply-all-blocker"
-        >
-          {safeguardBlockerSentence}
         </p>
       ) : null}
       {!isSelecting &&

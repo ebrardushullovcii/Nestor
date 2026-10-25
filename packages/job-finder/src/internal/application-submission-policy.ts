@@ -148,8 +148,6 @@ export interface EvaluateApplicationSubmissionPolicyInput {
   finalControl: SubmissionFinalControlIdentity;
   /** Current remaining per-run capacity at the moment of the decision. */
   remainingRunCapacity: number;
-  /** Current remaining per-local-day capacity at the moment of the decision. */
-  remainingDailyCapacity: number;
   /** Idempotency state of the preflight's bound key. */
   idempotency: SubmissionIdempotencyState;
   /** Exact current policy identity, answer identity, and finite stop facts. */
@@ -246,16 +244,14 @@ function describeCapacityProblem(
   input: EvaluateApplicationSubmissionPolicyInput,
 ): string {
   if (
-    input.remainingRunCapacity !== input.preflight.remainingRunCapacityBefore ||
-    input.remainingDailyCapacity !==
-      input.preflight.remainingDailyCapacityBefore
+    input.remainingRunCapacity !== input.preflight.remainingRunCapacityBefore
   ) {
-    return `Remaining capacity changed since preflight (run ${input.preflight.remainingRunCapacityBefore} -> ${input.remainingRunCapacity}, day ${input.preflight.remainingDailyCapacityBefore} -> ${input.remainingDailyCapacity}).`;
+    return `Remaining capacity changed since preflight (run ${input.preflight.remainingRunCapacityBefore} -> ${input.remainingRunCapacity}).`;
   }
   if (input.remainingRunCapacity <= 0) {
     return "Remaining per-run capacity is exhausted.";
   }
-  return "Remaining per-local-day capacity is exhausted.";
+  return "Remaining per-run capacity is invalid.";
 }
 
 /**
@@ -581,13 +577,9 @@ export function evaluateApplicationSubmissionPolicy(
 
   if (
     !Number.isSafeInteger(input.remainingRunCapacity) ||
-    !Number.isSafeInteger(input.remainingDailyCapacity) ||
     input.remainingRunCapacity > input.envelope.maxApplicationsPerRun ||
-    input.remainingDailyCapacity > input.envelope.maxApplicationsPerLocalDay ||
     input.remainingRunCapacity !== preflight.remainingRunCapacityBefore ||
-    input.remainingDailyCapacity !== preflight.remainingDailyCapacityBefore ||
-    input.remainingRunCapacity <= 0 ||
-    input.remainingDailyCapacity <= 0
+    input.remainingRunCapacity <= 0
   ) {
     return blocked("capacity_invalid", describeCapacityProblem(input));
   }

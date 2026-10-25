@@ -89,7 +89,6 @@ async function createAuthorizedFixture() {
     revision: 1,
     scope: { campaignId: null, jobIds: [job.id] },
     maxApplicationsPerRun: 1,
-    maxApplicationsPerLocalDay: 1,
     intermediateMutationsAuthorized: true,
     accountCreationAuthorized: false,
     allowedResumeSha256: [RESUME_SHA],

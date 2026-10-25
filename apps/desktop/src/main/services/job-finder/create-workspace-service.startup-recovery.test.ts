@@ -521,7 +521,6 @@ describe("startup reset recovery before workspace exposure", () => {
       revision: 1,
       scope: { campaignId: null, jobIds: ["startup_job"] },
       maxApplicationsPerRun: 1,
-      maxApplicationsPerLocalDay: 1,
       intermediateMutationsAuthorized: false,
       accountCreationAuthorized: false,
       allowedResumeSha256: [digest],
@@ -560,7 +559,6 @@ describe("startup reset recovery before workspace exposure", () => {
       answers: { revision: 1, digest },
       finalControl: { signature: digest, ref: "startup_control" },
       remainingRunCapacityBefore: 1,
-      remainingDailyCapacityBefore: 1,
       createdAt: "2026-08-27T10:00:00.000Z",
     });
     const grant = SubmissionExecutionGrantSchema.parse({

@@ -118,13 +118,7 @@ import {
 } from "./job-search-campaigns";
 import { CampaignNotificationSchema } from "./campaign-operations";
 import {
-  JobFinderIntelligenceStateSchema,
-  ResumeStrategyCoveragePolicySchema,
-  ResumeStrategyEvidenceBoundariesSchema,
-  ResumeStrategyHeadlinePolicySchema,
-  ResumeStrategyRecommendationSourceSchema,
-  ResumeStrategySkillsPolicySchema,
-} from "./job-finder-intelligence";
+  JobFinderIntelligenceStateSchema } from "./job-finder-intelligence";
 import { ApplyQueueSchema } from "./apply-queue";
 
 export const JobFinderJobActionInputSchema = z.object({
@@ -935,7 +929,6 @@ export const JobFinderSettingsSchema = z.object({
   /** The person's ordinary default for new application runs. */
   applicationAutomationMode: ApplicationAutomationModeSchema.optional(),
   salaryDisclosure: ApplicationSalaryDisclosureRuleSchema.optional(),
-  maxApplicationsPerLocalDay: z.number().int().min(1).optional(),
   keepSessionAlive: z.boolean(),
   discoveryOnly: z.boolean().default(false),
   resumeApplicationMode: ResumeApplicationModeSchema.optional(),
@@ -1159,46 +1152,6 @@ export type JobFinderResumeWorkspaceSharedProfile = z.infer<
   typeof JobFinderResumeWorkspaceSharedProfileSchema
 >;
 
-/**
- * Read-only strategy context shown inside Resume Studio. It is deliberately
- * advisory: it carries recommendation/selection provenance and the strategy's
- * policy fields, but never an approval, digest, application-readiness, or
- * current-artifact flag. Reusing a strategy therefore can never make a stale
- * or unapproved artifact application-ready; the per-job draft approval and
- * staleness checks remain the only authority.
- */
-export const JobFinderResumeWorkspaceStrategyContextSchema = z
-  .object({
-    roleFamily: NonEmptyStringSchema.nullable().default(null),
-    recommendedStrategyId: NonEmptyStringSchema.nullable().default(null),
-    recommendedStrategyName: NonEmptyStringSchema.nullable().default(null),
-    recommendationSource:
-      ResumeStrategyRecommendationSourceSchema.default("none"),
-    recommendationReason: NonEmptyStringSchema.nullable().default(null),
-    selectedStrategyId: NonEmptyStringSchema.nullable().default(null),
-    selectedStrategyName: NonEmptyStringSchema.nullable().default(null),
-    selectionSource: z
-      .enum(["user", "campaign_default", "rule_match"])
-      .nullable()
-      .default(null),
-    selectionReason: NonEmptyStringSchema.nullable().default(null),
-    selectedAt: IsoDateTimeSchema.nullable().default(null),
-    // Policy fields of the strategy that is currently recommended/selected for
-    // this job. They are presentation defaults only (for example the template
-    // used when a fresh draft is seeded); they never grant approval.
-    templateId: ResumeTemplateIdSchema.nullable().default(null),
-    headlinePolicy: ResumeStrategyHeadlinePolicySchema.nullable().default(null),
-    skillsPolicy: ResumeStrategySkillsPolicySchema.nullable().default(null),
-    coveragePolicy: ResumeStrategyCoveragePolicySchema.nullable().default(null),
-    tailoringStrength: TailoringModeSchema.nullable().default(null),
-    evidenceBoundaries:
-      ResumeStrategyEvidenceBoundariesSchema.nullable().default(null),
-  })
-  .strict();
-export type JobFinderResumeWorkspaceStrategyContext = z.infer<
-  typeof JobFinderResumeWorkspaceStrategyContextSchema
->;
-
 export const JobFinderResumeWorkspaceSchema = z.object({
   listingCheckState: z.enum(["checking", "failed"]).nullable().optional(),
   job: SavedJobSchema,
@@ -1213,8 +1166,6 @@ export const JobFinderResumeWorkspaceSchema = z.object({
   workHistoryReviewSuggestions: z
     .array(WorkHistoryReviewSuggestionSchema)
     .default([]),
-  strategyContext:
-    JobFinderResumeWorkspaceStrategyContextSchema.nullable().default(null),
   /**
    * Strength that actually ran (or will run) for this job: the named
    * approach's tailoring strength when one is selected, otherwise the
@@ -2005,7 +1956,6 @@ export const UpdateApplicationDefaultsInputSchema = z.object({
   coverLetter: CoverLetterPreferenceSchema.optional(),
   applicationAutomationMode: ApplicationAutomationModeSchema.optional(),
   salaryDisclosure: ApplicationSalaryDisclosureRuleSchema.optional(),
-  maxApplicationsPerLocalDay: z.number().int().min(1).optional(),
 });
 export type UpdateApplicationDefaultsInput = z.infer<
   typeof UpdateApplicationDefaultsInputSchema
@@ -2022,7 +1972,8 @@ export type UpdateWorkspaceBehaviorInput = z.infer<
 >;
 
 /**
- * Everything the AI behavior section of Settings saves in one action.
+ * Everything the AI behavior section of Settings saves in one action, plus
+ * the resume level saved from Profile.
  *
  * `resumeApproach` is the person's one four-way choice: keep the imported
  * file, or tailor at one of three strengths. It writes two stored fields

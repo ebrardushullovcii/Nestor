@@ -1,6 +1,5 @@
 import type {
   ApplicationPageState,
-  GlobalDailyApplicationPreparationCapacity,
   JobFinderExactApplicationTarget,
   JobFinderRendererWorkspaceSnapshot,
 } from "@nestor/contracts";
@@ -10,11 +9,6 @@ import {
   type ApplicationAnswerStep,
 } from "./applications-answer-step";
 import { Button } from "@renderer/components/ui";
-import {
-  formatDailyPreparationBatchExceedsRemainingText,
-  formatDailyPreparationCapacityReachedText,
-  isDailyPreparationCapacityExhausted,
-} from "@renderer/features/job-finder/lib/job-finder-daily-capacity";
 import {
   CONFIRM_STEP_DONE_ACTION,
   CONFIRM_STEP_DONE_PENDING_LABEL,
@@ -87,7 +81,6 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   applyMode?: ApplyMode;
   canRestageAutoRun: boolean;
   canRestageQueueRun: boolean;
-  dailyPreparationCapacity: GlobalDailyApplicationPreparationCapacity | null;
   excludedQueueRecoveryEntries: QueueEntry[];
   isApplyPending: boolean;
   /** All work is paused: nothing here may start an application. */
@@ -95,7 +88,6 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   onStartApplyCopilot: (input: JobFinderExactApplicationTarget) => void;
   onReviewResumePdf?: (jobId: string) => void;
   onStartAutoApplyQueue: (jobIds: string[]) => void;
-  onOpenSafeguards?: () => void;
   /** Takes the person to the Needs you step that holds the answer control. */
   onOpenNeedsYou?: () => void;
   /** The question step, answerable here instead of only on Needs you. */
@@ -160,13 +152,11 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   const {
     canRestageAutoRun,
     canRestageQueueRun,
-    dailyPreparationCapacity,
     isApplyPending,
     applicationWorkPaused = false,
     onStartApplyCopilot,
     onReviewResumePdf,
     onStartAutoApplyQueue,
-    onOpenSafeguards,
     onOpenNeedsYou,
     answerStep = null,
     onAllowSiteSaves,
@@ -195,7 +185,6 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   const presentation = resolveApplicationRecoveryPresentation({
     ...(props.progressNow === undefined ? {} : { now: props.progressNow }),
     ...(props.applyMode ? { applyMode: props.applyMode } : {}),
-    canOpenSafeguards: Boolean(onOpenSafeguards),
     destinationUrl: getApplyResultDestinationUrl(
       visibleApplyResult?.privacyReceipt,
     ),
@@ -233,37 +222,8 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
   // group instead of leaving a disabled control without a target.
   const showQueueRecoveryAction =
     canRestageQueueRun && selectedQueueRecoveryJobIds.length > 0;
-  // The fixed local-day safeguard is enforced fail-closed by the workspace
-  // service. When nothing remains, every start control is disabled here so no
-  // dialog or run can begin, and the reached state is stated in plain text
-  // with the exact usage and reset timing instead of a silent no-op.
-  const isDailyCapacityExhausted = isDailyPreparationCapacityExhausted(
-    dailyPreparationCapacity,
-  );
   // The pause holds every start the same way the spent day does.
-  const isStartBlocked = isDailyCapacityExhausted || applicationWorkPaused;
-  const dailyCapacityReachedText =
-    dailyPreparationCapacity && isDailyCapacityExhausted
-      ? formatDailyPreparationCapacityReachedText(dailyPreparationCapacity)
-      : null;
-  // A partial exceedance keeps its own control-associated reason so the
-  // disabled multi-job control names the selected count, the remaining
-  // slots, and the local reset timing instead of reading as full
-  // exhaustion, which stays owned by the reached summary below. Single-job
-  // retry keeps working while any slot remains.
-  const selectedQueueRecoveryExceedsDailyRemaining =
-    showQueueRecoveryAction &&
-    dailyPreparationCapacity !== null &&
-    !isDailyCapacityExhausted &&
-    selectedQueueRecoveryJobIds.length > dailyPreparationCapacity.remaining;
-  const queueRecoveryExceedsNoteId = useId();
-  const dailyQueueRecoveryExceedsRemainingReason =
-    dailyPreparationCapacity && selectedQueueRecoveryExceedsDailyRemaining
-      ? formatDailyPreparationBatchExceedsRemainingText({
-          capacity: dailyPreparationCapacity,
-          selectedCount: selectedQueueRecoveryJobIds.length,
-        })
-      : null;
+  const isStartBlocked = applicationWorkPaused;
   // A fresh run is offered under More only where a fresh run could change
   // anything. A structural stop — no apply route, closed listing, applying
   // happens elsewhere — offers no retry at all, here or above.
@@ -526,17 +486,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
                   {presentation.primaryActionLabel}
                 </Button>
               ) : null}
-              {primaryAction === "open_safeguards" && onOpenSafeguards ? (
-                <Button
-                  className={RECOVERY_PRIMARY_ACTION_CLASS_NAME}
-                  data-testid="applications-recovery-primary-action-button"
-                  onClick={onOpenSafeguards}
-                  type="button"
-                  variant="primary"
-                >
-                  {presentation.primaryActionLabel}
-                </Button>
-              ) : null}
+              {null}
               {onReviewBeforeSending ? (
                 <Button
                   className={RECOVERY_PRIMARY_ACTION_CLASS_NAME}
@@ -749,21 +699,13 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
                     </p>
                   ) : null}
                   <Button
-                    aria-describedby={
-                      dailyQueueRecoveryExceedsRemainingReason
-                        ? queueRecoveryExceedsNoteId
-                        : undefined
-                    }
                     className={RECOVERY_ACTION_CLASS_NAME}
                     onClick={() =>
                       onStartAutoApplyQueue(selectedQueueRecoveryJobIds)
                     }
                     type="button"
                     variant="secondary"
-                    disabled={
-                      isStartBlocked ||
-                      selectedQueueRecoveryExceedsDailyRemaining
-                    }
+                    disabled={isStartBlocked}
                   >
                     Prepare remaining jobs
                   </Button>
@@ -799,16 +741,7 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
             {finishInBrowserStatus}
           </p>
         ) : null}
-        {dailyQueueRecoveryExceedsRemainingReason ? (
-          <p
-            aria-live="polite"
-            className="text-(length:--text-small) leading-6 text-foreground-muted"
-            data-testid="queue-recovery-daily-capacity-exceeded-note"
-            id={queueRecoveryExceedsNoteId}
-          >
-            {dailyQueueRecoveryExceedsRemainingReason}
-          </p>
-        ) : null}
+
         {applicationWorkPaused &&
         ((primaryAction === "try_again" && !rejectedFormat) ||
           showQueueRecoveryAction) ? (
@@ -817,17 +750,6 @@ export function ApplicationsDetailPanelRecoveryActionsSection(props: {
             data-testid="application-work-paused-note"
           >
             {APPLICATION_WORK_PAUSED_REASON}
-          </p>
-        ) : null}
-        {dailyCapacityReachedText ? (
-          <p
-            // A line by the actions it limits, not a box: amber because the
-            // day's preparations are used up (ADR 0042).
-            className="text-(length:--text-small) leading-6 text-(--warning-text)"
-            data-testid="daily-capacity-reached-alert"
-            role="alert"
-          >
-            {dailyCapacityReachedText}
           </p>
         ) : null}
       </section>

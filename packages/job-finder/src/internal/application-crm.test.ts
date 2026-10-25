@@ -1,5 +1,4 @@
 import { ApplyJobResultSchema } from "@nestor/contracts";
-import { OutcomeEventSchema } from "@nestor/contracts";
 import { describe, expect, test } from "vitest";
 import { ApplicationRecordSchema } from "@nestor/contracts";
 import type {
@@ -1737,71 +1736,6 @@ describe("tracker bulk safety and current exports", () => {
       expect(exported.content).toContain("2026-10-04T09:00:00Z");
     },
   );
-});
-
-test("exports offer, note and follow-up details and the exact recorded outcome", () => {
-  const current = record({
-    crm: {
-      stage: "offer",
-      stageSource: "user",
-      stageChangedAt: "2026-08-15T10:00:00Z",
-      compensation: {
-        offerBase: { amount: 95000, currency: "EUR", period: "year" },
-        offerDeadlineAt: "2026-08-20T10:00:00Z",
-        offerStatus: "active",
-      },
-      notes: [
-        {
-          id: "note",
-          body: "Synthetic offer discussion",
-          createdAt: "2026-08-15T10:00:00Z",
-          updatedAt: "2026-08-15T10:00:00Z",
-        },
-      ],
-      reminders: [reminder()],
-      interviews: [interview()],
-    },
-  });
-  const outcome = OutcomeEventSchema.parse({
-    id: "outcome",
-    applicationRecordId: current.id,
-    jobId: current.jobId,
-    campaignId: "plan",
-    source: "local",
-    company: current.company,
-    jobTitle: current.title,
-    outcome: "interview",
-    occurredAt: "2026-08-15T10:00:00Z",
-    note: "Recruiter debrief synthetic unique note",
-    userControlled: true,
-  });
-  const csv = exportApplicationCrm({
-    records: [current],
-    request: { format: "csv", applicationRecordIds: [] },
-  }).content;
-  expect(csv).toContain("95000,EUR");
-  expect(csv).toContain("Synthetic offer discussion");
-  expect(csv).toContain("Follow up");
-  expect(csv).toContain("Panel interview");
-  const json = JSON.parse(
-    exportApplicationCrm({
-      records: [current],
-      request: { format: "json", applicationRecordIds: [] },
-      outcomes: [outcome],
-    }).content,
-  ) as { applications: { outcomes: (typeof outcome)[] }[] };
-  expect(json.applications[0]?.outcomes).toEqual([outcome]);
-  expect(buildApplicationCrmCalendar([current])[0]?.title).toContain(
-    "Software Engineer at Example Inc",
-  );
-  expect(
-    buildApplicationCrmCalendar([
-      {
-        ...current,
-        crm: { ...current.crm!, archivedAt: "2026-08-15T10:00:00Z" },
-      },
-    ]),
-  ).toEqual([]);
 });
 
 test.each(["csv", "json"] as const)(

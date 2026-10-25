@@ -34,7 +34,7 @@ export function readRunStatus(
     return {
       done: queue.state === "done" || queue.state === "stopped",
       summary: `Apply queue ${queue.state.replaceAll("_", " ")}: ${queue.startedJobIds.length} started, ${queue.skipped.length} held back, ${queue.jobIds.length} chosen.${queue.pausedReason ? ` ${queue.pausedReason}` : ""}`,
-      details: { state: queue.state, startedJobIds: queue.startedJobIds, skipped: queue.skipped, resumesAt: queue.resumesAt },
+      details: { state: queue.state, startedJobIds: queue.startedJobIds, skipped: queue.skipped },
     };
   }
   if (run.kind === "discovery") {

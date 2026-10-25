@@ -5,7 +5,6 @@ import {
   type ApplyQueue,
   type ApplyQueueSkippedJob,
 } from "@nestor/contracts";
-import { SameCompanyApplicationConflictError } from "@nestor/job-finder";
 
 /** The run ceiling from ADR 0012: one run starts at most ten applications. */
 export const APPLY_QUEUE_RUN_SIZE = 10;
@@ -22,8 +21,6 @@ export interface ApplyQueueStartedRun {
 export interface ApplyQueueRunnerDeps {
   loadQueue(): Promise<ApplyQueue | null>;
   saveQueue(queue: ApplyQueue | null): Promise<void>;
-  /** Starts the day can still take, and when the day's count resets. */
-  readDailyCapacity(): Promise<{ remaining: number; resetsAt: string }>;
   readSavedMode(): Promise<ApplicationAutomationMode>;
   isActivityPaused(): Promise<boolean>;
   /** One run of at most ten jobs in `mode`; throws when nothing could start. */
@@ -34,7 +31,6 @@ export interface ApplyQueueRunnerDeps {
   cancelRun(runId: string): Promise<void>;
   publish(): void;
   now?: () => Date;
-  setTimer?: (callback: () => void, delayMs: number) => () => void;
   createId?: () => string;
   onError?: (error: unknown) => void;
 }
@@ -99,13 +95,6 @@ export function createApplyQueueRunner(
   deps: ApplyQueueRunnerDeps,
 ): ApplyQueueRunner {
   const now = deps.now ?? (() => new Date());
-  const setTimer =
-    deps.setTimer ??
-    ((callback: () => void, delayMs: number) => {
-      const handle = setTimeout(callback, delayMs);
-      (handle as { unref?: () => void }).unref?.();
-      return () => clearTimeout(handle);
-    });
   const createId =
     deps.createId ??
     (() =>
@@ -118,7 +107,6 @@ export function createApplyQueueRunner(
   let pumping: Promise<void> | null = null;
   let pumpAgain = false;
   let activeRunSettled: Promise<void> | null = null;
-  let clearWakeTimer: (() => void) | null = null;
   // Jobs taken out this session. A run never takes one, even if a save that
   // read the queue before the removal lands after it.
   const removedJobIds = new Set<string>();
@@ -130,23 +118,6 @@ export function createApplyQueueRunner(
         : null,
     );
     deps.publish();
-  };
-
-  const armWakeTimer = (resumesAt: string) => {
-    clearWakeTimer?.();
-    // A second past local midnight, so the new day's count is what is read.
-    const delayMs = Math.max(
-      1_000,
-      Date.parse(resumesAt) - now().getTime() + 1_000,
-    );
-    // Timers longer than about 24.8 days overflow; a day is the most needed.
-    clearWakeTimer = setTimer(
-      () => {
-        clearWakeTimer = null;
-        pump();
-      },
-      Math.min(delayMs, 2_147_000_000),
-    );
   };
 
   /** Drops jobs taken out before a run took them; an emptied queue is done. */
@@ -165,11 +136,9 @@ export function createApplyQueueRunner(
     if (
       listApplyQueueRemainingJobIds(next).length === 0 &&
       !next.activeRunId &&
-      (next.state === "paused" || next.state === "waiting_for_tomorrow")
+      next.state === "paused"
     ) {
-      clearWakeTimer?.();
-      clearWakeTimer = null;
-      next = { ...next, state: "done", pausedReason: null, resumesAt: null };
+      next = { ...next, state: "done", pausedReason: null };
     }
     await save(next);
     return next;
@@ -181,52 +150,28 @@ export function createApplyQueueRunner(
     if (!loaded) return;
     const queue = await withoutRemovedJobs(loaded);
     if (activeRunSettled) return;
-    if (queue.state !== "running" && queue.state !== "waiting_for_tomorrow") {
+    if (queue.state !== "running") {
       return;
     }
     const remaining = listApplyQueueRemainingJobIds(queue);
     if (remaining.length === 0) {
-      clearWakeTimer?.();
-      clearWakeTimer = null;
       await save({
         ...queue,
         state: "done",
         activeRunId: null,
-        resumesAt: null,
       });
       return;
     }
     // "Pause new work" holds the queue too; resuming nudges it.
     if (await deps.isActivityPaused()) return;
-    const capacity = await deps.readDailyCapacity();
-    if (capacity.remaining <= 0) {
-      if (
-        queue.state !== "waiting_for_tomorrow" ||
-        queue.resumesAt !== capacity.resetsAt
-      ) {
-        await save({
-          ...queue,
-          state: "waiting_for_tomorrow",
-          resumesAt: capacity.resetsAt,
-        });
-      }
-      armWakeTimer(capacity.resetsAt);
-      return;
-    }
-    clearWakeTimer?.();
-    clearWakeTimer = null;
 
-    const take = remaining.slice(
-      0,
-      Math.min(APPLY_QUEUE_RUN_SIZE, capacity.remaining),
-    );
+    const take = remaining.slice(0, APPLY_QUEUE_RUN_SIZE);
     const mode = leastPermissiveMode(queue.mode, await deps.readSavedMode());
     // Taken before the run starts: a crash or restart mid-run never hands
     // the same job to a second run.
     await save({
       ...queue,
       state: "running",
-      resumesAt: null,
       pausedReason: null,
       startedJobIds: [...queue.startedJobIds, ...take],
     });
@@ -235,33 +180,6 @@ export function createApplyQueueRunner(
     try {
       started = await deps.startRun(take, mode);
     } catch (error: unknown) {
-      const refused =
-        error instanceof SameCompanyApplicationConflictError
-          ? error.skipped.filter((entry) => take.includes(entry.jobId))
-          : [];
-      if (refused.length > 0) {
-        const current = await deps.loadQueue();
-        if (current) {
-          const giveBack = new Set(take);
-          const refusedIds = new Set(refused.map((entry) => entry.jobId));
-          await save({
-            ...current,
-            startedJobIds: current.startedJobIds.filter(
-              (id) => !giveBack.has(id),
-            ),
-            skipped: [
-              ...current.skipped.filter(
-                (entry) => !refusedIds.has(entry.jobId),
-              ),
-              ...refused,
-            ],
-          });
-        }
-        // Only the named jobs are set aside. Re-read capacity and mode before
-        // starting the others; a concurrent Pause or Stop still wins.
-        pumpAgain = true;
-        return;
-      }
       // Nothing started: the jobs go back and the queue pauses with the
       // reason, so Continue tries the same jobs again.
       const current = await deps.loadQueue();
@@ -365,10 +283,7 @@ export function createApplyQueueRunner(
           skipped: existing.skipped.filter(
             (entry) => !unique.includes(entry.jobId),
           ),
-          state:
-            existing.state === "waiting_for_tomorrow"
-              ? existing.state
-              : "running",
+          state: "running",
           pausedReason: null,
         };
       } else {
@@ -381,7 +296,6 @@ export function createApplyQueueRunner(
           skipped: [],
           activeRunId: null,
           pausedReason: null,
-          resumesAt: null,
           createdAt,
           updatedAt: createdAt,
         };
@@ -405,20 +319,14 @@ export function createApplyQueueRunner(
         return queue;
       }
       if (action === "pause") {
-        if (
-          queue.state !== "running" &&
-          queue.state !== "waiting_for_tomorrow"
-        ) {
+        if (queue.state !== "running") {
           return queue;
         }
-        clearWakeTimer?.();
-        clearWakeTimer = null;
         // The run under way finishes; no new run starts.
         const next = {
           ...queue,
           state: "paused" as const,
           pausedReason: null,
-          resumesAt: null,
         };
         await save(next);
         return next;
@@ -434,15 +342,11 @@ export function createApplyQueueRunner(
         pump();
         return next;
       }
-      // Stop: the run under way is cancelled and nothing else starts.
-      clearWakeTimer?.();
-      clearWakeTimer = null;
       const next = {
         ...queue,
         state: "stopped" as const,
         activeRunId: null,
         pausedReason: null,
-        resumesAt: null,
       };
       await save(next);
       if (queue.activeRunId) {
@@ -485,8 +389,6 @@ export function createApplyQueueRunner(
     },
     dispose() {
       disposed = true;
-      clearWakeTimer?.();
-      clearWakeTimer = null;
     },
   };
 }

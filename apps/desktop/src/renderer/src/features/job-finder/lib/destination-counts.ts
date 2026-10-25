@@ -112,42 +112,6 @@ export function countUserCreatedSearchPlans(
   return plans.length > 1 ? plans.length : 0;
 }
 
-export function countOutcomeEvents(
-  workspace: JobFinderRendererWorkspaceSnapshot,
-): number {
-  return (workspace.intelligence?.outcomeEvents ?? []).length;
-}
-
-export function countResumeApproaches(
-  workspace: JobFinderRendererWorkspaceSnapshot,
-): number {
-  return (workspace.intelligence?.resumeStrategies ?? []).length;
-}
-
-/** Inventory: what the Companies page lists. */
-export function countKnownCompanies(
-  workspace: JobFinderRendererWorkspaceSnapshot,
-): number {
-  return (workspace.intelligence?.companies ?? []).length;
-}
-
-/**
- * Attention: companies holding a pending merge review. This is deliberately a
- * different population from {@link countKnownCompanies} — the sidebar used to
- * print this number bare beside the destination name "Companies", which read
- * as an inventory count and was wrong by an order of magnitude. It now renders
- * with the attention treatment and a noun ("2 to review").
- */
-export function countCompaniesAwaitingMergeReview(
-  workspace: JobFinderRendererWorkspaceSnapshot,
-): number {
-  return (workspace.intelligence?.companies ?? []).filter((company) =>
-    company.mergeReviewCandidates.some(
-      (candidate) => candidate.decision === "pending",
-    ),
-  ).length;
-}
-
 const NO_SAFEGUARDS = {
   companyApplicationCaps: [],
   simultaneousApplicationConflicts: [],
@@ -181,13 +145,9 @@ export function countWorkspaceSafeguardBlockers(
   );
 }
 
-export function countSafeguardBlockers(
+export function countNeedsYou(
   workspace: JobFinderRendererWorkspaceSnapshot,
 ): number {
-  return countWorkspaceSafeguardBlockers(workspace);
-}
-
-export function countNeedsYou(workspace: JobFinderRendererWorkspaceSnapshot): number {
   return countWorkspaceNeedsYouItems(workspace);
 }
 

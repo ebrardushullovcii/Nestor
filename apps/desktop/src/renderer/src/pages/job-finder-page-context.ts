@@ -9,7 +9,6 @@ import type {
   CampaignRuleFunnelProjection,
   ClearApplicationAnswerCommandInput,
   CandidateProfile,
-  CompanyIntelligenceMutationInput,
   DiscoveryActivityEvent,
   DiscoveryFeedbackReason,
   EditableSourceInstructionArtifact,
@@ -31,11 +30,7 @@ import type {
   ProfileSetupReviewActionOptions,
   ProfileSetupStep,
   ProjectGroupedManualAnswerCommand,
-  RapidReviewMutationInput,
-  RecommendResumeStrategyInput,
-  RecordOutcomeInput,
   RemoveEmployerExclusionInput,
-  ResumeStrategyRecommendation,
   ResumeImportProgressEvent,
   ResumeApplicationMode,
   TailoringMode,
@@ -43,12 +38,7 @@ import type {
   SaveApplicationAnswerCommandInput,
   SaveCampaignRuleInput,
   SaveJobSearchCampaignInput,
-  SaveResumeStrategyInput,
-  SafeguardMutationInput,
-  SelectResumeStrategyInput,
-  SetCampaignResumeStrategyDefaultInput,
   SetJobFinderActivityControlInput,
-  SetOutcomeSuggestionEnabledInput,
   SnoozeGroupedDecisionInput,
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
@@ -181,8 +171,6 @@ export interface JobFinderPageContext {
     jobIds: readonly string[],
     options?: { quiet?: boolean },
   ) => Promise<void>;
-  onMutateRapidReview: (input: RapidReviewMutationInput) => Promise<void>;
-  onMutateSafeguards: (input: SafeguardMutationInput) => Promise<boolean>;
   onApproveCurrentResume: (jobId: string) => void;
   /**
    * Approves the resume in the background and opens the next one to review
@@ -246,19 +234,6 @@ export interface JobFinderPageContext {
   onMutateApplicationCrmBulkStage: (
     command: ApplicationCrmBulkStageMutationInput,
   ) => Promise<void>;
-  onRefreshCompanyIntelligence: () => Promise<void>;
-  onMutateCompanyIntelligence: (
-    command: CompanyIntelligenceMutationInput,
-  ) => Promise<void>;
-  onSetCompanyPreference: (input: {
-    companyId: string;
-    preference: "neutral" | "follow" | "prefer" | "review" | "exclude";
-  }) => Promise<void>;
-  onReviewCompanyMerge: (input: {
-    companyId: string;
-    candidateId: string;
-    decision: "accepted" | "rejected";
-  }) => Promise<void>;
   onGetSourceDebugRunDetails: (runId: string) => Promise<SourceDebugRunDetails>;
   /** `retryInterrupted` imports again the file a stopped import saved. */
   onImportResume: (options?: { retryInterrupted?: boolean }) => void;
@@ -389,19 +364,6 @@ export interface JobFinderPageContext {
   onRunSourceDebug: (
     targetId: string,
     options?: { readabilityTimeoutMs?: number },
-  ) => void;
-  onRecordOutcome: (input: RecordOutcomeInput) => Promise<boolean>;
-  onSetOutcomeSuggestionEnabled: (
-    input: SetOutcomeSuggestionEnabledInput,
-  ) => Promise<boolean>;
-  onSaveResumeStrategy: (input: SaveResumeStrategyInput) => Promise<boolean>;
-  onDisableResumeStrategy: (strategyId: string) => void;
-  onSelectResumeStrategy: (input: SelectResumeStrategyInput) => void;
-  onRecommendResumeStrategy: (
-    input: RecommendResumeStrategyInput,
-  ) => Promise<ResumeStrategyRecommendation | null>;
-  onSetCampaignResumeStrategyDefault: (
-    input: SetCampaignResumeStrategyDefaultInput,
   ) => void;
   onSaveAll: (
     profile: CandidateProfile,
