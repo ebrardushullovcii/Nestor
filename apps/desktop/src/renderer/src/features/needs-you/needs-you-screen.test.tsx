@@ -94,6 +94,7 @@ beforeEach(() => {
     applications.claimNext()!,
   ];
   const run = createNeedsYouCommandRunner(() => applications, {
+    retry: () => Promise.resolve(),
     open: () => Promise.resolve(true),
     check: () => Promise.resolve(false),
   });

@@ -487,7 +487,7 @@ export const readProfileTool = defineTool({
   name: "read_profile",
   group: "profile",
   description:
-    "Reads the saved profile and setup readiness by section: basics, experience, background (including saved answers), preferences, review, or all. Review provides byte-bounded pages of current imported values and text/visual evidence, for both saved and pending details including scans. Follow returned nextRead arguments until null before claiming every section or imported detail was checked. all returns counts and points to dedicated review pages for evidence.",
+    "Reads the saved profile and setup readiness by section: basics, experience, background, preferences, review, or all. Form answers live in Needs you. Review provides byte-bounded pages of current imported values and text/visual evidence, for both saved and pending details including scans. Follow returned nextRead arguments until null before claiming every section or imported detail was checked. all returns counts and points to dedicated review pages for evidence.",
   parameters: json.object({
     section: json.enumOf(SECTIONS),
     reviewOffset: {

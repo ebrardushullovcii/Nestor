@@ -3,6 +3,7 @@ import type {
   ApplyRawPageHands,
   CandidateAsset,
   JobFinderJobDetail,
+  NeedsYouDetails,
 } from "@nestor/contracts";
 import type { AssistantToolDefinition } from "./tool-kit";
 
@@ -16,6 +17,8 @@ import type { AssistantToolDefinition } from "./tool-kit";
 export interface AssistantHostPorts {
   /** Store commands registered by the host, shared with the screens. */
   commands?: readonly AssistantToolDefinition[];
+  /** One typed Needs you read, including source sign-in items. */
+  readNeed?(id: number): Promise<NeedsYouDetails | null>;
   readJobDetail?(
     jobId: string,
     planId: string | null,

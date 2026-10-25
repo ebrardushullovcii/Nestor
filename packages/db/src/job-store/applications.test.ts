@@ -18,6 +18,41 @@ import { openJobStore, type JobStore } from "./job-store";
 
 const stores: JobStore[] = [];
 const folders: string[] = [];
+
+it("persists guarded answer Undo without retracting answers that released applications", () => {
+  const folder = mkdtempSync(path.join(tmpdir(), "nestor-answer-undo-"));
+  folders.push(folder);
+  const file = path.join(folder, "jobs.sqlite");
+  const { jobs, applications } = open(file);
+  applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+  const a = applications.claimNext()!;
+  const b = applications.claimNext()!;
+  applications.needsYou.request(question(a.id, a.attempt));
+  applications.needsYou.request(question(b.id, b.attempt));
+  const task = applications.needsYou.list().rows[0]!;
+  const change = applications.needsYou.changeAnswers(() =>
+    applications.needsYou.answer({ id: task.id, answer: "No", remember: true }),
+  );
+  expect(change.value).toEqual({ resolved: true, queued: 2 });
+  expect(change.undoCount).toBe(1);
+  jobs.close();
+  const reopened = open(file).applications;
+  expect(reopened.needsYou.undoAnswerChange(change.undoId!)).toEqual({
+    changed: 1,
+    skipped: 0,
+  });
+  expect(reopened.needsYou.listAnswers({}).total).toBe(0);
+  expect(reopened.getApplication(a.id)?.state).toBe("queued");
+  expect(reopened.getApplication(b.id)?.state).toBe("queued");
+  expect(reopened.needsYou.list().total).toBe(0);
+  const resumed = reopened.claimNext()!;
+  expect(
+    reopened.needsYou.request(question(resumed.id, resumed.attempt)),
+  ).toEqual({
+    status: "answered",
+    answer: "No",
+  });
+});
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();
   for (const folder of folders.splice(0))

@@ -7,7 +7,34 @@ import {
 } from "@nestor/contracts";
 import { assistantCommandTools } from "./command-tools";
 import { assertPersonAnswerAuthority } from "./person-answer-authority";
-import { AssistantToolError } from "./tool-kit";
+import { AssistantToolError, type AssistantToolContext } from "./tool-kit";
+
+async function answerChange<
+  T extends { undoId: number | null; undoCount: number },
+>(value: T, summary: string, { session }: AssistantToolContext) {
+  if (!value.undoId) return { summary, data: value };
+  const { part } = await session.recordChange({
+    target: "app_command",
+    targetId: String(value.undoId),
+    summary,
+    undoCommand: {
+      name: "undo_form_answer_change",
+      input: { undoId: value.undoId },
+      expectedCount: value.undoCount,
+    },
+    entries: [
+      {
+        path: ["savedAnswers"],
+        kind: "set",
+        before: "Previous saved answers",
+        after: summary,
+        index: null,
+        label: "Saved answers for future forms",
+      },
+    ],
+  });
+  return { summary, data: value, parts: [part] };
+}
 
 export type RunNeedsYouCommand = <K extends NeedsYouCommandName>(
   name: K,
@@ -69,12 +96,34 @@ export function needsYouCommandTools(run: RunNeedsYouCommand) {
           : "Nothing is waiting on the person.",
         data: page,
       }),
-      answer_need: (value) => ({
-        summary: value.resolved
-          ? `Answer saved. ${value.queued} applications can continue.`
-          : "That question was already answered or is no longer needed.",
-        data: value,
-      }),
+      answer_need: (value, _input, context) =>
+        answerChange(
+          value,
+          value.resolved
+            ? `Answer saved. ${value.queued} applications can continue.`
+            : "That question was already answered or is no longer needed.",
+          context,
+        ),
+      create_form_answer: (value, _input, context) =>
+        answerChange(
+          value,
+          `Saved the answer to ${value.prompt} for future forms.`,
+          context,
+        ),
+      upsert_form_answer: (value, _input, context) =>
+        answerChange(
+          value,
+          `Saved the answer to ${value.prompt} for future forms.`,
+          context,
+        ),
+      save_form_answer: (value, _input, context) =>
+        answerChange(
+          value,
+          value.saved
+            ? "Updated the saved answer for future forms."
+            : "That saved answer no longer exists.",
+          context,
+        ),
       check_need: (value) => ({
         summary: value
           ? "The browser step is complete. Applications continue."
@@ -87,8 +136,20 @@ export function needsYouCommandTools(run: RunNeedsYouCommand) {
           : "This application tab is unavailable.",
         data: value,
       }),
-      forget_form_answers: (value) => ({
-        summary: `Forgot ${value} saved answers.`,
+      retry_need: (value) => ({
+        summary: value
+          ? "Retrying the site. Its Needs you item stays until the site is readable."
+          : "That site sign-in item is no longer waiting.",
+        data: value,
+      }),
+      forget_form_answers: (value, _input, context) =>
+        answerChange(
+          value,
+          `Forgot ${value.forgotten} saved answers.`,
+          context,
+        ),
+      undo_form_answer_change: (value) => ({
+        summary: `Restored ${value.changed} saved answers for future forms.${value.skipped ? " Later edits were kept." : ""} Answers already used in applications were kept.`,
         data: value,
       }),
     },

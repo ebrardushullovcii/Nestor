@@ -19,6 +19,11 @@ import {
   UpsertSavedFormAnswerInputSchema,
 } from "./applications";
 
+const AnswerChangeSchema = z.object({
+  undoId: z.number().int().positive().nullable(),
+  undoCount: z.number().int().nonnegative(),
+});
+
 export const NEEDS_YOU_COMMANDS = {
   list_needs_you: {
     effect: "read",
@@ -53,7 +58,7 @@ export const NEEDS_YOU_COMMANDS = {
     description:
       "Save the person's answer to one question and continue every application it unblocks. Remember it only when the person asks.",
     input: AnswerNeedsYouInputSchema,
-    output: AnswerNeedsYouResultSchema,
+    output: AnswerNeedsYouResultSchema.merge(AnswerChangeSchema),
   },
   open_need: {
     effect: "local_write",
@@ -66,6 +71,13 @@ export const NEEDS_YOU_COMMANDS = {
     effect: "local_write",
     description:
       "Check the exact application page after the person completed a browser step. A remaining wall keeps it open. Source items use retry_source instead.",
+    input: ApplicationTargetSchema,
+    output: z.boolean(),
+  },
+  retry_need: {
+    effect: "external",
+    description:
+      "Retry a site's Needs you sign-in item after the person finishes in the browser. The item stays until that site is actually readable. Use check_need for application browser steps.",
     input: ApplicationTargetSchema,
     output: z.boolean(),
   },
@@ -95,28 +107,40 @@ export const NEEDS_YOU_COMMANDS = {
     description:
       "Save the person's reusable answer by stable key, including its kind, proof references and optional scope. All answer text lives in Needs you.",
     input: UpsertSavedFormAnswerInputSchema,
-    output: SavedFormAnswerSchema,
+    output: SavedFormAnswerSchema.merge(AnswerChangeSchema),
   },
   save_form_answer: {
     effect: "local_write",
     description:
       "Update the person's remembered answer, preserving the question and its scope.",
     input: SaveFormAnswerInputSchema,
-    output: z.boolean(),
+    output: z.object({ saved: z.boolean() }).merge(AnswerChangeSchema),
   },
   create_form_answer: {
     effect: "local_write",
     description:
       "Save a question and the person's answer in Needs you before a form asks. Numeric answers are reused as facts even when another form uses a text field.",
     input: CreateFormAnswerInputSchema,
-    output: SavedFormAnswerSchema,
+    output: SavedFormAnswerSchema.merge(AnswerChangeSchema),
   },
   forget_form_answers: {
     effect: "local_write",
     description:
       "Forget selected remembered answers. Previously submitted applications keep their receipts.",
     input: ForgetFormAnswersInputSchema,
-    output: z.number().int().nonnegative(),
+    output: z
+      .object({ forgotten: z.number().int().nonnegative() })
+      .merge(AnswerChangeSchema),
+  },
+  undo_form_answer_change: {
+    effect: "local_write",
+    description:
+      "Undo one saved-answer change, keeping later edits. This restores memory for future forms; it cannot retract answers already used or submitted.",
+    input: z.object({ undoId: z.number().int().positive() }).strict(),
+    output: z.object({
+      changed: z.number().int().nonnegative(),
+      skipped: z.number().int().nonnegative(),
+    }),
   },
 } as const;
 export type NeedsYouCommandName = keyof typeof NEEDS_YOU_COMMANDS;

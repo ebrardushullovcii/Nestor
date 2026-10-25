@@ -1,4 +1,8 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import {
+  runConversationTurn,
+  type AgentLoopToolDefinition,
+} from "@nestor/agent-runtime";
 import {
   buildDeterministicStructuredResumeDraft,
   createOpenAiCompatibleJobFinderAiClient,
@@ -17,7 +21,7 @@ import {
 } from "./test-fixtures";
 
 describe("openai-compatible chat and draft behavior", () => {
-  test("ignores model tool calls that were not offered in the request", async () => {
+  test("returns an explicit runtime error for an unknown unoffered tool and recovers", async () => {
     const restoreFetch = mockJsonFetch({
       choices: [
         {
@@ -44,27 +48,49 @@ describe("openai-compatible chat and draft behavior", () => {
         model: "test-model",
         label: "AI resume agent",
       });
+      const expectedTool: AgentLoopToolDefinition = {
+        type: "function",
+        function: {
+          name: "expected_tool",
+          description: "Expected tool",
+          parameters: { type: "object", properties: {}, required: [] },
+        },
+      };
 
       const result = await client.chatWithTools(
         [{ role: "user", content: "hello" }],
-        [
-          {
-            type: "function",
-            function: {
-              name: "expected_tool",
-              description: "Expected tool",
-              parameters: {
-                type: "object",
-                properties: {},
-                required: [],
-              },
-            },
-          },
-        ],
+        [expectedTool],
         { maxOutputTokens: 42 },
       );
 
-      expect(result.toolCalls).toBeUndefined();
+      const execute = vi.fn(() =>
+        Promise.resolve({ kind: "ok" as const, content: "Expected tool ran." }),
+      );
+      let calls = 0;
+      const turn = await runConversationTurn({
+        model: {
+          chatWithTools(messages) {
+            if (calls++ === 0) return Promise.resolve(result);
+            expect(messages.at(-1)).toEqual({
+              role: "tool",
+              toolCallId: "call_1",
+              content: "There is no tool called unexpected_tool.",
+            });
+            return Promise.resolve({
+              content: "That tool is unavailable; nothing was changed.",
+            });
+          },
+        },
+        tools: [
+          { definition: expectedTool, label: () => "Expected tool", execute },
+        ],
+        assembleMessages: (messages) =>
+          Promise.resolve([{ role: "user", content: "hello" }, ...messages]),
+        ceilings: { maxModelCalls: 2 },
+      });
+      expect(execute).not.toHaveBeenCalled();
+      expect(turn.ending).toBe("replied");
+      expect(turn.reply).toBe("That tool is unavailable; nothing was changed.");
     } finally {
       restoreFetch();
     }
@@ -1774,7 +1800,6 @@ describe("openai-compatible chat and draft behavior", () => {
       fetchMock.restore();
     }
   });
-
 });
 
 test("the provider forwards parallel tool proposals and returns both in order", async () => {

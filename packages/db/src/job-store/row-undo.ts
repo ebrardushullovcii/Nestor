@@ -7,7 +7,8 @@ type Target =
   | { table: "tracker_events"; id: number }
   | { table: "tracker_tags"; job_id: number; tag: string }
   | { table: "tracker_views"; id: number }
-  | { table: "job_sites"; id: number };
+  | { table: "job_sites"; id: number }
+  | { table: "form_answers"; id: number };
 type Row = Record<string, SQLInputValue>;
 type Change = { target: Target; before: Row | null; after: Row | null };
 
@@ -16,8 +17,8 @@ type Change = { target: Target; before: Row | null; after: Row | null };
 export function createRowUndo(
   store: JobStore,
   options: {
-    journal: "tracker_undo" | "job_site_undo";
-    cause: "tracker" | "sites";
+    journal: "tracker_undo" | "job_site_undo" | "form_answer_undo";
+    cause: "tracker" | "sites" | "application";
   },
 ) {
   const read = (target: Target): Row | null => {
@@ -98,6 +99,23 @@ export function createRowUndo(
           }
           const { table, ...key } = item.target;
           if (
+            table === "form_answers" &&
+            item.before &&
+            store
+              .sql(
+                "SELECT id FROM form_answers WHERE answer_key = ? AND country = ? AND site_origin = ? AND id <> ?",
+              )
+              .get(
+                item.before.answer_key!,
+                item.before.country!,
+                item.before.site_origin!,
+                item.before.id!,
+              )
+          ) {
+            skipped++;
+            continue;
+          }
+          if (
             item.before?.job_id &&
             !store
               .sql("SELECT id FROM jobs WHERE id = ?")
@@ -157,7 +175,7 @@ export function createRowUndo(
         if (changed)
           store.notify({
             cause: options.cause,
-            stages: options.cause === "sites" ? [] : ["resume", "applied"],
+            stages: options.cause === "tracker" ? ["resume", "applied"] : [],
             ids: ids.size <= 200 ? [...ids] : null,
             searchId: null,
           });

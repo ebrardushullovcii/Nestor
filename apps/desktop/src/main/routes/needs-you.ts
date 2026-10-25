@@ -9,8 +9,12 @@ import { getApplicationStore } from "../services/job-finder/application-store";
 import { getApplicationService } from "../services/applications";
 import { getJobFinderWorkspaceService } from "../services/job-finder/workspace-service";
 import { getEmbeddedBrowser } from "../services/browser/embedded-browser";
+import { runJobCommand } from "../services/job-commands";
 
 const run = createNeedsYouCommandRunner(getApplicationStore, {
+  retry: async (id) => {
+    await runJobCommand("retry_source", { id });
+  },
   open: async (id) => {
     const task = getApplicationStore().needsYou.list({
       after: id - 1,

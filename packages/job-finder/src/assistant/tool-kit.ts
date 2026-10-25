@@ -496,6 +496,9 @@ export function toConversationTool(
         typeof parsedJson === "object" && parsedJson !== null
           ? { ...(parsedJson as Record<string, unknown>) }
           : {};
+      // Activity text is host metadata, except where a command owns a real
+      // status field (for example the Applications tracker).
+      if (!("status" in definition.parameters.properties)) delete record.status;
       const hasCompletionHint =
         receiptReplyTools.has(definition.name) &&
         !("complete" in definition.parameters.properties);
