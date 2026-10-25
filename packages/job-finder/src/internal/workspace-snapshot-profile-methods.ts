@@ -3011,14 +3011,23 @@ export function createWorkspaceSnapshotProfileMethods(
       const nextResumeApplicationMode =
         nextSettings.resumeApplicationMode ?? "tailored_per_job";
 
+      const updateSettings = (latest: JobFinderSettings): JobFinderSettings => ({
+        ...nextSettings,
+        applicationAutomationMode:
+          settings.applicationAutomationMode ??
+          latest.applicationAutomationMode ??
+          "confirm_before_submit",
+        salaryDisclosure:
+          settings.salaryDisclosure ?? latest.salaryDisclosure ?? "pause_for_user",
+      });
       if (currentResumeApplicationMode === nextResumeApplicationMode) {
-        await ctx.repository.commitSettingsUpdate(() => nextSettings);
+        await ctx.repository.commitSettingsUpdate(updateSettings);
       } else {
         await ctx.repository.commitSavedJobDelta({
           update: capturePreviousResumeApplicationMode(
             currentResumeApplicationMode,
           ),
-          updateSettings: () => nextSettings,
+          updateSettings,
         });
       }
       return getWorkspaceSnapshot(true);

@@ -278,7 +278,7 @@ export function JobSearchHomeScreen(props: JobSearchHomeScreenProps) {
     findJobsCounts: props.findJobsCounts ?? null,
     canRunDiscovery: Boolean(props.onRunDiscovery),
     applicationAutomationMode:
-      props.applicationAutomationMode ?? "prepare_only",
+      props.applicationAutomationMode ?? "confirm_before_submit",
   });
   const missingStartingPageCoveredBySourceFix =
     model.problems.some((problem) => problem.id === "failing-sources") &&

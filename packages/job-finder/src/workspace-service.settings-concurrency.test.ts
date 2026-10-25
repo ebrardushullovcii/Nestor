@@ -581,7 +581,6 @@ test("pay choice saves through the real workspace service without sending permis
   for (const applicationAutomationMode of [
     "autonomous_submit",
     "confirm_before_submit",
-    "prepare_only",
   ] as const) {
     const snapshot = await service.updateApplicationDefaults({
       salaryDisclosure: "answer_from_profile",
@@ -599,4 +598,22 @@ test("pay choice saves through the real workspace service without sending permis
   expect((await service.getWorkspaceSnapshot()).settings.salaryDisclosure).toBe(
     "pause_for_user",
   );
+});
+
+test("saving an unrelated settings section preserves the independently saved Apply mode", async () => {
+  const repository = createInMemoryJobFinderRepository(createSeed());
+  const service = createTestHarness(repository);
+  await service.updateApplicationDefaults({
+    applicationAutomationMode: "autonomous_submit",
+  });
+  const unrelated = {
+    ...(await repository.getSettings()),
+    appearanceTheme: "dark" as const,
+  };
+  delete unrelated.applicationAutomationMode;
+  await service.saveSettings(unrelated);
+  expect((await repository.getSettings()).applicationAutomationMode).toBe(
+    "autonomous_submit",
+  );
+  expect((await repository.getSettings()).appearanceTheme).toBe("dark");
 });

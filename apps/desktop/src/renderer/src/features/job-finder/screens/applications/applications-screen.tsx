@@ -893,7 +893,7 @@ export function ApplicationsScreen(props: {
           onClick: () =>
             onStartAutoApplyQueue(
               retryableJobIds,
-              props.applicationAutomationMode ?? "prepare_only",
+              props.applicationAutomationMode ?? "confirm_before_submit",
             ),
         },
       });
@@ -1282,7 +1282,7 @@ export function ApplicationsScreen(props: {
             onStartAutoApplyQueue={(jobIds) =>
               onStartAutoApplyQueue(
                 jobIds,
-                props.applicationAutomationMode ?? "prepare_only",
+                props.applicationAutomationMode ?? "confirm_before_submit",
               )
             }
             applyMode={applyMode}

@@ -254,7 +254,7 @@ export const applyToJobsTool = defineTool({
     );
     if (paused) throw new AssistantToolError("refused", paused);
     const savedMode: ApplicationAutomationMode =
-      snapshot.settings.applicationAutomationMode ?? "prepare_only";
+      snapshot.settings.applicationAutomationMode ?? "confirm_before_submit";
     const caveatsFor = createJobCaveats(snapshot);
     const cautioned: { jobId: string; reason: string }[] = [];
     const candidates = [...new Set(input.jobIds)].filter((jobId) => {
@@ -394,7 +394,7 @@ export const sendApplicationsTool = defineTool({
       grants: await session.grants.list(),
       jobIds: [...new Set(input.jobIds)],
       action: "send",
-      savedMode: snapshot.settings.applicationAutomationMode ?? "prepare_only",
+      savedMode: snapshot.settings.applicationAutomationMode ?? "confirm_before_submit",
     });
     const allowed = decisions
       .filter((decision) => decision.allowed)

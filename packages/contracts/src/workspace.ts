@@ -36,6 +36,7 @@ import {
 import {
   ApplicationAttestationKindSchema,
   ApplicationAutomationModeSchema,
+  ApplicationApplyModeSchema,
   ApplicationSalaryDisclosureRuleSchema,
   ApplicationAuthorityEnvelopeSchema,
   SubmissionArmedMarkerSchema,
@@ -926,8 +927,8 @@ export const JobFinderSettingsSchema = z.object({
   writeResumesOnShortlist: z.boolean().optional(),
   humanReviewRequired: z.boolean(),
   allowAutoSubmitOverride: z.boolean(),
-  /** The person's ordinary default for new application runs. */
-  applicationAutomationMode: ApplicationAutomationModeSchema.optional(),
+  /** Fill and leave for the person's click, or send for them. */
+  applicationAutomationMode: ApplicationApplyModeSchema.optional(),
   salaryDisclosure: ApplicationSalaryDisclosureRuleSchema.optional(),
   keepSessionAlive: z.boolean(),
   discoveryOnly: z.boolean().default(false),
@@ -1954,7 +1955,7 @@ export const UpdateApplicationDefaultsInputSchema = z.object({
   fontPreset: DocumentFontPresetSchema.optional(),
   /** How a letter Job Finder writes should read. */
   coverLetter: CoverLetterPreferenceSchema.optional(),
-  applicationAutomationMode: ApplicationAutomationModeSchema.optional(),
+  applicationAutomationMode: ApplicationApplyModeSchema.optional(),
   salaryDisclosure: ApplicationSalaryDisclosureRuleSchema.optional(),
 });
 export type UpdateApplicationDefaultsInput = z.infer<

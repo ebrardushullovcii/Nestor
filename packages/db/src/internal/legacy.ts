@@ -53,7 +53,6 @@ function recoverLegacySettings(
     ...seed,
     humanReviewRequired: true,
     allowAutoSubmitOverride: false,
-    applicationAutomationMode: "prepare_only",
     aiBehavior: conservativeBehavior,
   });
 

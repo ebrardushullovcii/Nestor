@@ -136,17 +136,12 @@ export function ChoiceCards<Id extends string>(props: {
 }
 
 export const APPLY_MODE_OPTIONS: readonly ChoiceCardOption<
-  "prepare_only" | "confirm_before_submit" | "autonomous_submit"
+  "confirm_before_submit" | "autonomous_submit"
 >[] = [
   {
-    id: "prepare_only",
-    label: "Prepare for me",
-    detail: "Fills the form and attaches the resume; you press Send.",
-  },
-  {
     id: "confirm_before_submit",
-    label: "Ask before sending",
-    detail: "Prepares everything, then waits for your go-ahead.",
+    label: "Fill in for me",
+    detail: "Fills the form and attaches your resume. You review it and press Send.",
   },
   {
     id: "autonomous_submit",

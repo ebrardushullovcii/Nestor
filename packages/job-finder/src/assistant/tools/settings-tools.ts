@@ -3,7 +3,7 @@ import { stopResumeWork } from "./resume-tools";
 import {
   AiBehaviorPreferenceSchema,
   ApplicationAttestationKindSchema,
-  ApplicationAutomationModeSchema,
+  ApplicationApplyModeSchema,
   CoverLetterPolicySchema,
   JobSearchSelectivitySchema,
   ProfileAssistantInitiativeSchema,
@@ -104,10 +104,10 @@ export const readSettingsTool = defineTool({
   async execute(_input, { service }) {
     const snapshot = await service.getWorkspaceSnapshot();
     return {
-      summary: `Apply mode ${snapshot.settings.applicationAutomationMode ?? "prepare_only"}, resume level ${snapshot.settings.resumeApplicationMode === "original_resume" ? "original" : snapshot.searchPreferences.tailoringMode}.`,
+      summary: `Apply mode ${snapshot.settings.applicationAutomationMode ?? "confirm_before_submit"}, resume level ${snapshot.settings.resumeApplicationMode === "original_resume" ? "original" : snapshot.searchPreferences.tailoringMode}.`,
       data: {
         applyMode:
-          snapshot.settings.applicationAutomationMode ?? "prepare_only",
+          snapshot.settings.applicationAutomationMode ?? "confirm_before_submit",
         resumeLevel:
           snapshot.settings.resumeApplicationMode === "original_resume"
             ? "original_resume"
@@ -145,10 +145,10 @@ export const updateApplySettingsTool = defineTool({
   name: "update_apply_settings",
   group: "settings",
   description:
-    "Changes how applying works by default: apply mode (prepare_only, confirm_before_submit, autonomous_submit), resume template, font, cover letter preference, or the default resume level (original_resume or tailored_per_job). Saved with Undo. Only when the person asks to change the default: to send applications they told you to send, use send_applications and leave this alone.",
+    "Changes how applying works by default: fill and leave for the person's click (confirm_before_submit) or send for them (autonomous_submit), resume template, font, cover letter preference, or the default resume level (original_resume or tailored_per_job). Saved with Undo. Only when the person asks to change the default: to send applications they told you to send, use send_applications and leave this alone.",
   parameters: json.object({
     applicationAutomationMode: json.enumOf(
-      ApplicationAutomationModeSchema.options,
+      ApplicationApplyModeSchema.options,
     ),
     resumeTemplateId: json.string(),
     fontPreset: json.string(),

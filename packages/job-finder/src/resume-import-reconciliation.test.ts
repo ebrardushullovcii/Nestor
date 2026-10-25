@@ -205,13 +205,6 @@ describe("resume import reconciliation", () => {
     ],
     ["inferred field", { notes: ["Inferred from the experience section"] }],
     [
-      "first-person About me",
-      {
-        target: { section: "identity", key: "summary", recordId: null },
-        value: "I build reliable workflow software.",
-      },
-    ],
-    [
       "shared memory",
       {
         target: {
@@ -602,8 +595,31 @@ describe("resume import reconciliation", () => {
     ).toBe(false);
   });
 
+  test("fills a first-person summary read from a scanned import", () => {
+    // The person's own SUMMARY words fill the empty summary; they edit the
+    // wording on the form rather than confirming it from a card first.
+    expect(
+      reconcileCandidates(
+        { ...emptyProfile(), summary: "" },
+        createSeed().searchPreferences,
+        [
+          scannedCandidate({
+            target: { section: "identity", key: "summary", recordId: null },
+            value: "I build reliable workflow software.",
+          }),
+        ],
+        scannedBundle(),
+      )[0]?.resolution,
+    ).toBe("auto_applied");
+  });
+
   test("fills empty search preferences from the resume", () => {
-    const seed = createSeed();
+    const baseSeed = createSeed();
+    const seed = {
+      ...baseSeed,
+      profile: { ...baseSeed.profile, targetRoles: [] },
+      searchPreferences: { ...baseSeed.searchPreferences, targetRoles: [] },
+    };
     const targetRolesCandidate = ResumeImportFieldCandidateSchema.parse({
       runId: "resume_import_run_target_roles",
       ...createStageCandidate({
@@ -1274,5 +1290,145 @@ describe("resume import reconciliation", () => {
         candidates,
       ).filter((candidate) => candidate.resolution === "auto_applied"),
     ).toHaveLength(2);
+  });
+
+  const modelCandidate = (
+    overrides: Partial<ResumeImportFieldCandidate> & {
+      target: ResumeImportFieldCandidate["target"];
+      value: ResumeImportFieldCandidate["value"];
+    },
+  ) =>
+    ResumeImportFieldCandidateSchema.parse({
+      runId: "resume_import_run_fill",
+      ...createStageCandidate({
+        target: overrides.target,
+        label: overrides.label ?? "Imported value",
+        value: overrides.value,
+        confidence: 0.82,
+        overall: 0.82,
+        recommendation: "needs_review",
+      }),
+      id:
+        overrides.id ??
+        `candidate_fill_${overrides.target.section}_${overrides.target.key}`,
+      sourceKind: "model_identity_summary",
+      resolution: "needs_review",
+      createdAt: "2026-04-10T10:00:00.000Z",
+      resolvedAt: null,
+      ...overrides,
+    });
+
+  test("model-read headline, summary, years and target roles fill empty fields without block evidence", () => {
+    const seed = createSeed();
+    const profile = { ...emptyProfile(), targetRoles: [] };
+    const preferences = { ...seed.searchPreferences, targetRoles: [] };
+    const candidates = [
+      modelCandidate({
+        target: { section: "identity", key: "headline", recordId: null },
+        label: "Headline",
+        value: "Senior Product Engineer",
+      }),
+      modelCandidate({
+        target: { section: "identity", key: "summary", recordId: null },
+        label: "Professional summary",
+        value:
+          "I build product platforms end to end, from discovery through launch and iteration.",
+      }),
+      modelCandidate({
+        target: {
+          section: "identity",
+          key: "yearsExperience",
+          recordId: null,
+        },
+        label: "Years of experience",
+        value: 8,
+      }),
+      modelCandidate({
+        target: {
+          section: "search_preferences",
+          key: "targetRoles",
+          recordId: null,
+        },
+        label: "Target roles",
+        value: ["Product Engineer", "Staff Engineer"],
+      }),
+    ];
+
+    const reconciled = reconcileCandidates(
+      profile,
+      preferences,
+      candidates,
+      undefined,
+      {
+        readByModel: true,
+      },
+    );
+
+    expect(reconciled.map((candidate) => candidate.resolution)).toEqual([
+      "auto_applied",
+      "auto_applied",
+      "auto_applied",
+      "auto_applied",
+    ]);
+  });
+
+  test("does not overwrite target roles the person already chose", () => {
+    const seed = createSeed();
+    // A profile already in use (not the untouched fresh-start seed).
+    const profile = { ...seed.profile, targetRoles: ["Designer"] };
+    const preferences = {
+      ...seed.searchPreferences,
+      targetRoles: ["Designer"],
+    };
+    const candidates = [
+      modelCandidate({
+        target: {
+          section: "search_preferences",
+          key: "targetRoles",
+          recordId: null,
+        },
+        label: "Target roles",
+        value: ["Product Engineer"],
+      }),
+    ];
+
+    const reconciled = reconcileCandidates(
+      profile,
+      preferences,
+      candidates,
+      undefined,
+      {
+        readByModel: true,
+      },
+    );
+
+    expect(reconciled[0]?.resolution).toBe("needs_review");
+  });
+
+  test("placeholder headline still fills after the name was already saved", () => {
+    const seed = createSeed();
+    const profile = {
+      ...emptyProfile(),
+      fullName: "Alex Morgan",
+      firstName: "Alex",
+      lastName: "Morgan",
+    };
+    const candidates = [
+      modelCandidate({
+        target: { section: "identity", key: "headline", recordId: null },
+        label: "Headline",
+        value: "Senior Product Engineer",
+      }),
+    ];
+
+    const reconciled = reconcileCandidates(
+      profile,
+      seed.searchPreferences,
+      candidates,
+      undefined,
+      { readByModel: true },
+    );
+
+    expect(reconciled[0]?.resolution).toBe("auto_applied");
   });
 });

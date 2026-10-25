@@ -1108,6 +1108,7 @@ describe("playwright browser runtime", () => {
       const debugPort = await reserveFreePort();
       const launchedChromeProcess = createMockChildProcess({ pid: 42427 });
       const fakePage = {
+        on: vi.fn(),
         bringToFront: vi.fn().mockResolvedValue(undefined),
         isClosed: () => false,
         url: () => "https://example.com/apply/job_visual_runtime",
@@ -2816,6 +2817,7 @@ describe("managed context service worker blocking", () => {
       const applyUrl = "https://example.com/apply/job_visual_runtime";
       let pageUrl = "about:blank";
       const fakePage = {
+        on: vi.fn(),
         bringToFront: vi.fn().mockResolvedValue(undefined),
         goto: vi.fn((url: string) => {
           pageUrl = url;
@@ -2913,6 +2915,7 @@ describe("managed context service worker blocking", () => {
       const launchedChromeProcess = createMockChildProcess({ pid: 63636 });
       const applyUrl = "https://example.com/apply/job_visual_runtime";
       const fakePage = {
+        on: vi.fn(),
         bringToFront: vi.fn().mockResolvedValue(undefined),
         goto: vi.fn(() =>
           Promise.reject(
@@ -3303,6 +3306,7 @@ describe("managed context active service worker gate", () => {
     const applyUrl = "https://example.com/apply/job_visual_runtime";
     let pageUrl = "about:blank";
     const fakePage = {
+      on: vi.fn(),
       bringToFront: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
       goto: vi.fn((url: string) => {
@@ -3315,6 +3319,7 @@ describe("managed context active service worker gate", () => {
     };
     let secondaryPageUrl = "about:blank";
     const secondaryPage = {
+      on: vi.fn(),
       bringToFront: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
       goto: vi.fn((url: string) => {
@@ -3569,6 +3574,7 @@ describe("managed context active service worker gate", () => {
       let thirdUrl = "about:blank";
       let thirdAdded = false;
       const thirdPage = {
+        on: vi.fn(),
         bringToFront: vi.fn().mockResolvedValue(undefined),
         close: vi.fn().mockResolvedValue(undefined),
         goto: vi.fn((url: string) => {

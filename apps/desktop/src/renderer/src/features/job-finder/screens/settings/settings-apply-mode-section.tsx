@@ -6,18 +6,16 @@ import {
 import { Switch } from "@renderer/components/ui/switch";
 import type {
   ApplicationSalaryDisclosureRule,
-  ApplicationAutomationMode,
+  ApplicationApplyMode,
 } from "@nestor/contracts";
 
 /**
  * What every Apply and Apply to all does from now on, said once the choice
  * has saved, so the person reads which mode the next journey will use.
  */
-const SAVED_MODE_SENTENCE: Record<ApplicationAutomationMode, string> = {
-  prepare_only:
-    "Saved. From now on Apply fills in each form and attaches the resume; you press Send.",
+const SAVED_MODE_SENTENCE: Record<ApplicationApplyMode, string> = {
   confirm_before_submit:
-    "Saved. From now on Apply fills in each form, then waits for your go-ahead before sending.",
+    "Saved. Apply fills in each form and attaches your resume; you press Send.",
   autonomous_submit:
     "Saved. From now on Apply fills in and sends each application, and pauses only when it needs you.",
 };
@@ -39,7 +37,7 @@ type ModeSaveState = {
 };
 
 /**
- * The three useful application defaults. The task-specific permission is
+ * The two application defaults. The task-specific permission is
  * assembled when an application starts; Settings stores only the person's
  * ordinary choice, never an empty authority envelope.
  *
@@ -50,10 +48,8 @@ type ModeSaveState = {
  */
 export function SettingsApplyModeSection(props: {
   headingId?: string;
-  /** The saved mode; the switch is off until the person turns it on. */
-  mode: ApplicationAutomationMode;
-  onSave: (input: {
-    mode: ApplicationAutomationMode }) => void | Promise<void>;
+  mode: ApplicationApplyMode;
+  onSave: (input: { mode: ApplicationApplyMode }) => void | Promise<void>;
   salaryDisclosure?: ApplicationSalaryDisclosureRule;
   onSaveSalaryDisclosure?: (
     value: ApplicationSalaryDisclosureRule,
@@ -96,7 +92,7 @@ export function SettingsApplyModeSection(props: {
   useEffect(() => {
     setSelectedMode(mode);
   }, [mode]);
-  const chooseMode = (value: ApplicationAutomationMode) => {
+  const chooseMode = (value: ApplicationApplyMode) => {
     if (isSaving || modeSaving) return;
     if (value === mode && modeSave.status !== "failed") {
       setSelectedMode(value);

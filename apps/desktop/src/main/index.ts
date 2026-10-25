@@ -20,6 +20,7 @@ import { getMainWindowCloseGuard } from "./setup/main-window-close-guard";
 import { closeJobStore } from "./services/job-store";
 import { registerJobRoutes } from "./services/job-commands";
 import { registerResumeRoutes } from "./routes/resumes";
+import { registerTrackerRoutes } from "./routes/tracker";
 import { stopResumeService } from "./services/resumes";
 import type * as InterviewOverlayApi from "./setup/interview-overlay-windows";
 import type * as InterviewSessionControlsApi from "./setup/interview-session-controls";
@@ -250,6 +251,7 @@ if (hasSingleInstanceLock) {
     console.error("[Desktop] The Job Finder store failed to open.", error);
   }
   registerResumeRoutes(ipcMain);
+  registerTrackerRoutes(ipcMain);
 }
 
 recordStartupDiagnostic("main module loaded");

@@ -375,11 +375,20 @@ function buildResolvedSelection(
           selection.scalarFields.summary = value;
         }
         break;
-      case "identity.yearsExperience":
-        if (typeof value === "number") {
-          selection.scalarFields.yearsExperience = value;
+      case "identity.yearsExperience": {
+        // Models regularly answer "8" or "8+" for a numeric field; dropping
+        // the string silently left Years empty after an otherwise good read.
+        const years =
+          typeof value === "number"
+            ? value
+            : typeof value === "string"
+              ? Number.parseFloat(value.replace(/[^0-9.]/g, ""))
+              : Number.NaN;
+        if (Number.isFinite(years) && years > 0) {
+          selection.scalarFields.yearsExperience = years;
         }
         break;
+      }
       case "location.currentLocation":
         if (typeof value === "string") {
           selection.scalarFields.currentLocation = value;

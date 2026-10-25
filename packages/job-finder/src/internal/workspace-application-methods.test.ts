@@ -226,124 +226,80 @@ describe("apply prerequisites resolve the resume path the verifier actually read
     );
   });
 
-  test("uses a ready tailored draft in prepare-only execution without requiring a separate approval", async () => {
-    const seed = createSeed();
-    const draftPath = `${CURRENT_USER_DATA_ROOT}/job-ready-draft.pdf`;
-    seed.tailoredAssets = seed.tailoredAssets.map((asset) =>
-      asset.jobId === "job_ready"
-        ? { ...asset, status: "ready", storagePath: draftPath }
-        : asset,
-    );
-    seed.resumeDrafts = [
-      {
-        id: "resume_draft_job_ready",
-        jobId: "job_ready",
-        status: "needs_review",
-        templateId: "classic_ats",
-        identity: null,
-        sections: [],
-        targetPageCount: 2,
-        generationMethod: "deterministic",
-        workHistoryReviewAcknowledgments: [],
-        claimConfirmations: [],
-        issueApprovals: [],
-        approvedAt: null,
-        approvedExportId: null,
-        staleReason: null,
-        createdAt: "2026-03-20T10:00:00.000Z",
-        updatedAt: "2026-03-20T10:04:00.000Z",
-      },
-    ];
-    seed.resumeExportArtifacts = [];
-    const disk = new Map([[draftPath, EXPORT_SHA256]]);
-    const { browserRuntime, executeApplicationFlow } =
-      createDiskAwareBrowserRuntime(new Set(disk.keys()));
-    const workspaceService = createService({
-      seed,
-      exportFileVerifier: createRecoveringExportFileVerifier(disk),
-      browserRuntime,
-    });
+  test.each(["confirm_before_submit", "autonomous_submit"] as const)(
+    "requires an approved tailored resume before opening the browser with saved mode %s",
+    async (mode) => {
+      const draftPath = `${CURRENT_USER_DATA_ROOT}/job-ready-draft.pdf`;
+      const unapprovedSeed = createSeed();
+      unapprovedSeed.settings = {
+        ...unapprovedSeed.settings,
+        applicationAutomationMode: mode,
+      };
+      unapprovedSeed.tailoredAssets = unapprovedSeed.tailoredAssets.map(
+        (asset) =>
+          asset.jobId === "job_ready"
+            ? { ...asset, status: "ready", storagePath: draftPath }
+            : asset,
+      );
+      unapprovedSeed.resumeDrafts = [
+        {
+          id: "resume_draft_job_ready",
+          jobId: "job_ready",
+          status: "needs_review",
+          templateId: "classic_ats",
+          identity: null,
+          sections: [],
+          targetPageCount: 2,
+          generationMethod: "deterministic",
+          workHistoryReviewAcknowledgments: [],
+          claimConfirmations: [],
+          issueApprovals: [],
+          approvedAt: null,
+          approvedExportId: null,
+          staleReason: null,
+          createdAt: "2026-03-20T10:00:00.000Z",
+          updatedAt: "2026-03-20T10:04:00.000Z",
+        },
+      ];
+      unapprovedSeed.resumeExportArtifacts = [];
+      const disk = new Map([[draftPath, EXPORT_SHA256]]);
+      const unapprovedRuntime = createDiskAwareBrowserRuntime(
+        new Set(disk.keys()),
+      );
+      const unapprovedService = createService({
+        seed: unapprovedSeed,
+        exportFileVerifier: createRecoveringExportFileVerifier(disk),
+        browserRuntime: unapprovedRuntime.browserRuntime,
+      });
 
-    await workspaceService.startApplyCopilotRun("job_ready");
+      const blocked = await unapprovedService.startApplyCopilotRun("job_ready");
+      expect(blocked.applyJobResults).toContainEqual(
+        expect.objectContaining({
+          state: "blocked",
+          blockerReason: "resume_missing",
+        }),
+      );
+      expect(unapprovedRuntime.executeApplicationFlow).not.toHaveBeenCalled();
 
-    expect(executeApplicationFlow.mock.calls[0]?.[1]).toMatchObject({
-      mode: "prepare_only",
-      accountCreationAuthorized: false,
-      submitAuthorized: false,
-      resumeArtifact: {
-        source: "tailored_export",
-        sourceDocumentId: "resume_draft_job_ready",
-        exportArtifactId: null,
-        filePath: draftPath,
-        sha256: EXPORT_SHA256,
-      },
-    });
-  });
+      const approvedSeed = createSeed();
+      approvedSeed.settings = {
+        ...approvedSeed.settings,
+        applicationAutomationMode: mode,
+      };
+      stageApprovedTailoredExport(approvedSeed, draftPath, EXPORT_SHA256);
+      const approvedRuntime = createDiskAwareBrowserRuntime(
+        new Set(disk.keys()),
+      );
+      const approvedService = createService({
+        seed: approvedSeed,
+        exportFileVerifier: createRecoveringExportFileVerifier(disk),
+        browserRuntime: approvedRuntime.browserRuntime,
+      });
 
-  test("requires an approved tailored resume for a sending mode before opening the browser", async () => {
-    const draftPath = `${CURRENT_USER_DATA_ROOT}/job-ready-draft.pdf`;
-    const unapprovedSeed = createSeed();
-    unapprovedSeed.settings = {
-      ...unapprovedSeed.settings,
-      applicationAutomationMode: "autonomous_submit",
-    };
-    unapprovedSeed.tailoredAssets = unapprovedSeed.tailoredAssets.map((asset) =>
-      asset.jobId === "job_ready"
-        ? { ...asset, status: "ready", storagePath: draftPath }
-        : asset,
-    );
-    unapprovedSeed.resumeDrafts = [
-      {
-        id: "resume_draft_job_ready",
-        jobId: "job_ready",
-        status: "needs_review",
-        templateId: "classic_ats",
-        identity: null,
-        sections: [],
-        targetPageCount: 2,
-        generationMethod: "deterministic",
-        workHistoryReviewAcknowledgments: [],
-        claimConfirmations: [],
-        issueApprovals: [],
-        approvedAt: null,
-        approvedExportId: null,
-        staleReason: null,
-        createdAt: "2026-03-20T10:00:00.000Z",
-        updatedAt: "2026-03-20T10:04:00.000Z",
-      },
-    ];
-    unapprovedSeed.resumeExportArtifacts = [];
-    const disk = new Map([[draftPath, EXPORT_SHA256]]);
-    const unapprovedRuntime = createDiskAwareBrowserRuntime(
-      new Set(disk.keys()),
-    );
-    const unapprovedService = createService({
-      seed: unapprovedSeed,
-      exportFileVerifier: createRecoveringExportFileVerifier(disk),
-      browserRuntime: unapprovedRuntime.browserRuntime,
-    });
-
-    await expect(
-      unapprovedService.startApplyCopilotRun("job_ready"),
-    ).rejects.toThrow("Approve the tailored resume");
-    expect(unapprovedRuntime.executeApplicationFlow).not.toHaveBeenCalled();
-
-    const approvedSeed = createSeed();
-    approvedSeed.settings = {
-      ...approvedSeed.settings,
-      applicationAutomationMode: "autonomous_submit",
-    };
-    stageApprovedTailoredExport(approvedSeed, draftPath, EXPORT_SHA256);
-    const approvedRuntime = createDiskAwareBrowserRuntime(new Set(disk.keys()));
-    const approvedService = createService({
-      seed: approvedSeed,
-      exportFileVerifier: createRecoveringExportFileVerifier(disk),
-      browserRuntime: approvedRuntime.browserRuntime,
-    });
-
-    await approvedService.startApplyCopilotRun("job_ready");
-    expect(approvedRuntime.executeApplicationFlow).toHaveBeenCalledTimes(1);
-  });
+      await approvedService.startApplyCopilotRun("job_ready");
+      expect(approvedRuntime.executeApplicationFlow).toHaveBeenCalledTimes(1);
+    },
+  );
 
   test("offers allowed supporting Documents to an initial application run", async () => {
     const seed = createSeed();
@@ -382,7 +338,9 @@ describe("apply prerequisites resolve the resume path the verifier actually read
     await workspaceService.startApplyCopilotRun("job_ready");
 
     expect(listAssets).toHaveBeenCalledWith({ includeDeleted: false });
-    expect(executeApplicationFlow.mock.calls[0]?.[1].applicationAttachments).toEqual([
+    expect(
+      executeApplicationFlow.mock.calls[0]?.[1].applicationAttachments,
+    ).toEqual([
       {
         assetId: asset.id,
         assetKind: "portfolio",

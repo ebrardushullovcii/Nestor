@@ -32,6 +32,7 @@ import { createSearches, type JobSearches } from "./searches";
 import { createStatements, type Statements } from "./statements";
 import { lookupSeenCards, rememberSeenCards } from "./seen-cards";
 
+export { createTrackerStore, type TrackerStore } from "./tracker";
 export {
   createResumeStore,
   ResumeChangedError,

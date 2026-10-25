@@ -237,7 +237,7 @@ export async function syncApplicationAuthorityForSavedMode(
 
   const settings = await repository.getSettings();
   const mode =
-    modeOverride ?? settings.applicationAutomationMode ?? "prepare_only";
+    modeOverride ?? settings.applicationAutomationMode ?? "confirm_before_submit";
   const authorityService = getJobFinderApplicationAuthorityService();
   const active = (await authorityService.list({ status: "active" }))[0] ?? null;
 
@@ -411,8 +411,8 @@ export async function syncApplicationAuthorityForSavedMode(
     // waited behind a final send.
     const latestSettings = await repository.getSettings();
     if (
-      (latestSettings.applicationAutomationMode ?? "prepare_only") !==
-      (settings.applicationAutomationMode ?? "prepare_only")
+      (latestSettings.applicationAutomationMode ?? "confirm_before_submit") !==
+      (settings.applicationAutomationMode ?? "confirm_before_submit")
     )
       return;
     const firstCurrent =
@@ -472,8 +472,8 @@ export async function syncApplicationAuthorityForSavedMode(
       // one transition, without leaving a gap between revoking and creating.
       const currentSettings = await repository.getSettings();
       if (
-        (currentSettings.applicationAutomationMode ?? "prepare_only") !==
-        (settings.applicationAutomationMode ?? "prepare_only")
+        (currentSettings.applicationAutomationMode ?? "confirm_before_submit") !==
+        (settings.applicationAutomationMode ?? "confirm_before_submit")
       )
         return;
       const replaced = await authorityService.replaceUsed({
@@ -536,12 +536,6 @@ export async function scopeSendPermissionToPreparedJobs(
   const repository =
     getJobFinderRepositoryForWorkspaceService(workspaceService);
   if (!repository) return;
-  const settings = await repository.getSettings();
-  if (
-    !modeOverride &&
-    (settings.applicationAutomationMode ?? "prepare_only") === "prepare_only"
-  )
-    return;
   const [runs, results] = await Promise.all([
     repository.listApplyRuns(),
     repository.listApplyJobResults(),
@@ -889,7 +883,7 @@ export async function executeApplyQueueAction(
   const { service, repository } = await requireApplyQueueRepository();
   if (actionId === "start-apply-queue") {
     const value = JobFinderStartApplyQueueInputSchema.parse(input);
-    const mode = value.applicationAutomationMode ?? (await repository.getSettings()).applicationAutomationMode ?? "prepare_only";
+    const mode = value.applicationAutomationMode ?? (await repository.getSettings()).applicationAutomationMode ?? "confirm_before_submit";
     await getApplyQueueRunner().start(value.jobIds, mode);
   } else if (actionId === "control-apply-queue") {
     const value = JobFinderApplyQueueControlInputSchema.parse(input);
@@ -947,7 +941,7 @@ export function getApplyQueueRunner(): ApplyQueueRunner {
     },
     readSavedMode: async () =>
       (await (await requireApplyQueueRepository()).repository.getSettings())
-        .applicationAutomationMode ?? "prepare_only",
+        .applicationAutomationMode ?? "confirm_before_submit",
     isActivityPaused: async () =>
       (
         await (
@@ -2674,12 +2668,12 @@ export function registerJobFinderRouteHandlers(
           workspace.job.title,
           workspace.job.company,
         );
-        const saveResult = await chooseResumeExportPath(
+        const chosenPath = await chooseResumeExportPath(
           event.sender,
           defaultPath,
         );
 
-        if (saveResult.canceled || !saveResult.filePath) {
+        if (!chosenPath) {
           const snapshot = await readWorkspaceProjection(
             jobFinderWorkspaceService,
           );
@@ -2696,9 +2690,7 @@ export function registerJobFinderRouteHandlers(
           } satisfies JobFinderResumePdfExportReply;
         }
 
-        outputPath = saveResult.filePath.toLowerCase().endsWith(".pdf")
-          ? saveResult.filePath
-          : `${saveResult.filePath}.pdf`;
+        outputPath = chosenPath;
       }
 
       const snapshot = await jobFinderWorkspaceService.exportResumePdf(

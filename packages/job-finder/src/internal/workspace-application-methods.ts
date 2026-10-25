@@ -2209,21 +2209,13 @@ export function createWorkspaceApplicationMethods(
       asset,
     });
     const approvedExport = approvedExportResolution.approvedExport;
-    const draftFilePath = asset?.storagePath?.trim() || null;
-    const canUseReviewedDraft =
-      (settings.applicationAutomationMode ?? "prepare_only") ===
-        "prepare_only" &&
-      draft !== null &&
-      (draft.status === "draft" || draft.status === "needs_review") &&
-      asset?.status === "ready" &&
-      draftFilePath !== null;
 
     if (!draft) {
       throw new Error(
         `A tailored resume draft is required before preparing the application for '${job.title}'.`,
       );
     }
-    if (!approvedExport && !canUseReviewedDraft) {
+    if (!approvedExport) {
       throw new Error(
         `Approve the tailored resume for '${job.title}' before starting this application mode.`,
       );
@@ -2238,7 +2230,7 @@ export function createWorkspaceApplicationMethods(
       jobTitle: job.title,
     });
 
-    const selectedFilePath = approvedExport?.filePath ?? draftFilePath;
+    const selectedFilePath = approvedExport.filePath;
     if (!selectedFilePath) {
       throw new Error(
         `The tailored resume file is unavailable for '${job.title}'. Create the draft again before preparing this application.`,
@@ -2262,13 +2254,11 @@ export function createWorkspaceApplicationMethods(
       );
     }
 
-    const verifiedSha256 = approvedExport
-      ? await verifyResumeFileIntegrity({
-          expectedSha256: approvedExport.sha256,
-          filePath: selectedFilePath,
-          label: "The approved tailored CV",
-        })
-      : ((await ctx.exportFileVerifier?.sha256?.(selectedFilePath)) ?? null);
+    const verifiedSha256 = await verifyResumeFileIntegrity({
+      expectedSha256: approvedExport.sha256,
+      filePath: selectedFilePath,
+      label: "The approved tailored CV",
+    });
     const verifiedApprovedExportPath =
       await resolveVerifiedResumeFilePath(selectedFilePath);
 
@@ -2279,11 +2269,11 @@ export function createWorkspaceApplicationMethods(
       profileRevision: profileState.revision,
       resumeApplicationMode,
       resumeArtifact: ApplicationResumeArtifactSchema.parse({
-        id: `application_resume_${job.id}_${approvedExport?.id ?? draft.id}`,
+        id: `application_resume_${job.id}_${approvedExport.id}`,
         jobId: job.id,
         source: "tailored_export",
-        sourceDocumentId: approvedExport ? null : draft.id,
-        exportArtifactId: approvedExport?.id ?? null,
+        sourceDocumentId: null,
+        exportArtifactId: approvedExport.id,
         fileName:
           selectedFilePath.split(/[\\/]/).at(-1) ?? `${job.title}-resume.pdf`,
         filePath: verifiedApprovedExportPath,
@@ -7946,19 +7936,13 @@ export function createWorkspaceApplicationMethods(
           asset,
         });
         const approvedExport = approvedExportResolution.approvedExport;
-        const reviewedDraftPath = asset?.storagePath?.trim() ?? "";
-        const canUseReviewedDraft =
-          !approvedExport &&
-          asset?.status === "ready" &&
-          (draft?.status === "draft" || draft?.status === "needs_review") &&
-          reviewedDraftPath.length > 0;
         const originalResumePath = profile.baseResume.storagePath?.trim() ?? "";
         const usesOriginalResume =
           resolveJobResumeApplicationMode(job, settings) === "original_resume";
 
         const shouldBlockForMissingResume = usesOriginalResume
           ? !originalResumePath
-          : !approvedExportResolution.ready && !canUseReviewedDraft;
+          : !approvedExportResolution.ready;
 
         // The missing-resume handoff must never orphan terminal artifacts on a
         // run nobody can cancel: register a durable cancellable running row
@@ -8080,7 +8064,7 @@ export function createWorkspaceApplicationMethods(
           const approvedFileExists = await ctx.exportFileVerifier.exists(
             usesOriginalResume
               ? originalResumePath
-              : (approvedExport?.filePath ?? reviewedDraftPath),
+              : (approvedExport?.filePath ?? ""),
           );
 
           if (!approvedFileExists) {
@@ -8746,8 +8730,7 @@ export function createWorkspaceApplicationMethods(
       const createdAt = new Date().toISOString();
       const effectiveApplicationAutomationMode =
         applicationAutomationMode ??
-        scopedSettings.applicationAutomationMode ??
-        "prepare_only";
+        scopedSettings.applicationAutomationMode ?? "confirm_before_submit";
       const capturedCampaignId = await ctx.getActiveCampaignId();
       const runId = createUniqueId("apply_run");
       const approvalId = createUniqueId("apply_submit_approval");

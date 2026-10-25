@@ -1,6 +1,6 @@
 # Apply and send
 
-"Apply" approves the resume and starts the application: Job Finder opens the job's application page in its in-app browser, fills the form from the profile, attaches the resume, and then follows the application mode in Settings. Under "Ask before sending" (the default) it stops before the site's send button and the person reads it over and sends it themselves; under "Send for me" Job Finder presses send. Applications tracks every application and its stage. Final submission stays the person's unless they authorize it (ADR 0012, 0024, 0027).
+"Apply" queues jobs with an approved resume. The two-way setting lives in Settings: "Fill in for me" (the default) fills the form, attaches the resume and leaves Send to the person; "Send for me" allows Job Finder to send. Ordinary form saves remain inside the application's scoped permission. The engine's lower-authority prepare-only capability is not a third setting. A queued application retains the mode chosen when Apply was pressed; a later setting change must not upgrade it. Final submission stays the person's unless they authorize it (ADR 0012, 0024, 0027).
 
 ## Sub-features
 
@@ -8,10 +8,11 @@
 - `apply-ready`: "Ready to send", "Ready for you to read over and send", the region "Review before sending" listing every answer going out and where it came from.
 - `apply-browser`: "Open the Job Finder browser" / "Reopen the Job Finder browser"; the browser peek modal over the app.
 - `apply-person-send`: the person presses the site's own Submit; the app records "You sent this application yourself on the site." and "Submitted (verified)" with the site's receipt.
-- `apply-send-for-me`: Settings application mode "Send for me" (typed consent); Job Finder presses send itself.
+- `apply-send-for-me`: Settings application mode "Send for me"; Job Finder presses send itself when the application and its guards permit it.
 - `apply-documents`: "Draft a cover letter" / short response document for an attachment question.
 - `applications-tracking`: filters (All, Waiting on you, In progress), "Hiring stage", "Open tracker", "Prepare interview" (links to Live Assistant).
 - `apply-recovery`: "Could not apply" and recovery actions.
+- `apply-pacing`: a site's HTTP 429 or 503 with Retry-After waits automatically, without a Needs-you question. Rejected main-page GETs reload after the wait; writes and sends are never replayed. Other sites can use the released worker slot. Sites that respond normally have no added delay.
 
 ## How to get to it (user POV)
 
@@ -27,7 +28,8 @@ Preconditions: a ready resume on `up --ai live`; the job comes from this instanc
 - **Send it yourself.** `$V/drive click "Open the Job Finder browser"`; `$V/drive shot form --target browser --url /apply/`; check the page's origin is the instance's replica (`sites.url`); `$V/drive click Submit --page browser --url /apply/`; `$V/drive press Escape`; `$V/drive wait "Application submitted" 60`. The finished application tab closes after its receipt is recorded. Proof: one new line in `submissions.jsonl` with the fields and the tailored PDF's name, `$V/db application_records 1` with `status: "submitted"` and `personSendReceipt`, and no remaining tab for that application.
 - Whole flow: `journeys/job-finder-replica.mjs apply`, then `send`. The journey refuses to press Submit unless the page's origin is the instance's replica server.
 - **Other forms.** Point the source at `/lever/` (CAPTCHA, background-check consent), `/greenhouse/` (drop zone, EEO), `/workday/` (account wall, four steps), `/gatekeeper/` (overlay, interstitial, new tab) or the larger sites. Not run through this skill yet.
-- **Send for me.** Not run through this skill yet. Settings › application mode › "Send for me" with its typed consent, then Apply; the proof is a replica receipt with no person click, and `application_authority_envelopes` naming the replica origin.
+- **Setting.** Settings › Applying has exactly two choices, "Fill in for me" and "Send for me". Picking either saves it immediately; navigate away and restart to check persistence. An unrelated settings save must retain it. Queue jobs with each mode and inspect `applications.mode`; changing Settings and pressing Apply again for an active job must not upgrade that row.
+- **Send for me.** Settings › Applying › "Send for me", then Apply; the proof is a replica receipt with no person click and authority naming the replica origin. A setting save alone must not grant sending permission. Recheck through the store runner after its cutover; the setting/store admission check alone does not prove sending.
 
 ## Gotchas
 
