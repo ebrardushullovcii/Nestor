@@ -47,6 +47,7 @@ Other entry points: `pnpm test:correctness`, `pnpm test:performance` (serial, no
 - Resume import: `pnpm --filter @nestor/desktop benchmark:resume-import`
 - Resume quality: `pnpm --filter @nestor/desktop benchmark:resume-quality` (`-- --canary-only` for the canary)
 - AI capabilities: `pnpm ai:benchmark plan | full <lane> | canary luna_high | full-report`. Keep each lane serial. Deterministic fallbacks are reported separately and never credited to the model.
+- Live discovery audit: `pnpm --filter @nestor/desktop audit:job-finder-live` needs network access and must never execute application actions.
 
 ## Assistant
 
